@@ -60,7 +60,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-532";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -10912,16 +10912,12 @@ sub wrap_text {
     return @lines;
 }
 
-# Shorten filename to fit within max_length, keeping start and end with '...' in middle
-# If $strip_path is true, removes directory path first (keeps only basename)
+# Shorten a file path to fit within max_length, keeping its start and end
+# around a '...' in the middle, so the directory stays visible on the left and
+# the end of the file name on the right. The progress line and the "Processed
+# files" table both render names through this one rule.
 sub shorten_filename {
-    my ($filename, $max_length, $strip_path) = @_;
-
-    # Optionally strip directory path, keeping only the filename
-    if ($strip_path) {
-        $filename =~ s{.*/}{};  # Remove everything up to and including last /
-        $filename =~ s{.*\\}{}; # Also handle Windows backslashes
-    }
+    my ($filename, $max_length) = @_;
 
     return $filename if length($filename) <= $max_length;
     return $filename if $max_length < 10;  # Too short to meaningfully shorten
@@ -11087,7 +11083,7 @@ sub progress_line_text {
     # name back whole, which on this surface would run the line past the width
     # the clear covers. Truncate outright at that point: the numbers are the
     # part that must stay readable.
-    my $shown = shorten_filename( $file, $room, 1 );
+    my $shown = shorten_filename( $file, $room );
     $shown = substr( $shown, 0, $room ) if length($shown) > $room;
 
     return $prefix . $shown;
