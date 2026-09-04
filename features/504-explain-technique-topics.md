@@ -17,7 +17,8 @@ by-product.
 
 - #504 (FEATURE: `--explain` technique topics — named analysis techniques as a
   second topic family) — the requirement, including the six groups and the
-  sixteen techniques.
+  sixteen techniques it named. The roster is now nineteen (D4); the issue body
+  carries the updated table.
 
 ## Audit findings
 
@@ -325,6 +326,48 @@ The group page lists its techniques so an analyst who does not yet know a
 technique's name has a usable entry point. It stays a leaf page under D1: the
 listing is content, not a drill-down level, and `ltl --explain` remains the only
 index.
+
+### D4 — Population gains Remainder Analysis, Attribute Surfacing and File Attribution (architect, 2026-09-04)
+
+Three techniques the interview surfaced have no home in the issue's original list
+and are added to the Population group, taking the roster from sixteen techniques to
+nineteen and the technique-family topic count to twenty-five (nineteen techniques
+plus the six group pages of D1).
+
+| Topic | `ltl --explain …` | The question it answers |
+|---|---|---|
+| Remainder Analysis | `remainder` | With the known problem taken out, is what is left healthy — and what shape does it have once it is no longer scaled against the thing that was removed? |
+| Attribute Surfacing | `attribute-surfacing` | Which user, session or query string inside this one API is producing the errors, the volume or the slow requests? |
+| File Attribution | `file-attribution` | Of these files, which ones contain the pattern — so which one is worth opening? |
+
+Remainder Analysis is not the second half of API Isolation: isolation asks what
+this looks like, subtraction asks what everything else looks like without it, and
+its signal is the rescaling measured in F15, which the isolation page cannot render
+at the same time.
+
+Attribute Surfacing covers `-xqs`, `-xu` and `-xs` on one page because the move,
+the reading and the precondition are the same for all three (F14). Session Isolation
+keeps its own page for the different move: cutting to one session and reading that
+journey through.
+
+File Attribution sits in Population rather than Correlation because it is an
+attribution question — which part of the input carries this — of the same shape as
+which API carries this. Correlation relates two different logs on a shared axis,
+which this does not.
+
+## Technique roster
+
+Nineteen techniques in six groups, each group also a topic of its own (D1).
+Bold marks a technique added after the issue was filed.
+
+| Group | Techniques |
+|---|---|
+| Time | Window Narrowing · Resolution Zoom · Traffic Load Profiling |
+| Population | Contribution Highlighting · API Isolation · Session Isolation · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
+| Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Variety vs. Volume · Timeout Clustering |
+| Comparison | Period-over-Period Comparison · Status Composition Over Time |
+| Concurrency | Thread Pool Utilisation |
+| Correlation | Cross-Log Correlation |
 
 ## Planning walkthrough
 
