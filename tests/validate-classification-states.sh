@@ -302,15 +302,15 @@ expect_indicator "$TMP_DIR/ind.out" 'catalog fetch'  '•'     '256:34'  'an all
 expect_indicator "$TMP_DIR/ind.out" 'upload'         '•'     '256:160' 'an all-failure row renders the bullet in rosso-corsa'
 expect_indicator "$TMP_DIR/ind.out" 'index rebuild'  '•'     '256:135' 'an all-conflict row renders the bullet in amethyst'
 expect_indicator "$TMP_DIR/ind.out" 'cache warm'     'space' 'default' 'an all-unclassified row stays unmarked'
-expect_indicator "$TMP_DIR/ind.out" 'checkout'       '•'     '256:173' 'a success/failure row renders the bullet in terracotta (MIXED)'
-expect_indicator "$TMP_DIR/ind.out" 'search'         '•'     '256:173' 'a success/unclassified row is MIXED too (D10)'
+expect_indicator "$TMP_DIR/ind.out" 'checkout'       '•'     '256:178' 'a success/failure row renders the bullet in gold (MIXED)'
+expect_indicator "$TMP_DIR/ind.out" 'search'         '•'     '256:178' 'a success/unclassified row is MIXED too (D10)'
 
 current_scenario="indicator/consolidated"
 set +e
 with_ansi_colour "$LTL" "${COMMON[@]}" -n 25 --terminal-width 200 -g 85 "${PIN[@]}" "$FIXTURE" > "$TMP_DIR/indg.out" 2> "$TMP_DIR/indg.err"
 set -e
 assert_no_runtime_warnings "$TMP_DIR/indg.err" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: runtime warnings"); }
-expect_indicator "$TMP_DIR/indg.out" 'placed' '~' '256:173' 'the consolidated success/failure pair renders ~ in terracotta'
+expect_indicator "$TMP_DIR/indg.out" 'placed' '~' '256:178' 'the consolidated success/failure pair renders ~ in gold'
 expect_indicator "$TMP_DIR/indg.out" 'catalog fetch' '•' '256:34' 'an unconsolidated row keeps the bullet under -g'
 
 # ---------------------------------------------------------------------------

@@ -454,7 +454,7 @@ my %classification_state_colour = (
     success  => 'kelly-green',
     failure  => 'rosso-corsa',
     conflict => 'amethyst',
-    mixed    => 'terracotta',
+    mixed    => 'gold',
 );
 
 # Per-file format-detection accumulator. Populated in read_and_process_logs()
@@ -1232,7 +1232,6 @@ my %colors = (
     'kelly-green' => "\033[38;5;34m",    # success
     'rosso-corsa' => "\033[38;5;160m",   # failure
     'gold'        => "\033[38;5;178m",   # unclassified: neither outcome
-    'terracotta'  => "\033[38;5;173m",   # mixed: a message row whose lines were not uniform
     'amethyst'    => "\033[38;5;135m",   # classification conflict: both criteria fired on the line
     'bright-black' => "\033[90m\033[109m",
     'bright-red' => "\033[91m\033[109m",

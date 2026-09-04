@@ -214,18 +214,7 @@ Stated in the architect's terms (2026-09-03).
   "the rules matched nothing on this line" and "the rules contradicted each
   other" are three explanations a reader has to be able to tell apart.
 
-- **D8 — Two new classification colours (architect, 2026-09-03).** `terracotta`
-  = 256-colour **173** (`#d7875f`) for `MIXED`, matched to the swatch the
-  architect supplied; `amethyst` = 256-colour **135** (`#af5fff`) for
-  `CLASSIFICATION CONFLICT`. Both join the classification shades in `%colors`
-  beside `kelly-green`, `rosso-corsa` and `gold`, named for the colour they are
-  (#452 D14), and each reads the same wherever its state appears — the summary
-  row and the message indicator. A muted terracotta keeps `MIXED` clear of `gold`
-  at one-character size, which a pure orange such as 208 would not; a violet
-  keeps `CLASSIFICATION CONFLICT` off the green–gold–orange–red axis entirely, so
-  it cannot be read as a degree of good or bad, which it is not. Both are still
-  judged on rendered output during implementation, as `kelly-green` and
-  `rosso-corsa` were after 22 and 88 proved too dark on a build.
+- **D8 — REVISED 2026-09-04 (architect) — `MIXED` renders in `gold`, the unclassified shade; `amethyst` (256-colour 135) is the `CLASSIFICATION CONFLICT` shade.** Terracotta 173 proved nearly indistinguishable from the failure red at the indicator's one-character size in the architect's testing. `MIXED` and unclassified never appear in the same place (a mixed row is marked, an unclassified row is not; the summary rows carry their labels), so sharing the shade costs nothing. The `terracotta` definition is removed.
 
 - **D9 — `MIXED` suppresses the run-level percentages (architect,
   2026-09-03).** Once a mixed row's lines are pulled out of the global success
