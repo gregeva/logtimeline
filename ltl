@@ -8390,6 +8390,285 @@ my $explain_attribute_surfacing_command = <<'END';
                                                    # which session owns the time
 END
 
+# Builder for the histogram signals the Shape techniques read from. Draws
+# the chart a run draws: a count axis on the left, a bar area of log-spaced
+# duration bins, the tick scale beneath and the percentile ladder below
+# that. Bars are given as eighths of the chart height so a shape can be
+# stated as the shape rather than as a picture of one.
+sub explain_histogram_shape {
+    my (%arg) = @_;
+    my @bars   = @{ $arg{bars} };            # 0..8 per bin
+    my @scale  = @{ $arg{scale} };           # [ position, label ]
+    my $rows   = $arg{rows}   // 5;
+    my $counts = $arg{counts} // ['', '', '', '', ''];
+    my $box    = $histogram_box_sets{light};
+    my $width  = scalar @bars;
+    my $bar_c  = "█";
+
+    my $out = '';
+    $out .= sprintf("%s%s%s\n", ' ' x 13, $colors{'bright-black'} . 'Duration Distribution' . $colors{'NC'}, '');
+    for my $r (reverse 1 .. $rows) {
+        # Each chart row covers 8/$rows eighths; a bar reaches this row when
+        # its height passes the row's floor. Contiguous filled cells share
+        # one colour run, as a run draws them.
+        my $floor = ($r - 1) * 8 / $rows;
+        my $cells = join('', map { $_ > $floor ? $bar_c : ' ' } @bars);
+        $cells =~ s/(\Q$bar_c\E+)/$colors{'green'}$1$colors{'NC'}/g;
+        $out .= sprintf('%8s %s%s%s',
+                        ($r == 1 ? '' : ($counts->[$r - 1] // '')),
+                        $colors{'bright-black'} . '┃' . $colors{'NC'},
+                        $cells,
+                        $colors{'bright-black'} . '┃' . $colors{'NC'}) . "\n";
+    }
+    # Tick axis.
+    my @axis = ('━') x $width;
+    for my $m (@scale) { $axis[$m->[0]] = '┻' if $m->[0] < $width }
+    $out .= sprintf('%8s %s', '0', $colors{'bright-black'} . '┗' . join('', @axis) . '┛' . $colors{'NC'}) . "\n";
+    # Labels beneath their ticks.
+    my @lbl = (' ') x $width;
+    for my $m (@scale) {
+        my $start = $m->[0] - int(length($m->[1]) / 2);
+        $start = 0 if $start < 0;
+        $start = $width - length($m->[1]) if $start + length($m->[1]) > $width;
+        substr($lbl[$start + $_], 0, 1) = substr($m->[1], $_, 1) for 0 .. length($m->[1]) - 1;
+    }
+    $out .= sprintf('%8s  %s', '', join('', @lbl)) . "\n";
+    for my $p (@{ $arg{percentiles} // [] }) {
+        $out .= sprintf("%s%s%s%s\n", ' ' x 10, $colors{'bright-yellow'}, $p, $colors{'NC'});
+    }
+    return $out;
+}
+
+# --- Shape, Comparison and Load group signals ---
+
+# The scale shared by the duration histograms below: a 64-cell log-spaced
+# axis from a millisecond to three seconds, the geometry a run draws.
+my @explain_hg_scale = ([1,'1ms'],[13,'5ms'],[25,'24.5ms'],[38,'121.6ms'],[50,'602.7ms'],[62,'3s']);
+
+# Tail Excursion vs. Distribution Shift: two shapes side by side. A tight
+# body with a thin far tail, against a body that has moved bodily right.
+my $explain_tail_excursion_example;
+{
+    my @excursion = (0) x 64;
+    $excursion[$_] = 8 for 6..9;
+    $excursion[$_] = 6 for 10..12;
+    $excursion[$_] = 3 for 13..15;
+    $excursion[$_] = 1 for 16..22;
+    $excursion[$_] = 1 for 55..58;
+    my @shift = (0) x 64;
+    $shift[$_] = 2 for 24..27;
+    $shift[$_] = 5 for 28..31;
+    $shift[$_] = 8 for 32..37;
+    $shift[$_] = 5 for 38..42;
+    $shift[$_] = 2 for 43..47;
+
+    my $out = "  A tail excursion — the body is where it was, a few went far right:\n\n";
+    $out .= explain_histogram_shape(
+        bars => \@excursion, scale => \@explain_hg_scale,
+        counts => ['0','2k','4k','6k','8k'],
+        percentiles => ['P50: 2ms   P90: 4ms   P95: 6ms   P99: 1.2s   P99.9: 2.8s'] );
+    $out .= "\n  A distribution shift — the whole body has moved right:\n\n";
+    $out .= explain_histogram_shape(
+        bars => \@shift, scale => \@explain_hg_scale,
+        counts => ['0','2k','4k','6k','8k'],
+        percentiles => ['P50: 96ms   P90: 210ms   P95: 265ms   P99: 402ms   P99.9: 580ms'] );
+    $explain_tail_excursion_example = $out;
+}
+
+# Bimodal Split: two peaks with a valley where the mean sits. Measured on
+# an hour of access log: a spike at a millisecond and a second peak two
+# decades away.
+my $explain_bimodal_split_example;
+{
+    my @bars = (0) x 64;
+    $bars[$_] = 8 for 1..3;
+    $bars[$_] = 1 for 8..14;
+    $bars[$_] = 1 for 20..32;
+    $bars[$_] = 5 for 33..35;
+    $bars[$_] = 1 for 36..44;
+    my $out = explain_histogram_shape(
+        bars => \@bars, scale => \@explain_hg_scale,
+        counts => ['0','7k','13k','20k','27k'],
+        percentiles => ['P50: 2ms   P90: 70.3ms   P95: 278.7ms   P99: 1s   P99.9: 1s'] );
+    $out .= "\n    The mean falls at 34ms — in the valley, where almost nothing is.\n";
+    $explain_bimodal_split_example = $out;
+}
+
+# Shape Comparison: the population's ladder and the highlighted subset's,
+# one under the other. Measured on an hour of access log under a highlight.
+my $explain_shape_comparison_example;
+{
+    my @bars = (0) x 64;
+    $bars[$_] = 8 for 1..3;
+    $bars[$_] = 1 for 8..14;
+    $bars[$_] = 1 for 20..32;
+    $bars[$_] = 5 for 33..35;
+    $bars[$_] = 1 for 36..44;
+    my $out = explain_histogram_shape(
+        bars => \@bars, scale => \@explain_hg_scale,
+        counts => ['0','7k','13k','20k','27k'],
+        percentiles => [
+            'P50: 2ms   P90: 70.3ms   P95: 278.7ms   P99: 1s   P99.9: 1s      (population)',
+            '  P50: 1ms   P90: 1ms   P95: 1ms   P99: 1ms   P99.9: 2ms        (highlighted)',
+        ] );
+    $explain_shape_comparison_example = $out;
+}
+
+# Timeout Clustering: a pile at a fixed value rather than a tail. Measured
+# on one endpoint over an hour: every percentile the same second.
+my $explain_timeout_clustering_example;
+{
+    my @bars = (0) x 64;
+    $bars[$_] = 8 for 0..13;
+    $bars[$_] = 6 for 51..63;
+    my $out = explain_histogram_shape(
+        bars => \@bars, scale => [[0,'1s'],[13,'1s'],[25,'1s'],[38,'1s'],[50,'1s'],[62,'1s']],
+        counts => ['0','360','720','1k','1k'],
+        percentiles => ['P50: 1s   P75: 1s   P90: 1s   P95: 1s   P99: 1s   P99.9: 1s'] );
+    $out .= "\n    1,950 requests, and the coefficient of variation is 0.00.\n";
+    $explain_timeout_clustering_example = $out;
+}
+
+# Period-over-Period Comparison: several periods folded onto one axis, and
+# the same fold over two corpora merged into one run.
+my $explain_period_over_period_example;
+{
+    my $out = "  One week, folded — the peaks are this week's:\n\n";
+    $out .= explain_timeline_rows([
+        [ 'MON 08:00', [['green','2xx: 88k']],  '1.2', '1.4k', 14 ],
+        [ 'TUE 08:00', [['green','2xx: 91k']],  '1.3', '1.5k', 15 ],
+        [ 'WED 08:00', [['green','2xx: 216k']], '9.8', '3.6k', 20 ],
+        [ 'THU 08:00', [['green','2xx: 87k']],  '1.1', '1.4k', 14 ],
+        [ 'FRI 08:00', [['green','2xx: 90k']],  '1.2', '1.5k', 15 ],
+    ]);
+    $out .= "\n  Six weeks, folded onto the same axis — Wednesday was one week's:\n\n";
+    $out .= explain_timeline_rows([
+        [ 'MON 08:00', [['green','2xx: 531k']], '1.2', '1.4k', 15 ],
+        [ 'TUE 08:00', [['green','2xx: 548k']], '1.3', '1.5k', 16 ],
+        [ 'WED 08:00', [['green','2xx: 562k']], '2.6', '1.5k', 16 ],
+        [ 'THU 08:00', [['green','2xx: 540k']], '1.2', '1.4k', 15 ],
+        [ 'FRI 08:00', [['green','2xx: 601k']], '1.4', '1.6k', 20 ],
+    ]);
+    $explain_period_over_period_example = $out;
+}
+
+# Status Composition Over Time: the per-bucket composition read down the
+# column, and split by a highlight so one call's statuses sit beside the
+# population's. Measured on forty minutes of access log.
+my $explain_status_composition_example;
+{
+    my $out = "  Composition down the column, with one call highlighted:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:20', [['yellow-HL','2'],['yellow','4xx: 12'],['green-HL','9.6k'],['green','2xx: 939']],  '1.8', '1.1k', 14, 12 ],
+        [ '2026-05-07 10:30', [['yellow','4xx: 11'],['green-HL','9.5k'],['green','2xx: 597']],                     '1.1', '1k',   14, 13 ],
+        [ '2026-05-07 10:40', [['yellow-HL','37'],['yellow','4xx: 11'],['green-HL','13.9k'],['green','2xx: 913']], '5.7', '1.5k', 20, 18 ],
+        [ '2026-05-07 10:50', [['yellow-HL','216'],['yellow','4xx: 21'],['green-HL','11.5k'],['green','2xx: 994']],'23.9','1.3k', 16, 15 ],
+    ]);
+    $explain_status_composition_example = $out;
+}
+
+# Load Over Time: a distinct-count column beside the occurrences bar. The
+# measured case is a thread pool pinned at its ceiling while throughput
+# falls away underneath it.
+my $explain_load_over_time_example;
+{
+    my $out = explain_timeline_rows([
+        [ '2026-01-26 10:00', [['yellow','4xx: 118'],['green','2xx: 42k']],   '2.2', '706', 20 ],
+        [ '2026-01-26 11:00', [['yellow','4xx: 156'],['green','2xx: 34.2k']], '2.9', '576', 16 ],
+        [ '2026-01-26 12:00', [['yellow','4xx: 68'],['green','2xx: 31.9k']],  '1.3', '537', 15 ],
+    ]);
+    # The pool column the timeline adds, set against the bars above it.
+    $out .= "\n" . ' ' x 5 . $colors{'bright-black'} . 'threads in pool, per bucket:' . $colors{'NC'}
+          . '   ' . $colors{'bright-yellow'} . '182   182   182' . $colors{'NC'} . "\n";
+    $explain_load_over_time_example = $out;
+}
+
+# Custom Metric Tracking: a value the log already reports, drawn as its own
+# column. The worked case is a round-trip time read from monitoring lines
+# whose payload is a run of name-and-value pairs.
+my $explain_custom_metric_example;
+{
+    my $out = "  A monitoring line, and the value to be pulled out of it:\n\n";
+    $out .= "     CONN_MON statistics: ... rto=224 rtt=21.289 rttvar=11.583 mss=1448 cwnd=10\n";
+    $out .= "                                    " . $colors{'bright-yellow'} . "↑── this one" . $colors{'NC'} . "\n";
+    $out .= "\n  Drawn as a column of its own, beside the occurrences bar:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-02-17 17:00', [['yellow','WARN: 14'],['green','INFO: 394']], '0',   '6.9', 16 ],
+        [ '2026-02-17 18:00', [['green','INFO: 508']],                       '0',   '8.5', 19 ],
+        [ '2026-02-17 19:00', [['green','INFO: 514']],                       '0',   '8.6', 19 ],
+        [ '2026-02-17 20:00', [['yellow','WARN: 39'],['green','INFO: 729']], '0.1', '13',  20 ],
+    ]);
+    $out .= "\n" . ' ' x 5 . $colors{'bright-black'} . 'rtt, per bucket:' . $colors{'NC'}
+          . '   ' . $colors{'bright-yellow'} . '20 ms   17.2 ms   17.3 ms   18.7 ms' . $colors{'NC'} . "\n";
+    $explain_custom_metric_example = $out;
+}
+
+my $explain_tail_excursion_reading = q{Two very different problems produce the same complaint, and the median cannot tell them apart. In a tail excursion the body of the distribution has not moved: most requests are as fast as they ever were, and a small population is suffering something extreme. In a distribution shift the whole body has moved right: nobody is having the old experience any more, and everybody is a little slower. The first is a small number of users having a terrible time; the second is every user having a slightly worse one, and they call for different fixes. The percentile ladder separates them once you read the whole of it rather than one rung. An excursion shows an unremarkable median and low percentiles with the ladder pulling far apart at the top — in the example the median is 2ms and the 99.9th is 2.8 seconds, three decades away. A shift shows every rung moved together and the spread between them ordinary — a median of 96ms with the 99.9th at 580ms is a body that has moved, not a tail that has grown. Tail-heaviness is the statistic that makes this rankable rather than something you look for one call at a time: rank the messages by it and the excursions come to the top, then isolate the winner and look at its shape. What falsifies the reading: the two are genuinely indistinguishable in the median and the ninetieth alone, so a reading taken from those two numbers is not this technique whatever it concludes. And tail-heaviness over a handful of observations is noise; check the occurrence count on the rows a ranking put at the top.};
+
+my $explain_tail_excursion_command = <<'END';
+    ltl -so kurtosis -n 20 access.log              # rank by tail-heaviness
+    ltl -i "<the winner>" -hg duration access.log  # then look at its shape
+    ltl -i "<the winner>" -o access.log            # the full percentile ladder
+END
+
+my $explain_bimodal_split_reading = q{A distribution with two peaks is two behaviours sharing a name. The usual causes are a cache that hits or misses, a fast path and a slow path through the same code, a request served locally or forwarded, a small response and a large one. What makes the pattern worth its own technique is that the summary statistics actively mislead on it: the mean falls in the valley between the peaks, where almost no request actually lands, and the median falls in whichever peak happens to hold more than half the observations, telling you nothing about the other one. In the example the mean is 34ms, and the histogram shows almost nothing there — a spike at a millisecond and a second peak two decades away, with the space between them nearly empty. The bimodality coefficient is what makes this rankable: above 0.555 is suspect multimodal, and approaching 1.0 is strongly so. Rank by it, isolate the top row, and read the histogram to see whether the two peaks are really there and how far apart they sit. Once they are confirmed the follow-on move is attribute surfacing: separate the isolated call by session, user or query string and see whether the two peaks are two populations. What falsifies the reading: the coefficient is a screening statistic, not a test. Below about a hundred observations, noise alone clears the threshold routinely, and a genuinely bimodal distribution with very unequal peaks can sit under it. Read the histogram before believing either answer — the chart is the evidence and the coefficient is only what brought you to it.};
+
+my $explain_bimodal_split_command = <<'END';
+    ltl -so bimodality_coef -n 20 access.log       # rank by the screening statistic
+    ltl -i "<the winner>" -hg duration access.log  # confirm the two peaks
+    ltl -i "<the winner>" -xs access.log           # are the peaks two populations?
+END
+
+my $explain_shape_comparison_reading = q{Every other technique in this group starts from a ranked statistic and looks for a candidate. This one starts with the candidate already in hand and asks how it sits against everything else. Highlight it rather than isolating it, and the histogram draws both: the population's bars with the highlighted subset's overlaid, and two percentile ladders beneath, the population's and the subset's. Reading the two ladders together is the technique. In the example the population runs from 2ms at the median to a second at the 99th, three decades of spread — a mixture of many different calls, which is what a whole population looks like. The highlighted endpoint reads 1ms at the median and 2ms at the 99.9th: one tight column, a single behaviour with almost no spread at all. That is a call that is not participating in the population's problem. Had the two ladders sat on top of each other, the call would simply be the population in miniature and nothing about it would be distinctive. Had the subset's ladder sat to the right of the population's at every rung, the call would be uniformly slower than everything around it. The heatmap answers the same question over time rather than in aggregate, which is worth doing when a relationship holds in one part of the day and not another. What falsifies the reading: the comparison is against the population including the highlighted subset, not against the rest of it. A subset that is most of the traffic is largely comparing against itself, and the two ladders will agree for that reason rather than because the call is typical. Check the highlighted share in the run summary before reading a close match as a finding.};
+
+my $explain_shape_comparison_command = <<'END';
+    ltl -h "/api/v2/checkout" -hg duration access.log
+                                                   # the two ladders, one under the other
+    ltl -h "/api/v2/checkout" -hm duration access.log
+                                                   # does the relationship hold over time?
+END
+
+my $explain_timeout_clustering_reading = q{Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it. The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0.00. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces. Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it. What falsifies the reading: a naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.};
+
+my $explain_timeout_clustering_command = <<'END';
+    ltl -so skewness -sa -n 20 access.log          # rank ascending: the least right-skewed
+    ltl -i "<the winner>" -hg duration access.log  # confirm the pile at one value
+    ltl -i "<the winner>" -so cv -n 5 access.log   # a cv near zero confirms it
+END
+
+my $explain_period_over_period_reading = q{Folding several periods onto one axis serves two different questions, and it is worth knowing which one you are asking. The first is normalisation. A single week may be a poor example of ordinary behaviour — one day carrying an activity that does not normally happen at all — and reading it as though it were the norm produces conclusions about nothing. Folding several weeks together broadens the sample, smooths the one-off spikes and yields a generic profile. In the example one week shows a Wednesday three times the size of every other day; six weeks folded together show five ordinary days, because that Wednesday belonged to one week rather than to the rhythm. Used this way the fold is not good for finding specific things — it is precisely designed to average them away — and it is what to reach for when the question is what the profile generically looks like. The second is before and after. A baseline captured after a go-live or a benchmarking exercise, set against current behaviour once users have complained. Merge both corpora into one run and fold by period: the two align on the same times of day, so you can see whether the high-load periods and the error periods line up between them or whether the current one has grown a peak the baseline did not have. What falsifies the reading: the two corpora cannot be told apart within a single run, because nothing marks a line by the file it came from. The comparison therefore takes a couple of executions — one over each corpus, read side by side — and inferring a difference from two runs is weaker than seeing it in one. And where the two corpora come from machines on different time bases, the fold aligns them by the wall clock each file states, so the periods line up wrongly without anything reporting that they have.};
+
+my $explain_period_over_period_command = <<'END';
+    ltl -pr week current/access.log-*              # this period's profile
+    ltl -pr week baseline/access.log-*             # the baseline's, read beside it
+    ltl -pr day -bs 15 access.log-*                # several weeks smoothed into one day
+END
+
+my $explain_status_composition_reading = q{A single failure percentage collapses two different events into one number. Two-hundreds giving way to four-hundreds at constant volume is a client population that has started sending something the server rejects; five-hundreds appearing on top of unchanged two-hundreds is a server that has started failing under load it was already carrying. Both move a failure percentage, and only the composition tells them apart. The legend carries the composition per bucket, and the technique is to read it down the column rather than across one row: which families are present, in what proportion, and how that proportion changes from bucket to bucket while the total volume stays where it was. The shortened totals are what make that possible — a column of comparable magnitudes rather than a column of raw numbers of differing lengths. Adding a highlight splits each bucket's composition, so one call's statuses sit beside the population's in every row. That is what turns the reading into an attribution: in the example the bucket at 10:50 carries 237 client errors, and 216 of them belong to the highlighted call. The composition said something changed; the highlight said what changed. Where the format supports it, the success and failure percentage columns give the same reading as a ratio per bucket rather than as a set of counts. What falsifies the reading: those percentages are withheld whenever the classified pair has stopped being the whole population — a classification conflict, a mixed row, or an unclassified line on a format that declares both rules — and the counts are shown instead. A missing percentage is a statement about the data, not a rendering gap, and a percentage read without checking the unclassified share is a ratio over an unknown denominator.};
+
+my $explain_status_composition_command = <<'END';
+    ltl -bs 10 access.log                          # composition per bucket, read down
+    ltl -h "/api/v2/checkout" -bs 10 access.log    # split it by one call
+    ltl -hf -bs 10 access.log                      # split it by outcome instead
+END
+
+my $explain_load_over_time_reading = q{A count of lines says how much work arrived. A distinct count says how much was in flight at once, which is a different question and usually the more useful one when the complaint is about capacity. Where the log carries a session or a user, those counts appear on their own and are load measures without any further asking: distinct sessions per bucket is concurrent users, and its shape over the day is the load profile the system actually experienced. Where the log carries a thread name, the thread-pool counts are switched on explicitly, and they answer two questions. Set against the request count they say whether the pool is sized right: a count that rises and falls with demand, well below its maximum, is a pool with headroom. And a count that reaches its maximum and stays there is the bottleneck — in the example the pool sits at exactly 182 in every bucket while throughput falls from 706 a minute to 537, which is a queue forming behind a limit rather than demand falling away. A pool pinned at its ceiling with throughput dropping underneath it is the clearest capacity signal the tool produces. What falsifies the reading: a distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.};
+
+my $explain_load_over_time_command = <<'END';
+    ltl -tpas access.log                           # every pool the log names
+    ltl -tpa "https-jsse-nio" access.log           # one pool
+    ltl -tpas -bs 10 access.log                    # finer, to see a ceiling being reached
+END
+
+my $explain_custom_metric_reading = q{Everything else here reads something the tool derives by itself. This one draws a value the log already reports and the tool has no reason to know about. Many logs carry monitoring lines whose payload is a run of name-and-value pairs — a queue depth, a heap size, a connection count, a round-trip time — and each of those is a series waiting to be graphed. Name the value and an aggregation, and it becomes a column beside the occurrences bar, one figure per time bucket, on the same axis as everything else. Which aggregation to ask for is part of the question. A maximum answers how bad it got and is usually right for a depth or a backlog. A mean answers what it was typically doing and is right for a rate or a latency. A distinct count answers how many different values appeared, which is how a count of actors is built out of a field that names them. The value is on the same timeline as the requests and the errors, so a queue that fills at the same moment the error rate rises is a relationship you can see rather than infer. What falsifies the reading: a specification that matches nothing is reported after the read, with how it was interpreted, so a metric that silently produces no column is not something you have to discover for yourself — but you do have to read the notice. And a value reported on some lines rather than every line is a sample, not a series: the bucket figure is an aggregate over the lines that happened to carry it, so a monitoring line written every five minutes gives twelve observations an hour whatever the bucket width says.};
+
+my $explain_custom_metric_command = <<'END';
+    ltl -udm "queue_depth::max" app.log            # the worst depth per bucket
+    ltl -udm "rtt:ms:mean" conn.log                # a mean round-trip time
+    ltl -udm "heap:MB:max" -udm "threads::max" app.log
+                                                   # two metrics, two columns
+END
+
 my $explain_cross_log_reading = q{Every file the run processed is listed, and the marker ahead of its name says what that file contributed. A green tick means the file contributed lines that survived the filters. A green tick on a bright-green background means it also contributed a line the highlight criteria matched — that is the file the condition is actually in. A red chi means the file contributed nothing: it was read, and none of its lines came through. Read the column, not the names: over a set of node logs it tells you which nodes are affected, over a run of daily files which days, and under -r over a directory tree the answer names a folder as readily as a file. Every include, exclude and highlight criterion the tool has drives the markers, not just a text pattern: a duration threshold answers which files carried requests slower than a minute, a failure filter reduces the run to the files that contain failures, and a bytes threshold answers which of them served the large responses. What falsifies the reading: a red chi is ambiguous on its own. It means the file holds no line matching the criteria — which is a different finding from the file holding no such line at all, because an include filter, a time window or a profile fold may have removed it before the criteria were ever applied. Check the run summary's included-lines count against the lines read before concluding a node is clean. One further caution: where the files come from machines on different time bases, the timeline aligns them by the wall clock each file states, so a correlation across mixed offsets is wrong without being reported as wrong.};
 
 my $explain_cross_log_command = <<'END';
@@ -8934,6 +9213,116 @@ sub populate_explain_topics {
             { type => 'pre',       text => $explain_attribute_surfacing_command },
             { type => 'subheading', text => 'See also' },
             { type => 'paragraph', text => 'population (the grouping this belongs to), attribute-isolation, api-isolation, rank-then-isolate. Options: -xs, -xu, -xqs, -i, -so, -g.' },
+        ],
+
+        # ==== Analysis techniques: Shape group (#504) ====
+
+        'tail-excursion' => [
+            { type => 'heading',   text => 'TAIL EXCURSION VS. DISTRIBUTION SHIFT' },
+            { type => 'paragraph', text => 'Did a few requests become very slow, or did everything become slower?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_tail_excursion_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_tail_excursion_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_tail_excursion_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'shape (the grouping this belongs to), rank-then-isolate, bimodal-split, timeout-clustering, shape-comparison, kurtosis, percentiles. Options: -so, -n, -i, -hg.' },
+        ],
+
+        'bimodal-split' => [
+            { type => 'heading',   text => 'BIMODAL SPLIT' },
+            { type => 'paragraph', text => 'Is this one behaviour or two mashed together?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_bimodal_split_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_bimodal_split_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_bimodal_split_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'shape (the grouping this belongs to), rank-then-isolate, attribute-surfacing, tail-excursion, bimodality_coef, histogram. Options: -so, -n, -i, -hg, -xs.' },
+        ],
+
+        'shape-comparison' => [
+            { type => 'heading',   text => 'SHAPE COMPARISON' },
+            { type => 'paragraph', text => 'Does this one thing have the same shape as the population, or its own?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_shape_comparison_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_shape_comparison_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_shape_comparison_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'shape (the grouping this belongs to), contribution-highlighting, tail-excursion, histogram, heatmap, percentiles. Options: -h, -hg, -hm, -hgw.' },
+        ],
+
+        'timeout-clustering' => [
+            { type => 'heading',   text => 'TIMEOUT CLUSTERING' },
+            { type => 'paragraph', text => 'Is something being killed at a ceiling?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_timeout_clustering_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_timeout_clustering_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_timeout_clustering_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'shape (the grouping this belongs to), rank-then-isolate, tail-excursion, skewness, cv, histogram. Options: -so, -sa, -n, -i, -hg.' },
+        ],
+
+        # ==== Analysis techniques: Comparison group (#504) ====
+
+        'period-over-period' => [
+            { type => 'heading',   text => 'PERIOD-OVER-PERIOD COMPARISON' },
+            { type => 'paragraph', text => 'Is this period normal, and has behaviour changed since the baseline?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_period_over_period_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_period_over_period_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_period_over_period_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'comparison (the grouping this belongs to), traffic-load-profiling, window-narrowing, cross-log-correlation. Options: -pr, -bs, -st, -et.' },
+        ],
+
+        'status-composition' => [
+            { type => 'heading',   text => 'STATUS COMPOSITION OVER TIME' },
+            { type => 'paragraph', text => 'Is the mix changing while the volume holds?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_status_composition_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_status_composition_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_status_composition_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'comparison (the grouping this belongs to), outcome-isolation, contribution-highlighting, classification. Options: -h, -bs, -hf, -hs, -hcl, -scl.' },
+        ],
+
+        # ==== Analysis techniques: Load group (#504) ====
+
+        'load-over-time' => [
+            { type => 'heading',   text => 'LOAD OVER TIME' },
+            { type => 'paragraph', text => 'How much was in flight, and did it hit a ceiling?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_load_over_time_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_load_over_time_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_load_over_time_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'load (the grouping this belongs to), custom-metric, traffic-load-profiling, attribute-surfacing. Options: -tpa, -tpas, -bs, -xs, -xu.' },
+        ],
+
+        'custom-metric' => [
+            { type => 'heading',   text => 'CUSTOM METRIC TRACKING' },
+            { type => 'paragraph', text => 'What does a value the log already reports look like over time?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_custom_metric_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_custom_metric_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_custom_metric_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'load (the grouping this belongs to), load-over-time, traffic-load-profiling. Options: -udm, -ucm, -bs.' },
         ],
 
         # ==== Analysis techniques: Correlation group (#504) ====

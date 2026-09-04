@@ -22,7 +22,7 @@ Locating behaviour in time. These are the moves that decide which stretch of the
 | `resolution-zoom` | What is inside that bar? |
 | `traffic-load-profiling` | What does the load look like hour to hour and day to day? |
 
-**See also.** [Population](#population--population) — where the question usually goes next, once you know when something happened and want to know which part of the traffic it belongs to. [Comparison](#comparison--comparison), for setting one period against another.
+**See also.** [Population](#population-population) — where the question usually goes next, once you know when something happened and want to know which part of the traffic it belongs to. [Comparison](#comparison-comparison), for setting one period against another.
 
 ---
 
@@ -44,7 +44,7 @@ Attributing a signal to a part of the traffic. These are the moves that answer w
 | `remainder` | With the known problem taken out, is what is left healthy? |
 | `attribute-surfacing` | Which user, session or query string inside this one call is producing it? |
 
-**See also.** [Shape](#shape--shape) — where the question goes next, once a candidate is in hand and you want to know what its distribution looks like. [Time](#time--time), for placing the same population on the clock.
+**See also.** [Shape](#shape-shape) — where the question goes next, once a candidate is in hand and you want to know what its distribution looks like. [Time](#time-time), for placing the same population on the clock.
 
 ---
 
@@ -63,7 +63,7 @@ Tails and modality. These are the moves that read the form of a distribution rat
 | `shape-comparison` | Does this one thing have the same shape as the population, or its own? |
 | `timeout-clustering` | Is something being killed at a ceiling? |
 
-**See also.** [Population](#population--population) — where every technique here starts, since a shape is only readable once a candidate has been picked out. The [histogram](histogram.md) and [heatmap](heatmap.md) references, for the charts these readings are taken from.
+**See also.** [Population](#population-population) — where every technique here starts, since a shape is only readable once a candidate has been picked out. The [histogram](histogram.md) and [heatmap](heatmap.md) references, for the charts these readings are taken from.
 
 ---
 
@@ -80,7 +80,7 @@ Setting one body of data against another, whether two periods of the same log or
 | `period-over-period` | Is this period normal, and has behaviour changed since the baseline? |
 | `status-composition` | Is the mix changing while the volume holds? |
 
-**See also.** [Time](#time--time) — the folding options these techniques drive are the same ones `traffic-load-profiling` uses, read for a different question. [Correlation](#correlation--correlation), when the two bodies of data are separate files rather than separate periods.
+**See also.** [Time](#time-time) — the folding options these techniques drive are the same ones `traffic-load-profiling` uses, read for a different question. [Correlation](#correlation-correlation), when the two bodies of data are separate files rather than separate periods.
 
 ---
 
@@ -97,7 +97,7 @@ How much was happening at once. These are the moves that put a quantity rather t
 | `load-over-time` | How much was in flight, and did it hit a ceiling? |
 | `custom-metric` | What does a value the log already reports look like over time? |
 
-**See also.** [Time](#time--time) — a load column is read against the clock, so the bucket width decides what it can show. [Population](#population--population), when the load turns out to come from one part of the traffic.
+**See also.** [Time](#time-time) — a load column is read against the clock, so the bucket width decides what it can show. [Population](#population-population), when the load turns out to come from one part of the traffic.
 
 ---
 
@@ -113,7 +113,7 @@ Relating the same system's logs to each other. Where the other groups work withi
 |---|---|
 | `cross-log-correlation` | Which of these logs exhibits this condition? |
 
-**See also.** [Population](#population--population) — the criteria that drive this read are the same include, exclude and highlight criteria the population techniques use, applied across files rather than within one. [Comparison](#comparison--comparison), when two corpora are being set against each other rather than surveyed.
+**See also.** [Population](#population-population) — the criteria that drive this read are the same include, exclude and highlight criteria the population techniques use, applied across files rather than within one. [Comparison](#comparison-comparison), when two corpora are being set against each other rather than surveyed.
 
 ---
 
@@ -136,7 +136,7 @@ ltl -st "2026-05-07 09:00" -et "2026-05-07 11:00" access.log   # what preceded a
 ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" access.log   # close onto the spike itself
 ```
 
-**See also.** [Time](#time--time) (the grouping this belongs to), `resolution-zoom`, `traffic-load-profiling`, `period-over-period`. Options: `-st`, `-et`, `-bs`, `-pr`.
+**See also.** [Time](#time-time) (the grouping this belongs to), `resolution-zoom`, `traffic-load-profiling`, `period-over-period`. Options: `-st`, `-et`, `-bs`, `-pr`.
 
 ---
 
@@ -165,7 +165,7 @@ ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" -bs 1 access.log   # the quart
 ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -s access.log  # the minute, five seconds a row
 ```
 
-**See also.** [Time](#time--time) (the grouping this belongs to), `window-narrowing`, `traffic-load-profiling`. Options: `-st`, `-et`, `-bs`, `-s`, `-ms`, `-ru`.
+**See also.** [Time](#time-time) (the grouping this belongs to), `window-narrowing`, `traffic-load-profiling`. Options: `-st`, `-et`, `-bs`, `-s`, `-ms`, `-ru`.
 
 ---
 
@@ -192,7 +192,7 @@ ltl -pr workweek access.log-*    # the same, weekend dropped
 ltl -pr day -bs 15 access.log-*  # a finer profile, 15 minutes a row
 ```
 
-**See also.** [Time](#time--time) (the grouping this belongs to), `period-over-period`, `window-narrowing`, `load-over-time`. Options: `-pr`, `-bs`, `-st`, `-et`.
+**See also.** [Time](#time-time) (the grouping this belongs to), `period-over-period`, `window-narrowing`, `load-over-time`. Options: `-pr`, `-bs`, `-st`, `-et`.
 
 ---
 
@@ -216,7 +216,7 @@ ltl -h "timeout|refused" app.log      # where two failure words occur
 ltl -hdmin 5000 access.log            # mark every request over five seconds
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `api-isolation`, `outcome-isolation`, `remainder`, `shape-comparison`. Options: `-h`, `-hdmin`, `-hdmax`, `-hf`, `-hs`, `-hpf`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `api-isolation`, `outcome-isolation`, `remainder`, `shape-comparison`. Options: `-h`, `-hdmin`, `-hdmax`, `-hf`, `-hs`, `-hpf`.
 
 ---
 
@@ -240,7 +240,7 @@ ltl -i "/api/v2/checkout" -hg duration access.log     # its distribution, clear 
 ltl -i "/api/v2/checkout" -bs 5 access.log            # its shape over time, five minutes a row
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `contribution-highlighting`, `attribute-surfacing`, `rank-then-isolate`, `remainder`. Options: `-i`, `-ipf`, `-e`, `-n`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `contribution-highlighting`, `attribute-surfacing`, `rank-then-isolate`, `remainder`. Options: `-i`, `-ipf`, `-e`, `-n`.
 
 ---
 
@@ -267,7 +267,7 @@ ltl -e "sess-4BDC7EE2" access.log  # everything but that session
 ltl -i "10.0.12.44" access.log     # one caller, when the line carries it
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `attribute-surfacing`, `api-isolation`, `contribution-highlighting`. Options: `-i`, `-e`, `-h`, `-xs`, `-xu`, `-xqs`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-surfacing`, `api-isolation`, `contribution-highlighting`. Options: `-i`, `-e`, `-h`, `-xs`, `-xu`, `-xqs`.
 
 ---
 
@@ -294,7 +294,7 @@ ltl -so mean -n 20 access.log                   # the slowest per call
 ltl -i "<the winner>" -hg duration access.log   # then isolate and look at its shape
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `api-isolation`, `tail-excursion`, `bimodal-split`, `timeout-clustering`. Options: `-so`, `-n`, `-sa`, `-i`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `api-isolation`, `tail-excursion`, `bimodal-split`, `timeout-clustering`. Options: `-so`, `-n`, `-sa`, `-i`.
 
 ---
 
@@ -321,7 +321,7 @@ ltl -ef -es access.log                  # the unclassified remainder
 ltl -hf -so duration -n 20 access.log   # failures ranked by the time they cost
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `status-composition`, `contribution-highlighting`, `rank-then-isolate`. Options: `-hf`, `-hs`, `-if`, `-ef`, `-is`, `-es`. See also the [classification reference](classification.md).
+**See also.** [Population](#population-population) (the grouping this belongs to), `status-composition`, `contribution-highlighting`, `rank-then-isolate`. Options: `-hf`, `-hs`, `-if`, `-ef`, `-is`, `-es`. See also the [classification reference](classification.md).
 
 ---
 
@@ -347,7 +347,7 @@ ltl -e "/api/v2/report" -bs 5 access.log        # what is left, at a finer resol
 ltl -e "/health" -e "/favicon.ico" access.log   # drop the noise before reading anything
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `api-isolation`, `contribution-highlighting`, `attribute-isolation`. Options: `-e`, `-epf`, `-i`, `-bs`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `api-isolation`, `contribution-highlighting`, `attribute-isolation`. Options: `-e`, `-epf`, `-i`, `-bs`.
 
 ---
 
@@ -372,7 +372,214 @@ ltl -i "/api/v2/search" -xqs access.log                # a row per query string
 ltl -i "/api/v2/device" -xs -so duration access.log    # which session owns the time
 ```
 
-**See also.** [Population](#population--population) (the grouping this belongs to), `attribute-isolation`, `api-isolation`, `rank-then-isolate`. Options: `-xs`, `-xu`, `-xqs`, `-i`, `-so`, `-g`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-isolation`, `api-isolation`, `rank-then-isolate`. Options: `-xs`, `-xu`, `-xqs`, `-i`, `-so`, `-g`.
+
+---
+
+### Tail Excursion vs. Distribution Shift — `tail-excursion`
+
+*Did a few requests become very slow, or did everything become slower?*
+
+**The signal.** Two histograms side by side: a body that has not moved with a thin tail reaching far right, against a body that has moved bodily right.
+
+**How to read it.** Two very different problems produce the same complaint, and the median cannot tell them apart. In a tail excursion the body of the distribution has not moved: most requests are as fast as they ever were, and a small population is suffering something extreme. In a distribution shift the whole body has moved right: nobody is having the old experience any more, and everybody is a little slower. The first is a small number of users having a terrible time; the second is every user having a slightly worse one, and they call for different fixes.
+
+The percentile ladder separates them once you read the whole of it rather than one rung. An excursion shows an unremarkable median and low percentiles with the ladder pulling far apart at the top — in the example the median is 2ms and the 99.9th is 2.8 seconds, three decades away. A shift shows every rung moved together and the spread between them ordinary — a median of 96ms with the 99.9th at 580ms is a body that has moved, not a tail that has grown.
+
+Tail-heaviness is the statistic that makes this rankable rather than something you look for one call at a time: rank the messages by it and the excursions come to the top, then isolate the winner and look at its shape.
+
+*What falsifies the reading.* The two are genuinely indistinguishable in the median and the ninetieth alone, so a reading taken from those two numbers is not this technique whatever it concludes. And tail-heaviness over a handful of observations is noise; check the occurrence count on the rows a ranking put at the top.
+
+**Command.**
+
+```text
+ltl -so kurtosis -n 20 access.log               # rank by tail-heaviness
+ltl -i "<the winner>" -hg duration access.log   # then look at its shape
+ltl -i "<the winner>" -o access.log             # the full percentile ladder
+```
+
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `bimodal-split`, `timeout-clustering`, `shape-comparison`. Statistics: [`kurtosis`, `percentiles`](statistics.md). Options: `-so`, `-n`, `-i`, `-hg`.
+
+---
+
+### Bimodal Split — `bimodal-split`
+
+*Is this one behaviour or two mashed together?*
+
+**The signal.** A histogram with two peaks and a valley between them — and the mean sitting in the valley.
+
+**How to read it.** A distribution with two peaks is two behaviours sharing a name. The usual causes are a cache that hits or misses, a fast path and a slow path through the same code, a request served locally or forwarded, a small response and a large one.
+
+What makes the pattern worth its own technique is that the summary statistics actively mislead on it: the mean falls in the valley between the peaks, where almost no request actually lands, and the median falls in whichever peak happens to hold more than half the observations, telling you nothing about the other one. In the example the mean is 34ms, and the histogram shows almost nothing there — a spike at a millisecond and a second peak two decades away, with the space between them nearly empty.
+
+The bimodality coefficient is what makes this rankable: above 0.555 is suspect multimodal, and approaching 1.0 is strongly so. Rank by it, isolate the top row, and read the histogram to see whether the two peaks are really there and how far apart they sit. Once they are confirmed the follow-on move is attribute surfacing: separate the isolated call by session, user or query string and see whether the two peaks are two populations.
+
+*What falsifies the reading.* The coefficient is a screening statistic, not a test. Below about a hundred observations, noise alone clears the threshold routinely, and a genuinely bimodal distribution with very unequal peaks can sit under it. Read the histogram before believing either answer — the chart is the evidence and the coefficient is only what brought you to it.
+
+**Command.**
+
+```text
+ltl -so bimodality_coef -n 20 access.log        # rank by the screening statistic
+ltl -i "<the winner>" -hg duration access.log   # confirm the two peaks
+ltl -i "<the winner>" -xs access.log            # are the peaks two populations?
+```
+
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `attribute-surfacing`, `tail-excursion`. Statistics: [`bimodality_coef`](statistics.md). The [histogram reference](histogram.md). Options: `-so`, `-n`, `-i`, `-hg`, `-xs`.
+
+---
+
+### Shape Comparison — `shape-comparison`
+
+*Does this one thing have the same shape as the population, or its own?*
+
+**The signal.** The histogram's two overlaid series and its two percentile ladders — the population's, and the highlighted subset's.
+
+**How to read it.** Every other technique in this group starts from a ranked statistic and looks for a candidate. This one starts with the candidate already in hand and asks how it sits against everything else. Highlight it rather than isolating it, and the histogram draws both: the population's bars with the highlighted subset's overlaid, and two percentile ladders beneath.
+
+Reading the two ladders together is the technique. In the example the population runs from 2ms at the median to a second at the 99th, three decades of spread — a mixture of many different calls, which is what a whole population looks like. The highlighted endpoint reads 1ms at the median and 2ms at the 99.9th: one tight column, a single behaviour with almost no spread at all. That is a call that is not participating in the population's problem.
+
+Had the two ladders sat on top of each other, the call would simply be the population in miniature and nothing about it would be distinctive. Had the subset's ladder sat to the right of the population's at every rung, the call would be uniformly slower than everything around it. The heatmap answers the same question over time rather than in aggregate, which is worth doing when a relationship holds in one part of the day and not another.
+
+*What falsifies the reading.* The comparison is against the population *including* the highlighted subset, not against the rest of it. A subset that is most of the traffic is largely comparing against itself, and the two ladders will agree for that reason rather than because the call is typical. Check the highlighted share in the run summary before reading a close match as a finding.
+
+**Command.**
+
+```text
+ltl -h "/api/v2/checkout" -hg duration access.log  # the two ladders, one under the other
+ltl -h "/api/v2/checkout" -hm duration access.log  # does the relationship hold over time?
+```
+
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `contribution-highlighting`, `tail-excursion`. The [histogram](histogram.md) and [heatmap](heatmap.md) references. Options: `-h`, `-hg`, `-hm`, `-hgw`.
+
+---
+
+### Timeout Clustering — `timeout-clustering`
+
+*Is something being killed at a ceiling?*
+
+**The signal.** A histogram with a pile at a fixed value rather than a tail, and a percentile ladder whose rungs all read the same number.
+
+**How to read it.** Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it.
+
+The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0.00. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces.
+
+Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it.
+
+*What falsifies the reading.* A naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.
+
+**Command.**
+
+```text
+ltl -so skewness -sa -n 20 access.log           # rank ascending: the least right-skewed
+ltl -i "<the winner>" -hg duration access.log   # confirm the pile at one value
+ltl -i "<the winner>" -so cv -n 5 access.log    # a cv near zero confirms it
+```
+
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `tail-excursion`. Statistics: [`skewness`, `cv`](statistics.md). Options: `-so`, `-sa`, `-n`, `-i`, `-hg`.
+
+---
+
+### Period-over-Period Comparison — `period-over-period`
+
+*Is this period normal, and has behaviour changed since the baseline?*
+
+**The signal.** Several periods folded onto one axis — one week, then six — so a peak that belongs to one week separates from a peak that is the rhythm.
+
+**How to read it.** Folding several periods onto one axis serves two different questions, and it is worth knowing which one you are asking.
+
+The first is **normalisation**. A single week may be a poor example of ordinary behaviour — one day carrying an activity that does not normally happen at all — and reading it as though it were the norm produces conclusions about nothing. Folding several weeks together broadens the sample, smooths the one-off spikes and yields a generic profile. In the example one week shows a Wednesday three times the size of every other day; six weeks folded together show five ordinary days, because that Wednesday belonged to one week rather than to the rhythm. Used this way the fold is not good for finding specific things — it is precisely designed to average them away — and it is what to reach for when the question is what the profile generically looks like.
+
+The second is **before and after**. A baseline captured after a go-live or a benchmarking exercise, set against current behaviour once users have complained. Merge both corpora into one run and fold by period: the two align on the same times of day, so you can see whether the high-load periods and the error periods line up between them or whether the current one has grown a peak the baseline did not have.
+
+*What falsifies the reading.* The two corpora cannot be told apart within a single run, because nothing marks a line by the file it came from. The comparison therefore takes a couple of executions — one over each corpus, read side by side — and inferring a difference from two runs is weaker than seeing it in one. And where the two corpora come from machines on different time bases, the fold aligns them by the wall clock each file states, so the periods line up wrongly without anything reporting that they have.
+
+**Command.**
+
+```text
+ltl -pr week current/access.log-*    # this period's profile
+ltl -pr week baseline/access.log-*   # the baseline's, read beside it
+ltl -pr day -bs 15 access.log-*      # several weeks smoothed into one day
+```
+
+**See also.** [Comparison](#comparison-comparison) (the grouping this belongs to), `traffic-load-profiling`, `window-narrowing`, `cross-log-correlation`. Options: `-pr`, `-bs`, `-st`, `-et`.
+
+---
+
+### Status Composition Over Time — `status-composition`
+
+*Is the mix changing while the volume holds?*
+
+**The signal.** The per-bucket legend composition, split by a highlight so one call's statuses sit beside the population's in every row.
+
+**How to read it.** A single failure percentage collapses two different events into one number. Two-hundreds giving way to four-hundreds at constant volume is a client population that has started sending something the server rejects; five-hundreds appearing on top of unchanged two-hundreds is a server that has started failing under load it was already carrying. Both move a failure percentage, and only the composition tells them apart.
+
+The legend carries the composition per bucket, and the technique is to read it down the column rather than across one row: which families are present, in what proportion, and how that proportion changes from bucket to bucket while the total volume stays where it was. The shortened totals are what make that possible — a column of comparable magnitudes rather than a column of raw numbers of differing lengths.
+
+Adding a highlight splits each bucket's composition, so one call's statuses sit beside the population's in every row. That is what turns the reading into an attribution: in the example the bucket at 10:50 carries 237 client errors, and 216 of them belong to the highlighted call. The composition said something changed; the highlight said what changed. Where the format supports it, the success and failure percentage columns give the same reading as a ratio per bucket rather than as a set of counts.
+
+*What falsifies the reading.* Those percentages are withheld whenever the classified pair has stopped being the whole population — a classification conflict, a mixed row, or an unclassified line on a format that declares both rules — and the counts are shown instead. A missing percentage is a statement about the data, not a rendering gap, and a percentage read without checking the unclassified share is a ratio over an unknown denominator.
+
+**Command.**
+
+```text
+ltl -bs 10 access.log                         # composition per bucket, read down
+ltl -h "/api/v2/checkout" -bs 10 access.log   # split it by one call
+ltl -hf -bs 10 access.log                     # split it by outcome instead
+```
+
+**See also.** [Comparison](#comparison-comparison) (the grouping this belongs to), `outcome-isolation`, `contribution-highlighting`. The [classification reference](classification.md). Options: `-h`, `-bs`, `-hf`, `-hs`, `-hcl`, `-scl`.
+
+---
+
+### Load Over Time — `load-over-time`
+
+*How much was in flight, and did it hit a ceiling?*
+
+**The signal.** A distinct-count column beside the occurrences bar — here a thread pool pinned at its ceiling while throughput falls away underneath it.
+
+**How to read it.** A count of lines says how much work arrived. A distinct count says how much was in flight at once, which is a different question and usually the more useful one when the complaint is about capacity.
+
+Where the log carries a session or a user, those counts appear on their own and are load measures without any further asking: distinct sessions per bucket is concurrent users, and its shape over the day is the load profile the system actually experienced.
+
+Where the log carries a thread name, the thread-pool counts are switched on explicitly, and they answer two questions. Set against the request count they say whether the pool is sized right: a count that rises and falls with demand, well below its maximum, is a pool with headroom. And a count that reaches its maximum and stays there is the bottleneck — in the example the pool sits at exactly 182 in every bucket while throughput falls from 706 a minute to 537, which is a queue forming behind a limit rather than demand falling away. A pool pinned at its ceiling with throughput dropping underneath it is the clearest capacity signal the tool produces.
+
+*What falsifies the reading.* A distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.
+
+**Command.**
+
+```text
+ltl -tpas access.log                  # every pool the log names
+ltl -tpa "https-jsse-nio" access.log  # one pool
+ltl -tpas -bs 10 access.log           # finer, to see a ceiling being reached
+```
+
+**See also.** [Load](#load-load) (the grouping this belongs to), `custom-metric`, `traffic-load-profiling`, `attribute-surfacing`. Options: `-tpa`, `-tpas`, `-bs`, `-xs`, `-xu`.
+
+---
+
+### Custom Metric Tracking — `custom-metric`
+
+*What does a value the log already reports look like over time?*
+
+**The signal.** A monitoring line whose payload is a run of name-and-value pairs, and one of those values drawn as a column of its own beside the occurrences bar.
+
+**How to read it.** Everything else here reads something the tool derives by itself. This one draws a value the log already reports and the tool has no reason to know about. Many logs carry monitoring lines whose payload is a run of name-and-value pairs — a queue depth, a heap size, a connection count, a round-trip time — and each of those is a series waiting to be graphed. Name the value and an aggregation, and it becomes a column beside the occurrences bar, one figure per time bucket, on the same axis as everything else.
+
+Which aggregation to ask for is part of the question. A maximum answers how bad it got and is usually right for a depth or a backlog. A mean answers what it was typically doing and is right for a rate or a latency. A distinct count answers how many different values appeared, which is how a count of actors is built out of a field that names them.
+
+The value is on the same timeline as the requests and the errors, so a queue that fills at the same moment the error rate rises is a relationship you can see rather than infer.
+
+*What falsifies the reading.* A specification that matches nothing is reported after the read, with how it was interpreted, so a metric that silently produces no column is not something you have to discover for yourself — but you do have to read the notice. And a value reported on some lines rather than every line is a sample, not a series: the bucket figure is an aggregate over the lines that happened to carry it, so a monitoring line written every five minutes gives twelve observations an hour whatever the bucket width says.
+
+**Command.**
+
+```text
+ltl -udm "queue_depth::max" app.log                   # the worst depth per bucket
+ltl -udm "rtt:ms:mean" conn.log                       # a mean round-trip time
+ltl -udm "heap:MB:max" -udm "threads::max" app.log    # two metrics, two columns
+```
+
+**See also.** [Load](#load-load) (the grouping this belongs to), `load-over-time`, `traffic-load-profiling`. Options: `-udm`, `-ucm`, `-bs`.
 
 ---
 
@@ -408,4 +615,4 @@ ltl -h "/api/v2/checkout" -r logs/             # which file in the tree carries 
 ltl -i "OutOfMemory" -r logs/                  # reduce the run to matching files
 ```
 
-**See also.** [Correlation](#correlation--correlation) (the grouping this belongs to), `contribution-highlighting`, `outcome-isolation`, `api-isolation`. Options: `-i`, `-e`, `-h`, `-hdmin`, `-hdmax`, `-if`, `-ef`, `-is`, `-es`, `-r`.
+**See also.** [Correlation](#correlation-correlation) (the grouping this belongs to), `contribution-highlighting`, `outcome-isolation`, `api-isolation`. Options: `-i`, `-e`, `-h`, `-hdmin`, `-hdmax`, `-if`, `-ef`, `-is`, `-es`, `-r`.
