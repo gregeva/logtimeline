@@ -293,6 +293,9 @@ if want "$current_scenario"; then
         assert_equal "users_hl" "$(yget series.buckets.0.users_hl)" 1 asserts 'The highlighted twin under -h alice: one highlighted user' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'
         assert_equal "sessions_hl" "$(yget series.buckets.0.sessions_hl)" 3 asserts 'The sessions twin under the same highlight: alice holds three sessions across her lines' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'
     fi
+    # A second run under its own scenario directory, so the file read is
+    # the one this run wrote.
+    current_scenario="users-without-highlight"
     run_export -bs 1440 -oe -n 0 "$USERS_FIXTURE" || true
     if [[ -n "$YAML_FILE" ]]; then
         assert_equal "no users_hl without a highlight" "$(yget series.buckets.0.users_hl)|$(yget series.buckets.0.sessions_hl)" "|" asserts 'Without a highlight neither twin is written' produced_by "$PRODUCER" contract 'features/444-access-log-format-family-and-user-surface.md D13'

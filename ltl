@@ -2753,7 +2753,14 @@ my %format_transform_code = (
     strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
     prepend_session     => q{ $message = "[$session] $message" if defined $session && $session ne '' && $session ne '-'; },  # emitted only when sessions are included (CLI-gated at compile); a bare - is an absent session (#444 D12/D14)
     prepend_user        => q{ $message = "[$user] $message" if defined $user && $user ne '' && $user ne '-'; },  # emitted only when users are included (CLI-gated at compile, #444 D12)
-    duration_from_unit_token => q{ $duration = convert_duration_to_ms($duration, $duration_unit_token) if defined $duration && $duration_unit_token ne 'ms'; },  # the unit written beside the value on the line (#444 D7)
+    # The unit written beside the value on the line (#444 D7). The converted
+    # value is stored as a string on purpose: the record lexicals are shared
+    # by every entry for the whole run, a floating-point result would leave
+    # $duration with a float-carrying scalar body from the registry
+    # self-validation onward, and every duration the raw statistics model
+    # then retains, on every file, would carry that slot unused (measured
+    # +8 bytes per retained duration, +6 MB on a 762k-line access log).
+    duration_from_unit_token => q{ $duration = '' . convert_duration_to_ms($duration, $duration_unit_token) if defined $duration && $duration_unit_token ne 'ms'; },
     strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
     gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; } },
     chop_message        => q{ chop $message; },
