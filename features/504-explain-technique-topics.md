@@ -178,18 +178,26 @@ the alternation is the technique:
 The precondition on the last step is the data: it only works if the log's own
 timestamps carry millisecond precision.
 
-### F11 — reported: the rates go wrong at extreme zoom (unverified)
+### F11 — reported: normalised rates lose meaning at fine bucket widths (unverified)
 
 Reported by the architect in the same interview; not observed in tool output during
-this audit, and stated here as a claim to be tested, not a measured finding. The
-message and error rates are normalised per `-ru` and so should hold steady as the
-bucket width shrinks. The architect reports that beyond a point they diverge, and
-that at extreme zoom and high precision the numbers become very wrong — cause
-unknown, either too few samples per bucket to support a rate or an error in the
-normalisation itself.
+this audit, and stated here as a claim to be tested, not a measured finding. As the
+zoom tightens the absolute per-bucket counters shrink, because each bucket covers a
+smaller period, while the message and error rates are normalised per `-ru` and so
+ought to hold steady. From a one-hour bucket down to a five-minute bucket they
+appear to. At a five-second bucket the normalised figures seem wrong: their
+bucket-to-bucket variance becomes very large.
 
-This bears directly on the Resolution Zoom topic: what the analyst reads to know a
-zoom has not misled them is exactly the pair the claim puts in doubt.
+The architect's reading is that the arithmetic is right and the algorithm is simply
+not adapted to the data present, or to what the feature is for at that resolution.
+The aperture and the bucket width are separate causes and only the second is at
+issue here: closing `-st`/`-et` around a spike drops the quiet periods and raises
+the rate legitimately, because the remaining lines really are denser.
+
+Filed as #535 (research: normalised message and error rates diverge at fine bucket
+widths). Informational, not a gate: the Resolution Zoom topic teaches the rates as
+the pair to watch across a zoom, and carries what that research concludes once it
+settles.
 
 ## Locked decisions
 
