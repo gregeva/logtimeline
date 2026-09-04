@@ -403,6 +403,38 @@ API is driving the success percentage down or is the source of all or most of th
 errors. The highlighted twin renders as a bare number whose identity is carried by
 its colour rather than a repeated label, so the technique page says how to read it.
 
+### F21 — the Concurrency technique is load over time, and thread pools are one instance of it
+
+From the interview (architect, 2026-09-04), with the log shape verified in the
+Windchill method-server corpus.
+
+The architect's correction: the technique is a visual comparison over time using the
+timeline's chart columns. A column can carry a bar chart of the number of distinct
+text values in each bucket, or of a numeric value under an aggregation function.
+Concurrency is one reading of that column, not the technique itself — "the technique
+as an indication of load over time is really the purpose".
+
+What the concurrency reading gives: the number of threads active in a pool over a
+period, set against the request count, which says whether the pool is sized right —
+constantly at its ceiling and circulating — and exposes a bottleneck when the thread
+count reaches its maximum and everything then comes to a halt.
+
+The same column, the same reading, over other attributes. Distinct sessions per
+bucket is a load measure: how many separate user sessions were live in that period.
+Distinct users per bucket gives concurrent users and how that evolves. Both appear
+on their own when the log carries the field; the thread-pool form is switched on
+with `-tpa` for a named pool or `-tpas` for all of them.
+
+`-udm` extends the same surface to anything else the line carries: an analyst
+defines one or many custom metrics, each with its own aggregation function, and each
+is drawn as a bar-chart column beside the others. The worked case is a queue depth
+read over time. The method-server corpus carries queue-watcher notification lines
+whose payload is a run of `Name=Value` pairs, among them the queue's total entry
+count, its waiting-ready count and its average entry execution time; extracting the
+entry count per queue and graphing it per time bucket turns those lines into a queue
+observation over time. (Corpus content is not reproduced here: the lines carry host
+and queue names.)
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
