@@ -322,6 +322,40 @@ cross-group interleaving F7 records for Time and Population. And the group page 
 Shape says plainly that modality is not readable off the whole-population views, so
 an analyst does not go looking for it there.
 
+### F18 — three Shape techniques derive from the shipped shape-statistic content
+
+Drafted by Claude from `docs/explain/statistics.md` § Distribution shape and the
+matching `--explain` topics, on the architect's direction that the shape metrics
+already document their own uses, plus his answer that kurtosis is what he reaches
+for to detect a very long tail. Recorded as a draft for confirmation, not as an
+architect decision.
+
+**Tail Excursion vs. Distribution Shift.** Rank on `kurtosis` to build the
+candidate list, then isolate and read the candidate's percentiles against its
+kurtosis. High kurtosis with an unremarkable `p50` and `p90` is a tail excursion:
+most requests are fine and a small population is suffering outliers concentrated in
+the tail, which `p99` and `p999` expose. Low kurtosis with a slow `p50` is a
+distribution shift: uniform slowness affecting everyone. The two look alike in
+`p50`/`p90` alone, which is why the shape metric is what separates them.
+
+**Timeout Clustering.** Rank on `skewness` ascending (`-sa`) to surface the
+negatively-skewed candidates. Latency is naturally right-skewed, so near-zero or
+negative skewness on a slow call is the signature of a hidden cap: requests that
+should run long are being killed at a ceiling and piling up there. Isolating the
+candidate and reading its histogram shows the pile at the cap. This is the manual
+form of the move; #193 (timeout auto-detection, on hold) would automate it.
+
+**Bimodal Split.** Rank on `bimodality_coef`; above 0.555 is suspect multimodal,
+approaching 1.0 strongly so. Isolate the candidate and read its histogram for two
+peaks with a valley where the mean sits. The falsifiers are documented with the
+statistic and belong on the technique page: below about 100 observations random
+noise alone clears the threshold, so a high value on a low-traffic call is a hint
+and not a verdict; and very unequal modes (99% fast, 1% slow) can leave the
+coefficient under threshold on a distribution that is genuinely bimodal.
+
+**Variety vs. Volume** has no counterpart in the shape statistics and is still
+open.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
