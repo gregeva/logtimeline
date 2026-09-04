@@ -15,7 +15,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [404] GET /store/missing                                                                                    1    7ms    7ms    7ms               7 msec 
+• [404] GET /store/missing                                                                                    1    7ms    7ms    7ms               7 msec 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-05-07 00:00 and 2025-05-07 00:00

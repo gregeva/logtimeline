@@ -66,7 +66,7 @@ command-line options: --disable-progress -ni -n 1 -hgdm bin --terminal-width 160
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [200] GET /Windchill/sslClientAuth/servlet/odata/v6/ProdMgmt/$metadata                                     12  106ms  167ms   5.4s   2.18       8.4 sec 
+• [200] GET /Windchill/sslClientAuth/servlet/odata/v6/ProdMgmt/$metadata                                     12  106ms  167ms   5.4s   2.18       8.4 sec 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2026-01-22 08:49 and 2026-01-25 07:41

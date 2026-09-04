@@ -1,0 +1,16 @@
+VERIFY CLS 2025-06-01 10:00:00.000 level=INFO thread=worker-1 object=Store took=12 catalog fetch
+VERIFY CLS 2025-06-01 10:00:01.000 level=INFO thread=worker-1 object=Store took=12 catalog fetch
+VERIFY CLS 2025-06-01 10:00:02.000 level=INFO thread=worker-1 object=Store took=5000 upload
+VERIFY CLS 2025-06-01 10:00:03.000 level=INFO thread=worker-1 object=Store took=5000 upload
+VERIFY CLS 2025-06-01 10:00:04.000 level=INFO thread=worker-1 object=Store took=12 checkout
+VERIFY CLS 2025-06-01 10:00:05.000 level=INFO thread=worker-1 object=Store took=5000 checkout
+VERIFY CLS 2025-06-02 10:00:00.000 level=INFO thread=worker-1 object=Store took=750 index rebuild
+VERIFY CLS 2025-06-02 10:00:01.000 level=INFO thread=worker-1 object=Store took=750 index rebuild
+VERIFY CLS 2025-06-02 10:00:02.000 level=INFO thread=worker-1 object=Store took=12 health ping
+VERIFY CLS 2025-06-03 10:00:00.000 level=INFO thread=worker-1 object=Store took=1500 cache warm
+VERIFY CLS 2025-06-03 10:00:01.000 level=INFO thread=worker-1 object=Store took=1500 cache warm
+VERIFY CLS 2025-06-03 10:00:02.000 level=INFO thread=worker-1 object=Store took=12 health ping
+VERIFY CLS 2025-06-04 10:00:00.000 level=INFO thread=worker-1 object=Store took=12 search
+VERIFY CLS 2025-06-04 10:00:01.000 level=INFO thread=worker-1 object=Store took=1500 search
+VERIFY CLS 2025-06-04 10:00:02.000 level=INFO thread=worker-1 object=Store took=12 order 1001 placed
+VERIFY CLS 2025-06-04 10:00:03.000 level=INFO thread=worker-1 object=Store took=5000 order 1002 placed
