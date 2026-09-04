@@ -107,6 +107,15 @@ prints the page explaining the Time grouping and the use cases it serves — but
 is a leaf page like any other, not a listing of its techniques. The sixteen
 techniques are leaf topics beside it. Twenty-two technique-family topics in all.
 
+### D2 — Topic names are the distinctive words, kebab-cased (architect, 2026-09-04)
+
+A technique is reached by the distinctive words of its name in kebab case —
+`ltl --explain tail-excursion`, `ltl --explain window-narrowing` — while the full
+name (`Tail Excursion vs. Distribution Shift`) is what the page heading and the
+table of contents show. The existing statistics topics keep their snake_case names
+(`std_dev`, `bimodality_coef`), so the registry carries both styles; the technique
+family is internally consistent and the two styles never collide.
+
 ## Planning walkthrough
 
 1. **Anatomy contract** — the fixed shape of a technique topic and of a group
