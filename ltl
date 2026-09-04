@@ -60,7 +60,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.0-504";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -6959,6 +6959,17 @@ my @explain_groups = (
     { category => 'visualizations', name => 'histogram',          topics => [qw(histogram)] },
     # Methodology: the reasoning behind a figure rather than a figure itself.
     { category => 'methodology',    name => 'classification',     topics => [qw(classification)] },
+    # Techniques: named investigative moves rather than explanations of a
+    # figure. One group per family of moves; the group page is itself a
+    # topic, listed first so the reader meets the grouping before its
+    # techniques. Appended after every existing group so the leading
+    # statistics slice keeps describing what it names.
+    { category => 'techniques',     name => 'Time',               topics => [qw(time window-narrowing resolution-zoom traffic-load-profiling)] },
+    { category => 'techniques',     name => 'Population',         topics => [qw(population contribution-highlighting api-isolation attribute-isolation rank-then-isolate outcome-isolation remainder attribute-surfacing)] },
+    { category => 'techniques',     name => 'Shape',              topics => [qw(shape tail-excursion bimodal-split shape-comparison timeout-clustering)] },
+    { category => 'techniques',     name => 'Comparison',         topics => [qw(comparison period-over-period status-composition)] },
+    { category => 'techniques',     name => 'Load',               topics => [qw(load load-over-time custom-metric)] },
+    { category => 'techniques',     name => 'Correlation',        topics => [qw(correlation cross-log-correlation)] },
 );
 
 # Top-level section-heading labels (rendered as bold uppercase by
@@ -6967,6 +6978,7 @@ my %explain_category_heading = (
     statistics     => 'STATISTICS',
     visualizations => 'VISUALIZATIONS',
     methodology    => 'METHODOLOGY',
+    techniques     => 'ANALYSIS TECHNIQUES',
 );
 
 # Number of leading groups tagged 'statistics'. --help statistics slices
@@ -6990,6 +7002,34 @@ my %explain_summary = (
     heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
     histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
     classification  => 'Success/failure classification, the event-ledger property, and what a log can legitimately tell you',
+
+    # Analysis techniques. Each line is the question the page answers, so
+    # the registry reads as a list of questions an analyst can put to a log.
+    'time'                      => 'Locating behaviour in time -- the group page',
+    'window-narrowing'          => 'What was happening around this moment?',
+    'resolution-zoom'           => 'What is inside that bar?',
+    'traffic-load-profiling'    => 'What does the load look like hour to hour and day to day?',
+    'population'                => 'Attributing a signal to a part of the traffic -- the group page',
+    'contribution-highlighting' => 'How much of this is that?',
+    'api-isolation'             => 'What does this call look like on its own?',
+    'attribute-isolation'       => 'What is this one session, thread, user or query string doing?',
+    'rank-then-isolate'         => 'Which message should I be looking at?',
+    'outcome-isolation'         => 'Which messages are failing, and is one of them responsible?',
+    'remainder'                 => 'With the known problem taken out, is what is left healthy?',
+    'attribute-surfacing'       => 'Which user, session or query string inside this one call is producing it?',
+    'shape'                     => 'Tails and modality -- the group page',
+    'tail-excursion'            => 'Did a few requests become very slow, or did everything become slower?',
+    'bimodal-split'             => 'Is this one behaviour or two mashed together?',
+    'shape-comparison'          => 'Does this one thing have the same shape as the population, or its own?',
+    'timeout-clustering'        => 'Is something being killed at a ceiling?',
+    'comparison'                => 'Setting one body of data against another -- the group page',
+    'period-over-period'        => 'Is this period normal, and has behaviour changed since the baseline?',
+    'status-composition'        => 'Is the mix changing while the volume holds?',
+    'load'                      => 'How much was happening at once -- the group page',
+    'load-over-time'            => 'How much was in flight, and did it hit a ceiling?',
+    'custom-metric'             => 'What does a value the log already reports look like over time?',
+    'correlation'               => 'Relating the same system\'s logs to each other -- the group page',
+    'cross-log-correlation'     => 'Which of these logs exhibits this condition?',
 );
 
 # Topic content registry. Each value is an arrayref of typed block hashrefs:
@@ -7424,12 +7464,52 @@ sub print_explain_registry {
     return $out;
 }
 
+# Category of a topic, read from @explain_groups so a topic can never be
+# introduced as something it is not. Returns undef for a topic no group
+# lists.
+sub explain_topic_category {
+    my ($topic) = @_;
+    for my $group (@explain_groups) {
+        for my $t (@{ $group->{topics} }) {
+            return $group->{category} if $t eq $topic;
+        }
+    }
+    return undef;
+}
+
+# True when the topic is a technique group's own page rather than one of
+# its techniques. The group page is the topic whose name is the group's
+# name lower-cased, which is also the first topic the group lists.
+sub explain_topic_is_group {
+    my ($topic) = @_;
+    for my $group (@explain_groups) {
+        return 1 if lc($group->{name}) eq $topic;
+    }
+    return 0;
+}
+
+# Intro sentence per category. Each says what kind of page follows, so a
+# reader arriving at one topic with no prior browsing is told what they
+# are looking at rather than being told every page is a per-message
+# statistic.
+my %explain_topic_intro = (
+    statistics     => "Long-form documentation for one of the statistics ltl computes for every message entry — usable to rank the top-messages table via -so and exported in full with -o CSV; a subset also appears as table columns. For an index of all statistics, run 'ltl --help statistics'. For the list of explainable topics, run 'ltl --explain'.",
+    visualizations => "Long-form documentation for one of the charts ltl draws — what it shows, how to read it, and the options that shape it. For the list of explainable topics, run 'ltl --explain'.",
+    methodology    => "Long-form documentation for the reasoning behind a figure ltl reports — what it means, and when a number built on it can be trusted. For the list of explainable topics, run 'ltl --explain'.",
+    techniques     => "An analysis technique: an investigative move you make with ltl — the question it answers, what the signal looks like, how to read it, and the command that produces it. For the list of explainable topics, run 'ltl --explain'.",
+);
+
+# A technique group's own page introduces the grouping rather than a move,
+# so it takes its own sentence. Keyed by topic name: a group page is the
+# topic whose name is its group's, and is listed first in that group.
+my $explain_technique_group_intro = "A family of analysis techniques: what the grouping is, when to reach for it, and the moves it holds. For any one of them, run 'ltl --explain <technique>'. For the list of explainable topics, run 'ltl --explain'.";
+
 # Render a single --explain topic. Caller is responsible for resolving
 # the topic name (via resolve_explain_topic). The output is prefixed with
 # the program banner and a short intro sentence positioning the topic
-# within the broader statistics landscape, so the user has context even
-# when invoking --explain on a single topic with no prior browsing
-# (Issue #261 per user feedback).
+# within its own category, so the user has context even when invoking
+# --explain on a single topic with no prior browsing (Issue #261 per user
+# feedback).
 sub print_explain_topic {
     my ($topic) = @_;
     my $blocks = $explain_topics{$topic};
@@ -7437,8 +7517,12 @@ sub print_explain_topic {
 
     my $out = '';
     $out .= get_title_string();
+    my $category = explain_topic_category($topic) // 'statistics';
+    my $intro = $explain_topic_intro{$category} // $explain_topic_intro{statistics};
+    $intro = $explain_technique_group_intro
+        if $category eq 'techniques' && explain_topic_is_group($topic);
     $out .= help_wrap(
-        "Long-form documentation for one of the statistics ltl computes for every message entry — usable to rank the top-messages table via -so and exported in full with -o CSV; a subset also appears as table columns. For an index of all statistics, run 'ltl --help statistics'. For the list of explainable topics, run 'ltl --explain'.",
+        $intro,
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -7886,6 +7970,63 @@ my $explain_histogram_flags = <<'END';
     ltl -hg duration -dmp 7 access.log            # tighter precision (slower)
 END
 
+# ============================================================================
+# Analysis technique topics (#504)
+#
+# A technique page is an investigative move rather than an explanation of a
+# figure, so it drops the statistics family's "How ltl computes this"
+# section. Its signal is generated here at a fixed cell width from the same
+# colour definitions the tool draws with, the practice the heatmap and
+# histogram examples already follow, so the example matches what a run
+# actually prints.
+# ============================================================================
+
+# Synthetic run-summary file list, the signal of the Cross-Log Correlation
+# page. Reproduces the marker column print_summary_table() draws ahead of
+# each processed file: a red chi where the file contributed no included
+# line, a green tick where it contributed included lines, and the same
+# green tick on the bright-green highlight background where it also
+# contributed a line the highlight matched. Markers and colours are read
+# from %colors so the example cannot drift from the run.
+my $explain_cross_log_example;
+{
+    my $marker_none = "$colors{'red'}χ$colors{'NC'}";
+    my $marker_hit  = "$colors{'green'}√$colors{'NC'}";
+    my $marker_hl   = "$colors{'green-HL'}√$colors{'NC'}";
+
+    my $w = "$colors{'white'}";
+    my $p = "$colors{'periwinkle'}";
+    my $nc = "$colors{'NC'}";
+
+    # Fixed 44-cell name field: wide enough for the longest name below and
+    # comfortably inside any terminal that renders the rest of the page.
+    my $name_w = 44;
+    my @rows = (
+        [ $marker_hl,   'node-01/localhost_access_log.2026-05-05.txt' ],
+        [ $marker_hit,  'node-02/localhost_access_log.2026-05-05.txt' ],
+        [ $marker_none, 'node-03/localhost_access_log.2026-05-05.txt' ],
+        [ $marker_hl,   'node-04/localhost_access_log.2026-05-05.txt' ],
+    );
+
+    my $out = '';
+    $out .= "     $w" . bs_underline('These file(s) were processed with analysis including results between') . "$nc\n";
+    $out .= "\n";
+    for my $r (@rows) {
+        $out .= sprintf("     %s[%s%s] %-*s [%s1%s]%s\n",
+                        $w, $r->[0], $w, $name_w, $r->[1], $p, $w, $nc);
+    }
+    $explain_cross_log_example = $out;
+}
+
+my $explain_cross_log_reading = q{Every file the run processed is listed, and the marker ahead of its name says what that file contributed. A green tick means the file contributed lines that survived the filters. A green tick on a bright-green background means it also contributed a line the highlight criteria matched — that is the file the condition is actually in. A red chi means the file contributed nothing: it was read, and none of its lines came through. Read the column, not the names: over a set of node logs it tells you which nodes are affected, over a run of daily files which days, and under -r over a directory tree the answer names a folder as readily as a file. Every include, exclude and highlight criterion the tool has drives the markers, not just a text pattern: a duration threshold answers which files carried requests slower than a minute, a failure filter reduces the run to the files that contain failures, and a bytes threshold answers which of them served the large responses. What falsifies the reading: a red chi is ambiguous on its own. It means the file holds no line matching the criteria — which is a different finding from the file holding no such line at all, because an include filter, a time window or a profile fold may have removed it before the criteria were ever applied. Check the run summary's included-lines count against the lines read before concluding a node is clean. One further caution: where the files come from machines on different time bases, the timeline aligns them by the wall clock each file states, so a correlation across mixed offsets is wrong without being reported as wrong.};
+
+my $explain_cross_log_command = <<'END';
+    ltl -hdmin 60000 node-*/access.2026-05-05.log  # which nodes served a slow request
+    ltl -hf node-*/access.2026-05-05.log           # which nodes produced failures
+    ltl -h "/api/v2/checkout" -r logs/             # which file in the tree carries it
+    ltl -i "OutOfMemory" -r logs/                  # reduce the run to matching files
+END
+
 my $explain_histogram_notes = q{The X-axis log scale means that visual distance between bars represents an exponential, not linear, gap in actual value. Two bars that look the same width apart on the screen could represent a 10x difference at one part of the chart and a 100x difference at another. When -hg is invoked alongside the bar graph (default), the histogram renders as an additional panel below the timeline. When -hg is invoked with multiple metrics (-hg duration,bytes), each metric gets its own histogram panel stacked vertically. Highlight overlays (-h pattern, or numeric criteria such as -hdmin) draw colored sub-bars within each main bar showing the proportion of highlighted entries; the highlight percentile legend appears below the main legend in highlight color. Color rendering depends on terminal support: modern Unix terminals and Windows Terminal display the gradient correctly; legacy Windows CMD with `more` shows monochrome bars (the layout and percentile ticks remain readable). Population-wide statistics exclude non-positive values: a zero or negative duration, byte count or count is never captured, so the histogram's count can be smaller than the lines included. The YAML aggregate export written with -o carries each histogrammed metric's count, observed extremes and percentile ladder.};
 
 sub populate_explain_topics {
@@ -8177,6 +8318,131 @@ sub populate_explain_topics {
             { type => 'paragraph', text => $explain_histogram_compute },
             { type => 'subheading', text => 'See also' },
             { type => 'paragraph', text => 'heatmap, percentiles, skewness, kurtosis, bimodality_coef. Flags: -hg, -hgw, -hgh, -dmp.' },
+        ],
+
+        # ==== Analysis techniques: group pages (#504) ====
+        # A group page says what the grouping is, when to reach for it, and
+        # lists its own techniques, so a reader who does not yet know a
+        # technique's name still has a way in. See also names the group the
+        # analyst typically goes to next, not the next step of a pipeline:
+        # the six groups are not a sequence.
+
+        'time' => [
+            { type => 'heading',   text => 'TIME' },
+            { type => 'paragraph', text => 'Locating behaviour in time. These are the moves that decide which stretch of the log you are looking at and how finely it is divided.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'Where an investigation enters depends on the signal that started it: a named day, a known error time to work outwards from, or nothing more than a suspicion. From any of those the first move is more often to broaden than to narrow — what was happening before the error, whether the same thing happens every day at the same time, how one day compares with another. Only once that broad look is done is it worth closing the aperture and raising the resolution. Reach for these techniques when you need to establish when, or when a signal you have already attributed to part of the traffic needs to be placed on the clock.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['window-narrowing',              'What was happening around this moment?'],
+                  ['resolution-zoom',               'What is inside that bar?'],
+                  ['traffic-load-profiling',        'What does the load look like hour to hour and day to day?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population — where the question usually goes next, once you know when something happened and want to know which part of the traffic it belongs to. comparison, for setting one period against another. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        'population' => [
+            { type => 'heading',   text => 'POPULATION' },
+            { type => 'paragraph', text => 'Attributing a signal to a part of the traffic. These are the moves that answer which calls, which attribute values or which outcomes are producing what you are looking at.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'This is where an investigation usually turns, and it generally comes before the time zoom: knowing whether one endpoint accounts for the occurrences or whether they are spread across the whole population changes what a narrower window will tell you. The moves divide into discovery, which keeps the whole population in view and marks part of it, and isolation, which cuts the population down. Discovery first is the safer order — a highlight leaves every total honest, while an isolation rescales everything that follows it.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['contribution-highlighting',     'How much of this is that?'],
+                  ['api-isolation',                 'What does this call look like on its own?'],
+                  ['attribute-isolation',           'What is this one session, thread, user or query string doing?'],
+                  ['rank-then-isolate',             'Which message should I be looking at?'],
+                  ['outcome-isolation',             'Which messages are failing, and is one of them responsible?'],
+                  ['remainder',                     'With the known problem taken out, is what is left healthy?'],
+                  ['attribute-surfacing',           'Which user, session or query string inside this one call is producing it?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'shape — where the question goes next, once a candidate is in hand and you want to know what its distribution looks like. time, for placing the same population on the clock. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        'shape' => [
+            { type => 'heading',   text => 'SHAPE' },
+            { type => 'paragraph', text => 'Tails and modality. These are the moves that read the form of a distribution rather than a single value from it.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'Reach for these when a latency figure is unsatisfying and you need to know what is behind it — whether a few requests became very slow or all of them became slower, whether one call is really two behaviours mashed together, whether something is being cut off at a ceiling. The whole-population views cannot answer any of that: across hundreds of thousands of requests the gaps between modes fill in, and there is no telling whether a peak belongs to one call or to the time range. Every technique here therefore enters through a ranked message table, on a candidate already isolated.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['tail-excursion',                'Did a few requests become very slow, or did everything become slower?'],
+                  ['bimodal-split',                 'Is this one behaviour or two mashed together?'],
+                  ['shape-comparison',              'Does this one thing have the same shape as the population, or its own?'],
+                  ['timeout-clustering',            'Is something being killed at a ceiling?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population — where every technique here starts, since a shape is only readable once a candidate has been picked out. histogram and heatmap for the charts these readings are taken from. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        'comparison' => [
+            { type => 'heading',   text => 'COMPARISON' },
+            { type => 'paragraph', text => 'Setting one body of data against another, whether two periods of the same log or two corpora captured at different times.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'Two questions bring you here. Is this period normal — where the answer comes from folding several periods together so one-off spikes stop looking like the rhythm. And has behaviour changed — where a baseline captured after a go-live is set against current behaviour once users have complained. A third question is comparison down a single column rather than across periods: whether the composition of what is happening is changing while the volume holds steady.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['period-over-period',            'Is this period normal, and has behaviour changed since the baseline?'],
+                  ['status-composition',            'Is the mix changing while the volume holds?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'time — the folding options these techniques drive are the same ones traffic-load-profiling uses, read for a different question. correlation, when the two bodies of data are separate files rather than separate periods. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        'load' => [
+            { type => 'heading',   text => 'LOAD' },
+            { type => 'paragraph', text => 'How much was happening at once. These are the moves that put a quantity rather than a count of lines on the timeline.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'Reach for these when the question is about capacity rather than about a particular call: how many sessions or users were active, whether a pool was sized right, whether a queue was filling. Concurrency is one reading of such a column, not the whole of it — a distinct count is a concurrency measure only where the attribute is held for the duration of the work, and is a population measure otherwise. Any value the log already reports can be drawn the same way once you tell the tool where to find it.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['load-over-time',                'How much was in flight, and did it hit a ceiling?'],
+                  ['custom-metric',                 'What does a value the log already reports look like over time?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'time — a load column is read against the clock, so the bucket width decides what it can show. population, when the load turns out to come from one part of the traffic. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        'correlation' => [
+            { type => 'heading',   text => 'CORRELATION' },
+            { type => 'paragraph', text => 'Relating the same system\'s logs to each other. Where the other groups work within one body of data, these moves ask which part of the input a condition lives in.' },
+            { type => 'subheading', text => 'When to use it' },
+            { type => 'paragraph', text => 'Reach for this when the input is many files rather than one — the same application across a set of nodes, one node across a run of days, or a directory tree you have been handed and have not yet opened. The question is which of them exhibits the condition, and the answer decides which file is worth reading. Because the logs are separated by node, instance or date, a yes or no per file is a statement about a node, an instance or a day.' },
+            { type => 'subheading', text => 'Techniques' },
+            { type => 'table',
+              headers => ['Technique',              'The question it answers'],
+              rows    => [
+                  ['cross-log-correlation',         'Which of these logs exhibits this condition?'],
+              ] },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population — the criteria that drive this read are the same include, exclude and highlight criteria the population techniques use, applied across files rather than within one. comparison, when two corpora are being set against each other rather than surveyed. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        # ==== Analysis techniques: Correlation group (#504) ====
+
+        'cross-log-correlation' => [
+            { type => 'heading',   text => 'CROSS-LOG CORRELATION' },
+            { type => 'paragraph', text => 'Which of these logs exhibits this condition?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_cross_log_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_cross_log_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_cross_log_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'correlation (the grouping this belongs to), contribution-highlighting, outcome-isolation, api-isolation. Options: -i, -e, -h, -hdmin, -hdmax, -if, -ef, -is, -es, -r.' },
         ],
     );
     return;

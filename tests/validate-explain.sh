@@ -337,6 +337,31 @@ assert_max_line_width() {
 
 TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram classification)
 
+# Analysis-technique topics (#504). TECHNIQUE_GROUPS are the group pages,
+# one per group; TECHNIQUE_TOPICS are the technique leaf pages. The two
+# lists together are the technique family, and both are listed in the
+# registry under the ANALYSIS TECHNIQUES category. Delivered in drops, so
+# a list grows as a drop lands and the roster the feature record gives is
+# reached at the last one.
+TECHNIQUE_GROUPS=(time population shape comparison load correlation)
+TECHNIQUE_TOPICS=(cross-log-correlation)
+
+# Technique count per group. Read from the registry the tool itself prints
+# rather than hardcoded here, so a technique added to a group but never
+# listed on its group page is a failure. The registry lists the group page
+# first and its techniques after it, under the group's own subheading, so
+# the count is the topics under that subheading less the group page itself.
+technique_count_for_group() {
+    local group_label="$1"
+    "$LTL" --explain 2>/dev/null | awk -v g="  $group_label" '
+        $0 == g            { inside = 1; next }
+        inside && /^  [A-Z]/ { inside = 0 }
+        inside && /^ANALYSIS TECHNIQUES$|^STATISTICS$|^VISUALIZATIONS$|^METHODOLOGY$/ { inside = 0 }
+        inside && /^    [a-z]/ { n++ }
+        END { print (n > 0 ? n - 1 : 0) }
+    '
+}
+
 # --- Scenario 1: every topic renders non-empty with the expected heading. ---
 scenario_all_topics_render() {
     for topic in "${TOPICS[@]}"; do
@@ -1171,6 +1196,431 @@ scenario_data_model_aware_prose() {
         contract    'features/287-message-stats-bin-counter-data-model.md section Algorithm appendix.'
 }
 
+# --- Scenario: every technique-family topic renders with the page anatomy. ---
+# AC2: each of the technique-family names exits 0, renders at least twenty
+# lines, opens with an uppercase heading and carries a See also near the end.
+# Same shape as scenario_all_topics_render, over the technique roster.
+scenario_technique_topics_render() {
+    local topic
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        current_scenario="technique-topic:$topic"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "tech-$topic" --explain "$topic")
+        local ec="${result%%:*}"
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        assert_exit "$ec" 0 \
+            asserts     "ltl --explain $topic exits 0 after emitting the technique-family page" \
+            produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch block)' \
+            contract    'Issue #504 AC2: every technique-family topic is reachable by the distinctive words of its name in kebab case'
+
+        assert_min_lines "$out" 20 \
+            asserts     "Technique-family topic '$topic' renders at least 20 lines of content" \
+            produced_by 'render_blocks() in ltl iterating over %explain_topics{$topic}' \
+            contract    'Issue #504 AC2: a technique-family page carries the full anatomy, not a stub'
+
+        # Heading is the full name uppercased; the topic name is the
+        # distinctive words, so the heading is asserted per topic rather
+        # than derived from the name.
+        assert_line "$out" \
+            pattern     '^[A-Z][A-Z ()./-]*$' \
+            asserts     "Technique-family topic '$topic' opens with an uppercase heading" \
+            produced_by 'render_heading() in ltl (block of type "heading" produced by help_heading)' \
+            contract    'Issue #504 AC2: the first block of every technique-family page is an uppercase heading carrying the full name'
+
+        assert_line "$out" \
+            pattern     '^  See also$' \
+            asserts     "Technique-family topic '$topic' carries a See also section near the end" \
+            produced_by '%explain_topics in ltl (final block of the technique-family page anatomy)' \
+            contract    'Issue #504 AC2, AC3, AC4: See also closes every technique-family page'
+    done
+}
+
+# --- Scenario: technique page anatomy (AC3). ---
+# A technique page renders, in order, a paragraph, a "The signal"
+# subheading followed by a pre block, a "How to read it" subheading, a
+# "Command" subheading followed by a pre block, and See also; and carries
+# no "How ltl computes this" subheading, because a technique is not
+# computed.
+scenario_technique_page_anatomy() {
+    local topic
+    for topic in "${TECHNIQUE_TOPICS[@]}"; do
+        current_scenario="technique-anatomy:$topic"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "tech-anatomy-$topic" --explain "$topic")
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        local sub
+        for sub in 'The signal' 'How to read it' 'Command' 'See also'; do
+            assert_line "$out" \
+                pattern     "^  ${sub}\$" \
+                asserts     "Technique page '$topic' carries the '$sub' subheading" \
+                produced_by 'render_subheading() in ltl (technique page anatomy in %explain_topics)' \
+                contract    'Issue #504 AC3: the technique page anatomy is question, The signal, How to read it, Command, See also'
+        done
+
+        assert_no_line "$out" \
+            pattern     '^  How ltl computes this$' \
+            asserts     "Technique page '$topic' carries no 'How ltl computes this' section; a technique is not computed" \
+            produced_by '%explain_topics in ltl (technique pages drop the statistics family compute section)' \
+            contract    'Issue #504 AC3, R4: the compute section belongs to the statistics family only'
+
+        # Section order. The four subheadings must appear in the anatomy
+        # order; a page that carries them all in the wrong order reads as
+        # a different page.
+        local order
+        order=$(grep -nE '^  (The signal|How to read it|Command|See also)$' "$out" | sed 's/.*:  //' | tr '\n' '|')
+        if [[ "$order" == "The signal|How to read it|Command|See also|" ]]; then
+            echo "  PASS  $current_scenario :: anatomy order"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        expected order: The signal|How to read it|Command|See also|"
+            echo "        got:            $order"
+            echo "        asserts:     A technique page renders its sections in the anatomy order: the question, The signal, How to read it, Command, See also."
+            echo "        produced_by: %explain_topics in ltl (block order of the technique page)"
+            echo "        contract:    Issue #504 AC3, R4: the order is the page contract, not just the presence of the sections"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: anatomy order was '''$order'''")
+        fi
+    done
+}
+
+# --- Scenario: group page anatomy (AC4). ---
+# A group page renders a paragraph, a "When to use it" subheading, a
+# table, and See also; the table's data-row count equals the number of
+# techniques the roster gives that group.
+scenario_technique_group_anatomy() {
+    local group
+    for group in "${TECHNIQUE_GROUPS[@]}"; do
+        current_scenario="technique-group:$group"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "tech-group-$group" --explain "$group")
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        local sub
+        for sub in 'When to use it' 'Techniques' 'See also'; do
+            assert_line "$out" \
+                pattern     "^  ${sub}\$" \
+                asserts     "Group page '$group' carries the '$sub' subheading" \
+                produced_by 'render_subheading() in ltl (group page anatomy in %explain_topics)' \
+                contract    'Issue #504 AC4: a group page says what the grouping is, when to use it, and lists its techniques'
+        done
+
+        assert_line "$out" \
+            pattern     '┌' \
+            asserts     "Group page '$group' renders its technique listing as a table" \
+            produced_by 'render_table() in ltl using %histogram_box_sets{light} glyphs' \
+            contract    'Issue #504 AC4: the technique listing is a table block, so it reflows with the terminal'
+
+        # Row count: data rows are the table body lines carrying a topic
+        # name in the first cell. Count the verticals-delimited body rows
+        # between the header separator and the bottom border.
+        # The group's registry subheading is its name title-cased; the
+        # topic name is the same word lower-cased.
+        local group_label
+        group_label="$(tr '[:lower:]' '[:upper:]' <<< "${group:0:1}")${group:1}"
+        local expected
+        expected=$(technique_count_for_group "$group_label")
+        if [[ -z "$expected" || "$expected" -eq 0 ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        the registry lists no techniques under the '$group_label' group"
+            echo "        asserts:     The registry lists each technique group's own techniques beneath its subheading."
+            echo "        produced_by: print_explain_registry() in ltl iterating @explain_groups"
+            echo "        contract:    Issue #504 AC4: a group with no techniques in the registry means the anchor moved or the group is empty; an unfound anchor is a failure, never a pass"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: no techniques found under $group_label in the registry")
+            continue
+        fi
+        local rows
+        rows=$(awk '/^  ├/{body=1; next} /^  └/{body=0} body && /^  │/{n++} END{print n+0}' "$out")
+        if [[ "$rows" == "$expected" ]]; then
+            echo "  PASS  $current_scenario :: technique rows=$rows (== $expected)"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        expected $expected technique rows, got $rows"
+            echo "        asserts:     The group page'''s Techniques table lists exactly the techniques the roster gives that group."
+            echo "        produced_by: %explain_topics in ltl (the group page'''s table block rows)"
+            echo "        contract:    Issue #504 AC4: the table row count equals the group'''s technique count; a technique added to a group without a row here is a listing the analyst cannot reach"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: $rows technique rows (expected $expected)")
+        fi
+    done
+}
+
+# --- Scenario: technique signals survive to raw output with ANSI intact. ---
+# AC6: each technique page'''s signal is a generated block drawn from the
+# tool'''s own colour definitions; a CSI count over the raw bytes fails if
+# the escapes are stripped at authoring time. Same method as
+# scenario_visualization_charts.
+scenario_technique_signals() {
+    local topic
+    for topic in "${TECHNIQUE_TOPICS[@]}"; do
+        current_scenario="technique-signal:$topic"
+        echo "[$current_scenario]"
+        local raw_file="$TMP_DIR/tech-signal-$topic.raw"
+        set +e
+        "$LTL" --explain "$topic" > "$raw_file" 2>"$raw_file.stderr"
+        set -e
+        check_stderr_warnings "$raw_file.stderr"
+
+        local ansi_count
+        ansi_count=$(perl -e '''
+            my ($file) = @ARGV;
+            open my $fh, "<", $file or die $!;
+            local $/;
+            my $content = <$fh>;
+            close $fh;
+            my $count = () = $content =~ /\x1b\[/g;
+            print $count;
+        ''' "$raw_file")
+
+        if [[ "$ansi_count" -ge 20 ]]; then
+            echo "  PASS  $current_scenario :: ANSI sequences=$ansi_count (>=20)"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        expected >= 20 ANSI CSI sequences in raw output, found $ansi_count"
+            echo "        asserts:     Technique topic '$topic' embeds a generated signal block whose colour escapes survive assembly and reach the pager unmolested."
+            echo "        produced_by: the signal generator for $topic in ltl (built from %colors, beside the heatmap and histogram example builders)"
+            echo "        contract:    Issue #504 AC6, R5: the signal is rendered from the tool'''s own colour definitions, not described in prose; this guards against accidental stripping at authoring time"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: only $ansi_count ANSI sequences (expected >=20)")
+        fi
+    done
+}
+
+# --- Scenario: the registry lists the technique family (AC1). ---
+scenario_technique_registry() {
+    current_scenario="technique-registry"
+    echo "[$current_scenario]"
+    local result
+    result=$(run_ltl "tech-registry" --explain)
+    local out="${result#*:}"
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^ANALYSIS TECHNIQUES$' \
+        asserts     "Registry emits the ANALYSIS TECHNIQUES top-level section heading" \
+        produced_by 'print_explain_registry() in ltl emitting help_heading per category transition' \
+        contract    'Issue #504 AC1, R1: the technique family is a fourth category beside STATISTICS, VISUALIZATIONS and METHODOLOGY'
+
+    local group
+    for group in Time Population Shape Comparison Load Correlation; do
+        assert_line "$out" \
+            pattern     "^  ${group}\$" \
+            asserts     "Registry emits the '$group' group subheading under ANALYSIS TECHNIQUES" \
+            produced_by 'print_explain_registry() in ltl iterating @explain_groups' \
+            contract    'Issue #504 AC1, R1: the technique family is organised in six groups'
+    done
+
+    local topic
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        assert_line "$out" \
+            pattern     "^    ${topic}[[:space:]]+[^[:space:]]" \
+            asserts     "Registry lists technique-family topic '$topic' with a one-line summary" \
+            produced_by 'print_explain_registry() in ltl iterating @explain_groups{topics} against %explain_summary' \
+            contract    'Issue #504 AC1, R2: every technique-family topic is listed and summarised, so the table of contents is the index'
+    done
+
+    # AC8: none of the technique-family topics may leak into the
+    # statistics index, which stays the statistics index.
+    local stats_out
+    result=$(run_ltl "tech-help-stats" --help statistics)
+    stats_out="${result#*:}"
+    check_capture_warnings "$stats_out"
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        assert_no_line "$stats_out" \
+            pattern     "^    ${topic}[[:space:]]" \
+            asserts     "Technique-family topic '$topic' must not appear in ltl --help statistics" \
+            produced_by 'print_help_statistics() in ltl (stats-only slice of @explain_groups)' \
+            contract    'Issue #504 AC8, R7: the leading-statistics slice keeps describing what it names as the registry grows'
+    done
+}
+
+# --- Scenario: no page is introduced as something it is not (AC7). ---
+# The single fixed intro sentence used to tell every reader they were
+# looking at a per-message statistic ranked by -so. Each category now
+# carries its own, and the technique groups carry a further one.
+scenario_topic_intro_matches_category() {
+    local topic
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        current_scenario="intro:$topic"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "intro-$topic" --explain "$topic")
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        assert_no_line "$out" \
+            pattern     'one of the statistics ltl computes for every message entry' \
+            asserts     "Technique-family topic '$topic' is not introduced as a per-message statistic" \
+            produced_by 'print_explain_topic() in ltl (per-category intro selected via explain_topic_category())' \
+            contract    'Issue #504 AC7, R6: no topic is introduced by prose that misdescribes it'
+
+        assert_line "$out" \
+            pattern     'analysis technique' \
+            asserts     "Technique-family topic '$topic' is introduced as analysis-technique content" \
+            produced_by 'print_explain_topic() in ltl (%explain_topic_intro, techniques entry)' \
+            contract    'Issue #504 AC7, R6: every page tells the reader what kind of page it is'
+    done
+
+    # The existing non-statistic topics keep an introduction of their own,
+    # and it is no longer the statistics sentence.
+    local pair
+    for pair in 'heatmap:one of the charts ltl draws' 'histogram:one of the charts ltl draws' 'classification:the reasoning behind a figure'; do
+        topic="${pair%%:*}"
+        local expect="${pair#*:}"
+        current_scenario="intro:$topic"
+        echo "[$current_scenario]"
+        result=$(run_ltl "intro-$topic" --explain "$topic")
+        out="${result#*:}"
+        check_capture_warnings "$out"
+
+        assert_no_line "$out" \
+            pattern     'one of the statistics ltl computes for every message entry' \
+            asserts     "Topic '$topic' is no longer introduced as a per-message statistic" \
+            produced_by 'print_explain_topic() in ltl (per-category intro selected via explain_topic_category())' \
+            contract    'Issue #504 AC7, R6: the fixed statistics sentence was wrong for every non-statistic topic'
+
+        assert_line "$out" \
+            pattern     "$expect" \
+            asserts     "Topic '$topic' is introduced as what it is" \
+            produced_by 'print_explain_topic() in ltl (%explain_topic_intro)' \
+            contract    'Issue #504 AC7, R6: each category carries an introduction describing that category'
+    done
+
+    # A statistics topic keeps the sentence that is true of it.
+    current_scenario="intro:mean"
+    echo "[$current_scenario]"
+    result=$(run_ltl "intro-mean" --explain mean)
+    out="${result#*:}"
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     'one of the statistics ltl computes for every message entry' \
+        asserts     "A statistics topic keeps the statistics introduction" \
+        produced_by 'print_explain_topic() in ltl (%explain_topic_intro, statistics entry)' \
+        contract    'Issue #504 AC7, R6: the fix narrows the sentence to the topics it is true of; it does not remove it'
+}
+
+# --- Scenario: the documented capabilities are stated on their pages (AC9). ---
+scenario_technique_documented_capabilities() {
+    current_scenario="documented:cross-log-marker-states"
+    echo "[$current_scenario]"
+    local result
+    result=$(run_ltl "documented-xlog" --explain cross-log-correlation)
+    local out="${result#*:}"
+    check_capture_warnings "$out"
+
+    # The three marker states, each named as what the analyst sees.
+    local state
+    for state in 'green tick' 'bright-green background' 'red chi'; do
+        assert_line "$out" \
+            pattern     "$state" \
+            asserts     "The cross-log page names the '$state' file-list marker state" \
+            produced_by 'print_summary_table() in ltl draws the marker column; the page documents it' \
+            contract    'Issue #504 AC9, R8: file attribution under filter and highlight works today and was documented nowhere; all three marker states are named'
+    done
+
+    assert_line "$out" \
+        pattern     'include, exclude and highlight criterion' \
+        asserts     "The cross-log page says every include, exclude and highlight criterion drives the markers, not only a text pattern" \
+        produced_by '%explain_topics in ltl (the cross-log page How to read it section)' \
+        contract    'Issue #504 AC9, R8: the numeric thresholds and the outcome filters drive the markers as much as a pattern does'
+}
+
+# --- Scenario: no internals leak into the technique pages (AC10). ---
+# No Perl identifier, issue number or decision label may reach a rendered
+# page or the mirror. The page is user-facing prose.
+scenario_technique_no_internals() {
+    local topic
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        current_scenario="no-internals:$topic"
+        echo "[$current_scenario]"
+        local result
+        result=$(run_ltl "internals-$topic" --explain "$topic")
+        local out="${result#*:}"
+        check_capture_warnings "$out"
+
+        # Issue references (#NNN) and decision labels (D5, F12, AC3, R7)
+        # standing as their own token.
+        assert_no_line "$out" \
+            pattern     '#[0-9]{2,}' \
+            asserts     "Technique-family topic '$topic' carries no issue number" \
+            produced_by '%explain_topics in ltl (technique-family content)' \
+            contract    'Issue #504 AC10, R10: user-facing prose carries no issue numbers'
+
+        assert_no_line "$out" \
+            pattern     '(^|[^A-Za-z0-9_])(D|F|R|AC)[0-9]+([^A-Za-z0-9_]|$)' \
+            asserts     "Technique-family topic '$topic' carries no decision, finding, requirement or acceptance-criterion label" \
+            produced_by '%explain_topics in ltl (technique-family content)' \
+            contract    'Issue #504 AC10, R10: decision labels belong to the feature record, never to a rendered page'
+
+        # Perl identifiers: a sigil-prefixed name, or a sub call written
+        # with parentheses.
+        assert_no_line "$out" \
+            pattern     '[%$@][a-z_]+_[a-z_]+' \
+            asserts     "Technique-family topic '$topic' names no Perl variable" \
+            produced_by '%explain_topics in ltl (technique-family content)' \
+            contract    'Issue #504 AC10, R10: the page describes what the analyst sees, never how it is stored'
+
+        assert_no_line "$out" \
+            pattern     '[a-z_]+_[a-z_]+\(\)' \
+            asserts     "Technique-family topic '$topic' names no Perl sub" \
+            produced_by '%explain_topics in ltl (technique-family content)' \
+            contract    'Issue #504 AC10, R10: internals stay out of user-facing prose'
+    done
+}
+
+# --- Scenario: every technique-family topic is mirrored (AC11). ---
+# docs/explain/techniques.md carries the whole family in one file, the
+# family precedent docs/explain/statistics.md sets.
+scenario_technique_mirror() {
+    current_scenario="mirror:techniques"
+    echo "[$current_scenario]"
+    local mirror="$REPO_DIR/docs/explain/techniques.md"
+
+    if [[ ! -f "$mirror" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     Every technique-family topic is mirrored under docs/explain/, as the statistics, heatmap, histogram and classification topics are."
+        echo "        produced_by: docs/explain/techniques.md (the family mirror)"
+        echo "        contract:    Issue #504 AC11, R9: the mirror is where the analyst follows a cross-reference; a missing file breaks every link"
+        echo "        (not found: $mirror)"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: docs/explain/techniques.md missing")
+        return
+    fi
+
+    local topic
+    for topic in "${TECHNIQUE_GROUPS[@]}" "${TECHNIQUE_TOPICS[@]}"; do
+        assert_line "$mirror" \
+            pattern     "^#{2,3} .*[\`]${topic}[\`]" \
+            asserts     "The mirror carries a section for technique-family topic '$topic' addressed by its topic name" \
+            produced_by 'docs/explain/techniques.md (one section per topic, in roster order)' \
+            contract    'Issue #504 AC11, R9: the mirror holds a page per topic so a wiki reader reaches the same content as the terminal'
+    done
+
+    # AC10 over the mirror: the same no-internals rule.
+    assert_no_line "$mirror" \
+        pattern     '(^|[^A-Za-z0-9_])(D|F|R|AC)[0-9]+([^A-Za-z0-9_]|$)' \
+        asserts     "The mirror carries no decision, finding, requirement or acceptance-criterion label" \
+        produced_by 'docs/explain/techniques.md' \
+        contract    'Issue #504 AC10, R10: the no-internals rule applies to the mirror as much as to the rendered page'
+
+    assert_no_line "$mirror" \
+        pattern     '[%$@][a-z_]+_[a-z_]+' \
+        asserts     "The mirror names no Perl variable" \
+        produced_by 'docs/explain/techniques.md' \
+        contract    'Issue #504 AC10, R10: the mirror is user-facing prose'
+}
+
 # ---------------------------------------------------------------------------
 # Run scenarios
 # ---------------------------------------------------------------------------
@@ -1207,6 +1657,24 @@ echo ""
 scenario_data_model_aware_prose
 echo ""
 scenario_ascii_and_ansi_modes
+echo ""
+scenario_technique_registry
+echo ""
+scenario_technique_topics_render
+echo ""
+scenario_technique_page_anatomy
+echo ""
+scenario_technique_group_anatomy
+echo ""
+scenario_technique_signals
+echo ""
+scenario_topic_intro_matches_category
+echo ""
+scenario_technique_documented_capabilities
+echo ""
+scenario_technique_no_internals
+echo ""
+scenario_technique_mirror
 
 echo ""
 echo "Results: $pass passed, $fail failed"
