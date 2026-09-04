@@ -353,8 +353,24 @@ noise alone clears the threshold, so a high value on a low-traffic call is a hin
 and not a verdict; and very unequal modes (99% fast, 1% slow) can leave the
 coefficient under threshold on a distribution that is genuinely bimodal.
 
-**Variety vs. Volume** has no counterpart in the shape statistics and is still
-open.
+The fourth Shape technique is not a shape-statistic move at all; see F19.
+
+### F19 — the fourth Shape technique compares one thing's shape against the population's
+
+`Variety vs. Volume` was Claude's coinage in the session that filed #504 and carries
+no authority; the architect does not use the term. What he described in its place
+(interview, 2026-09-04): variety meaning the types against the volume, how closely
+grouped various things are — answered with the heatmap and the histogram coupled
+with highlighting, comparing visually the shape of one thing to the shape of the
+population.
+
+Verified on the 5,000-line access-log slice. `-hg duration` with a highlight on one
+endpoint draws both series in the same chart and prints two percentile rows: the
+population at `P50 2ms`, `P95 308.6ms`, `P99 1s`, and beneath it the highlighted
+endpoint at `P50 1ms`, `P95 2ms`, `P99 3ms`. The highlighted call renders as one
+tight column near 1ms while the population spreads across three decades. The
+comparison is both visual and numeric in a single view, with no second run and
+without cutting the population away.
 
 ## Locked decisions
 
@@ -443,6 +459,16 @@ session as one worked attribute among several. It pairs with Attribute Surfacing
 (D4): surfacing separates the population by an attribute so its values can be seen;
 isolation acts on one value once it is known.
 
+### D6 — Shape Comparison replaces Variety vs. Volume (architect, 2026-09-04)
+
+The fourth Shape technique is **Shape Comparison**
+(`ltl --explain shape-comparison`), answering *does this one thing have the same
+shape as the population, or its own?* It is read off the histogram's two overlaid
+series and its two percentile rows under a highlight (F19), and off the heatmap for
+whether that relationship holds or changes across time buckets. It is the only
+Shape technique that does not enter through a ranked shape statistic: the candidate
+is already in hand and the question is how it sits against everything else.
+
 ## Technique roster
 
 Nineteen techniques in six groups, each group also a topic of its own (D1).
@@ -452,7 +478,7 @@ Bold marks a technique added after the issue was filed.
 |---|---|
 | Time | Window Narrowing · Resolution Zoom · Traffic Load Profiling |
 | Population | Contribution Highlighting · API Isolation · Attribute Isolation *(was Session Isolation, D5)* · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
-| Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Variety vs. Volume · Timeout Clustering |
+| Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Shape Comparison *(was Variety vs. Volume, D6)* · Timeout Clustering |
 | Comparison | Period-over-Period Comparison · Status Composition Over Time |
 | Concurrency | Thread Pool Utilisation |
 | Correlation | Cross-Log Correlation |
