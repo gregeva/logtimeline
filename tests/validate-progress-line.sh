@@ -258,7 +258,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md D4 — a final frame or the completion line is emitted unconditionally outside the throttle'
 
 assert_command \
-    command     "grep -qE '^Processing +[0-9]+%/[0-9]+% \\(file [0-9]+/3\\) line [0-9.]+[kMB]?[a-z]*, [0-9.]+[kMB]?[a-z]* total(, [0-9.]+[kMB]?[a-z]* lines/sec)?: part-[0-9]+\\.txt\$' '$MULTI'" \
+    command     "grep -qE '^Processing +[0-9]+%/[0-9]+% \\(file [0-9]+/3\\) line [0-9.]+[kMB]?[a-z]*, [0-9.]+[kMB]?[a-z]* total(, [0-9.]+[kMB]?[a-z]* lines/sec)?: [^ ]*part-[0-9]+\\.txt\$' '$MULTI'" \
     label       'the multi-file line carries file%, overall%, the counter, line, total and the filename, in that order' \
     asserts     'With two or more files the line reads: the file percentage over the overall percentage, the file counter, the current line, the run total, optionally the rate, and the filename LAST — the filename is the only variable-length element, so it sits where it cannot shift the numerics as the run moves between files' \
     produced_by 'progress_line_text() in ltl' \
@@ -269,21 +269,21 @@ assert_command \
 # a blend, sizes taken from somewhere other than the selected set — lands on
 # different numbers.
 assert_command \
-    command     "grep -qE '^Processing +0%/0% \\(file 1/3\\) .*: part-1\\.txt\$' '$MULTI'" \
+    command     "grep -qE '^Processing +0%/0% \\(file 1/3\\) .*: [^ ]*part-1\\.txt\$' '$MULTI'" \
     label       'file 1 of 3 opens at 0% overall' \
     asserts     'The overall percentage is bytes of closed files plus the live handle position over the sum of the selected sets sizes; before any file has closed that is 0 of 3160 bytes' \
     produced_by 'progress_line_text() in ltl, from the sweep in size_selected_files_for_progress()' \
     contract    'features/446-overall-progress-indicator.md D1/D2 — bytes own the percentage; the total is taken once over the final selected list'
 
 assert_command \
-    command     "grep -qE '^Processing +0%/25% \\(file 2/3\\) .*: part-2\\.txt\$' '$MULTI'" \
+    command     "grep -qE '^Processing +0%/25% \\(file 2/3\\) .*: [^ ]*part-2\\.txt\$' '$MULTI'" \
     label       'file 2 of 3 opens at 25% overall (790 of 3160 bytes closed)' \
     asserts     'A file credits its whole size to the overall numerator when it closes, so the next file opens at exactly the closed bytes over the total: 790/3160 = 25%' \
     produced_by 'read_and_process_logs() in ltl (the roll from the live position to the full size at close) and progress_line_text()' \
     contract    'features/446-overall-progress-indicator.md D2/D3 — the contribution rolls from tell to the stat size at close, so the figure is monotonic and a skipped file still reaches 100%'
 
 assert_command \
-    command     "grep -qE '^Processing +0%/50% \\(file 3/3\\) .*: part-3\\.txt\$' '$MULTI'" \
+    command     "grep -qE '^Processing +0%/50% \\(file 3/3\\) .*: [^ ]*part-3\\.txt\$' '$MULTI'" \
     label       'file 3 of 3 opens at 50% overall (1580 of 3160 bytes closed)' \
     asserts     'The overall figure accumulates across files: two closed files of 790 bytes each is 1580 of 3160, which is 50% — bytes, not the file count, which would read 66% here' \
     produced_by 'progress_line_text() in ltl' \
@@ -348,7 +348,7 @@ capture_frames "$SINGLE" \
     "$PART3"
 
 assert_command \
-    command     "grep -qE '^Processing +[0-9]+% line [0-9.]+[kMB]?[a-z]*(, [0-9.]+[kMB]?[a-z]* lines/sec)?: part-3\\.txt\$' '$SINGLE'" \
+    command     "grep -qE '^Processing +[0-9]+% line [0-9.]+[kMB]?[a-z]*(, [0-9.]+[kMB]?[a-z]* lines/sec)?: [^ ]*part-3\\.txt\$' '$SINGLE'" \
     label       'the single-file line carries one percentage and the filename' \
     asserts     'With one file the line shows the file percentage, the current line, optionally the rate, and the filename — the same shape as the multi-file line with the overall figure and counter removed' \
     produced_by 'progress_line_text() in ltl' \
@@ -427,6 +427,56 @@ assert_command \
     asserts     'The row the frame fills is the terminal it is painted on: at 60 columns the padding runs to 59, so the same self-covering property holds on a narrow terminal, where the filename shortening makes the line length vary most' \
     produced_by 'paint_progress_line() in ltl (the pad is measured from $terminal_width)' \
     contract    'features/446-overall-progress-indicator.md D8 — the row width is the terminal width the run was given'
+
+# ---------------------------------------------------------------------------
+# Scenario: the frame names the file by its path, shortened in the middle
+#
+# The name is rendered the way the "Processed files" table renders it: the path
+# as given when it fits, otherwise the start of the path, an ellipsis, and the
+# end of the file name. The fixtures are copied under directories inside
+# $TMP_DIR (where capture_frames runs) and passed by relative path, so the
+# expected text is exact and independent of where the repo is checked out.
+# ---------------------------------------------------------------------------
+current_scenario="path-in-frame"
+
+SHORT_DIR="alpha"
+LONG_DIR="a-directory-whose-name-is-long-enough-that-the-frame-cannot-hold-it"
+mkdir -p "$TMP_DIR/$SHORT_DIR" "$TMP_DIR/$LONG_DIR"
+cp "$PART1" "$TMP_DIR/$SHORT_DIR/part-1.txt"
+cp "$PART2" "$TMP_DIR/$SHORT_DIR/part-2.txt"
+cp "$PART1" "$TMP_DIR/$LONG_DIR/part-1.txt"
+cp "$PART2" "$TMP_DIR/$LONG_DIR/part-2.txt"
+
+PATHED="$TMP_DIR/pathed.frames"
+capture_frames "$PATHED" \
+    -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
+    "$SHORT_DIR/part-1.txt" "$SHORT_DIR/part-2.txt"
+
+assert_command \
+    command     "grep -qE '^Processing .*\\(file 1/2\\) .*: $SHORT_DIR/part-1\\.txt\$' '$PATHED'" \
+    label       'a path that fits is shown whole, directory included' \
+    asserts     'The frame ends with the path exactly as it was given, so the reader sees which folder the run is in and not just the file name' \
+    produced_by 'progress_line_text() in ltl (shorten_filename() on the path as given)' \
+    contract    'features/532-progress-line-file-path.md D1 — the progress line calls the shortener on the path as given, with no directory strip'
+
+LONG_PATHED="$TMP_DIR/long-pathed.frames"
+capture_frames "$LONG_PATHED" \
+    -ni --terminal-width "$NARROW_WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
+    "$LONG_DIR/part-1.txt" "$LONG_DIR/part-2.txt"
+
+assert_command \
+    command     "grep -qE '^Processing .*\\(file 1/2\\) .*: a-d[^ ]*\\.\\.\\.[^ ]*1\\.txt\$' '$LONG_PATHED'" \
+    label       'a path that does not fit keeps its start and the end of the file name around an ellipsis' \
+    asserts     'Shortening removes the middle of the path: the frame ends with the first characters of the directory, an ellipsis, and the tail of the file name, so both the folder and the file remain identifiable' \
+    produced_by 'progress_line_text() in ltl (shorten_filename() keeps the start and the end)' \
+    contract    'features/532-progress-line-file-path.md — requirement: shortened in the middle so the start of the path and the end of the file name both remain visible'
+
+assert_command \
+    command     "! grep '^Processing ' '$LONG_PATHED' | awk -v w=$NARROW_WIDTH 'length(\$0) > w - 1 { print; found = 1 } END { exit !found }'" \
+    label       "no frame with a shortened path exceeds $((NARROW_WIDTH - 1)) characters" \
+    asserts     'Keeping the directory does not change what absorbs the fit: the name is still shortened to the room the numerics leave, and the line never wraps' \
+    produced_by 'progress_line_text() in ltl (the room calculation)' \
+    contract    'features/446-overall-progress-indicator.md D5 — the filename is the variable-length element and is shortened to fit the terminal'
 
 # ---------------------------------------------------------------------------
 # Scenario: an unreadable file keeps the two-percentage shape.
