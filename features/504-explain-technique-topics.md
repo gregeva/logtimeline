@@ -114,6 +114,41 @@ population, and only then zooms. So the Time and Population groups interleave in
 practice, and each group page's *See also* names the group the analyst typically
 reaches for next rather than presenting the six groups as an ordered pipeline.
 
+### F8 — Traffic Load Profiling and Period-over-Period Comparison share `-pr` and differ by intent
+
+From the interview (architect, 2026-09-04). Both techniques drive the profile
+folding modes (`-pr day`, `week`, `workweek`, …); the line between them is what the
+analyst is asking, not which option they type.
+
+**Traffic Load Profiling** reads the shape of the load itself: what it looks like
+hour to hour and day to day, where the high and low days fall across a week, where
+the peak-load periods and excessive concurrency sit, and whether errors occur in
+consistent groupings or some other pattern. The architect names it the most
+important technique in the Time group.
+
+**Period-over-Period Comparison** puts the same folding to two different uses.
+First, normalisation: the week in question may be a poor example of representative
+behaviour — a spike on one day from activity that would not normally occur — so
+folding several periods together broadens the observed sample into a more diverse
+population, smooths the peaks and yields a normalised trend. It is not good for
+finding specific things; it is what to reach for when the question is what the
+profile generically looks like. Second, before and after: a baseline captured after
+a go-live or a benchmarking exercise, against current behaviour once users have
+complained. Merging both corpora into one run and folding by period aligns them on
+the same times, so the analyst can see whether the periods of high load or errors
+line up between the two, or amplify the totals.
+
+### F9 — no way to highlight a specific input file, so before/after is roundabout
+
+Stated by the architect in the same interview. The before/after use of
+Period-over-Period Comparison wants the population cut in two along the boundary
+between the baseline corpus and the current one. `ltl` has no option that
+highlights lines by the file they came from: `-h` and the pattern files match line
+content, and the per-file evidence that exists (F3's `χ`/`√` marker) is a summary
+indicator, not a highlight series. The analyst therefore reaches the comparison
+over a couple of executions rather than one, and the Period-over-Period topic has
+to teach that roundabout form.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
