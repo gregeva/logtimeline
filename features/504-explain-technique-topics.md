@@ -116,6 +116,35 @@ table of contents show. The existing statistics topics keep their snake_case nam
 (`std_dev`, `bimodality_coef`), so the registry carries both styles; the technique
 family is internally consistent and the two styles never collide.
 
+### D3 — Page anatomy: technique pages and group pages (architect, 2026-09-04)
+
+A technique page uses the existing block vocabulary, dropping the statistics
+family's *How ltl computes this* section — a technique is not computed:
+
+| Section | Block | Content |
+|---|---|---|
+| heading | `heading` | The full name, uppercased |
+| — | `paragraph` | The question the technique answers, one sentence |
+| The signal | `pre` | The shape rendered in ANSI/ASCII, at most 80 visible columns (F6) |
+| How to read it | `paragraph` | The reading, and what would falsify it |
+| Command | `pre` | The worked command |
+| See also | `paragraph` | Related techniques and the options the technique uses |
+
+A group page is the same skeleton, with its techniques listed:
+
+| Section | Block | Content |
+|---|---|---|
+| heading | `heading` | The group name, uppercased |
+| — | `paragraph` | What the grouping is |
+| When to use it | `paragraph` | The use cases the grouping serves |
+| Techniques | `table` | Each technique in the group: its topic name and its one-line question |
+| See also | `paragraph` | The other groups, and `ltl --explain` for the table of contents |
+
+The group page lists its techniques so an analyst who does not yet know a
+technique's name has a usable entry point. It stays a leaf page under D1: the
+listing is content, not a drill-down level, and `ltl --explain` remains the only
+index.
+
 ## Planning walkthrough
 
 1. **Anatomy contract** — the fixed shape of a technique topic and of a group
