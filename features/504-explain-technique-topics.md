@@ -1025,26 +1025,50 @@ Three findings the implementation added to the record:
 
 ### The wiki mirror
 
-R9's mirror has two homes, and the second was missed on the first pass. The
-established pattern is that a `docs/explain/` file and its wiki page are the
-same bytes under a different name: `Heatmap-Reference` and `heatmap.md` are
-byte-identical, as are `Histogram-Reference` and `histogram.md`. The
-technique family follows it — `Analysis-Techniques-Reference` carries
-`docs/explain/techniques.md` verbatim, with only the four cross-references to
-the statistics, histogram, heatmap and classification references taking their
-wiki page names instead of file paths.
+R9's mirror has two homes, and the mechanism between them is a copy, not a
+second document. The release procedure (`docs/process/workflow.md`,
+*Post-release*, step 14) clones the wiki and overwrites each page with its
+`docs/` source; `docs/` is the source of truth and the wiki is regenerated
+from it every release. So the surfaces cannot drift as long as the map is
+right, and the map is what needs asserting.
 
-`Home` mirrors `docs/usage.md` the same way, so the two edits this work made
-there were applied to it: the `--explain` option row and the paragraph on the
-technique family beside the one pointing at the statistics reference.
+Nothing asserted it. The technique mirror was written and the map was not
+touched, which would have shipped a release with no wiki page for the
+family. Two scenarios now close that:
 
-Two pre-existing drifts were found and are **not** repaired here, since
-neither belongs to this issue: `Statistics-Reference` is behind
-`docs/explain/statistics.md` by two content changes (the interquartile range's
-accuracy note and the export's sample-size rule), and `Home` is behind
-`docs/usage.md` by around 150 lines. Both are the same class of gap — nothing
-asserts that a wiki page still matches the file it mirrors, which is why the
-drift was invisible. Worth an issue of its own.
+- **`wiki-sync-map`** — every source the step copies exists; every page it
+  copies is also staged, since the step removes the clone at the end and an
+  unstaged page is lost without a word; and every mirror under
+  `docs/explain/` is carried by the map. The map is read out of the workflow
+  document rather than restated in the harness, so the check cannot drift
+  from the procedure it guards.
+- **`wiki-link-form`** — no mirror links to a sibling by file path. A page is
+  copied verbatim, so `](statistics.md)` resolves in the repository and 404s
+  on the wiki; a sibling is addressed by its wiki page name, which is how
+  `docs/usage.md` already writes its links. `docs/explain/techniques.md` was
+  corrected to that form.
+
+### F26 — the wiki was published by hand mid-issue, which is a release step
+
+Publishing to the wiki was done directly from this branch before the map was
+understood, so the live wiki briefly carried unreleased content and a
+hand-edited `Home`. Both pages happen to match what the release copy will
+write, so nothing is left inconsistent, but the act was wrong: the wiki is
+generated at release from `docs/`, and nothing else should write to it. The
+correction is that this issue changes only `docs/` and the map; the wiki
+reaches its published state at the next release like every other page.
+
+### Pre-existing drift, not repaired here
+
+`Statistics-Reference` is behind `docs/explain/statistics.md` by two content
+changes, and `Home` is behind `docs/usage.md` by around 150 lines. Both are
+evidence the same thing: the sync step has not run for some releases. The new
+scenarios assert the map, not the state of the remote — a check that cloned
+the wiki would put the network in the test suite and would fail on a stale
+remote the harness cannot fix. Filed as #539 (published wiki pages are behind
+the `docs/` sources they are copied from), which also records that
+`Classification-Reference` is absent from the wiki although the step copies
+it.
 
 ### Completion gate
 
@@ -1070,3 +1094,4 @@ All informational, none a gate on this issue.
 | #535 | Research: normalised message and error rates diverge at fine bucket widths | Resolution Zoom teaches the rates as the pair to watch across a zoom (F11) |
 | #536 | Expose the thread name as an attribute | Attribute Isolation cannot address the thread until it lands (F16) |
 | #537 | Expose the access-log remote host as an attribute | Attribute Isolation cannot address the caller until it lands (F16) |
+| #539 | Published wiki pages are behind the `docs/` sources they are copied from | Found while adding the technique family to the sync map (F26 and the drift section) |
