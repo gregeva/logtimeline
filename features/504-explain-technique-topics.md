@@ -975,11 +975,23 @@ findings; and across mixed time bases the correlation fails silently (#155).
 
 ## Planning walkthrough
 
-1. **Anatomy contract** — the fixed shape of a technique topic and of a group
-   page, and the registry changes each needs.
-2. **Interview, group by group** — six passes pulling the techniques, their use
-   cases, and the signal each one reads.
-3. **Content spec** — the topics written out, one at a time, against the anatomy.
-4. **Acceptance criteria and harness plan** — what `tests/validate-help-content.sh`
-   asserts, and the `docs/explain/` mirror.
-5. **Delivery shape** — whether twenty-two topics ship in one drop or several.
+| Phase | State |
+|---|---|
+| 1. Anatomy contract | Closed — D1, D2, D3 |
+| 2. Interview, group by group | Closed — F7 to F22 across all six groups; roster changes D4 to D8 |
+| 3. Content spec | Closed — one block per topic under *Content specification* |
+| 4. Acceptance criteria and harness plan | Closed — R1 to R11, AC1 to AC12, D9 |
+| 5. Delivery shape | Closed — D11, three drops |
+
+Specification complete. Implementation of drop 1 has not started.
+
+## Issues filed from this work
+
+All informational, none a gate on this issue.
+
+| Issue | What it is | Where it touches this work |
+|---|---|---|
+| #534 | Highlight the lines contributed by a specific input file | Period-over-Period Comparison's before-and-after use is roundabout without it (F9) |
+| #535 | Research: normalised message and error rates diverge at fine bucket widths | Resolution Zoom teaches the rates as the pair to watch across a zoom (F11) |
+| #536 | Expose the thread name as an attribute | Attribute Isolation cannot address the thread until it lands (F16) |
+| #537 | Expose the access-log remote host as an attribute | Attribute Isolation cannot address the caller until it lands (F16) |
