@@ -322,13 +322,12 @@ cross-group interleaving F7 records for Time and Population. And the group page 
 Shape says plainly that modality is not readable off the whole-population views, so
 an analyst does not go looking for it there.
 
-### F18 — three Shape techniques derive from the shipped shape-statistic content
+### F18 — three Shape techniques derive from the shipped shape-statistic content (locked)
 
 Drafted by Claude from `docs/explain/statistics.md` § Distribution shape and the
 matching `--explain` topics, on the architect's direction that the shape metrics
 already document their own uses, plus his answer that kurtosis is what he reaches
-for to detect a very long tail. Recorded as a draft for confirmation, not as an
-architect decision.
+for to detect a very long tail. Locked as written by the architect, 2026-09-04.
 
 **Tail Excursion vs. Distribution Shift.** Rank on `kurtosis` to build the
 candidate list, then isolate and read the candidate's percentiles against its
