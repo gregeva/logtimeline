@@ -719,15 +719,259 @@ extend.
       and scopes it as prototyping research. Compensating practice, per the same
       document: each signal is verified by running the technique's own worked
       command against a real log and comparing the rendered output to the page.
-      The architect decides whether that stands as the verification.
+      Disposition in D9: that practice stands as the verification.
 
-## Open items
+### D9 — AC12 stands on the compensating practice (architect delegated, 2026-09-04)
 
-- **The mirror layout under `docs/explain/`.** The existing mirrors are one file per
-  visual or methodology topic (`heatmap.md`, `histogram.md`, `classification.md`)
-  and one file for the whole statistics family (`statistics.md`). Twenty-five
-  technique-family topics could follow either shape — one `techniques.md`, one file
-  per group, or one per topic. Not decided.
+The architect delegated the choice. AC12 — that a signal faithfully depicts what
+`ltl` draws — stays a recorded gap rather than becoming prototyping scope on this
+issue. The verification is the one `docs/test-driven-development.md` already
+prescribes for a visual surface: every signal is produced by running that technique's
+own worked command against a real log and matching the page to what came back, and
+the worked command on the page is the same command. AC6 keeps the mechanical guard
+that the signal is present and its bytes survive. Deriving a general method for
+asserting a rendered terminal surface remains the repository-wide open question that
+document already records, and is not carried by this issue.
+
+### D10 — one mirror file for the whole technique family (architect delegated, 2026-09-04)
+
+`docs/explain/` mirrors a family in one file (`statistics.md` holds all thirteen
+statistics) and a standalone topic in its own (`heatmap.md`, `histogram.md`,
+`classification.md`). The technique family follows the family precedent: a single
+`docs/explain/techniques.md` carrying all twenty-five pages, in roster order, group
+page before its techniques. One file keeps the cross-references between techniques
+navigable in the wiki, which is where the analyst follows them.
+
+### D11 — three drops (architect, 2026-09-04)
+
+| Drop | Contents |
+|---|---|
+| 1 | The fourth category and its registry entries; the six group pages; the intro fix of R6; and Cross-Log Correlation end to end as the worked technique |
+| 2 | Time (3 techniques) and Population (7) |
+| 3 | Shape (4), Comparison (2) and Load (2) |
+
+Cross-Log Correlation is the worked technique of drop 1 because it exercises the
+hardest part of the anatomy — a generated signal drawn from the tool's own colour
+definitions — and because it delivers half of R8, the file-list attribution that is
+implemented today and documented nowhere.
+
+## Content specification
+
+One block per topic: the question the page answers, the signal it renders, what the
+reading is and what falsifies it, and the worked command. The finished prose is
+written during implementation against these; the finding each rests on is named.
+
+### Time — group page `time`
+
+The grouping: locating behaviour in time. Where an investigation enters depends on
+the signal that started it — a named day, a known error time to work outwards from,
+or nothing but a suspicion — and the first move is more often to broaden than to
+narrow (F7). *See also* points at Population, which is where the question usually
+goes next.
+
+**Window Narrowing** — `window-narrowing`. *Question:* what was happening around this
+moment? *Signal:* the timeline with the aperture open, then closed around the point
+of interest. *Reading:* the move runs both ways — widening around a known error time
+to see what preceded it is the same move as cutting down to a spike (F7).
+*Falsifier:* narrowing changes the population, so a rate that rises after the cut has
+not necessarily risen in the system — the quiet periods were simply dropped (F11).
+*Command:* `-st` and `-et`.
+
+**Resolution Zoom** — `resolution-zoom`. *Question:* what is inside that bar?
+*Signal:* one hour drawn at 60-minute width, then at one-minute width, then below the
+minute. *Reading:* the ladder alternates aperture and bucket width; still localised
+to a single minute means an anomaly worth another rung, flat across the hour means a
+condition that ran for the hour and the answer is already in hand (F10). The counts
+shrink as the buckets narrow while the normalised rates hold, which is what makes two
+rungs comparable (F4). *Falsifier:* at very fine widths the normalised rates lose
+meaning through bucket-to-bucket variance (F11), and the millisecond rung needs
+millisecond timestamps in the log. *Command:* `-st`/`-et` with `-bs`, then `-s`, then
+`-ms` with sub-second `-bs`.
+
+**Traffic Load Profiling** — `traffic-load-profiling`. *Question:* what does the load
+look like hour to hour and day to day? *Signal:* the timeline folded onto one
+representative period. *Reading:* where the high and low days fall across a week,
+where peak load and excessive concurrency sit, and whether errors recur in consistent
+groupings (F8). *Falsifier:* folding a single unrepresentative period reproduces its
+one-off spikes as if they were the rhythm — that is what Period-over-Period
+Comparison's normalising use exists for. *Command:* `-pr day`, `-pr week`,
+`-pr workweek`.
+
+### Population — group page `population`
+
+The grouping: attributing a signal to a part of the traffic. This is where an
+investigation usually turns, and the population question generally precedes the time
+zoom (F7, F12). *See also* points at Shape and at Time.
+
+**Contribution Highlighting** — `contribution-highlighting`. *Question:* how much of
+this is that? *Signal:* the highlight bar beside the main bar, the `(HL)` twins in the
+legend, and the `TOP HIGHLIGHTED MESSAGES` table beside `TOP OVERALL MESSAGES`.
+*Reading:* the share a pattern contributes across time without discarding anything;
+the message table surfaces the matched rows even when they are a fraction of a
+percent of the population (F12). *Falsifier:* none of the population is removed, so
+the totals stay honest — but the highlight matches line content, not the file a line
+came from (F9, #534). *Command:* `-h <regex>`.
+
+**API Isolation** — `api-isolation`. *Question:* what does this call look like on its
+own? *Signal:* the timeline containing only the matching lines. *Reading:* the shape
+of one call's contribution, clear of everything else, which is what makes the
+attribute exposures readable afterwards (F14). *Falsifier:* every rate, scale and
+total now describes the isolated subset, not the system. *Command:* `-i <regex>`.
+
+**Attribute Isolation** — `attribute-isolation`. *Question:* what is this one session,
+thread, user, caller or query string doing? *Signal:* the timeline cut to, or
+highlighting, one attribute value. *Reading:* an attribute of the activity is held
+and the population is isolated on it, highlighted by it, or has it removed — the move
+is the same whichever attribute it is (F16). *Falsifier:* the attribute has to be on
+the line; the thread name and the access-log remote host cannot be addressed this way
+yet (#536, #537). *Command:* `-i`, `-h` or `-e` on the value.
+
+**Rank then Isolate** — `rank-then-isolate`. *Question:* which message should I be
+looking at? *Signal:* the top-messages table re-ranked. *Reading:* occurrences name
+the volume contributors, total duration names the time contributors — the right
+ranking depends on whether the complaint is about how much or about how long (F12).
+It is also the entry point for every Shape technique (F17). *Falsifier:* a ranking
+metric the rows cannot support returns nothing to rank. *Command:* `-so duration -n 20`,
+then `-i` on the winner.
+
+**Outcome Isolation** — `outcome-isolation`. *Question:* which messages are failing,
+and is one of them responsible? *Signal:* `TOP HIGHLIGHTED MESSAGES` under a failure
+highlight beside the overall table, and the per-row state marker. *Reading:* failures
+that a ranking by occurrences would never surface appear with their names, counts and
+durations; the four states keep the figures honest (F5, F12). *Falsifier:* a format
+that declines to classify produces no outcome at all, and a large unclassified share
+means the classified pair is not the whole population (F5). *Command:* `-hf`, `-if`,
+and `-ef -es` for the unclassified remainder.
+
+**Remainder Analysis** — `remainder`. *Question:* with the known problem taken out, is
+what is left healthy? *Signal:* the timeline before and after the exclusion, rescaled.
+*Reading:* removing a dominant contributor lets the shape it was flattening become
+readable — measured, two buckets that both drew a full-width bar separate to 17 and 13
+blocks once the endpoint accounting for 40% of the lines is dropped (F15).
+*Falsifier:* the exclusion removes that traffic from every total and rate as well, so
+the remainder's figures are not the system's. *Command:* `-e <regex>`.
+
+**Attribute Surfacing** — `attribute-surfacing`. *Question:* which user, session or
+query string inside this one call is producing the errors, the volume or the slow
+requests? *Signal:* one consolidated message row separating into a row per attribute
+value. *Reading:* consolidation is what made the population readable; once a call is
+isolated it is what hides the answer, and surfacing reverses it so the aggregation
+happens per value (F14). *Falsifier:* applied before a call is isolated there is too
+much noise in the view to read. *Command:* `-i <api>` with `-xu`, `-xs` or `-xqs`.
+
+### Shape — group page `shape`
+
+The grouping: tails and modality. The whole-population views cannot show modality —
+across hundreds of thousands of requests the gaps fill in and there is no telling
+whether what peeks out belongs to one call or to the time range (F17). Every technique
+here therefore enters through Rank then Isolate. *See also* points at Population.
+
+**Tail Excursion vs. Distribution Shift** — `tail-excursion`. *Question:* did a few
+requests become very slow, or did everything become slower? *Signal:* the isolated
+candidate's histogram with its percentile ticks. *Reading:* high kurtosis with an
+unremarkable `p50` and `p90` is a small population suffering outliers concentrated in
+the tail; low kurtosis with a slow `p50` is uniform slowness affecting everyone (F18).
+*Falsifier:* the two are indistinguishable in `p50`/`p90` alone, so a reading taken
+without the shape metric is not this technique. *Command:* `-so kurtosis -n 20`, then
+`-i` and `-hg duration`.
+
+**Bimodal Split** — `bimodal-split`. *Question:* is this one behaviour or two mashed
+together? *Signal:* the isolated candidate's histogram showing two peaks with a valley
+where the mean sits. *Reading:* above 0.555 is suspect multimodal, approaching 1.0
+strongly so (F18). *Falsifier:* below about a hundred observations noise alone clears
+the threshold, and very unequal modes can stay under it while the distribution is
+genuinely bimodal (F18). *Command:* `-so bimodality_coef -n 20`, then `-i` and
+`-hg duration`.
+
+**Shape Comparison** — `shape-comparison`. *Question:* does this one thing have the
+same shape as the population, or its own? *Signal:* the histogram's two overlaid
+series with its two percentile rows — the population's and the highlighted subset's.
+*Reading:* measured on an access log, a highlighted endpoint reads `p50 1ms`,
+`p95 2ms`, `p99 3ms` as one tight column while the population reads `p50 2ms`,
+`p95 308.6ms`, `p99 1s` across three decades (F19); the heatmap answers whether that
+relationship holds across time buckets. *Falsifier:* the comparison is against the
+population *including* the highlighted subset, so a dominant subset is partly
+comparing against itself. *Command:* `-h <regex> -hg duration`, then `-hm duration`.
+
+**Timeout Clustering** — `timeout-clustering`. *Question:* is something being killed
+at a ceiling? *Signal:* the isolated candidate's histogram with a pile at a fixed
+value rather than a tail. *Reading:* latency is naturally right-skewed, so near-zero
+or negative skewness on a slow call is the signature of a cap — requests that should
+run long are being cut off and accumulating at the limit (F18). *Falsifier:* a
+naturally bounded operation is left-skewed without any timeout involved. *Command:*
+`-so skewness -sa -n 20`, then `-i` and `-hg duration`.
+
+### Comparison — group page `comparison`
+
+The grouping: setting one body of data against another, whether two periods or two
+corpora. *See also* points at Time.
+
+**Period-over-Period Comparison** — `period-over-period`. *Question:* is this period
+normal, and has behaviour changed since the baseline? *Signal:* several periods folded
+onto one axis. *Reading:* two uses. Normalising — the period in question may be a poor
+example of representative behaviour, and folding several together broadens the sample,
+smooths one-off spikes and yields a generic profile; it is not good for finding
+specific things. Comparing — a baseline corpus and a current one merged into one run
+and folded by period align on the same times, so the analyst can see whether the
+high-load and error periods line up or amplify (F8). *Falsifier:* the two corpora
+cannot yet be told apart within the run, so the comparison takes a couple of
+executions and is read by inference across them (F9, #534); and across mixed time
+bases the alignment fails silently (#155). *Command:* `-pr week` over the merged
+inputs.
+
+**Status Composition Over Time** — `status-composition`. *Question:* is the mix
+changing while the volume holds? *Signal:* the per-bucket legend composition beside
+the success and failure percentage columns. *Reading:* 2xx giving way to 4xx at
+constant volume is a different event from 5xx appearing on top of unchanged 2xx, and a
+single failure percentage collapses both; the shortened totals are what make rows
+comparable down the column, and a highlight splits each bucket's composition so one
+call's statuses sit beside the population's — measured, a bucket whose every 5xx
+belonged to the highlighted call (F20). *Falsifier:* the percentages are withheld when
+the classified pair is not the whole population, and the counts are shown instead
+(F5). *Command:* `-h <regex>` with the classification columns shown.
+
+### Load — group page `load`
+
+The grouping: how much was happening at once. Concurrency is one reading of a
+timeline column, not the whole of it (F21, D7). *See also* points at Time.
+
+**Load Over Time** — `load-over-time`. *Question:* how much was in flight, and did it
+hit a ceiling? *Signal:* a bar-chart column of the distinct count per time bucket.
+*Reading:* distinct sessions per bucket and distinct users per bucket are load
+measures that appear on their own when the log carries the field; active threads in a
+pool set against the request count says whether the pool is sized right, and a count
+sitting at its maximum before throughput stops is the bottleneck (F21). *Falsifier:*
+a distinct count is only a concurrency measure where the attribute is held for the
+duration of the work. *Command:* `-tpas`, or `-tpa <pool>`.
+
+**Custom Metric Tracking** — `custom-metric`. *Question:* what does a value the log
+already reports look like over time? *Signal:* the analyst's own metric drawn as a
+bar-chart column beside the others. *Reading:* any token or number the line carries
+can be extracted under an aggregation function and graphed per bucket; the worked case
+is a queue depth read from monitoring lines whose payload is a run of name-and-value
+pairs, turning them into a queue observation over time (F21). *Falsifier:* a metric
+whose spec matches nothing is reported after the read, and a value that is not
+reported on every line is a sample, not a series. *Command:* `-udm` with the metric
+spec.
+
+### Correlation — group page `correlation`
+
+The grouping: relating the same system's logs to each other. *See also* points at
+Population.
+
+**Cross-Log Correlation** — `cross-log-correlation`. *Question:* which of these logs
+exhibits this condition? *Signal:* the marker column in the run summary's file list —
+the check where a file contributed included lines, the highlight marker where it
+matched the highlight criteria, and the cross where it contributed none (F3).
+*Reading:* the same system's logs are separated by physical node, application
+instance or date, so a yes or no per file is a statement about a node, an instance or
+a day. Every include, exclude and highlight criterion drives the markers, not only a
+text pattern: a duration threshold answers which files carried requests over a
+minute, a failure filter reduces the run to the files that contain failures, and under
+`-r` the answer names a folder as readily as a file (F22). *Falsifier:* a cross can
+mean the file holds no such line or that filtering removed it, which are different
+findings; and across mixed time bases the correlation fails silently (#155).
+*Command:* `-hdmin <ms>` or `-if` over the file set, with `-r` for a tree.
 
 ## Planning walkthrough
 
