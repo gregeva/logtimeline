@@ -91,13 +91,27 @@ mixed. The analyst-facing surfaces are:
 The success and failure percentage columns are the intended read of outcome over
 time. `errRate` is the older, coarser signal and is not the technique's subject.
 
-### F6 — rendered signal shapes are bounded at 80 columns
+### F6 — rendered examples are generated in code at a fixed cell width
 
-`render_pre()` returns its text verbatim, so an ANSI/ASCII signal shape renders
-unchanged and is never reflowed. Nothing measures escape-sequence width, and
-`help_wrap_width()` returns `max(80, --terminal-width)`. Every rendered shape is
-therefore authored to fit 80 columns, and its visible width is counted excluding
-escape sequences.
+The explain surface reflows to the actual terminal width: measured on
+`--explain kurtosis`, the widest rendered line is 100 characters at
+`--terminal-width 100`, 140 at 140 and 200 at 200. The 80 in `help_wrap_width()`
+is a floor for narrower terminals, not a cap. (The banner is a fixed 94-character
+rule that does not respond to width at all, so an 80-column terminal already
+overflows on the existing pages.)
+
+`render_pre()` returns its text verbatim, so a `pre` block is the one thing that
+does not reflow — and the established practice for a rendered example is not to
+hand-draw one. Both existing visual topics generate theirs in code at a fixed cell
+width, sourcing their colours from the tool's own definitions so the example matches
+what the tool actually draws: the heatmap example is built at 80 cells from the
+`@column_colors` yellow gradient, the histogram example at a 60-cell bar area with
+its tick marks placed against that width. The width is a property of the chart being
+drawn, chosen where the example is built, and is comfortably inside any terminal
+that renders the rest of the page.
+
+The technique topics' signal shapes follow that practice rather than introducing a
+new one.
 
 ### F7 — the analyst's path crosses groups; the groups are not a sequence
 
