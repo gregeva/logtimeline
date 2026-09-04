@@ -3,12 +3,15 @@
 Issue #524 (`-bs`/`--bucket-size` accepts a value with a unit, converted through
 the conversion the user-defined-metric units already use).
 
-Status: specification. D1 (one ladder, every time-unit surface converged in this
-issue), D2 (the ladder, its spellings, month 30 days and year 365 days) and D4
-(precision separate from bucket width) are locked, including the complete
-display ladder; D3 (grammar: bare number unchanged, `-s`/`-ms` set its unit)
-and D5 (documentation) are locked. Every decision is locked; the acceptance
-criteria below are agreed with them.
+Status: implemented on branch `524-bucket-size-accepts-a-unit-2` (the
+specification branch was merged and deleted under PR #526). D1 (one ladder,
+every time-unit surface converged in this issue), D2 (the ladder, its
+spellings, month 30 days and year 365 days) and D4 (precision separate from
+bucket width) are locked, including the complete display ladder; D3 (grammar:
+bare number unchanged, `-s`/`-ms` set its unit) and D5 (documentation) are
+locked. Every decision is locked; the acceptance criteria below are agreed with
+them and asserted by `tests/validate-bucket-size-units.sh`. Findings made
+while implementing are in § Implementation findings.
 
 ## Requirement
 
@@ -226,6 +229,63 @@ are the contracts, both existing).
     `-bs 500ms`, inspected on the terminal before the work is called done.
 
 No criterion is unassertable or unknown.
+
+## Implementation findings
+
+Recorded on the tree as implemented (2026-09-03).
+
+- **Where the ladder lives.** `@time_unit_ladder` in the globals, with two
+  derived lookups (`%time_unit_step` by canonical token,
+  `%time_unit_by_spelling` by lower-cased spelling) and one shared
+  canonicaliser, `time_unit_canonical()`. The `-ru` multiplier and its two
+  suffix tables are now views computed from the ladder (seconds per step, `/`
+  plus the short name, `_` plus the medium name), so the four existing rate
+  units render exactly as before and every other step follows the same rule.
+  The unit a bare `-bs` number carries is resolved once into
+  `$bucket_size_unit` and read by the seconds conversion in
+  `adapt_to_terminal_settings()`, which no longer restates the minute and
+  millisecond multipliers.
+- **A zero duration now renders `0ns`, not `0us`.** `format_time()` climbs
+  the ladder from its lowest step, and a value that reaches no step renders in
+  that step; the old scaler started at microseconds, so zero read `0us`. One
+  golden carried the old form, `tests/reference-output/ms-w160.txt` (21 cells
+  in the per-bucket duration column, all at zero), and was re-blessed. This is
+  the only rendered change below seven days, so acceptance criterion 5a holds
+  on every other golden. The proper rendering of a zero duration on that
+  column is the cause #444 D16 traces (`features/444-access-log-format-family-and-user-surface.md`);
+  the latency cells already render zero in the resolved unit through
+  `format_duration()` and are unchanged.
+- **Sub-millisecond steps convert by division.** The per-line converter is
+  one lookup and one multiply for every step from the millisecond up; the
+  nanosecond and microsecond steps carry a divisor instead, because
+  `$value / 1000` and `$value * 0.001` are not the same double for every
+  value, and the `-du us` and `-du ns` paths must produce the values they
+  produced before. The display scaler multiplies by the same divisor when a
+  value lands on one of those steps.
+- **`min` cannot name the minute in the metric unit slot.** `parse_udm_configs()`
+  reads any aggregation name in the unit slot as a mis-slotted function and
+  rejects the spec with a corrected spelling (the rule recorded in
+  `features/user-defined-metrics.md`), and `min` is both an aggregation and a
+  ladder spelling. This predates the ladder: the old private map also carried
+  `min`, and the function-name check fired first then too. The other three
+  parsing surfaces accept `min`; the metric slot accepts `m`, `minute` and
+  `minutes`. The harness exercises the metric slot with `minutes` in place of
+  `min` and this note is the record of the one spelling on which the surfaces
+  are not mutually sufficient. Reconciling the two rules is the architect's
+  call and is not made here.
+- **The epoch-timestamp path of CSV input** (`-du` applied to an epoch column)
+  converted through its own three-line divisor chain; it now reads the ladder
+  step, multiplying for the second and above and dividing below, so `-du m` on
+  an epoch column is honoured the same way as `-du us`.
+- **Fixture.** `tests/fixtures/bucket-size-units.txt` (four lines: 10, 45 and
+  400 days, and a value that reads as 500 ns under `-du ns`) is the display
+  ladder's producer; recorded in `docs/test-logs.md`.
+- **CSV column rules.** `tests/csv-output/rules/stats-columns.tsv` gains the
+  `err-rate_*` and `msg-rate_*` columns for the six new rate suffixes
+  (`_nsec`, `_usec`, `_msec`, `_wk`, `_mon`, `_yr`), so the structural
+  validator can represent every column the tool can now emit; the
+  `duration_unit_resolved` enum in `tests/csv-output/validate-csv-output.pl`
+  accepts every canonical token.
 
 ## Merge gate
 

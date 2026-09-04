@@ -28,19 +28,21 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 
 | Option | Description |
 |--------|-------------|
-| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
-| `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
-| `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
+| `-bs, --bucket-size <width>` | Set the width of each time bucket on the timeline: a bare number in minutes (seconds under `-s`, milliseconds under `-ms`), or a number with a unit such as `90s`, `1.5h`, `1d` or `1w` (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; `m` is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with `-s` and `-ms`. |
+| `-s, --seconds` | Read a bare `-bs` number as seconds, and render timestamps with seconds precision |
+| `-ms, --milliseconds` | Read a bare `-bs` number as milliseconds, and render timestamps with `.fff` precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
 | `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Each mode has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
-| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`) |
+| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`) |
 | `-lf, --log-format <name>` | Read every file as this log format instead of detecting it — the escape hatch when detection picks the wrong variant; an unknown name lists the known formats |
-| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
+| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day), or any other unit of the same ladder (`ns`, `us`, `ms`, `w`, `month`, `year`) |
 
 ```bash
 # 5-minute buckets (default unit is minutes)
 ltl -bs 5 access.log
+# Daily buckets: a unit on -bs sets the width, the timestamps keep minute precision
+ltl -bs 1d access.log
 # 30-second buckets
 ltl -s -bs 30 access.log
 # 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
@@ -411,7 +413,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | Part | Description |
 |------|-------------|
 | `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
 | `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
 | `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety`. A fourth field without `/…/` is always a token key and is matched literally |
 | `/regex/` | Custom extraction pattern, recognised by its slashes at the end of the spec — `rows:/…/` and `rows:::/…/` read the same (overrides default name/key matching). A capture group narrows the value; without one the whole match is the value. e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
