@@ -66,7 +66,7 @@ FIXTURE_DIR="$REPO_DIR/tests/fixtures/progress-multi-file"
 PART1="$FIXTURE_DIR/part-1.txt"
 PART2="$FIXTURE_DIR/part-2.txt"
 PART3="$FIXTURE_DIR/part-3.txt"
-ACCESS_FORMAT="access_common_duration_ms"
+ACCESS_FORMAT="access_common_duration"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -477,9 +477,14 @@ current_scenario="notice-not-in-progress-row"
 COLLIDE="$TMP_DIR/collide.frames"
 COLLIDE_RAW="$COLLIDE.raw"
 set +e
+# The access parts raise no note (their shape is one format, #444); a
+# connection-server file with no name evidence and a day-3 date (neither
+# member of its group eliminated) falls to the group default and raises the
+# note the scenario needs.
+sed 's/^2026-05-30/2026-05-03/' "$REPO_DIR/tests/fixtures/format-detection/connection-server.txt" > "$TMP_DIR/renamed-cxserver.txt"
 ( cd "$TMP_DIR" && with_ascii_colour "$LTL" \
     -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 \
-    "$PART1" "$PART2" "$PART3" ) >"$COLLIDE_RAW" 2>&1
+    "$PART1" "$PART2" "$PART3" "$TMP_DIR/renamed-cxserver.txt" ) >"$COLLIDE_RAW" 2>&1
 collide_status=$?
 set -e
 if [[ "$collide_status" -ne 0 ]]; then
@@ -524,7 +529,7 @@ QUIET_NOTICE="$TMP_DIR/quiet-notice.err"
 set +e
 ( cd "$TMP_DIR" && with_ascii_colour "$LTL" \
     -ni --disable-progress --terminal-width "$WIDTH" -bs 1440 -oe -n 1 \
-    "$PART1" "$PART2" "$PART3" ) >/dev/null 2>"$QUIET_NOTICE"
+    "$PART1" "$PART2" "$PART3" "$TMP_DIR/renamed-cxserver.txt" ) >/dev/null 2>"$QUIET_NOTICE"
 set -e
 assert_command \
     command     "grep -q '^Note: [^:]*: the detected log format' '$QUIET_NOTICE'" \

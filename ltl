@@ -2958,12 +2958,13 @@ sub format_registry_specs {
     # shape it carries. The shared prefix captures host, ident and the
     # remote user with three explicit backtracking-free captures (D6): the
     # user is capture 3 on every entry, and every other field ordinal follows.
-    # Unit is the variant-group axis where one shape is written in two units
-    # (D3): the _ms member is Tomcat 6-9 (%D milliseconds, stem
-    # localhost_access_log, .txt), the _us member is Apache HTTP Server and
-    # Tomcat 10.1+ (%D microseconds, stem access/access_log, .log).
-    { name => 'mt3ts', slug => 'access_common_duration_thread_session_ms', match_type => 19, scanned => 1, head_class => 'any',
-      family => 'access', variant_group => 'access_common_duration_thread_session', variant_default => 1,
+    # A shape is one format whatever unit its producer writes %D in: nothing
+    # on the line distinguishes Tomcat 6-9 milliseconds from Apache HTTP
+    # Server or Tomcat 10.1+ microseconds, so no unit variant exists (D3 as
+    # revised). The entry declares the millisecond default and -du names the
+    # other unit.
+    { name => 'mt3ts', slug => 'access_common_duration_thread_session', match_type => 19, scanned => 1, head_class => 'any',
+      family => 'access',
       filename => { stem => 'localhost_access_log', date => 'iso', ext => '.txt', placement => 'before',
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+) (\S+) (\S+)$',
@@ -2986,30 +2987,10 @@ sub format_registry_specs {
         [ '05/May/2025:00:00:03', '4xx', undef, undef, '-', '-', undef, 'null', 'GET /Thingworx/Things/T2', '0', '3.000', '404', '1' ],
       ],
       expect_outcomes => [ 1, 1, 2 ] },
-    { name => 'mt3tsus', slug => 'access_common_duration_thread_session_us', match_type => 20, scanned => 1, head_class => 'any',
-      family => 'access', variant_group => 'access_common_duration_thread_session',
-      filename => { stem => 'access(?:_log)?', date => 'compact', index => 'dot_n', ext => '.log', placement => 'after',
-                    samples => [ 'access.log-20260609', 'access_log', 'access.log', 'access_log.1' ] },
-      pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+) (\S+) (\S+)$',
-      field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'thread'],[10,'session'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session', 'prepend_user' ],
-      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'us', stats_eligible => 1,
-      event_ledger => 1,
-      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
-                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
-      expect_ancestors => [],
-      samples => [
-        '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542 http-nio-8080-exec-1 -',
-      ],
-      expect => [
-        [ '22/Jan/2026:08:49:51', '2xx', undef, undef, '-', '-', undef, 'http-nio-8080-exec-1', 'GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping', '209', '173542', '200', '1' ],
-      ],
-      expect_outcomes => [ 1 ] },
     # CodeBeamer's Tomcat valve writes the duration twice, each bracketed
     # with its unit (D7): the first token is read in the unit written on the
     # line, the second is matched and discarded, so this shape carries no
-    # unit ambiguity and belongs to no unit group.
+    # unit ambiguity.
     { name => 'mt12', slug => 'access_common_duration_bracketed', match_type => 12, scanned => 1, head_class => 'any',
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) \[(\d+(?:\.\d+)?)(us|ms|s)\] \[(\d+(?:\.\d+)?)(?:us|ms|s)\]$',
@@ -3108,8 +3089,8 @@ sub format_registry_specs {
         [ '08/Jun/2026:03:08:03', '2xx', undef, undef, 'alice', undef, undef, undef, 'GET /store/catalog', '5120', undef, '200', '1' ],
       ],
       expect_outcomes => [ 1, 1 ] },
-    { name => 'mt3', slug => 'access_common_duration_ms', match_type => 3, scanned => 1, head_class => 'any',
-      family => 'access', variant_group => 'access_common_duration', variant_default => 1,
+    { name => 'mt3', slug => 'access_common_duration', match_type => 3, scanned => 1, head_class => 'any',
+      family => 'access',
       filename => { stem => 'localhost_access_log', date => 'iso', ext => '.txt', placement => 'before',
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+)$',
@@ -3132,28 +3113,6 @@ sub format_registry_specs {
         [ '05/May/2025:00:00:02', '4xx', undef, undef, '-', undef, undef, undef, 'GET /Thingworx/Things/T2', '0', '3', '404', '1' ],
       ],
       expect_outcomes => [ 1, 1, 2 ] },
-    { name => 'mt3us', slug => 'access_common_duration_us', match_type => 14, scanned => 1, head_class => 'any',
-      family => 'access', variant_group => 'access_common_duration',
-      filename => { stem => 'access(?:_log)?', date => 'compact', index => 'dot_n', ext => '.log', placement => 'after',
-                    samples => [ 'access.log-20260609', 'access_log', 'access.log', 'access_log.1' ] },
-      pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+)$',
-      field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
-      time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'us', stats_eligible => 1,
-      event_ledger => 1,
-      classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
-                          failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
-      expect_ancestors => [],
-      samples => [
-        '127.0.0.1 - - [22/Jan/2026:08:49:51 +0000] "GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping HTTP/1.1" 200 209 173542',
-        '127.0.0.1 - alice [22/Jan/2026:08:49:52 +0000] "GET /Windchill/app/ HTTP/1.1" 200 4096 902133',
-      ],
-      expect => [
-        [ '22/Jan/2026:08:49:51', '2xx', undef, undef, '-', undef, undef, undef, 'GET /Windchill/servlet/WindchillGW/wt.httpgw.HTTPServer/ping', '209', '173542', '200', '1' ],
-        [ '22/Jan/2026:08:49:52', '2xx', undef, undef, 'alice', undef, undef, undef, 'GET /Windchill/app/', '4096', '902133', '200', '1' ],
-      ],
-      expect_outcomes => [ 1, 1 ] },
     # The Common Log Format: Tomcat's shipped default, Apache's default when
     # no format is named. No duration, no session.
     { name => 'mt4', slug => 'access_common', match_type => 4, scanned => 1, head_class => 'any',
@@ -3591,7 +3550,24 @@ sub select_format_variants {
     my $W = \%format_evidence_weights;
     my $fn = format_filename_evidence($path);
     my $probes = format_sample_probes($lines, $fn->{date});
-    my %out = ( filename => $fn, probes => $probes, groups => {} );
+    my %out = ( filename => $fn, probes => $probes, groups => {}, fields => {} );
+    # Populated identity fields of every scanned entry the sample matches
+    # (#444 D8): the evidence block reports them for the entry the file binds,
+    # whether or not the entry sits in a variant group.
+    for my $e (@format_registry_members) {
+        my %ord = map { $_->[1] => $_->[0] } grep { $_->[1] =~ /^(?:user|session|thread)$/ } @{ $e->[FR_FIELD_MAP] };
+        next unless %ord;
+        my ($n, %populated) = (0);
+        for my $line (@$lines) {
+            my @c = ($line =~ $e->[FR_PATTERN]) or next;
+            $n++;
+            for my $f (keys %ord) {
+                my $v = $c[ $ord{$f} - 1 ];
+                $populated{$f}++ if defined $v && $v ne '' && $v ne '-';
+            }
+        }
+        $out{fields}{ $e->[FR_NAME] } = { lines => $n, map { $_ => ($populated{$_} // 0) } keys %ord } if $n;
+    }
     for my $g (sort { $format_variant_groups{$a}{slot} <=> $format_variant_groups{$b}{slot} } keys %format_variant_groups) {
         my @members = map { $format_registry_entry{$_} } @{ $format_variant_groups{$g}{members} };
         my (%score, %why, %live, %fields);
@@ -5335,10 +5311,12 @@ sub emit_format_detection_evidence_verbose {
             $pr ? $pr->{oor} : 0, $pr ? $pr->{viol} : 0,
             $ev->{steady}{impossible_date} // 0, $ev->{steady}{monotonic_violations} // 0,
             ($pr && $pr->{fdate}) ? $pr->{fdate} : '-');
-        # Populated identity fields of the selected member over the sampled
-        # lines its pattern matched (#444 D8); '-' for a field the member
-        # does not declare.
-        my $fl = $r->{fields}{ $r->{selected} } // {};
+    }
+    # Populated identity fields of the entry the file bound, over the sampled
+    # lines its pattern matched (#444 D8); '-' for a field the entry does not
+    # declare; absent when the entry declares none.
+    my ($bound) = grep { $_->[FR_SLUG] eq ($format_detection{$file}{slug} // '') } @format_registry_members;
+    if ($bound && (my $fl = $ev->{fields}{ $bound->[FR_NAME] })) {
         push @verbose_output, '  fields: ' . join(' ', map {
             "$_=" . (exists $fl->{$_} ? "$fl->{$_}/" . ($fl->{lines} // 0) : '-') } qw(user session thread));
     }
@@ -7300,11 +7278,10 @@ sub print_help_formats {
     for my $family (@family_order) {
         my @members = grep { ($_->{family} // '') eq $family } format_registry_specs();
         $out .= help_subheading(ucfirst($family) . " log family");
-        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . ". The unit groups hold one shape written in two units by different producers; the member a file binds is chosen from its name and content, and -lf pins one.", indent => 4, first_indent => 4) . "\n";
+        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . ". A trailing duration is read in milliseconds unless -du names the unit the producer writes (Apache HTTP Server and Tomcat 10.1 and later write %D in microseconds); nothing on the line tells them apart.", indent => 4, first_indent => 4) . "\n";
         for my $spec (@members) {
             next if $seen_slug{ $spec->{slug} }++;
             $out .= help_opt($spec->{slug}, ($spec->{event_ledger} ? 'event ledger' : 'not an event ledger') . '. '
-                . ($spec->{variant_group} ? "Member of the $spec->{variant_group} unit group" . ($spec->{variant_default} ? ' (default)' : '') . '. ' : '')
                 . "Classifies as the family does.");
         }
         $out .= "\n";

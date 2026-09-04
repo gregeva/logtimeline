@@ -57,7 +57,7 @@ export PERL
 ACCESS_FIXTURE="$REPO_DIR/tests/fixtures/access-classification-buckets.txt"
 DIAG_FIXTURE="$REPO_DIR/tests/fixtures/diagnostics-classification-overlap.txt"
 GC_FIXTURE="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
-ACCESS_FORMAT="access_common_duration_ms"
+ACCESS_FORMAT="access_common_duration"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"

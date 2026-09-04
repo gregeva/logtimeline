@@ -294,8 +294,8 @@ scenario_tomcat9_ms() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: access_common_duration_ms$' \
-        asserts     'Tomcat 9 access log with %D millisecond duration binds to slug `access_common_duration_ms`. The Tomcat name selects the millisecond member of the access_common_duration unit group (#444 D3).' \
+        pattern     '^  format: access_common_duration$' \
+        asserts     'Tomcat 9 access log with %D millisecond duration binds to slug `access_common_duration`. The Tomcat name selects the millisecond member of the access_common_duration unit group (#444 D3).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -334,7 +334,7 @@ scenario_tomcat_common() {
 
     assert_line "$out" \
         pattern     '^  format: access_common$' \
-        asserts     'A standard/common access log (no duration field) binds to slug `access_common`, not to `access_common_duration_ms`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
+        asserts     'A standard/common access log (no duration field) binds to slug `access_common`, not to `access_common_duration`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
         produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 4 branch, `$`-anchored after the bytes field)' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -388,7 +388,7 @@ scenario_jboss_enhanced() {
 
     assert_line "$out" \
         pattern     '^  format: jboss_access$' \
-        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `access_common_duration_ms`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
+        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `access_common_duration`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
         produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 9 branch, `$`-anchored after the trailing duration field)' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -411,32 +411,24 @@ scenario_apache_httpd_us() {
 
     local log="$LOGS_DIR/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
     local out
-    # The specimen's analyst-renamed file name carries no stem evidence, so
-    # the common-plus-duration shape falls to the unit group's millisecond
-    # default with the ambiguity note naming the microsecond member; the
-    # staged httpd fixture (variant-httpd-named) proves the microsecond
-    # member by name evidence. No -du: detection is the subject.
+    # Detection is the subject: the specimen binds the one
+    # common-plus-duration format; the unit is -du's business.
     out=$(run_format_detection "$log")
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: access_common_duration_ms$' \
+        pattern     '^  format: access_common_duration$' \
         asserts     'A common-plus-duration line binds the access_common_duration unit group; with no name evidence the millisecond default is selected and the note names the microsecond alternative (#444 D3/D15)' \
         produced_by 'select_format_variants() and format_variant_ambiguity_note() in ltl' \
         contract    'features/444-access-log-format-family-and-user-surface.md D3 (unit is the variant-group axis), D15 (the note per file names every alternative)'
 
-    assert_line "$out.stderr" \
-        pattern     '^Note: [^:]+: the detected log format \(access_common_duration_ms\) is written by more than one producer' \
-        asserts     'The default-basis selection is surfaced on stderr, once for this file' \
-        produced_by 'format_variant_ambiguity_note() in ltl' \
-        contract    'features/444-access-log-format-family-and-user-surface.md D15'
 }
 
 
 # ---------------------------------------------------------------------------
 # #444: the access-log family. Each shape is its own strictly anchored slot,
-# named by root plus the fields it adds; unit groups are selected by name
-# evidence; populated identity fields are detection evidence; the per-file
+# named by root plus the fields it adds; populated identity fields are
+# detection evidence; the per-file
 # ambiguity note names every alternative. Contract:
 # features/444-access-log-format-family-and-user-surface.md D1-D8, D14, D15.
 # ---------------------------------------------------------------------------
@@ -449,8 +441,8 @@ scenario_family_shapes() {
     # Each staged fixture carries one shape; -bs 1440 -oe: detection only.
     for row in "access-combined.txt|access.log|access_combined|D1/D4: a combined line (Apache or nginx) binds access_combined; no duration, no session" \
                "access-combined-duration.txt|localhost_access_log.2025-05-05.txt|access_combined_duration|D2/D4: combined plus a trailing duration binds access_combined_duration, behind the stricter jboss_access" \
-               "access-thread-session.txt|localhost_access_log.2025-05-05.txt|access_common_duration_thread_session_ms|D2/D3: common plus duration, thread and session binds the thread-session shape, Tomcat name -> ms member" \
-               "access-users-only.txt|access.log|access_common_duration_us|D3: the httpd name selects the microsecond member of the access_common_duration group" \
+               "access-thread-session.txt|localhost_access_log.2025-05-05.txt|access_common_duration_thread_session|D2: common plus duration, thread and session binds the thread-session shape" \
+               "access-users-only.txt|access.log|access_common_duration|D3 as revised: an httpd-named common-plus-duration file binds the one common-plus-duration format" \
                "access-bracketed-us.txt|codebeamer_access_log.2025-10-29.txt|access_common_duration_bracketed|D7: the bracketed shape binds whatever unit the line writes"; do
         IFS='|' read -r fixture staged format why <<< "$row"
         log=$(stage_fixture "$fixture" "$staged") || continue
@@ -475,8 +467,7 @@ scenario_family_shapes() {
     # A counting metric makes the section walk the buckets, where the sessions
     # oracle line is printed.
     out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
-    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0
- \
+    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
 }
@@ -490,18 +481,12 @@ scenario_family_fields_evidence() {
     assert_line "$out" pattern '^  fields: user=9/12 session=- thread=-$' \
         asserts 'the evidence block reports the populated identity fields of the selected member over the sampled lines it matched: 9 of 12 users populated; session and thread are not fields of this shape' \
         produced_by 'select_format_variants() (captures kept) and emit_format_detection_evidence_verbose() in ltl' contract "$FAMILY_CONTRACT D8"
-    assert_line "$out" pattern '^  candidates: mt3=[0-9.]+,mt3us=5\.50$' \
-        asserts 'the selected member earns shape 1.0 + stem 3.0 + ext 1.0 + field_populated 0.5 for the user column = 5.50' \
-        produced_by 'select_format_variants() in ltl (field_populated weight)' contract "$FAMILY_CONTRACT D8; features/log-format-registry.md I1 (one weight table)"
     # The same content with - in every user column: no population, no credit.
     log_dash="$TMP_DIR/$current_scenario/dash/access.log"; mkdir -p "$(dirname "$log_dash")"
     perl -pe 's/^(\S+ \S+) \S+ /$1 - /' "$log" > "$log_dash"
     out_dash=$(run_format_detection "$log_dash"); check_capture_warnings "$out_dash"
     assert_line "$out_dash" pattern '^  fields: user=0/12 session=- thread=-$' \
         asserts 'with a bare - in every user column no line populates the field' \
-        produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
-    assert_line "$out_dash" pattern '^  candidates: mt3=[0-9.]+,mt3us=5\.00$' \
-        asserts 'no populated field, no credit: the score is shape + stem + ext = 5.00' \
         produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
     log=$(stage_fixture access-users-sessions.txt localhost_access_log.2025-05-05.txt) || return
     out=$(run_format_detection "$log"); check_capture_warnings "$out"
@@ -515,15 +500,15 @@ scenario_family_pin_names() {
     echo "[$current_scenario]"
     local log out err name
     log=$(stage_fixture access-combined.txt access.log) || return
-    for name in access_common access_combined access_combined_duration access_common_duration_ms access_common_duration_us \
-                access_common_duration_thread_session_ms access_common_duration_thread_session_us access_common_duration_bracketed; do
+    for name in access_common access_combined access_combined_duration access_common_duration \
+                access_common_duration_thread_session access_common_duration_bracketed; do
         out=$(run_format_detection "$log" -lf "$name"); check_capture_warnings "$out"
         assert_line "$out" pattern "^format_pin: $name\$" \
             asserts "-lf accepts the family name $name" produced_by 'apply_format_pin() in ltl' contract "$FAMILY_CONTRACT D2 (names are the user-facing vocabulary)"
     done
     err="$TMP_DIR/$current_scenario/old-name.err"
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -lf tomcat_access_with_duration "$log" > /dev/null 2> "$err" || true
-    assert_line "$err" pattern '^Error: Unknown log format .tomcat_access_with_duration. for -lf\. Known formats: .*access_combined.*access_common_duration_ms' \
+    assert_line "$err" pattern '^Error: Unknown log format .tomcat_access_with_duration. for -lf\. Known formats: .*access_combined.*access_common_duration' \
         asserts 'the retired product-named format is unknown, and the rejection lists the family names' \
         produced_by 'apply_format_pin() in ltl' contract "$FAMILY_CONTRACT D1/D2"
 }
@@ -547,18 +532,21 @@ scenario_family_bracketed_unit() {
 }
 
 scenario_family_ambiguity_note_per_file() {
-    current_scenario="family-ambiguity-note-per-file"
+    current_scenario="ambiguity-note-per-file"
     echo "[$current_scenario]"
-    # Two files that both fall to the unit default: the note prints twice,
-    # each naming its file and the microsecond alternative with its unit.
+    # Two files of the connection-server group with no name evidence and no
+    # deciding content (a day-3 date eliminates neither member) both fall to
+    # the group default: the note prints twice, each naming its file
+    # and the alternative member (R15/D15).
     local a b out
-    a=$(stage_fixture access-thread-session.txt one.txt) || return
-    b=$(stage_fixture access-users-sessions.txt two.txt) || return
+    local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
+    a="$dir/one.txt"; b="$dir/two.txt"
+    sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
     out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
     assert_command \
-        command "[ \"\$(grep -c '^Note: .*: the detected log format (access_common_duration_thread_session_ms) is written by more than one producer' '$out.stderr')\" = 2 ] && grep -q 'one.txt: the detected' '$out.stderr' && grep -q 'two.txt: the detected' '$out.stderr' && grep -q -- '-lf access_common_duration_thread_session_us (us)' '$out.stderr'" \
-        label 'the ambiguity note prints once per file that fell to a default, naming the file and every alternative with its unit' \
-        asserts 'a two-file run where both files fall to the unit default prints the note twice, each naming its file and the microsecond member (R15/D15)' \
+        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 2 ] && grep -q 'one.txt: the detected' '$out.stderr' && grep -q 'two.txt: the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
+        label 'the ambiguity note prints once per file that fell to a default, naming the file and the alternative' \
+        asserts 'a two-file run where both files fall to the group default prints the note twice, each naming its file and every other member (R15/D15)' \
         produced_by 'format_variant_ambiguity_note() in ltl (per-file latch)' contract "$FAMILY_CONTRACT D15"
 }
 
@@ -1417,26 +1405,29 @@ scenario_classification_consolidation_reconciles() {
         contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17)"
 }
 
-scenario_unit_ambiguity_warning() {
-    current_scenario="unit-ambiguity-warning"
+scenario_variant_ambiguity_note() {
+    current_scenario="variant-ambiguity-note"
     echo "[$current_scenario]"
 
     # D47/I6 (#384): binding a variant-group member that was selected by
     # default — nothing in the file name or content decided between the
-    # producers — emits one stderr note naming the consequence (here the
-    # duration unit) and the overrides. The note is an intentional
-    # diagnostic — it never carries an ` at ... line` suffix, so
-    # check_capture_warnings stays clean. The Tomcat file's name does not
-    # carry the producer's stem, so the group default holds by its standing
-    # credit (basis default).
-    local tomcat="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    # producers — emits one stderr note naming the consequence and the
+    # overrides. The note is an intentional diagnostic — it never carries an
+    # ` at ... line` suffix, so check_capture_warnings stays clean. The
+    # connection-server fixture rewritten to a day-3 date leaves both
+    # members of its group alive (no impossible month under either layout)
+    # and carries no name evidence, so the group default holds by its
+    # standing credit (basis default). The access shapes form no group
+    # since #444 revised D3, so this is the one shipping group.
+    local undecided="$TMP_DIR/$current_scenario/renamed-cxserver.txt"; mkdir -p "$(dirname "$undecided")"
+    sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$undecided"
     local out
-    out=$(run_format_detection "$tomcat")
+    out=$(run_format_detection "$undecided")
     check_capture_warnings "$out"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: [^:]+: the detected log format \(access_common_duration_ms\) is written by more than one producer and the duration unit differs between them \(assumed ms\); nothing in the file name or content decided which - use -du <unit>, or -lf access_common_duration_us \(us\), if the file comes from the other producer$' \
-        asserts     'Binding a default-selected variant-group member without deciding evidence emits the note on stderr once per file, naming the file, the consequence class (unit) and the assumption, pointing at -du and at -lf with every other member and its unit (#444 D15)' \
+        pattern     '^Note: [^:]+: the detected log format \(connection_server_standard\) is written by more than one producer and the date layout differs between them; nothing in the file name or content decided which - use -lf integration_runtime_standard if the file comes from the other producer$' \
+        asserts     'Binding a default-selected variant-group member without deciding evidence emits the note on stderr once per file, naming the file, the consequence class (here the date layout) and -lf with every other member (#444 D15)' \
         produced_by 'format_variant_ambiguity_note() in ltl (first-match block)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note); the note text is part of the contract'
     assert_line "$out" \
@@ -1445,16 +1436,14 @@ scenario_unit_ambiguity_warning() {
         produced_by 'select_format_variants() in ltl' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 
-    # Contracted absence 1: an explicit -du suppresses the note — the user
-    # has stated the unit, so there is no assumption to surface.
-    local out_du
-    out_du=$(run_format_detection "$tomcat" -du ms)
-    check_capture_warnings "$out_du"
-
-    assert_absent "$out_du.stderr" \
+    # Contracted absence 1: a pin names the format, so no assumption is in effect.
+    local out_pin
+    out_pin=$(run_format_detection "$undecided" -lf connection_server_standard)
+    check_capture_warnings "$out_pin"
+    assert_absent "$out_pin.stderr" \
         pattern     '^Note: [^:]+: the detected log format' \
-        asserts     'With -du given (any unit), the unit note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
-        produced_by 'format_variant_ambiguity_note() in ltl (duration_unit_override gate)' \
+        asserts     'With -lf given, the note is contracted ABSENT: the user named the format' \
+        produced_by 'format_variant_ambiguity_note() in ltl (pin gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
     # Contracted absence 2: a format outside any variant group (codebeamer)
@@ -1462,21 +1451,18 @@ scenario_unit_ambiguity_warning() {
     local out_cb
     out_cb=$(run_format_detection "$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
-
     assert_absent "$out_cb.stderr" \
         pattern     '^Note: [^:]+: the detected log format' \
         asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
         produced_by 'format_variant_ambiguity_note() in ltl (variant-group gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
-    # Contracted absence 3: the same content under the producer-true name
-    # is decided by evidence (stem), so no assumption is in effect.
-    local staged="$TMP_DIR/localhost_access_log.2025-05-05.txt"
-    cp "$tomcat" "$staged"
+    # Contracted absence 3: the same content under the producer-true name is
+    # decided by evidence (stem), so no assumption is in effect.
+    local staged; staged=$(stage_fixture connection-server.txt cxserver.1.log) || return
     local out_named
     out_named=$(run_format_detection "$staged")
     check_capture_warnings "$out_named"
-
     assert_absent "$out_named.stderr" \
         pattern     '^Note: [^:]+: the detected log format' \
         asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
@@ -1484,7 +1470,7 @@ scenario_unit_ambiguity_warning() {
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
     assert_line "$out_named" \
         pattern     '^  selection_basis: evidence$' \
-        asserts     'The producer-true Tomcat name selects the Tomcat member by stem evidence' \
+        asserts     'The producer-true name selects the member by stem evidence' \
         produced_by 'select_format_variants() in ltl' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 }
@@ -1517,13 +1503,13 @@ scenario_classification_format_switch() {
         contract    "$CLASSIFICATION_CONTRACT - rule_changes counts mid-file changes whose old and new entry carry different criteria signatures (D19, D32)"
 
     assert_line "$out" \
-        pattern     '^rule_change: file=.*/classification-format-switch\.txt line=5 from=access_common_duration_ms to=thingworx_standard$' \
+        pattern     '^rule_change: file=.*/classification-format-switch\.txt line=5 from=access_common_duration to=thingworx_standard$' \
         asserts     'The change is listed with the file, the line at which the new rules took effect, and the old and new format slugs' \
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - rule_change: file=<path> line=N from=<slug> to=<slug> (D19)"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: .*classification-format-switch\.txt line 5: the classification rules changed because the detected log format changed from access_common_duration_ms to thingworx_standard - lines before this point were classified under the previous rules$' \
+        pattern     '^Note: .*classification-format-switch\.txt line 5: the classification rules changed because the detected log format changed from access_common_duration to thingworx_standard - lines before this point were classified under the previous rules$' \
         asserts     'The user is told, on stderr, at which line the rules changed, from which format to which, and that earlier lines were classified under the previous rules' \
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - D19 note text; registered on #412 as a producer to migrate"
@@ -1575,7 +1561,7 @@ scenario_classification_format_interleaved() {
         contract    "$CLASSIFICATION_CONTRACT - rule_change: lines list at most the first 10 per file (D19)"
 
     assert_line "$out" \
-        pattern     '^rule_change: file=.*/classification-format-interleaved\.txt line=11 from=thingworx_standard to=access_common_duration_ms$' \
+        pattern     '^rule_change: file=.*/classification-format-interleaved\.txt line=11 from=thingworx_standard to=access_common_duration$' \
         asserts     'The tenth listed change is the one at line 11: the listing is the first ten in file order, and the from/to slugs swap direction with every alternation' \
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - rule_change: lines in input order (D19)"
@@ -1708,71 +1694,49 @@ scenario_variant_integration_runtime_unnamed() {
         contract 'features/log-format-registry.md section Drop 1.5 F6'
 }
 
-scenario_variant_tomcat_named() {
-    current_scenario="variant-tomcat-named"
+scenario_unit_tomcat_named() {
+    current_scenario="unit-tomcat-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_ms mt3 evidence '0\.86'
+    assert_line "$out" pattern '^  format: access_common_duration$' \
+        asserts 'The common-plus-duration shape is one format whatever unit the producer writes: a Tomcat-named file binds it (#444 D3 as revised)' \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/444-access-log-format-family-and-user-surface.md D3 (revised 2026-09-04: no unit variant)'
     assert_line "$out" pattern '^  filename_evidence: stem=mt3ts ext=match date=present index=-$' \
-        asserts 'The Tomcat name decomposes to stem, .txt and a date' \
+        asserts 'The Tomcat name decomposes to stem, .txt and a date (the thread-session entry declares the same stem and precedes the common-duration entry)' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     assert_absent "$out.stderr" pattern '^Note: ' \
-        asserts 'Stem evidence decided the unit; no ambiguity note' \
+        asserts 'A shape outside any variant group raises no ambiguity note' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
 }
 
-scenario_variant_tomcat_extension_only() {
-    current_scenario="variant-tomcat-extension-only"
-    echo "[$current_scenario]"
-    local log; log=$(stage_fixture tomcat-access.txt whatever.log) || return
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_ms mt3 default '0\.50'
-    assert_line "$out" pattern '^  candidates: mt3=2\.00,mt3us=2\.00$' \
-        asserts 'An extension alone ties the group default (standing credit = extension weight) and never moves the selection off it (I1)' \
-        produced_by 'select_format_variants() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 I1'
-    assert_line "$out.stderr" pattern '^Note: [^:]+: the detected log format \(access_common_duration_ms\) is written by more than one producer' \
-        asserts 'A default-basis selection surfaces the assumption' \
-        produced_by 'format_variant_ambiguity_note() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 I6'
-}
-
-scenario_variant_httpd_named() {
-    current_scenario="variant-httpd-named"
+scenario_unit_httpd_named() {
+    current_scenario="unit-httpd-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_us mt3us evidence '0\.69'
-    assert_line "$out" pattern '^  filename_evidence: stem=mt3tsus ext=match date=present index=-$' \
-        asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
+    assert_line "$out" pattern '^  format: access_common_duration$' \
+        asserts 'An httpd-named file binds the same format: nothing on the line or in the registry distinguishes the microsecond producer' \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/444-access-log-format-family-and-user-surface.md D3 (revised 2026-09-04)'
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'No entry declares the httpd name any more, so the name carries no evidence' \
         produced_by 'format_filename_evidence() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D45/I4'
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     assert_absent "$out.stderr" pattern '^Note: ' \
-        asserts 'Evidence decided the microsecond member; no -du needed and no note' \
+        asserts 'No variant group, no note; the unit is the -du mechanism'"'"'s business' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
-    # The microsecond unit is applied: a -du us run must render identically.
+    # -du us is the way to read the microsecond producer: the resolved unit
+    # follows the override, and the section reports it.
     local out_du; out_du=$(run_format_detection "$log" -du us); check_capture_warnings "$out_du"
-    assert_command label "httpd member carries microseconds (output identical to -du us)" \
-        command "diff <(grep -av '^duration_unit_override' '$out') <(grep -av '^duration_unit_override' '$out_du') > /dev/null" \
-        asserts 'The httpd member declares %D in microseconds, so the evidence-selected run equals the explicit -du us run' \
-        produced_by 'read_and_process_logs() in ltl (FR_DURATION_UNIT conversion)' \
-        contract 'features/log-format-registry.md section Drop 1.5 D47 (first variant groups)'
-}
-
-scenario_variant_httpd_renamed() {
-    current_scenario="variant-httpd-renamed"
-    echo "[$current_scenario]"
-    local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_ms mt3 default '0\.70'
-    assert_line "$out.stderr" pattern '^Note: [^:]+: the detected log format \(access_common_duration_ms\) is written by more than one producer' \
-        asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
-        produced_by 'format_variant_ambiguity_note() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D44/I6'
+    assert_line "$out_du" pattern '^duration_unit_override: us$' \
+        asserts 'When -du us is given, the format-detection section reports the override' \
+        produced_by 'emit_format_detection_verbose() in ltl (run-level duration_unit_override field)' \
+        contract 'features/524-bucket-size-unit.md D1 (one converter every unit surface reads); features/444-access-log-format-family-and-user-surface.md D3 (revised)'
 }
 
 scenario_variant_thingworx_rolled() {
@@ -1871,11 +1835,11 @@ scenario_variant_mixed_legend() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture mixed.txt mixed.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_line "$out" pattern '^  formats: connection_server_standard,access_common_duration_ms$' \
+    assert_line "$out" pattern '^  formats: connection_server_standard,access_common_duration$' \
         asserts 'Every format found in the file is listed, first-bound first' \
         produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=access_common_duration_ms$' \
+    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=access_common_duration$' \
         asserts 'The legend numbers formats in first-detection order across the run (I8)' \
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
@@ -1893,7 +1857,7 @@ scenario_variant_mixed_legend() {
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
     assert_command label "console legend line" \
-        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 access_common_duration_ms *\$'" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 access_common_duration *\$'" \
         asserts 'One legend line below the title names the numbered formats (D50)' \
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
@@ -2050,7 +2014,7 @@ scenario_format_pin() {
     if "$LTL" --disable-progress -ni -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
         echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
     else
-        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*access_common_duration_ms.*connection_server_standard.*integration_runtime_standard' \
+        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*access_common_duration.*connection_server_standard.*integration_runtime_standard' \
             asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
             produced_by 'apply_format_pin() in ltl' \
             contract 'features/log-format-registry.md section Drop 1.5 D49'
@@ -2093,14 +2057,12 @@ scenario_classification_consolidation_reconciles; echo ""
 scenario_classification_format_switch; echo ""
 scenario_classification_format_interleaved; echo ""
 scenario_classification_summary_rows; echo ""
-scenario_unit_ambiguity_warning; echo ""
+scenario_variant_ambiguity_note; echo ""
 scenario_variant_connection_server; echo ""
 scenario_variant_integration_runtime_named; echo ""
 scenario_variant_integration_runtime_unnamed; echo ""
-scenario_variant_tomcat_named; echo ""
-scenario_variant_tomcat_extension_only; echo ""
-scenario_variant_httpd_named; echo ""
-scenario_variant_httpd_renamed; echo ""
+scenario_unit_tomcat_named; echo ""
+scenario_unit_httpd_named; echo ""
 scenario_variant_thingworx_rolled; echo ""
 scenario_windchill_method_server_named; echo ""
 scenario_windchill_method_server_rolled; echo ""

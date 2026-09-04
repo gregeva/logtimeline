@@ -24,7 +24,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   4xx Client error (HL)             1 (10%)   
   4xx Client error                  1 (10%)      Log Formats
   3xx Redirection                   2 (20%)   
-  2xx Success                       2 (20%)      1 access_common_duration_ms
+  2xx Success                       2 (20%)      1 access_common_duration
   1xx Informational                 2 (20%)   
   ─────────────────────────────────────────   
   LINES READ                             10   

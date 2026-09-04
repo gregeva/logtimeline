@@ -213,14 +213,14 @@ scenario_inventory() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^scanned_entries: 21$' \
+        pattern     '^scanned_entries: 19$' \
         asserts     'The registry compiles 17 scanned entries (every format the scan can recognise, variant members included); csv is stateful and outside the scan array' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry_members built by build_format_registry()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a scanned format is added or removed, in the same commit as this assertion'
 
     assert_line "$out" \
-        pattern     '^family: access=mt3ts,mt3tsus,mt12,mt9,mt19,mt20,mt3,mt3us,mt4$' \
-        asserts     'the access family lists its nine members in static order: thread-session (ms, us), bracketed, jboss, combined-duration, combined, common-duration (ms, us), common (#444 D4/D5)' \
+        pattern     '^family: access=mt3ts,mt12,mt9,mt19,mt20,mt3,mt4$' \
+        asserts     'the access family lists its seven members in static order: thread-session, bracketed, jboss, combined-duration, combined, common-duration, common (#444 D4/D5)' \
         produced_by 'emit_format_registry_verbose() in ltl (family line)' \
         contract    'features/444-access-log-format-family-and-user-surface.md D5; features/log-format-registry.md section -V format-registry section-contract'
     assert_line "$out" \
@@ -241,7 +241,7 @@ scenario_inventory() {
         contract    'features/log-format-registry.md section -V format-registry section-contract'
 
     assert_line "$out" \
-        pattern     '^  entry: mt3us slug=access_common_duration_us group=access_common_duration default=no role=scanned$' \
+        pattern     '^  entry: mt3 slug=access_common_duration group=mt3 default=yes role=scanned$' \
         asserts     'A non-default variant member reports its group and default=no - the evidence pass can seat it, but it does not hold the slot by default' \
         produced_by 'emit_format_registry_verbose() in ltl (group and FR_GROUP_DEFAULT per entry)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - variant groups are D47/F1'
@@ -264,8 +264,8 @@ scenario_structure() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  group: access_common_duration slot=10 default=mt3 members=mt3,mt3us$' \
-        asserts     'The access_common_duration unit group declares its slot position, its default member and its full member list - the common-plus-duration shape is written in milliseconds by Tomcat 6-9 and in microseconds by Apache HTTP Server and Tomcat 10.1+ (#444 D3)' \
+        pattern     '^  group: connection_server slot=1 default=mt10 members=mt10,mt10ir$' \
+        asserts     'A variant group declares its slot position, its default member and its full member list; the access shapes form none, since a unit no line carries cannot make a variant (#444 D3 as revised)' \
         produced_by 'emit_format_registry_verbose() in ltl, reading %format_variant_groups built by build_format_registry()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - group membership is declared by variant_group/variant_default in format_registry_specs()'
 
@@ -276,7 +276,7 @@ scenario_structure() {
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a format is added, removed or re-sequenced in format_registry_specs()'
 
     assert_line "$out" \
-        pattern     '^  ancestors: access_common_duration <- -$' \
+        pattern     '^  ancestors: mt3 <- -$' \
         asserts     'With every family pattern anchored at both ends (#444 D4) no earlier group shadows the common-plus-duration shape: its derived pinned-ancestor set is empty (D26)' \
         produced_by 'derive_format_constraints() in ltl; emitted by emit_format_registry_verbose()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - the derived set is cross-checked against each entry expect_ancestors by D24 gate 4, so a drift fails the build before this assertion'
@@ -288,7 +288,7 @@ scenario_structure() {
         contract    'features/log-format-registry.md section -V format-registry section-contract'
 
     assert_line "$out" \
-        pattern     '^variant_groups: connection_server=mt10,access_common_duration_thread_session=mt3ts,access_common_duration=mt3$' \
+        pattern     '^variant_groups: connection_server=mt10$' \
         asserts     'Each variant group reports the member actually seated in its slot for this run - here both defaults, since the tomcat fixture gives no evidence for either alternative' \
         produced_by 'emit_format_registry_verbose() in ltl (occupant read from @format_scan_order)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract'
@@ -360,7 +360,7 @@ scenario_election_pinned() {
     current_scenario="election-pinned"
     echo "[$current_scenario]"
     local out
-    out=$(run_format_registry "$FIXTURES/tomcat-access.txt" -lf access_common_duration_ms)
+    out=$(run_format_registry "$FIXTURES/tomcat-access.txt" -lf access_common_duration)
     check_capture_warnings "$out"
 
     assert_line "$out" \

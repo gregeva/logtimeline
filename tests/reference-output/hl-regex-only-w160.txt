@@ -59,7 +59,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -du us -h
   3xx Redirection                 7 (1.03%)   
   2xx Success (HL)               34 (5.02%)      Log Formats
   2xx Success                   632 (93.4%)   
-  ─────────────────────────────────────────      1 access_common_duration_ms
+  ─────────────────────────────────────────      1 access_common_duration
   LINES READ                            677   
   HIGHLIGHTED                            34   
   LINES INCLUDED                        677   
