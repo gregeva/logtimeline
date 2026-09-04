@@ -132,6 +132,9 @@ series.buckets[].count.mean	number	conditional:count
 series.buckets[].count.max	number	conditional:count	
 series.buckets[].count.sum	number	conditional:count	
 series.buckets[].sessions	int	conditional:sessions	
+series.buckets[].sessions_hl	int	conditional:highlight	
+series.buckets[].users	int	conditional:users	
+series.buckets[].users_hl	int	conditional:highlight	
 series.buckets[].threadpools.*	number	conditional:-tpa	
 series.buckets[].udm.*.*	number	conditional:-udm	
 series.buckets[].heatmap.*.data_model	string	conditional:-hm	

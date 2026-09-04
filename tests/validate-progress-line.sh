@@ -66,7 +66,7 @@ FIXTURE_DIR="$REPO_DIR/tests/fixtures/progress-multi-file"
 PART1="$FIXTURE_DIR/part-1.txt"
 PART2="$FIXTURE_DIR/part-2.txt"
 PART3="$FIXTURE_DIR/part-3.txt"
-ACCESS_FORMAT="tomcat_access_with_duration"
+ACCESS_FORMAT="access_common_duration"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -477,9 +477,14 @@ current_scenario="notice-not-in-progress-row"
 COLLIDE="$TMP_DIR/collide.frames"
 COLLIDE_RAW="$COLLIDE.raw"
 set +e
+# The access parts raise no note (their shape is one format, #444); a
+# connection-server file with no name evidence and a day-3 date (neither
+# member of its group eliminated) falls to the group default and raises the
+# note the scenario needs.
+sed 's/^2026-05-30/2026-05-03/' "$REPO_DIR/tests/fixtures/format-detection/connection-server.txt" > "$TMP_DIR/renamed-cxserver.txt"
 ( cd "$TMP_DIR" && with_ascii_colour "$LTL" \
     -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 \
-    "$PART1" "$PART2" "$PART3" ) >"$COLLIDE_RAW" 2>&1
+    "$PART1" "$PART2" "$PART3" "$TMP_DIR/renamed-cxserver.txt" ) >"$COLLIDE_RAW" 2>&1
 collide_status=$?
 set -e
 if [[ "$collide_status" -ne 0 ]]; then
@@ -497,7 +502,7 @@ tr '\r' '\n' < "$COLLIDE_RAW" \
 # future format change makes detection unambiguous here, the scenario stops
 # testing anything and must fail rather than pass silently.
 assert_command \
-    command     "grep -q '^Note: the detected log format' '$COLLIDE'" \
+    command     "grep -q '^Note: [^:]*: the detected log format' '$COLLIDE'" \
     label       'the unpinned run raises the format-ambiguity notice' \
     asserts     'This fixture matches more than one producer of the same line shape, so an unpinned run raises the unit-ambiguity notice — the mid-read notice this scenario exists to place' \
     produced_by 'format_variant_ambiguity_note() in ltl' \
@@ -511,7 +516,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md section Implementation — notices are held until the read ends'
 
 assert_command \
-    command     "test \"\$(grep -n '^Processing completed\\.' '$COLLIDE' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^Note: the detected log format' '$COLLIDE' | head -1 | cut -d: -f1)\"" \
+    command     "test \"\$(grep -n '^Processing completed\\.' '$COLLIDE' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^Note: [^:]*: the detected log format' '$COLLIDE' | head -1 | cut -d: -f1)\"" \
     label       'the notice is emitted after the read completes' \
     asserts     'The held notice is flushed once the read is over, so it appears below the completion line rather than between frames — the reader sees an uninterrupted progress line, then the notices' \
     produced_by 'flush_deferred_notices() in ltl, called at the end of read_and_process_logs()' \
@@ -524,10 +529,10 @@ QUIET_NOTICE="$TMP_DIR/quiet-notice.err"
 set +e
 ( cd "$TMP_DIR" && with_ascii_colour "$LTL" \
     -ni --disable-progress --terminal-width "$WIDTH" -bs 1440 -oe -n 1 \
-    "$PART1" "$PART2" "$PART3" ) >/dev/null 2>"$QUIET_NOTICE"
+    "$PART1" "$PART2" "$PART3" "$TMP_DIR/renamed-cxserver.txt" ) >/dev/null 2>"$QUIET_NOTICE"
 set -e
 assert_command \
-    command     "grep -q '^Note: the detected log format' '$QUIET_NOTICE'" \
+    command     "grep -q '^Note: [^:]*: the detected log format' '$QUIET_NOTICE'" \
     label       'the notice still prints under --disable-progress' \
     asserts     'Deferral moves a notice past the read; it never suppresses one. --disable-progress silences the indicator, and a behavioural notice is not an indicator' \
     produced_by 'flush_deferred_notices() in ltl — the flush is not gated on $disable_progress' \

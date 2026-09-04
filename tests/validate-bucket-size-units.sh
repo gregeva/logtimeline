@@ -360,7 +360,10 @@ fi
 current_scenario="one-mechanism/structure"
 ladder_defs=$(grep -cE '^my @time_unit_ladder\b' "$LTL" || true)
 # The ladder's own rows are the one place a spelling list belongs.
-stray_lists=$(grep -nE "qw\([^)]*\b(ns|us|ms|msec|usec)\b|\((ns|us|ms|s)\|(us|ms|s|m)|\(s\|m\|h\|d\)" "$LTL" | grep -vE '^\s*[0-9]+:\s*#' | grep -vE "token => '" || true)
+# A format's recognition pattern describes a line shape (a bracketed duration
+# token carries its unit on the line); the value it captures is converted
+# through the ladder, so pattern_src lines are not unit tables either.
+stray_lists=$(grep -nE "qw\([^)]*\b(ns|us|ms|msec|usec)\b|\((ns|us|ms|s)\|(us|ms|s|m)|\(s\|m\|h\|d\)" "$LTL" | grep -vE '^\s*[0-9]+:\s*#' | grep -vE "token => '|pattern_src =>" || true)
 if [[ "$ladder_defs" == 1 && -z "$stray_lists" ]]; then
     pass_with "exactly one ladder definition; no stray time-unit token list or regex"
 else

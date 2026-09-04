@@ -75,7 +75,7 @@ FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-skew.txt"
 # category computes to one character on its own merits, so no assertion over it
 # can tell a row that draws no bar from one that draws a short one.
 SUBCHAR_FIXTURE="$REPO_DIR/tests/fixtures/category-contribution-subcharacter.txt"
-ACCESS_FORMAT="tomcat_access_with_duration"
+ACCESS_FORMAT="access_common_duration"
 WIDTH=140
 
 # The category row: two spaces of table padding, then 41 characters of row.

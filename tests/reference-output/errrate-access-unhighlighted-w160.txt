@@ -20,7 +20,7 @@ command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 
   4xx Client error                  2 (20%)   
   3xx Redirection                   2 (20%)      Log Formats
   2xx Success                       2 (20%)   
-  1xx Informational                 2 (20%)      1 tomcat_access_with_duration
+  1xx Informational                 2 (20%)      1 access_common_duration
   ─────────────────────────────────────────   
   LINES READ                             10   
   LINES INCLUDED                         10   
