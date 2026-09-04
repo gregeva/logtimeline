@@ -297,6 +297,31 @@ attribute) and #537 (expose the access-log remote host as an attribute).
 Informational, not gates: the Attribute Isolation topic is written against the
 attributes that exist today and gains these two once they land.
 
+### F17 — the Shape techniques enter through the ranked message table, not the timeline
+
+From the interview (architect, 2026-09-04). The framing the group needs correcting
+first: the timeline *is* the distribution across time. It says a great deal visually
+about a population, and the heatmap adds a per-bucket histogram, so an analyst can
+see between time buckets whether the distribution is evolving or holding steady.
+
+What it cannot do is show modality. Across a whole population of hundreds of
+thousands of requests the gaps fill in; something may peek out, but there is no way
+to tell from that view whether it belongs to one API or is a general pattern of
+those time ranges.
+
+So the shape statistics are reached, today, through the top-messages table.
+Ranking on a shape metric — sorting or reverse-sorting according to what the
+technique calls for — turns the table into a list of candidates. The analyst then
+includes, excludes or highlights one of them, which isolates it, and reads its own
+heatmap and histogram: how the distribution evolves for that message alone, and
+what its modality actually looks like.
+
+Two consequences. The Shape techniques all enter through Rank then Isolate, which
+sits in the Population group, so each Shape topic names it as the way in — the same
+cross-group interleaving F7 records for Time and Population. And the group page for
+Shape says plainly that modality is not readable off the whole-population views, so
+an analyst does not go looking for it there.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
