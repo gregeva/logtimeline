@@ -38,9 +38,7 @@ behaviour for both callers, so its strip-path flag is removed rather than left
 unused: a flag no caller passes is a second behaviour nobody exercises and
 nobody tests.
 
-**D2 — No before benchmark.** The shortener runs only when a frame is painted,
-at most twice a second under the 500 ms repaint gate
-(`features/446-overall-progress-indicator.md` D4); nothing per line changes.
+**D2 — The before/after benchmark runs.** An executable line of `ltl` changed, which is the scope table's first row (`docs/process/workflow.md` § 3); the shortener's own cost is not the point, the rule is. The before run is taken on the base commit in a worktree of the release branch.
 
 ## Acceptance criteria
 
