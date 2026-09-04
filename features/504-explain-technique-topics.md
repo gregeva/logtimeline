@@ -233,6 +233,50 @@ API's contribution across time inside the full population — whether it failed
 throughout, or succeeded in some periods and failed only in others. The population
 is never cut away; the highlight is what moves.
 
+### F13 — file attribution is a Population move, and the marker is its output
+
+From the interview (architect, 2026-09-04). With seven or eight input files the
+analyst does not know whether a pattern is present in all of them or only some.
+Running the highlight over the whole set answers it from the summary's file list:
+the green `√` marks a file that contributed matched lines, the red `χ` a file that
+contributed none — either because it holds no such line or because filtering
+removed them. That pinpoints one file out of the group, which is then something to
+open directly or grep against.
+
+This is the consumer that makes F3's undocumented marker worth writing down: the
+marker is not a decoration on the file list, it is the output of the technique.
+
+### F14 — API Isolation is include, then expose what consolidation masked
+
+From the same interview. Once a pattern is in hand, troubleshooting starts with
+`-i` to eliminate everything but the message in question, which gives the shape of
+the contributions from messages matching that pattern, clear of the rest.
+
+The second half of the move is what isolation makes affordable. Over a large
+population the analyst wants general characteristics, so ltl masks, truncates and
+consolidates away the varying parts of a message. Honing in reverses that: with one
+API isolated, `-xqs` surfaces the query string, `-xu` the user name, `-xs` the
+session, each separating what had been one consolidated row so that the aggregation
+happens per query string, per user or per session. That answers whether one
+particular user is contributing the errors, the volume or the slow requests.
+Without isolating the API first there is too much noise in the view for it to be
+read.
+
+### F15 — exclusion is the inverse move, and it rescales what is left
+
+From the same interview, with the effect verified on the 5,000-line access-log
+slice. Having identified an API whose callers are anomalous, or a problem already
+understood and being addressed, the analyst excludes it and reassesses: is the
+remaining workload healthy, does it carry other areas of impact, is something else
+being affected by that error.
+
+Removing a dominant contributor also rescales the timeline. Measured, at one-minute
+buckets over the slice: with everything included, the 09:48 and 09:49 buckets both
+draw a 22-block bar and are indistinguishable; excluding the single endpoint that
+accounts for 2,017 of the 5,000 lines leaves 09:48 at 17 blocks against 09:49 at
+13, and the difference in the remaining traffic becomes readable. The dominant
+message had been setting the scale and flattening everything measured against it.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
