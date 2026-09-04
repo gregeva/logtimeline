@@ -446,19 +446,19 @@ own file. The question is which of those files surfaces a pattern or satisfies a
 condition, and the answer is the yes/no marker in the summary's file list: the check
 where a file matched, the highlight marker where it matched the highlight criteria.
 
-The criteria are not limited to text patterns. `-hdmin 60000` answers which log files
-carried requests over sixty seconds; `-if` reduces the run to the files that contain
-failures. Verified over a two-file run: with `-hdmin 1000` both files take the
+The criteria are not limited to text patterns: every include, exclude and highlight
+criterion drives the file list. `-hdmin 60000` answers which log files carried
+requests over sixty seconds; `-if` reduces the run to the files that contain
+failures. With `-r` the same read extends across a directory tree, so the markers
+give correlation across files *and* folders — which node's directory, which day's
+rotation, which instance's subtree carries the condition. Verified over a two-file run: with `-hdmin 1000` both files take the
 highlight marker; raising the threshold to a deliberately extreme value leaves one
 file with the highlight marker and drops the other back to the plain check. The
 marker therefore discriminates between files on numeric and outcome criteria exactly
 as it does on a highlight pattern (F3).
 
-**This collides with File Attribution (D4).** The mechanism, the surface and the
-signal are the same read; only the framing differs — locating a file worth opening,
-against attributing a condition to a node, an instance or a day. Two pages would
-render the same signal twice, which the anatomy of D3 does not support. Raised for
-decision rather than resolved.
+This collided with File Attribution (D4) — the same mechanism, surface and signal,
+differing only in framing. Resolved by D8: the two are one technique.
 
 ## Locked decisions
 
@@ -575,19 +575,35 @@ to render.
 
 The roster is twenty techniques and twenty-six topics.
 
+### D8 — File Attribution merges into Cross-Log Correlation (architect, 2026-09-04)
+
+File Attribution (D4) and Cross-Log Correlation are one read of one surface, and are
+merged into a single technique, **Cross-Log Correlation**, in the Correlation group.
+File Attribution is dropped from the Population group; the rest of D4 stands.
+
+The page's question is *which of these logs exhibits this condition?* — where the
+logs are the same system separated by physical node, application instance or date.
+Its criteria are every include, exclude and highlight criterion the tool has: text
+patterns, the numeric thresholds, and the outcome filters. Its signal is the marker
+column in the summary's file list. Under `-r` the same read covers a directory tree,
+so the answer names a folder as readily as a file. The "which file do I go and open"
+use falls out of the same page rather than needing one of its own.
+
+The roster returns to nineteen techniques and twenty-five topics.
+
 ## Technique roster
 
-Twenty techniques in six groups, each group also a topic of its own (D1).
+Nineteen techniques in six groups, each group also a topic of its own (D1).
 Bold marks a technique added after the issue was filed.
 
 | Group | Techniques |
 |---|---|
 | Time | Window Narrowing · Resolution Zoom · Traffic Load Profiling |
-| Population | Contribution Highlighting · API Isolation · Attribute Isolation *(was Session Isolation, D5)* · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** · **File Attribution** |
+| Population | Contribution Highlighting · API Isolation · Attribute Isolation *(was Session Isolation, D5)* · Rank then Isolate · Outcome Isolation · **Remainder Analysis** · **Attribute Surfacing** |
 | Shape | Tail Excursion vs. Distribution Shift · Bimodal Split · Shape Comparison *(was Variety vs. Volume, D6)* · Timeout Clustering |
 | Comparison | Period-over-Period Comparison · Status Composition Over Time |
 | Load *(was Concurrency, D7)* | Load Over Time *(was Thread Pool Utilisation, D7)* · **Custom Metric Tracking** |
-| Correlation | Cross-Log Correlation |
+| Correlation | Cross-Log Correlation *(absorbs File Attribution, D8)* |
 
 ## Planning walkthrough
 
