@@ -96,9 +96,10 @@ time. `errRate` is the older, coarser signal and is not the technique's subject.
 The explain surface reflows to the actual terminal width: measured on
 `--explain kurtosis`, the widest rendered line is 100 characters at
 `--terminal-width 100`, 140 at 140 and 200 at 200. The 80 in `help_wrap_width()`
-is a floor for narrower terminals, not a cap. (The banner is a fixed 94-character
-rule that does not respond to width at all, so an 80-column terminal already
-overflows on the existing pages.)
+is a floor for narrower terminals, not a cap. The banner is a fixed 94-character
+rule that does not respond to width at all; `tests/validate-explain.sh` excludes it
+from the width assertion by design, recording that it carries its own width contract
+independent of `--explain` content.
 
 `render_pre()` returns its text verbatim, so a `pre` block is the one thing that
 does not reflow — and the established practice for a rendered example is not to
@@ -618,6 +619,115 @@ Bold marks a technique added after the issue was filed.
 | Comparison | Period-over-Period Comparison · Status Composition Over Time |
 | Load *(was Concurrency, D7)* | Load Over Time *(was Thread Pool Utilisation, D7)* · **Custom Metric Tracking** |
 | Correlation | Cross-Log Correlation *(absorbs File Attribution, D8)* |
+
+## Requirements
+
+Derived from #504 and from the interview findings above. Each is what the analyst or
+the reader observes, not how it is built.
+
+- **R1** — `--explain` carries a fourth category alongside `statistics`,
+  `visualizations` and `methodology`, holding the six technique groups. It is
+  appended after the existing groups so the leading-statistics slice that
+  `--help statistics` takes continues to describe what it names (F1).
+- **R2** — Twenty-five topics are reachable and listed: nineteen techniques and six
+  group pages (D1, D4, D5, D6, D7, D8), each addressed by the distinctive words of
+  its name in kebab case, with the full name shown as the page heading and in the
+  table of contents (D2).
+- **R3** — A group page explains what the grouping is, when to use it, and lists its
+  own techniques with their one-line questions (D1, D3).
+- **R4** — A technique page answers, in this order: the question it answers, what
+  the signal looks like, how to read it including what would falsify the reading,
+  and the worked command (D3). It carries no *How ltl computes this* section — a
+  technique is not computed.
+- **R5** — The signal is rendered, not described: the page shows the shape the
+  analyst will see, built the way the heatmap and histogram examples are built —
+  in code, at a fixed cell width, from the tool's own colour definitions (F6).
+- **R6** — No topic is introduced by prose that misdescribes it. The single fixed
+  sentence that today tells every reader they are looking at a per-message statistic
+  ranked by `-so` is wrong for the four existing non-statistic topics and for all
+  twenty-five new ones (F2).
+- **R7** — `--help statistics` continues to index the statistics only, as it already
+  excludes the visualization topics (F1).
+- **R8** — Two capabilities that work today and are documented nowhere are written
+  down: which input files carry a pattern or satisfy a criterion, read off the
+  summary's file-list markers under every include, exclude and highlight criterion
+  and across directories under `-r` (F3, F22); and the normalised message and error
+  rates standing beside absolute counts that change with the bucket width (F4).
+- **R9** — Every technique-family topic's content is mirrored under `docs/explain/`,
+  as the statistics, heatmap, histogram and classification topics are.
+- **R10** — The content carries no internals: no Perl identifiers, issue numbers or
+  decision labels, in either the terminal pages or the mirror.
+- **R11** — A group page's *See also* names the group an analyst typically reaches
+  for next; the six groups are not presented as an ordered pipeline (F7).
+
+## Acceptance criteria
+
+Triaged before implementation. *Assertable* means the verification method is known;
+*unassertable* records a gap and its reason. The owning harness is
+`tests/validate-explain.sh`, which already carries the scenario vocabulary these
+extend.
+
+### Assertable
+
+- [ ] **AC1 (R1, R2)** — `ltl --explain` with no argument emits the technique
+      category's top-level section heading, the six group subheadings beneath it,
+      and all twenty-five topic names each with a one-line summary. Extends
+      `scenario_registry`, which already asserts a heading per category transition
+      and a listing per topic.
+- [ ] **AC2 (R2)** — For each of the twenty-five names, `ltl --explain <name>` exits
+      0, renders at least twenty lines, opens with an uppercase heading and carries
+      a *See also* near the end. This is `scenario_all_topics_render` unchanged in
+      shape, with the new names added to its topic list.
+- [ ] **AC3 (R4)** — Every technique page renders, in order, a paragraph, a *The
+      signal* subheading followed by a `pre` block, a *How to read it* subheading,
+      a *Command* subheading followed by a `pre` block, and *See also*; and no
+      technique page carries a *How ltl computes this* subheading.
+- [ ] **AC4 (R3)** — Every group page renders a paragraph, a *When to use it*
+      subheading, a table, and *See also*; the table's row count equals the number
+      of techniques the roster gives that group.
+- [ ] **AC5 (R5)** — At `--terminal-width` 80, 120 and 200, no rendered content line
+      of any new page exceeds the width. This is `assert_max_line_width` as it
+      stands: it already excludes the title banner and exempts verbatim `pre`
+      blocks, so a signal block at its fixed cell width passes by the same rule the
+      heatmap and histogram examples pass under today.
+- [ ] **AC6 (R5)** — Each technique page's signal survives to raw output with its
+      ANSI escape sequences intact, asserted the way `scenario_visualization_charts`
+      asserts the heatmap and histogram examples: a CSI count over the page's raw
+      bytes, so accidental stripping at authoring time fails the harness.
+- [ ] **AC7 (R6)** — No technique or group page carries the statistics intro
+      sentence, and no existing topic loses an introduction: every page's intro
+      describes the kind of topic it actually is.
+- [ ] **AC8 (R7)** — `ltl --help statistics` lists none of the twenty-five
+      technique-family topic names, asserted the way the same scenario already
+      excludes `heatmap` and `histogram`.
+- [ ] **AC9 (R8)** — The Cross-Log Correlation page names all three file-list marker
+      states and says that every include, exclude and highlight criterion drives
+      them; the Resolution Zoom page states that absolute counts change with the
+      bucket width while the normalised rates do not.
+- [ ] **AC10 (R10)** — No rendered page, and no mirror file, contains a Perl
+      identifier, an issue number or a decision label.
+- [ ] **AC11 (R9)** — Every technique-family topic has mirrored content under
+      `docs/explain/`.
+
+### Unassertable
+
+- [ ] **AC12 (R5)** — *That a signal faithfully depicts what `ltl` draws for that
+      technique.* AC6 proves a signal is present and its bytes survive; nothing
+      mechanical proves the shape is the one the tool would actually produce on that
+      data. `docs/test-driven-development.md` records that the general method for
+      asserting a rendered terminal surface is an open question in this repository
+      and scopes it as prototyping research. Compensating practice, per the same
+      document: each signal is verified by running the technique's own worked
+      command against a real log and comparing the rendered output to the page.
+      The architect decides whether that stands as the verification.
+
+## Open items
+
+- **The mirror layout under `docs/explain/`.** The existing mirrors are one file per
+  visual or methodology topic (`heatmap.md`, `histogram.md`, `classification.md`)
+  and one file for the whole statistics family (`statistics.md`). Twenty-five
+  technique-family topics could follow either shape — one `techniques.md`, one file
+  per group, or one per topic. Not decided.
 
 ## Planning walkthrough
 
