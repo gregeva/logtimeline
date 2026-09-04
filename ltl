@@ -60,7 +60,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0-504";
+my $version_number = "0.18.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -9509,7 +9509,7 @@ sub print_help {
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
     $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) or 'formats' (the log formats it recognises and how each classifies successes and failures).");
-    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization or a method (e.g. 'classification'); with no topic, lists available topics.");
+    $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
 

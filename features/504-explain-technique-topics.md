@@ -669,49 +669,52 @@ extend.
 
 ### Assertable
 
-- [ ] **AC1 (R1, R2)** — `ltl --explain` with no argument emits the technique
+- [x] **AC1 (R1, R2)** — `ltl --explain` with no argument emits the technique
       category's top-level section heading, the six group subheadings beneath it,
       and all twenty-five topic names each with a one-line summary. Extends
       `scenario_registry`, which already asserts a heading per category transition
       and a listing per topic.
-- [ ] **AC2 (R2)** — For each of the twenty-five names, `ltl --explain <name>` exits
+- [x] **AC2 (R2)** — For each of the twenty-five names, `ltl --explain <name>` exits
       0, renders at least twenty lines, opens with an uppercase heading and carries
       a *See also* near the end. This is `scenario_all_topics_render` unchanged in
       shape, with the new names added to its topic list.
-- [ ] **AC3 (R4)** — Every technique page renders, in order, a paragraph, a *The
+- [x] **AC3 (R4)** — Every technique page renders, in order, a paragraph, a *The
       signal* subheading followed by a `pre` block, a *How to read it* subheading,
       a *Command* subheading followed by a `pre` block, and *See also*; and no
       technique page carries a *How ltl computes this* subheading.
-- [ ] **AC4 (R3)** — Every group page renders a paragraph, a *When to use it*
+- [x] **AC4 (R3)** — Every group page renders a paragraph, a *When to use it*
       subheading, a table, and *See also*; the table's row count equals the number
       of techniques the roster gives that group.
-- [ ] **AC5 (R5)** — At `--terminal-width` 80, 120 and 200, no rendered content line
+- [x] **AC5 (R5)** — At `--terminal-width` 80, 120 and 200, no rendered content line
       of any new page exceeds the width. This is `assert_max_line_width` as it
       stands: it already excludes the title banner and exempts verbatim `pre`
       blocks, so a signal block at its fixed cell width passes by the same rule the
       heatmap and histogram examples pass under today.
-- [ ] **AC6 (R5)** — Each technique page's signal survives to raw output with its
+- [x] **AC6 (R5)** — Each technique page's signal survives to raw output with its
       ANSI escape sequences intact, asserted the way `scenario_visualization_charts`
       asserts the heatmap and histogram examples: a CSI count over the page's raw
       bytes, so accidental stripping at authoring time fails the harness.
-- [ ] **AC7 (R6)** — No technique or group page carries the statistics intro
+- [x] **AC7 (R6)** — No technique or group page carries the statistics intro
       sentence, and no existing topic loses an introduction: every page's intro
       describes the kind of topic it actually is.
-- [ ] **AC8 (R7)** — `ltl --help statistics` lists none of the twenty-five
+- [x] **AC8 (R7)** — `ltl --help statistics` lists none of the twenty-five
       technique-family topic names, asserted the way the same scenario already
       excludes `heatmap` and `histogram`.
-- [ ] **AC9 (R8)** — The Cross-Log Correlation page names all three file-list marker
+- [x] **AC9 (R8)** — The Cross-Log Correlation page names all three file-list marker
       states and says that every include, exclude and highlight criterion drives
       them; the Resolution Zoom page states that absolute counts change with the
       bucket width while the normalised rates do not.
-- [ ] **AC10 (R10)** — No rendered page, and no mirror file, contains a Perl
+- [x] **AC10 (R10)** — No rendered page, and no mirror file, contains a Perl
       identifier, an issue number or a decision label.
-- [ ] **AC11 (R9)** — Every technique-family topic has mirrored content under
+- [x] **AC11 (R9)** — Every technique-family topic has mirrored content under
       `docs/explain/`.
 
 ### Unassertable
 
-- [ ] **AC12 (R5)** — *That a signal faithfully depicts what `ltl` draws for that
+`[~]` marks a criterion met by its compensating practice rather than by an
+assertion.
+
+- [~] **AC12 (R5)** — *That a signal faithfully depicts what `ltl` draws for that
       technique.* AC6 proves a signal is present and its bytes survive; nothing
       mechanical proves the shape is the one the tool would actually produce on that
       data. `docs/test-driven-development.md` records that the general method for
@@ -983,7 +986,56 @@ findings; and across mixed time bases the correlation fails silently (#155).
 | 4. Acceptance criteria and harness plan | Closed — R1 to R11, AC1 to AC12, D9 |
 | 5. Delivery shape | Closed — D11, three drops |
 
-Specification complete. Implementation of drop 1 has not started.
+Specification complete. All three drops implemented.
+
+## Implementation
+
+| Drop | State |
+|---|---|
+| 1 | Landed — the fourth category, the six group pages, the per-category introductions, Cross-Log Correlation |
+| 2 | Landed — Time (3 techniques) and Population (7) |
+| 3 | Landed — Shape (4), Comparison (2) and Load (2) |
+
+Twenty-five topics reachable and listed; nineteen techniques and six group
+pages. Every acceptance criterion from AC1 to AC11 is asserted by
+`tests/validate-explain.sh`, which grew from 154 to 662 assertions across
+nine new scenarios. AC12 stands on the compensating practice D9 settles:
+every signal was produced by running that technique's own worked command
+against a real log and matching the page to what came back.
+
+Three findings the implementation added to the record:
+
+- **F23 — the group page needed its own introduction.** R6 was written
+  against the per-topic sentence that misdescribed every non-statistic
+  topic. A per-category sentence fixes it for the technique leaves, but a
+  group page is not a technique, and being introduced as one is the same
+  defect in a smaller form. Group pages take a fourth sentence of their own.
+- **F24 — the group table's row count is read from the registry, not
+  declared in the harness.** A hardcoded count per group cannot detect the
+  failure it exists to catch: a technique added to a group's roster but
+  never given a row on its page. The harness reads the count from the
+  registry the tool prints, and a probe adding a technique without a row
+  now fails as it should.
+- **F25 — no page needs the `pre` exemption AC5 grants it.** The rendered
+  examples the heatmap and histogram pages carry run to 89 and 90 columns,
+  and AC5 exempts verbatim `pre` blocks for that reason. Every one of the
+  twenty-five new pages renders with no line over the terminal width at 80,
+  120 and 200, generated signals included, so the exemption is unused by
+  this work rather than relied on.
+
+### Completion gate
+
+Run on the commit being merged, with `$version_number` restored to
+`0.18.0` first.
+
+- **Full harness suite:** all 36 `tests/validate-*.sh` exit 0, each with a
+  summary line showing assertions ran. No failures.
+- **Before/after benchmark**, same machine, same session,
+  `single-day-access-log-standard`: total time 9.1 s → 8.8 s (-3.0%),
+  peak RSS 151.0 MB → 152.4 MB (+0.9%), lines read and included identical.
+  Both inside the 5% threshold; the memory difference is the content strings
+  the registry now holds. The before capture was taken from the base commit
+  in a worktree; both result files were deleted afterwards.
 
 ## Issues filed from this work
 
