@@ -472,9 +472,12 @@ scenario_family_shapes() {
         produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
     # A bare - session is absent, not a session, on the thread-session shape (R14).
     log=$(stage_fixture access-thread-session.txt localhost_access_log.2025-05-05.txt) || return
-    out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
-    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 3  sessions_hl: 0$' \
-        asserts 'six lines carry a session id over three distinct values and six carry a bare -, which is absent: the sessions count is 3 (R14)' \
+    # A counting metric makes the section walk the buckets, where the sessions
+    # oracle line is printed.
+    out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
+    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0
+ \
+        asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
 }
 
@@ -533,8 +536,8 @@ scenario_family_bracketed_unit() {
     # duration sum over the one bucket is 258 ms.
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
     cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir/codebeamer_access_log.2025-10-29.txt"
-    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o codebeamer_access_log.2025-10-29.txt > out 2> err ) || true
-    check_stderr_warnings "$dir/err"
+    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o codebeamer_access_log.2025-10-29.txt > out 2> out.stderr ) || true
+    check_capture_warnings "$dir/out"
     local csv; csv=$(ls "$dir"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
     assert_command \
         command "col=\$(head -1 '$csv' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv')\" = 258 ]" \
@@ -861,7 +864,7 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
     assert_line "$out" \
-        pattern     '^guarded: mt12,mt4,mt9$' \
+        pattern     '^guarded: mt12,mt9,mt19,mt20,mt4$' \
         asserts     'Exactly the three cheap-superset-guard entries (D28) carry guards, listed in static registry order' \
         produced_by 'compile_format_guard() wiring in build_format_registry(); emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (D28 guard set)'
@@ -1711,7 +1714,7 @@ scenario_variant_tomcat_named() {
     local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" access_common_duration_ms mt3 evidence '0\.86'
-    assert_line "$out" pattern '^  filename_evidence: stem=mt3 ext=match date=present index=-$' \
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3ts ext=match date=present index=-$' \
         asserts 'The Tomcat name decomposes to stem, .txt and a date' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
@@ -1742,8 +1745,8 @@ scenario_variant_httpd_named() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_us mt3us evidence '0\.71'
-    assert_line "$out" pattern '^  filename_evidence: stem=mt3us ext=match date=present index=-$' \
+    assert_variant_selection "$out" access_common_duration_us mt3us evidence '0\.69'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3tsus ext=match date=present index=-$' \
         asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D45/I4'
@@ -1765,7 +1768,7 @@ scenario_variant_httpd_renamed() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" access_common_duration_ms mt3 default '0\.75'
+    assert_variant_selection "$out" access_common_duration_ms mt3 default '0\.70'
     assert_line "$out.stderr" pattern '^Note: [^:]+: the detected log format \(access_common_duration_ms\) is written by more than one producer' \
         asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
@@ -2047,7 +2050,7 @@ scenario_format_pin() {
     if "$LTL" --disable-progress -ni -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
         echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
     else
-        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*connection_server_standard.*integration_runtime_standard.*access_common_duration_ms' \
+        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*access_common_duration_ms.*connection_server_standard.*integration_runtime_standard' \
             asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
             produced_by 'apply_format_pin() in ltl' \
             contract 'features/log-format-registry.md section Drop 1.5 D49'

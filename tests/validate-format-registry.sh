@@ -264,20 +264,20 @@ scenario_structure() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  group: access_with_duration slot=8 default=mt3 members=mt3,mt3us$' \
-        asserts     'The access_with_duration group declares its slot position, its default member and its full member list - Tomcat and httpd share a line shape but differ in duration unit' \
+        pattern     '^  group: access_common_duration slot=10 default=mt3 members=mt3,mt3us$' \
+        asserts     'The access_common_duration unit group declares its slot position, its default member and its full member list - the common-plus-duration shape is written in milliseconds by Tomcat 6-9 and in microseconds by Apache HTTP Server and Tomcat 10.1+ (#444 D3)' \
         produced_by 'emit_format_registry_verbose() in ltl, reading %format_variant_groups built by build_format_registry()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - group membership is declared by variant_group/variant_default in format_registry_specs()'
 
     assert_line "$out" \
-        pattern     '^static_order: mt1std,mt10,mt16,mt1gen,mt2,mt12,mt4,mt9,mt3,mt5,mt6,mt7,mt8,mt17,mt11$' \
+        pattern     '^static_order: mt1std,mt10,mt16,mt1gen,mt2,mt3ts,mt12,mt9,mt19,mt20,mt3,mt4,mt5,mt6,mt7,mt8,mt17,mt11$' \
         asserts     'The static scan order is the declaration order of the group slots - the order every run starts from and the baseline promotion permutes' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a format is added, removed or re-sequenced in format_registry_specs()'
 
     assert_line "$out" \
-        pattern     '^  ancestors: access_with_duration <- mt12,mt4,mt9$' \
-        asserts     'The derived pinned-ancestor set records that three earlier groups shadow access_with_duration, so promotion may never move it ahead of them (D26)' \
+        pattern     '^  ancestors: access_common_duration <- -$' \
+        asserts     'With every family pattern anchored at both ends (#444 D4) no earlier group shadows the common-plus-duration shape: its derived pinned-ancestor set is empty (D26)' \
         produced_by 'derive_format_constraints() in ltl; emitted by emit_format_registry_verbose()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - the derived set is cross-checked against each entry expect_ancestors by D24 gate 4, so a drift fails the build before this assertion'
 
@@ -288,7 +288,7 @@ scenario_structure() {
         contract    'features/log-format-registry.md section -V format-registry section-contract'
 
     assert_line "$out" \
-        pattern     '^variant_groups: connection_server=mt10,access_with_duration=mt3$' \
+        pattern     '^variant_groups: connection_server=mt10,access_common_duration_thread_session=mt3ts,access_common_duration=mt3$' \
         asserts     'Each variant group reports the member actually seated in its slot for this run - here both defaults, since the tomcat fixture gives no evidence for either alternative' \
         produced_by 'emit_format_registry_verbose() in ltl (occupant read from @format_scan_order)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract'

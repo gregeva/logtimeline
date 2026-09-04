@@ -192,7 +192,7 @@ scenario_users_column() {
     out=$(run_ltl_users -s -bs 5 -oe -n 0 -h alice -V udm-counting -udm 'ruser::distinct:/^\S+ \S+ ([^- ]\S*) /')
     check_capture_warnings "$out"
     assert_command \
-        command     "awk '/^bucket: [0-9]+  metric: ruser  /{ u[\$2]=\$14; u_hl[\$2]=\$16 } /^bucket: [0-9]+  users: /{ us[\$2]=\$4; us_hl[\$2]=\$6 } END { n=0; for (b in u) { n++; if (!(b in us) || u[b] != us[b] || u_hl[b] != us_hl[b]) { print \"mismatch bucket \" b \": udm \" u[b] \"/\" u_hl[b] \" users \" us[b] \"/\" us_hl[b]; exit 1 } } if (n < 2) { print \"only \" n \" bucket(s)\"; exit 1 } }' '$out'" \
+        command     "awk '/^bucket: [0-9]+  metric: ruser  /{ u[\$2]=\$10; u_hl[\$2]=\$12 } /^bucket: [0-9]+  users: /{ us[\$2]=\$4; us_hl[\$2]=\$6 } END { n=0; for (b in u) { n++; if (!(b in us) || u[b] != us[b] || u_hl[b] != us_hl[b]) { print \"mismatch bucket \" b \": udm \" u[b] \"/\" u_hl[b] \" users \" us[b] \"/\" us_hl[b]; exit 1 } } if (n < 2) { print \"only \" n \" bucket(s)\"; exit 1 } }' '$out'" \
         label       'distinct UDM on the remote-user token equals the built-in users column per bucket, plain and highlight, across >= 2 buckets' \
         asserts     'the users column is the sessions oracle twinned: a distinct-count UDM over the user token reproduces the users column exactly, including the -HL dimension' \
         produced_by 'read_and_process_logs() (%log_users accumulation) + calculate_all_statistics() (users promotion) + emit_udm_counting_verbose() in ltl' \
@@ -224,12 +224,12 @@ scenario_users_column() {
     # -xu: the thread-session fixture has one message per line, so the split
     # is proven on the ThingWorx specimen, whose messages repeat across users.
     local tw="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
-    local plain xu
-    plain=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '^[^\[[:space:]]*\s*\[' || true)
-    xu=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '^[^\[[:space:]]*\s*\[' || true)
+    local with without
+    with=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '\] \[(SuperUser|Administrator)\] ' || true)
+    without=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '\] \[(SuperUser|Administrator)\] ' || true)
     assert_command \
-        command "[ \"$xu\" -gt \"$plain\" ] && [ \"$plain\" -gt 0 ]" \
-        label "-xu splits message rows per user ($plain rows without, $xu with)" \
+        command "[ \"$with\" -gt 0 ] && [ \"$without\" -eq 0 ]" \
+        label "-xu prepends the user to the message key ($with rows carry a user under -xu, $without without)" \
         asserts '-xu prepends the user to the message key the way -xs prepends the session, so a text logged by several users becomes one row per user (D12)' \
         produced_by 'the prepend_user transform emitted by compile_format_extractor() under -xu in ltl' contract "$USERS_CONTRACT"
     # A non-access format that captures a user renders the same column: the
@@ -237,7 +237,9 @@ scenario_users_column() {
     # users on nine of its twelve lines.
     local wc="$REPO_DIR/tests/fixtures/format-detection/windchill-method-server-users.txt"
     local wout; wout=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-counting "$wc" > "$wout" 2> "$wout.stderr" || true
+    # The section walks buckets for the metrics of the run, so one counting
+    # metric makes the users oracle line reachable.
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-counting -udm 'req::count:request' "$wc" > "$wout" 2> "$wout.stderr" || true
     check_capture_warnings "$wout"
     assert_line "$wout" pattern '^bucket: [0-9]+  users: 3  users_hl: 0$' \
         asserts 'the Windchill Method Server user field feeds the same users column (three distinct users in the day bucket)' \

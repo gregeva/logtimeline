@@ -497,7 +497,7 @@ tr '\r' '\n' < "$COLLIDE_RAW" \
 # future format change makes detection unambiguous here, the scenario stops
 # testing anything and must fail rather than pass silently.
 assert_command \
-    command     "grep -q '^Note: the detected log format' '$COLLIDE'" \
+    command     "grep -q '^Note: [^:]*: the detected log format' '$COLLIDE'" \
     label       'the unpinned run raises the format-ambiguity notice' \
     asserts     'This fixture matches more than one producer of the same line shape, so an unpinned run raises the unit-ambiguity notice — the mid-read notice this scenario exists to place' \
     produced_by 'format_variant_ambiguity_note() in ltl' \
@@ -511,7 +511,7 @@ assert_command \
     contract    'features/446-overall-progress-indicator.md section Implementation — notices are held until the read ends'
 
 assert_command \
-    command     "test \"\$(grep -n '^Processing completed\\.' '$COLLIDE' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^Note: the detected log format' '$COLLIDE' | head -1 | cut -d: -f1)\"" \
+    command     "test \"\$(grep -n '^Processing completed\\.' '$COLLIDE' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^Note: [^:]*: the detected log format' '$COLLIDE' | head -1 | cut -d: -f1)\"" \
     label       'the notice is emitted after the read completes' \
     asserts     'The held notice is flushed once the read is over, so it appears below the completion line rather than between frames — the reader sees an uninterrupted progress line, then the notices' \
     produced_by 'flush_deferred_notices() in ltl, called at the end of read_and_process_logs()' \
@@ -527,7 +527,7 @@ set +e
     "$PART1" "$PART2" "$PART3" ) >/dev/null 2>"$QUIET_NOTICE"
 set -e
 assert_command \
-    command     "grep -q '^Note: the detected log format' '$QUIET_NOTICE'" \
+    command     "grep -q '^Note: [^:]*: the detected log format' '$QUIET_NOTICE'" \
     label       'the notice still prints under --disable-progress' \
     asserts     'Deferral moves a notice past the read; it never suppresses one. --disable-progress silences the indicator, and a behavioural notice is not an indicator' \
     produced_by 'flush_deferred_notices() in ltl — the flush is not gated on $disable_progress' \

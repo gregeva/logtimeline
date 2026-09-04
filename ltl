@@ -60,7 +60,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0-444";
+my $version_number = "0.18.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -2794,7 +2794,7 @@ sub format_registry_specs {
                     samples => [ 'ApplicationLog.log', 'ApplicationLog.2025-05-05.0.log', 'ErrorLog.2025-05-05.1.log', 'ScriptLog.2025-04-09.4.log', 'AkkaCommunicationLog.log', 'ApplicationLog.2025-05-05.0.log.gz' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
-      transforms => [],
+      transforms => [ 'prepend_user' ],
       message_metrics => {
           gate_lit => '=',
           probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B'  },
@@ -3281,7 +3281,7 @@ sub format_registry_specs {
                                  'MethodServer.log', 'BackgroundMethodServerESI.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d{3}) (\w+) +\[(.*?)\] (\S+) (\S*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'user'],[6,'message'] ],
-      transforms => [],
+      transforms => [ 'prepend_user' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],

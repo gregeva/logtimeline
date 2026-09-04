@@ -73,11 +73,17 @@ assert_no_soft_wrap() {
         # (HARNESS-DESIGN.md section Self-documenting assertions).
         my $surface = "unclassified";
         my $producer = "the layout engine in ltl";
-        my ($n, @bad);
+        my ($n, @bad, $in_section);
         while (my $line = <$fh>) {
             $n++;
             (my $plain = $line) =~ s/\e\[[0-9;]*m//g;
             chomp $plain;
+            # A -V section is machine-readable observability, not a rendered
+            # surface: its lines are as long as their key lists and are never
+            # placed by the layout engine, so they are outside this check.
+            if ($plain =~ /^=== END /) { $in_section = 0; next }
+            if ($plain =~ /^=== /)     { $in_section = 1; next }
+            next if $in_section;
 
             if    ($plain =~ /,:: ltl ::. log timeline/)  { $surface = "run banner";        $producer = "the banner block in ltl (fixed width, does not read --terminal-width)" }
             elsif ($plain =~ /^\s*timestamp\s+legend/)    { $surface = "timeline";          $producer = "print_bar_graph() in ltl" }
