@@ -148,6 +148,10 @@ content, and the per-file evidence that exists (F3's `χ`/`√` marker) is a sum
 indicator, not a highlight series. The analyst therefore reaches the comparison
 over a couple of executions rather than one, and the Period-over-Period topic has
 to teach that roundabout form.
+Filed as #534 (highlight the lines contributed by a specific input file).
+Informational, not a gate: this work is specified and implemented in full against
+the multi-run form that works today, and the Period-over-Period Comparison topic
+gains a pointer once #534 lands.
 
 ## Locked decisions
 
