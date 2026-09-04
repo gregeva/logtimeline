@@ -8018,6 +8018,378 @@ my $explain_cross_log_example;
     $explain_cross_log_example = $out;
 }
 
+# Shared builder for the timeline signals the technique pages render. Draws
+# the rows a run prints: the timestamp, the status legend, the message rate
+# over the error rate, the occurrences bar and its scale. Colours come from
+# %colors so an example cannot drift from the run it depicts, and the bar
+# area is a fixed 20 cells, the width the chart itself carries.
+#
+# Each row is [ timestamp, legend-pairs, err-rate, msg-rate, bar-cells ]
+# where legend-pairs is an arrayref of [ colour-key, label ].
+sub explain_timeline_rows {
+    my ($rows) = @_;
+    my $bar_cells = 20;   # the bar area's width; a full bucket fills it
+    my $out = '';
+    for my $r (@$rows) {
+        my ($ts, $legend, $err, $msg, $filled) = @$r;
+        my $legend_txt = join(' ', map { "$colors{$_->[0]}$_->[1]$colors{'NC'}" } @$legend);
+        my $legend_plain = join(' ', map { $_->[1] } @$legend);
+        my $legend_pad = 34 - length($legend_plain);
+        $legend_pad = 1 if $legend_pad < 1;
+        my $rate = sprintf('%s%s%s:%s%s%s/m%s',
+                           $colors{'err-rate'}, $err, $colors{'NC'},
+                           $colors{'msg-rate'}, $msg, $colors{'bright-black'},
+                           $colors{'NC'});
+        my $rate_plain = "$err:$msg/m";
+        my $rate_pad = 12 - length($rate_plain);
+        $rate_pad = 1 if $rate_pad < 1;
+        # A highlighted run leads the bar in the highlight colour, exactly
+        # as a run draws it: the same green over the bright-green
+        # background the legend twin carries.
+        my $hl = $r->[5] // 0;
+        $hl = $filled if $hl > $filled;
+        # The empty tail of the bar area is not drawn: a run pads it to
+        # keep the columns that follow aligned, and the example has none.
+        my $bar = ($hl ? $colors{'green-HL'} . ('█' x $hl) . $colors{'NC'} : '')
+                . $colors{'green'} . ('█' x ($filled - $hl)) . $colors{'NC'};
+        $out .= sprintf("     %s %s%s%s%s %s%s%s %s\n",
+                        $ts, $legend_txt, ' ' x $legend_pad,
+                        ' ' x $rate_pad, $rate,
+                        $colors{'bright-black'}, '│', $colors{'NC'}, $bar);
+    }
+    return $out;
+}
+
+# --- Time group signals ---
+# Each is the timeline a run draws at the aperture and bucket width the
+# technique names, so the page shows the move rather than describing it.
+# The values are the shape measured on a day of access logs: a quiet
+# overnight period, a mid-morning peak, and one five-minute window whose
+# error rate rises forty-fold while the message rate barely moves.
+
+# Window Narrowing: the aperture open over a day, then closed on one hour.
+my $explain_window_narrowing_example;
+{
+    my $out = "  Aperture open — a full day at the default bucket width:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 00:00', [['yellow','4xx: 72'],['green','2xx: 71.9k']],  '0.6', '600',  10 ],
+        [ '2026-05-07 04:00', [['red','5xx: 13'],['yellow','4xx: 140'],['green','2xx: 96.3k']], '1.3', '822',  13 ],
+        [ '2026-05-07 08:00', [['red','5xx: 38'],['yellow','4xx: 117'],['green','2xx: 98.3k']], '1.3', '828',  13 ],
+        [ '2026-05-07 10:00', [['red','5xx: 64'],['yellow','4xx: 410'],['green','2xx: 146.2k']],'3.9', '1.2k', 20 ],
+        [ '2026-05-07 12:00', [['red','5xx: 6'],['yellow','4xx: 126'],['green','2xx: 118k']],   '1.1', '994',  16 ],
+    ]);
+    $out .= "\n  Aperture closed on the peak hour:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['red','5xx: 2'],['yellow','4xx: 5'],['green','2xx: 5.3k']],   '1.4', '1.1k', 10 ],
+        [ '2026-05-07 10:15', [['yellow','4xx: 6'],['green','2xx: 4.4k']],   '1.2', '889',  8 ],
+        [ '2026-05-07 10:30', [['red','5xx: 4'],['yellow','4xx: 8'],['green','2xx: 6.1k']],   '2.4', '1.3k', 11 ],
+        [ '2026-05-07 10:45', [['red','5xx: 8'],['yellow','4xx: 277'],['green','2xx: 17.3k']],'28.5','1.8k', 20 ],
+    ]);
+    $explain_window_narrowing_example = $out;
+}
+
+# Resolution Zoom: one hour at three bucket widths. The counts fall as the
+# buckets narrow while the message rate holds — the pair that makes two
+# rungs of the ladder comparable.
+my $explain_resolution_zoom_example;
+{
+    my $out = "  One hour at the 60-minute default — one row, one total:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['red','5xx: 10'],['yellow','4xx: 282'],['green','2xx: 21.3k']], '4.9', '362', 13 ],
+    ]);
+    $out .= "\n  The same hour at five minutes — a spike appears:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:45', [['red','5xx: 8'],['yellow','4xx: 45'],['green','2xx: 8.7k']],  '10.6','1.8k', 16 ],
+        [ '2026-05-07 10:50', [['yellow','4xx: 232'],['green','2xx: 8.6k']], '46.4','1.8k', 15 ],
+        [ '2026-05-07 10:55', [['red','5xx: 2'],['yellow','4xx: 5'],['green','2xx: 4k']],     '1.4', '805',  7 ],
+    ]);
+    $out .= "\n  And at one minute — it is one minute, not five:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:49', [['red','5xx: 1'],['yellow','4xx: 38'],['green','2xx: 1.9k']],  '39',  '2k',   10 ],
+        [ '2026-05-07 10:50', [['yellow','4xx: 220'],['green','2xx: 3.5k']], '220', '3.7k', 19 ],
+        [ '2026-05-07 10:51', [['yellow','4xx: 3'],['green','2xx: 1.6k']],   '3',   '1.7k', 8 ],
+    ]);
+    $explain_resolution_zoom_example = $out;
+}
+
+# Traffic Load Profiling: a week folded onto one representative day, so the
+# rhythm shows rather than the calendar.
+my $explain_traffic_load_example;
+{
+    my $out = "  A week of logs folded onto one representative day:\n\n";
+    $out .= explain_timeline_rows([
+        [ '00:00', [['green','2xx: 302k']],  '0.5', '598',  6  ],
+        [ '04:00', [['green','2xx: 486k']],  '1.2', '963',  10 ],
+        [ '08:00', [['green','2xx: 691k']],  '1.4', '1.4k', 14 ],
+        [ '10:00', [['green','2xx: 984k']],  '3.7', '1.9k', 20 ],
+        [ '12:00', [['green','2xx: 812k']],  '1.1', '1.6k', 16 ],
+        [ '16:00', [['green','2xx: 458k']],  '0.9', '907',  9  ],
+        [ '20:00', [['green','2xx: 213k']],  '0.4', '422',  4  ],
+    ]);
+    $explain_traffic_load_example = $out;
+}
+
+my $explain_window_narrowing_reading = q{The aperture decides what the timeline is a picture of. Open, it shows the whole file at the default bucket width and tells you where to look; closed around a moment, every row is one slice of that moment and the bars rescale to what remains. The move runs both ways, and which way you go depends on what you already have. Given a known error time, open the aperture around it — start an hour before and end an hour after — and read what preceded the error rather than the error itself: a rise in volume, a change in the status mix, a slow climb in duration. Given a spike you can already see, close the aperture onto it and drop everything else, so the rows that were one bar become a dozen. Neither direction is the beginning of the investigation more often than the other. What falsifies the reading: narrowing changes the population, so a rate that rises after the cut has not necessarily risen in the system — the quiet periods that were holding the average down have simply been dropped. Compare a narrowed run against the same figures before the cut, not against your expectation of what normal looks like. The bars, too, are scaled to the largest bucket in view, so the same traffic draws a full-width bar in a quiet window and a short one in a busy one.};
+
+my $explain_window_narrowing_command = <<'END';
+    ltl -st "2026-05-07 09:00" -et "2026-05-07 11:00" access.log
+                                                   # what preceded a 10:00 error
+    ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" access.log
+                                                   # close onto the spike itself
+END
+
+my $explain_resolution_zoom_reading = q{A bar is a total, and a total hides its own shape. At the 60-minute default a day is 24 rows and every value is an hour's worth, which is enough to say where to look and nothing more: a peak at 10:00 says nothing about what happens inside that hour. From there the move alternates two adjustments, and the alternation is the technique. Close the aperture around the peak, then narrow the bucket for what remains, then read the result and decide whether to go again. Still localised to one row means an anomalous occurrence and the ladder continues; spread flat across the whole window means a condition that ran for the whole window, and the answer is already in hand. In the example the hour holds 282 client errors, which at five minutes turns out to be one bucket rather than twelve, and at one minute turns out to be one minute — 220 of them inside sixty seconds. Watch the two numbers beside each other as you descend. The raw counts fall with the bucket width, because a bucket holds less; the rates beside them are normalised per unit of time and do not, so the message rate holding near 1.8k a minute across two rungs is what says the traffic did not change while the errors did. That pairing is what makes two rungs comparable at all. Continuing down: tighten the aperture again, drop below the minute with a sub-minute bucket, and raise the timestamp precision to seconds and then milliseconds, until at the finest grain a quarter-second bucket answers whether executions are spread evenly across a second or all land on the second transition. What falsifies the reading: the finest rungs need the log's own timestamps to carry that precision, and a millisecond bucket over second-resolution timestamps invents structure that is not in the data. At very fine widths the normalised rates also become noisy, since one or two observations in a narrow bucket extrapolate to a large per-minute figure; below about a minute, read the counts and treat the rates as indicative.};
+
+my $explain_resolution_zoom_command = <<'END';
+    ltl access.log                                 # the day at the 60-minute default
+    ltl -st "2026-05-07 10:00" -et "2026-05-07 11:00" -bs 5 access.log
+                                                   # the hour, five minutes a row
+    ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" -bs 1 access.log
+                                                   # the quarter hour, a minute a row
+    ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -s access.log
+                                                   # the minute, five seconds a row
+END
+
+my $explain_traffic_load_reading = q{Folding collapses the calendar onto one representative period, so several days of a log draw one day and several weeks draw one week. What you are reading is the rhythm rather than the events: where the high and low hours fall, where the peak-load periods sit, and whether the errors recur in consistent groupings or arrive at no particular time. A load profile that rises through the morning, peaks mid-morning and falls away through the evening is a working day; the same profile with a second peak at three in the morning is a batch window, and worth knowing about before anything is concluded from a daytime measurement. Fold by week rather than by day to see which days carry the load, and by working week to drop the weekend from the picture entirely. The most useful reading is often the one that is absent: an error grouping that survives the fold happens at the same time every day and is scheduled; one that disappears into the average happened once. What falsifies the reading: folding a single unrepresentative period reproduces its one-off spikes as though they were the rhythm, and the fold gives you no way to tell the two apart. A profile drawn from one week is a description of that week. Fold several, and where the peaks stay put they are the rhythm.};
+
+my $explain_traffic_load_command = <<'END';
+    ltl -pr day access.log-*                       # the daily rhythm across the set
+    ltl -pr week access.log-*                       # which days carry the load
+    ltl -pr workweek access.log-*                   # the same, weekend dropped
+    ltl -pr day -bs 15 access.log-*                 # a finer profile, 15 minutes a row
+END
+
+# Builder for a top-messages table, the surface most Population techniques
+# are read from. Rows are [ marker-colour-key, text, occurrences, p50, total ]
+# and the marker position carries the row's classification state as a
+# colour, exactly as a run draws it.
+sub explain_message_rows {
+    my ($title, $rows) = @_;
+    my $out = " $colors{'cyan'}" . bs_bold(" $title ") . "$colors{'NC'}\n";
+    $out .= " $colors{'cyan'}" . ('─' x 78) . "$colors{'NC'}\n";
+    for my $r (@$rows) {
+        my ($mark, $text, $occ, $p50, $total) = @$r;
+        $out .= sprintf("%s•%s %-46s %6s %7s %9s\n",
+                        $colors{$mark}, $colors{'NC'}, $text, $occ, $p50, $total);
+    }
+    return $out;
+}
+
+# --- Population group signals ---
+# Paths and identifiers in every example are neutral placeholders; the
+# shapes are those measured on real access logs.
+
+# Contribution Highlighting: the highlighted run leads each bar, the
+# legend carries the highlighted twin, and the highlighted messages get a
+# table of their own beside the overall one.
+my $explain_contribution_example;
+{
+    my $out = explain_timeline_rows([
+        [ '2026-05-07 08:00', [['yellow','4xx: 14'],['green-HL','781'],['green','2xx: 4.2k']], '0.2', '600',  13, 3 ],
+        [ '2026-05-07 10:00', [['yellow','4xx: 41'],['green-HL','1.9k'],['green','2xx: 9.1k']],'0.7', '1.2k', 20, 4 ],
+        [ '2026-05-07 12:00', [['yellow','4xx: 12'],['green-HL','622'],['green','2xx: 7.4k']], '0.2', '994',  16, 2 ],
+    ]);
+    $out .= "\n";
+    $out .= explain_message_rows('TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)', [
+        ['kelly-green', '[200] POST /api/v2/device/properties',  '1.9k', '1ms',  '31 msec'],
+        ['kelly-green', '[200] POST /api/v2/device/status',      '842',  '1ms',  '30 msec'],
+    ]);
+    $out .= "\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] POST /api/v2/catalog/search',     '9.1k', '0ms',  '719 msec'],
+        ['kelly-green', '[200] POST /api/v2/orders/submit',      '3.2k', '60ms', '30.1 sec'],
+        ['kelly-green', '[200] POST /api/v2/device/properties',  '1.9k', '1ms',  '31 msec'],
+    ]);
+    $explain_contribution_example = $out;
+}
+
+# API Isolation: the timeline containing only the matching lines, clear of
+# everything else. The scale is now that of the isolated call.
+my $explain_api_isolation_example;
+{
+    my $out = "  The whole population — one call is 4% of it and invisible:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 08:00', [['yellow','4xx: 14'],['green','2xx: 20.5k']], '0.2', '600',  13 ],
+        [ '2026-05-07 10:00', [['yellow','4xx: 41'],['green','2xx: 31.2k']], '0.7', '1.2k', 20 ],
+        [ '2026-05-07 12:00', [['yellow','4xx: 12'],['green','2xx: 24.9k']], '0.2', '994',  16 ],
+    ]);
+    $out .= "\n  Isolated on that one call — the same hours, its own scale:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 08:00', [['yellow','4xx: 2'],['green','2xx: 612']],   '0.0', '17.9', 8  ],
+        [ '2026-05-07 10:00', [['yellow','4xx: 31'],['green','2xx: 1.5k']], '0.5', '43.4', 20 ],
+        [ '2026-05-07 12:00', [['yellow','4xx: 3'],['green','2xx: 704']],   '0.1', '20.6', 9  ],
+    ]);
+    $explain_api_isolation_example = $out;
+}
+
+# Attribute Isolation: one attribute value held, and the population cut to
+# it, marked within it, or with it removed.
+my $explain_attribute_isolation_example;
+{
+    my $out = "  Highlighted — the one session inside the whole population:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['green-HL','318'],['green','2xx: 9.1k']],  '0.4', '1.2k', 20, 1 ],
+        [ '2026-05-07 10:30', [['green-HL','1.4k'],['green','2xx: 8.4k']], '0.6', '1.1k', 18, 3 ],
+        [ '2026-05-07 11:00', [['green-HL','29'],['green','2xx: 7.9k']],   '0.3', '1k',   17, 1 ],
+    ]);
+    $out .= "\n  Isolated — only that session, on its own scale:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['green','2xx: 318']],  '0.0', '5.3',  5  ],
+        [ '2026-05-07 10:30', [['green','2xx: 1.4k']], '0.2', '23.3', 20 ],
+        [ '2026-05-07 11:00', [['green','2xx: 29']],   '0.0', '0.5',  1  ],
+    ]);
+    $explain_attribute_isolation_example = $out;
+}
+
+# Rank then Isolate: the same population ranked two ways. Occurrences names
+# the volume contributors, total duration the time contributors, and they
+# are not the same rows.
+my $explain_rank_then_isolate_example;
+{
+    my $out = "  Ranked by occurrences — who is called most:\n\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] POST /api/v2/catalog/search',    '12.5k', '1ms',   '13.8 sec'],
+        ['kelly-green', '[200] POST /api/v2/device/properties', '10.6k', '1ms',    '7.0 sec'],
+        ['kelly-green', '[200] POST /api/v2/session/heartbeat',  '9.9k', '1ms',    '6.8 sec'],
+    ]);
+    $out .= "\n  Ranked by total duration — who owns the time:\n\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] POST /api/v2/report/generate',   '26.6k', '1s',     '7.2 hr'],
+        ['kelly-green', '[200] POST /api/v2/orders/submit',      '155k', '58ms',   '2.4 hr'],
+        ['kelly-green', '[200] POST /api/v2/catalog/search',    '12.5k', '1ms',   '13.8 sec'],
+    ]);
+    $explain_rank_then_isolate_example = $out;
+}
+
+# Outcome Isolation: the failure highlight surfaces failing messages by
+# name, beside an overall table in which they never appear.
+my $explain_outcome_isolation_example;
+{
+    my $out = explain_message_rows('TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)', [
+        ['rosso-corsa', '[404] GET  /favicon.ico',              '57', '0ms', '6 msec'],
+        ['rosso-corsa', '[500] POST /api/v2/report/generate',   '16', '1ms', '18 msec'],
+        ['rosso-corsa', '[404] GET  /api/v2/health',            '12', '0ms', '5 msec'],
+    ]);
+    $out .= "\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] POST /api/v2/orders/submit',  '11.4k', '58ms', '11 min'],
+        ['kelly-green', '[200] POST /api/v2/report/generate', '1.9k', '1s',   '32.5 min'],
+    ]);
+    $out .= "\n  In the run summary, the highlighted twin beside its family:\n\n";
+    $out .= "  $colors{'red'}5xx Server error (HL)         17 (0.025%)$colors{'NC'}\n";
+    $out .= "  $colors{'yellow'}4xx Client error (HL)        334 (0.483%)$colors{'NC'}\n";
+    $out .= "  $colors{'magenta'}3xx Redirection              589 (0.852%)$colors{'NC'}\n";
+    $out .= "  $colors{'green'}2xx Success                 68180 (98.6%)$colors{'NC'}\n";
+    $explain_outcome_isolation_example = $out;
+}
+
+# Remainder Analysis: the same window before and after one dominant
+# contributor is dropped. The measured effect is on the duration column —
+# ten minutes a bucket becomes twenty seconds — and on every share.
+my $explain_remainder_example;
+{
+    my $out = "  Before — one endpoint owns the time:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['yellow','4xx: 15'],['green','2xx: 10.5k']],  '1.5', '1.1k', 10 ],
+        [ '2026-05-07 10:20', [['yellow','4xx: 14'],['green','2xx: 10.6k']],  '1.8', '1.1k', 10 ],
+        [ '2026-05-07 10:40', [['yellow','4xx: 48'],['green','2xx: 14.8k']],  '5.7', '1.5k', 14 ],
+        [ '2026-05-07 10:50', [['yellow','4xx: 237'],['green','2xx: 12.5k']], '23.9','1.3k', 12 ],
+    ]);
+    $out .= "    total duration per bucket: 10.3m   8.8m   10.3m   10.8m\n";
+    $out .= "    3xx share of all lines:    0.852%\n";
+    $out .= "\n  After dropping it — what was left, rescaled:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-05-07 10:00', [['yellow','4xx: 15'],['green','2xx: 6.1k']],   '1.5', '622',  9  ],
+        [ '2026-05-07 10:20', [['yellow','4xx: 14'],['green','2xx: 6.7k']],   '1.5', '683',  10 ],
+        [ '2026-05-07 10:40', [['yellow','4xx: 48'],['green','2xx: 10.2k']],  '4.8', '1k',   15 ],
+        [ '2026-05-07 10:50', [['yellow','4xx: 237'],['green','2xx: 8.2k']],  '23.7','852',  12 ],
+    ]);
+    $out .= "    total duration per bucket: 20.4s  20.7s   24.3s   35.1s\n";
+    $out .= "    3xx share of all lines:    1.33%\n";
+    $explain_remainder_example = $out;
+}
+
+# Attribute Surfacing: one consolidated row separating into a row per
+# attribute value once the attribute is kept in the grouping key.
+my $explain_attribute_surfacing_example;
+{
+    my $out = "  Consolidated — one row per endpoint:\n\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] POST /api/v2/device/properties', '785', '25ms', '33.9 sec'],
+        ['kelly-green', '[200] POST /api/v2/device/status',     '683', '14ms', '11.3 sec'],
+    ]);
+    $out .= "\n  With the session kept in the key — a row per session:\n\n";
+    $out .= explain_message_rows('TOP OVERALL MESSAGES', [
+        ['kelly-green', '[200] [session 4BDC…] POST /api/v2/device/…', '683', '14ms', '11.3 sec'],
+        ['kelly-green', '[200] [session 6501…] POST /api/v2/device/…', '486', '15ms',  '8.8 sec'],
+        ['kelly-green', '[200] [session 1B20…] POST /api/v2/device/…', '378', '21ms', '12.2 sec'],
+        ['kelly-green', '[200] [session 9902…] POST /api/v2/device/…', '347', '54ms', '23.2 sec'],
+    ]);
+    $explain_attribute_surfacing_example = $out;
+}
+
+my $explain_contribution_reading = q{A highlight marks part of the population without removing any of it. Three surfaces carry the answer at once. The bars gain a leading run in the highlight colour, so the share a pattern contributes is visible bucket by bucket and you can see whether it is steady or concentrated in one stretch. The legend gains a twin entry carrying the highlighted count beside the family it came from, and the run summary carries the same pair with its percentage. And the matched messages get a table of their own beside the overall one, which is what makes the technique work on small contributors: a pattern that is a fraction of a percent of the traffic will never reach the overall table, but it is the whole of the highlighted one. This is the discovery move, and it is the safer one to make first. Nothing is removed, so every total, rate and share still describes the system; the highlighted figures sit inside them rather than replacing them. Isolation, which cuts the population down, is what you reach for once you know the pattern is worth isolating. What falsifies the reading: the highlight matches line content, so it can only mark what a line says. It cannot mark lines by the file they came from, so a highlight cannot separate a baseline corpus from a current one within a single run.};
+
+my $explain_contribution_command = <<'END';
+    ltl -h "/api/v2/checkout" access.log           # how much of the traffic is one endpoint
+    ltl -h "timeout|refused" app.log               # where two failure words occur
+    ltl -hdmin 5000 access.log                     # mark every request over five seconds
+END
+
+my $explain_api_isolation_reading = q{Isolation drops every line that does not match, so what is left is one call and the timeline is redrawn around it. That is the point: at four per cent of the traffic a call's own shape is invisible inside the population, and isolated it fills the chart. It is also the precondition for the moves that follow. The attribute exposures are unreadable across a whole population — too many values, too little signal — and become readable the moment the population is one call. So does the shape work: a histogram of everything shows the aggregate of every call mixed together, and a histogram of one call shows that call. What falsifies the reading: every figure now describes the isolated subset and not the system. The rate is the call's rate, not the traffic's; the bars are scaled to the call's own busiest bucket, so a bar that fills the width means the call's own peak and says nothing about load; and the shares in the run summary are shares of what survived the filter. Read them as answers about the call, and go back to the unfiltered run for anything about the system. If the question is how much of the whole this call accounts for, the move is the highlight, not the isolation.};
+
+my $explain_api_isolation_command = <<'END';
+    ltl -i "/api/v2/checkout" access.log           # only that endpoint
+    ltl -i "/api/v2/checkout" -hg duration access.log
+                                                   # its distribution, clear of the rest
+    ltl -i "/api/v2/checkout" -bs 5 access.log     # its shape over time, five minutes a row
+END
+
+my $explain_attribute_isolation_reading = q{An attribute is anything the line carries that identifies the actor rather than the action: a session id, a user name, a thread, a caller address, a query string. The technique is to take one value of one such attribute and act on it — isolate the population to it, mark it within the population, or take it out. The three are the same move with different consequences, and which one to reach for depends on what you already know. Highlight when you want the value's contribution in context, with every total still describing the system. Isolate when you want the value's own behaviour and are willing to give up the context. Exclude when the value is the known problem and the question is what is left. It works for any attribute the line carries, which is why the technique is not one per attribute: what you type changes, what you are doing does not. Pair it with attribute surfacing, which is the move that finds the value in the first place — surfacing separates the population by an attribute so the values can be seen, and isolation acts on one of them once it is known. What falsifies the reading: the attribute has to be on the line and has to be part of what the tool matches against. A value that appears in a field the message key does not carry cannot be addressed this way, and a session id that appears on only some of a session's lines will isolate those lines rather than that session.};
+
+my $explain_attribute_isolation_command = <<'END';
+    ltl -h "sess-4BDC7EE2" access.log              # one session inside the population
+    ltl -i "sess-4BDC7EE2" access.log              # only that session
+    ltl -e "sess-4BDC7EE2" access.log              # everything but that session
+    ltl -i "10.0.12.44" access.log                 # one caller, when the line carries it
+END
+
+my $explain_rank_then_isolate_reading = q{The ranked table is the entry point to almost everything else, and the ranking metric decides what it points at. Ranked by occurrences it names the volume contributors: the calls made most often, which is what to look at when the complaint is about load or a system that is busy. Ranked by total duration it names the time contributors: the calls that own the wall clock, which is what to look at when the complaint is that something is slow. They are usually different rows. In the example the busiest call runs twelve thousand times for fourteen seconds of total time, while the call that owns seven hours of it runs half as often — a ranking by occurrences would never have found it. Pick the ranking that matches the complaint, take the row at the top, and isolate on it. That pair — rank, then isolate — is how every technique in the shape group begins, because a distribution is only readable once the candidate is on its own. The ranking can also be by any of the statistics, which is what makes the shape techniques reachable: rank by tail-heaviness to find the call with outliers, by asymmetry to find one being cut off at a ceiling. What falsifies the reading: a ranking metric the rows cannot support returns nothing to rank. The shape statistics need several observations per row before they mean anything, so ranking a table of one-request endpoints by tail-heaviness ranks noise. Check the occurrence count of the rows a ranking put at the top before believing the order.};
+
+my $explain_rank_then_isolate_command = <<'END';
+    ltl -so occurrences -n 20 access.log           # the volume contributors
+    ltl -so duration -n 20 access.log              # the time contributors
+    ltl -so mean -n 20 access.log                  # the slowest per call
+    ltl -i "<the winner>" -hg duration access.log  # then isolate and look at its shape
+END
+
+my $explain_outcome_isolation_reading = q{A failure highlight marks every line the format classifies as a failure, and the highlighted message table then names them. That table is the technique: failures are rare by definition, so they are exactly the rows a ranking by occurrences will never reach. In the example the top overall row runs eleven thousand times, while the failing rows run fifty-seven, sixteen and twelve — invisible in any ranking of the population, and the whole content of the highlighted table. Each arrives with its name, its count and its durations, which is usually enough to say whether the failures are one broken endpoint or spread across many. The run summary carries the same split as highlighted twins beside their families, so the share is there as well as the names. The classification also filters rather than marks — include only failures to make the whole run about them, or drop both successes and failures to leave exactly the lines the format could not classify, which is the remainder worth reading when the classified pair does not add up. What falsifies the reading: a format that declines to classify produces no outcome at all, and there is nothing for this technique to work on. Where a format does classify, a large unclassified share means the successes and failures are not the whole population and a percentage over them is not a rate over everything that happened. The run summary reports that share; read it before treating a failure percentage as a failure rate.};
+
+my $explain_outcome_isolation_command = <<'END';
+    ltl -hf access.log                             # mark failures, keep the population
+    ltl -if access.log                             # only the failures
+    ltl -ef -es access.log                         # the unclassified remainder
+    ltl -hf -so duration -n 20 access.log          # failures ranked by the time they cost
+END
+
+my $explain_remainder_reading = q{Exclusion answers the question isolation cannot: with the known problem taken out, is what is left healthy? It is not the second half of isolation. Isolation asks what this looks like; subtraction asks what everything else looks like without it, and the two cannot be drawn at the same time. What makes it worth its own move is the rescaling. A dominant contributor flattens everything beside it, and dropping it lets the rest become readable. In the example, dropping one endpoint takes the total duration in each bucket from around ten minutes to around twenty seconds — that endpoint was almost all of the time — and the whole shape of what remains becomes visible where before it was a flat line at the bottom of the chart. The shares move too, and for the same reason: the redirect share rises from 0.852% to 1.33% without a single extra redirect, because the denominator shrank. That rescaling is the reading. If what is left looks healthy, the excluded thing was the problem. If what is left has its own peak in the same bucket, it was not. What falsifies the reading: the exclusion removes that traffic from every total and every rate as well as from the chart, so the remainder's figures are not the system's. A share that rises after an exclusion has not risen in the system. Compare the remainder against itself over time, not against the figures from the unfiltered run.};
+
+my $explain_remainder_command = <<'END';
+    ltl -e "/api/v2/report" access.log             # everything but the known problem
+    ltl -e "/api/v2/report" -bs 5 access.log       # what is left, at a finer resolution
+    ltl -e "/health" -e "/favicon.ico" access.log  # drop the noise before reading anything
+END
+
+my $explain_attribute_surfacing_reading = q{Consolidation is what makes a message table readable: near-identical lines are grouped so a call appears once with its totals rather than ten thousand times. That is the right default across a population, and it is what hides the answer once a call has been isolated. Surfacing reverses it for one attribute — keep the session, the user or the query string in the grouping key, and the single consolidated row separates into a row per value, each with its own count and durations. In the example one endpoint at 785 requests becomes four sessions, and the distribution across them is the answer: one session at 683 requests, three others in the hundreds. A single value carrying most of the volume is a different finding from the volume being spread evenly, and the consolidated row cannot tell you which you have. The same applies to time rather than volume — a per-value breakdown of durations says whether one user is experiencing the slowness or all of them are. What falsifies the reading: run before a call has been isolated, there is too much in the view to read anything from it, because every call separates by every value at once. Isolate first. And the attribute must be on the line: surfacing a field the log does not record produces the consolidated row unchanged, not an error.};
+
+my $explain_attribute_surfacing_command = <<'END';
+    ltl -i "/api/v2/device" -xs access.log         # that call, a row per session
+    ltl -i "/api/v2/device" -xu access.log         # a row per user
+    ltl -i "/api/v2/search" -xqs access.log        # a row per query string
+    ltl -i "/api/v2/device" -xs -so duration access.log
+                                                   # which session owns the time
+END
+
 my $explain_cross_log_reading = q{Every file the run processed is listed, and the marker ahead of its name says what that file contributed. A green tick means the file contributed lines that survived the filters. A green tick on a bright-green background means it also contributed a line the highlight criteria matched — that is the file the condition is actually in. A red chi means the file contributed nothing: it was read, and none of its lines came through. Read the column, not the names: over a set of node logs it tells you which nodes are affected, over a run of daily files which days, and under -r over a directory tree the answer names a folder as readily as a file. Every include, exclude and highlight criterion the tool has drives the markers, not just a text pattern: a duration threshold answers which files carried requests slower than a minute, a failure filter reduces the run to the files that contain failures, and a bytes threshold answers which of them served the large responses. What falsifies the reading: a red chi is ambiguous on its own. It means the file holds no line matching the criteria — which is a different finding from the file holding no such line at all, because an include filter, a time window or a profile fold may have removed it before the criteria were ever applied. Check the run summary's included-lines count against the lines read before concluding a node is clean. One further caution: where the files come from machines on different time bases, the timeline aligns them by the wall clock each file states, so a correlation across mixed offsets is wrong without being reported as wrong.};
 
 my $explain_cross_log_command = <<'END';
@@ -8428,6 +8800,140 @@ sub populate_explain_topics {
               ] },
             { type => 'subheading', text => 'See also' },
             { type => 'paragraph', text => 'population — the criteria that drive this read are the same include, exclude and highlight criteria the population techniques use, applied across files rather than within one. comparison, when two corpora are being set against each other rather than surveyed. Run \'ltl --explain\' for the full table of contents.' },
+        ],
+
+        # ==== Analysis techniques: Time group (#504) ====
+
+        'window-narrowing' => [
+            { type => 'heading',   text => 'WINDOW NARROWING' },
+            { type => 'paragraph', text => 'What was happening around this moment?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_window_narrowing_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_window_narrowing_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_window_narrowing_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'time (the grouping this belongs to), resolution-zoom, traffic-load-profiling, period-over-period. Options: -st, -et, -bs, -pr.' },
+        ],
+
+        'resolution-zoom' => [
+            { type => 'heading',   text => 'RESOLUTION ZOOM' },
+            { type => 'paragraph', text => 'What is inside that bar?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_resolution_zoom_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_resolution_zoom_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_resolution_zoom_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'time (the grouping this belongs to), window-narrowing, traffic-load-profiling. Options: -st, -et, -bs, -s, -ms, -ru.' },
+        ],
+
+        'traffic-load-profiling' => [
+            { type => 'heading',   text => 'TRAFFIC LOAD PROFILING' },
+            { type => 'paragraph', text => 'What does the load look like hour to hour and day to day?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_traffic_load_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_traffic_load_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_traffic_load_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'time (the grouping this belongs to), period-over-period, window-narrowing, load-over-time. Options: -pr, -bs, -st, -et.' },
+        ],
+
+        # ==== Analysis techniques: Population group (#504) ====
+
+        'contribution-highlighting' => [
+            { type => 'heading',   text => 'CONTRIBUTION HIGHLIGHTING' },
+            { type => 'paragraph', text => 'How much of this is that?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_contribution_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_contribution_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_contribution_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), api-isolation, outcome-isolation, remainder, shape-comparison. Options: -h, -hdmin, -hdmax, -hf, -hs, -hpf.' },
+        ],
+
+        'api-isolation' => [
+            { type => 'heading',   text => 'API ISOLATION' },
+            { type => 'paragraph', text => 'What does this call look like on its own?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_api_isolation_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_api_isolation_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_api_isolation_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), contribution-highlighting, attribute-surfacing, rank-then-isolate, remainder. Options: -i, -ipf, -e, -n.' },
+        ],
+
+        'attribute-isolation' => [
+            { type => 'heading',   text => 'ATTRIBUTE ISOLATION' },
+            { type => 'paragraph', text => 'What is this one session, thread, user, caller or query string doing?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_attribute_isolation_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_attribute_isolation_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_attribute_isolation_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), attribute-surfacing, api-isolation, contribution-highlighting. Options: -i, -e, -h, -xs, -xu, -xqs.' },
+        ],
+
+        'rank-then-isolate' => [
+            { type => 'heading',   text => 'RANK THEN ISOLATE' },
+            { type => 'paragraph', text => 'Which message should I be looking at?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_rank_then_isolate_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_rank_then_isolate_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_rank_then_isolate_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), api-isolation, tail-excursion, bimodal-split, timeout-clustering. Options: -so, -n, -sa, -i.' },
+        ],
+
+        'outcome-isolation' => [
+            { type => 'heading',   text => 'OUTCOME ISOLATION' },
+            { type => 'paragraph', text => 'Which messages are failing, and is one of them responsible?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_outcome_isolation_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_outcome_isolation_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_outcome_isolation_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), status-composition, contribution-highlighting, rank-then-isolate. Options: -hf, -hs, -if, -ef, -is, -es.' },
+        ],
+
+        'remainder' => [
+            { type => 'heading',   text => 'REMAINDER ANALYSIS' },
+            { type => 'paragraph', text => 'With the known problem taken out, is what is left healthy?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_remainder_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_remainder_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_remainder_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), api-isolation, contribution-highlighting, attribute-isolation. Options: -e, -epf, -i, -bs.' },
+        ],
+
+        'attribute-surfacing' => [
+            { type => 'heading',   text => 'ATTRIBUTE SURFACING' },
+            { type => 'paragraph', text => 'Which user, session or query string inside this one call is producing the errors, the volume or the slow requests?' },
+            { type => 'subheading', text => 'The signal' },
+            { type => 'pre',       text => $explain_attribute_surfacing_example },
+            { type => 'subheading', text => 'How to read it' },
+            { type => 'paragraph', text => $explain_attribute_surfacing_reading },
+            { type => 'subheading', text => 'Command' },
+            { type => 'pre',       text => $explain_attribute_surfacing_command },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'population (the grouping this belongs to), attribute-isolation, api-isolation, rank-then-isolate. Options: -xs, -xu, -xqs, -i, -so, -g.' },
         ],
 
         # ==== Analysis techniques: Correlation group (#504) ====

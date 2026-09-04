@@ -344,7 +344,7 @@ TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coe
 # a list grows as a drop lands and the roster the feature record gives is
 # reached at the last one.
 TECHNIQUE_GROUPS=(time population shape comparison load correlation)
-TECHNIQUE_TOPICS=(cross-log-correlation)
+TECHNIQUE_TOPICS=(window-narrowing resolution-zoom traffic-load-profiling contribution-highlighting api-isolation attribute-isolation rank-then-isolate outcome-isolation remainder attribute-surfacing cross-log-correlation)
 
 # Technique count per group. Read from the registry the tool itself prints
 # rather than hardcoded here, so a technique added to a group but never
