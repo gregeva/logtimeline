@@ -503,7 +503,7 @@ family's *How ltl computes this* section — a technique is not computed:
 |---|---|---|
 | heading | `heading` | The full name, uppercased |
 | — | `paragraph` | The question the technique answers, one sentence |
-| The signal | `pre` | The shape rendered in ANSI/ASCII, at most 80 visible columns (F6) |
+| The signal | `pre` | The shape rendered in ANSI/ASCII, generated in code at a fixed cell width from the tool's own colour definitions, per the existing practice (F6) |
 | How to read it | `paragraph` | The reading, and what would falsify it |
 | Command | `pre` | The worked command |
 | See also | `paragraph` | Related techniques and the options the technique uses |
