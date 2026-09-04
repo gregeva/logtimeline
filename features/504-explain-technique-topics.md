@@ -96,6 +96,24 @@ unchanged and is never reflowed. Nothing measures escape-sequence width, and
 therefore authored to fit 80 columns, and its visible width is counted excluding
 escape sequences.
 
+### F7 — the analyst's path crosses groups; the groups are not a sequence
+
+From the interview (architect, 2026-09-04). Where an investigation enters depends
+on the signal that started it: a named day or time, or a known error time to work
+outwards from. From there the move is usually to broaden rather than narrow — what
+was happening before the error, whether the same thing happens daily at the same
+time, how one day compares with another and one week with another. Only after that
+broad look does the analyst narrow the window and raise the resolution.
+
+Two consequences for the content. First, Window Narrowing is bidirectional: setting
+`-st`/`-et` around a known error time to see what preceded it is the same move as
+cutting down to a spike, and the topic covers both. Second, the population question
+comes before the time zoom — the analyst first establishes whether one API or
+pattern accounts for the occurrences or whether they are spread across the
+population, and only then zooms. So the Time and Population groups interleave in
+practice, and each group page's *See also* names the group the analyst typically
+reaches for next rather than presenting the six groups as an ordered pipeline.
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
