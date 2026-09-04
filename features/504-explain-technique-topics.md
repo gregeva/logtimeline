@@ -55,8 +55,10 @@ this work cannot add a fourth category without resolving it.
 
 The run summary's file list prints a per-file marker ahead of each filename, from
 `@match_char` and `%in_files_matched`: red `χ` when the file contributed no
-included line, green `√` when it contributed included lines, and bright green `√`
-when it contributed a line the highlight matched. Under `-i`/`-e` and `-h` this
+included line, green `√` when it contributed included lines, and a green `√` on a
+bright-green background when it contributed a line the highlight matched (verified
+on a 5,000-line Tomcat access log under `-hf`: the marker rendered with the
+background fill). Under `-i`/`-e` and `-h` this
 answers *which of these files is the signal actually in*, over any number of input
 files, without a separate run per file. `docs/usage.md` does not mention the
 marker in any form.
@@ -198,6 +200,38 @@ Filed as #535 (research: normalised message and error rates diverge at fine buck
 widths). Informational, not a gate: the Resolution Zoom topic teaches the rates as
 the pair to watch across a zoom, and carries what that research concludes once it
 settles.
+
+### F12 — the Population moves run discovery through highlight, not through filtering
+
+From the interview (architect, 2026-09-04), with the tool behaviour verified on a
+5,000-line Tomcat access log slice.
+
+The analyst arrives thinking about performance stability, and the question shifts
+quickly. A high number of errors over time shows first as the size and length of
+the category bars across the time buckets; the top-messages table, sorted by
+occurrences by default, names the top contributors. Re-sorting with `-so` surfaces
+different aspects of the same population: when something is taking excessively long
+and getting slower, ranking on total duration gives the total time contribution per
+message — per API.
+
+The diagnostic move is what the table does *not* show. A high error count with no
+error category among the top ten by occurrences means the errors come from many
+patterns rather than one, so ranking by occurrences will never surface them: the
+successful traffic crowds them out.
+
+`-hf` resolves that without discarding the population. Verified output on the
+access-log slice, where failures are 17 of 5,000 lines (0.34%): the top-N table
+splits into `TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)` and
+`TOP OVERALL MESSAGES`, side by side. The three failing endpoints appear with their
+status codes, occurrence counts and duration statistics, none of which a top-N by
+occurrences would have shown; the run summary gains a `HIGHLIGHTED` count and the
+category rows gain their `(HL)` twins.
+
+That yields a name. With the name in hand the analyst switches the highlight from
+failures to that message's string pattern, and the timeline then shows that one
+API's contribution across time inside the full population — whether it failed
+throughout, or succeeded in some periods and failed only in others. The population
+is never cut away; the highlight is what moves.
 
 ## Locked decisions
 
