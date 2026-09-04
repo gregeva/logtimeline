@@ -1621,6 +1621,141 @@ scenario_technique_mirror() {
         contract    'Issue #504 AC10, R10: the mirror is user-facing prose'
 }
 
+# --- Scenario: the wiki sync map covers every mirror source (R9). ---
+# The wiki is not a second copy that could drift: the release step in
+# docs/process/workflow.md overwrites each page with a byte-for-byte copy of
+# its docs/ source, so the two surfaces are in sync by construction and what
+# has to be asserted is the map that keeps them so. Three ways it can be
+# wrong, each of which ships a stale or missing wiki page at the next
+# release, and none of which anything caught before now:
+#
+#   1. A source file exists and no copy line names it (the technique family
+#      was written and the map was not touched).
+#   2. A copy line names a source that does not exist (a renamed or deleted
+#      doc leaves the release step failing mid-way).
+#   3. A copy line has no matching entry in the git add, so the page is
+#      written into the clone and never committed.
+#
+# The map is read out of the workflow document rather than restated here, so
+# this scenario cannot drift from the procedure it guards.
+scenario_wiki_sync_map() {
+    current_scenario="wiki-sync-map"
+    echo "[$current_scenario]"
+    local workflow="$REPO_DIR/docs/process/workflow.md"
+
+    if [[ ! -f "$workflow" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     The wiki sync map is read from the release procedure that owns it."
+        echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+        echo "        contract:    Issue #504 R9: docs/ is the source of truth and the wiki is overwritten from it each release"
+        echo "        (not found: $workflow)"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: docs/process/workflow.md missing")
+        return
+    fi
+
+    # The copy lines of the sync step: "cp <source> /tmp/ltl-wiki/<Page>.md".
+    local map_file="$TMP_DIR/wiki-sync-map.txt"
+    grep -o "cp [^ ]*\.md /tmp/ltl-wiki/[^ ]*\.md" "$workflow" \
+        | sed "s/^cp //; s| /tmp/ltl-wiki/| |" > "$map_file" || true
+
+    local mapped
+    mapped=$(wc -l < "$map_file" | tr -d " ")
+    if [[ "$mapped" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     The release procedure carries a wiki sync step naming a source and a page per copy."
+        echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+        echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors: a grep matching nothing is a failure, never a pass"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: no cp lines found in the wiki sync step")
+        return
+    fi
+    echo "  PASS  $current_scenario :: sync map carries $mapped page(s)"
+    pass=$((pass + 1))
+
+    # (2) every mapped source exists, and (3) its page is committed.
+    local src page
+    while read -r src page; do
+        if [[ -f "$REPO_DIR/$src" ]]; then
+            echo "  PASS  $current_scenario :: $src -> $page (source present)"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        the sync step copies '$src', which does not exist"
+            echo "        asserts:     Every source the wiki sync step copies is a file that exists, so the release step cannot fail part-way through."
+            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+            echo "        contract:    Issue #504 R9: the wiki is overwritten from docs/ each release; a copy line naming a moved or deleted file breaks that release"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: sync source missing: $src")
+        fi
+
+        if grep -q "git add[^&]*$page" "$workflow"; then
+            echo "  PASS  $current_scenario :: $page is committed by the sync step"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        '$page' is copied into the clone but never added"
+            echo "        asserts:     Every page the sync step writes is also staged, so the copy reaches the wiki rather than being discarded with the clone."
+            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+            echo "        contract:    Issue #504 R9: the step ends by removing the clone, so an unstaged page is silently lost"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: page copied but not added: $page")
+        fi
+    done < "$map_file"
+
+    # (1) every mirror source under docs/explain is carried by the map. This
+    # is the direction that failed for the technique family: the file was
+    # written, and nothing said the map had to grow with it.
+    local f base
+    for f in "$REPO_DIR"/docs/explain/*.md; do
+        base="docs/explain/$(basename "$f")"
+        if grep -q "^$base " "$map_file"; then
+            echo "  PASS  $current_scenario :: $base is carried by the sync map"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        '$base' has no copy line in the wiki sync step"
+            echo "        asserts:     Every docs/explain mirror is copied to the wiki by the release step, so a topic family reachable in the terminal is reachable on the wiki."
+            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+            echo "        contract:    Issue #504 R9, AC11: the mirror exists so a wiki reader reaches the same content as the terminal; a mirror the sync step does not name never gets there"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: mirror not in the sync map: $base")
+        fi
+    done
+}
+
+# --- Scenario: a mirror is copy-ready for the wiki (R9). ---
+# Each page is a byte-for-byte copy of its source, so a link written as a
+# file path resolves in the repository and 404s on the wiki. A sibling is
+# addressed by its wiki page name, which is how docs/usage.md already writes
+# its links.
+scenario_wiki_link_form() {
+    current_scenario="wiki-link-form"
+    echo "[$current_scenario]"
+    local f base offenders
+    for f in "$REPO_DIR"/docs/explain/*.md; do
+        base="docs/explain/$(basename "$f")"
+        # A relative link to a sibling markdown file; an anchor-only link
+        # (#section) stays within the page and is fine on both surfaces.
+        # No match is the passing case here, so the non-zero exit is
+        # consumed deliberately rather than by set -e (HARNESS-DESIGN.md
+        # Trap 1). The scenario still fails loudly when a link is found.
+        offenders=$(grep -o "](\([A-Za-z0-9_-]*\.md\)[^)]*)" "$f" | sort -u | tr "\n" " ") || true
+        if [[ -z "$offenders" ]]; then
+            echo "  PASS  $current_scenario :: $base links to siblings by wiki page name"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        $base carries file-path link(s): $offenders"
+            echo "        asserts:     A mirror links to a sibling page by its wiki page name, not by a file path."
+            echo "        produced_by: docs/explain/*.md (the wiki sources copied verbatim by the release step)"
+            echo "        contract:    Issue #504 R9: the wiki page is a byte-for-byte copy of its source, so a file-path link resolves in the repository and 404s for the wiki reader the mirror exists to serve"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: file-path links in $base")
+        fi
+    done
+}
+
 # ---------------------------------------------------------------------------
 # Run scenarios
 # ---------------------------------------------------------------------------
@@ -1675,6 +1810,10 @@ echo ""
 scenario_technique_no_internals
 echo ""
 scenario_technique_mirror
+echo ""
+scenario_wiki_sync_map
+echo ""
+scenario_wiki_link_form
 
 echo ""
 echo "Results: $pass passed, $fail failed"

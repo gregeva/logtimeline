@@ -63,7 +63,7 @@ Tails and modality. These are the moves that read the form of a distribution rat
 | `shape-comparison` | Does this one thing have the same shape as the population, or its own? |
 | `timeout-clustering` | Is something being killed at a ceiling? |
 
-**See also.** [Population](#population-population) — where every technique here starts, since a shape is only readable once a candidate has been picked out. The [histogram](histogram.md) and [heatmap](heatmap.md) references, for the charts these readings are taken from.
+**See also.** [Population](#population-population) — where every technique here starts, since a shape is only readable once a candidate has been picked out. The [histogram](Histogram-Reference) and [heatmap](Heatmap-Reference) references, for the charts these readings are taken from.
 
 ---
 
@@ -321,7 +321,7 @@ ltl -ef -es access.log                  # the unclassified remainder
 ltl -hf -so duration -n 20 access.log   # failures ranked by the time they cost
 ```
 
-**See also.** [Population](#population-population) (the grouping this belongs to), `status-composition`, `contribution-highlighting`, `rank-then-isolate`. Options: `-hf`, `-hs`, `-if`, `-ef`, `-is`, `-es`. See also the [classification reference](classification.md).
+**See also.** [Population](#population-population) (the grouping this belongs to), `status-composition`, `contribution-highlighting`, `rank-then-isolate`. Options: `-hf`, `-hs`, `-if`, `-ef`, `-is`, `-es`. See also the [classification reference](Classification-Reference).
 
 ---
 
@@ -398,7 +398,7 @@ ltl -i "<the winner>" -hg duration access.log   # then look at its shape
 ltl -i "<the winner>" -o access.log             # the full percentile ladder
 ```
 
-**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `bimodal-split`, `timeout-clustering`, `shape-comparison`. Statistics: [`kurtosis`, `percentiles`](statistics.md). Options: `-so`, `-n`, `-i`, `-hg`.
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `bimodal-split`, `timeout-clustering`, `shape-comparison`. Statistics: [`kurtosis`, `percentiles`](Statistics-Reference). Options: `-so`, `-n`, `-i`, `-hg`.
 
 ---
 
@@ -424,7 +424,7 @@ ltl -i "<the winner>" -hg duration access.log   # confirm the two peaks
 ltl -i "<the winner>" -xs access.log            # are the peaks two populations?
 ```
 
-**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `attribute-surfacing`, `tail-excursion`. Statistics: [`bimodality_coef`](statistics.md). The [histogram reference](histogram.md). Options: `-so`, `-n`, `-i`, `-hg`, `-xs`.
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `attribute-surfacing`, `tail-excursion`. Statistics: [`bimodality_coef`](Statistics-Reference). The [histogram reference](Histogram-Reference). Options: `-so`, `-n`, `-i`, `-hg`, `-xs`.
 
 ---
 
@@ -449,7 +449,7 @@ ltl -h "/api/v2/checkout" -hg duration access.log  # the two ladders, one under 
 ltl -h "/api/v2/checkout" -hm duration access.log  # does the relationship hold over time?
 ```
 
-**See also.** [Shape](#shape-shape) (the grouping this belongs to), `contribution-highlighting`, `tail-excursion`. The [histogram](histogram.md) and [heatmap](heatmap.md) references. Options: `-h`, `-hg`, `-hm`, `-hgw`.
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `contribution-highlighting`, `tail-excursion`. The [histogram](Histogram-Reference) and [heatmap](Heatmap-Reference) references. Options: `-h`, `-hg`, `-hm`, `-hgw`.
 
 ---
 
@@ -475,7 +475,7 @@ ltl -i "<the winner>" -hg duration access.log   # confirm the pile at one value
 ltl -i "<the winner>" -so cv -n 5 access.log    # a cv near zero confirms it
 ```
 
-**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `tail-excursion`. Statistics: [`skewness`, `cv`](statistics.md). Options: `-so`, `-sa`, `-n`, `-i`, `-hg`.
+**See also.** [Shape](#shape-shape) (the grouping this belongs to), `rank-then-isolate`, `tail-excursion`. Statistics: [`skewness`, `cv`](Statistics-Reference). Options: `-so`, `-sa`, `-n`, `-i`, `-hg`.
 
 ---
 
@@ -527,7 +527,7 @@ ltl -h "/api/v2/checkout" -bs 10 access.log   # split it by one call
 ltl -hf -bs 10 access.log                     # split it by outcome instead
 ```
 
-**See also.** [Comparison](#comparison-comparison) (the grouping this belongs to), `outcome-isolation`, `contribution-highlighting`. The [classification reference](classification.md). Options: `-h`, `-bs`, `-hf`, `-hs`, `-hcl`, `-scl`.
+**See also.** [Comparison](#comparison-comparison) (the grouping this belongs to), `outcome-isolation`, `contribution-highlighting`. The [classification reference](Classification-Reference). Options: `-h`, `-bs`, `-hf`, `-hs`, `-hcl`, `-scl`.
 
 ---
 

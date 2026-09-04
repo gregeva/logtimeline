@@ -234,7 +234,13 @@ already carries every bullet. Never `git merge` anywhere in this sequence.
 13. **The release is finished only when** `gh pr view {PR#} --json state` reports `MERGED` and `git log --oneline main..release/X.Y.Z` is empty. An open release PR is an unfinished release. Any session that finds main behind a release branch reports that first and fixes it before anything else; it never rebases new work onto the release branch to route around it.
 14. Sync the wiki:
     ```bash
-    git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cp docs/explain/statistics.md /tmp/ltl-wiki/Statistics-Reference.md && cp docs/explain/heatmap.md /tmp/ltl-wiki/Heatmap-Reference.md && cp docs/explain/histogram.md /tmp/ltl-wiki/Histogram-Reference.md && cp docs/explain/classification.md /tmp/ltl-wiki/Classification-Reference.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md Statistics-Reference.md Heatmap-Reference.md Histogram-Reference.md Classification-Reference.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki
+    git clone https://github.com/gregeva/logtimeline.wiki.git /tmp/ltl-wiki && cp docs/usage.md /tmp/ltl-wiki/Home.md && cp docs/purpose.md /tmp/ltl-wiki/Purpose-and-Design-Philosophy.md && cp docs/explain/statistics.md /tmp/ltl-wiki/Statistics-Reference.md && cp docs/explain/heatmap.md /tmp/ltl-wiki/Heatmap-Reference.md && cp docs/explain/histogram.md /tmp/ltl-wiki/Histogram-Reference.md && cp docs/explain/classification.md /tmp/ltl-wiki/Classification-Reference.md && cp docs/explain/techniques.md /tmp/ltl-wiki/Analysis-Techniques-Reference.md && cd /tmp/ltl-wiki && git add Home.md Purpose-and-Design-Philosophy.md Statistics-Reference.md Heatmap-Reference.md Histogram-Reference.md Classification-Reference.md Analysis-Techniques-Reference.md && git commit -m "Sync wiki docs from vX.Y.Z" && git push && rm -rf /tmp/ltl-wiki
     ```
-    The `docs/` files are the source of truth; the wiki is overwritten each release.
+    The `docs/` files are the source of truth; the wiki is overwritten each
+    release. Each page is a byte-for-byte copy of its source, so a link to a
+    sibling page is written in the source as its wiki page name
+    (`[Statistics Reference](Statistics-Reference)`), never as a file path.
+    `tests/validate-explain.sh` asserts the map above against what is on
+    disk, so a source file added without a copy line, or a copy line naming a
+    file that does not exist, fails before the release.
 15. Delete merged feature branches: `git branch -d {branch} && git push origin --delete {branch}` — never the release branch.
