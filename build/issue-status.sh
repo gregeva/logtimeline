@@ -193,7 +193,7 @@ cmd_sweep() {
             fi
         fi
 
-        # Blocking is NOT a status signal. CLAUDE.md § Issue Status: "Status is
+        # Blocking is NOT a status signal. docs/process/issues.md § Issue status: "Status is
         # orthogonal to blocking. An issue can be `blocked_by` an open issue AND
         # be `in progress` at the same time." An open dependency therefore says
         # nothing about which status an issue should carry, and `on hold` in

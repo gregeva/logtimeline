@@ -1,0 +1,36 @@
+ 
+──────────────────────────────────────────────────────────────────────────────────────────────
+   ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
+──────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     timestamp                        legend                    success failure                    occurrences                     duration          bytes      
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 2025-05-07 00:00 5xx: 2 1 4xx: 1 3xx: 2 2xx: 2 1xx: 2  4:10/d    60%     40%   │ ████████████████████████████████████████████   119 msec        1.1 KiB        
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+command-line options: --disable-progress -ni -n 1 --terminal-width 160 -bs 1440 -ru d -h store/missing 
+
+  TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+• [404] GET /store/missing                                                                                    1    7ms    7ms    7ms               7 msec 
+
+  ─────────────────────────────────────────   
+  Category                            Total      These file(s) were processed with analysis including results between 2025-05-07 00:00 and 2025-05-07 00:00
+  ─────────────────────────────────────────   
+  5xx Server error                  2 (20%)      [√] tests/fixtures/http-status-families.txt                                                              [1]
+  4xx Client error (HL)             1 (10%)   
+  4xx Client error                  1 (10%)      Log Formats
+  3xx Redirection                   2 (20%)   
+  2xx Success                       2 (20%)      1 access_common_duration
+  1xx Informational                 2 (20%)   
+  ─────────────────────────────────────────   
+  LINES READ                             10   
+  HIGHLIGHTED                             1   
+  LINES INCLUDED                         10   
+  SUCCESS CLASSIFIED                6 (60%)   
+  FAILURE CLASSIFIED                4 (40%)   
+  ─────────────────────────────────────────   
+

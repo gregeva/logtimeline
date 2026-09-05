@@ -1,0 +1,12 @@
+192.0.2.10 - alice [05/May/2025:10:00:00 +0000] "POST /store/catalog HTTP/1.1" 200 512 5.000 https-jsse-nio-8443-exec-1 S0000AB12CD34EF
+192.0.2.11 - bob [05/May/2025:10:00:01 +0000] "POST /store/item/42 HTTP/1.1" 200 519 8.001 https-jsse-nio-8443-exec-2 S0001AB12CD34EF
+192.0.2.12 - carol [05/May/2025:10:00:02 +0000] "POST /store/cart HTTP/1.1" 200 526 11.002 https-jsse-nio-8443-exec-3 S0002AB12CD34EF
+192.0.2.13 - - [05/May/2025:10:00:03 +0000] "POST /store/checkout HTTP/1.1" 200 533 14.003 https-jsse-nio-8443-exec-1 S0000AB12CD34EF
+192.0.2.10 - alice [05/May/2025:10:00:04 +0000] "POST /store/search HTTP/1.1" 200 540 17.004 https-jsse-nio-8443-exec-2 S0001AB12CD34EF
+192.0.2.11 - bob [05/May/2025:10:00:05 +0000] "POST /store/login HTTP/1.1" 200 547 20.005 https-jsse-nio-8443-exec-3 S0002AB12CD34EF
+192.0.2.12 - carol [05/May/2025:10:00:06 +0000] "POST /store/logout HTTP/1.1" 200 554 23.006 https-jsse-nio-8443-exec-1 S0000AB12CD34EF
+192.0.2.13 - - [05/May/2025:10:00:07 +0000] "POST /store/images/logo.png HTTP/1.1" 200 561 26.007 https-jsse-nio-8443-exec-2 S0001AB12CD34EF
+192.0.2.10 - alice [05/May/2025:10:00:08 +0000] "POST /store/api/orders HTTP/1.1" 200 568 29.008 https-jsse-nio-8443-exec-3 S0002AB12CD34EF
+192.0.2.11 - bob [05/May/2025:10:00:09 +0000] "POST /store/api/stock HTTP/1.1" 200 575 32.009 https-jsse-nio-8443-exec-1 S0000AB12CD34EF
+192.0.2.12 - carol [05/May/2025:10:00:10 +0000] "POST /store/help HTTP/1.1" 200 582 35.010 https-jsse-nio-8443-exec-2 S0001AB12CD34EF
+192.0.2.13 - - [05/May/2025:10:00:11 +0000] "POST /store/account HTTP/1.1" 200 589 38.011 https-jsse-nio-8443-exec-3 S0002AB12CD34EF

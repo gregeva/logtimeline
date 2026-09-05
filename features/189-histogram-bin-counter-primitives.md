@@ -49,7 +49,7 @@ Steps 1 and 2 are sequential (the contract must be locked before the prototype i
 
 ### Integration
 
-All work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is the implementation ticket's call, not the contract's.
+All work lands on feature branches per docs/process/workflow.md. Specific release-branch integration is the implementation ticket's call, not the contract's.
 
 ## Terminology
 
@@ -91,7 +91,7 @@ Issue #426 (compact per-message statistics store) proposes to re-container these
 
 - **P8+P9 (span-only, verbatim geometry) are digest-identical to today's primitives** on every fixture and scenario exercised — this feature's validation carries over by construction; R1–R12 hold verbatim.
 - **P10 (shared grid) contradicts no locked arithmetic**: Decision 1's walk is grid-agnostic (92/92 edge cases; same rank-convention crossover at bpd ≈ 256). It makes D4, D5 and R6 vacuous (no out-of-range state, no seed, no rebin) and requires an explicit amendment if adopted; D8's rebin/overflow fields become inert.
-- **Corrections to this feature's validation report regardless of #426** (proposed, not applied): V5 finding 1 held for 327 of 328 N ≥ 100 keys at bpd 256 (one key at 0.934% vs the 0.904% bound, via a `partition_extend` remap — visible in V5's own table); R4's "structural" bound is not met once a partition has been remapped by widening or by `merge_bin_counter_entries` (up to ~2 bins after merges on the primary surface); the primitives are undefined for v ≤ 0 (`partition_extend` never terminates on a negative value, dies on 0) — the caller-side `> 0` guard is part of the contract; Decision 2's ~212 MB / ~2.1 KB-per-partition guidance describes today's dense layout only (S ≈ 0.96 KB, G ≈ 0.6 KB per key at bpd 53; T grows 5.8× from bpd 53 to 616, S 1.2×, G 1.4×); merge-driven rebins reset `rebins` to 0 and are invisible to `-V` rebin telemetry.
+- **Corrections to this feature's validation report regardless of #426** (proposed, not applied): V5 finding 1 held for 327 of 328 N ≥ 100 keys at bpd 256 (one key at 0.934% vs the 0.904% bound, via a `partition_extend` remap — visible in V5's own table); R4's "structural" bound is not met once a partition's counts have been remapped — by `partition_extend` widening, or by the consolidation collapse in `collapse_bin_counter_entry`, which projects a consolidated row's members onto one shared union geometry and leaves that row's percentiles within about one bucket of the pooled-sample answer (measured on real duration streams, a single collapse leaves that bound in force on 1.54% of evaluations on a Tomcat access log and 2.08% on a ThingWorx scriptlog; on generated maximally-disjoint pairs, 1 in 4,000, worst case 1.0008 bin widths — `features/459-bin-counter-combination-order.md` sections 7 and 9). The bound is unaffected on the heatmap and histogram display surfaces, whose percentiles are read from the un-projected streaming partition and whose display projection carries cells and bars only; the primitives are undefined for v ≤ 0 (`partition_extend` never terminates on a negative value, dies on 0) — the caller-side `> 0` guard is part of the contract; Decision 2's ~212 MB / ~2.1 KB-per-partition guidance describes today's dense layout only (S ≈ 0.96 KB, G ≈ 0.6 KB per key at bpd 53; T grows 5.8× from bpd 53 to 616, S 1.2×, G 1.4×); merge-driven rebins reset `rebins` to 0 and are invisible to `-V` rebin telemetry.
 
 No decision in this file changes until the architect locks one in the #426 record and, where a #187 decision changes, amends #187.
 
@@ -196,7 +196,7 @@ Per #187 Decision 4, each partition maintains two extra counter slots beyond the
 - **Underflow counter**: tallies values where `0 < value < partition.min` (positive values below the partition's current low boundary, where the partition's growth cap — if any — has not extended further).
 - **Overflow counter**: tallies values where `value > partition.max` (values above the partition's current high boundary, where the partition's growth cap — if any — has not extended further).
 
-Under #187 Decision 5's auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition extends to contain observed values. The counters function as a safety net for extreme cases (e.g., a single outlier value beyond what the doubling-rebin extends to in a reasonable number of rebins).
+Under #187 Decision 5's auto-resize lifecycle these are **guards expected to read zero**, not a signal expected to go non-zero: the partition grows until the observed value is contained, so under the shipped growth policy neither counter can be incremented, and `none` is the only `out_of_range_bounded` value a shipped run emits. They remain in the contract as designed-in instrumentation — a partition that ever stopped growing short of an observed value would say so here rather than silently mis-rank. Under a partition model that stores no range of its own to fall outside of, they are structurally unreachable rather than merely quiescent; the reading is the same either way — a non-zero value means the containment guarantee has been broken.
 
 The primitive must:
 
@@ -204,7 +204,7 @@ The primitive must:
 - Include both in `total_N` for R4's rank computation.
 - Expose them to consumers for the per-consumer audit aggregates (`partitions_with_overflow_count`, `partitions_with_underflow_count` per #187 Decision 8).
 
-**Audit semantics — per-quantile, not per-partition.** The `out_of_range_bounded` audit code is determined per-quantile by R4 at the moment of invocation, based on whether the target rank for that specific quantile lands in the underflow counter, an in-range bin, or the overflow counter. A partition with `partitions_with_overflow_count > 0` may still report `audit = none` for some quantiles (those whose target rank lands in an in-range bin). Per #187 Decision 4, the overflow/underflow counter's share of total N determines which quantiles fire: a quantile q lands in overflow only when `ceil(q · total_N) > (total_N − overflow_count)`; symmetric for underflow. The prototype's V3 (`prototype/189-bin-counter-primitives-validation-report.md` § V3) validated this empirically — a partition with overflow=3 in 1003 total observations reported `audit = none` at q=0.01 because the target rank landed in the in-range region. Consumer tests must not assert `audit = high` for every quantile of any partition where `overflow > 0`.
+**Audit semantics — per-quantile, not per-partition.** The `out_of_range_bounded` audit code is determined per-quantile by R4 at the moment of invocation, based on whether the target rank for that specific quantile lands in the underflow counter, an in-range bin, or the overflow counter. It is read from whichever entry R4 was invoked against — for every consumer that is the streaming counter entry, which is the one carrying the live counters; a display-side fold of those counters into a projection's edge bins neither zeroes them nor changes the audit. A partition with `partitions_with_overflow_count > 0` may still report `audit = none` for some quantiles (those whose target rank lands in an in-range bin). Per #187 Decision 4, the overflow/underflow counter's share of total N determines which quantiles fire: a quantile q lands in overflow only when `ceil(q · total_N) > (total_N − overflow_count)`; symmetric for underflow. The prototype's V3 (`prototype/189-bin-counter-primitives-validation-report.md` § V3) validated this empirically — a partition with overflow=3 in 1003 total observations reported `audit = none` at q=0.01 because the target rank landed in the in-range region. Consumer tests must not assert `audit = high` for every quantile of any partition where `overflow > 0`.
 
 ### R7 — Independence of partitions across consumers (and across keys within a consumer)
 
@@ -235,9 +235,12 @@ The primitives expose telemetry signals that consumers populate into the locked 
 
 The primitives must expose:
 
-- Per-partition `min`, `max`, `bin_count`, and counter-store memory footprint — for the `bin_count` and `state_budget_bytes` fields in `-V` per consumer block.
-- Aggregate rebin event count per consumer (sum of rebin events across all partitions for that consumer) — for `total_rebin_events` field.
-- Per-partition rebin-event-count distribution across the partition population — for `rebins_per_partition: p50=N p95=N p99=N max=N` field. Per #187 Decision 5, this distribution is the empirical-tuning surface for the seed heuristic.
+- Per-partition `min`, `max`, `bin_count`, and counter-store memory footprint — for the `bin_count` and `state_budget_bytes` fields in `-V` per consumer block. The footprint is the counters' **payload** — partition geometry plus the bin slots spanned — not a measurement of the live structure. A live measurement reports what the process allocated, which depends on how the structure grew rather than on what it holds, so it moves between runs while no observation changes; and that allocation cannot be modelled deterministically either (measured per-slot cost spans 8 to ~170 bytes by density and growth history). The payload is exact and reproducible, and is an instrument for comparison, not an absolute footprint — RSS remains the measure of record for that (amended 2026-08-26 by #462).
+- Rebin event counts per consumer, **separated by mechanism** — for the `rebin_growth_events`, `rebin_merge_events` and `rebin_finalize_events` fields (amended 2026-08-26 by #462; a single aggregate was retired because one number cannot say which mechanism moved).
+  - The growth and combination counts are carried on the **store entry**, not on the partition. A combination replaces the target's partition with one built by `partition_rebin()`, so a count held on the partition is discarded exactly when consolidation happens — which is why consolidation was invisible. `partition_new()` and `partition_rebin()` therefore carry no `rebins` slot and `partition_extend()` increments none; the caller increments the entry's counter.
+  - The finalize count cannot come from a snapshot of the streaming store at all: the projection into display shape runs after the snapshot and discards the partitions it projects. It is counted at its own call sites by the finalizer that projects.
+- Per-partition growth-event-count distribution across the partition population — for `rebins_per_partition: p50=N p95=N p99=N max=N` field. Per #187 Decision 5, this distribution is the empirical-tuning surface for the seed heuristic.
+- Member-histogram retention across combined keys — for `members_live`, `members_max` and `members_memory_bytes`. Carried on the store entry and summed at snapshot; a combination folds the source's membership into the target's rather than dropping it.
 - Per-partition high-water-mark bin count — for `max_partition_bins` field.
 - Per-partition overflow and underflow counter values — for `partitions_with_overflow_count` and `partitions_with_underflow_count` aggregates.
 - Per-quantile R4 return state (whether the value came from interpolation or from an overflow/underflow boundary) — for `out_of_range_bounded: high|low|none` per quantile.
@@ -313,6 +316,23 @@ my ($finalized_p, $finalized_bins) = partition_rebin(
 # [d_min, d_max]. $finalized_bins is the count vector. Underflow and overflow
 # from the streaming partition can be folded into $finalized_bins[0] and
 # [$target_bin_count - 1] respectively, or kept separate per consumer choice.
+# That fold is a DISPLAY-side operation: it conserves mass across the drawn
+# axis. It does not zero the streaming entry's counters, which remain the
+# audit source for the percentile calls below.
+
+# Percentiles: R4 reads the STREAMING entry, not the projection. $entry is
+# still alive at this point and is the highest-fidelity representation the
+# consumer holds; the projection above exists for display geometry only.
+# The returned value is clamped to the display axis before it is published
+# or mapped to a column, because a streaming bin straddles the observed
+# extremes and the projection's by-construction containment does not apply.
+for my $q (@quantiles) {
+    my ($v, $audit) = percentile($entry, $q);
+    next unless defined $v;
+    $v = $d_min if $v < $d_min;
+    $v = $d_max if $v > $d_max;
+    # ... publish $v; map $v to a display column.
+}
 
 # Display rendering:
 #   F2: read $finalized_bins directly (partition geometry IS display geometry).
@@ -499,14 +519,14 @@ Histogram data structures declared at `ltl:285–331`: `$histogram_buckets_per_d
 **Constraints discovered (histogram-mode global percentile):**
 
 - **Today this path is entangled with the bin-counter population** — both happen in the same routine, against the same raw arrays, in two different sort-and-index passes (one for percentiles at `ltl:4926`, one for binning at `ltl:4972`).
-- **Under bin-counter mode the raw arrays don't exist**, so this path must either disappear (drop legend percentile values) or migrate to R4 (interpolate from the bin counters that are present). Migration to R4 is the natural answer, and it lands when #187's algorithm choice is in place — i.e., as a side benefit of Phase 2.
+- **Under bin-counter mode the raw arrays don't exist**, so this path must either disappear (drop legend percentile values) or migrate to R4 (interpolate from the bin counters that are present). Migration to R4 is the natural answer, and it lands when #187's algorithm choice is in place — i.e., as a side benefit of Phase 2. The counters R4 reads are the streaming ones, `%histogram_counters{$metric}` (and `%histogram_counters_hl{$metric}` for the highlight sub-store), not the display-shaped projection behind `%histogram_buckets`; the value is clamped to the display axis before it is stored in `%histogram_stats`.
 - **Percentile set: P1, P10, P25, P50, P75, P90, P95, P99, P99.9, P99.99** — wider than the summary-table set; R4 must support all ten.
 
 #### Heatmap percentile-marker consumer
 
 | Site | `ltl` location | What it does today (raw-value mode) | Under bin-counter mode | Reads / writes | Key shape |
 |---|---|---|---|---|---|
-| Inside `calculate_heatmap_buckets` | `ltl:4818, 4823–4834` | Sorts `%heatmap_raw{$bucket}`, derives P50/P95/P99/P99.9 values via index lookup, maps each value to a bin index via `find_heatmap_bucket`, stores in `%heatmap_percentiles{$bucket}` as bin indices. | At end of pass, per time bucket: invoke #189 R4 against `%heatmap_data{$bucket}` for each quantile. Map R4's numeric return value to a bin index via R2 (or equivalent). Store in `%heatmap_percentiles{$bucket}` as bin indices (unchanged shape). | Reads `%heatmap_data` (bin-counter mode) or `%heatmap_raw` (raw-value mode). Writes `%heatmap_percentiles`. | `time_bucket` |
+| Inside `calculate_heatmap_buckets` | `ltl:4818, 4823–4834` | Sorts `%heatmap_raw{$bucket}`, derives P50/P95/P99/P99.9 values via index lookup, maps each value to a bin index via `find_heatmap_bucket`, stores in `%heatmap_percentiles{$bucket}` as bin indices. | At end of pass, per time bucket: invoke #189 R4 against the streaming counter entry `%heatmap_counters{$bucket}` for each quantile — not against the display-shaped projection whose counts populate `%heatmap_data`. Clamp the numeric return value to the display axis, then map it to a display column via `find_heatmap_bucket`. Store in `%heatmap_percentiles{$bucket}` as column indices (unchanged shape). | Reads `%heatmap_counters` (bin-counter mode) or `%heatmap_raw` (raw-value mode). Writes `%heatmap_percentiles`. | `time_bucket` |
 | Consumer | `ltl:6378–6432` (`print_heatmap_row`) | Overlays `|` markers at the recorded bin indices for each rendered row. Unchanged. | Unchanged. | Reads `%heatmap_percentiles`. | — |
 
 **Resolution — percentile markers and indicators under bin-counter mode**

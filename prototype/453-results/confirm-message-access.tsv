@@ -1,0 +1,5 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+access	pure-access-1m.log	1000000	-	baseline	2.552161	2.545888	2.561828	2.5522	+0.0000	0.00
+access	pure-access-1m.log	1000000	6	c6-msg-base	2.880523	2.868331	2.884385	2.8805	+0.3284	2.46
+access	pure-access-1m.log	1000000	6	c6-msg-relookup	2.930304	2.926466	2.939687	2.9303	+0.3781	2.83
+access	pure-access-1m.log	1000000	6	c6-msg-heldref	2.922472	2.918246	2.930101	2.9225	+0.3703	2.77

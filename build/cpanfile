@@ -1,7 +1,8 @@
-requires 'Cwd';
 requires 'Devel::Size';
+requires 'File::Glob';
 requires 'File::Spec';
 requires 'Getopt::Long';
+requires 'JSON::PP';
 requires 'List::Util';
 requires 'POSIX';
 requires 'Term::ANSIColor';
@@ -12,3 +13,5 @@ requires 'Text::ParseWords';
 requires 'Time::HiRes';
 requires 'Time::Local';
 requires 'Time::Piece';
+requires 'YAML::PP';
+requires 'YAML::PP::Common';

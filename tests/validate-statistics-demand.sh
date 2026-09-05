@@ -3,7 +3,8 @@
 # per-store statistics-group demand resolution with raising consumers, the
 # per-store moment source, and the per-store statistics-calculation counters
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
-# (Issues #305, #303).
+# (Issues #305, #303), and the resolution when the run retains no message at
+# all (-n 0, or any non-positive count, Issue #458).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -38,6 +39,8 @@ neutralize_colour_env
 # CSV, sort field, heatmap), so display options are the subject and none is
 # suppressed; the 5k, 4-minute slice is already minimal.
 ACCESS_LOG="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+NO_METRICS_FIXTURE="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+SINGLE_SAMPLE_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -69,6 +72,18 @@ run_section() {
     local outfile
     outfile=$(mktemp)
     "$LTL" --disable-progress -ni --terminal-width 200 -V "$sections" "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    echo "$outfile"
+}
+
+# Same, against an explicit input file instead of $ACCESS_LOG — for the
+# unsatisfiable-sort scenarios (#418), whose fixtures are chosen for what the
+# run does NOT contain. `-bs 1440 -oe`: these read a stderr note and the
+# sort_gate line, never a bucket.
+run_section_on() {
+    local sections="$1" input="$2"; shift 2
+    local outfile
+    outfile=$(mktemp)
+    "$LTL" --disable-progress -ni --terminal-width 200 -bs 1440 -oe -V "$sections" "$@" "$input" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -348,6 +363,19 @@ if body=$(extract_section "$out"); then
         asserts     'Every population-pass invocation is accounted for: it either yielded a defined sort value or demoted the key to the fill block' \
         produced_by 'calculate_all_statistics() in ltl (two-pass sort path)' \
         contract    "$CONTRACT"
+    # #418 control for the D6 amendment: the ordinary partial case (some keys
+    # rank, some fill) is untouched — the gate stands aside and stays quiet.
+    assert_line "$body" \
+        pattern     '^sort_gate: operand=skewness family=duration observed=1 fallback=none$' \
+        asserts     'A statistic sort that ranks at least one key is left standing: the unsatisfiable-sort gate resolves the family, sees it observed, and takes no fallback' \
+        produced_by 'apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
+        contract    "$CONTRACT"
+    assert_command \
+        command     "! grep -q '^Note: .*ordered by occurrences' '$out.stderr'" \
+        label       'no fallback note on stderr in the partial case' \
+        asserts     'The fallback note is printed only in the degenerate case (no key ranks); a partial ranking with a fill block prints nothing — the blank statistic cell remains the signal' \
+        produced_by 'sort_fallback_to_occurrences() in ltl (reached only from a detection point that fired)' \
+        contract    "features/303-calculated-statistic-sort-path.md § sort contract point 4, as amended by features/418-unsatisfiable-sort-selection-cost.md § D6"
     assert_command \
         command     "! grep -qE '^  sort_(selection|calc):' '$sb'" \
         label       'no sort_selection/sort_calc lines on the bucket store' \
@@ -389,6 +417,132 @@ if body=$(extract_section "$out"); then
         asserts     'Both passes run under a percentile sort: population over the defined block, top-N over the displayed keys' \
         produced_by 'calculate_all_statistics() in ltl (population_calls telemetry); topn derived at emit time' \
         contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+# Unsatisfiable statistic sort (#418): each scenario proves the PATH taken at
+# one detection point, across the three metric families. An occurrences-
+# ordered table looks the same whichever way it was reached, so the
+# assertions read the sort_gate line (the decision), the presence or absence
+# of sort_selection (whether the walk ran), and the stderr note.
+# Sabotage record (HARNESS-DESIGN.md § Proving a new assertion can fail),
+# 2026-08-28, each probe restored after confirming the expected failure with
+# the full asserts/produced_by/contract triple and exit 1:
+#   1. apply_parse_time_sort_gate() made to return before resetting the sort
+#      key            => scenario-6 sort_gate fallback=parse and the
+#                        no-sort_selection assertions failed;
+#   2. apply_pre_walk_sort_gate() observed forced to 1
+#                     => scenario-7 fallback=pre-walk, the note, and the
+#                        no-sort_selection assertions failed;
+#   3. apply_post_walk_sort_gate() made to return unconditionally
+#                     => scenario-8 fallback=post-walk and the note failed;
+#   4. note printed unconditionally from sort_fallback_to_occurrences()
+#      call site      => scenario-3 no-note control failed.
+GATE_CONTRACT='features/418-unsatisfiable-sort-selection-cost.md § D3 (three detection points), D5 (parse-time fallback is literal), D12 (gate state on -V) — stability-contracted via features/duration-statistics.md § sort_gate'
+
+current_scenario="scenario-6-sort-unsatisfiable-at-parse"
+echo "--- $current_scenario ---"
+# -so <family operand> together with that family's --omit flag, all three
+# families. Knowable before a line is read: the sort key is reset to
+# occurrences at parse time, so the calculated-statistic branch never runs.
+for combo in "p99:-od:duration:-od/--omit-durations" "bytes_mean:-ob:bytes:-ob/--omit-bytes" "count_mean:-oc:count:-oc/--omit-count"; do
+    IFS=: read -r operand flag family flagname <<< "$combo"
+    out=$(run_section_on statistics-demand "$ACCESS_LOG" -so "$operand" "$flag")
+    check_capture_warnings "$out"
+    if body=$(extract_section "$out"); then
+        assert_line "$body" \
+            pattern     "^sort_gate: operand=$operand family=$family observed=0 fallback=parse\$" \
+            asserts     "-so $operand with $flag is a contradiction knowable at option parsing: the gate resolves the $family family, records the metric as never collected, and falls back at parse time" \
+            produced_by 'apply_parse_time_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
+            contract    "$GATE_CONTRACT"
+        assert_command \
+            command     "! grep -qE '^  sort_(selection|calc):' '$body'" \
+            label       "no sort_selection line: the calculated-statistic branch was never entered (-so $operand $flag)" \
+            asserts     'A parse-time fallback resets the sort key to occurrences before demand resolution, so the two-pass sort path — and its telemetry — never runs (D5: the fallback is literal, not an outcome reached by another route)' \
+            produced_by 'apply_parse_time_sort_gate() in ltl (sort key reset); calculate_all_statistics() emits sort_selection only on the calculated-statistic branch' \
+            contract    "$GATE_CONTRACT"
+        assert_command \
+            command     "grep -qF 'Note: cannot apply -so/--sort-on $operand because $flagname discards the $family metric - the messages table is ordered by occurrences' '$out.stderr'" \
+            label       "contradiction note on stderr names -so/--sort-on $operand, $flagname and the fallback" \
+            asserts     'The parse-time note names the contradiction (the option that discarded the metric, short and long form) and states that the table is ordered by occurrences' \
+            produced_by 'apply_parse_time_sort_gate() in ltl' \
+            contract    'features/418-unsatisfiable-sort-selection-cost.md § D1 (contradiction notice)'
+    fi
+done
+echo
+
+############################################################
+current_scenario="scenario-7-sort-unsatisfiable-before-walk"
+echo "--- $current_scenario ---"
+# A log carrying no duration, bytes or count field at all: the family is
+# collectable but nothing was observed, so the walk is skipped outright.
+for combo in "p99:duration" "bytes_mean:bytes" "count_mean:count"; do
+    IFS=: read -r operand family <<< "$combo"
+    out=$(run_section_on statistics-demand "$NO_METRICS_FIXTURE" -so "$operand")
+    check_capture_warnings "$out"
+    if body=$(extract_section "$out"); then
+        assert_line "$body" \
+            pattern     "^sort_gate: operand=$operand family=$family observed=0 fallback=pre-walk\$" \
+            asserts     "-so $operand on a log with no $family values: the gate reads the family's observation state after the read loop, finds nothing observed, and falls back before the population walk" \
+            produced_by 'apply_pre_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
+            contract    "$GATE_CONTRACT"
+        assert_command \
+            command     "! grep -qE '^  sort_(selection|calc):' '$body'" \
+            label       "no sort_selection line: the population walk was skipped, not run and discarded (-so $operand)" \
+            asserts     'A pre-walk fallback resets the sort key before the per-category loop, so the population walk and the fill-block re-sort never execute — the cost the fix removes' \
+            produced_by 'apply_pre_walk_sort_gate() in ltl, called at the head of the per-message block in calculate_all_statistics()' \
+            contract    "$GATE_CONTRACT"
+        assert_command \
+            command     "grep -qF 'Note: no $family values were found - the requested sort (-so/--sort-on $operand) could not be produced, so the messages table is ordered by occurrences' '$out.stderr'" \
+            label       "absence note on stderr names the $family family, -so/--sort-on $operand and the fallback" \
+            asserts     'The pre-walk note states that no values of the family were found, names the requested sort option in short and long form, and states that the table is ordered by occurrences' \
+            produced_by 'sort_fallback_to_occurrences() in ltl (pre-walk text)' \
+            contract    'features/418-unsatisfiable-sort-selection-cost.md § D1 (absence notice, before the walk)'
+    fi
+done
+echo
+
+############################################################
+current_scenario="scenario-8-sort-unsatisfiable-after-walk"
+echo "--- $current_scenario ---"
+# Durations observed, but every key carries one sample: below the n>=4 shape
+# floor (skewness) and the n>=2 spread floor (cv). The walk runs, the defined
+# block is empty, and the gate says so afterwards.
+for combo in "skewness:12" "cv:12"; do
+    IFS=: read -r operand keys <<< "$combo"
+    out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -so "$operand")
+    check_capture_warnings "$out"
+    if body=$(extract_section "$out"); then
+        sm=$(extract_store "$body" message)
+        assert_line "$sm" \
+            pattern     "^  sort_selection: statistic=$operand defined=0 fill=$keys demoted=0\$" \
+            asserts     "With durations present but one sample per key, the walk runs and every key lands in the fill block: defined=0 with all $keys keys in fill" \
+            produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
+            contract    "$CONTRACT"
+        assert_line "$body" \
+            pattern     "^sort_gate: operand=$operand family=duration observed=1 fallback=post-walk\$" \
+            asserts     "-so $operand where no key meets the eligibility floor: the family was observed (so neither earlier point fired), and the gate falls back after the walk on an empty defined block" \
+            produced_by 'apply_post_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
+            contract    "$GATE_CONTRACT"
+        assert_command \
+            command     "grep -qF 'Note: the requested sort (-so/--sort-on $operand) could not be produced from the duration values in this run - the messages table is ordered by occurrences' '$out.stderr'" \
+            label       "post-walk note on stderr names -so/--sort-on $operand, the duration family and the fallback" \
+            asserts     'The post-walk note states that the sort could not be produced from the values the run had (they exist, but never enough per message), names the sort option in short and long form, and states that the table is ordered by occurrences' \
+            produced_by 'sort_fallback_to_occurrences() in ltl (post-walk text)' \
+            contract    'features/418-unsatisfiable-sort-selection-cost.md § D1 (absence notice, after the walk)'
+    fi
+done
+# The available-value branch has no floor above one observation: a bytes
+# operand on a log that carries bytes must NOT trip the post-walk gate.
+out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -so bytes_mean)
+check_capture_warnings "$out"
+if body=$(extract_section "$out"); then
+    assert_line "$body" \
+        pattern     '^sort_gate: operand=bytes_mean family=bytes observed=1 fallback=none$' \
+        asserts     'A bytes operand on a log carrying bytes ranks on the available-value branch, which the post-walk gate never judges — the gate is scoped to calculated statistics with an eligibility floor' \
+        produced_by 'apply_post_walk_sort_gate() in ltl (%STAT_FIELD_GROUP membership test)' \
+        contract    "$GATE_CONTRACT"
 fi
 echo
 
@@ -439,6 +593,158 @@ if body=$(extract_section "$out"); then
         produced_by 'emit_statistics_demand_verbose() and emit_runtime_config_verbose() in ltl, both reading $message_duration_stats_demand' \
         contract    "$CONTRACT"
 fi
+echo
+
+############################################################
+# -n 0 retains no message at all, so the message store has no consumer, no
+# population and no rendered table — while the bucket store and the timeline
+# are untouched. The demand side is read from the statistics-demand section
+# and the store size from benchmark-data's COUNTS rows; the two render
+# assertions read the displayed surface itself, because "the messages table is
+# absent" and "the timeline is present" are properties of that surface with no
+# internal-state equivalent (tests/HARNESS-DESIGN.md section Render-invariant
+# harnesses). The layout is pinned by run_section's --terminal-width 200 and
+# ANSI is stripped before matching.
+current_scenario="scenario-9-no-message-retention"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand,benchmark-data -n 0)
+check_capture_warnings "$out"
+sed -E 's/\x1b\[[0-9;]*m//g' "$out" > "$out.plain"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  store_demand: 0$' \
+        asserts     'With no message retained the message store has no active consumer, so its store demand is 0' \
+        produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution gated on $capture_messages)' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  population: 0$' \
+        asserts     'No message key is walked because none was ever stored: the message store block-boundary population is 0' \
+        produced_by 'calculate_all_statistics() in ltl ($stats_population_messages, per-category population accumulation)' \
+        contract    "$CONTRACT"
+    for group in terminal_core csv_body extended_percentiles shape_moments; do
+        assert_line "$sm" \
+            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            asserts     "With the message store undemanded no group can be demanded on it ($group)" \
+            produced_by 'resolve_statistics_group_demand() in ltl (store-level demand is a precondition for every consumer)' \
+            contract    "$CONTRACT"
+    done
+    assert_line "$sm" \
+        pattern     '^  stats_calls: 0$' \
+        asserts     'The per-message statistics primitive is never invoked when no message is retained' \
+        produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls in %stats_demand_telemetry)' \
+        contract    "$CONTRACT"
+    sb=$(extract_store "$body" bucket)
+    assert_line "$sb" \
+        pattern     '^  store_demand: 1$' \
+        asserts     'Retaining no message leaves the per-time-bucket store untouched: the timeline latency column still consumes it' \
+        produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution)' \
+        contract    "$CONTRACT"
+fi
+assert_line "$out" \
+    pattern     '^COUNTS[[:space:]]+log_messages_entries[[:space:]]+0$' \
+    asserts     'No log message is added to the per-message store, so it holds zero entries at the end of the run' \
+    produced_by 'emit_benchmark_data_verbose() in ltl (COUNTS rows over %log_messages)' \
+    contract    'tests/HARNESS-DESIGN.md section Reserved section names — benchmark-data COUNTS rows are stability-contracted; renames are breaking'
+assert_line "$out" \
+    pattern     '^COUNTS[[:space:]]+log_messages_population[[:space:]]+0$' \
+    asserts     'The walk-time message population re-emitted into benchmark-data agrees with the statistics-demand population line (one source, two surfaces)' \
+    produced_by 'emit_benchmark_data_verbose() in ltl (re-emitted $stats_population_messages)' \
+    contract    'tests/HARNESS-DESIGN.md section Counters serving benchmark attribution — one source, two surfaces'
+assert_command \
+    command     "! grep -qE 'TOP (OVERALL|HIGHLIGHTED) MESSAGES' '$out.plain'" \
+    label       'neither messages-table header is rendered' \
+    asserts     'The message summary table is skipped entirely - not printed empty, and not printed with a header only' \
+    produced_by 'pipeline_render() in ltl (print_message_summary is not called when no message is retained)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_line "$out.plain" \
+    pattern     '^[[:space:]]+timestamp[[:space:]]+legend[[:space:]]+(success[[:space:]]+failure[[:space:]]+)?occurrences[[:space:]]' \
+    asserts     'The timeline bar graph is still produced when no message is retained' \
+    produced_by 'print_bar_graph() in ltl (column header row)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_line "$out.plain" \
+    pattern     'P50:[0-9]+' \
+    asserts     'Statistics over the whole population are still computed and displayed: the timeline latency column carries its percentiles' \
+    produced_by 'print_bar_graph() in ltl (latency statistics column, fed by the per-time-bucket store)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+echo
+
+############################################################
+# The options that configure only the per-message store are ignored rather than
+# rejected, and the tool says so on stderr. The notice is a behavioural notice,
+# not progress output, so it is emitted whatever --disable-progress is set to.
+current_scenario="scenario-10-no-message-retention-inert-options"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -n 0 -g 85 -mdm bin -so p50)
+check_capture_warnings "$out"
+assert_line "$out.stderr" \
+    pattern     'Note: -n/--top-messages 0 retains no message, so .*-g/--group-similar.*-mdm/--message-stats-data-model.*-so/--sort-on have no effect' \
+    asserts     'Message grouping, the message statistics data model and the message ranking are reported inert (not rejected) when no message is retained, naming each option the user passed' \
+    produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+if body=$(extract_section "$out"); then
+    assert_line "$body" \
+        pattern     '^sort_gate: operand=p50 family=duration observed=n/a fallback=none$' \
+        asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
+        produced_by 'apply_parse_time_sort_gate() / apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+# A negative top-message count takes the same path as zero: it cannot rank a
+# row either, so nothing is retained. Read from the demand section alone —
+# nothing here depends on the render or on the bucket axis.
+current_scenario="scenario-11-negative-top-messages-retains-nothing"
+echo "--- $current_scenario ---"
+out=$(run_section statistics-demand -n -5)
+check_capture_warnings "$out"
+if body=$(extract_section "$out"); then
+    sm=$(extract_store "$body" message)
+    assert_line "$sm" \
+        pattern     '^  store_demand: 0$' \
+        asserts     'A negative top-message count retains nothing, exactly as zero does: the message store has no active consumer' \
+        produced_by 'adapt_to_command_line_options() in ltl (retention resolved from the top-message count being greater than zero)' \
+        contract    "$CONTRACT"
+    assert_line "$sm" \
+        pattern     '^  population: 0$' \
+        asserts     'No message key is walked under a negative top-message count, because none was ever stored' \
+        produced_by 'calculate_all_statistics() in ltl ($stats_population_messages, per-category population accumulation)' \
+        contract    "$CONTRACT"
+fi
+echo
+
+############################################################
+# A CSV request under -n 0 is half-served: the STATS CSV is written, the
+# MESSAGES CSV is not, and the user is told so at run time. The run gets its
+# own scratch directory so the two file assertions see only its own artifacts
+# (scenario 2 also writes CSVs into the shared workdir). `-bs 1440 -oe`: this
+# scenario reads a stderr notice and which files exist, never a bucket row.
+current_scenario="scenario-12-no-message-retention-csv-request"
+echo "--- $current_scenario ---"
+CSV_ONLY_DIR="$WORKDIR/csv-no-message-retention"
+mkdir -p "$CSV_ONLY_DIR"
+cd "$CSV_ONLY_DIR"
+out=$(run_section statistics-demand -bs 1440 -oe -n 0 -o)
+cd "$WORKDIR"
+check_capture_warnings "$out"
+assert_line "$out.stderr" \
+    pattern     'Note: -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written' \
+    asserts     'A CSV request is reported as half-served when no message is retained: the user is told at run time which of the two files is not written and why' \
+    produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_command \
+    command     "ls '$CSV_ONLY_DIR'/*-LTL-STATS-*.csv" \
+    label       'the STATS CSV is still written' \
+    asserts     'Retaining no message does not affect the per-time-bucket CSV: -o still writes it' \
+    produced_by 'pipeline_render() in ltl (STATS CSV open, gated only on the CSV request)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+assert_command \
+    command     "! ls '$CSV_ONLY_DIR'/*-LTL-MESSAGES-*.csv" \
+    label       'no MESSAGES CSV file is created' \
+    asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
+    produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
+    contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
 echo
 
 ############################################################

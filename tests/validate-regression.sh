@@ -51,6 +51,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 neutralize_colour_env
 # shellcheck source=lib/fixtures.sh
 source "$SCRIPT_DIR/lib/fixtures.sh"
+# shellcheck source=lib/rendered-output.sh
+source "$SCRIPT_DIR/lib/rendered-output.sh"
 TMP_DIR=$(mktemp -d)
 # Cleanup is unconditional — if the script aborts mid-run (under set -e),
 # the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
@@ -82,10 +84,30 @@ APACHE_LOG="logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026
 PLOT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
 DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
-# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
+# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin.
+#
+# The version banner is normalised to [VERSION] so the goldens survive a version
+# bump. The pattern must accept the branch marker as well as the release number:
+# a feature branch stamps $version_number as X.Y.Z-{issue} (e.g. 0.18.0-432) for
+# the life of the branch, per docs/process/workflow.md § Version stamping, so every development
+# build carries a suffix. Matching only [0-9.]+ made every scenario fail on any
+# branch, for the one reason the goldens are explicitly meant to ignore.
+#
+# The TOP OVERALL MESSAGES block is not part of the layout surface these
+# references freeze, so it is dropped. The drop is bounded by the run summary
+# that closes the output: the skip ends on the summary's first line -- the rule
+# above the Category header, two spaces in and padded on the right -- so the
+# category totals, the HIGHLIGHTED row and the file/format legend stay inside
+# the asserted surface. Per tests/HARNESS-DESIGN.md an anchor that matches
+# nothing is a failure: reaching end of input with the skip still open exits 3,
+# so a truncated surface aborts instead of being asserted. A run invoked with
+# -osum prints no summary, and the echoed options line -- which sits under the
+# bar graph, ahead of the skipped block -- says so, so such a run has nothing
+# to close the skip and is exempt.
+# Must match capture-regression.sh exactly.
 strip_nondeterministic() {
-    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
+    | perl -ne 'BEGIN{$skip=0; $want_summary=1} END{ $? = 3 if $skip && $want_summary } $want_summary=0 if /^(?:environment|command-line) options: / && /(?:^|\s)(?:-osum|--omit-summary)(?=\s|$)/; $skip=1 if /TOP OVERALL/; $skip=0 if /^ {2}(?:─)+ +$/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Verify reference directory exists
@@ -108,7 +130,7 @@ failures=()
 # Per tests/HARNESS-DESIGN.md § Self-documenting assertions, these three
 # fields are surfaced alongside every failure.
 REGRESSION_ASSERTS='ltl output (after stripping ANSI, timing, memory, and other nondeterministic content) is byte-identical to the captured reference file for this scenario'
-REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl - composite rendered output'
+REGRESSION_PRODUCED_BY='print_bar_graph(), print_summary_table(), print_heatmap_row(), and the layout engine in ltl - composite rendered output. The -bin scenarios additionally run finalize_heatmap_unified() / finalize_histogram_unified(), whose display projection produces the rendered geometry'
 REGRESSION_CONTRACT='tests/HARNESS-DESIGN.md section Self-documenting assertions + this harness re-runs the commands from capture-regression.sh against tests/reference-output/; rebaselining is a per-release activity, not an automatic remediation'
 
 # Emit a regression-suite failure in the self-documenting multi-line form
@@ -135,6 +157,15 @@ run_test() {
     local name="$1"
     shift
     local reffile="$REF_DIR/$name.txt"
+    # The width this scenario renders at, read from its own command line, so the
+    # soft-wrap check below judges the render against the terminal it was told
+    # it had rather than against a constant.
+    local render_width=""
+    local _a _prev=""
+    for _a in "$@"; do
+        [[ "$_prev" == "--terminal-width" ]] && render_width="$_a"
+        _prev="$_a"
+    done
     local tmpfile="$TMP_DIR/$name.txt"
     local stderrfile="$TMP_DIR/$name.stderr"
     local difffile="$TMP_DIR/$name.diff"
@@ -158,6 +189,14 @@ run_test() {
         emit_regression_fail "$name" "ltl exited ${pipe_status[0]} (stderr below)" "$stderrfile"
         return
     fi
+    # strip_nondeterministic exits 3 when it reached end of input still skipping,
+    # i.e. the run summary that ends the TOP OVERALL skip never appeared. Per
+    # tests/HARNESS-DESIGN.md an anchor that matches nothing is a failure, not a
+    # smaller surface that quietly passes.
+    if [[ "${pipe_status[1]}" -ne 0 ]]; then
+        emit_regression_fail "$name" "output filter found no run summary to end the TOP OVERALL skip; the asserted surface would be truncated (stderr below)" "$stderrfile"
+        return
+    fi
     # Runtime-warning cleanliness (HARNESS-DESIGN.md section Runtime-warning
     # cleanliness): a byte-stable render can still be produced by a warning-
     # emitting data path; the stderr capture is inspected, not just kept.
@@ -165,6 +204,34 @@ run_test() {
         fail=$((fail + 1))
         failures+=("$name :: perl-runtime-warnings-on-stderr")
         return
+    fi
+    # Soft-wrap cleanliness: a render that is byte-identical to its reference
+    # still fails the reader if it is wider than the terminal, because the wrap
+    # displaces every line below it. Only scenarios at or above the supported
+    # floor are judged — narrower ones are outside the rendering contract
+    # (features/column-layout-refactor.md section Minimum supported terminal width).
+    if [[ -n "$render_width" && "$render_width" -ge $MIN_SUPPORTED_WIDTH ]]; then
+        local wrap_issue
+        wrap_issue=$(soft_wrap_known_failure "$name")
+        if assert_no_soft_wrap "$tmpfile" "$render_width" "$name" 2>/dev/null; then
+            # A scenario listed as a known failure that no longer wraps is
+            # reported, not silently accepted: the fix has landed and the entry
+            # is stale.
+            if [[ -n "$wrap_issue" ]]; then
+                echo "  XPASS $name :: no longer exceeds its terminal width — remove its entry from tests/rendered-output/soft-wrap-known-failures.tsv (#$wrap_issue)"
+            fi
+        elif [[ -n "$wrap_issue" ]]; then
+            # The check still ran and printed what overflowed; the block is
+            # suppressed because the defect is filed and open.
+            local wrap_detail
+            wrap_detail=$(assert_no_soft_wrap "$tmpfile" "$render_width" "$name" 2>&1 >/dev/null || true)
+            printf '%s\n' "${wrap_detail//  FAIL /  XFAIL}" >&2
+            echo "  XFAIL $name :: exceeds its terminal width — known, #$wrap_issue"
+        else
+            fail=$((fail + 1))
+            failures+=("$name :: output exceeds its terminal width")
+            return
+        fi
     fi
     if [[ ! -s "$tmpfile" ]]; then
         emit_regression_fail "$name" "captured output is empty (regression target produced nothing; stderr below)" "$stderrfile"
@@ -210,6 +277,8 @@ done
 # but not byte-identical, which would make this layout/rendering regression
 # suite fragile to precision tweaks. Layout coverage is what we want here;
 # bin-counter accuracy is covered by tests/validate-histogram-bin-counters.sh.
+# The bin arm of each of these scenarios is at the end of this file (#450) --
+# raw is not the default, and both paths ship.
 for mode in duration bytes count; do
     run_test "heatmap-${mode}-w160" "$LTL" $COMMON -dm raw --terminal-width 160 -hm "$mode" -bs 1 "$SCRIPT_LOG"
 done
@@ -297,6 +366,77 @@ run_test "hl-hcmin-plotlog-w160"   "$LTL" $HL_COMMON --terminal-width 160 -ic -h
 run_test "hl-heatmap-hdmin-w160"   "$LTL" $HL_COMMON -dm raw --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
 run_test "hl-histogram-hdmin-w160" "$LTL" $HL_COMMON -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
 run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -hdmin 100000 "$DPM5K_LOG" "$PLOT_LOG"
+
+# ---------------------------------------------------------------------------
+# #453 — the error rate reads the per-line failure classification (D13), so
+# a highlighted failure counts toward errRate like any other (D12). The
+# unhighlighted access run is the R7 parity anchor: its errRate must stay
+# 4/d on the ten-status-family fixture; the highlighted runs pin the
+# corrected rate (a highlighted 404 still counts: 4/d, not 3/d; a
+# highlighted ERROR on a diagnostics log: 2/d, not 1/d).
+# ---------------------------------------------------------------------------
+FIXTURES="tests/fixtures"
+run_test "errrate-access-unhighlighted-w160"          "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d "$FIXTURES/http-status-families.txt"
+run_test "errrate-access-highlighted-failure-w160"    "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h store/missing "$FIXTURES/http-status-families.txt"
+run_test "errrate-diagnostics-highlighted-failure-w160" "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h ERROR "$FIXTURES/log-level-vocabulary.txt"
+
+# ---------------------------------------------------------------------------
+# Bin data model — the shipped default for both display surfaces (#450)
+# ---------------------------------------------------------------------------
+# The -dm raw scenarios above pin the sort-and-index path, which users reach
+# only by asking for it: choose_data_model('heatmap') and
+# choose_data_model('histogram') both default to 'bin'. Without the block
+# below, the rendering users actually get by default was compared against no
+# reference at all.
+#
+# The raw scenarios stay — they assert a different, still-shipped path — so
+# each surface now carries both arms and the pair is the raw-vs-bin diff.
+#
+# -hmdm bin / -hgdm bin rather than -dm bin: each scenario pins only the
+# surface it asserts, per HARNESS-DESIGN.md § Invocation coherence. -dm bin
+# would additionally flip per-time-bucket statistics, moving the timeline
+# P50/P95 cells in every histogram scenario — an unrelated surface inside the
+# asserted bytes.
+#
+# These references are expected to move under #459 (combination arithmetic)
+# and #460 (percentile source). That is the point: they are blessed now, before
+# those changes, so the diff measures what the changes did.
+
+for mode in duration bytes count; do
+    run_test "heatmap-${mode}-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm "$mode" -bs 1 "$SCRIPT_LOG"
+done
+
+run_test "autohide-hm-w120-bin" "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-duration-w80-bin"  "$LTL" $COMMON -hmdm bin --terminal-width 80  -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-duration-w100-bin" "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm bytes    -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-count-w100-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm count    -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-lbg-duration-w160-bin" "$LTL" $COMMON -hmdm bin --light-background --terminal-width 160 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-hmw30-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 30 -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 80 -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-duration-w80-bin"  "$LTL" $COMMON -hgdm bin --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120-bin" "$LTL" $COMMON -hgdm bin --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration "$APACHE_LOG"
+
+run_test "hg-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-multi-duration-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160-bin"            "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes,count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-hgw30-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160-bin"        "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160-bin"      "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+
+run_test "hm-hg-duration-w160-bin" "$LTL" $COMMON -hmdm bin -hgdm bin --terminal-width 160 -hm duration -hg duration -bs 1 "$SCRIPT_LOG"
+
+run_test "hl-heatmap-hdmin-w160-bin"   "$LTL" $HL_COMMON -hmdm bin --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
+run_test "hl-histogram-hdmin-w160-bin" "$LTL" $HL_COMMON -hgdm bin --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
 
 echo ""
 echo "Results: $pass passed, $fail failed, $skip skipped"

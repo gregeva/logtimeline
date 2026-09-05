@@ -254,7 +254,7 @@ apache-default/messages: 248 cells checked, 0 T4, 0 T3, 2 T2, 5 T1, structural=O
 
 ## Decision 8 — Release-process integration
 
-A new step in CLAUDE.md release process, inserted **after** #223's structural validation and **before** benchmarks:
+A new step in the release process (docs/process/workflow.md), inserted **after** #223's structural validation and **before** benchmarks:
 
 > **Validate statistics:** `./tests/validate-statistics.sh` — must exit 0 (no T3/T4 failures across any of the three layers) before proceeding. T1/T2 advisories are non-blocking; review to confirm any drift is intentional.
 
@@ -335,7 +335,7 @@ The wiring mechanism is open and will be settled when the helper is drafted. Ind
 
 ### Today's "orchestrator" is the release-process step list
 
-There is no master `run-all-tests.sh` today. The release-process step list in CLAUDE.md is the de facto orchestrator. The orchestration-signaling contract means the release process must either:
+There is no master `run-all-tests.sh` today. The release-process step list in docs/process/workflow.md is the de facto orchestrator. The orchestration-signaling contract means the release process must either:
 
 - (a) wrap the validator pair in a small script that sets the env var, runs both validators, then calls cleanup; or
 - (b) document the env-var convention so each release-process step sets it inline.
@@ -387,7 +387,7 @@ The existing scaffolding at `tests/percentile-values/` is renamed wholesale to `
 - [ ] For totals, counts, durations, and bytes the harness does not read the source log — Layer 1 + Layer 2 only.
 - [ ] For the sensitive statistics in Decision 3, Layer 3 reads the source log specifically to feed the oracle.
 - [ ] Every Apache HTTP2 scenario prepends `-du us` to its options.
-- [ ] CLAUDE.md release process updated per Decision 8.
+- [ ] Release process (docs/process/workflow.md) updated per Decision 8.
 - [ ] `tests/lib/csv-cache.sh` exists and is sourced by both `validate-csv-output.sh` and `validate-statistics.sh`.
 - [ ] `tests/.artifacts/` is added to `.gitignore`.
 - [ ] CSV cache filenames follow the `{scenario}_{options-shorthand}_{logfile-shorthand}__{messages|stats}.csv` pattern (Decision 10), computed mechanically — no hand-maintained scenario→filename table.
@@ -412,7 +412,7 @@ When the follow-up implementation lands, every check below must pass.
 6. **Hand-induced T3 (Layer 3)**: temporarily change `ltl`'s p99 interpolation method, re-run, confirm the oracle reports a T3-L3 disagreement on `p99` and identifies `numpy.percentile` as the reference. Revert and confirm Layer 3 returns to all-T1.
 7. **Anchor-missing**: rename one column in the #223 rules TSV, re-run, confirm hard failure (not silent zero-match pass).
 10. **Dependency-missing**: temporarily uninstall NumPy, confirm the driver fails fast with an install hint, not a silent skip.
-11. CLAUDE.md release-process step renders correctly when read end-to-end.
+11. The release-process step in docs/process/workflow.md renders correctly when read end-to-end.
 
 ## Requirements-drift prevention
 

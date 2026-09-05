@@ -42,7 +42,7 @@ Steps 1, 2, and 3 are sequential prerequisites. Step 4 (this feature's work) can
 
 ### Integration
 
-Work lands on feature branches per CLAUDE.md's release process. Specific release-branch integration is this implementation ticket's choice.
+Work lands on feature branches per docs/process/workflow.md. Specific release-branch integration is this implementation ticket's choice.
 
 ## Terminology
 
@@ -117,7 +117,15 @@ When a value falls outside the partition's current `[min, max]`, R3 triggers reb
 
 The revision moves the partition-to-display reconciliation from render time (where the streaming partition's anchoring is fixed) to end-of-parse (where extents are known and a fresh partition can be constructed with display-anchored boundaries). The geometric-midpoint re-bin in `partition_rebin` is mass-conserving (each source bin's count goes entirely into one target bin) — empirically validated at 100% mass retention, 100% peak retention, 0-column X-offset on the canonical 148 MB Tomcat dataset (V6/V7 in `prototype/189-bin-counter-primitives.pl`; report at `prototype/201-projection-comparison-report.md`).
 
-**`heatmap_markers` and `histogram_view` percentile indicators.** Under the revised R5, these are derived by invoking #189 R4 (percentile) against the **finalized** partition, not the streaming one. The numeric percentile value lands directly on a display column boundary because the finalized partition's geometry matches the display.
+**`heatmap_markers` and `histogram_view` percentile indicators.** These are derived by invoking #189 R4 (percentile) against the **streaming** partition — the highest-fidelity counters this surface holds, at bpd=616 — not against the finalized display-shaped one. The finalize re-bin is a display-geometry step only: it produces the cell counts and the bar heights, and no percentile passes through it.
+
+Because the value is computed at streaming resolution, it does not land on a display column boundary by construction, and it is not confined to the display axis by construction either: a streaming bin straddles the observed extremes, so an interpolated value can fall just outside the axis at either end. The contract is therefore explicit rather than geometric:
+
+- The numeric value is **clamped to the display axis endpoints** before it is published or mapped — `[$effective_min, $effective_max]` for the heatmap, `[$min, $max]` (the histogram's own axis, identical to the first and last display boundary) for the histogram, with the highlight sub-store clamped to the parent's axis so both legends sit on one axis.
+- The clamped value is what is printed in the legend, what is published as the `-V` percentile-tick input, and what is mapped to a column (`find_heatmap_bucket` for markers, the tick position calculation for the histogram). The printed value, the published input and the rendered tick therefore agree, and the axis bounds bracket every value listed against them.
+- Column alignment is validated by test rather than guaranteed by matching geometry.
+
+The trade is deliberate. The display projection collapses resolution from bpd=616 to the display's own column count (~52 for the heatmap, `decades × 8` by default for the histogram), so sourcing the number from it costs roughly two orders of magnitude of the precision the streaming partition already holds, buying nothing but boundary coincidence. Measured on `tests/fixtures/tomcat-access-duration-spread.txt` under `-hg` against the exact `-hgdm raw` reference: the streaming source gives duration P99 and bytes P99 exactly and bytes P50 within 0.007%, where the projected source misses them by −5.96%, −7.02% and +6.22% respectively.
 
 **Algorithmic continuity.** `partition_rebin` reuses the existing geometric-midpoint remap loop from `partition_extend` (`ltl:613–622`). The streaming partition continues to use #189 R1–R6 unchanged. F1 consumers (`summary_table`, `csv_output`, `time_bucket_stats`) are unaffected by the R5 revision; they use the auto-resize lifecycle without a finalize re-bin step per #187 Decision 5 F1 contract.
 
@@ -138,29 +146,31 @@ Search vocabulary for #34 reviewers: any code that splits a source bin's count, 
 
 ### R6 — Overflow and underflow per #187 Decision 4
 
-Per #187 Decision 4, each partition maintains separate overflow and underflow counters distinct from the in-range bins. Under #187 Decision 5's auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition extends to contain observed values. Decision 4's mechanisms function primarily as a safety net.
+Per #187 Decision 4, each partition maintains separate overflow and underflow counters distinct from the in-range bins. Under #187 Decision 5's auto-resize lifecycle they are **guards expected to read zero**, not an audit signal expected to go non-zero: the partition grows until the value is contained, so no shipped run can drive either counter above zero, and `none` is the only `out_of_range_bounded` value any shipped run emits on these consumers. They stay in the contract as designed-in instrumentation — a partition geometry that ever stopped growing short of an observed value would show up here rather than silently. A partition model that stores no range of its own to fall outside of would make them structurally unreachable rather than merely quiescent, and the reading is the same either way: a non-zero value means the containment guarantee has been broken.
 
-The migrated consumers do not require any feature-specific overflow handling beyond what #189 implements per #187 Decision 4.
+The migrated consumers apply one feature-specific out-of-range operation, and it is display-side only: `finalize_heatmap_unified` and `finalize_histogram_unified` fold the streaming partition's `underflow` and `overflow` into the first and last bins of the projected partition, so that the rendered cells and bars conserve total mass across the display axis. That fold shapes what is drawn; it is not what the percentiles are read from. The percentile audit for `heatmap_markers` and `histogram_view` is determined by R4 against the **streaming** entry, which carries the live counters — per-quantile, per #189 R6's audit semantics.
 
 ### R7 — Telemetry surface for `-V` output per #187 Decision 8
 
 Each migrated consumer produces a per-consumer block in the locked `=== BIN-COUNTER MODE ===` `-V` section per #187 Decision 8, with the locked consumer-name strings: `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 
-Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `total_rebin_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `counter_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable).
+Each per-consumer block reports the contract-surface fields locked in #187 Decision 8: `path`, `partition_keying`, `partition_count`, `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `max_partition_bins`, `partitions_with_overflow_count`, `partitions_with_underflow_count`, `overflow_total`, `underflow_total`, `counter_memory_bytes`, `members_live`, `members_max`, `members_memory_bytes`, `rebins_per_partition`, `percentiles_emitted`, `out_of_range_bounded`, `shares_partitions_with` (where applicable). (Field set amended 2026-08-26 by #462; `total_rebin_events` retired.)
+
+`rebin_finalize_events` is the field these two surfaces exist to demonstrate: every heatmap and histogram partition is projected into display shape once per run, on every such run with no flags required, and until #462 that projection was counted by nothing because it happens after the telemetry snapshot. The count equals `partition_count` on both surfaces. What it counts is a **display-geometry projection only** — it produces cell colors and bar heights, and no percentile passes through it; percentiles are read from the streaming partition (R5). The highlight sub-stores (`%heatmap_counters_hl`, `%histogram_counters_hl`) take their own projections and are **not** observed by any consumer block — see the open item in `features/bin-counter-accuracy-and-observability.md`.
 
 The exact field formats are locked in #187 Decision 8. This feature implements the consumer-specific population of those fields; it does not define new fields.
 
 ### R8 — Display geometry preservation (revised 2026-05-20 via #201)
 
-**For F2 (heatmap):** Display geometry — `$heatmap_width` (column count), color scheme, percentile-marker positions, legend layout — is unchanged by the migration. The finalized partition (per the revised R5) has `bin_count = $heatmap_width` with boundaries derived from observed `[d_min, d_max]`, matching the shipped `calculate_heatmap_buckets` output structurally. Cell colors derive from finalized partition counts; markers from R4 invoked against the finalized partition.
+**For F2 (heatmap):** Display geometry — `$heatmap_width` (column count), color scheme, percentile-marker positions, legend layout — is unchanged by the migration. The finalized partition (per the revised R5) has `bin_count = $heatmap_width` with boundaries derived from observed `[d_min, d_max]`, matching the shipped `calculate_heatmap_buckets` output structurally. Cell colors derive from finalized partition counts; markers derive from R4 invoked against the retained streaming partition, clamped to the display axis and then mapped to a display column (R5).
 
 Empirical validation (V6 in `prototype/189-bin-counter-primitives.pl` against the canonical 148 MB Tomcat dataset): 100% mass retention, 100% peak retention, 0-column peak X-offset. Algebraic worst-case X-offset at locked defaults is ≤1 column.
 
-**For F3 (histogram):** Display geometry — `$bar_area_width`, bar layout, percentile-tick positions, legend — is unchanged by the migration. The finalize re-bin produces a target partition with the same shape ltl computes today (`int(decades × histogram_buckets_per_decade)` buckets, log-spaced over `[d_min, d_max]`), and the shipped `calculate_histogram_display_buckets` projection (`ltl:7462`) is applied unchanged. The shipped stretched-bar rendering convention is preserved exactly.
+**For F3 (histogram):** Display geometry — `$bar_area_width`, bar layout, the axis the percentile ticks are positioned on, legend — is unchanged by the migration. The tick *values* are not display geometry: they come from the streaming partition and are clamped to the axis before being positioned on the display grid, so a tick lines up with the value printed for it in the legend (R5). The finalize re-bin produces a target partition with the same shape ltl computes today (`int(decades × histogram_buckets_per_decade)` buckets, log-spaced over `[d_min, d_max]`), and the shipped `calculate_histogram_display_buckets` projection (`ltl:7462`) is applied unchanged. The shipped stretched-bar rendering convention is preserved exactly.
 
-Internal precision improves because the streaming partition runs at locked bpd=616 (Level 9, HdrHistogram 3-sig-digit reference). At that bpd the finalize re-bin's per-bucket displacement is below the visibility threshold of a 9-character-tall ASCII histogram on both canonical datasets (V8 sweep evidence: 1.10% on your file, 5.78% on 148MB file — both well under the ~11% threshold for one character row of visible difference).
+Internal precision improves because the streaming partition runs at locked bpd=616 (Level 9, HdrHistogram 3-sig-digit reference). The finalize re-bin's per-bucket displacement is a **bar-and-cell rendering bound only** — at that bpd it is below the visibility threshold of a 9-character-tall ASCII histogram on both canonical datasets (V8 sweep evidence: 1.10% on your file, 5.78% on 148MB file — both well under the ~11% threshold for one character row of visible difference). It is not the accuracy bound on the percentile numbers: those are computed at bpd=616 and never pass through the projection, so their bound is R4's own bin-resolution bound at the streaming resolution.
 
-Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per CLAUDE.md) to confirm:
+Implementation tickets must validate against the existing baseline-regression harness (`tests/baseline/`, per docs/process/workflow.md) to confirm:
 - F2: byte-equivalent display output within the 1-column X-offset algebraic bound.
 - F3: visible histogram structure (spike-trough patterns, multi-modal peaks) preserved per V8 evidence. Per-bucket displacement at locked bpd=616 is below visual threshold; the spike-trough-spike pattern of legacy renders is reproduced exactly.
 
@@ -181,7 +191,6 @@ The partitions are independent in `[min, max]` as each per-time-bucket partition
 Each consumer's `path:` line in its `=== BIN-COUNTER MODE ===` block per #187 Decision 8 reports the active path for that consumer:
 
 - `unified` — consumer is on the migrated path.
-- `pre_migration` — consumer has not yet migrated, or this is a pre-migration validation run.
 - `user_opt_out` — `--exact-percentiles` is active per #187 Decision 7.
 - `feature_not_active` — the consumer's feature is not engaged in this run (`-hm` not requested for heatmap consumers; `-hg` not requested for histogram consumers; or no values matched).
 
@@ -241,7 +250,7 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 | First value for a new time bucket (heatmap) is observed | Per #189 R1 (Decision 5 lifecycle), partition is lazily constructed centered on the first value with 5-decade span. No upfront sizing required. |
 | First value for a new metric (histogram) is observed | Same lazy construction at first observation. |
 | Subsequent value falls outside the current partition `[min, max]` | Per #189 R1 / Decision 5, partition extends via HdrHistogram-convention doubling. Existing counts preserved. Rebin event tallied per Decision 5 telemetry. |
-| Value falls outside the partition after doubling cap (if any) | Increments overflow or underflow counter per #187 Decision 4. Per-quantile `out_of_range_bounded` audit field reflects this. |
+| Value falls outside the partition after doubling cap (if any) | Increments overflow or underflow counter per #187 Decision 4, and the per-quantile `out_of_range_bounded` audit field reflects it. Unreachable under the shipped growth policy — the partition grows until the value is contained (R6), so these counters read zero and the audit reads `none`. |
 | All-same metric values | Single bin populated; partition operates correctly. Per #187 R5. |
 | Single observed value | Partition constructed with single observation; subsequent percentile queries return that value per #187 R5. |
 | Multi-file run | Each file's values feed the same per-`time_bucket` (heatmap) and per-metric (histogram) partitions. Auto-resize accommodates the combined range. No special multi-file handling required at this feature's layer. |
@@ -255,11 +264,11 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 ### Migration completeness
 
 - [x] R1 holds: all four consumers (`heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`) have unified-path implementations.
-- [x] R2 holds: no runtime mode-selection gate; each consumer runs either `unified`, `pre_migration`, `user_opt_out`, or `feature_not_active`.
+- [x] R2 holds: no runtime mode-selection gate; each consumer runs either `unified`, `user_opt_out`, or `feature_not_active`.
 - [x] R3 holds: partitions use #189 R1's auto-resize lifecycle for streaming; finalize re-bins into display-anchored target partition via #189 R12 per #201.
 - [x] R4 holds: per-line accumulation during parse via #189 R2 / R3; no raw-value arrays under the unified path.
-- [x] R5 holds (revised): two-stage stream + finalize re-bin per #201; geometric-midpoint projection only (fidelity invariant).
-- [x] R6 holds: overflow/underflow per #187 Decision 4 folded into finalized partition's edge bins.
+- [x] R5 holds (revised): two-stage stream + finalize re-bin per #201; geometric-midpoint projection only (fidelity invariant); percentiles computed against the streaming partition and clamped to the display axis before publication or mapping.
+- [x] R6 holds: overflow/underflow per #187 Decision 4 folded into the finalized partition's edge bins for display; the percentile audit is taken from the streaming entry, where both counters read zero under the shipped growth policy.
 - [x] R7 holds: `=== BIN-COUNTER MODE ===` section reports each consumer's block per #187 Decision 8 with telemetry snapshot captured at finalize.
 - [x] R8 holds (revised): display geometry unchanged; precision improvements via bpd=616 streaming + finalize re-bin to legacy partition shape.
 - [x] R9 holds: heatmap and histogram have independent counter stores; per-family stream bpd constants (`$heatmap_stream_bpd`, `$histogram_stream_bpd`).
@@ -289,12 +298,12 @@ Validation on the canonical 148MB Tomcat log:
 - `--exact-percentiles` output byte-identical to HEAD (pre-migration code preserved).
 - Unified path renders bars byte-identical to exact path; percentile values within ~1.3% (bin-resolution bound).
 - HEATMAP STATISTICS: ~580 ms → ~5 ms (~120× faster).
-- Peak memory drops by ~40 MiB (`heatmap_raw` + `histogram_values` eliminated; replaced by ~2 MiB total of streaming partitions discarded after finalize).
+- Peak memory drops by ~40 MiB (`heatmap_raw` + `histogram_values` eliminated; replaced by ~2 MiB total of streaming partitions, each of which serves its key's percentiles at finalize (R5) and is released as that key completes).
 - Fidelity invariant honored: spike-trough multi-modal structure preserved exactly.
 
 ## Validation
 
-This section defines the **validation scenarios** for the heatmap and histogram migrations. The validation harness lives in `tests/baseline/` per CLAUDE.md.
+This section defines the **validation scenarios** for the heatmap and histogram migrations. The validation harness lives in `tests/baseline/` per docs/process/workflow.md.
 
 ### Contract-level scenarios from #187
 

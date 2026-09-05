@@ -50,7 +50,7 @@ The dispatcher's top-level order, per the code audit (function names are the dur
 | 7 | `calculate_heatmap_buckets()` / `calculate_histogram_buckets()` | finalize — each a #266 data-model dispatcher (raw → exact path, bin → unified finalize) |
 | 8 | `normalize_data_for_output()` | render (prep; includes layout calculation before scaling) |
 | 9 | `detect_index_drift()` + `emit_*_verbose()` family + `print_verbose_output()` | render (verbose/telemetry surface) |
-| 10 | `print_bar_graph()`, `print_histograms()`, `print_summary_table()`, `print_message_summary()`, `print_threadpool_summary()`, CSV output lifecycle | render |
+| 10 | `print_bar_graph()`, `print_histograms()`, `print_run_options()`, `print_message_summary()`, `print_threadpool_summary()`, `print_summary_table()`, CSV output lifecycle | render |
 | 11 | `write_index_file()` | render (post-output; #46) |
 
 **Hard constraint:** the `measure_memory_structures()` / `memory_debug_decomposition()` instrumentation checkpoints woven between steps keep their positions — their labels are observable `-mem`/debug output.

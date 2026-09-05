@@ -1,0 +1,153 @@
+key	type	presence	gate
+schema_version	int	yes	
+provenance.determining.version	string	yes	
+provenance.determining.generated_at	string	yes	
+provenance.determining.options.command-line	string	yes	
+provenance.determining.options.environment	string	conditional:LTL_CONFIG	
+provenance.determining.filters	string	yes	
+provenance.determining.data_model.bucket_stats	string	yes	
+provenance.determining.data_model.message_stats	string	yes	
+provenance.determining.data_model.histogram	string	yes	
+provenance.determining.data_model.heatmap	string	yes	
+provenance.determining.data_model.precision	int	yes	
+provenance.determining.duration_unit_resolved	string	yes	
+provenance.determining.duration_unit_source	string	yes	
+provenance.determining.profile	string	conditional:-pr	
+provenance.determining.format_pin	string	conditional:-lf	
+population.formats[].name	string	yes	
+population.formats[].event_ledger	bool	yes	
+population.files_bound	int	yes	
+population.files_event_ledger	int	yes	
+population.rule_changes	int	yes	
+population.observation.start	string	conditional:included-lines	
+population.observation.end	string	conditional:included-lines	
+population.observation.duration_seconds	number	conditional:included-lines	
+population.observation.duration	string	conditional:included-lines	
+population.sources.files	int	yes	
+population.sources.files_matched	int	yes	
+population.sources.directories	int	yes	
+population.sources.directory_list[]	string	yes	
+population.lines.read	int	yes	
+population.lines.unmatched	int	yes	
+population.lines.included	int	yes	
+population.lines.excluded.time_window	int	conditional:-st/-et	
+population.lines.excluded.profile	int	conditional:-pr	
+population.lines.excluded.filter	int	conditional:content-or-outcome-filter	
+population.lines.excluded.numeric	int	conditional:numeric-threshold	
+population.lines.excluded.other	int	yes	
+population.lines.highlighted	int	conditional:highlight	
+measurements.lines_included	int	yes	
+measurements.classified	int	yes	
+measurements.successes	int	yes	
+measurements.failures	int	yes	
+measurements.unclassified	int	yes	
+measurements.conflicts	int	yes	
+measurements.mixed	int	yes	
+measurements.unclassified_qualifying_lines	int	yes	
+measurements.success_pct	number	conditional:pct_eligible	
+measurements.failure_pct	number	conditional:pct_eligible	
+measurements.pct_eligible	bool	yes	
+measurements.non_qualifying_lines	int	yes	
+measurements.categories.*	int	yes	
+measurements.total_time	string	yes	
+measurements.max_memory_used	string	yes	
+measurements.histogram.*.data_model	string	conditional:-hg	
+measurements.histogram.*.occurrences	int	conditional:-hg	
+measurements.histogram.*.min	number	conditional:-hg	
+measurements.histogram.*.max	number	conditional:-hg	
+measurements.histogram.*.p1	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p5	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p10	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p25	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p50	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p75	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p90	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p95	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p99	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p999	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p9999	number	conditional:-hg	count:occurrences
+measurements.histogram.*.p99999	number	conditional:-hg	count:occurrences
+measurements.histogram.*.highlighted.occurrences	int	conditional:highlight	
+measurements.histogram.*.highlighted.p1	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p5	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p10	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p25	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p50	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p75	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p90	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p95	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p99	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p999	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p9999	number	conditional:highlight	count:occurrences
+measurements.histogram.*.highlighted.p99999	number	conditional:highlight	count:occurrences
+series.bucket_size_seconds	number	yes	
+series.bucket_count	int	yes	
+series.omit_empty	bool	yes	
+series.rate_unit	string	yes	
+
+series.buckets[].timestamp	string	yes	
+series.buckets[].occurrences	int	yes	
+series.buckets[].successes	int	yes	
+series.buckets[].failures	int	yes	
+series.buckets[].success_pct	number	conditional:bucket-eligible	
+series.buckets[].failure_pct	number	conditional:bucket-eligible	
+series.buckets[].non_qualifying_lines	int	yes	
+series.buckets[].conflicts	int	yes	
+series.buckets[].unclassified_qualifying_lines	int	yes	
+series.buckets[].categories.*	int	conditional:populated-bucket	
+series.buckets[].err_rate	number	conditional:rates	
+series.buckets[].msg_rate	number	conditional:rates	
+series.buckets[].duration.data_model	string	conditional:duration	
+series.buckets[].duration.occurrences	int	conditional:duration	
+series.buckets[].duration.sum	number	conditional:duration	
+series.buckets[].duration.min	number	conditional:duration-family	
+series.buckets[].duration.mean	number	conditional:duration-family	
+series.buckets[].duration.max	number	conditional:duration-family	
+series.buckets[].duration.std_dev	number	conditional:duration-family	
+series.buckets[].duration.p1	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p5	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p10	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p25	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p50	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p75	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.iqr	number	conditional:duration-family	
+series.buckets[].duration.p90	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p95	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p99	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p999	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p9999	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.p99999	number	conditional:duration-family	count:occurrences
+series.buckets[].duration.cv	number	conditional:duration-family	
+series.buckets[].duration.skewness	number	conditional:shape	
+series.buckets[].duration.kurtosis	number	conditional:shape	
+series.buckets[].duration.bimodality_coef	number	conditional:shape	
+series.buckets[].bytes.occurrences	int	conditional:bytes-family	
+series.buckets[].bytes.min	number	conditional:bytes-family	
+series.buckets[].bytes.mean	number	conditional:bytes-family	
+series.buckets[].bytes.max	number	conditional:bytes-family	
+series.buckets[].bytes.sum	number	conditional:bytes	
+series.buckets[].count.occurrences	int	conditional:count	
+series.buckets[].count.min	number	conditional:count	
+series.buckets[].count.mean	number	conditional:count	
+series.buckets[].count.max	number	conditional:count	
+series.buckets[].count.sum	number	conditional:count	
+series.buckets[].sessions	int	conditional:sessions	
+series.buckets[].sessions_hl	int	conditional:highlight	
+series.buckets[].users	int	conditional:users	
+series.buckets[].users_hl	int	conditional:highlight	
+series.buckets[].threadpools.*	number	conditional:-tpa	
+series.buckets[].udm.*.*	number	conditional:-udm	
+series.buckets[].heatmap.*.data_model	string	conditional:-hm	
+series.buckets[].heatmap.*.occurrences	int	conditional:-hm	
+series.buckets[].heatmap.*.p1	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p5	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p10	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p25	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p50	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p75	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p90	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p95	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p99	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p999	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p9999	number	conditional:-hm	count:occurrences
+series.buckets[].heatmap.*.p99999	number	conditional:-hm	count:occurrences

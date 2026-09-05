@@ -1,0 +1,6 @@
+family	fixture	lines	class	arm	median_s	min_s	max_s	us_per_line	delta_us_per_line	pct_of_budget
+scriptlog	synth-info-1m.log	1000000	-	baseline	3.078452	3.063684	3.086619	3.0785	+0.0000	0.00
+scriptlog	synth-info-1m.log	1000000	6	c6-none	3.172258	3.146833	3.299508	3.1723	+0.0938	0.87
+scriptlog	synth-info-1m.log	1000000	6	c6-nested-hash	3.179134	3.174899	3.185512	3.1791	+0.1007	0.93
+scriptlog	synth-info-1m.log	1000000	6	c6-array-idx	3.199943	3.195044	3.209728	3.1999	+0.1215	1.12
+scriptlog	synth-info-1m.log	1000000	6	c6-array-idx-guarded	3.166397	3.159735	3.168872	3.1664	+0.0879	0.81

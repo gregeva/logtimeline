@@ -81,10 +81,23 @@ for f in "$ACCESS_LOG" "$SCRIPT_LOG" "$APACHE_LOG" "$PLOT_LOG" "$DPM5K_LOG"; do
     fi
 done
 
-# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin
+# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin.
+#
+# The TOP OVERALL MESSAGES block is not part of the layout surface these
+# references freeze, so it is dropped. The drop is bounded by the run summary
+# that closes the output: the skip ends on the summary's first line -- the rule
+# above the Category header, two spaces in and padded on the right -- so the
+# category totals, the HIGHLIGHTED row and the file/format legend stay inside
+# the captured surface. Per tests/HARNESS-DESIGN.md an anchor that matches
+# nothing is a failure: reaching end of input with the skip still open exits 3,
+# so a truncated surface aborts instead of being captured. A run invoked with
+# -osum prints no summary, and the echoed options line -- which sits under the
+# bar graph, ahead of the skipped block -- says so, so such a run has nothing
+# to close the skip and is exempt.
+# Must match validate-regression.sh exactly.
 strip_nondeterministic() {
-    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[0-9.]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0} $skip=1 if /TOP OVERALL/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
+    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
+    | perl -ne 'BEGIN{$skip=0; $want_summary=1} END{ $? = 3 if $skip && $want_summary } $want_summary=0 if /^(?:environment|command-line) options: / && /(?:^|\s)(?:-osum|--omit-summary)(?=\s|$)/; $skip=1 if /TOP OVERALL/; $skip=0 if /^ {2}(?:─)+ +$/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
 }
 
 # Create output directory
@@ -114,6 +127,16 @@ run_test() {
 
     if [[ "${pipe_status[0]}" -ne 0 ]]; then
         echo "  FAIL  $name :: ltl exited ${pipe_status[0]}; stderr:" >&2
+        sed 's/^/        /' "$stderrfile" >&2
+        rm -f "$outfile"
+        exit 1
+    fi
+    # strip_nondeterministic exits 3 when it reached end of input still skipping,
+    # i.e. the run summary that ends the TOP OVERALL skip never appeared. Per
+    # tests/HARNESS-DESIGN.md an anchor that matches nothing is a failure —
+    # blessing a truncated reference would weaken every later run silently.
+    if [[ "${pipe_status[1]}" -ne 0 ]]; then
+        echo "  FAIL  $name :: output filter found no run summary to end the TOP OVERALL skip; the reference would be truncated" >&2
         sed 's/^/        /' "$stderrfile" >&2
         rm -f "$outfile"
         exit 1
@@ -243,6 +266,78 @@ run_test "hl-hcmin-plotlog-w160"   "$LTL" $HL_COMMON --terminal-width 160 -ic -h
 run_test "hl-heatmap-hdmin-w160"   "$LTL" $HL_COMMON -dm raw --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
 run_test "hl-histogram-hdmin-w160" "$LTL" $HL_COMMON -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
 run_test "hl-filelegend-two-files-w160" "$LTL" $HL_COMMON --terminal-width 160 -hdmin 100000 "$DPM5K_LOG" "$PLOT_LOG"
+
+# ---------------------------------------------------------------------------
+# #453 — the error rate reads the per-line failure classification (D13), so
+# a highlighted failure counts toward errRate like any other (D12). The
+# unhighlighted access run is the R7 parity anchor: its errRate must stay
+# 4/d on the ten-status-family fixture; the highlighted runs pin the
+# corrected rate (a highlighted 404 still counts: 4/d, not 3/d; a
+# highlighted ERROR on a diagnostics log: 2/d, not 1/d).
+# ---------------------------------------------------------------------------
+FIXTURES="tests/fixtures"
+run_test "errrate-access-unhighlighted-w160"          "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d "$FIXTURES/http-status-families.txt"
+run_test "errrate-access-highlighted-failure-w160"    "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h store/missing "$FIXTURES/http-status-families.txt"
+run_test "errrate-diagnostics-highlighted-failure-w160" "$LTL" $HL_COMMON --terminal-width 160 -bs 1440 -ru d -h ERROR "$FIXTURES/log-level-vocabulary.txt"
+
+echo "Bin data model renders (Issue #450):"
+# ---------------------------------------------------------------------------
+# Bin data model — the shipped default for both display surfaces (#450)
+# ---------------------------------------------------------------------------
+# The -dm raw scenarios above pin the sort-and-index path, which users reach
+# only by asking for it: choose_data_model('heatmap') and
+# choose_data_model('histogram') both default to 'bin'. Without the block
+# below, the rendering users actually get by default was compared against no
+# reference at all.
+#
+# The raw scenarios stay — they assert a different, still-shipped path — so
+# each surface now carries both arms and the pair is the raw-vs-bin diff.
+#
+# -hmdm bin / -hgdm bin rather than -dm bin: each scenario pins only the
+# surface it asserts, per HARNESS-DESIGN.md § Invocation coherence. -dm bin
+# would additionally flip per-time-bucket statistics, moving the timeline
+# P50/P95 cells in every histogram scenario — an unrelated surface inside the
+# asserted bytes.
+#
+# These references are expected to move under #459 (combination arithmetic)
+# and #460 (percentile source). That is the point: they are blessed now, before
+# those changes, so the diff measures what the changes did.
+
+for mode in duration bytes count; do
+    run_test "heatmap-${mode}-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm "$mode" -bs 1 "$SCRIPT_LOG"
+done
+
+run_test "autohide-hm-w120-bin" "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-duration-w80-bin"  "$LTL" $COMMON -hmdm bin --terminal-width 80  -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-duration-w100-bin" "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm duration -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-bytes-w120-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 120 -hm bytes    -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-count-w100-bin"    "$LTL" $COMMON -hmdm bin --terminal-width 100 -hm count    -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-lbg-duration-w160-bin" "$LTL" $COMMON -hmdm bin --light-background --terminal-width 160 -hm duration -bs 1 "$SCRIPT_LOG"
+
+run_test "heatmap-hmw30-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 30 -bs 1 "$SCRIPT_LOG"
+run_test "heatmap-hmw80-duration-w160-bin" "$LTL" $COMMON -hmdm bin --terminal-width 160 -hm duration -hmw 80 -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-duration-w80-bin"  "$LTL" $COMMON -hgdm bin --terminal-width 80  -hg duration "$APACHE_LOG"
+run_test "hg-duration-w120-bin" "$LTL" $COMMON -hgdm bin --terminal-width 120 -hg duration "$APACHE_LOG"
+run_test "hg-duration-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration "$APACHE_LOG"
+
+run_test "hg-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg bytes "$APACHE_LOG"
+run_test "hg-count-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-multi-duration-bytes-w160-bin" "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes        "$APACHE_LOG"
+run_test "hg-multi-all-w160-bin"            "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes,count -bs 1 "$SCRIPT_LOG"
+
+run_test "hg-hgw30-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgw 30 "$APACHE_LOG"
+run_test "hg-hgw50-multi-w160-bin"        "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration,bytes -hgw 50 "$APACHE_LOG"
+run_test "hg-hgh4-duration-w160-bin"      "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 4  "$APACHE_LOG"
+run_test "hg-hgh16-duration-w160-bin"     "$LTL" $COMMON -hgdm bin --terminal-width 160 -hg duration       -hgh 16 "$APACHE_LOG"
+
+run_test "hm-hg-duration-w160-bin" "$LTL" $COMMON -hmdm bin -hgdm bin --terminal-width 160 -hm duration -hg duration -bs 1 "$SCRIPT_LOG"
+
+run_test "hl-heatmap-hdmin-w160-bin"   "$LTL" $HL_COMMON -hmdm bin --terminal-width 160 -hm duration -hdmin 963 "$DPM5K_LOG"
+run_test "hl-histogram-hdmin-w160-bin" "$LTL" $HL_COMMON -hgdm bin --terminal-width 160 -du us -hg duration -hdmin 100 "$APACHE_LOG"
 
 echo ""
 echo "Captured $count reference files to: $REF_DIR"

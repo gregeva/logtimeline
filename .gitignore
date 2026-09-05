@@ -3,12 +3,19 @@ _Inline/
 tests/profile/samples/
 tests/.artifacts/
 logs/
+# ... and the symlink of the same name that the git worktrees carry in place
+# of the directory, which the trailing slash above does not match.
+logs
 
 # Runtime artifact (Issue #46 / #179)
 ltl-index.csv
 
-# Local Claude Code state — never commit
-.claude/
+# Local Claude Code state — never commit. Only the shared, reviewed project
+# configuration is tracked: .claude/rules/ (path-scoped rules) and
+# .claude/settings.json (hooks). settings.local.json, worktrees, locks stay local.
+.claude/*
+!.claude/rules/
+!.claude/settings.json
 .claude.local/
 
 # Common secret-bearing files
@@ -33,6 +40,7 @@ credentials*
 .vscode
 *.log
 *.csv
+*-LTL-AGGREGATE.yaml
 *.out
 
 # #224 statistics-drift baselines are tracked deliverables, not produced

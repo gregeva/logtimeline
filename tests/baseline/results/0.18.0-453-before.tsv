@@ -1,0 +1,301 @@
+test_name	options	metric_type	metric_name	value
+multi-day-custom-logs-standard		version	0.18.0-453
+multi-day-custom-logs-standard		FILES	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.2.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.3.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.4.log;logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log	485559953
+multi-day-custom-logs-standard		lines_read	1530399
+multi-day-custom-logs-standard		lines_included	1530399
+multi-day-custom-logs-standard		TIMING	detect/registry_build	0.008
+multi-day-custom-logs-standard		TIMING	detect/scan_sub_compile	0.004
+multi-day-custom-logs-standard		TIMING	parse/read_files	16.523
+multi-day-custom-logs-standard		TIMING	accumulate/initialize_buckets	0.000
+multi-day-custom-logs-standard		TIMING	finalize/group_similar	0.000
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics	0.454
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/bucket_stats	0.057
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/population_walk	0.000
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/sort_selection	0.384
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/group_calc	0.004
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+multi-day-custom-logs-standard		TIMING	finalize/calculate_statistics/untimed	0.008
+multi-day-custom-logs-standard		TIMING	finalize/heatmap_statistics	0.000
+multi-day-custom-logs-standard		TIMING	finalize/histogram_statistics	0.000
+multi-day-custom-logs-standard		TIMING	render/normalize_data	0.001
+multi-day-custom-logs-standard		TIMING	total	16.987
+multi-day-custom-logs-standard		MEMORY	rss_peak	200540160
+multi-day-custom-logs-standard		MEMORY	bucket_stats_counters	120
+multi-day-custom-logs-standard		MEMORY	bucket_stats_counters_hl	120
+multi-day-custom-logs-standard		MEMORY	consolidation_clusters	120
+multi-day-custom-logs-standard		MEMORY	consolidation_key_message	120
+multi-day-custom-logs-standard		MEMORY	consolidation_key_trigrams	120
+multi-day-custom-logs-standard		MEMORY	consolidation_key_trigrams_norm	120
+multi-day-custom-logs-standard		MEMORY	consolidation_ngram_index	120
+multi-day-custom-logs-standard		MEMORY	consolidation_patterns	120
+multi-day-custom-logs-standard		MEMORY	consolidation_posting_size	120
+multi-day-custom-logs-standard		MEMORY	consolidation_unmatched	120
+multi-day-custom-logs-standard		MEMORY	format_scan_subs	753664
+multi-day-custom-logs-standard		MEMORY	heatmap_counters	120
+multi-day-custom-logs-standard		MEMORY	heatmap_counters_hl	120
+multi-day-custom-logs-standard		MEMORY	heatmap_data	120
+multi-day-custom-logs-standard		MEMORY	heatmap_data_hl	120
+multi-day-custom-logs-standard		MEMORY	heatmap_raw	120
+multi-day-custom-logs-standard		MEMORY	heatmap_raw_hl	120
+multi-day-custom-logs-standard		MEMORY	histogram_counters	120
+multi-day-custom-logs-standard		MEMORY	histogram_counters_hl	120
+multi-day-custom-logs-standard		MEMORY	histogram_values	576
+multi-day-custom-logs-standard		MEMORY	log_analysis	29831658
+multi-day-custom-logs-standard		MEMORY	log_messages	107476285
+multi-day-custom-logs-standard		MEMORY	log_messages_counters	120
+multi-day-custom-logs-standard		MEMORY	log_occurrences	20755
+multi-day-custom-logs-standard		MEMORY	log_sessions	120
+multi-day-custom-logs-standard		MEMORY	log_stats	52881
+multi-day-custom-logs-standard		MEMORY	log_threadpools	240
+multi-day-custom-logs-standard		MEMORY	message_key_order	20313
+multi-day-custom-logs-standard		MEMORY	threadpool_activity	778
+multi-day-custom-logs-standard		MEMORY	udm_distinct	120
+multi-day-custom-logs-standard		MEMORY	udm_last_value	120
+multi-day-custom-logs-standard		MEMORY	unattributed	62380370
+multi-day-custom-logs-standard		MEMORY_FINAL	log_messages	107476285
+multi-day-custom-logs-standard		MEMORY_FINAL	log_analysis	24391
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_clusters	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_patterns	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_key_message	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_unmatched	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_ngram_index	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_key_trigrams	120
+multi-day-custom-logs-standard		MEMORY_FINAL	consolidation_key_trigrams_norm	120
+multi-day-custom-logs-standard		COUNTS	log_messages_entries	182419
+multi-day-custom-logs-standard		COUNTS	log_occurrences_entries	25
+multi-day-custom-logs-standard		COUNTS	log_stats_entries	25
+multi-day-custom-logs-standard		COUNTS	log_analysis_entries	24
+multi-day-custom-logs-standard		COUNTS	log_messages_population	182419
+multi-day-custom-logs-standard		COUNTS	threadpool_entries	0
+multi-day-custom-logs-standard		COUNTS	format_scan_subs_compiled	1
+multi-day-custom-logs-standard		COUNTS	format_scan_sub_cache_hits	4
+multi-day-custom-logs-standard		CONFIG	terminal_width	200
+multi-day-custom-logs-standard		CONFIG	terminal_height	24
+multi-day-custom-logs-standard		CONFIG	max_log_message_length	200
+multi-day-custom-logs-standard		CONFIG	time_bucket_size	60
+multi-day-custom-logs-standard		CONFIG	bucket_size_seconds	3600.00
+single-day-access-log-standard		version	0.18.0-453
+single-day-access-log-standard		FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
+single-day-access-log-standard		lines_read	761698
+single-day-access-log-standard		lines_included	761698
+single-day-access-log-standard		TIMING	detect/registry_build	0.009
+single-day-access-log-standard		TIMING	detect/scan_sub_compile	0.004
+single-day-access-log-standard		TIMING	parse/read_files	10.170
+single-day-access-log-standard		TIMING	accumulate/initialize_buckets	0.000
+single-day-access-log-standard		TIMING	finalize/group_similar	0.000
+single-day-access-log-standard		TIMING	finalize/calculate_statistics	0.152
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/bucket_stats	0.098
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/population_walk	0.000
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/sort_selection	0.007
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/group_calc	0.047
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+single-day-access-log-standard		TIMING	finalize/calculate_statistics/untimed	0.000
+single-day-access-log-standard		TIMING	finalize/heatmap_statistics	0.000
+single-day-access-log-standard		TIMING	finalize/histogram_statistics	0.000
+single-day-access-log-standard		TIMING	render/normalize_data	0.001
+single-day-access-log-standard		TIMING	total	10.331
+single-day-access-log-standard		MEMORY	rss_peak	149258240
+single-day-access-log-standard		MEMORY	bucket_stats_counters	120
+single-day-access-log-standard		MEMORY	bucket_stats_counters_hl	120
+single-day-access-log-standard		MEMORY	consolidation_clusters	120
+single-day-access-log-standard		MEMORY	consolidation_key_message	120
+single-day-access-log-standard		MEMORY	consolidation_key_trigrams	120
+single-day-access-log-standard		MEMORY	consolidation_key_trigrams_norm	120
+single-day-access-log-standard		MEMORY	consolidation_ngram_index	120
+single-day-access-log-standard		MEMORY	consolidation_patterns	120
+single-day-access-log-standard		MEMORY	consolidation_posting_size	120
+single-day-access-log-standard		MEMORY	consolidation_unmatched	120
+single-day-access-log-standard		MEMORY	format_scan_subs	737280
+single-day-access-log-standard		MEMORY	heatmap_counters	120
+single-day-access-log-standard		MEMORY	heatmap_counters_hl	120
+single-day-access-log-standard		MEMORY	heatmap_data	120
+single-day-access-log-standard		MEMORY	heatmap_data_hl	120
+single-day-access-log-standard		MEMORY	heatmap_raw	120
+single-day-access-log-standard		MEMORY	heatmap_raw_hl	120
+single-day-access-log-standard		MEMORY	histogram_counters	120
+single-day-access-log-standard		MEMORY	histogram_counters_hl	120
+single-day-access-log-standard		MEMORY	histogram_values	576
+single-day-access-log-standard		MEMORY	log_analysis	55259354
+single-day-access-log-standard		MEMORY	log_messages	58794129
+single-day-access-log-standard		MEMORY	log_messages_counters	120
+single-day-access-log-standard		MEMORY	log_occurrences	18844
+single-day-access-log-standard		MEMORY	log_sessions	120
+single-day-access-log-standard		MEMORY	log_stats	32133
+single-day-access-log-standard		MEMORY	log_threadpools	240
+single-day-access-log-standard		MEMORY	message_key_order	1879
+single-day-access-log-standard		MEMORY	threadpool_activity	778
+single-day-access-log-standard		MEMORY	udm_distinct	120
+single-day-access-log-standard		MEMORY	udm_last_value	120
+single-day-access-log-standard		MEMORY	unattributed	34410387
+single-day-access-log-standard		MEMORY_FINAL	log_messages	58794129
+single-day-access-log-standard		MEMORY_FINAL	log_analysis	12095
+single-day-access-log-standard		MEMORY_FINAL	consolidation_clusters	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_patterns	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_key_message	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_unmatched	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_ngram_index	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_key_trigrams	120
+single-day-access-log-standard		MEMORY_FINAL	consolidation_key_trigrams_norm	120
+single-day-access-log-standard		COUNTS	log_messages_entries	3184
+single-day-access-log-standard		COUNTS	log_occurrences_entries	15
+single-day-access-log-standard		COUNTS	log_stats_entries	15
+single-day-access-log-standard		COUNTS	log_analysis_entries	15
+single-day-access-log-standard		COUNTS	log_messages_population	3184
+single-day-access-log-standard		COUNTS	threadpool_entries	0
+single-day-access-log-standard		COUNTS	format_scan_subs_compiled	1
+single-day-access-log-standard		COUNTS	format_scan_sub_cache_hits	0
+single-day-access-log-standard		CONFIG	terminal_width	200
+single-day-access-log-standard		CONFIG	terminal_height	24
+single-day-access-log-standard		CONFIG	max_log_message_length	200
+single-day-access-log-standard		CONFIG	time_bucket_size	60
+single-day-access-log-standard		CONFIG	bucket_size_seconds	3600.00
+single-day-access-log-top25-consolidate	-n 25 -g	version	0.18.0-453
+single-day-access-log-top25-consolidate	-n 25 -g	FILES	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	155210047
+single-day-access-log-top25-consolidate	-n 25 -g	lines_read	761698
+single-day-access-log-top25-consolidate	-n 25 -g	lines_included	761698
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	detect/registry_build	0.007
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	detect/scan_sub_compile	0.005
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	parse/read_files	11.260
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	accumulate/initialize_buckets	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/group_similar	4.330
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics	0.308
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/bucket_stats	0.157
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/population_walk	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/sort_selection	0.001
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/group_calc	0.150
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/calculate_statistics/untimed	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/heatmap_statistics	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	finalize/histogram_statistics	0.000
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	render/normalize_data	0.001
+single-day-access-log-top25-consolidate	-n 25 -g	TIMING	total	15.906
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	rss_peak	184696832
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	bucket_stats_counters	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	bucket_stats_counters_hl	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_clusters	50804405
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_key_message	909346
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_key_trigrams	4343764
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_key_trigrams_norm	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_ngram_index	5078271
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_patterns	120923
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_posting_size	360923
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	consolidation_unmatched	578658
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	format_scan_subs	770048
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_counters	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_counters_hl	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_data	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_data_hl	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	heatmap_raw_hl	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	histogram_counters	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	histogram_counters_hl	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	histogram_values	576
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_analysis	55259354
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_messages	58777363
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_messages_counters	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_occurrences	18844
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_sessions	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_stats	32133
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	log_threadpools	240
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	message_key_order	3854
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	threadpool_activity	778
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	udm_distinct	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	udm_last_value	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY	unattributed	7635552
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	log_messages	56220122
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	log_analysis	12095
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_clusters	50804405
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_patterns	119803
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_key_message	65592
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_unmatched	240
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_ngram_index	120
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_key_trigrams	16440
+single-day-access-log-top25-consolidate	-n 25 -g	MEMORY_FINAL	consolidation_key_trigrams_norm	120
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	log_messages_entries	615
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	log_occurrences_entries	15
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	log_stats_entries	15
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	log_analysis_entries	15
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	log_messages_population	615
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	threadpool_entries	0
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	format_scan_subs_compiled	1
+single-day-access-log-top25-consolidate	-n 25 -g	COUNTS	format_scan_sub_cache_hits	0
+single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	terminal_width	200
+single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	terminal_height	24
+single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	max_log_message_length	200
+single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	time_bucket_size	60
+single-day-access-log-top25-consolidate	-n 25 -g	CONFIG	bucket_size_seconds	3600.00
+single-day-application-log-standard		version	0.18.0-453
+single-day-application-log-standard		FILES	logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log	89111117
+single-day-application-log-standard		lines_read	479904
+single-day-application-log-standard		lines_included	479904
+single-day-application-log-standard		TIMING	detect/registry_build	0.008
+single-day-application-log-standard		TIMING	detect/scan_sub_compile	0.004
+single-day-application-log-standard		TIMING	parse/read_files	3.479
+single-day-application-log-standard		TIMING	accumulate/initialize_buckets	0.000
+single-day-application-log-standard		TIMING	finalize/group_similar	0.000
+single-day-application-log-standard		TIMING	finalize/calculate_statistics	0.007
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/bucket_stats	0.000
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/population_walk	0.000
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/sort_selection	0.007
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/group_calc	0.000
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/threadpool_stats	0.000
+single-day-application-log-standard		TIMING	finalize/calculate_statistics/untimed	0.000
+single-day-application-log-standard		TIMING	finalize/heatmap_statistics	0.000
+single-day-application-log-standard		TIMING	finalize/histogram_statistics	0.000
+single-day-application-log-standard		TIMING	render/normalize_data	0.001
+single-day-application-log-standard		TIMING	total	3.494
+single-day-application-log-standard		MEMORY	rss_peak	32997376
+single-day-application-log-standard		MEMORY	bucket_stats_counters	120
+single-day-application-log-standard		MEMORY	bucket_stats_counters_hl	120
+single-day-application-log-standard		MEMORY	consolidation_clusters	120
+single-day-application-log-standard		MEMORY	consolidation_key_message	120
+single-day-application-log-standard		MEMORY	consolidation_key_trigrams	120
+single-day-application-log-standard		MEMORY	consolidation_key_trigrams_norm	120
+single-day-application-log-standard		MEMORY	consolidation_ngram_index	120
+single-day-application-log-standard		MEMORY	consolidation_patterns	120
+single-day-application-log-standard		MEMORY	consolidation_posting_size	120
+single-day-application-log-standard		MEMORY	consolidation_unmatched	120
+single-day-application-log-standard		MEMORY	format_scan_subs	786432
+single-day-application-log-standard		MEMORY	heatmap_counters	120
+single-day-application-log-standard		MEMORY	heatmap_counters_hl	120
+single-day-application-log-standard		MEMORY	heatmap_data	120
+single-day-application-log-standard		MEMORY	heatmap_data_hl	120
+single-day-application-log-standard		MEMORY	heatmap_raw	120
+single-day-application-log-standard		MEMORY	heatmap_raw_hl	120
+single-day-application-log-standard		MEMORY	histogram_counters	120
+single-day-application-log-standard		MEMORY	histogram_counters_hl	120
+single-day-application-log-standard		MEMORY	histogram_values	576
+single-day-application-log-standard		MEMORY	log_analysis	240
+single-day-application-log-standard		MEMORY	log_messages	2872116
+single-day-application-log-standard		MEMORY	log_messages_counters	120
+single-day-application-log-standard		MEMORY	log_occurrences	22310
+single-day-application-log-standard		MEMORY	log_sessions	120
+single-day-application-log-standard		MEMORY	log_stats	120
+single-day-application-log-standard		MEMORY	log_threadpools	240
+single-day-application-log-standard		MEMORY	message_key_order	2879
+single-day-application-log-standard		MEMORY	threadpool_activity	778
+single-day-application-log-standard		MEMORY	udm_distinct	120
+single-day-application-log-standard		MEMORY	udm_last_value	120
+single-day-application-log-standard		MEMORY	unattributed	29309045
+single-day-application-log-standard		MEMORY_FINAL	log_messages	2872116
+single-day-application-log-standard		MEMORY_FINAL	log_analysis	240
+single-day-application-log-standard		MEMORY_FINAL	consolidation_clusters	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_patterns	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_key_message	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_unmatched	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_ngram_index	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_key_trigrams	120
+single-day-application-log-standard		MEMORY_FINAL	consolidation_key_trigrams_norm	120
+single-day-application-log-standard		COUNTS	log_messages_entries	6512
+single-day-application-log-standard		COUNTS	log_occurrences_entries	24
+single-day-application-log-standard		COUNTS	log_stats_entries	24
+single-day-application-log-standard		COUNTS	log_analysis_entries	0
+single-day-application-log-standard		COUNTS	log_messages_population	6512
+single-day-application-log-standard		COUNTS	threadpool_entries	0
+single-day-application-log-standard		COUNTS	format_scan_subs_compiled	1
+single-day-application-log-standard		COUNTS	format_scan_sub_cache_hits	0
+single-day-application-log-standard		CONFIG	terminal_width	200
+single-day-application-log-standard		CONFIG	terminal_height	24
+single-day-application-log-standard		CONFIG	max_log_message_length	200
+single-day-application-log-standard		CONFIG	time_bucket_size	60
+single-day-application-log-standard		CONFIG	bucket_size_seconds	3600.00

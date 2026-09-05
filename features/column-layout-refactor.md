@@ -87,6 +87,29 @@ Removed — see [DD-04](#dd-04-legend-as-single-content-driven-column). Legend i
 
 ## Layout Engine Requirements
 
+### Minimum supported terminal width
+
+**100 columns** (architect's decision, 2026-08-30; initially set at 90 and raised
+the same day). Below that, rendering is not undertaken to be correct.
+
+This exists to make the rendering contract assertable. The tool's output model
+rests on known character placement — columns line up down a table, bars are
+proportional across rows, the timeline aligns with its axis. A line longer than
+the terminal soft-wraps onto the next row and displaces everything below it, so
+**no line the tool prints may exceed the terminal width**, and that is a
+rendering failure whatever the content says. Without a stated floor there is no
+range to assert it over.
+
+Known open defects against this contract, found 2026-08-30 and not yet fixed:
+#497 (messages-table rows overflow between 100 and 115 columns; the heatmap
+overflows at every width, by up to 54 columns) and #498 (messages-table headings
+degrade to unreadable stubs and stop aligning with the columns they name).
+
+A claim about rendering names the view it was measured on. The default view, the
+heatmap (`-hm`) and the histogram (`-hg`) allocate width differently and fail
+differently: measuring only the default view produced a "clean at 120 and above"
+finding that the heatmap contradicts at every width.
+
 ### Width Allocation Pipeline
 
 The layout engine allocates terminal width through an 8-step pipeline:

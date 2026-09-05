@@ -168,6 +168,11 @@ against the tiny fixture tree.
 `print_help()` and the options reference in `docs/usage.md` updated in the
 same commit — parity enforced by `tests/validate-help-content.sh`.
 
+The quoting a `-r` pattern needs in order to survive the shell, and the
+guidance the no-files failure carries when a sweep selects nothing, are owned
+by `features/445-unquoted-glob-consumed-by-shell-before-r.md`. Nothing there
+changes which files `-r` selects.
+
 ## Implementation notes
 
 - **N1 — The sweep is an explicit breadth-first queue, not `File::Find`.**

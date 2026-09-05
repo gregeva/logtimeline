@@ -31,6 +31,22 @@ perl -i -pe 's/\Q$some_regex\E/replacement/' file    # WRONG
 
 For literal in-file replacement, prefer an editor tool with explicit literal matching over a `perl -i -pe` one-liner.
 
+**4. Run a harness with `bash` or by its own path — never `sh`.**
+
+Every `tests/validate-*.sh` carries a `#!/usr/bin/env bash` shebang, and three of them (`validate-format-detection.sh`, `validate-csv-output.sh`, `validate-statistics.sh`) compare captures with process substitution:
+
+```bash
+diff <(grep -av '^duration_unit_override' "$a") <(grep -av '^duration_unit_override' "$b")
+```
+
+`<(...)` is not POSIX. Under `sh` it is a **syntax error**, and a harness that runs its assertions through `eval` reports that error as a failed assertion — a green codebase reads as a defect, in the assertion whose comparison happens to be the most interesting one. Chasing it leads to a fix for a bug that was never there.
+
+Run `./tests/validate-x.sh` or `bash ./tests/validate-x.sh`. Never `sh ./tests/validate-x.sh`.
+
+**5. Harness runs are not concurrent.**
+
+The harnesses share one scratch directory, the `logs/` corpus and the `CI=1` cache. Two suites running at once — a gate in a worktree while another check runs in the main checkout — corrupt each other's intermediate CSVs and produce failures that belong to neither tree. Before starting a suite, check nothing else is running (`pgrep -fl validate-`), and treat any failure observed during a concurrent run as unattributed until it is reproduced alone.
+
 ## grep and non-ASCII output
 
 `grep` switches to binary mode when a stream contains non-ASCII bytes, printing `Binary file matches` (or nothing) instead of matching lines. The symptom is a grep returning **nothing** for a line plainly visible in `head`, which reads as "the feature is broken" rather than "the encoding broke the match". This cost hours during #289, grepping captured harness output whose `contract:` / `produced_by:` strings carried `§` and `—`.
@@ -43,6 +59,6 @@ The underlying design rule still holds and is enforced by the harness contract: 
 
 ## Running `ltl` from an agent session
 
-Always pass `--disable-progress`. Progress output (spinners, per-file percentages, ETA) is written for a human watching a terminal; in a captured session it is a large volume of redundant tokens. This is separate from the rule that user-facing *informational* messages must never be gated behind that flag — see `CLAUDE.md`.
+Always pass `--disable-progress`. Progress output — the read pass's rewritten status line carrying the file and overall percentages, the file counter, line counts and rate, plus the per-phase "Calculating ..." lines — is written for a human watching a terminal; in a captured session it is a large volume of redundant tokens. This is separate from the rule that user-facing *informational* messages must never be gated behind that flag — see `CLAUDE.md` § Before writing or changing code.
 
 `--terminal-width N` (hidden option) sets the render width in piped or non-TTY contexts. The `COLUMNS` environment variable does **not** work: `ltl` calls `GetTerminalSize()`, which needs a real TTY. At narrow widths (80–100) omit columns explicitly (`-os -od -ov`) rather than relying on truncation.

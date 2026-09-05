@@ -1,0 +1,68 @@
+# Known Layer-3 failures: comparisons that breach the blocking threshold because
+# of a filed, open defect in ltl — not because the harness is miscalibrated.
+#
+# An entry suppresses the block for exactly one (scenario, file_kind, column,
+# key_class) combination and is reported as XFAIL, with its issue, on every run.
+# It is NOT a tolerance: the comparison still happens and the deviation is still
+# printed.
+#
+# Entries are self-clearing. If a registered comparison PASSES, the engine fails
+# the run with "known failure no longer reproduces" — so the fix cannot land
+# without the entry being removed in the same change.
+#
+# Columns:
+#   scenario    — scenario id from scenarios.tsv
+#   file_kind   — messages | stats
+#   column      — the CSV column whose comparison is expected to breach
+#   key_class   — merged (row key contains the consolidation wildcard '*')
+#                 | any
+#   issue       — the open defect this is waiting on
+#   note        — why, in one line
+#
+# ---------------------------------------------------------------------------
+# #469: consolidated rows are addressed on each cluster's own bin edges, so the
+# members must be projected onto a shared geometry before they can be combined.
+#
+# A consolidated row's percentiles are derived from the member histograms of the
+# keys the row absorbed, projected onto one shared geometry. The oracle derives
+# the same row by pooling those keys' raw durations into a single histogram. One
+# projection is not zero projections, so the two cannot agree closer than one
+# bucket - 4.44% at the per-message surface's default 53 buckets per decade.
+# Every entry below is inside that bound; IQR entries are larger because an IQR
+# is a difference of two percentiles and carries both.
+#
+# Attribution history, because it has moved twice and the reasoning is the point.
+# Registered against #459 (combination order) on 2026-08-26, on the assumption
+# that its compounding was the cause. It was not: #459 landed on 2026-08-27,
+# removing the compounding and proving order-independence, and these comparisons
+# still breach. They moved to #460 (percentile source) with the bound as the
+# stated cause. They are not #460's either: #460 removes the display projection
+# that precedes histogram and heatmap percentiles, and the merged rows below do
+# not take that path - their percentiles already come from the un-projected
+# streaming entry, and their one projection is the collapse onto the shared
+# geometry. Measured on real grouped rows, that single projection leaves the
+# one-bucket bound on 1.54% (tomcat) and 2.08% (thingworx) of evaluations; see
+# features/459-bin-counter-combination-order.md sections 7 and 9.
+#
+# They clear under #469, which addresses consolidated rows on a shared bucket
+# grid and so performs no projection at all. Until then they are the accepted
+# residual bound, documented as such in features/187-histogram-bin-counter-
+# percentiles.md section R4. The entries are self-clearing and the engine will
+# insist.
+# ---------------------------------------------------------------------------
+scenario	file_kind	column	key_class	issue	note
+apache-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry, 4.0% against a 4.44% bucket
+codebeamer-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 3.0% against a 4.44% bucket
+codebeamer-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p25	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	p50	merged	469	one projection onto the shared geometry
+codebeamer-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both
+thingworx-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 4.2% against a 4.44% bucket
+thingworx-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p50	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p75	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p95	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p999	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both

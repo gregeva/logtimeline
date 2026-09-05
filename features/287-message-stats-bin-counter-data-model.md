@@ -46,7 +46,7 @@ Steps 1-4 are sequential prerequisites; all are shipped. Step 5 (this feature) c
 
 ### Integration
 
-Work lands on the issue branch `287-message-stats-bin-counter-data-model` per CLAUDE.md's development workflow. Release-branch integration is decided at the implementation-ticket level.
+Work lands on the issue branch `287-message-stats-bin-counter-data-model` per docs/process/workflow.md. Release-branch integration is decided at the implementation-ticket level.
 
 ## Terminology
 
@@ -66,7 +66,7 @@ This feature does **not** lock new decisions. It consumes the locked unified con
 | D1 — In-bin interpolation formula | #187 | `percentile($entry, $q)` (the #189 R4 primitive at `ltl:958`) applied per `(category, log_key)`; emitted ladder is P1, P5, P10, P25, P50, P75, P90, P95, P99, P999, P9999, P99999. |
 | D2 — Precision lever | #187 | `buckets_per_decade` default 53 for this surface. **NOT** 616 — bpd=616 is the F2/F3 streaming default per #34 R5 because F2/F3 partition counts are bounded ~70 (per-`time_bucket` or per-metric); F1 partition counts scale with `(category, log_key)` cardinality (unbounded), so bpd=616 would multiply per-partition memory by ~12× and exceed the memory budget the migration is supposed to bound. Tunable via `-pbpd N` / `--percentile-precision 1..9` on the run as a whole, applied uniformly. |
 | D4 — Overflow/underflow handling | #187 | Per-partition underflow/overflow counters per #189 R6; counted toward total N; per-quantile `out_of_range_bounded: high\|low\|none` audit in `-V`. |
-| D5 — Partition lifecycle | #187 | HdrHistogram-style auto-resize per partition. Lazy construct on first observation per `(category, log_key)`; seeded at 5 decades centered on first value; HdrHistogram-convention doubling on rebin. **No finalize re-bin** — surface 3 has no display geometry to anchor against (the summary table and CSV writer consume scalar percentile values, not partition bins), so #189 R12 `partition_rebin` is not used on this surface. |
+| D5 — Partition lifecycle | #187 | HdrHistogram-style auto-resize per partition. Lazy construct on first observation per `(category, log_key)`; seeded at 5 decades centered on first value; HdrHistogram-convention doubling on rebin. **No display-geometry finalize re-bin** — surface 3 has no display geometry to anchor against (the summary table and CSV writer consume scalar percentile values, not partition bins), so #189 R12 `partition_rebin` is never used here to project into display shape; its one use on this surface is the consolidation collapse onto a union geometry (R6). |
 | D7 — User opt-out | #187 | `--exact-percentiles` continues to force `raw` on this surface via the resolution chain in `choose_data_model` (`ltl:1394`). `-mdm bin` wins over `--exact-percentiles` when both are passed (per #266's resolution chain: per-surface flag > omnibus > internal logic, where `-ep` is consulted). `-V` reports `user_opt_out` on the `summary_table` and `csv_output` blocks when the resolved data model is `raw` and `-ep` was the reason. |
 | D8 — `-V` output format | #187 | `summary_table` and `csv_output` are added to `%migrated` (`ltl:2092`); per-consumer block emits the locked Decision 8 fields populated from real partition state. `csv_output` is a `shares_partitions_with: summary_table` short-form block per #189 R7. |
 | D10 — Prototype validation | #187 | Already discharged by #189's V1–V8 validation work; no additional prototype required for this surface (the primitive contract is unchanged and the producer call site is structurally simple). |
@@ -114,12 +114,12 @@ The reason `m2_sum` is tracked even though `sum_of_squares` is already present: 
 
 #### R2.3 — Consolidation merge under `-mdm bin`
 
-`merge_consolidation_stats` (`ltl:5003–5020`) merges two `(category, log_key)` clusters during fuzzy consolidation. Under `-mdm raw` it appends `durations[]` arrays and sums `sum_of_squares` / `total_duration` / `occurrences`. Under `-mdm bin`, the same sub must:
+`merge_consolidation_stats` merges two `(category, log_key)` clusters during fuzzy consolidation. Under `-mdm raw` it appends `durations[]` arrays and sums `sum_of_squares` / `total_duration` / `occurrences`. Under `-mdm bin` it sums the scalar and UDM accumulators and hands the counter state to `merge_bin_state` (`if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') { merge_bin_state($target, $source); }`). Under `-mdm bin`, the combined path must:
 
-- Per-bin add the two clusters' counter-store entries (their `bins`, `overflow`, and `underflow` fields). When the two clusters' partitions have different `[min, max]` extents, the narrower partition is extended via #189's `partition_extend` to align with the wider one before the per-bin add. The geometric-midpoint remap is the existing #189 mechanism; no new primitive surface.
+- **Defer the counter combination instead of adding pairwise.** `merge_bin_state` either observes a single line's value through `counter_entry_observe` or calls `merge_bin_counter_entries`, which performs no bin arithmetic at all: it pushes the source entry (and the source's own members) onto the target's `member_entries` list and folds `overflow`, `underflow` and `rebin_growth`. The combination happens once, later, in `collapse_bin_counter_entry`, which computes ONE union geometry over the entry's own counters and every member at the same time (`$union_min` / `$union_max` taken across all sides, `$union_bin_count = int($bpd * (log($union_max/$union_min)/log(10)))`) and projects each side whose geometry differs from the union into it exactly once via `partition_rebin`, from that side's pristine counts. A side whose geometry already equals the union is not projected at all. Because every side is projected once from untouched counts, the combined result does not depend on the order the clusters arrived in. Overflow and underflow counters add directly. The geometric-midpoint remap is the existing #189 mechanism; no new primitive surface.
 - Merge the moment sidecars on the per-key hash via the Chan-Welford-Pébay parallel-merge formulas (Algorithm appendix). `sum_of_squares` and `total_duration` add directly (they are linear); `min`/`max` take elementwise min/max; `m2_sum`/`m3_sum`/`m4_sum` use the locked merge formulas.
 
-The merge produces a single combined cluster whose state is observationally identical (up to the bin-resolution bound on percentiles, and numerically identical on the sidecar-derived statistics) to what would have been produced by feeding every sample of both clusters into a single partition from scratch.
+The merge produces a single combined cluster whose sidecar-derived statistics are numerically identical to what would have been produced by feeding every sample of both clusters into a single partition from scratch. Percentiles carry the residual bound the collapse itself introduces: projecting a member's counts onto the union geometry displaces mass by at most one bucket, so a consolidated row's percentiles stay within about one bucket of the pooled-sample answer. Measured on real duration streams, a single collapse leaves that one-bucket bound in force on 1.54% of evaluations (Tomcat access log) and 2.08% (ThingWorx scriptlog); on generated maximally-disjoint pairs the rate is 1 in 4,000, worst case 1.0008 bin widths. See `features/459-bin-counter-combination-order.md` sections 7 and 9.
 
 #### R2.4 — `-mdm raw` producer path unchanged
 
@@ -181,7 +181,9 @@ Per-`(category, log_key)` partitions follow #187 Decision 5's locked auto-resize
 - Seeded at 5 decades centered on the first observed value (`min = v_0 / sqrt(10^5)`, `max = v_0 · sqrt(10^5)`).
 - Extended via HdrHistogram-convention doubling when subsequent values fall outside `[min, max]` (via #189's `partition_extend`).
 
-**No finalize re-bin** is performed. The surface 3 consumers (summary table cells, CSV scalars) consume scalar percentile values via `percentile($entry, $q)`, not partition bins. There is no display geometry to project onto. The `partition_rebin` wrapper added by #189 R12 (for F2/F3 display-geometry-bound consumers per #201) is not used on this surface.
+**No display-geometry finalize re-bin** is performed. The surface 3 consumers (summary table cells, CSV scalars) consume scalar percentile values via `percentile($entry, $q)`, not partition bins. There is no display geometry to project onto, so the F2/F3 use of the #189 R12 `partition_rebin` wrapper — projecting a partition into display shape — never happens here.
+
+`partition_rebin` is nonetheless used on this surface for one purpose: `collapse_bin_counter_entry` calls it to project a consolidated row's members onto their shared union geometry (R2.3). That collapse is the only projection the per-message counters take, and it is reported as `rebin_finalize_events` (one per member actually re-projected). It is also the only re-binning a percentile on this surface passes through: a row that was never consolidated is read straight off its streaming partition.
 
 ### R7 — Overflow / underflow per #187 Decision 4
 
@@ -225,15 +227,25 @@ consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: <N>
-  total_rebin_events: <N>
+  rebin_growth_events: <N>
+  rebin_merge_events: <N>
+  rebin_finalize_events: <N>
   max_partition_bins: <N>
   partitions_with_overflow_count: <N>
   partitions_with_underflow_count: <N>
+  overflow_total: <N>
+  underflow_total: <N>
   counter_memory_bytes: <N>
+  members_live: <N>
+  members_max: <N>
+  members_memory_bytes: <N>
+  members_per_partition: p50=<N> p95=<N> p99=<N> max=<N>
   rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>
   percentiles_emitted: p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
   out_of_range_bounded: p1=<none|low|high> ... p99999=<none|low|high>
 ```
+
+Amended 2026-08-26 by #462: `total_rebin_events` is retired in favour of the three per-mechanism counters, the out-of-range totals and the retention fields are emitted, and `counter_memory_bytes` becomes a derived figure. `summary_table` reads percentiles directly from its streaming partitions and never projects into display shape, so `rebin_finalize_events` counts one thing only on this surface: the members a consolidated row re-projected onto its shared union geometry (R2.3). It reads zero on a run that consolidated nothing. `rebin_merge_events` counts re-binning performed while a combination is being accumulated, and reads zero because the combination is deferred to a single projection per side.
 
 The `csv_output` block emits the shared-partition short form per #189 R7:
 
@@ -245,7 +257,7 @@ consumer: csv_output
   out_of_range_bounded: p1=<none|low|high> ... p99999=<none|low|high>
 ```
 
-Under `-mdm raw` (or `-ep`), both consumers report `path: pre_migration` or `path: user_opt_out` respectively, with no telemetry block (matching today's behavior for any pre-migration consumer).
+Under `-mdm raw`, both consumers report `path: user_opt_out`, with no telemetry block — the path line alone is the report.
 
 #### R8.2 — `=== percentile-algorithm / message-stats ===` updated
 
@@ -293,7 +305,7 @@ Exact-value statistics produced via sidecars match the raw path modulo the order
 
 Under `-mdm raw` (and under `-mdm` unset → default raw), every output surface — summary table cell values, MESSAGES CSV cell values, `-V` runtime-config rows, `-V percentile-algorithm` block, `-V histogram-bin-counters` blocks for surfaces other than `summary_table`/`csv_output` — is byte-identical to the pre-#287 output.
 
-The `summary_table` and `csv_output` blocks in `-V histogram-bin-counters` change from `path: pre_migration` to `path: pre_migration` (unchanged — they only flip to `unified` under `-mdm bin`) or `path: user_opt_out` (when `-ep` is set). The block structure itself is unchanged.
+The `summary_table` and `csv_output` blocks in `-V histogram-bin-counters` report `path: unified` under `-mdm bin` and `path: user_opt_out` when the surface resolves to `raw`. The block structure itself is unchanged.
 
 ### R13 — Boundaries with other features
 
@@ -325,7 +337,7 @@ This feature does NOT own:
 | `ltl:7449–7453` (consolidation s1-matched stats_source) | Branch on resolved data model: under bin, route the duration sample into the s1-cluster's working counter store via `counter_update` instead of initializing `stats_source->{durations} = [$duration]`. Update sidecars. |
 | `ltl:7500–7513` (parse-loop duration update) | Branch on resolved data model: under bin, additionally call `counter_update(\%log_messages_counters, "$category\x1f$log_key", $duration)` and update `min`/`max`/`m2_sum`/`m3_sum`/`m4_sum` via the Welford-Pébay online formulas. The `push @{ ... {durations}}, $duration` at `ltl:7506` remains until Commit 5 (the memory-win step) — keeps a safety net through validation. |
 | `ltl:4582–4583` (cluster reinject into `%log_messages`) | Under bin: move the cluster's counter-store entry to `%log_messages_counters{"$category\x1f$canonical_log_key"}`; copy sidecar fields into the per-key hash. Under raw: unchanged (cluster's `durations[]` copied as today). |
-| `ltl:5003–5020` (`merge_consolidation_stats`) | Add the bin-merge branch per R2.3: per-bin add the two counter-store entries (extending the narrower via `partition_extend` first); merge sidecars via Chan-Welford-Pébay formulas. |
+| `merge_consolidation_stats` (grep `sub merge_consolidation_stats`) | Add the bin-merge branch per R2.3: delegate to `merge_bin_state`, which merges the sidecars via the Chan-Welford-Pébay formulas (gated on `$message_stats_demand_shape`) and defers the counter combination to `merge_bin_counter_entries` (member accumulation plus the `overflow`/`underflow`/`rebin_growth` fold). `collapse_bin_counter_entry` performs the single union-geometry `partition_rebin` projection per side at finalize. |
 | `ltl:8616–8651` (per-key dispatch in `calculate_all_statistics`) | Under `dm = 'bin'`, call `calculate_statistics_bin($log_messages{$category}{$log_key}, $log_messages_counters{"$category\x1f$log_key"})` and store the return tuple. Under raw, the existing `calculate_statistics($aggregated_data)` runs unchanged. |
 | `ltl` (new sub, alongside `calculate_statistics`) | `calculate_statistics_bin($sidecar_entry, $counter_entry)` — returns the 22-tuple per R3.2. Sidecar-derived stats from `$sidecar_entry`; percentile ladder via `percentile($counter_entry, $q)` invocations. |
 | `ltl` (new sub, alongside `finalize_heatmap_unified` at `ltl:7848`) | `finalize_message_stats_unified()` — captures `$bin_counter_telemetry{summary_table} = snapshot_counter_telemetry(\%log_messages_counters)` and aliases `$bin_counter_telemetry{csv_output}` to the same hashref. Runs unconditionally when `%log_messages_counters` is non-empty. |
@@ -335,7 +347,7 @@ This feature does NOT own:
 | `tests/statistics-drift/baselines/{apache,tomcat,thingworx,codebeamer}-bin-data-model/messages.csv` | Re-capture against the new bin path (R9.1). |
 | `docs/usage.md` (the `-mdm` entry) | Update the description: remove "selector resolved but currently only the raw reduction is implemented for this surface; `bin` lands in a follow-up". |
 | `print_help()` | Same update for the `-mdm` help line at `ltl:3773`. |
-| `releases/v0.15.0.md` | One bullet referencing #287 per CLAUDE.md release process. |
+| `releases/v0.15.0.md` | One bullet referencing #287 per docs/process/workflow.md § Merge and close. |
 | `CLAUDE.md` | No change unless a release-process surface mentions the surface-3 fallback; sweep to confirm. |
 
 ## Algorithm appendix
@@ -379,7 +391,7 @@ The store-entry shape (`{partition, bins, overflow, underflow}`) is the locked #
 
 ### Chan-Welford-Pébay parallel-merge for consolidation
 
-When two clusters A and B are merged in `merge_consolidation_stats` (R2.3), the moment accumulators combine as follows:
+When two clusters A and B are merged (R2.3), the moment accumulators are combined by `merge_bin_state` as follows:
 
 ```
 n_AB    = n_A + n_B
@@ -399,17 +411,18 @@ M4_AB   = M4_A + M4_B
         + 4 * delta   * (n_A * M3_B - n_B * M3_A) / n_AB
 ```
 
-`occurrences` (= `n`), `total_duration` (= `Σx`), `sum_of_squares` (= `Σx²`) are linear and add directly. `min` and `max` take elementwise min/max. The bin partitions per-bin-add after aligning their geometries via #189's `partition_extend` (the narrower of the two is extended to the wider; existing counts retain their indices per #187 Decision 5's lifecycle).
+`occurrences` (= `n`), `total_duration` (= `Σx`), `sum_of_squares` (= `Σx²`) are linear and add directly. `min` and `max` take elementwise min/max. The bin partitions are not combined here at all: `merge_bin_counter_entries` retains B (and B's own members) as members of A, and `collapse_bin_counter_entry` combines every side onto one union geometry later — no side keeps its indices unless its geometry already equals the union, since each non-conforming side is remapped by geometric midpoint through `partition_rebin`.
 
 ### Bin-counter merge
 
-The bin partitions of clusters A and B are merged via #189's existing primitives:
+The bin partitions of clusters A and B are combined in two stages, via #189's existing primitives:
 
-- If `A.partition.[min, max] ⊇ B.partition.[min, max]`, then `partition_extend(B, A.min, A.max)` brings B onto A's geometry; per-bin add.
-- If `B.partition.[min, max] ⊇ A.partition.[min, max]`, symmetric.
-- Otherwise (overlapping but neither contains the other), extend whichever is narrower in each direction.
+- **At merge time (`merge_bin_counter_entries`), nothing is added.** B, together with B's own members, is pushed onto A's `member_entries` list; only `overflow`, `underflow` and `rebin_growth` fold into A. A's own counters are left untouched, so no displacement is introduced and nothing depends on which cluster arrived first.
+- **At collapse time (`collapse_bin_counter_entry`), one union geometry is computed over A and every member at once** — `$union_min` / `$union_max` as the min/max across all sides, `$union_bin_count = int($bpd * (log($union_max/$union_min)/log(10)))` — and each side whose geometry differs from the union is projected into it exactly once, from its pristine counts, via `partition_rebin`. A side already on the union geometry is not projected. Every side is therefore remapped at most once, and the result is independent of merge order.
 
-Overflow and underflow counters add directly. No new primitive surface is required; this is the existing #189 `partition_extend` composition pattern.
+Overflow and underflow counters add directly. No new primitive surface is required; this composes #189's `partition_rebin` wrapper.
+
+Pairwise projection — extending the narrower partition onto the wider one at each merge — is deliberately not used: it compounds displacement across successive merges and makes the stored answer depend on the order clusters arrived in.
 
 ## Edge cases
 
@@ -428,7 +441,7 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 | Single observation per key | Partition has one populated bin; all percentiles equal that value. `std_dev`, `cv`, `skewness`, `kurtosis`, `bimodality_coef` all undef (n < 4 guard at `ltl:8795` + (n < 2) guard at `ltl:8765`). Matches raw path. |
 | Per-key `occurrences = 0` | `calculate_statistics_bin` returns undef (matches `calculate_statistics`'s early return at `ltl:8752`). |
 | `--omit-durations` set | No duration accumulation at producer side (existing gate at `ltl:7500`); no partition is allocated for any key; consumer skips the dispatch entirely (gate at `ltl:8616`). Output unchanged. |
-| Fuzzy consolidation merging two clusters | R2.3 applies. Sidecars merge via Chan-Welford-Pébay; partitions per-bin-add after geometry alignment via `partition_extend`. |
+| Fuzzy consolidation merging two clusters | R2.3 applies. Sidecars merge via Chan-Welford-Pébay in `merge_bin_state`; the partitions are retained as members and combined once at collapse onto a single union geometry via `partition_rebin`. |
 | Cluster reinject after consolidation | R2.1 cluster-reinject site at `ltl:4582–4583` moves the cluster's counter-store entry into `%log_messages_counters{"$cat\x1f$canonical_key"}` and copies the cluster's sidecar fields into `%log_messages{$cat}{$canonical_key}`; no `durations[]` array under bin. |
 | `-pbpd N` or `--percentile-precision M` (precision lever) | Applied uniformly per #187 Decision 2. The active bpd shapes every partition's bin count. `-V` reports the active bpd and source per Decision 8. |
 
@@ -450,7 +463,7 @@ Overflow and underflow counters add directly. No new primitive surface is requir
 
 ### `-V` output
 
-- [x] `=== histogram-bin-counters ===` `summary_table` block reports `path: unified` under `-mdm bin`; `path: user_opt_out` under `-mdm raw`/default. (Resolves to `user_opt_out`, not the originally-worded `pre_migration`, because #287 added `summary_table` to `%migrated`; the `-ep` opt-out path was removed with the flag.)
+- [x] `=== histogram-bin-counters ===` `summary_table` block reports `path: unified` under `-mdm bin`; `path: user_opt_out` under `-mdm raw`/default.
 - [x] `=== histogram-bin-counters ===` `csv_output` block emits `shares_partitions_with: summary_table` short form per #189 R7.
 - [x] `summary_table` block fields populated from real partition state via `%bin_counter_telemetry`.
 - [x] `=== percentile-algorithm / message-stats ===` reports `effective_algorithm: exponential_interpolation_within_bucket` under `-mdm bin`; `nearest_rank` otherwise. No `effective_algorithm_note:` line emitted for this surface.

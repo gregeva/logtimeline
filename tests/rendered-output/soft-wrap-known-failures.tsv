@@ -1,0 +1,19 @@
+# Known soft-wrap failures: regression scenarios whose render exceeds the
+# terminal width because of a filed, open defect in ltl — not because the check
+# is miscalibrated.
+#
+# An entry suppresses the block for exactly one scenario and is reported as
+# XFAIL, with its issue, on every run. It is NOT a tolerance: the check still
+# runs, the overflow is still measured, and the offending lines are still
+# printed. A scenario that STOPS overflowing while listed here is reported as an
+# unexpected pass, so a fix cannot land silently and leave a stale entry behind.
+#
+# Remove an entry when its issue is fixed. Adding one requires a filed issue.
+#
+# scenario<TAB>issue<TAB>surface
+heatmap-duration-w100	497	heatmap width is a fixed default added to a terminal budget that cannot hold it
+heatmap-count-w100	497	heatmap width is a fixed default added to a terminal budget that cannot hold it
+heatmap-duration-w100-bin	497	heatmap width is a fixed default added to a terminal budget that cannot hold it
+heatmap-count-w100-bin	497	heatmap width is a fixed default added to a terminal budget that cannot hold it
+errrate-diagnostics-highlighted-failure-w160	497	timeline legend grows with a highlighted category and the row is not re-fitted
+classification-percentages-w120-access-120	497	run options echo prints the raw command line without fitting it to the terminal width

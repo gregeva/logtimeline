@@ -15,6 +15,10 @@
 # so no file contributes lines and none would be distinguishable there, but
 # each still appears as a `file:` entry here.
 #
+# Two scenarios instead assert on stderr, because what they test is a
+# diagnostic and not a selection: the note naming directories the sweep could
+# not read, and the guidance a failed `-r` run gives about quoting the pattern.
+#
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the file-selection invariant being tested
 #   - produced_by: where in ltl the behaviour is produced (function name)
@@ -336,6 +340,65 @@ if capture_selection "$TMP_DIR/silent.sel" $SHAPE -r "$FIXTURE_ROOT/*.888"; then
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission, guarded on @unreadable_directories)' \
         contract    'features/420-recursive-file-selection.md § D8 — unreadable directories: collect, continue, report once at the end'
 fi
+
+# --- Scenario: a -r run that selects nothing points at quoting the pattern ---
+# Invocation shape (tests/HARNESS-DESIGN.md § Invocation coherence): the
+# assertion reads a stderr diagnostic emitted while the file arguments are
+# still being expanded, before a bucket, a table or a -V section exists, so the
+# run carries no analysis options at all — the pattern is the whole input.
+current_scenario="no-match-quoting-guidance"
+echo "[$current_scenario]"
+GUIDANCE_ANCHOR='Hint: with -r, put the file pattern in double quotes'
+CONTRACT_GUIDANCE='features/445-unquoted-glob-consumed-by-shell-before-r.md § The failure message — the quoting guidance rides on the no-files failure and on no other path'
+
+for variant in "with-r" "without-r"; do
+    # The array is seeded with the two options every invocation in this harness
+    # carries: bash 3.2 expands an empty array under `set -u` as an unbound
+    # variable, which would abort the subshell before ltl ever ran.
+    nomatch_args=(--disable-progress -ni)
+    [[ "$variant" == "with-r" ]] && nomatch_args+=(-r)
+    set +e
+    ( cd "$TMP_DIR" && "$LTL" "${nomatch_args[@]}" 'no-such-*.888' ) \
+        > "$TMP_DIR/nomatch-$variant.out" 2>"$TMP_DIR/nomatch-$variant.stderr"
+    nomatch_rc=$?
+    set -e
+    # Runtime-warning cleanliness (HARNESS-DESIGN.md § Runtime-warning
+    # cleanliness). The intentional diagnostics this scenario asserts on never
+    # carry the ` at <file> line <N>` suffix, so both live on one capture.
+    if ! assert_no_runtime_warnings "$TMP_DIR/nomatch-$variant.stderr" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+    assert_command \
+        command     "[ $nomatch_rc -eq 2 ] && grep -aqF -- 'unable to open any files' '$TMP_DIR/nomatch-$variant.stderr'" \
+        label       "a pattern matching nothing is a hard error ($variant)" \
+        asserts     'A file pattern that selects no file leaves nothing to read, so the run stops with the same could-not-open-any-files error whether or not -r was given' \
+        produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl, rendered via print_usage()' \
+        contract    'features/445-unquoted-glob-consumed-by-shell-before-r.md § The failure message — a pattern matching no file stops the run with the same could-not-open-any-files error, with or without -r'
+done
+
+assert_command \
+    command     "grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/nomatch-with-r.stderr'" \
+    label       'the -r no-match failure tells the user to quote the pattern' \
+    asserts     'When -r selected nothing, the failure names the commonest cause the tool cannot detect for itself: the shell consumed the pattern before ltl started. The guidance says to enclose the pattern in double quotes, and why' \
+    produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the -r hint handed to print_usage()), rendered by print_usage()' \
+    contract    "$CONTRACT_GUIDANCE"
+
+assert_command \
+    command     "! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/nomatch-without-r.stderr'" \
+    label       'the same failure without -r carries no quoting guidance' \
+    asserts     'The guidance is specific to -r: without it, a pattern the shell expanded selects exactly what ltl would have selected itself, so quoting is not the explanation and the advice would misdirect' \
+    produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is conditional on -r)' \
+    contract    "$CONTRACT_GUIDANCE"
+
+# Reuses the stderr of the preceding scenario's successful -r sweep rather than
+# running ltl again: the assertion is that a run which selected files says
+# nothing about quoting, and that run has already happened.
+assert_command \
+    command     "[ -f '$TMP_DIR/silent.sel.stderr' ] && ! grep -aqF -- '$GUIDANCE_ANCHOR' '$TMP_DIR/silent.sel.stderr'" \
+    label       'a -r run that selected files carries no quoting guidance' \
+    asserts     'The guidance is tied to selecting nothing, never to the use of -r: a sweep that found its files says nothing about quoting, so a correct invocation is never warned about a problem it does not have' \
+    produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is reached only on the failure path)' \
+    contract    "$CONTRACT_GUIDANCE"
 
 echo
 echo "Results: $pass passed, $fail failed"

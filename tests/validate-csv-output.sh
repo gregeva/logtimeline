@@ -240,6 +240,117 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
     fi
 done < <(tail -n +2 "$SCENARIOS_TSV")
 
+# ---------------------------------------------------------------------------
+# Cache validity (#448).
+#
+# The cached CSV artifacts are shared with validate-statistics.sh and a CI=1 run
+# leaves them behind on purpose so that chaining is cheap. They must therefore
+# expire, or a session that never ran cleanup-test-artifacts.sh leaves them to
+# be read back forever: forty artifacts three days old validated 21 of 23
+# scenarios here against an ltl that predated two of the columns the contract
+# had since gained, and both harnesses then failed against output no version of
+# the tool would produce.
+#
+# The three staleness decisions are asserted against the helper directly, on a
+# crafted artifact, with no ltl run at all. The refresh itself is proved once,
+# end to end, on the smallest fixture scenario — the warning must reach stderr
+# and the artifact must actually be produced again.
+# ---------------------------------------------------------------------------
+
+CACHE_PERL="${PERL:-perl}"
+CACHE_SCENARIO="gc-g1-categories"
+CACHE_PRODUCED_BY='csv_cache_staleness_reason() and csv_cache_produce() in tests/lib/csv-cache.sh'
+CACHE_CONTRACT='tests/HARNESS-DESIGN.md § Cached capture artifacts expire; features/448-category-summary-share-and-bar.md § Harness defect found while fixing the monochrome option'
+
+cache_assert() {
+    local label="$1" rc="$2" detail="$3" asserts="$4"
+    if [[ "$rc" -eq 0 ]]; then
+        echo "PASS  cache-validity :: $label"
+        total_pass=$((total_pass + 1))
+    else
+        echo "FAIL  cache-validity :: $label"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $CACHE_PRODUCED_BY"
+        echo "        contract:    $CACHE_CONTRACT"
+        echo "$detail" | sed 's/^/        | /'
+        total_fail=$((total_fail + 1))
+    fi
+}
+
+cache_backdate() {
+    "$CACHE_PERL" -e 'my $t = time - $ARGV[1]; utime($t, $t, $ARGV[0]) or die "cannot backdate $ARGV[0]\n";' "$1" "$2"
+}
+
+cache_row="$(awk -F'\t' -v s="$CACHE_SCENARIO" '$1 == s { print; exit }' "$SCENARIOS_TSV")"
+if [[ -z "$cache_row" ]]; then
+    echo "ERROR: cache-validity scenario '$CACHE_SCENARIO' is not in $SCENARIOS_TSV" >&2
+    exit 1
+fi
+IFS=$'\t' read -r _cs cache_logfile cache_options _rest <<<"$cache_row"
+
+if ! csv_cache_produce "$CACHE_SCENARIO" "$cache_logfile" "$cache_options" \
+        "$(csv_cache_logfile_shorthand "$cache_logfile")"; then
+    echo "ERROR: cache-validity could not obtain a cached artifact for $CACHE_SCENARIO" >&2
+    exit 1
+fi
+CACHE_MSG="$CSV_CACHE_MESSAGES"
+CACHE_SIG="$(csv_cache_signature_path "$CACHE_MSG")"
+
+# 1. A freshly captured artifact is reusable.
+set +e
+reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
+set -e
+cache_assert 'a freshly captured artifact is read back rather than produced again' \
+    "$([[ $rc -eq 1 ]] && echo 0 || echo 1)" \
+    "staleness_rc=$rc reason=${reason:-<none>}" \
+    'The cache must still do its job: within the validity period, and with the CSV-emitting code unchanged, the artifact is reused. An expiry that refuses everything would turn a chained CI run into two full captures and the sharing this helper exists for would be gone.'
+
+# 2. Past the validity period.
+cache_backdate "$CACHE_MSG" $(( (_CSV_CACHE_MAX_AGE_MINUTES + 5) * 60 ))
+set +e
+reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
+set -e
+cache_assert 'an artifact older than the validity period is stale' \
+    "$([[ $rc -eq 0 && "$reason" == *"validity period"* ]] && echo 0 || echo 1)" \
+    "staleness_rc=$rc reason=${reason:-<none>}" \
+    'Age alone expires an artifact. This is the case that shipped the incident: the artifacts were left behind by a CI=1 run days earlier and were read back without anything noticing that the tool had moved on.'
+
+# 3. The CSV-emitting code changed since the capture.
+"$CACHE_PERL" -e 'my $t = time; utime($t, $t, $ARGV[0]) or die;' "$CACHE_MSG"
+printf 'not-the-signature-that-produced-this\n' > "$CACHE_SIG"
+set +e
+reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
+set -e
+cache_assert 'an artifact whose producing CSV code has changed is stale whatever its age' \
+    "$([[ $rc -eq 0 && "$reason" == *"changed after it was captured"* ]] && echo 0 || echo 1)" \
+    "staleness_rc=$rc reason=${reason:-<none>}" \
+    'A minutes-old artifact is still wrong if the CSV columns moved under it. The signature covers the CSV-emitting code of ltl and the column-rule spec, so an edit to either expires the capture while an edit elsewhere in the tool leaves it alone — the cache would be worthless if every touch of ltl threw it away.'
+
+# 4. No record of what produced it.
+rm -f "$CACHE_SIG"
+set +e
+reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
+set -e
+cache_assert 'an artifact with no record of its producing code is stale' \
+    "$([[ $rc -eq 0 && "$reason" == *"without a record"* ]] && echo 0 || echo 1)" \
+    "staleness_rc=$rc reason=${reason:-<none>}" \
+    'Artifacts captured before this rule existed carry no signature, and an unanswerable question is never answered as "fresh": the artifact is produced again.'
+
+# 5. The refresh itself: the warning reaches stderr and the artifact is rebuilt.
+cache_backdate "$CACHE_MSG" $(( (_CSV_CACHE_MAX_AGE_MINUTES + 5) * 60 ))
+cache_refresh_err="$(mktemp)"
+set +e
+csv_cache_produce "$CACHE_SCENARIO" "$cache_logfile" "$cache_options" \
+    "$(csv_cache_logfile_shorthand "$cache_logfile")" 2>"$cache_refresh_err"
+rc=$?
+set -e
+refresh_age="$("$CACHE_PERL" -e 'my @s = stat($ARGV[0]); printf "%d", time - $s[9];' "$CACHE_MSG")"
+cache_assert 'a stale cache is refreshed, and says so' \
+    "$([[ $rc -eq 0 && $refresh_age -lt 300 ]] && grep -q 'WARNING stale cache' "$cache_refresh_err" && echo 0 || echo 1)" \
+    "produce_rc=$rc artifact_age_seconds=$refresh_age stderr=$(sed 's/^/          /' "$cache_refresh_err")" \
+    'The refresh is not silent. A cache that quietly serves stale artifacts is what kept this invisible for three days, so the run states that the artifacts were stale and are being produced again, and the artifact on disk is the new one.'
+rm -f "$cache_refresh_err"
+
 echo ""
 echo "=== CSV output integrity: $scenarios_run scenarios, $total_pass pass, $total_fail fail ==="
 

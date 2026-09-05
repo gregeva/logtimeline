@@ -4,6 +4,72 @@ This document is the source of guidance, best practices, and requirements for te
 
 If you are adding a new harness, modifying an existing one, or changing any `-V` output in `ltl`, read this document first.
 
+This document covers **how a harness is built**, once you know what it must assert. What it must assert comes from the feature's acceptance criteria, which are derived from its requirements and agreed *before* implementation — see [`docs/test-driven-development.md`](../docs/test-driven-development.md). Where a criterion's verification method is not yet known, determining it is prototyping scope, not something to settle while writing the harness: [`prototype/README.md`](../prototype/README.md).
+
+## Asserting rendered output
+
+Two libraries assert what the tool **renders**, rather than which escape
+sequence it emitted: `tests/lib/rendered-output.sh` (harness-facing) and
+`tests/lib/rendered-output.pl` (the decoder it drives).
+
+**Why raw-escape assertions are not enough.** A `grep -q 'ESC\[48;5;196m'`
+confirms only that some code was emitted somewhere on the line. It cannot say
+which cell carries an attribute, what the combination of foreground and
+background on one cell is, how two rows compare, or that an attribute is absent.
+And it is written *from the implementation*: under #448 a bar built from the
+wrong colour vocabulary was asserted with the codes that vocabulary emits, and
+23 assertions passed against five simultaneous defects.
+
+**The unit is a cell.** `decode_line()` returns one record per displayed
+character carrying its resolved foreground and background, so a predicate can
+state the requirement: `bar_inverts()` (inside the fill the colour is the
+background and the text is black; outside it the colour is the foreground and
+there is no background), `fill_extent()`, `fill_colour()`, `text_colour()`.
+
+**A timeline column is selected by the layout engine's own offsets.**
+`parse_debug_layout()` reads the `--debug-layout` table into per-column cell
+offsets (accumulated exactly as the engine spends width), and `column_slice()`
+cuts a decoded row to one column's cells — so a predicate can assert colour,
+fill extent or centring (`centred_report()`) per column. A capture used this way
+must be produced with `--debug-layout`; a missing table, a missing column id, or
+a slice past the row end are hard failures, never empty results. Harness-facing
+wrapper: `timeline_cell_report` in `rendered-output.sh`. Method validated in
+`prototype/452-timeline-cell-selector/FINDINGS.md`.
+
+**No line may exceed the terminal width.** The output model rests on known
+character placement, so a line that soft-wraps displaces every line below it and
+every column with them — a rendering failure whatever the content says.
+`assert_no_soft_wrap` checks the whole capture, because a wrap anywhere in a run
+displaces the surface a harness is asserting. It applies from the minimum
+supported width upward (`MIN_SUPPORTED_WIDTH`, one value in the library;
+`features/column-layout-refactor.md` § *Minimum supported terminal width*).
+
+**Known failures are registered, never tolerated.**
+`tests/rendered-output/soft-wrap-known-failures.tsv` suppresses the block for a
+scenario whose overflow is a filed, open defect. The check still runs, the
+overflow is still measured, and the offending lines are still printed — as
+XFAIL with its issue number. A registered scenario that *stops* overflowing is
+reported as XPASS, so a fix cannot land silently and leave a stale entry.
+Adding an entry requires a filed issue.
+
+**A failure names its own focus area.** `assert_no_soft_wrap` classifies each
+offending line by the surface it belongs to and the sub that renders it — *"line
+19 is 154 columns (over by 54) in the timeline [print_bar_graph() in ltl]"* — and
+surfaces the capture path and the width it rendered at alongside the three
+mandatory fields. A soft-wrap failure spans surfaces with different producers, so
+a single `produced_by` naming one sub would be wrong for most of the lines
+reported; the per-line attribution is what lets the reader act without opening
+the capture or re-running anything. This is the § *Self-documenting assertions*
+rule applied to a check whose failures are not confined to one renderer.
+
+**Three traps, each of which produced a wrong answer while this was built:**
+decode UTF-8 before measuring (the box-drawing rules are multi-byte, and
+counting bytes reports a 160-column rule as 480); `38;5;0` is a black
+foreground, not a reset, so SGR parameters are read as whole values rather than
+by a regex that matches a trailing `;0`; and a row is sliced to its own width
+before decoding, because the summary table shares its physical line with the
+file-details pane.
+
 ## Why this exists
 
 Test harnesses make assertions against application output. When the application output and the harness drift apart silently — a section gets renamed, a key gets removed, a format changes — three things happen:
@@ -105,18 +171,25 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `runtime-config` — effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool regexes, resolved duration-statistics demand booleans (Issue #349), and per-flag resolved values (including the numeric highlight criteria, Issue #312)
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179); `heatmap_preseed_min`/`heatmap_preseed_max` expose the live post-preseed heatmap bounds when a heatmap is active (Issue #310)
 - `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
-- `histogram-bin-counters` — HDR-style bin-counter histogram state and finalized histogram dimensions (Issue #187)
+- `histogram-bin-counters` — HDR-style bin-counter histogram state (Issue #187; field set amended by #462, contract in features/187-histogram-bin-counter-percentiles.md § Decision 8)
+  - sub-section `histogram-bin-counters / display-dimensions` (Issue #473): the geometry the chart is drawn on — per-metric sample counts, min/max, decades, bucket layout — built after the display projection. The name carries the epoch: the parent section's fields describe the streaming partitions as they stood before that projection, and the two are different by design. Emitted from `finalize_histogram_unified()` through the deferred sub-section buffer, so it appears inside the parent's brackets although a different code path produces it.
+- `histogram-percentile-ticks` — the inputs of the histogram percentile tick mapping, at full precision: per metric the bar width, axis min and max, and each selected percentile value (Issue #462). The computed columns are deliberately absent: a harness reading them back would compare `ltl` with itself. This section is printed by `print_histograms()` rather than pushed to `@verbose_output`, because the layout it describes does not exist until the render runs, after `print_verbose_output()` has flushed — so it appears after the histogram, not with the other sections.
 - `message-grouping` — fuzzy message consolidation (Issue #96)
+  - sub-section `message-grouping / cluster-membership` (Issue #462): the grouping consolidation produced, canonical key to member keys. Recorded only when the section is requested. It exists so a consumer outside `ltl` — the statistics oracle — can form the same sample sets a consolidated row aggregates; without it those rows cannot be checked at all.
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
-- `profile` — timeline folding (--profile): resolved mode, fold period, included weekdays, included vs dropped sample counts (Issue #256)
+- `profile` — timeline folding (--profile): resolved mode, the rendered profile window (`profile_window_seconds` = kept days × 86400; the internal fold modulus is not exposed), included weekdays in the mode's axis order, included vs dropped sample counts (Issues #256, #451; contract in features/451-weekday-weekend-profile-modes.md § `-V profile` section contract)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
+- `udm-specs` — per `-udm` specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived after the read loop from the bucket accumulators, the intent hint if any, and parse-time rejections with their reason (Issues #443, #449; contract in features/user-defined-metrics.md § `-V udm-specs` section-contract)
 - `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution), and block-boundary populations (per-store `population`, phase-level `threadpool_population` — the sub-stage timing denominators, Issue #417) (Issues #305, #303, #417)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings (per-stage `TIMING` rows, the `finalize/calculate_statistics/*` sub-stage rows, Issue #417 — contract in features/417-substage-statistics-timing.md — and the `detect/scan_sub_compile` accumulator, Issue #413), memory, structure counts (including the re-emitted block-boundary populations per the one-source-two-surfaces rule above)
 - `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
 - `format-registry` — the compiled registry itself: entry inventory (name, slug, group, variant-default, scanned/stateful role), structure (variant groups with occupants, static scan order, derived pinned-ancestor constraints), and scan-sub compile state (subs compiled, cache hits, accumulated compile-boundary RSS delta, compiled order signatures). Per-file detection telemetry stays in `format-detection` (Issue #413; contract in features/log-format-registry.md § `-V format-registry` section-contract)
+- `csv-output` — CSV output precision mode, resolved per-family decimal counts, duration unit source, and the max-decimals ceiling the structural harness reads (Issue #268)
+- `percentile-algorithm` — per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats and bucket-stats (Issue #280)
+- `filter-summary` — the run's line accounting as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, highlighted (Issue #503, reserved by #229/#230; contract in features/503-yaml-aggregate-export.md § `-V filter-summary` section contract)
+- `aggregate-export` — the YAML aggregate export `-o` writes: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the `heatmap-ladder` sub-section with each bucket's retained heatmap percentile values (Issue #503; contract in features/503-yaml-aggregate-export.md § `-V aggregate-export` section contract). Printed at the writer's site after the file exists, so it appears after every section `print_verbose_output()` flushes.
 
 **Reserved by sub-issues, not yet implemented:**
-- `filter-summary` (Issues #229, #230 — shared section, ownership decided during research)
 - `option-resolution` (Issue #231)
 
 ## Stability contract
@@ -476,6 +549,18 @@ fi
 
 The rule exists because the `udm-counting` csv-output scenario exercised the exact code path of a per-message uninitialized-division bug and emitted 125 warnings on every run — invisibly, because no harness read stderr (Issue #326). The sweep that brought every harness under the check was Issue #341.
 
+## Cached capture artifacts expire
+
+A helper that caches an `ltl` capture so several harnesses can share it (`tests/lib/csv-cache.sh`) must decide whether a cached artifact may still be read back. Two rules, both derived from one incident (Issue #448): a `CI=1` run deliberately skips the cleanup so the next harness in the chain can reuse its capture, so a session that ends without `tests/cleanup-test-artifacts.sh` leaves its artifacts on disk indefinitely. Forty of them, three days old, were later read back by both consumers and validated 21 of 23 scenarios against an `ltl` that predated two of the columns the contract had since gained. Both harnesses failed against output that no version of the tool would produce, and the same cache would just as easily have passed a scenario it should have failed.
+
+**A cached artifact has a validity period.** One hour: long enough for the chaining the cache exists for (the harnesses in a `CI=1` chain run minutes apart), short enough that nothing survives into another working session. Past it, the artifact is produced again.
+
+**A cached artifact records what produced it.** Age alone does not cover a capture taken minutes ago from a tool that has since changed. The record is a digest of the code that decides the artifact's content — for the CSV cache, the `ltl` subs dedicated to CSV, the CSV-writing lines of the subs that write one, and the column-rule spec the validators read. It is deliberately not a digest of the whole tool: an edit anywhere would then throw the capture away, and the regeneration cost would fall on every session that touches an unrelated surface.
+
+**The refresh is never silent, and an unanswerable question is never answered "fresh".** The run states that the artifacts were stale and are being produced again, with the reason. A cache that quietly serves the wrong artifact produces exactly the false confidence the missing-anchor rule exists to prevent — worse, because the harness reports a result about a tool it never ran. An artifact whose validity cannot be determined (no record, unreadable timestamp) is treated as stale.
+
+The rules themselves are under test: `tests/validate-csv-output.sh` § cache-validity asserts each decision against a crafted artifact — no `ltl` run — and proves the refresh end to end on the smallest fixture scenario.
+
 ## Colour rendering is controlled, never inherited
 
 `ltl` decides whether to emit ANSI from two environment variables, checked in this order by `help_ansi_enabled()`: `FORCE_COLOR` (npm/chalk convention) turns ANSI on, then `NO_COLOR` (no-color.org) turns it off, then `-t STDOUT` decides. That precedence is deliberate and is not a harness concern. What *is* a harness concern is that both variables arrive from whatever shell launched the suite.
@@ -586,4 +671,4 @@ Render-invariant harnesses (the category above) were added after Issue #292: thr
 - `ltl --help` — current `-V` surface and known section names
 - `ltl -V list` — runtime-discoverable registry of section names and one-line descriptions
 - Issue #226 — framework that this document is built on
-- CLAUDE.md § `-V` discipline — the mandatory pointer back to this document
+- CLAUDE.md § Before writing or changing code and § Where to look — the mandatory pointers back to this document

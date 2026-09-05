@@ -68,7 +68,7 @@ The six new options join the resolved-values registry. This modifies a `-V` sect
 
 Script-header TODO sketching this feature (`-hdmin` idea, ~ltl:17) is resolved and removed. The separate highlight-counters TODO (~ltl:15) remains open and untouched.
 
-## Documentation sweep (same effort; help and docs/usage.md in the same commit per CLAUDE.md alignment rule)
+## Documentation sweep (same effort; help and docs/usage.md in the same commit per CLAUDE.md § Before writing or changing code)
 
 - `print_help()`: six new entries in the Filtering subsection; inclusive-bounds wording on the six existing filter entries; extend the "filters affect all computed statistics" note to state that highlight criteria do NOT alter the population — they only partition it.
 - `docs/usage.md`: Filtering prose and options table (~:51-80); a runnable example (doc examples are executed by `validate-doc-examples.sh`).

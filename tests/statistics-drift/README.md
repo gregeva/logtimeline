@@ -27,7 +27,8 @@ L1 and L3 share the same ladder:
 
 ## Scenario matrix
 
-4 logs × 4 option families = 16 scenarios. See `scenarios.tsv` for the full
+4 logs × 4 option families, plus the #289 heatmap pair and the #450
+bin-consolidated rows = **21 scenarios**. See `scenarios.tsv` for the full
 manifest. Apache HTTP2 scenarios prepend `-du us` because its log records
 duration in microseconds and auto-detection cannot infer this. All scenarios
 pin `-mdm` and `-bdm` explicitly via #266's selectors.
@@ -36,7 +37,8 @@ pin `-mdm` and `-bdm` explicitly via #266's selectors.
 |---|---|---|
 | `default` | `-bs 240 -n 25 -mdm raw -bdm raw -o` | Raw-array baseline |
 | `consolidated` | `-bs 240 -g 90 -n 25 -mdm raw -bdm raw -o` | Fuzzy consolidation at 90% |
-| `bin-data-model` | `-bs 240 -n 25 -mdm bin -bdm bin -o` | Bin-counter data model (falls back to raw today) |
+| `bin-data-model` | `-bs 240 -n 25 -mdm bin -bdm bin -o` | Bin-counter data model, honoured end to end |
+| `bin-consolidated` | `-bs 240 -g 90 -n 25 -mdm bin -bdm bin -o` | The `-g` × bin cross — the only path reaching `merge_bin_counter_entries()` (#450). Apache, ThingWorx and Codebeamer only |
 | `sorted-by-p999` | `-bs 240 -n 25 -so p999 -mdm raw -bdm raw -o` | Percentile-based ranking |
 
 ## Usage
@@ -121,6 +123,43 @@ the feature file.
 
 ## L3 oracle scope
 
+**Layer 3 covers consolidated rows** (#462). A consolidated row's key is a
+wildcard pattern that appears nowhere in the log, so the oracle — which groups
+by exact message key and implements no fuzzy merge — could not form its sample
+set and skipped it. The harness now captures `ltl -V message-grouping`'s
+cluster-membership sub-section per consolidating scenario and passes it to the
+oracle as `--cluster-membership`, which folds each member into its cluster
+before computing. The division: **`ltl` supplies the grouping**, which is the
+fuzzy matcher's decision and not a statistic, and **the oracle computes the
+arithmetic over each group itself**, which is what it exists to check.
+
+Unpaired rows are still counted and reported as `unpaired=N (wildcard=M)`, and
+a scenario where every row went unpaired is named `NO CELLS COMPARED` rather
+than reporting `L3=OK` (#450) — so a future regression in the pairing shows up
+instead of quietly reducing coverage.
+
+### Known Layer-3 failures
+
+`known-failures.tsv` registers comparisons that breach the blocking threshold
+because of a filed, open defect in `ltl` rather than a miscalibrated harness.
+An entry suppresses the block for one (scenario, file_kind, column, key_class)
+and is reported as `XFAIL` with its issue on every run; the comparison still
+happens and the deviation is still printed, and the scenario reports
+`L3=OK-WITH-XFAIL` rather than `L3=OK`.
+
+**Entries are self-clearing.** If a registered comparison passes, the engine
+fails the run with `KNOWN-FAILURE-STALE` — a fix cannot land without its
+entries being removed in the same change.
+
+The current entries are all #459: combining two bin-counter histograms
+re-projects both sides onto a union geometry, and the displacement compounds
+with merge depth. Measured against the oracle, percentiles drift 2.7–4.2% and
+IQR up to 32.6% on the two deep-merge scenarios. `apache-bin-consolidated`, at
+52 projections, stays inside the threshold, and the raw `*-consolidated`
+scenarios agree exactly — which is what identifies the bin merge as the cause
+rather than the grouping.
+
+
 External-oracle validation is reserved for statistics where the algorithm has
 non-trivial degrees of freedom and quiet methodology bugs are plausible:
 `p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999`, `std_dev`,
@@ -135,7 +174,7 @@ counts, rate counts) are validated by L1 + L2 only.
 ```
 tests/statistics-drift/
 ├── README.md                        ← this file
-├── scenarios.tsv                    ← 16 scenarios (4 logs × 4 families)
+├── scenarios.tsv                    ← 21 scenarios (see the matrix above)
 ├── compare-statistics-drift.pl      ← L1+L2+L3 engine
 ├── oracle/
 │   └── calculate-reference.py       ← algorithm-aware NumPy/SciPy oracle

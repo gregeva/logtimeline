@@ -358,10 +358,13 @@ _THREAD_POOL_RE = re.compile(r'^(.*)-\d+$')
 _THREAD_TRUNCATE_LEN = 20
 _OBJECT_TRUNCATE_LEN = 25
 
-# ltl:135 — log_levels list (the levels ltl recognises). Lines whose
-# captured category isn't in this list are skipped at ltl:7256. The
-# oracle must apply the same filter so partition fidelity holds for
-# ScriptLog lines that carry levels like "STDERR" or empty.
+# The levels ltl recognises: the @log_levels list in ltl, gated per line in
+# read_and_process_logs() against %log_level_set. The oracle must apply the
+# same filter so partition fidelity holds for ScriptLog lines that carry
+# levels like "STDERR" or empty. AUDIT is not in ltl's vocabulary and no
+# ThingWorx line carries it in the level position (it appears only inside
+# message text, as "[SECURITY AUDIT ...]"); it is retained here as an inert
+# entry so this set stays a superset and never drops a line ltl would keep.
 LOG_LEVELS = {
     "FORCE", "AUDIT", "FATAL", "ERROR", "WARN", "INFO",
     "DEBUG", "TRACE", "DATA",
@@ -391,7 +394,8 @@ def parse_thingworx_scriptlog_line(line):
     (ts_str, level, obj, _instance, _user,
      _session, _platform, thread, message) = m.groups()
 
-    # ltl:7256 — skip lines whose category isn't a recognised log level.
+    # Skip lines whose category isn't a recognised log level, as the
+    # per-line category gate in read_and_process_logs() does.
     if level not in LOG_LEVELS:
         return None
 
@@ -888,6 +892,18 @@ def main():
         description="NumPy/SciPy reference oracle for Layer 3 (Issue #224).",
     )
     ap.add_argument("--log", required=True, help="Path to source log file")
+    ap.add_argument(
+        "--cluster-membership", default=None,
+        help="Path to a capture of ltl's `-V message-grouping` "
+             "cluster-membership sub-section. When a scenario runs with -g, "
+             "consolidation folds many message keys into one row whose key is "
+             "a wildcard pattern that appears nowhere in the log, so this "
+             "oracle cannot form that row's sample set on its own and used to "
+             "skip it silently. Given this mapping the oracle groups the same "
+             "way ltl did and then computes the statistics independently: ltl "
+             "supplies the grouping, which is the fuzzy matcher's decision "
+             "and not a statistic; the arithmetic over each group stays the "
+             "oracle's own. (Issue #462.)")
     ap.add_argument("--bucket-size-seconds", type=int, required=True,
                     help="Bucket size in seconds (e.g. -bs 240 → 14400)")
     ap.add_argument("--duration-unit", default="ms", choices=("ms", "us"),
@@ -953,6 +969,26 @@ def main():
     lines_parsed = 0
     lines_with_duration = 0
 
+    # member row-message -> the canonical row-message ltl reports it under.
+    membership = {}
+    if args.cluster_membership:
+        canonical = None
+        with open(args.cluster_membership, "r", encoding="utf-8",
+                  errors="replace") as mfh:
+            for raw in mfh:
+                line = raw.rstrip("\n")
+                if line.startswith("  cluster: "):
+                    # "<category>\x1f<canonical>" — the oracle keys rows by
+                    # message alone and carries category separately.
+                    payload = line[len("  cluster: "):]
+                    canonical = payload.split("\x1f", 1)[-1]
+                elif line.startswith("    member: ") and canonical is not None:
+                    membership[line[len("    member: "):]] = canonical
+        print(f"INFO oracle: cluster membership loaded, "
+              f"{len(membership)} member keys "
+              f"across {len(set(membership.values()))} clusters",
+              file=sys.stderr)
+
     with open(args.log, "r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
             lines_total += 1
@@ -966,6 +1002,11 @@ def main():
             lines_with_duration += 1
 
             duration *= du_factor
+
+            # Fold the member into its cluster, so this row's sample set is
+            # the same one ltl aggregated (#462).
+            if membership:
+                row_message = membership.get(row_message, row_message)
 
             be = bucket_epoch(epoch, args.bucket_size_seconds)
             key = (row_message, be)

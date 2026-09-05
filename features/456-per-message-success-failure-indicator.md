@@ -1,0 +1,466 @@
+# Per-message success/failure indicator, and the classification states behind it (#456)
+
+**Issue:** #456 (FEATURE: Per-message success/failure indicator in log messages and summary table)
+**Branch:** `456-per-message-success-failure-indicator` off `release/0.18.0`
+**Status:** implemented on branch `456-per-message-success-failure-indicator-2`
+(2026-09-03), D1-D12 locked, no open decisions; the acceptance criteria below
+are asserted by `tests/validate-classification-states.sh`. Everything specified
+here ships under this issue (D11); the decisions that belong to another surface
+are recorded in that surface's own document and referenced from here. Findings
+made while implementing are in § Implementation findings.
+
+## Scope
+
+The motivating consumer is the analyst reading the two message blocks — `TOP
+HIGHLIGHTED MESSAGES` and `TOP OVERALL MESSAGES` — who can see how a message
+ranks but not which side of the classification its lines fell on. One coloured
+character alongside each row answers that at a glance, in the character position
+the consolidation marker already occupies, costing the layout nothing.
+
+Defining that indicator honestly turned out to require three states the tool
+does not have, and all of them ship here (D11). A row is not always uniform, a line's two classification rules can
+both fire, and a window's success/failure pair can silently stop being that
+window's whole population. Each of those is a gap in what the tool can currently
+say, so the work divides into:
+
+1. **The indicator** — a coloured character per message row in the two message
+   blocks, carrying the row's classification state.
+2. **`CLASSIFICATION CONFLICT`** — a new per-line outcome for a line that
+   satisfies both the success and the failure criteria, counted per time bucket
+   and for the run, and exported.
+3. **`MIXED`** — a new message-scope state for a row whose lines were not
+   uniform, with a global counter that the success and failure counters give
+   their lines up to.
+4. **A per-bucket unclassified count**, and the revised percentage-suppression
+   rule that reads it.
+
+Out of scope: a per-message *percentage* (the hand-forward in
+`features/452-success-failure-percentage-columns.md` § Hand-forward); per-file
+figures (same place); the notices surface itself (#412).
+
+## What already ships — substrate audit (read off the tree, 2026-09-03)
+
+| Needed | What the code does today |
+|---|---|
+| An indicator position | `print_message_summary()`: `my $row = $is_consolidated ? "~" : " " x $table_padding_outer;`. `$table_padding_outer` is 1, so the marker and the blank it replaces are the same single character and the indicator costs the layout nothing |
+| Row colour independence | The block header ends in the block colour and the rule line beneath it resets with `NC`; message rows are then emitted as plain text with no escapes at all (confirmed on rendered output, `tests/fixtures/http-status-families.txt`). An indicator is therefore self-contained — colour, character, reset — with no block colour to restore |
+| Per-message outcome counts | `$log_messages{$grouping}{$key}{outcomes}[1\|2]`, successes and failures. Merged across consolidation by `merge_consolidation_stats()` and projected onto the cluster's canonical entry in `group_similar_messages()` |
+| Capture of those counts | Gated to `-o` alone by #517 (`$message_outcomes_demand`), which recovered the `%log_messages` growth #453 introduced and named this feature as the consumer that would rejoin its demand terms |
+| Classification colours | `%colors`: `kelly-green` (256-colour 34) success, `rosso-corsa` (160) failure, `gold` (178) unclassified. Shared by the summary's classified rows and the timeline's `success`/`failure` columns (#452 D14) |
+| Per-line outcome | `$line_outcome`: 0 unclassified, 1 success, 2 failure. Decided by the generated classifier in `format_classification_src()` |
+| Per-bucket outcome counters | `%bucket_outcomes{$bucket}`: slot 1 successes, slot 2 failures, slot 3 the count of lines whose registry entry has `FR_PCT_QUALIFYING == 0`. Slot 0 is never written (#453 D30) |
+| Run outcome counters | `$total_successes`, `$total_failures`, `$total_non_qualifying_lines`, all written at the include point in `read_and_process_logs()` |
+| Unclassified | **Not counted anywhere, at any scope.** The run figure is a subtraction in `classification_reconciliation()`: `$total_lines_included - ($total_successes + $total_failures)`. There is no per-bucket equivalent and nothing derives one |
+| Percentage suppression | `normalize_data_for_output()` falls back to `success_pct_count` / `failure_pct_count` on `$bucket_outcome->[3]` alone. Run level: `($classified > 0 && $total_non_qualifying_lines == 0)` |
+| Consolidation timing | Checkpoint merges run inside the read loop (`run_consolidation_checkpoint()`); the final pass runs in `pipeline_finalize()`, after every file has been read (`group_similar_messages()`, on by default, `--no-final-pass` the hidden opt-out) |
+| Message data per time bucket | Nothing holds it. `%log_messages` has no time dimension |
+| User-facing statements of the marker | `--help` (`-g` row: "Consolidated entries are marked with ~ in the output"), `docs/usage.md:140` |
+
+### Findings that shaped the requirements
+
+- **F1 — A line matching both criteria is silently filed as a failure.**
+  `format_classification_src()` compiles the decision as `($f) ? 2 : ($s) ? 1 :
+  0`, so failure short-circuits and the success rule is never evaluated on such a
+  line. Nothing on any surface says the two rules both fired. Adding the conflict
+  state is therefore a correctness fix, not only a new figure.
+- **F2 — Suppression today has exactly one path, and it is a property of the
+  format, not of the line.** `FR_PCT_QUALIFYING` is set at registry build from
+  the entry's declarations (`_cls_both && (event_ledger || $show_classification)`).
+  An included line from a non-qualifying entry increments slot 3 whatever its own
+  outcome was; an unclassified line from a *qualifying* entry increments nothing,
+  and its window keeps printing a percentage over a denominator that is no longer
+  the whole population.
+- **F3 — Bucket counters cannot be trued up after the fact.** A consolidation
+  merge sees the member keys' `outcomes` counts and nothing else. With no
+  structure holding message data per time bucket, a merge knows a cluster has
+  become non-uniform but not which buckets its lines fell in. Half the merges
+  also happen after parsing has ended.
+- **F4 — None of the three new states can fire on any format shipping today.**
+  Conflict cannot, because the five access-family entries test `category_bucket`
+  against disjoint alternations (`^(?:1xx|2xx|3xx)$` against `^(?:4xx|5xx)$`).
+  Qualifying-source unclassified cannot, because on those entries every category
+  the vocabulary gate admits is matched by one of the two rules. Mixed cannot,
+  because the message key is prefixed with the exact status code
+  (`[$log_level] …`) and consolidation clusters are partitioned by that same
+  prefix (`$cat_gk = "$category|$grouping_key"`), so neither a key nor a cluster
+  can hold two outcomes. All three become reachable with the first format that
+  classifies on evidence outside the grouping key — #483 (success/failure
+  classification criteria for the Java G1 GC log format) is the nearest
+  candidate. D10 broadens the mixed test to a row mixing an outcome with
+  unclassified lines, which does not change this: on those entries no included
+  line goes unclassified, and on `java_gc_g1` every line does, so a row is
+  uniform either way. **No rendered output moves on any shipping format**, and
+  nothing in the current corpus exercises the new states; see § Acceptance
+  criteria, which D12 resolves by building the producer as part of this work.
+
+- **F5 — A run that retains no messages needs no special case (architect,
+  2026-09-03).** `$capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;`, and
+  `adapt_to_command_line_options()` switches consolidation off outright under
+  `-n 0` (`$group_similar_sensitivity = "none"`, with the note that `-g` has no
+  effect). No messages means no merging means no ambiguity to manage: nothing is
+  ever moved into `MIXED`, its count is zero rather than unknown, and D9's
+  suppression simply does not trigger. The run-level shares print by the ordinary
+  rule. No `-n 0` branch is added anywhere.
+
+## Requirements
+
+Stated in the architect's terms (2026-09-03).
+
+- **R1 — One indicator character per message row, in the position the
+  consolidation marker occupies.** Not consolidated: the bullet `•` (U+2022).
+  Consolidated: the existing `~`, recoloured. The classification is carried by
+  the character's colour in both cases; the marker never moves and the layout
+  never changes.
+- **R2 — Unclassified rows carry no indicator.** Absence of classification is
+  not a finding about the message, and marking it would read as a negative
+  pattern about the row. The position stays as it renders today — blank, or `~`
+  in its current uncoloured form.
+- **R3 — The indicator's colours are the classification colours already in
+  use.** Success reads in the same shade as the `SUCCESS CLASSIFIED` summary row
+  and the timeline's `success` column; failure likewise. One outcome, one colour,
+  wherever it appears.
+- **R4 — Both message blocks.** `TOP HIGHLIGHTED MESSAGES` and `TOP OVERALL
+  MESSAGES`. The run summary table is not a target: it has no per-message row,
+  and its classified rows already carry those colours on their own text.
+- **R5 — A line that satisfies both criteria is its own outcome**, named
+  `CLASSIFICATION CONFLICT`. It is neither a success nor a failure: the rules
+  contradicted each other on that line, and the analyst needs to see that the
+  criteria are wrong, not a figure derived as though they were right.
+- **R6 — Conflict is counted per time bucket and for the run**, and exported in
+  the YAML aggregate alongside the other outcome figures.
+- **R7 — A window holding any conflict prints absolute counts, not
+  percentages.** The line was not cleanly classified, so the classified pair is
+  not that window's whole population and a share of it measures nothing.
+- **R8 — An unclassified line from a format that declares both outcomes has the
+  same effect.** On such a format every line should be classifiable; one that is
+  not means something was missed, nobody knows what, and the denominator has
+  quietly stopped being the population. This revises #452 D3 (see D6).
+- **R9 — A message row whose lines were not uniform is `MIXED`.** Its lines
+  leave the global success and failure counters and are counted in a global
+  `MIXED` counter, so the run-level figures stay as reliable as the data allows.
+- **R10 — Time-bucket counters record what was known when the bucket passed and
+  are never revised.** Once a bucket has passed there is no visibility into what
+  was in it, so mixed is a global and per-message figure only.
+- **R11 — `MIXED` has its own colour**, used for both the summary table's mixed
+  counter row and the indicator on a mixed message row.
+
+## Locked decisions
+
+- **D1 — The indicator is one character in the consolidation marker's position
+  (architect, 2026-09-03).** `•` (U+2022) when the row is not consolidated, the
+  existing `~` when it is. The consolidation marker is never displaced: when a
+  row is both consolidated and classified, only the `~`'s colour changes. The
+  position is `$table_padding_outer` wide — one character — so the width
+  allocation in `print_message_summary()` is untouched.
+- **D2 — Colour carries the classification, in both message blocks (architect,
+  2026-09-03).** `kelly-green` for success, `rosso-corsa` for failure — the same
+  `%colors` definitions the summary's classified rows and the timeline's
+  percentage columns read, so an outcome has one colour everywhere. `MIXED` has
+  its own colour, the same one on the indicator and on the summary table's mixed
+  row. Unclassified has none (R2).
+- **D3 — `CLASSIFICATION CONFLICT` is a per-line outcome (architect,
+  2026-09-03).** A line whose success and failure criteria both evaluate true is
+  neither, and takes a fourth value. It is counted at time-bucket and run scope
+  and exported, like the other outcomes. This retires the short-circuit in F1.
+- **D4 — `MIXED` is a message-scope state, and only the global counters move
+  (architect, 2026-09-03).** A message row whose lines were not uniform is mixed;
+  its success and failure counts are subtracted from the global success and
+  failure counters and added to a global mixed counter. Per-bucket counters are
+  not adjusted: they state what was known at parse time, and F3 shows there is no
+  way to revise them without a structure that does not exist. The consequence is
+  deliberate — the summary rows will no longer reconcile with the sum of the
+  bucket counters, by exactly the mixed count.
+- **D5 — Every line of a mixed row leaves its own counter for `MIXED`
+  (architect, 2026-09-03).** The movement is mechanical and symmetric: when
+  rows are formed and merged and a row's state resolves to mixed, each of its
+  lines is subtracted from the counter it was counted in and added to the mixed
+  counter. The architect's worked case: one line counted as a success and
+  another as a failure each increment their global counter; the final
+  consolidation pass merges the two messages into one entry; success decrements
+  by one, failure decrements by one, mixed increments by two, and the
+  consolidated entry's classification state becomes mixed. Under D10 the same
+  applies to a mixed row's unclassified and conflict lines — the row is one
+  representation and all of it is mixed. The run-level figures therefore become
+  a five-way partition of counted quantities, and `unclassified` stops being
+  the subtraction `included - (successes + failures)` that
+  `classification_reconciliation()` computes today:
+
+  ```
+  SUCCESS + FAILURE + CLASSIFICATION CONFLICT + MIXED + UNCLASSIFIED = LINES INCLUDED
+  ```
+
+  *Implementation note, not a competing decision:* the same result is produced
+  by one walk of the retained rows at end of parse, after the final
+  consolidation pass, which also covers a row that resolves to mixed without
+  having been consolidated. Whichever way it is realised, the arithmetic above
+  is the contract.
+- **D6 — Percentage suppression is one meaning with three paths (architect,
+  2026-09-03).** A window falls back to absolute counts (the D17 mechanism:
+  `success_pct_count` / `failure_pct_count`, the absent `%` telling the reader it
+  is a count) when its success/failure pair is not its whole classified
+  population. That happens when the window holds a line from a non-qualifying
+  source (shipped), an unclassified line from a qualifying source (new), or a
+  conflict (new). Run-level eligibility takes the same terms. **This revises
+  #452 D3**, which had unclassified lines never disqualify a row — the lenient
+  rung was wrong for a format that declares both outcomes, because there an
+  unclassified line means the classification failed to catch something.
+- **D7 — Counting the new suppression paths needs two new per-bucket slots
+  (Claude, from D3 and D6).** Slot 4 for conflicts and slot 5 for unclassified
+  lines from qualifying sources, written in the same per-line block that already
+  writes slots 1, 2 and 3 — the same cost class as the shipped slot-3 increment,
+  no new structure. The three suppression counts stay separate rather than
+  folding into slot 3, because #503 D16 exports the non-qualifying count
+  specifically to explain an absent percentage, and "the format did not qualify",
+  "the rules matched nothing on this line" and "the rules contradicted each
+  other" are three explanations a reader has to be able to tell apart.
+
+- **D8 — REVISED 2026-09-04 (architect) — `MIXED` renders in `gold`, the unclassified shade; `amethyst` (256-colour 135) is the `CLASSIFICATION CONFLICT` shade.** Terracotta 173 proved nearly indistinguishable from the failure red at the indicator's one-character size in the architect's testing. `MIXED` and unclassified never appear in the same place (a mixed row is marked, an unclassified row is not; the summary rows carry their labels), so sharing the shade costs nothing. The `terracotta` definition is removed.
+
+- **D9 — `MIXED` suppresses the run-level percentages (architect,
+  2026-09-03).** Once a mixed row's lines are pulled out of the global success
+  and failure counters, the run's classified denominator no longer covers every
+  classified line, so a share of it is not a share of the population. With a
+  non-zero mixed count the run summary's `SUCCESS CLASSIFIED` and `FAILURE
+  CLASSIFIED` rows print their counts without a share, exactly as they already do
+  on a run carrying a non-qualifying source. `mixed` joins `non_qualifying` in
+  the run-level eligibility predicate in `classification_reconciliation()`. The
+  per-bucket columns are untouched: they keep what was known when the bucket
+  passed (D4).
+
+- **D10 — A row's state is uniformity, and anything else is `MIXED`
+  (architect, 2026-09-03).** A message row takes an outcome's colour only when
+  every one of its lines carries that same state: all success, all failure, or
+  all conflict (amethyst). Every other combination is `MIXED`, including a row
+  mixing an outcome with unclassified lines — any uncertainty removes the
+  expectation of certainty, and a row rendered as pure success when some of its
+  lines were never classified would be read as a count of successful
+  occurrences it is not. A row whose lines are all unclassified stays unmarked
+  (R2). This supersedes Claude's proposal that unclassified lines be treated as
+  leakage the row's state ignores.
+
+- **D11 — The whole of this specification ships under #456, and each decision
+  lives in the document that owns its surface (architect, 2026-09-03).** The
+  indicator and the classification states it needs are one piece of work and are
+  not split into separate issues. The master reference documents are the source
+  of truth for what belongs to them, and this document points at them rather than
+  restating them:
+
+  | Decision | Recorded in |
+  |---|---|
+  | Unclassified from a qualifying source disqualifies its window (revises D3) | `features/452-success-failure-percentage-columns.md` § Locked decisions, D3 amendment |
+  | The fourth `$line_outcome` value, its effect on the compiled classifier, `expect_outcomes`, the outcome filters and highlight criteria, and the `-V` classification section contract | `features/453-success-failure-classification-event-ledger.md` § Extension under #456 |
+  | The new outcome figures in the aggregate export and the causes of an absent percentage | `features/503-yaml-aggregate-export.md`, beside D16 |
+  | The indicator itself, the `MIXED` state, the colours, and the reasoning behind all of the above | this document |
+
+- **D12 — The producer for the new states is built here (architect,
+  2026-09-03).** "You need to be able to test what you build": a synthetic log
+  file and a registry entry capable of producing all four line states ship as
+  part of this work, not as a dependency on #483.
+
+  **Design.** The entry declares both outcomes on the `duration` field, which the
+  message key does not carry (`[$log_level] [$thread] [$object] $message`, and
+  `$log_level` is the category when no status code is captured). Deliberately
+  overlapping and deliberately incomplete criteria give one field all four
+  states — success `^\d{1,3}$`, failure `^[5-9]\d{2,}$`:
+
+  | duration | matches | state |
+  |---|---|---|
+  | 12 | success only | success |
+  | 750 | both | classification conflict |
+  | 5000 | failure only | failure |
+  | 1500 | neither | unclassified, from a qualifying source |
+
+  Because the classifying field is outside the key, the same message text at
+  different durations collapses to one row holding several states — `MIXED`
+  without `-g` — while near-identical texts give mixed clusters with it. The
+  entry declares `event_ledger => 1` and both criteria, so it qualifies, which is
+  what makes its unclassified line the new D6 path rather than the shipped
+  slot-3 one.
+
+  **Containment.** It is declared `scanned => 0`, so it never joins the scan
+  cascade and no real log can bind it; the harness reaches it with `-lf`. It is
+  excluded from the `--help formats` listing, which today iterates every spec, so
+  a verification-only entry never appears in user-facing prose. Both are
+  registry-schema questions owned by `features/log-format-registry.md` and are
+  recorded there in the same commit that adds the entry.
+
+## Data model changes
+
+| Change | Where | Cost |
+|---|---|---|
+| Fourth `$line_outcome` value for conflict | `format_classification_src()`, and every consumer of `$line_outcome`: the outcome filters and highlight criteria (`-is/-if/-es/-ef`, `-hs/-hf`, #455), the per-message `outcomes` array, `expect_outcomes` validation on every format spec | The compiled classifier stops short-circuiting on failure and evaluates both criteria |
+| `%bucket_outcomes` slots 4 and 5 | The include point in `read_and_process_logs()` | Two conditional increments per line, the class of the shipped slot-3 increment |
+| Global mixed counter, and `unclassified` becomes counted rather than derived | The point rows are formed and merged (D5); `classification_reconciliation()` stops subtracting | One pass over retained rows; no per-line cost |
+| Per-message outcome capture back on for classified runs | `$message_outcomes_demand`, #517 D1 — its demand terms gain this feature's state, as #517 anticipated | One array increment per classified line, on default access-log runs. **The one measurable cost in the design**; the before/after benchmark has to carry it |
+| Revised eligibility predicate | `normalize_data_for_output()` per bucket, `classification_reconciliation()` for the run | Arithmetic only |
+
+## Surfaces to update in the same drop
+
+Each carries its own document's contract; the pointer is to the owner, not a
+second copy of the rule (D11).
+
+- Timeline `success` / `failure` columns and the errRate column — eligibility
+  only, per the D3 amendment in `features/452-success-failure-percentage-columns.md`.
+- Run summary: the new `CLASSIFICATION CONFLICT` and `MIXED` rows, printed on the
+  `UNCLASSIFIED` pattern (only when non-zero), through `summary_colour()` so `-sm`
+  prints the table plain.
+- `-V` classification section — contract owned by
+  `features/453-success-failure-classification-event-ledger.md`; read
+  `tests/HARNESS-DESIGN.md` before touching it, and update every consumer in the
+  same commit.
+- YAML aggregate export — keys owned by `features/503-yaml-aggregate-export.md`.
+- STATS CSV and MESSAGES CSV outcome columns.
+- `--help` (`-g` row) and `docs/usage.md:140`, which both state that a
+  consolidated entry is marked with `~`, now also a classification carrier.
+- `--explain classification` and `docs/explain/classification.md`.
+
+## Acceptance criteria
+
+Agreed before code, per `docs/test-driven-development.md`. Every criterion below
+is **assertable**; D12 removed the one "unknown" the feature had by making the
+producer part of the work. Runs are shaped to the assertion they serve:
+`-bs 1440 -oe -ni` for counting and selection assertions, `-lf` to bind the
+verification format, fixed `--terminal-width` for rendered-cell assertions.
+
+**The producer**
+
+1. The synthetic fixture is committed as `.txt`, confirmed tracked by
+   `git ls-files`, described in `docs/test-logs.md` in the same commit, and
+   carries lines for all four states, plus one message text repeated at
+   differing durations and one pair of near-identical texts for the `-g` case.
+2. The verification entry never binds by detection: every existing
+   `tests/validate-format-detection.sh` scenario reports the same format it does
+   on the base commit, and the fixture itself is unrecognised without `-lf`.
+3. The entry is absent from `ltl --help formats`, and
+   `tests/validate-help-content.sh` passes with `--help` and `docs/usage.md` in
+   agreement.
+
+**The four line states**
+
+4. On the fixture, `-V` classification reports successes, failures, conflicts and
+   unclassified matching the fixture's designed composition.
+5. The line whose duration satisfies both criteria is counted as a conflict and
+   in neither successes nor failures — the regression guard on the retired
+   `($f) ? 2 : ($s) ? 1 : 0` short-circuit.
+6. `SUCCESS + FAILURE + CLASSIFICATION CONFLICT + MIXED + UNCLASSIFIED =
+   LINES INCLUDED` on every run in this section.
+
+**Eligibility**
+
+7. A window holding a conflict renders its success and failure cells as absolute
+   counts — no `%` — and a window holding a qualifying-source unclassified line
+   does the same, each proved on a bucket carrying only that cause.
+8. A window carrying neither, on the same run, still renders percentages.
+9. The run-level shares are withheld and the counts printed whenever any of the
+   run's disqualifying terms is non-zero, including a non-zero mixed count (D9),
+   while the timeline columns keep their per-bucket percentages (D4).
+
+**`MIXED`**
+
+10. A message row holding lines of differing states without `-g` renders the
+    terracotta indicator, and the global counters lose exactly that row's lines
+    to `MIXED`.
+11. The architect's worked case under `-g`: one success line and one failure line
+    consolidate to one entry; success decrements by one, failure decrements by
+    one, mixed increments by two, and the entry renders `~` in terracotta.
+12. A row whose lines are all conflicts renders `~` or `•` in amethyst; a row
+    whose lines are all unclassified renders exactly as it does on the base
+    commit.
+13. `-n 0` on the same fixture prints the run-level shares and no `MIXED` row,
+    with no `-n 0` branch anywhere in the source (F5).
+
+**The indicator**
+
+14. A non-consolidated classified row renders `•` (U+2022); a consolidated one
+    renders `~`; both in their state's colour, and the row's remaining text is
+    unchanged from the base commit.
+15. The message table's column widths and every other rendered column are
+    byte-identical to the base commit on the same run — the indicator occupies
+    the position the marker already held and costs the layout nothing.
+
+**Export and regression**
+
+16. The YAML aggregate export carries the new outcome figures at run and bucket
+    scope and the cause of each absent percentage, per the extension recorded in
+    `features/503-yaml-aggregate-export.md`.
+17. Every `tests/reference-output/*.txt` scenario is byte-identical to the base
+    commit: F4 establishes that no shipping format can reach any new state, and
+    `unclassified` becoming counted rather than derived must not change its
+    value.
+18. No runtime warnings: stderr carries no ` at ltl line N` on any criterion run
+    (`tests/lib/runtime-warnings.sh`).
+19. Full `tests/validate-*.sh` suite green, and a before/after benchmark on this
+    machine carrying the cost of per-message outcome capture re-enabled on
+    classified runs (#517 D1).
+
+**Harness placement.** The new assertions extend the classification contract, so
+`tests/HARNESS-DESIGN.md` is read before any harness file is created or renamed,
+every assertion declares `asserts`, `produced_by` and `contract`, and every
+consumer of a changed `-V` section is updated in the same commit.
+
+## Implementation findings
+
+Recorded on the tree as implemented (2026-09-03).
+
+- **The conflict outcome is the value 4, and outcome values are slots.** The
+  per-line block writes `$bucket_outcomes{$bucket}[$line_outcome]++` and the
+  per-message store `outcomes[$line_outcome]++` unchanged; 3 was already the
+  non-qualifying-source slot (#452 D2), so the fourth outcome takes the slot D7
+  reserved for it and no per-line mapping is added. Slot 5 (unclassified from a
+  qualifying source) and the counted run-level unclassified figure are one
+  `else` branch on the existing `if ($line_outcome)`. Details in
+  `features/453-success-failure-classification-event-ledger.md` § Extension
+  under #456.
+- **The verification entry's line shape had to avoid a loose shipping pattern.**
+  The first draft put the timestamp second (`VERIFY <timestamp> [INFO] …`) and
+  every line bound `tw_edge_c_sdk`, whose pattern takes any first token before
+  an ISO timestamp; a bracketed level after a leading timestamp would bind
+  `thingworx_rac_client` the same way. The shape is `VERIFY CLS <timestamp>
+  level=<L> thread=<t> object=<o> took=<ms> <message>`, which no cascade
+  pattern matches (16 of 16 lines unmatched without `-lf`). The message key is
+  `[INFO] [worker] [Store] <message>` (the thread truncated to the key's
+  width), so one text at several durations is one row.
+- **Containment is two registry-schema keys**, recorded in
+  `features/log-format-registry.md` § Pin-only entries: `scanned => 0` with a
+  pattern makes the entry compiled but not scanned (it passes the sample and
+  parity gates, takes no cascade slot, and only `-lf` seats it); `verification
+  => 1` keeps it out of `--help formats` and the known-format list. The pin
+  path previously read only the scanned members, so a non-scanned entry could
+  not be pinned at all; it now reads the pin-only list too.
+- **The MIXED movement is one walk of the retained rows** after the final
+  consolidation pass (`resolve_message_classification_states()`, the
+  implementation note under D5): each row's state is read by the same
+  function the indicator uses, and a mixed row's lines leave the counter each
+  was counted in. `unclassified_qualifying` is a cause counter, not a
+  partition member, and is not reduced by the movement.
+- **Per-message outcome capture is on whenever a message is retained**
+  (`$message_outcomes_demand` = MESSAGES CSV or `-n` above zero), the demand
+  term #517 anticipated. The before/after benchmark at the gate carries it.
+- **Acceptance criterion 17 does not hold as written, by design of R1.** Every
+  classified row on a shipping format now renders the bullet in its outcome's
+  colour, so a regression golden that carries a message block changes in
+  exactly the marker column; the goldens are re-blessed and the diff confined
+  to that column is the check. No other cell moves: criterion 15 is what
+  holds.
+- **Consumers of the marker column and of the MESSAGES CSV shape.** The
+  duration-display checker (`tests/duration-display/check-duration-cells.pl`)
+  anchored a message row on a bracket preceded by whitespace only; the marker
+  position now precedes the bracket, so the anchor admits it (the bullet is
+  three bytes, which a single-character class did not cover). The statistics
+  drift baselines (`tests/statistics-drift/baselines/`) carry the MESSAGES and
+  STATS CSV shapes, so the `conflicts` column is a structural drift against
+  them by construction; they were re-captured and the diff inspected to be the
+  added column alone. The `-sm` assertion in
+  `tests/validate-classification-percentages.sh` grepped the whole capture for
+  the classification shades and now reads the summary rows only, since `-sm`
+  renders the run summary table plain and the indicator lives in the message
+  blocks.
+- **Colours judged on rendered output.** Terracotta 173 reads clearly apart
+  from gold 178 at one-character size and amethyst 135 sits off the
+  green-gold-red axis, on the fixture and on an access-log specimen (D8).
+
+## Merge gate
+
+Full harness suite plus a before/after benchmark on this machine, per
+`docs/process/workflow.md` § 3, on the commit being merged, with
+`$version_number` restored to `0.18.0` first.

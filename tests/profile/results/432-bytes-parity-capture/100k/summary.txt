@@ -1,0 +1,44 @@
+====================================================================================================
+Profile:  /Users/gregeva/Documents/GitHub/logtimeline/tests/profile/results/432-bytes-parity-capture/100k/nytprof.out
+Script:   /Users/gregeva/Documents/GitHub/logtimeline/ltl
+Perl:     5.42.2
+CPU time: 2.5077 s (sum of exclusive times)
+Subs:     20 shown of 416 matching (from 1107 total)
+Sort:     incl time | Filter: Perl subs only
+ltl -V:   lines_read=100000  total=4.041s  rss=55 MB
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  pipeline_parse                                               1    2.4106  0.000026  2410.637   96.1
+   2  read_and_process_logs                                        1    2.4053    1.5449  2405.298   95.9
+   3  __ANON__[(eval 44)[/Users/gregeva/Documents/GitHu...    100041    0.7197    0.5073     0.007   28.7
+   4  get_memory_usage                                             7    0.0271    0.0002     3.869    1.1
+   5  pipeline_finalize                                            1    0.0258  0.000056    25.845    1.0
+   6  calculate_all_statistics                                     1    0.0211    0.0072    21.132    0.8
+   7  measure_memory_structures                                    5    0.0199  0.000075     3.983    0.8
+   8  calculate_statistics                                         6    0.0137    0.0055     2.286    0.5
+   9  Term::ReadKey::GetTerminalSize                               1    0.0136    0.0001    13.579    0.5
+  10  format_scan_sub_resolve                                      1    0.0119  0.000012    11.930    0.5
+  11  compile_format_scan_sub                                      1    0.0119    0.0036    11.918    0.5
+  12  pipeline_detect                                              1    0.0114  0.000005    11.360    0.5
+  13  build_format_registry                                        1    0.0114    0.0021    11.351    0.5
+  14  pipeline_render                                              1    0.0092  0.000073     9.187    0.4
+  15  BEGIN@50                                                     1    0.0068    0.0003     6.802    0.3
+  16  Text::CSV::_load                                             2    0.0065  0.000034     3.232    0.3
+  17  Text::CSV::_load_pp                                          1    0.0064  0.000001     6.430    0.3
+  18  Text::CSV::BEGIN@1.1                                         1    0.0064    0.0061     6.408    0.3
+  19  compile_format_extractor                                    34    0.0053    0.0047     0.157    0.2
+  20  BEGIN@37                                                     1    0.0053    0.0014     5.287    0.2
+
+Note: %Tot = incl_time / 2.5077 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]
+      Use --sort excl to rank by exclusive time
+
+====================================================================================================
+Cross-Validation: NYTProf call counts vs ltl -V output
+----------------------------------------------------------------------------------------------------
+  read_and_process_logs                     NYTProf calls=1  ltl-V lines_read=100000
+    (called once; loops internally over lines)
+
+  [OK] All cross-validation checks within tolerance.

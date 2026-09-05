@@ -343,10 +343,22 @@ scenario_message_stats_bin() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - partition_count field is locked; format is integer.'
 
     assert_line "$out" \
-        pattern     '^  total_rebin_events: [0-9]+$' \
-        asserts     'total_rebin_events is present and a non-negative integer - the auto-resize lifecycle has either fired zero or more rebins across all partitions.' \
-        produced_by 'snapshot_counter_telemetry() in ltl' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - total_rebin_events field is locked; format is integer.'
+        pattern     '^  rebin_growth_events: [0-9]+$' \
+        asserts     'rebin_growth_events counts one mechanism only - a partition outgrowing its range and doubling. It is carried on the store entry, not the partition, so a combination that replaces the partition adds to it rather than resetting it.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, summing $entry->{rebin_growth}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism; no summed figure is reported.'
+
+    assert_line "$out" \
+        pattern     '^  rebin_merge_events: [0-9]+$' \
+        asserts     'rebin_merge_events counts each projection onto a union geometry performed while combining two histograms - zero, one or two per combination, since a side already congruent with the union is not projected.' \
+        produced_by 'merge_bin_counter_entries() in ltl, accumulated on the target entry and summed by snapshot_counter_telemetry()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
+
+    assert_line "$out" \
+        pattern     '^  rebin_finalize_events: [0-9]+$' \
+        asserts     'rebin_finalize_events on summary_table counts the collapse of a consolidated row: every member histogram absorbed into a cluster is projected into one union geometry exactly once when that cluster is finalized (#459). Zero on a run with no consolidation; a positive count otherwise. It is NOT a display-shape projection - summary_table has no display geometry.' \
+        produced_by 'finalize_message_stats_unified() in ltl - initialised to 0 by snapshot_counter_telemetry(), incremented only by the finalizers that project' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
 
     assert_line "$out" \
         pattern     '^  max_partition_bins: [0-9]+$' \
@@ -367,10 +379,46 @@ scenario_message_stats_bin() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - underflow tally is the audit surface.'
 
     assert_line "$out" \
-        pattern     '^  counter_memory_bytes: [0-9]+$' \
-        asserts     'counter_memory_bytes is present and a non-negative integer - the Devel::Size measurement of the counter store carrying the empirical-tuning signal for partition-count vs memory.' \
+        pattern     '^  overflow_total: [0-9]+$' \
+        asserts     'overflow_total is the summed overflow count across partitions - a guard expected to read zero, kept visible so that if it ever fires it can be investigated.' \
         produced_by 'snapshot_counter_telemetry() in ltl' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked.'
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - the out-of-range counters are safety instrumentation, not an audit signal expected to go non-zero.'
+
+    assert_line "$out" \
+        pattern     '^  underflow_total: [0-9]+$' \
+        asserts     'underflow_total is the symmetric summed underflow count - likewise a guard expected to read zero.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - the out-of-range counters are safety instrumentation.'
+
+    assert_line "$out" \
+        pattern     '^  counter_memory_bytes: [0-9]+$' \
+        asserts     'counter_memory_bytes is reproducible across runs on identical input. It reports the counters payload - partition geometry plus the bin slots spanned - not a measurement of the live structure, whose allocation depends on growth history and moves between runs while no observation changes.' \
+        produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked; format is bare bytes.'
+
+    assert_line "$out" \
+        pattern     '^  members_live: [1-9][0-9]*$' \
+        asserts     'members_live counts the member histograms alive across combined keys. It is conserved under consolidation - folding keys into clusters lowers partition_count but not members_live - so it is positive whenever any partition exists.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, summing $entry->{members}' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - member-histogram retention across combined keys is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_max: [1-9][0-9]*$' \
+        asserts     'members_max is the largest membership reached by any single entry - at least 1, since an entry always stands for itself.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, high-water over $entry->{members}' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - the maximum member count reached across the population is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_memory_bytes: [0-9]+$' \
+        asserts     'members_memory_bytes is the footprint of the member histograms the store stands for. On summary_table it is the live store plus the payload of every member retained until its cluster collapsed, so it is a high-water figure that diverges from counter_memory_bytes whenever consolidation retained anything, and equals it otherwise (#459).' \
+        produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - the member-histogram footprint is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'members_per_partition reports how many member histograms each surviving partition stands for, in the same four-field format as rebins_per_partition. It is the figure a retention ceiling would be sized from: members_live and members_max cannot say between them whether the retained load is spread across partitions or concentrated in one, and on real logs it is heavily concentrated (#459).' \
+        produced_by 'snapshot_counter_telemetry() in ltl, over $entry->{members}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - field added 2026-08-27 by #459; four-field format matches rebins_per_partition.'
 
     assert_line "$out" \
         pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
@@ -432,8 +480,8 @@ scenario_message_stats_csv_shared() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %shares_with map carrying csv_output => summary_table' \
         contract    'features/189-histogram-bin-counter-primitives.md section R7 - shared partitions across consumers; features/187 section Decision 8 - locked short-form block; features/287 section R8.1.'
 
-    # Cleanup: -o leaves CSV files in the cwd
-    rm -f *MESSAGES-*.csv *STATS-*.csv 2>/dev/null || true
+    # Cleanup: -o leaves its two CSVs and the aggregate export in the cwd
+    rm -f *MESSAGES-*.csv *STATS-*.csv *-LTL-AGGREGATE.yaml 2>/dev/null || true
     rm -f "$out" "$out.stderr"
 }
 
@@ -460,7 +508,7 @@ scenario_message_stats_raw() {
 
     assert_line "$out" \
         pattern     '^  path: user_opt_out$' \
-        asserts     'Under -mdm raw, summary_table reports path: user_opt_out - the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        asserts     'Under -mdm raw, summary_table reports path: user_opt_out - the user pinned the raw data model on this surface, so the sort-based statistics path runs and no bin counters are kept. No telemetry block follows.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %consumer_opted_out_to_raw map (Issue #287 Commit 4)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 path vocabulary - user_opt_out is the migrated-but-pinned-raw label.'
 
@@ -517,10 +565,22 @@ scenario_bucket_stats_bin() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - partition_count field is locked; format is integer.'
 
     assert_line "$out" \
-        pattern     '^  total_rebin_events: [0-9]+$' \
-        asserts     'total_rebin_events is present and a non-negative integer - the auto-resize lifecycle has fired zero or more rebins across all per-bucket partitions.' \
-        produced_by 'snapshot_counter_telemetry() in ltl' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - total_rebin_events field is locked; format is integer.'
+        pattern     '^  rebin_growth_events: [0-9]+$' \
+        asserts     'rebin_growth_events counts one mechanism only - a partition outgrowing its range and doubling. It is carried on the store entry, not the partition, so a combination that replaces the partition adds to it rather than resetting it.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, summing $entry->{rebin_growth}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism; no summed figure is reported.'
+
+    assert_line "$out" \
+        pattern     '^  rebin_merge_events: [0-9]+$' \
+        asserts     'rebin_merge_events counts each projection onto a union geometry performed while combining two histograms - zero, one or two per combination, since a side already congruent with the union is not projected.' \
+        produced_by 'merge_bin_counter_entries() in ltl, accumulated on the target entry and summed by snapshot_counter_telemetry()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
+
+    assert_line "$out" \
+        pattern     '^  rebin_finalize_events: 0$' \
+        asserts     'rebin_finalize_events counts projections into display shape, and is asserted as exactly zero for time_bucket_stats, whose dedicated store is read directly by the percentile path and never projected into display shape.' \
+        produced_by 'finalize_bucket_stats_unified() in ltl - initialised to 0 by snapshot_counter_telemetry(), incremented only by the finalizers that project' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - re-binning is reported per mechanism.'
 
     assert_line "$out" \
         pattern     '^  max_partition_bins: [0-9]+$' \
@@ -541,10 +601,46 @@ scenario_bucket_stats_bin() {
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - underflow tally is the audit surface.'
 
     assert_line "$out" \
-        pattern     '^  counter_memory_bytes: [0-9]+$' \
-        asserts     'counter_memory_bytes is present and a non-negative integer - the Devel::Size measurement of the dedicated per-time-bucket counter store.' \
+        pattern     '^  overflow_total: [0-9]+$' \
+        asserts     'overflow_total is the summed overflow count across partitions - a guard expected to read zero, kept visible so that if it ever fires it can be investigated.' \
         produced_by 'snapshot_counter_telemetry() in ltl' \
-        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked.'
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - the out-of-range counters are safety instrumentation, not an audit signal expected to go non-zero.'
+
+    assert_line "$out" \
+        pattern     '^  underflow_total: [0-9]+$' \
+        asserts     'underflow_total is the symmetric summed underflow count - likewise a guard expected to read zero.' \
+        produced_by 'snapshot_counter_telemetry() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 + section Decision 4 - the out-of-range counters are safety instrumentation.'
+
+    assert_line "$out" \
+        pattern     '^  counter_memory_bytes: [0-9]+$' \
+        asserts     'counter_memory_bytes is reproducible across runs on identical input. It reports the counters payload - partition geometry plus the bin slots spanned - not a measurement of the live structure, whose allocation depends on growth history and moves between runs while no observation changes.' \
+        produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - counter_memory_bytes is locked; format is bare bytes.'
+
+    assert_line "$out" \
+        pattern     '^  members_live: [1-9][0-9]*$' \
+        asserts     'members_live counts the member histograms alive across combined keys. It is conserved under consolidation - folding keys into clusters lowers partition_count but not members_live - so it is positive whenever any partition exists.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, summing $entry->{members}' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - member-histogram retention across combined keys is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_max: [1-9][0-9]*$' \
+        asserts     'members_max is the largest membership reached by any single entry - at least 1, since an entry always stands for itself.' \
+        produced_by 'snapshot_counter_telemetry() in ltl, high-water over $entry->{members}' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - the maximum member count reached across the population is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_memory_bytes: [0-9]+$' \
+        asserts     'members_memory_bytes is the footprint of the retained member histograms. It equals counter_memory_bytes while combination still collapses members into one histogram; the two diverge once members are retained.' \
+        produced_by 'counter_store_bytes() in ltl via snapshot_counter_telemetry()' \
+        contract    'features/bin-counter-accuracy-and-observability.md section D4 - the member-histogram footprint is observable.'
+
+    assert_line "$out" \
+        pattern     '^  members_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
+        asserts     'members_per_partition reports how many member histograms each surviving partition stands for, in the same four-field format as rebins_per_partition. It is the figure a retention ceiling would be sized from: members_live and members_max cannot say between them whether the retained load is spread across partitions or concentrated in one, and on real logs it is heavily concentrated (#459).' \
+        produced_by 'snapshot_counter_telemetry() in ltl, over $entry->{members}' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - field added 2026-08-27 by #459; four-field format matches rebins_per_partition.'
 
     assert_line "$out" \
         pattern     '^  rebins_per_partition: p50=[0-9]+ p95=[0-9]+ p99=[0-9]+ max=[0-9]+$' \
@@ -595,7 +691,7 @@ scenario_bucket_stats_raw() {
 
     assert_line "$out" \
         pattern     '^  path: user_opt_out$' \
-        asserts     'Under -bdm raw, time_bucket_stats reports path: user_opt_out - the consumer is migrated but the user pinned raw on this surface, so the pre-migration code runs. No telemetry block follows.' \
+        asserts     'Under -bdm raw, time_bucket_stats reports path: user_opt_out - the user pinned the raw data model on this surface, so the sort-based statistics path runs and no bin counters are kept. No telemetry block follows.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %consumer_opted_out_to_raw map (Issue #289)' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 path vocabulary - user_opt_out is the migrated-but-pinned-raw label.'
 
@@ -615,6 +711,48 @@ scenario_always_present() {
     check_capture_warnings "$out"
 
     assert_header_present "$out"
+
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 9: the display-dimensions sub-section, and the epoch its name
+# carries. Needs -hg: the sub-section exists only when a histogram renders.
+# ---------------------------------------------------------------------------
+scenario_display_dimensions() {
+    current_scenario="display-dimensions"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section -hg duration -hgdm bin)
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^=== histogram-bin-counters / display-dimensions ===$' \
+        asserts     'The sub-section reporting the geometry the chart is drawn on is named for the epoch it describes, so a reader cannot mistake it for the streaming figures its parent section reports' \
+        produced_by 'finalize_histogram_unified() in ltl (deferred sub-section buffer, drained by emit_bin_counter_mode_verbose)' \
+        contract    'tests/HARNESS-DESIGN.md section Reserved section names + features/187-histogram-bin-counter-percentiles.md section Decision 8 - sub-section names are stability-contracted; renames are breaking'
+
+    assert_line "$out" \
+        pattern     '^=== END histogram-bin-counters / display-dimensions ===$' \
+        asserts     'The sub-section carries its explicit end marker, so a harness can range-extract it without dragging adjacent content' \
+        produced_by 'finalize_histogram_unified() in ltl (deferred sub-section buffer)' \
+        contract    'tests/HARNESS-DESIGN.md section Delimiter contract - end markers are required'
+
+    assert_line "$out" \
+        pattern     '^  Duration:  +samples=[0-9]+ +min=[^ ]+ +max=[^ ]+ +decades=[0-9]+\.[0-9]{2} buckets_per_decade=[0-9]+ total_buckets=[0-9]+$' \
+        asserts     'Each metric line reports the display geometry the bars were drawn on: sample count, observed range, decades spanned, and the bucket layout derived from them' \
+        produced_by 'format_histogram_dimensions_line() in ltl' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - the sub-section content shape is part of the locked section contract'
+
+    # The sub-section is drained inside the parent's brackets, which is what
+    # makes its name the only thing distinguishing the two epochs.
+    assert_line "$out" \
+        pattern     '^=== END histogram-bin-counters ===$' \
+        asserts     'The display-dimensions sub-section closes before the parent section does, so it is reported inside the parent brackets rather than as a section of its own' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl (sub-section drain before the closing bracket)' \
+        contract    'Issue #226 deferred sub-section framework + tests/HARNESS-DESIGN.md section Delimiter contract'
 
     rm -f "$out" "$out.stderr"
 }
@@ -645,6 +783,8 @@ echo ""
 scenario_bucket_stats_raw
 echo ""
 scenario_always_present
+echo ""
+scenario_display_dimensions
 
 echo ""
 echo "Results: $pass passed, $fail failed"

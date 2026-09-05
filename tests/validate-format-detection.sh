@@ -9,7 +9,7 @@
 # and asserts the expected slug, match_type, and matched_lines.
 #
 # Scope: slugs with fixtures under logs/ are asserted directly;
-# tomcat_access_common is asserted against a fixture derived on the fly
+# access_common is asserted against a fixture derived on the fly
 # from the Tomcat 9 log (duration field stripped, issue #345), and
 # jboss_access against a fixture derived from the same log (quoted
 # referrer/user-agent + trailing duration appended, issue #365). The
@@ -21,7 +21,11 @@
 # windchill_workgroup_manager is asserted against the committed wgm-client.txt fixture
 # staged under each of its three producer-true names (issue #395).
 # The `format-detection / scan` sub-section (registry scan telemetry,
-# issue #58) is asserted by the scan-telemetry scenarios.
+# issue #58) is asserted by the scan-telemetry scenarios, and the
+# `format-detection / classification` sub-section (per-line success/failure
+# classification, issue #453) by the classification scenarios, which also
+# reconcile the per-message success/failure CSV columns across a
+# consolidated run.
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-histogram-bin-counters.sh.
@@ -290,8 +294,8 @@ scenario_tomcat9_ms() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: tomcat_access_with_duration$' \
-        asserts     'Tomcat 9 access log with %D millisecond duration binds to slug `tomcat_access_with_duration`. Detection regex: ltl:4907 (match_type 3).' \
+        pattern     '^  format: access_common_duration$' \
+        asserts     'Tomcat 9 access log with %D millisecond duration binds to slug `access_common_duration`. The Tomcat name selects the millisecond member of the access_common_duration unit group (#444 D3).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -329,8 +333,8 @@ scenario_tomcat_common() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: tomcat_access_common$' \
-        asserts     'A standard/common access log (no duration field) binds to slug `tomcat_access_common`, not to `tomcat_access_with_duration`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
+        pattern     '^  format: access_common$' \
+        asserts     'A standard/common access log (no duration field) binds to slug `access_common`, not to `access_common_duration`. The end-anchored match_type 4 regex is ordered before the broader match_type 3 regex so duration-less lines cannot be claimed by the with-duration branch.' \
         produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 4 branch, `$`-anchored after the bytes field)' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -345,6 +349,12 @@ scenario_tomcat_common() {
         asserts     'Every line of the derived common-format fixture parses as match_type 4 (no fallthroughs to other branches)' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
         contract    'Derived 1:1 from the hand-truncated 5000-line Tomcat 9 fixture; if that fixture changes, the expected count changes in the same commit'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: yes$' \
+        asserts     'An access log is an event ledger: the server writes one line per request it handled, so the file reports event_ledger: yes and its lines can be read as attempted events. A common-format access log has no duration field, which does not change that - the ledger property is a property of the producer, not of the fields present.' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 scenario_jboss_enhanced() {
@@ -378,7 +388,7 @@ scenario_jboss_enhanced() {
 
     assert_line "$out" \
         pattern     '^  format: jboss_access$' \
-        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `tomcat_access_with_duration`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
+        asserts     'An enhanced/JBoss access log (quoted referrer, quoted user-agent, trailing duration) binds to slug `jboss_access`, not to `access_common_duration`. The end-anchored match_type 9 regex is ordered before the broader match_type 3 regex, whose all-optional tail would otherwise claim these lines with duration=undef and junk thread/session captures (issue #365).' \
         produced_by 'emit_format_detection_verbose() in ltl; detection cascade in read_and_process_logs() (match_type 9 branch, `$`-anchored after the trailing duration field)' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -401,22 +411,143 @@ scenario_apache_httpd_us() {
 
     local log="$LOGS_DIR/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log"
     local out
-    # Run with -du us per the documented workaround. Apache HTTP %D is
-    # microseconds; without -du us, durations are 1000x off.
-    out=$(run_format_detection "$log" -du us)
+    # Detection is the subject: the specimen binds the one
+    # common-plus-duration format; the unit is -du's business.
+    out=$(run_format_detection "$log")
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: tomcat_access_with_duration$' \
-        asserts     'Apache HTTP Server 2.x access log binds to slug `tomcat_access_with_duration` - same regex as Tomcat 9, currently misclassified pending format-registry rewrite (#23)' \
-        produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    'features/225-test-harness-coverage-gaps.md section #228 + ltl GLOBALS comment on Apache misclassification - when #23 splits the formats, this scenario must be updated to expect the new Apache-specific slug'
+        pattern     '^  format: access_common_duration$' \
+        asserts     'A common-plus-duration line binds the access_common_duration unit group; with no name evidence the millisecond default is selected and the note names the microsecond alternative (#444 D3/D15)' \
+        produced_by 'select_format_variants() and format_variant_ambiguity_note() in ltl' \
+        contract    'features/444-access-log-format-family-and-user-surface.md D3 (unit is the variant-group axis), D15 (the note per file names every alternative)'
 
-    assert_line "$out" \
-        pattern     '^duration_unit_override: us$' \
-        asserts     'When `-du us` is given, the format-detection section reports the override value' \
-        produced_by 'emit_format_detection_verbose() in ltl (run-level duration_unit_override field)' \
-        contract    '%match_type_to_slug and emit_format_detection_verbose() in ltl - duration_unit_override is locked field reporting the user-supplied -du value'
+}
+
+
+# ---------------------------------------------------------------------------
+# #444: the access-log family. Each shape is its own strictly anchored slot,
+# named by root plus the fields it adds; populated identity fields are
+# detection evidence; the per-file
+# ambiguity note names every alternative. Contract:
+# features/444-access-log-format-family-and-user-surface.md D1-D8, D14, D15.
+# ---------------------------------------------------------------------------
+FAMILY_CONTRACT='features/444-access-log-format-family-and-user-surface.md'
+
+scenario_family_shapes() {
+    current_scenario="family-shapes"
+    echo "[$current_scenario]"
+    local log out
+    # Each staged fixture carries one shape; -bs 1440 -oe: detection only.
+    for row in "access-combined.txt|access.log|access_combined|D1/D4: a combined line (Apache or nginx) binds access_combined; no duration, no session" \
+               "access-combined-duration.txt|localhost_access_log.2025-05-05.txt|access_combined_duration|D2/D4: combined plus a trailing duration binds access_combined_duration, behind the stricter jboss_access" \
+               "access-thread-session.txt|localhost_access_log.2025-05-05.txt|access_common_duration_thread_session|D2: common plus duration, thread and session binds the thread-session shape" \
+               "access-users-only.txt|access.log|access_common_duration|D3 as revised: an httpd-named common-plus-duration file binds the one common-plus-duration format" \
+               "access-bracketed-us.txt|codebeamer_access_log.2025-10-29.txt|access_common_duration_bracketed|D7: the bracketed shape binds whatever unit the line writes"; do
+        IFS='|' read -r fixture staged format why <<< "$row"
+        log=$(stage_fixture "$fixture" "$staged") || continue
+        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        assert_line "$out" pattern "^  format: $format\$" \
+            asserts "$why" \
+            produced_by 'build_format_registry() static order and the generated scan sub in ltl' \
+            contract "$FAMILY_CONTRACT D1-D4, D7"
+        assert_line "$out" pattern '^  matched_lines: 12$' \
+            asserts 'every line of the fixture binds the shape (strict anchoring leaves no line to a looser pattern)' \
+            produced_by 'read_and_process_logs() in ltl' contract "$FAMILY_CONTRACT D4"
+    done
+    # The combined line carries no session: the thread-session shape's
+    # all-optional tail no longer exists to swallow a quoted "-" (R13).
+    log=$(stage_fixture access-combined.txt access.log) || return
+    out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
+    assert_absent "$out" pattern '^bucket: [0-9]+  sessions: ' \
+        asserts 'a combined line yields no session: the quoted "-" of the user-agent position is never captured as one (R13)' \
+        produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
+    # A bare - session is absent, not a session, on the thread-session shape (R14).
+    log=$(stage_fixture access-thread-session.txt localhost_access_log.2025-05-05.txt) || return
+    # A counting metric makes the section walk the buckets, where the sessions
+    # oracle line is printed.
+    out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
+    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
+        asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
+        produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
+}
+
+scenario_family_fields_evidence() {
+    current_scenario="family-fields-evidence"
+    echo "[$current_scenario]"
+    local log out log_dash out_dash
+    log=$(stage_fixture access-users-only.txt access.log) || return
+    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  fields: user=9/12 session=- thread=-$' \
+        asserts 'the evidence block reports the populated identity fields of the selected member over the sampled lines it matched: 9 of 12 users populated; session and thread are not fields of this shape' \
+        produced_by 'select_format_variants() (captures kept) and emit_format_detection_evidence_verbose() in ltl' contract "$FAMILY_CONTRACT D8"
+    # The same content with - in every user column: no population, no credit.
+    log_dash="$TMP_DIR/$current_scenario/dash/access.log"; mkdir -p "$(dirname "$log_dash")"
+    perl -pe 's/^(\S+ \S+) \S+ /$1 - /' "$log" > "$log_dash"
+    out_dash=$(run_format_detection "$log_dash"); check_capture_warnings "$out_dash"
+    assert_line "$out_dash" pattern '^  fields: user=0/12 session=- thread=-$' \
+        asserts 'with a bare - in every user column no line populates the field' \
+        produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
+    log=$(stage_fixture access-users-sessions.txt localhost_access_log.2025-05-05.txt) || return
+    out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  fields: user=9/12 session=12/12 thread=12/12$' \
+        asserts 'all three identity fields are reported for the thread-session shape' \
+        produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
+}
+
+scenario_family_pin_names() {
+    current_scenario="family-pin-names"
+    echo "[$current_scenario]"
+    local log out err name
+    log=$(stage_fixture access-combined.txt access.log) || return
+    for name in access_common access_combined access_combined_duration access_common_duration \
+                access_common_duration_thread_session access_common_duration_bracketed; do
+        out=$(run_format_detection "$log" -lf "$name"); check_capture_warnings "$out"
+        assert_line "$out" pattern "^format_pin: $name\$" \
+            asserts "-lf accepts the family name $name" produced_by 'apply_format_pin() in ltl' contract "$FAMILY_CONTRACT D2 (names are the user-facing vocabulary)"
+    done
+    err="$TMP_DIR/$current_scenario/old-name.err"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -lf tomcat_access_with_duration "$log" > /dev/null 2> "$err" || true
+    assert_line "$err" pattern '^Error: Unknown log format .tomcat_access_with_duration. for -lf\. Known formats: .*access_combined.*access_common_duration' \
+        asserts 'the retired product-named format is unknown, and the rejection lists the family names' \
+        produced_by 'apply_format_pin() in ltl' contract "$FAMILY_CONTRACT D1/D2"
+}
+
+scenario_family_bracketed_unit() {
+    current_scenario="family-bracketed-unit"
+    echo "[$current_scenario]"
+    # The microsecond fixture's twelve durations are 5, 8, ... 38 ms written
+    # as [5000us] ... [38000us]: read in the unit on the line, the STATS CSV
+    # duration sum over the one bucket is 258 ms.
+    local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
+    cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir/codebeamer_access_log.2025-10-29.txt"
+    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o codebeamer_access_log.2025-10-29.txt > out 2> out.stderr ) || true
+    check_capture_warnings "$dir/out"
+    local csv; csv=$(ls "$dir"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
+    assert_command \
+        command "col=\$(head -1 '$csv' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv')\" = 258 ]" \
+        label 'bracketed [Nus] durations read as microseconds: bucket duration sum 258 ms' \
+        asserts 'the first bracketed token is the duration and its unit is the one written on the line (us here), converted to milliseconds before any statistic' \
+        produced_by 'the duration_from_unit_token transform in the access_common_duration_bracketed entry in ltl' contract "$FAMILY_CONTRACT D7"
+}
+
+scenario_family_ambiguity_note_per_file() {
+    current_scenario="ambiguity-note-per-file"
+    echo "[$current_scenario]"
+    # Two files of the connection-server group with no name evidence and no
+    # deciding content (a day-3 date eliminates neither member) both fall to
+    # the group default: the note prints twice, each naming its file
+    # and the alternative member (R15/D15).
+    local a b out
+    local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
+    a="$dir/one.txt"; b="$dir/two.txt"
+    sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
+    out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
+    assert_command \
+        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 2 ] && grep -q 'one.txt: the detected' '$out.stderr' && grep -q 'two.txt: the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
+        label 'the ambiguity note prints once per file that fell to a default, naming the file and the alternative' \
+        asserts 'a two-file run where both files fall to the group default prints the note twice, each naming its file and every other member (R15/D15)' \
+        produced_by 'format_variant_ambiguity_note() in ltl (per-file latch)' contract "$FAMILY_CONTRACT D15"
 }
 
 scenario_codebeamer() {
@@ -429,8 +560,8 @@ scenario_codebeamer() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^  format: tomcat_codebeamer$' \
-        asserts     'Codebeamer access log with `[Nms] [Ns]` duration fields binds to slug `tomcat_codebeamer`. Detection regex: ltl:4892 (match_type 12).' \
+        pattern     '^  format: access_common_duration_bracketed$' \
+        asserts     'Codebeamer access log with `[Nms] [Ns]` duration fields binds to slug `access_common_duration_bracketed`. Detection regex: ltl:4892 (match_type 12).' \
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract    '%match_type_to_slug in ltl GLOBALS - slug names are locked; renames are breaking under HARNESS-DESIGN.md section Stability contract'
 
@@ -467,6 +598,12 @@ scenario_thingworx_standard() {
         asserts     'ThingWorx standard log binds to internal match_type 1' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
         contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 1 covers both full ThingWorx and the Logback-style fallback at ltl:4655'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'An application log is not an event ledger: it records what the code chose to log, so there is no one-line-per-request relationship and the file reports event_ledger: no - its line counts must not be read as attempted events' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 scenario_thingworx_with_metrics() {
@@ -482,13 +619,13 @@ scenario_thingworx_with_metrics() {
         pattern     '^  format: thingworx_standard$' \
         asserts     'ThingWorx ScriptLog with durationMS=/bytes= fields also binds to `thingworx_standard` - the duration/bytes capture happens within match_type 1, not as a separate slug' \
         produced_by 'emit_format_detection_verbose() in ltl' \
-        contract    '%match_type_to_slug in ltl GLOBALS - ThingWorx logs with or without metrics share the same slug; metric presence is signaled via is_access_log=yes'
+        contract    '%match_type_to_slug in ltl GLOBALS - ThingWorx logs with or without metrics share the same slug; metric presence is signaled via metrics_observed=yes'
 
     assert_line "$out" \
-        pattern     '^  is_access_log: yes$' \
-        asserts     'A ThingWorx log with durationMS= or bytes= flips is_access_log to yes per ltl:4799-4802' \
-        produced_by 'emit_format_detection_verbose() in ltl (per-file is_access_log field)' \
-        contract    'features/225-test-harness-coverage-gaps.md section #228 - is_access_log distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
+        pattern     '^  metrics_observed: yes$' \
+        asserts     'A ThingWorx log carrying durationMS= or bytes= fields reports metrics_observed: yes for the file - at least one of its lines observed a metric' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file metrics_observed field), fed by read_and_process_logs() folding the per-line $metrics_observed set by the format spec probe declaring marks_metrics_observed' \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (D18) and features/log-format-registry.md section `-V format-detection` section-contract - metrics_observed distinguishes ThingWorx logs that have parseable latency/bytes from ones that do not'
 }
 
 scenario_tw_edge_c_sdk() {
@@ -535,6 +672,12 @@ scenario_csv_with_udm() {
         asserts     'CSV path uses internal match_type 13' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file match_type field)' \
         contract    'features/225-test-harness-coverage-gaps.md section #228 - match_type 13 is reserved for the CSV path'
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'A CSV file read through -udm is not an event ledger: its rows are measurements the user supplied, with no guarantee that one row is one handled request, so the file reports event_ledger: no' \
+        produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+        contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
 }
 
 # Shared shape for the six registry-sample scenarios: write the fixture
@@ -543,8 +686,10 @@ scenario_csv_with_udm() {
 # same lines build_format_registry() validates at every startup (D24), so
 # a passing scenario proves the end-to-end path (file -> scan -> section)
 # for a format the corpus has no committed fixture for.
+# The fifth argument is optional: a scenario that names the expected
+# event_ledger value gets that assertion too; one that omits it does not.
 assert_registry_sample_scenario() {
-    local fixture="$1" slug="$2" mt="$3" nlines="$4"
+    local fixture="$1" slug="$2" mt="$3" nlines="$4" event_ledger="${5:-}"
     local out
     out=$(run_format_detection "$fixture")
     check_capture_warnings "$out"
@@ -586,6 +731,14 @@ assert_registry_sample_scenario() {
         asserts     "Every line of the whole-file sample is recognised by the registry patterns directly ($nlines lines), without touching scan_attempts" \
         produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
+
+    if [[ -n "$event_ledger" ]]; then
+        assert_line "$out" \
+            pattern     "^  event_ledger: $event_ledger\$" \
+            asserts     "A file bound to slug \`$slug\` reports event_ledger: $event_ledger - whether the producer writes one line per event it handled, so that the file's lines may be read as attempted events" \
+            produced_by "emit_format_detection_verbose() in ltl (per-file event_ledger field, bound in read_and_process_logs() from the first matching entry's FR_EVENT_LEDGER slot)" \
+            contract    'features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (R8, D19) - event_ledger: yes|no follows metrics_observed: in every file block'
+    fi
 }
 
 scenario_thingworx_rac_client() {
@@ -622,7 +775,10 @@ scenario_java_gc_g1() {
 [2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted
 [2025-06-05T11:17:57.418+0000][info][gc] Using G1
 EOF
-    assert_registry_sample_scenario "$log" java_gc_g1 6 6
+    # A GC log is an event ledger even though it classifies no outcome: the
+    # JVM writes one line per collection it performed, so the lines are the
+    # events. event_ledger and outcome classification are independent.
+    assert_registry_sample_scenario "$log" java_gc_g1 6 6 yes
 }
 
 scenario_tw_analytics_v2() {
@@ -690,13 +846,13 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 15$' \
-        asserts     'All 15 scanned registry entries are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 18$' \
+        asserts     'All 18 scan slots are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
     assert_line "$out" \
-        pattern     '^guarded: mt12,mt4,mt9$' \
+        pattern     '^guarded: mt12,mt9,mt19,mt20,mt4$' \
         asserts     'Exactly the three cheap-superset-guard entries (D28) carry guards, listed in static registry order' \
         produced_by 'compile_format_guard() wiring in build_format_registry(); emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (D28 guard set)'
@@ -893,26 +1049,385 @@ scenario_scan_telemetry_nomatch() {
         contract    'features/log-format-registry.md section -V format-detection section-contract'
 }
 
-scenario_unit_ambiguity_warning() {
-    current_scenario="unit-ambiguity-warning"
+# ---------- #453 success/failure classification (S3) -----------------------
+#
+# The `format-detection / classification` sub-section is run-level: one block
+# per run, every key deterministic for a committed fixture, so the scenarios
+# below assert values and never mere presence. The fixtures are the smallest
+# inputs carrying each signal - ten access lines (one per HTTP status family),
+# seven GC lines for a format that declines to classify, six diagnostics lines
+# for the global default - so the coarsest bucket with no empty buckets
+# (`-bs 1440 -oe`, HARNESS-DESIGN.md section Invocation coherence) serves every
+# assertion: classification counts a line at the include point and never reads
+# a bucket.
+CLASSIFICATION_CONTRACT='features/453-success-failure-classification-event-ledger.md section `-V` section-contract changes (D20)'
+SUMMARY_ROWS_PRODUCER='print_summary_table() in ltl (the SUCCESS CLASSIFIED / FAILURE CLASSIFIED rows, reading $total_successes/$total_failures and the $cls_*_declared flags set at the include point)'
+RULE_CHANGE_PRODUCER='format_classification_rule_change() in ltl, called from the include point in read_and_process_logs() when $line_cls_sig differs from the file'"'"'s current signature; lines emitted by emit_format_detection_verbose()'
+CLASSIFICATION_PRODUCER='emit_format_detection_verbose() in ltl (format-detection / classification sub-section, reading $total_successes/$total_failures accumulated at the include point in read_and_process_logs())'
+
+# Read one key of the classification sub-section out of a capture. A missing
+# sub-section header, or a key absent from it, is a hard failure - never an
+# empty string carried forward (HARNESS-DESIGN.md Traps 2 and 3).
+classification_value() {
+    local capture="$1" key="$2" value
+    if ! grep -qE '^=== format-detection / classification ===$' "$capture"; then
+        echo "FAIL: classification sub-section header not found in $capture" >&2
+        exit 1
+    fi
+    value=$(sed -n '/^=== format-detection \/ classification ===$/,/^=== END format-detection \/ classification ===$/p' "$capture" \
+            | grep -E "^$key: " | awk '{print $2}')
+    if [[ -z "$value" ]]; then
+        echo "FAIL: key '$key' not found in the classification sub-section of $capture" >&2
+        exit 1
+    fi
+    echo "$value"
+}
+
+# Sum the `successes` and `failures` columns over every message row of the
+# MESSAGES CSV written into directory $1, printed as "<successes> <failures>".
+# Parsed with python3's csv reader: message fields are quoted and carry commas,
+# so a naive comma split misaligns the columns. Anything that would yield an
+# empty or partial sum - no CSV, more than one CSV, no rows, a missing column -
+# exits non-zero so the caller fails rather than asserting on nothing.
+csv_outcome_sums() {
+    python3 - "$1" <<'PY'
+import csv, glob, sys
+found = sorted(glob.glob(sys.argv[1] + '/*LTL-MESSAGES*.csv'))
+if len(found) != 1:
+    sys.stderr.write("expected exactly one MESSAGES CSV in %s, found %d\n" % (sys.argv[1], len(found)))
+    sys.exit(1)
+with open(found[0], newline='') as fh:
+    rows = list(csv.DictReader(fh))
+if not rows:
+    sys.stderr.write("no message rows in %s\n" % found[0])
+    sys.exit(1)
+for col in ('successes', 'failures'):
+    if col not in rows[0]:
+        sys.stderr.write("column '%s' absent from %s\n" % (col, found[0]))
+        sys.exit(1)
+print("%d %d" % (sum(int(r['successes']) for r in rows),
+                 sum(int(r['failures']) for r in rows)))
+PY
+}
+
+# Run ltl with -o against $2 inside its own directory under $TMP_DIR, named by
+# $1. ltl writes its CSVs into the current directory, so each run needs a
+# directory of its own; $TMP_DIR is cleaned by the EXIT trap, keeping transient
+# artifacts out of any deliverables area (HARNESS-DESIGN.md Traps 9 and 10).
+# No `-n` limit: the assertion sums every message row, so no row may be
+# withheld from the CSV. Echoes the capture path; its stderr is beside it.
+run_classification_csv() {
+    local tag="$1" log="$2"
+    shift 2
+    local dir="$TMP_DIR/$current_scenario/$tag"
+    mkdir -p "$dir"
+    local outfile="$dir/capture.out"
+    set +e
+    ( cd "$dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -o -V format-detection "$@" "$log" ) \
+        > "$outfile" 2>"$outfile.stderr"
+    local ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]]; then
+        echo "FAIL: ltl exited $ec for $log (classification CSV run '$tag'); stderr:" >&2
+        sed 's/^/    /' "$outfile.stderr" >&2
+        exit 1
+    fi
+    if ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo "FAIL: format-detection section header not found in capture $outfile" >&2
+        exit 1
+    fi
+    echo "$outfile"
+}
+
+scenario_classification_access() {
+    current_scenario="classification-access"
+    echo "[$current_scenario]"
+
+    # Ten Tomcat access lines, one per HTTP status family: 1xx/2xx/3xx are
+    # successes (6 lines), 4xx/5xx failures (4 lines), every line classified.
+    local log="$REPO_DIR/tests/fixtures/http-status-families.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^=== format-detection / classification ===$' \
+        asserts     'The run-level classification sub-section is emitted inside the format-detection section' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT; delimiters per HARNESS-DESIGN.md section Delimiter contract"
+
+    assert_line "$out" \
+        pattern     '^lines_included: 10$' \
+        asserts     'lines_included is the existing run counter unchanged: matched lines that survived filtering (all ten fixture lines)' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - lines_included is \$total_lines_included, unchanged in meaning (R5)"
+
+    assert_line "$out" \
+        pattern     '^successes: 6$' \
+        asserts     'The six 1xx/2xx/3xx access lines are classified as successes by the access family status criteria' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - successes counts lines whose outcome was success at the include point"
+
+    assert_line "$out" \
+        pattern     '^failures: 4$' \
+        asserts     'The four 4xx/5xx access lines are classified as failures' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - failures counts lines whose outcome was failure at the include point"
+
+    assert_line "$out" \
+        pattern     '^classified: 10$' \
+        asserts     'classified is successes + failures, computed by the tool rather than re-derived by every consumer' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - classified = successes + failures"
+
+    assert_line "$out" \
+        pattern     '^unclassified: 0$' \
+        asserts     'An access log with a status code on every line leaves no line unclassified' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified = lines_included - classified"
+
+    assert_line "$out" \
+        pattern     '^unclassified_pct: 0\.0$' \
+        asserts     'The unclassified share is reported to one decimal, and is 0.0 when every included line was classified' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified / lines_included x 100, one decimal"
+
+    assert_line "$out" \
+        pattern     '^unmatched_lines: 0$' \
+        asserts     'The run total of unmatched lines sits beside the shortfall; no fixture line went unrecognised' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - run total of the per-file unmatched_lines key (R5: an unmatched line is never included)"
+
+    assert_line "$out" \
+        pattern     '^event_ledger_files: 1/1$' \
+        asserts     'The single bound file is an event ledger: one Tomcat access line per request handled, so the shortfall is meaningful for this run' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - event-ledger files / files with a bind (R8, D19)"
+
+    assert_line "$out" \
+        pattern     '^rule_changes: 0$' \
+        asserts     'A single-format run flips no occupant mid-file, so no criteria signature changes' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_changes counts mid-file flips whose occupants carry different criteria signatures (D19)"
+
+    assert_absent "$out" \
+        pattern     '^rule_change: ' \
+        asserts     'The per-flip rule_change: detail lines are contracted ABSENT when rule_changes is 0, so a capture never carries an empty list' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: is absent when the count is 0"
+
+    assert_line "$out" \
+        pattern     '^default_failure: category_bucket=\^\(\?:ERROR\|FATAL\|CRITICAL\)\$$' \
+        asserts     'The capture is self-describing about the global default failure rule in force: the canonical field=pattern signature of the resolved default failure list' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - signature is field=pattern conditions, criteria joined by | and conditions by & (D15)"
+
+    assert_line "$out" \
+        pattern     '^=== END format-detection / classification ===$' \
+        asserts     'The classification sub-section carries its own END marker so a harness can range-extract it unambiguously' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT; delimiters per HARNESS-DESIGN.md section Delimiter contract"
+
+    assert_line "$out" \
+        pattern     '^=== END format-detection ===$' \
+        asserts     'The sub-section is emitted inside the parent section, whose END marker still closes the whole block after it' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - the sub-section is emitted inside the parent before its END marker"
+}
+
+scenario_classification_declining() {
+    current_scenario="classification-declining"
+    echo "[$current_scenario]"
+
+    # java_gc_g1 declines to classify (its criteria are the research question
+    # filed as #483), so every included line is unclassified while the format
+    # remains an event ledger: coverage is maximal, the outcome is unknown.
+    local log="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^lines_included: 7$' \
+        asserts     'All seven GC lines survive filtering and reach the include point, whether or not they can be classified' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - lines_included is unchanged in meaning by classification (R5)"
+
+    assert_line "$out" \
+        pattern     '^successes: 0$' \
+        asserts     'A format that declines to classify asserts no success: unclassified is a third outcome, never a default to one side' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - java_gc_g1 declines to classify until #483 lands (D9)"
+
+    assert_line "$out" \
+        pattern     '^failures: 0$' \
+        asserts     'A format that declines to classify asserts no failure either, and does not fall back to the global default' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - an entry may explicitly decline to classify (R4, D9)"
+
+    assert_line "$out" \
+        pattern     '^classified: 0$' \
+        asserts     'Nothing is classified on a declining format, so no reliability figure can be computed from this run' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - classified = successes + failures"
+
+    assert_line "$out" \
+        pattern     '^unclassified: 7$' \
+        asserts     'Every included line of a declining format is unclassified' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified = lines_included - classified"
+
+    assert_line "$out" \
+        pattern     '^unclassified_pct: 100\.0$' \
+        asserts     'A wholly unclassified run reports 100.0, the signal a consumer reads to say the figure is unavailable' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified / lines_included x 100, one decimal"
+
+    assert_line "$out" \
+        pattern     '^event_ledger_files: 1/1$' \
+        asserts     'Declining to classify does not stop a format being an event ledger: every GC pause produces a line, so coverage is maximal even though the outcome is undecided' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - event-ledger files / files with a bind (R8, D9)"
+}
+
+scenario_classification_default() {
+    current_scenario="classification-default"
+    echo "[$current_scenario]"
+
+    # Six diagnostics lines, one per log level. The global default declares
+    # failure only (an INFO line is not evidence of success), so FATAL and
+    # ERROR are failures and the remaining four levels are unclassified.
+    local log="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^lines_included: 6$' \
+        asserts     'All six diagnostics lines survive filtering and reach the include point' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - lines_included is unchanged in meaning by classification (R5)"
+
+    assert_line "$out" \
+        pattern     '^failures: 2$' \
+        asserts     'The inherited global default classifies the FATAL and ERROR lines as failures; WARN is not a failure without a matching message condition' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - an entry declaring nothing inherits the global default failure list (R4, D3, D15)"
+
+    assert_line "$out" \
+        pattern     '^successes: 0$' \
+        asserts     'The global default declares failure only: success cannot be asserted from a diagnostics line, so an INFO line is unclassified rather than a success' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - the global default declares failure only (D7)"
+
+    assert_line "$out" \
+        pattern     '^unclassified: 4$' \
+        asserts     'The WARN, INFO, DEBUG and TRACE lines are unclassified under the failure-only default' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified = lines_included - classified (D7)"
+
+    assert_line "$out" \
+        pattern     '^unclassified_pct: 66\.7$' \
+        asserts     'The unclassified share is rounded to one decimal (4 of 6 lines reads 66.7, not 66.66666)' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - unclassified / lines_included x 100, one decimal"
+
+    assert_line "$out" \
+        pattern     '^event_ledger_files: 0/1$' \
+        asserts     'A diagnostics log is not an event ledger - it records what a component chose to log, not one line per operation - so the file counts in the denominator only' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - event-ledger files / files with a bind (R8, D19)"
+}
+
+scenario_classification_consolidation_reconciles() {
+    current_scenario="classification-consolidation-reconciles"
+    echo "[$current_scenario]"
+
+    # The S3 obligation: the per-message outcome slots ride through
+    # consolidation. The same fixture is run twice - plain, and consolidated at
+    # -g 60, which merges the ten message keys into eight - and the successes
+    # and failures columns of the MESSAGES CSV must sum to the same totals in
+    # both runs, and to the run-level counts of their own capture.
+    local log="$REPO_DIR/tests/fixtures/http-status-families.txt"
+
+    local plain_out cons_out
+    plain_out=$(run_classification_csv plain "$log")
+    check_capture_warnings "$plain_out"
+    cons_out=$(run_classification_csv consolidated "$log" -g 60)
+    check_capture_warnings "$cons_out"
+
+    local plain_dir cons_dir
+    plain_dir=$(dirname "$plain_out")
+    cons_dir=$(dirname "$cons_out")
+
+    local plain_sums cons_sums
+    plain_sums=$(csv_outcome_sums "$plain_dir")
+    if [[ -z "$plain_sums" ]]; then
+        echo "FAIL: could not sum the unconsolidated MESSAGES CSV in $plain_dir" >&2
+        exit 1
+    fi
+    cons_sums=$(csv_outcome_sums "$cons_dir")
+    if [[ -z "$cons_sums" ]]; then
+        echo "FAIL: could not sum the consolidated MESSAGES CSV in $cons_dir" >&2
+        exit 1
+    fi
+
+    local plain_section cons_section
+    plain_section="$(classification_value "$plain_out" successes) $(classification_value "$plain_out" failures)"
+    cons_section="$(classification_value "$cons_out" successes) $(classification_value "$cons_out" failures)"
+
+    assert_command \
+        command     "[[ '$plain_sums' == '6 4' ]]" \
+        label       "unconsolidated MESSAGES CSV rows sum to successes=6 failures=4 (observed: $plain_sums)" \
+        asserts     'The per-message success/failure columns of the CSV account for every classified line of the run: six successes and four failures spread over the ten message keys' \
+        produced_by 'the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; merge_consolidation_stats() sums them element-wise' \
+        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation"
+
+    assert_command \
+        command     "[[ '$cons_sums' == '6 4' ]]" \
+        label       "consolidated (-g 60) MESSAGES CSV rows sum to successes=6 failures=4 (observed: $cons_sums)" \
+        asserts     'Consolidation merges message keys without losing or double-counting an outcome: the merged rows carry the same totals as the unconsolidated ones' \
+        produced_by 'the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; merge_consolidation_stats() sums them element-wise' \
+        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation - a consolidated run's merged counts equal the unconsolidated totals"
+
+    assert_command \
+        command     "[[ '$plain_sums' == '$cons_section' && '$cons_sums' == '$cons_section' ]]" \
+        label       "both CSV sums equal the consolidated run's own sub-section counts (section: $cons_section, plain CSV: $plain_sums, consolidated CSV: $cons_sums)" \
+        asserts     'The per-message store and the run-level counters are two views of one classification, so a consolidated run reconciles with its own sub-section and with the unconsolidated run' \
+        produced_by "the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; merge_consolidation_stats() sums them element-wise; run-level counts from $CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation"
+
+    assert_command \
+        command     "[[ '$plain_section' == '$cons_section' ]]" \
+        label       "the run-level successes/failures are unchanged by consolidation (plain: $plain_section, consolidated: $cons_section)" \
+        asserts     'Consolidation is a presentation of the message store, not a re-classification: the run-level counters are accumulated at the include point and cannot move when -g merges keys' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17)"
+}
+
+scenario_variant_ambiguity_note() {
+    current_scenario="variant-ambiguity-note"
     echo "[$current_scenario]"
 
     # D47/I6 (#384): binding a variant-group member that was selected by
     # default — nothing in the file name or content decided between the
-    # producers — emits one stderr note naming the consequence (here the
-    # duration unit) and the overrides. The note is an intentional
-    # diagnostic — it never carries an ` at ... line` suffix, so
-    # check_capture_warnings stays clean. The Tomcat file's name does not
-    # carry the producer's stem, so the group default holds by its standing
-    # credit (basis default).
-    local tomcat="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
+    # producers — emits one stderr note naming the consequence and the
+    # overrides. The note is an intentional diagnostic — it never carries an
+    # ` at ... line` suffix, so check_capture_warnings stays clean. The
+    # connection-server fixture rewritten to a day-3 date leaves both
+    # members of its group alive (no impossible month under either layout)
+    # and carries no name evidence, so the group default holds by its
+    # standing credit (basis default). The access shapes form no group
+    # since #444 revised D3, so this is the one shipping group.
+    local undecided="$TMP_DIR/$current_scenario/renamed-cxserver.txt"; mkdir -p "$(dirname "$undecided")"
+    sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$undecided"
     local out
-    out=$(run_format_detection "$tomcat")
+    out=$(run_format_detection "$undecided")
     check_capture_warnings "$out"
 
     assert_line "$out.stderr" \
-        pattern     '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer and the duration unit differs between them \(assumed ms\); nothing in the file names or content decided which - use -du <unit> or -lf httpd_access_with_duration if the files come from the other producer$' \
-        asserts     'Binding a default-selected variant-group member without deciding evidence emits the run-level note on stderr: no filename, naming the consequence class (unit) and the assumption, pointing at -du and at -lf with the other member' \
+        pattern     '^Note: [^:]+: the detected log format \(connection_server_standard\) is written by more than one producer and the date layout differs between them; nothing in the file name or content decided which - use -lf integration_runtime_standard if the file comes from the other producer$' \
+        asserts     'Binding a default-selected variant-group member without deciding evidence emits the note on stderr once per file, naming the file, the consequence class (here the date layout) and -lf with every other member (#444 D15)' \
         produced_by 'format_variant_ambiguity_note() in ltl (first-match block)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note); the note text is part of the contract'
     assert_line "$out" \
@@ -921,16 +1436,14 @@ scenario_unit_ambiguity_warning() {
         produced_by 'select_format_variants() in ltl' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 
-    # Contracted absence 1: an explicit -du suppresses the note — the user
-    # has stated the unit, so there is no assumption to surface.
-    local out_du
-    out_du=$(run_format_detection "$tomcat" -du ms)
-    check_capture_warnings "$out_du"
-
-    assert_absent "$out_du.stderr" \
-        pattern     '^Note: the detected log format' \
-        asserts     'With -du given (any unit), the unit note is contracted ABSENT: the note exists only to surface an assumption, and -du removes the assumption' \
-        produced_by 'format_variant_ambiguity_note() in ltl (duration_unit_override gate)' \
+    # Contracted absence 1: a pin names the format, so no assumption is in effect.
+    local out_pin
+    out_pin=$(run_format_detection "$undecided" -lf connection_server_standard)
+    check_capture_warnings "$out_pin"
+    assert_absent "$out_pin.stderr" \
+        pattern     '^Note: [^:]+: the detected log format' \
+        asserts     'With -lf given, the note is contracted ABSENT: the user named the format' \
+        produced_by 'format_variant_ambiguity_note() in ltl (pin gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
     # Contracted absence 2: a format outside any variant group (codebeamer)
@@ -938,29 +1451,26 @@ scenario_unit_ambiguity_warning() {
     local out_cb
     out_cb=$(run_format_detection "$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
-
     assert_absent "$out_cb.stderr" \
-        pattern     '^Note: the detected log format' \
+        pattern     '^Note: [^:]+: the detected log format' \
         asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
         produced_by 'format_variant_ambiguity_note() in ltl (variant-group gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
 
-    # Contracted absence 3: the same content under the producer-true name
-    # is decided by evidence (stem), so no assumption is in effect.
-    local staged="$TMP_DIR/localhost_access_log.2025-05-05.txt"
-    cp "$tomcat" "$staged"
+    # Contracted absence 3: the same content under the producer-true name is
+    # decided by evidence (stem), so no assumption is in effect.
+    local staged; staged=$(stage_fixture connection-server.txt cxserver.1.log) || return
     local out_named
     out_named=$(run_format_detection "$staged")
     check_capture_warnings "$out_named"
-
     assert_absent "$out_named.stderr" \
-        pattern     '^Note: the detected log format' \
+        pattern     '^Note: [^:]+: the detected log format' \
         asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
         produced_by 'format_variant_ambiguity_note() in ltl (selection-basis gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
     assert_line "$out_named" \
         pattern     '^  selection_basis: evidence$' \
-        asserts     'The producer-true Tomcat name selects the Tomcat member by stem evidence' \
+        asserts     'The producer-true name selects the member by stem evidence' \
         produced_by 'select_format_variants() in ltl' \
         contract    'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
 }
@@ -970,6 +1480,167 @@ scenario_unit_ambiguity_warning() {
 # Every run uses -bs 1440 -oe: the fixtures span months (and the mixed
 # fixture pairs files a year apart), and these scenarios assert detection,
 # not buckets — no empty-bucket memory for a time axis nobody reads.
+
+scenario_classification_format_switch() {
+    current_scenario="classification-format-switch"
+    echo "[$current_scenario]"
+
+    # D19: a file in which a second format wins the scan mid-way. Four Tomcat
+    # access-log lines (status-code criteria) followed by three ThingWorx
+    # application-log lines (the default level criterion): the criteria
+    # signatures differ, so the change at line 5 is counted, listed, told to
+    # the user once, and the file's event-ledger property follows the new
+    # entry.
+    local log="$REPO_DIR/tests/fixtures/classification-format-switch.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^rule_changes: 1$' \
+        asserts     'One change of classifying entry with differing criteria signatures is counted for the run' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_changes counts mid-file changes whose old and new entry carry different criteria signatures (D19, D32)"
+
+    assert_line "$out" \
+        pattern     '^rule_change: file=.*/classification-format-switch\.txt line=5 from=access_common_duration to=thingworx_standard$' \
+        asserts     'The change is listed with the file, the line at which the new rules took effect, and the old and new format slugs' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: file=<path> line=N from=<slug> to=<slug> (D19)"
+
+    assert_line "$out.stderr" \
+        pattern     '^Note: .*classification-format-switch\.txt line 5: the classification rules changed because the detected log format changed from access_common_duration to thingworx_standard - lines before this point were classified under the previous rules$' \
+        asserts     'The user is told, on stderr, at which line the rules changed, from which format to which, and that earlier lines were classified under the previous rules' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - D19 note text; registered on #412 as a producer to migrate"
+
+    assert_line "$out" \
+        pattern     '^  event_ledger: no$' \
+        asserts     'The file'"'"'s event-ledger property follows the entry its lines are classified under: an access log (ledger) that turns into an application log (not a ledger) ends the run as a non-ledger file' \
+        produced_by 'format_classification_rule_change() in ltl re-binding $format_detection{$file}{event_ledger}' \
+        contract    "$CLASSIFICATION_CONTRACT - event_ledger re-set whenever the classifying entry changes (D19)"
+
+    assert_line "$out" \
+        pattern     '^successes: 3$' \
+        asserts     'The three 2xx access lines before the change are successes under the access rules and are not revisited after it' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - lines classified before the change are not revisited (D19)"
+
+    assert_line "$out" \
+        pattern     '^failures: 2$' \
+        asserts     'The 404 line (access rules) and the ERROR line (default level rule) are both failures: each line is classified under the criteria of the entry that matched it' \
+        produced_by "$CLASSIFICATION_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - a line is classified under the criteria of the entry that matched it (D19)"
+}
+
+scenario_classification_format_interleaved() {
+    current_scenario="classification-format-interleaved"
+    echo "[$current_scenario]"
+
+    # D19's second fixture: the two formats alternate line by line (24 lines,
+    # 23 changes). Every change is counted, only the first ten are listed,
+    # and the user is told once per file, not once per change.
+    local log="$REPO_DIR/tests/fixtures/classification-format-interleaved.txt"
+    local out
+    out=$(run_format_detection "$log")
+    check_capture_warnings "$out"
+
+    assert_line "$out" \
+        pattern     '^rule_changes: 23$' \
+        asserts     'Every alternation between the two formats is counted, not only the listed ones' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_changes counts every change in the run (D19)"
+
+    local listed
+    listed=$(grep -c '^rule_change: ' "$out" || true)
+    assert_command \
+        command     "[[ '$listed' == '10' ]]" \
+        label       "exactly 10 rule_change: lines listed for 23 changes (observed: $listed)" \
+        asserts     'The listing is capped at the first ten changes per file so an interleaved file does not emit one line per alternation' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: lines list at most the first 10 per file (D19)"
+
+    assert_line "$out" \
+        pattern     '^rule_change: file=.*/classification-format-interleaved\.txt line=11 from=thingworx_standard to=access_common_duration$' \
+        asserts     'The tenth listed change is the one at line 11: the listing is the first ten in file order, and the from/to slugs swap direction with every alternation' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - rule_change: lines in input order (D19)"
+
+    local notes
+    notes=$(grep -c '^Note: .*the classification rules changed' "$out.stderr" || true)
+    assert_command \
+        command     "[[ '$notes' == '1' ]]" \
+        label       "exactly one rule-change note on stderr for 23 changes (observed: $notes)" \
+        asserts     'The user is told once per file, at the first change, however many times the rules change afterwards' \
+        produced_by "$RULE_CHANGE_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - note once per file, at the first change (D19)"
+}
+
+scenario_classification_summary_rows() {
+    current_scenario="classification-summary-rows"
+    echo "[$current_scenario]"
+
+    # The rendering surface of the counters: SUCCESS CLASSIFIED / FAILURE
+    # CLASSIFIED rows under LINES INCLUDED in the run summary, each shown when
+    # its outcome was declared or observed, the share of classified lines
+    # beside the count and omitted when no line was a success.
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    local access="$REPO_DIR/tests/fixtures/http-status-families.txt"
+    local diag="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+    local gc="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+    local r_access="$dir/access.txt" r_diag="$dir/diag.txt" r_gc="$dir/gc.txt"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$access" 2> "$r_access.stderr" > "$r_access"
+    assert_no_runtime_warnings "$r_access.stderr" "$current_scenario access"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$diag" 2> "$r_diag.stderr" > "$r_diag"
+    assert_no_runtime_warnings "$r_diag.stderr" "$current_scenario diagnostics"
+    "$LTL" --disable-progress -ni --terminal-width 120 -bs 1440 -oe -n 1 "$gc" 2> "$r_gc.stderr" > "$r_gc"
+    assert_no_runtime_warnings "$r_gc.stderr" "$current_scenario gc"
+
+    # The classified rows carry their outcome's colour. This scenario asserts
+    # the rows' text and shape — the count, the share, the funnel order — so
+    # the escapes are stripped here rather than written into every anchored
+    # pattern; the colour itself is the contract of
+    # tests/validate-classification-percentages.sh.
+    perl -i -pe 's/\e\[[0-9;]*m//g' "$r_access" "$r_diag" "$r_gc"
+
+    assert_line "$r_access" \
+        pattern     '^  SUCCESS CLASSIFIED +6 \(60%\) *$' \
+        asserts     'An access log shows the success count with its share of all classified lines (6 of 10), right-aligned to the table boundary' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows (architect, 2026-08-29): share = count / (successes + failures), three significant digits"
+
+    assert_line "$r_access" \
+        pattern     '^  FAILURE CLASSIFIED +4 \(40%\) *$' \
+        asserts     'The failure row carries the complementary share' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: both rows shown when both outcomes are declared"
+
+    assert_command \
+        command     "grep -oE 'LINES INCLUDED|SUCCESS CLASSIFIED|FAILURE CLASSIFIED|LINES READ' '$r_access' | tr '\n' ' ' | grep -q '^LINES READ LINES INCLUDED SUCCESS CLASSIFIED FAILURE CLASSIFIED '" \
+        label       'tallies read as a funnel: LINES READ, LINES INCLUDED, then the classified rows' \
+        asserts     'The two rows partition LINES INCLUDED and appear directly beneath it; LINES READ leads the tallies (#452, architect 2026-08-31)' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows placement"
+
+    assert_line "$r_diag" \
+        pattern     '^  FAILURE CLASSIFIED +2 *$' \
+        asserts     'A diagnostics log under the failure-only default shows the failure count with no share: with no successes the share would always read 100%' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: share omitted when no line was a success"
+
+    assert_absent "$r_diag" \
+        pattern     '^  SUCCESS CLASSIFIED' \
+        asserts     'No SUCCESS CLASSIFIED row when no bound format declares success rules and no line was a success' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: a row is shown only when its outcome was declared or observed"
+
+    assert_absent "$r_gc" \
+        pattern     'CLASSIFIED' \
+        asserts     'A declining format (GC) shows neither row' \
+        produced_by "$SUMMARY_ROWS_PRODUCER" \
+        contract    "$CLASSIFICATION_CONTRACT - summary rows: nothing declared, nothing observed, nothing shown"
+}
 
 scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
@@ -1023,71 +1694,49 @@ scenario_variant_integration_runtime_unnamed() {
         contract 'features/log-format-registry.md section Drop 1.5 F6'
 }
 
-scenario_variant_tomcat_named() {
-    current_scenario="variant-tomcat-named"
+scenario_unit_tomcat_named() {
+    current_scenario="unit-tomcat-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" tomcat_access_with_duration mt3 evidence '0\.86'
-    assert_line "$out" pattern '^  filename_evidence: stem=mt3 ext=match date=present index=-$' \
-        asserts 'The Tomcat name decomposes to stem, .txt and a date' \
+    assert_line "$out" pattern '^  format: access_common_duration$' \
+        asserts 'The common-plus-duration shape is one format whatever unit the producer writes: a Tomcat-named file binds it (#444 D3 as revised)' \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/444-access-log-format-family-and-user-surface.md D3 (revised 2026-09-04: no unit variant)'
+    assert_line "$out" pattern '^  filename_evidence: stem=mt3ts ext=match date=present index=-$' \
+        asserts 'The Tomcat name decomposes to stem, .txt and a date (the thread-session entry declares the same stem and precedes the common-duration entry)' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     assert_absent "$out.stderr" pattern '^Note: ' \
-        asserts 'Stem evidence decided the unit; no ambiguity note' \
+        asserts 'A shape outside any variant group raises no ambiguity note' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
 }
 
-scenario_variant_tomcat_extension_only() {
-    current_scenario="variant-tomcat-extension-only"
-    echo "[$current_scenario]"
-    local log; log=$(stage_fixture tomcat-access.txt whatever.log) || return
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.50'
-    assert_line "$out" pattern '^  candidates: mt3=2\.00,mt3us=2\.00$' \
-        asserts 'An extension alone ties the group default (standing credit = extension weight) and never moves the selection off it (I1)' \
-        produced_by 'select_format_variants() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 I1'
-    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
-        asserts 'A default-basis selection surfaces the assumption' \
-        produced_by 'format_variant_ambiguity_note() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 I6'
-}
-
-scenario_variant_httpd_named() {
-    current_scenario="variant-httpd-named"
+scenario_unit_httpd_named() {
+    current_scenario="unit-httpd-named"
     echo "[$current_scenario]"
     local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" httpd_access_with_duration mt3us evidence '0\.71'
-    assert_line "$out" pattern '^  filename_evidence: stem=mt3us ext=match date=present index=-$' \
-        asserts 'access.log-20260609 decomposes under after-placement: stem, .log, then the compact date' \
+    assert_line "$out" pattern '^  format: access_common_duration$' \
+        asserts 'An httpd-named file binds the same format: nothing on the line or in the registry distinguishes the microsecond producer' \
+        produced_by 'read_and_process_logs() in ltl (first-match block)' \
+        contract 'features/444-access-log-format-family-and-user-surface.md D3 (revised 2026-09-04)'
+    assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
+        asserts 'No entry declares the httpd name any more, so the name carries no evidence' \
         produced_by 'format_filename_evidence() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D45/I4'
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
     assert_absent "$out.stderr" pattern '^Note: ' \
-        asserts 'Evidence decided the microsecond member; no -du needed and no note' \
+        asserts 'No variant group, no note; the unit is the -du mechanism'"'"'s business' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
-    # The microsecond unit is applied: a -du us run must render identically.
+    # -du us is the way to read the microsecond producer: the resolved unit
+    # follows the override, and the section reports it.
     local out_du; out_du=$(run_format_detection "$log" -du us); check_capture_warnings "$out_du"
-    assert_command label "httpd member carries microseconds (output identical to -du us)" \
-        command "diff <(grep -av '^duration_unit_override' '$out') <(grep -av '^duration_unit_override' '$out_du') > /dev/null" \
-        asserts 'The httpd member declares %D in microseconds, so the evidence-selected run equals the explicit -du us run' \
-        produced_by 'read_and_process_logs() in ltl (FR_DURATION_UNIT conversion)' \
-        contract 'features/log-format-registry.md section Drop 1.5 D47 (first variant groups)'
-}
-
-scenario_variant_httpd_renamed() {
-    current_scenario="variant-httpd-renamed"
-    echo "[$current_scenario]"
-    local log; log=$(stage_fixture httpd-access.txt renamed.txt) || return
-    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" tomcat_access_with_duration mt3 default '0\.75'
-    assert_line "$out.stderr" pattern '^Note: the detected log format \(tomcat_access_with_duration\) is written by more than one producer' \
-        asserts 'A renamed httpd file falls to the default with the note (D44: visible-or-good-enough)' \
-        produced_by 'format_variant_ambiguity_note() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D44/I6'
+    assert_line "$out_du" pattern '^duration_unit_override: us$' \
+        asserts 'When -du us is given, the format-detection section reports the override' \
+        produced_by 'emit_format_detection_verbose() in ltl (run-level duration_unit_override field)' \
+        contract 'features/524-bucket-size-unit.md D1 (one converter every unit surface reads); features/444-access-log-format-family-and-user-surface.md D3 (revised)'
 }
 
 scenario_variant_thingworx_rolled() {
@@ -1186,11 +1835,11 @@ scenario_variant_mixed_legend() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture mixed.txt mixed.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_line "$out" pattern '^  formats: connection_server_standard,tomcat_access_with_duration$' \
+    assert_line "$out" pattern '^  formats: connection_server_standard,access_common_duration$' \
         asserts 'Every format found in the file is listed, first-bound first' \
         produced_by 'read_and_process_logs() in ltl (per-file formats, N7)' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=tomcat_access_with_duration$' \
+    assert_line "$out" pattern '^legend: 1=connection_server_standard,2=access_common_duration$' \
         asserts 'The legend numbers formats in first-detection order across the run (I8)' \
         produced_by 'emit_format_detection_verbose() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
@@ -1208,7 +1857,7 @@ scenario_variant_mixed_legend() {
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
     assert_command label "console legend line" \
-        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 tomcat_access_with_duration *\$'" \
+        command "perl -pe 's/\\e\\[[0-9;]*[a-zA-Z]//g' '$render' | grep -q '  1 connection_server_standard  2 access_common_duration *\$'" \
         asserts 'One legend line below the title names the numbered formats (D50)' \
         produced_by 'print_summary_table() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D50'
@@ -1261,6 +1910,43 @@ scenario_windchill_workgroup_manager() {
         asserts 'After the run mt16 (no pinned ancestors) leads the MTF scan order' \
         produced_by 'format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (D26 pinned-closure MTF)'
+}
+
+# A WGM client written by a client configured with `use_local_time YES`
+# (issue #512): the zone is a numeric offset with a non-zero-padded hour
+# (`+2:00`, `+0:00`) instead of `Z`. The whole file must bind mt16 by shape;
+# the regression this guards is a zone-anchored pattern that matches nothing
+# here, leaving the file to thingworx_rac_client, whose bracketed-token tail
+# accepts the minority of lines that carry one.
+scenario_wgm_client_localtime() {
+    current_scenario="wgm-client-localtime"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture wgm-client-localtime.txt uwgm.log.1) || return
+    local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
+        asserts 'A WGM client log whose timestamps carry a numeric zone offset binds windchill_workgroup_manager, not the bracketed-token format that would otherwise accept a minority of its lines' \
+        produced_by 'read_and_process_logs() in ltl (first-match block); emitted by emit_format_detection_verbose()' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
+    assert_absent "$out" pattern '^  format: thingworx_rac_client$' \
+        asserts 'No WGM file binds thingworx_rac_client: mt16 is a pinned ancestor of mt2, and the zone form must not decide which of the two claims the file' \
+        produced_by 'derive_format_constraints() and format_registry_promote() in ltl; emitted by emit_format_detection_verbose()' \
+        contract 'features/395-wgm-client-log-format.md section Scan-order constraint'
+    assert_line "$out" pattern '^  matched_lines: 35$' \
+        asserts 'Every line of the local-offset fixture matches the mt16 pattern - both the +0:00 and +2:00 offset forms, header block, data lines and the bracket-bearing line that the thingworx_rac_client tail would otherwise accept' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512); the fixture and this count change in the same commit'
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'No local-offset WGM line falls through the scan' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
+        contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
+    assert_line "$out" pattern $'^lines_included\t35$' \
+        asserts 'Every matched local-offset line survives the category-vocabulary gate through the wgm_msgtype transform' \
+        produced_by 'wgm_msgtype transform in %format_transform_code; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
+    assert_line "$out" pattern '^  sample_formats: mt16=35$' \
+        asserts 'The evidence sample recognises every local-offset line as mt16 in static cascade order - no earlier entry accepts the shape' \
+        produced_by 'sample_file_for_detection() in ltl (direct pattern recognition, static cascade order)' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys, umbrella D53)'
 }
 
 # The three WGM filenames share one entry (a group of one, D55): each stem
@@ -1328,7 +2014,7 @@ scenario_format_pin() {
     if "$LTL" --disable-progress -ni -bs 1440 -oe -lf nonsense "$log" > /dev/null 2> "$err"; then
         echo "  FAIL  $current_scenario :: -lf nonsense exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf nonsense exited 0")
     else
-        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*connection_server_standard.*integration_runtime_standard.*tomcat_access_with_duration' \
+        assert_line "$err" pattern '^Error: Unknown log format .nonsense. for -lf\. Known formats: .*access_common_duration.*connection_server_standard.*integration_runtime_standard' \
             asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
             produced_by 'apply_format_pin() in ltl' \
             contract 'features/log-format-registry.md section Drop 1.5 D49'
@@ -1346,6 +2032,11 @@ scenario_tomcat_common;         echo ""
 scenario_jboss_enhanced;        echo ""
 scenario_apache_httpd_us;       echo ""
 scenario_codebeamer;            echo ""
+scenario_family_shapes;         echo ""
+scenario_family_fields_evidence; echo ""
+scenario_family_pin_names;      echo ""
+scenario_family_bracketed_unit; echo ""
+scenario_family_ambiguity_note_per_file; echo ""
 scenario_thingworx_standard;    echo ""
 scenario_thingworx_with_metrics; echo ""
 scenario_tw_edge_c_sdk;         echo ""
@@ -1359,14 +2050,19 @@ scenario_connection_server_standard; echo ""
 scenario_windchill_method_server; echo ""
 scenario_scan_telemetry;        echo ""
 scenario_scan_telemetry_nomatch; echo ""
-scenario_unit_ambiguity_warning; echo ""
+scenario_classification_access; echo ""
+scenario_classification_declining; echo ""
+scenario_classification_default; echo ""
+scenario_classification_consolidation_reconciles; echo ""
+scenario_classification_format_switch; echo ""
+scenario_classification_format_interleaved; echo ""
+scenario_classification_summary_rows; echo ""
+scenario_variant_ambiguity_note; echo ""
 scenario_variant_connection_server; echo ""
 scenario_variant_integration_runtime_named; echo ""
 scenario_variant_integration_runtime_unnamed; echo ""
-scenario_variant_tomcat_named; echo ""
-scenario_variant_tomcat_extension_only; echo ""
-scenario_variant_httpd_named; echo ""
-scenario_variant_httpd_renamed; echo ""
+scenario_unit_tomcat_named; echo ""
+scenario_unit_httpd_named; echo ""
 scenario_variant_thingworx_rolled; echo ""
 scenario_windchill_method_server_named; echo ""
 scenario_windchill_method_server_rolled; echo ""
@@ -1375,6 +2071,7 @@ scenario_windchill_method_server_renamed; echo ""
 scenario_variant_mixed_legend; echo ""
 scenario_windchill_workgroup_manager; echo ""
 scenario_wgm_filename_family;   echo ""
+scenario_wgm_client_localtime;  echo ""
 scenario_format_pin
 
 echo ""

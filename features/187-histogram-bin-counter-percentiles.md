@@ -42,7 +42,7 @@ The locked decisions in this file (see *Locked decisions from research* for the 
 - **F1 — Design philosophy**: ltl is the query-time analyzer; precision is a user-tunable lever; rank-in-bin information is used because ltl has it (pre-aggregated systems don't).
 - **Decision 1 + 1A — In-bin interpolation**: Prometheus native-exponential `histogram_quantile()` formula, verified verbatim against `promql/quantile.go` lines 331–353.
 - **Decision 2 — Precision lever**: `buckets_per_decade` default 53 (OTEP-149 Scale-4 analog); two CLI flags exposing the lever (`-pbpd` numeric, `--percentile-precision 1..9` tiered); valid range 4-616; `-pbpd` wins on conflict. 53 is the global default/floor; a consumer surface with bounded partition cardinality may pin a finer per-surface resolution (the per-time-bucket surface does so via `-bsbpd` / `--bucket-stats-buckets-per-decade`, #289). Per-surface upward tuning is sanctioned and does not constitute a forbidden per-consumer variant — the algorithm, lifecycle, in-bin rule, and out-of-range handling remain uniform.
-- **Decision 4 — Out-of-range handling**: Prometheus `+Inf` convention adopted verbatim for high end; symmetric `-Inf`-equivalent for low end; separate counters; overflow/underflow contribute to total N; R4 returns the partition's edge boundary if target rank lands in overflow/underflow; `out_of_range_bounded: high|low|none` audit field per quantile in `-V`.
+- **Decision 4 — Out-of-range handling**: Prometheus `+Inf` convention adopted verbatim for high end; symmetric `-Inf`-equivalent for low end; separate counters; overflow/underflow contribute to total N; R4 returns the partition's edge boundary if target rank lands in overflow/underflow; `out_of_range_bounded: high|low|none` field per quantile in `-V`, a guard whose only shipped reading is `none`.
 - **Decision 5 — Partition lifecycle**: HdrHistogram-style auto-resize per partition (per-key for the summary table; per-time-bucket for the heatmap; global for the histogram view); seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin. No precedent run or `#179` index dependency for partition sizing. Per-partition rebin telemetry exposed in `-V` so the seeding heuristic is empirically tunable.
 
 These decisions are *contract-level*: they apply uniformly to every consumer of the primitive, not just to one path. Decision 5 in particular says that the lifecycle is HdrHistogram-style auto-resize *for every partition in ltl that builds bin counters from raw values during a parse pass* — which includes the per-time-bucket heatmap partitions and the global histogram partition, not just the per-message-key partitions of the summary table.
@@ -98,7 +98,7 @@ The pre-migration sort-based computation (`calculate_statistics` at `ltl:5488` a
 
 There is no runtime gate that decides between an "approximate path" and an "exact path" within a consumer. Each consumer migrates onto the unified contract through its R9 phase; the migration is validated against the baseline-regression harness in exact mode (the pre-migration code) for byte-identity per R11. Once the phase validates, that consumer runs the unified-contract path unconditionally for subsequent runs.
 
-The only opt-back-out mechanism available to users is whatever practical decision 7 produces (e.g., a `--exact-percentiles` flag). That mechanism is a user-facing preference, not a runtime gate. R10 lists the surviving reason codes.
+The only opt-back-out mechanism available to users is the per-surface data-model selectors locked in Decision 7 (`-dm` and the four per-surface forms `-mdm`, `-bdm`, `-hmdm`, `-hgdm`, each taking `raw` or `bin`). Pinning a surface to `raw` is a user-facing preference, not a runtime gate. R10 lists the surviving reason codes.
 
 The previously specified gating criteria (R2.1 index pre-seed, R2.2 tier match, R2.3 input criteria) are dissolved per *Locked decisions from research* § Decision 6:
 
@@ -122,20 +122,22 @@ The unified contract must produce all percentile values required by the catalogu
 
 The unified contract's accuracy is governed by:
 
-- **Bin-resolution error** — bounded uniformly by partition geometry. At Decision 2's locked default `buckets_per_decade = 53`, per-bin width is ~1.044× (~2.2% width, ~1.1% midpoint error). The bound applies uniformly across quantiles. Tighter precision available via Decision 2's CLI lever (`--percentile-precision` 1..9 maps to bpd 4..616; `-pbpd N` for direct numeric override).
-- **Out-of-range bounding** — when a target rank lands in the overflow or underflow counter (Decision 4), R4 returns `boundary[B]` or `boundary[0]` respectively. The `-V` audit field `out_of_range_bounded: high|low|none` per quantile makes this visible.
+- **Bin-resolution error** — bounded by partition geometry at the resolution the counts were captured at. Percentiles are computed from the streaming partition on every surface, so no display projection stands between the captured counts and the returned number. At the default precision tier the heatmap and histogram surfaces stream at 616 bins per decade (~1.0038× per-bin width) and the per-message and per-time-bucket surfaces at 53 (~1.044×, ~2.2% width, ~1.1% midpoint error). The bound applies uniformly across quantiles. Resolution is the analyst's lever per run: `--data-model-precision` / `-dmp` (tiers 1..9) resolves a per-surface bins-per-decade through Decision 2's locked tier table.
+- **Consolidation collapse** — the residual bound, and the one partition geometry alone does not cover. A consolidated row's member histograms are projected onto one shared union geometry (`collapse_bin_counter_entry`), so a consolidated row's percentiles sit within about one bucket of the pooled-sample answer. Measured on real duration streams, a single collapse leaves the one-bucket bound on 1.54% of evaluations on the Tomcat access log and on 2.08% on the ThingWorx scriptlog; on generated maximally-disjoint pairs the rate is 1 in 4,000, worst case 1.0008 bin widths. Evidence: `features/459-bin-counter-combination-order.md` §§ 7 and 9. The bound is removed structurally only by putting consolidated rows on a shared bucket grid (#469).
+- **Out-of-range bounding** — a designed-in guard, not a live path. Were a target rank to land in the overflow or underflow counter (Decision 4), R4 would return `boundary[B]` or `boundary[0]` respectively; under the shipped growth policy the partition always grows until the value is contained, so no rank reaches either counter. The per-quantile `-V` field `out_of_range_bounded: high|low|none` consequently reads `none` on every shipped run — it exists so that a future growth cap would be visible the moment it fired.
 
-The accuracy contract is **structural** (derived from partition geometry and the Decision 1 formula), not empirical. It applies to every consumer running the unified contract. R7 reports the active precision parameter and the per-quantile out-of-range audit field.
+The bin-resolution component is derived from partition geometry and the Decision 1 formula; it holds wherever a partition's counts are read at the resolution they were captured at, which is every consumer running the unified contract. The consolidation component is empirical, and is quoted with the input it was measured on. R7 reports the active precision parameter and the per-quantile out-of-range field.
 
-The acceptance criterion is that for any input in the D2 representative-dataset set, every required quantile from the unified contract falls within the bin-resolution bound around the pre-migration exact-mode value. This is the baseline-regression validation that each R9 phase runs against `tests/baseline/`.
+The acceptance criterion is that for any input in the D2 representative-dataset set, every required quantile from the unified contract falls within the bin-resolution bound around the pre-migration exact-mode value — widened, on rows the run consolidated, by the consolidation-collapse allowance above. This is the baseline-regression validation that each R9 phase runs against `tests/baseline/`.
 
 ### R5 — Degenerate-input behavior
 
 The unified contract handles the following inputs without crashing and without producing nonsensical values:
 
 - **Zero matched values** — percentiles emit `-` (today's behavior preserved). No partition is constructed; no R4 invocation occurs.
-- **All-same value** — single bin is populated; every percentile equals that value (the Decision 1 formula returns `upper` for any quantile that lands in the single bin via fraction = 1.0, and `lower = upper` for an all-same input by partition geometry).
-- **Single value** — partition is constructed with a single observation; the partition's single populated bin contains that observation; every percentile equals that value.
+- **Values at or below zero** — the primitives are defined only for `v > 0`: a partition's geometry is log-spaced (`min = v₀ / sqrt(10^decades)`, `log_ratio = log(max/min)`), which a zero first value kills outright and a negative one leaves the growth loop unable to terminate. The **caller-side `v > 0` guard is part of the contract**: every consumer filters non-positive samples before the counter update. Such samples are therefore outside the bin-model percentile population entirely — they are not counted, not binned, and do not contribute to `total_N`.
+- **All-same value** — a single bin is populated; every percentile collapses to one value. That value is the populated bin's **upper boundary**, not the observed value: an all-same input still seeds a full-span partition, so the bin has `lower < upper`, and the Decision 1 formula returns `upper` for any quantile landing in it (fraction = 1.0). The returned value sits within the bin-resolution bound of the observed value.
+- **Single value** — partition is constructed with a single observation; the partition's single populated bin contains that observation; every percentile collapses to that bin's upper boundary, as for all-same input.
 - **Small N** — Decision 1's formula computes for any positive `bin_count`. Decision 3 locked the posture of no per-bin guard. Small-N inputs produce well-defined output; rank-support concerns are not surfaced as warnings in `-V` (Decision 3).
 
 ### R6 — Determinism
@@ -144,21 +146,20 @@ The unified contract is deterministic for a given input. The Decision 1 formula 
 
 ### R7 — `-V` observability
 
-A dedicated `=== BIN-COUNTER MODE ===` section reports the unified contract's state. The full format, field names, consumer-name strings, and structural conventions are locked in *Locked decisions from research* § Decision 8. R7 is the requirements-section anchor; Decision 8 is authoritative.
+A dedicated `=== histogram-bin-counters ===` section reports the unified contract's state. The full format, field names, consumer-name strings, and structural conventions are locked in *Locked decisions from research* § Decision 8. R7 is the requirements-section anchor; Decision 8 is authoritative.
 
 The contract surface includes (full detail in Decision 8):
 
-- **Run-level header**: `opt_out_active`, `opt_out_notice` (when active), `percentile_precision` (resolved tier with source), `buckets_per_decade` (resolved numeric value with source).
-- **Per-consumer blocks** (one per consumer catalogued in R12): `consumer:` opener, `path:` (R10 code), and when on the unified path, the locked per-consumer field set (`partition_keying`, `partition_count`, rebin telemetry from Decision 5, overflow/underflow audit aggregates and per-quantile audit from Decision 4, `percentiles_emitted`, `out_of_range_bounded:` inline per-quantile).
+- **Run-level header**: `data_model_precision` (resolved tier with source).
+- **Per-consumer blocks** (one per consumer catalogued in R12): `consumer:` opener, `path:` (R10 code), and when on the unified path, the locked per-consumer field set (`partition_keying`, `partition_count`, rebin telemetry from Decision 5, the Decision 4 overflow/underflow guard counters and their per-quantile companion — all expected to read zero and `none` respectively, `percentiles_emitted`, `out_of_range_bounded:` inline per-quantile).
 - **Shared-partition consumers**: `shares_partitions_with:` short-form blocks.
 - **Section presence**: always emitted under `-V`; reports `consumers_active: none` when no consumer is computing.
 
-The section name (`=== BIN-COUNTER MODE ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
-- **Rebin telemetry (per-consumer using the unified path)**: `total_rebin_events`, `rebins_per_key { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock; intended to support empirical seed-heuristic tuning).
+The section name (`=== histogram-bin-counters ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
+- **Rebin telemetry (per-consumer using the unified path)**: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `rebins_per_partition { p50, p95, p99, max }`, `members_per_partition { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock, as amended 2026-08-26 by #462; intended to support empirical seed-heuristic tuning).
 - **Tier-correctness for filtered runs**: if a run includes a filter, `-V` reports the filter context so an analyst can audit whether the result is appropriate (R2.2 reframed as audit concern, not gate).
-- **Pre-migration consumers (any still running the sort-based path during phased migration)**: `n` (the value count consumed) and `sorted: yes` line, matching R11's byte-identical contract.
 
-Section name (`=== BIN-COUNTER MODE ===`) and the core field labels are part of the feature contract. Practical decision 8 settles cosmetic and verbosity details.
+Section name (`=== histogram-bin-counters ===`) and the core field labels are part of the feature contract. Practical decision 8 settles cosmetic and verbosity details.
 
 ### R8 — Coupling to the unified primitive contract
 
@@ -199,13 +200,12 @@ Each phase below names a group of consumers that the implementation tickets are 
 `-V` reports, per consumer, which computation path is running this run. The vocabulary:
 
 - `unified` — the consumer has been migrated and is running the unified contract path.
-- `pre_migration` — the consumer's R9 phase has not yet validated, so the pre-migration sort-based code is running. Used during the phased rollout described in R9.
-- `user_opt_out` — the consumer was migrated but the user explicitly opted out via the practical decision 7 mechanism (e.g., `--exact-percentiles` flag).
+- `user_opt_out` — the consumer was migrated, but the surface it belongs to resolved to the `raw` data model because the user pinned it there with a Decision 7 selector (`-dm`, or the per-surface `-mdm` / `-bdm` / `-hmdm` / `-hgdm`).
 - `feature_not_active` — no values were matched; no percentile computation occurred. The partition is not constructed.
 
-The previous reason codes from the dissolved R2 gate (`no_index`, `tier_mismatch`, `input_criteria_failed`, `approximate_eligible`, `exact_default`) are removed. They corresponded to the runtime mode-selection gate that no longer exists.
+The previous reason codes from the dissolved R2 gate (`no_index`, `tier_mismatch`, `input_criteria_failed`, `approximate_eligible`, `exact_default`) are removed. They corresponded to the runtime mode-selection gate that no longer exists. The vocabulary carries no code for an unmigrated consumer: every consumer in the block order runs the unified contract, so a run has no way to report one, and a locked value nothing can emit is not instrumentation.
 
-Practical decision 7 may introduce a `--exact-percentiles` flag; if so, `user_opt_out` is its surface in `-V`. Practical decision 8 settles the exact label format for these codes.
+`user_opt_out` is the `-V` surface of Decision 7's data-model selectors, and is therefore reported per surface rather than per run. Practical decision 8 settles the exact label format for these codes.
 
 ### R11 — Baseline-regression byte-identity during phased migration
 
@@ -218,7 +218,7 @@ For each consumer migrating onto the unified contract (per R9 phases), the migra
 
 ### R11a — Existing exact-mode behavior preserved as user opt-out
 
-Where practical decision 7 introduces a user-facing `--exact-percentiles` (or equivalent) opt-out, opting out runs the pre-migration code path and produces byte-identical output to the pre-feature implementation. The existing regression suite must continue to pass byte-identically under the opt-out path.
+Pinning a surface to the `raw` data model with a Decision 7 selector runs that surface's pre-migration code path and produces byte-identical output to the pre-feature implementation. The opt-out is per surface, so the guarantee applies to the surfaces pinned, not to the run as a whole. The existing regression suite must continue to pass byte-identically under a pinned-`raw` path.
 
 ### R12 — Consumer audit (every percentile and histogram consumer in ltl)
 
@@ -336,16 +336,16 @@ Two additional paths were catalogued during the audit:
 
 - **Today's data structure**: `%heatmap_percentiles{$bucket} = { p50, p95, p99, p999 }` — stored as **bin indices, not values**. Derived at `ltl:4823–4834` by sorting `%heatmap_raw{$bucket}`, indexing P50/P95/P99/P99.9, then mapping each value to a bin via `find_heatmap_bucket`.
 - **Today's computation**: sort-and-index, then bin lookup. Output is a column position on the heatmap row, not a numeric percentile value.
-- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition (bpd=616, Level 9) during parse → end-of-parse finalize re-bin into display-bound partition (F2: `bin_count = $heatmap_width`; F3: `bin_count = int(decades × histogram_buckets_per_decade)`, matching shipped histogram partition shape). R4 invoked against the finalized partition. F2 renders finalized partition directly; F3 applies `calculate_histogram_display_buckets` unchanged. See `features/201-display-geometry-bound-consumers.md` § Recommendation.
-- **Symmetric resolution for the histogram consumer — superseded 2026-05-20 via #201**: same pattern, F3-specific partition shape preserves shipped stretched-bar rendering. Numeric percentile value derived from the finalized partition via R4.
+- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition (bpd=616, Level 9) during parse → end-of-parse finalize re-bin into display-bound partition (F2: `bin_count = $heatmap_width`; F3: `bin_count = int(decades × histogram_buckets_per_decade)`, matching shipped histogram partition shape). **R4 is invoked against the streaming (bpd 616) partition**, not the finalized one — the display projection serves rendering, and the marker value has no reason to inherit its resolution. The returned value is clamped to the display axis before being mapped to a column. F2 renders the finalized partition directly; F3 applies `calculate_histogram_display_buckets` unchanged. See `features/201-display-geometry-bound-consumers.md` § Recommendation.
+- **Symmetric resolution for the histogram consumer — superseded 2026-05-20 via #201**: same pattern, F3-specific partition shape preserves shipped stretched-bar rendering. The numeric percentile value is likewise derived via R4 from the streaming partition, clamped to the axis the bars are drawn on.
 
 #### C2-cells — Heatmap cells themselves (R9 Phase 3 target; cell colors)
 
 - **Today's data structure**: `%heatmap_raw{$bucket}` — per-time-bucket raw value array, accumulated during the parse. End-of-parse `calculate_histogram_buckets`-area logic computes global `[min, max]`, derives the W-column display boundaries, then bins each per-bucket value to color the cells.
 - **Today's computation**: full retention of per-bucket raw values for the duration of the parse; end-of-parse global partition derivation and per-cell counting.
-- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition per `time_bucket` during the parse (using the unmodified F1 #189 primitives). At end-of-parse, each per-`time_bucket` partition is **re-binned via geometric-midpoint projection** into a display-bound partition with `bin_count = $heatmap_width` and boundaries log-spaced over the global `[d_min, d_max]`. The heatmap reads finalized partitions directly per row — no render-time re-projection. See `features/201-display-geometry-bound-consumers.md` § Recommendation for the locked F2 contract and `prototype/201-projection-comparison-report.md` for empirical validation.
+- **Migration target (R9 Phase 3) — superseded 2026-05-20 via #201**: streaming auto-resize partition per `time_bucket` during the parse (using the unmodified F1 #189 primitives). At end-of-parse, each per-`time_bucket` partition is **re-binned via geometric-midpoint projection** into a display-bound partition with `bin_count = $heatmap_width` and boundaries log-spaced over the global `[d_min, d_max]`. The heatmap's **cells** read finalized partitions directly per row — no render-time re-projection. (The row's percentile markers do not: they come from the streaming partition, per the C2 entry above.) See `features/201-display-geometry-bound-consumers.md` § Recommendation for the locked F2 contract and `prototype/201-projection-comparison-report.md` for empirical validation.
 - **Compatibility constraints on #189**: R1 unchanged; R3 supports per-`time_bucket` keying (already in the contract); R4 unchanged. The finalize re-bin step is a new caller-side composition that reuses `partition_extend`'s remap loop at `ltl:613-622` — see `features/189-histogram-bin-counter-primitives.md` for the optional `partition_rebin` wrapper.
-- **Display geometry unchanged**: W columns, color scheme, layout all preserved. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd default for the heatmap partition.
+- **Display geometry unchanged**: W columns, color scheme, layout all preserved. Two precisions are in play and they are not the same number: the cells are drawn from the display projection at W columns, while the row's percentile markers are computed at the streaming resolution — 616 bins per decade for the heatmap surface at the default precision tier, against today's shipped 8 bpd heatmap partition.
 
 #### C1 (revised) — Histogram-mode global percentiles (R9 Phase 2 or 3 target)
 
@@ -355,9 +355,9 @@ Two additional paths were catalogued during the audit:
 
 - **Today's data structure**: `histogram_values{$metric}` — global per-metric raw value array, accumulated during the parse. End-of-parse `calculate_histogram_buckets` (`ltl:4908`) computes global `[min, max]`, derives boundaries, bins each value, frees the array.
 - **Today's computation**: sort-and-index for percentile derivation interleaved with bin counting. Memory cost is full retention of all observed values for the duration of the parse.
-- **Migration target (R9 Phase 2 or 3, timing decided per implementation risk) — superseded 2026-05-20 via #201**: streaming auto-resize partition per metric, streaming bpd=616 (Level 9). At end-of-parse, the streaming partition is **re-binned via geometric-midpoint projection** into a target partition with `bin_count = int(decades × histogram_buckets_per_decade)` (same shape ltl computes today, `-hgbpd` default 8) and boundaries log-spaced over `[d_min, d_max]`. The shipped `calculate_histogram_display_buckets` projection at `ltl:7462` is applied unchanged to the finalized partition for stretched-bar rendering. V8 empirical validation confirms multi-modal spike-trough structure preserved exactly on canonical datasets. See `features/201-display-geometry-bound-consumers.md` § Recommendation and `prototype/201-projection-comparison-report.md`. UX follow-on for narrower-bar rendering is tracked in #204.
+- **Migration target (R9 Phase 2 or 3, timing decided per implementation risk) — superseded 2026-05-20 via #201**: streaming auto-resize partition per metric, streaming bpd=616 (Level 9). At end-of-parse, the streaming partition is **re-binned via geometric-midpoint projection** into a target partition with `bin_count = int(decades × histogram_buckets_per_decade)` (same shape ltl computes today, `-hgbpd` default 8) and boundaries log-spaced over `[d_min, d_max]`. The shipped `calculate_histogram_display_buckets` projection at `ltl:7462` is applied unchanged to the finalized partition for stretched-bar rendering. V8's per-column measurement at bpd=616 on the smaller of the two canonical datasets (the report's `display_width=71` case) showed 0.0% deviation across the whole spike region (columns 11–42, 6 ms–1 s, where 95%+ of the mass lives), with three medium-density tail columns deviating ±0.1–0.3%; multi-modal spike-trough structure preserved. On the 148 MB Tomcat dataset the same bpd measured 5.78%, and no value in the locked 4–616 range reaches sub-1% on both datasets. What carries the choice is the visibility threshold rather than a percentage target: the right bound for ASCII bar rendering is "smaller than one character row", which at the default 9-row height is ~11%, and 616 sits safely under it on every dataset tested. See `features/201-display-geometry-bound-consumers.md` § Recommendation and `prototype/201-projection-comparison-report.md`. UX follow-on for narrower-bar rendering is tracked in #204.
 - **Compatibility constraints on #189**: R1 must support a single global auto-resize partition with per-metric keying; R3 supports `key = ()` per metric; R4 unchanged. Display geometry handled by the consumer.
-- **Display geometry unchanged**: column count, layout, percentile-tick rendering all preserved. Internal precision improves because Decision 2's locked default (53 bpd) is higher than today's shipped 8 bpd histogram default.
+- **Display geometry unchanged**: column count, layout, percentile-tick rendering all preserved. As on the heatmap, display precision and percentile precision are separate: bar heights come from the display projection, while the legend values and tick positions are computed at the streaming resolution — 616 bins per decade for the histogram surface at the default precision tier, against today's shipped 8 bpd histogram default.
 
 ### Currently no bin-derived percentile interpolation in `ltl`
 
@@ -402,15 +402,15 @@ The algorithm substrate is fixed (HdrHistogram-style log-spaced bin counters, pe
 | Case | Required behavior |
 |---|---|
 | No matched messages | Percentiles emit `-`; no partition is constructed; `-V` reports `feature_not_active` per R10. |
-| All matched values are identical | Partition has a single populated bin; every percentile equals that value (Decision 1's formula returns that value uniformly when all observations land in one bin). |
-| Single matched value | Same as above — single observation, single bin, every percentile equals that value. |
+| Value at or below zero | Never reaches the primitives: the partition's log-spaced geometry cannot bin a non-positive value, so every consumer applies the contractual caller-side `v > 0` guard before the counter update. Such samples are excluded from the bin-model percentile population entirely (per R5). |
+| All matched values are identical | Partition has a single populated bin; every percentile collapses to one value, which is that bin's **upper boundary** (Decision 1's formula at fraction = 1.0) — within the bin-resolution bound of the observed value, not equal to it. The partition is still seeded across its full default span, so `lower < upper` holds. |
+| Single matched value | Same as above — single observation, single bin, every percentile returns that bin's upper boundary. |
 | Very small N | Decision 1's formula computes for any positive `bin_count`; no per-bin guard (Decision 3); no rank-support warning (Decision 3). Output is well-defined for any N ≥ 1. |
-| Per-key partition rebins mid-parse | Expected behavior per Decision 5's auto-resize lifecycle. Each rebin is recorded in the Decision 5 `-V` telemetry counters (`total_rebin_events`, `rebins_per_key {p50, p95, p99, max}`). |
-| Per-key value falls outside partition's current [min, max] | Triggers a rebin (Decision 5 doubling). If the value falls outside the rebinned partition for any reason (e.g., extreme outlier past the doubled extent), it is counted in the overflow or underflow counter per Decision 4. The per-quantile `out_of_range_bounded: high\|low` audit field reflects this on subsequent percentile queries. |
+| Per-key partition rebins mid-parse | Expected behavior per Decision 5's auto-resize lifecycle. Each is recorded in the Decision 5 `-V` telemetry counter for its own mechanism (`rebin_growth_events` here; see also `rebins_per_partition {p50, p95, p99, max}`). |
+| Per-key value falls outside partition's current [min, max] | Triggers a rebin (Decision 5 doubling), repeated until the partition contains the value — there is no growth cap, so the rebinned partition always contains it however extreme it is. The Decision 4 overflow and underflow counters are guards against a growth cap that does not exist today: they stay at zero, and the per-quantile `out_of_range_bounded` field stays at `none`. |
 | Filtered run | The unified contract runs unconditionally. The filter context is reported in `-V` for analyst audit per R7. Filter-context audit is not a gate. |
-| User opts out via `--exact-percentiles` (if practical decision 7 ships this) | The consumer's pre-migration code path runs; output is byte-identical to the pre-feature implementation per R11a. `-V` reports `user_opt_out` per R10. |
-| Consumer not yet migrated (during the phased rollout) | The consumer runs its pre-migration code path; `-V` reports `pre_migration` per R10. |
-| Highlight pattern present (pre-Phase 4) | Highlight-subset percentiles use the pre-migration code path until #51 lands; `-V` reports `pre_migration` for the highlight consumer. Migration covered by R9 Phase 4. |
+| User pins a surface to `raw` with a Decision 7 selector (`-dm`, `-mdm`, `-bdm`, `-hmdm`, `-hgdm`) | Every consumer on that surface runs its pre-migration code path; output is byte-identical to the pre-feature implementation per R11a. `-V` reports `user_opt_out` for those consumers per R10, and `unified` for consumers on surfaces left at `bin`. |
+| Highlight pattern present | The highlight subset streams its own parallel partitions and its percentiles come from them; it has no consumer name of its own in the `-V` block order, so no block reports it. |
 | Concurrent ltl processes | Inherited from #179; out of this feature's concern. |
 
 ## Acceptance criteria
@@ -438,7 +438,7 @@ These are not acceptance criteria for #187; #187 defines them as contract surfac
 - The unified-contract code path is implemented per the locked decisions (F1, Decisions 1, 1A, 2, 3, 4, 5).
 - The unified-contract output for each required percentile (per R3 per consumer) falls within the bin-resolution bound (R4) around the pre-migration output across the D2 dataset set.
 - `-V` emits the contract surface defined in R7 and Decision 8: per-consumer path (R10), per-partition state, per-quantile `out_of_range_bounded`, rebin telemetry per Decision 5.
-- User opt-out (R11a) under `--exact-percentiles` preserves byte-identical pre-feature output for the consumer.
+- User opt-out (R11a) — the consumer's surface pinned to `raw` with a Decision 7 selector — preserves byte-identical pre-feature output for the consumer.
 
 ### Cross-consumer
 
@@ -451,11 +451,11 @@ This section defines the **contract-surface validation scenarios** that any cons
 
 ### Existing baseline regression (contract surface)
 
-`tests/baseline/` is ltl's existing baseline-regression harness. Consumer migration tickets integrate their own validation against this harness per CLAUDE.md's release process. Validates R11 / R11a for that consumer.
+`tests/baseline/` is ltl's existing baseline-regression harness. Consumer migration tickets integrate their own validation against this harness per docs/process/workflow.md. Validates R11 / R11a for that consumer.
 
 ### Contract-level scenario suite
 
-Run ltl with `-V`, assert against the `=== BIN-COUNTER MODE ===` section. These scenarios validate the unified contract surface (R7, R10) independently of any specific consumer's migration progress.
+Run ltl with `-V`, assert against the `=== histogram-bin-counters ===` section. These scenarios validate the unified contract surface (R7, R10) independently of any specific consumer's migration progress.
 
 | Scenario | Setup | Action | Assertions |
 |---|---|---|---|
@@ -463,12 +463,11 @@ Run ltl with `-V`, assert against the `=== BIN-COUNTER MODE ===` section. These 
 | `unified-pbpd-override` | Consumer migrated; user runs `ltl -pbpd 32 <F> -V`. | `ltl -pbpd 32 <F> -V`. | `buckets_per_decade: 32 (-pbpd 32)` reported. |
 | `unified-precision-tier` | Consumer migrated; user runs `--percentile-precision 7`. | `ltl --percentile-precision 7 <F> -V`. | `buckets_per_decade: 115 (--percentile-precision 7)` reported. |
 | `unified-flag-conflict` | Consumer migrated; both flags specified. | `ltl --percentile-precision 4 -pbpd 100 <F> -V`. | `-pbpd` wins per Decision 2 lock. `buckets_per_decade: 100 (-pbpd 100; --percentile-precision 4 overridden)`. |
-| `pre-migration-consumer` | Run on a consumer whose phase has not yet validated. | `ltl <F> -V`. | Per-consumer line reports `pre_migration`. R11 byte-identity holds against pre-feature output for that consumer. |
-| `user-opt-out` (if practical decision 7 ships this) | Consumer migrated; user runs with opt-out flag. | `ltl --exact-percentiles <F> -V`. | Per-consumer line reports `user_opt_out`. R11a byte-identity holds. |
+| `user-opt-out` | Consumer migrated; user pins its surface to `raw` with a Decision 7 selector. | `ltl -mdm raw <F> -V`. | The pinned surface's consumers report `user_opt_out`; consumers on surfaces left at `bin` still report `unified`. R11a byte-identity holds for the pinned surface. |
 | `zero-values` | No values matched. | `ltl -i nonexistent <F> -V`. | Percentiles emit `-`; `reason: feature_not_active`. No partition constructed. No crash. |
-| `all-same` | All matched values identical. | Crafted log file. | All percentiles equal that value. |
-| `single-value` | Single matched value. | Crafted log file. | All percentiles equal that value. |
-| `out-of-range-bounded` | Crafted log file where some percentile target ranks land in overflow or underflow. | `ltl <F> -V`. | Affected quantiles report `out_of_range_bounded: high` or `low`; R4 returned boundary value (not interpolated). |
+| `all-same` | All matched values identical. | Crafted log file. | All percentiles equal one another, at the populated bin's upper boundary — within the bin-resolution bound of the observed value, not equal to it. |
+| `single-value` | Single matched value. | Crafted log file. | Same as `all-same`. |
+| `out-of-range-guards-read-zero` | Any input, including one with extreme outliers. No input can drive a target rank into overflow or underflow while the partition grows without a cap, so the assertion available is that the guards hold. | `ltl <F> -V`. | Every quantile reports `out_of_range_bounded: none`; `overflow_total` and `underflow_total` read 0, as do `partitions_with_overflow_count` and `partitions_with_underflow_count`. |
 | `accuracy-within-bin-resolution` | Representative D2 dataset; consumer migrated. | Run twice — once with pre-migration code (forced via opt-out flag if available, else via build-time fallback), once unified. | Per-quantile errors fall within the bin-resolution bound (R4) for the active `buckets_per_decade`. |
 | `state-budget-reported` | Migrated consumer; any run. | `ltl <F> -V`. | `state_budget_bytes` matches actual counter-store memory; rebin telemetry totals match observed rebin events. |
 
@@ -623,7 +622,7 @@ Fully deterministic. Output is a function of bin counters only. R6 satisfied tri
 
 Tail-quantile accuracy (P99.9, P99.99) decomposes into two sources. Source 1 is documented in the consulted literature; source 2 is widely-attributed in the community but the grounding pass could not verify the canonical attributions in primary sources, so its framing is recorded honestly rather than as established prior art.
 
-**Source 1 — Bin-resolution error (industry-documented).** Bounded uniformly by partition geometry. DDSketch publishes this contract explicitly as relative-error α; the relationship α ↔ γ ↔ buckets-per-decade is in the sketches-java implementation (the paper PDF could not be fetched). OTEL exponential histogram exposes the same property via the Scale → base relationship. HdrHistogram exposes it via "significant value digits." The bound applies *uniformly* across quantiles — by construction of the log-spaced partition, P50 and P99.9 inherit the same bin-resolution bound.
+**Source 1 — Bin-resolution error (industry-documented).** Bounded uniformly by partition geometry. DDSketch publishes this contract explicitly as relative-error α; the relationship α ↔ γ ↔ buckets-per-decade is in the sketches-java implementation (the paper PDF could not be fetched). OTEL exponential histogram exposes the same property via the Scale → base relationship. HdrHistogram exposes it via "significant value digits." The bound applies *uniformly* across quantiles — by construction of the log-spaced partition, P50 and P99.9 inherit the same bin-resolution bound. (This paragraph records what the literature establishes about a single partition's geometry. For the bound as it applies to ltl — which surface reads its percentiles at which resolution, and the consolidation-collapse residual that geometry alone does not cover — R4 is authoritative.)
 
 | `buckets_per_decade` | Per-bin width ratio | Source-defined contract analog |
 |---|---|---|
@@ -681,7 +680,7 @@ Populated against the inventory in `docs/test-logs.md` at `release/0.14.5` HEAD.
 | Regime | Why it matters to this research | Existing log file(s) | Notes |
 |---|---|---|---|
 | Heavy-tailed access log (Tomcat / Apache) | The dominant Phase 2 use case (Path A) and a Phase 3 driver (Path B). Tomcat/Apache access logs have right-skewed duration distributions — most responses fast, a long tail of slow ones. Tail-quantile (P99, P99.9) accuracy under this shape is the primary stress test for any candidate algorithm. | `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` (277 MB Tomcat 9, ms latency); `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` (220 MB); `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` (148 MB); `logs/AccessLogs/localhost_access_log.2025-03-21.txt` (2.6 MB, fast iteration); `logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` (658 KB, Apache HTTP2 with microsecond latency — distinct unit regime) | The four Tomcat files form a graduated size series for the same workload — useful for any analysis that wants to vary N without changing distribution shape. |
-| ThingWorx mixed-traffic log | Path A and Path B coverage on a structurally different log family. ThingWorx CustomThingworxLogs carry `durationMS=` fields, enabling per-message latency percentiles on a non-access-log distribution shape (service-call latencies rather than HTTP response latencies). | `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log` (29 MB, canonical heatmap file per CLAUDE.md); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log` through `.4.log` (72–98 MB each, same workload graduated); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log` (98 MB); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.log` (54 MB) | The clean variant has duration, bytes, and count metrics simultaneously — useful for cross-metric percentile coherence checks. |
+| ThingWorx mixed-traffic log | Path A and Path B coverage on a structurally different log family. ThingWorx CustomThingworxLogs carry `durationMS=` fields, enabling per-message latency percentiles on a non-access-log distribution shape (service-call latencies rather than HTTP response latencies). | `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log` (29 MB, canonical heatmap file per docs/test-logs.md); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.1.log` through `.4.log` (72–98 MB each, same workload graduated); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-10.0.log` (98 MB); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.log` (54 MB) | The clean variant has duration, bytes, and count metrics simultaneously — useful for cross-metric percentile coherence checks. |
 | High-cardinality DEBUG/ERROR-heavy log | Path A under the regime where the per-`log_key` distribution flattens (many distinct log keys, few values each). Stresses the small-per-key-N behavior of any algorithm chosen for Path A. Also relevant to Path C1 if histogram mode is engaged on the same file. | `logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log` (101.7 MB; 288K lines, ~286K unique keys — per consolidation memory); `logs/ThingworxLogs/ApplicationLog.2025-05-05.0.log` (85 MB, broader L:DEBUG/INFO/WARN/ERROR mix); `logs/ThingworxLogs/ApplicationLog.2025-05-06.0.log` (6.5 MB); `logs/ThingworxLogs/ApplicationLog.2025-12-12.282-Windows.log` (10 MB, Windows variant) | These files do not carry per-message duration values (no `durationMS=`). They are relevant to Path C1 (histogram-mode global, when `-hg` is run) and to count-based percentile regimes; per-message duration percentiles (Path A) do not apply to these files unless paired with a metric source. Documented as a constraint, not a gap. |
 | Small-N case (a few hundred values per `log_key` or per `time_bucket`) | Path B at typical bucket sizes routinely produces small N per bucket. Path A at one-off log messages produces single-occurrence keys. The substrate's behavior here is the focus of D3 Decision 3 (tail-bin fall-through) and Decision 6 (small-N gating into exact mode). | `logs/Codebeamber/codebeamer_access_log.2025-10-29.txt` (83 KB, naturally small); `logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` (739 KB, single-service slice); `logs/ThingworxLogs/AuthLog.2025-05-06.0.log` (257 KB); `logs/ThingworxLogs/DatabaseLog.2025-05-05.0.log` (700 KB); `logs/ThingworxLogs/DatabaseLog.log` (29 KB, very small) | Small-N per *time bucket* can also be induced on any larger file by narrowing the bucket size (`-b 0.1` for 6-second buckets, `-ms` for millisecond precision). The cross-reference notes that this is reachable from existing files via CLI flags rather than requiring a dedicated file. |
 | Degenerate — all-same values | Edge case R5; trivially handled by exact mode; approximate mode must agree. | Reproducible by filtering any existing file to a single repeated message (`-if <pattern>` selecting one log_key) where every value is the same — common for health-check endpoints. Health-check filter pattern files exist (`patterns/probes`, `patterns/metrics`). | No dedicated file. |
@@ -703,7 +702,7 @@ D3 is the central deliverable of Phase 1. It synthesizes D1's analysis into a me
 
 D3 does **not** lock the implementation. The decision conversation between user and Claude is what locks it; D3 is the input to that conversation, and the locked entries live in *Locked decisions from research*.
 
-> **Status as of 2026-05-19: GROUNDED + F1, Decisions 1, 1A, 2, 3, 4, 5, 7, 8, 10 locked; Decisions 6, 9 DISSOLVED. All decision-conversation work complete.** The D3 content has been rebuilt from `features/187-histogram-industry-grounding.md` (industry-practice research pass) with primary-source citations. Locked: **F1** (design-philosophy framing: ltl as query-time analyzer, `buckets_per_decade` as the analyst's lever, rank-in-bin information used); **Decision 1** (R4 uses the Prometheus native-exponential in-bucket interpolation formula, verified verbatim against `promql/quantile.go` lines 331–353); **Decision 1A** (use rank-in-bin); **Decision 2** (`buckets_per_decade` default 53 / OTEP-149 Scale-4 analog; two CLI flags — numeric `-pbpd` and tiered `--percentile-precision 1..9`; valid range 4 ≤ N ≤ 616; `-pbpd` always wins on conflict); **Decision 3** (no per-bin sample-count guard in R4; no partition-level rank-support signal in `-V`; follows strict industry convention); **Decision 4** (Prometheus `+Inf` overflow convention adopted verbatim for high end; symmetric `-Inf`-equivalent underflow convention for low end; separate counters; overflow/underflow contribute to N; R4 returns `boundary[B]` or `boundary[0]` if target rank lands in overflow/underflow; per-quantile `-V` audit field `out_of_range_bounded: high|low|none`); **Decision 5** (HdrHistogram-style auto-resize per partition across all consumers; partition seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin; no precedent run or #179 index dependency for partition sizing; per-partition rebin telemetry exposed in `-V` for empirical seed-heuristic tuning); **Decision 7** (visible `--exact-percentiles` flag with deprecation notice; global scope; available one release cycle past each consumer's migration validation per implementation-ticket choice; `-V` reports top-level banner AND per-consumer `user_opt_out` line per R10); **Decision 8** (`-V` `=== BIN-COUNTER MODE ===` section with run-level header + per-consumer blocks; locked consumer-name strings; field names and section/consumer/field naming all locked; format mirrors existing `=== INDEX READ-BACK ===` convention; primary purpose is testability and AI-agent debugging); **Decision 10** (prototype validation scope — five mandatory aspects #189 must validate empirically before production code begins: in-bin formula on real data, auto-resize lifecycle on per-key fan-out at scale, initial seed heuristic + overflow/underflow on edge cases, end-to-end `-V` output sample, calculation accuracy vs. current array-of-values approach; hard prerequisite for #189 production code). **Decision 6** dissolved — no runtime gate in the unified contract. **Decision 9** dissolved — activation policy and release-engineering decisions are out of scope for #187; they belong to the per-consumer implementation tickets that consume this contract.
+> **Status as of 2026-05-19: GROUNDED + F1, Decisions 1, 1A, 2, 3, 4, 5, 7, 8, 10 locked; Decisions 6, 9 DISSOLVED. All decision-conversation work complete.** The D3 content has been rebuilt from `features/187-histogram-industry-grounding.md` (industry-practice research pass) with primary-source citations. Locked: **F1** (design-philosophy framing: ltl as query-time analyzer, `buckets_per_decade` as the analyst's lever, rank-in-bin information used); **Decision 1** (R4 uses the Prometheus native-exponential in-bucket interpolation formula, verified verbatim against `promql/quantile.go` lines 331–353); **Decision 1A** (use rank-in-bin); **Decision 2** (`buckets_per_decade` default 53 / OTEP-149 Scale-4 analog; two CLI flags — numeric `-pbpd` and tiered `--percentile-precision 1..9`; valid range 4 ≤ N ≤ 616; `-pbpd` always wins on conflict); **Decision 3** (no per-bin sample-count guard in R4; no partition-level rank-support signal in `-V`; follows strict industry convention); **Decision 4** (Prometheus `+Inf` overflow convention adopted verbatim for high end; symmetric `-Inf`-equivalent underflow convention for low end; separate counters; overflow/underflow contribute to N; R4 returns `boundary[B]` or `boundary[0]` if target rank lands in overflow/underflow; per-quantile `-V` field `out_of_range_bounded: high|low|none`, a guard whose only shipped reading is `none`); **Decision 5** (HdrHistogram-style auto-resize per partition across all consumers; partition seeded with full-default-span centered on first value; HdrHistogram-convention doubling on rebin; no precedent run or #179 index dependency for partition sizing; per-partition rebin telemetry exposed in `-V` for empirical seed-heuristic tuning); **Decision 7** (visible per-surface data-model selectors `-dm` / `-mdm` / `-bdm` / `-hmdm` / `-hgdm`, each `<raw|bin>`; permanent, not deprecated; no run-level banner — `-V` reports the per-consumer `user_opt_out` line per R10); **Decision 8** (`-V` `=== histogram-bin-counters ===` section with run-level header + per-consumer blocks; locked consumer-name strings; field names and section/consumer/field naming all locked; format mirrors existing `=== INDEX READ-BACK ===` convention; primary purpose is testability and AI-agent debugging); **Decision 10** (prototype validation scope — five mandatory aspects #189 must validate empirically before production code begins: in-bin formula on real data, auto-resize lifecycle on per-key fan-out at scale, initial seed heuristic + overflow/underflow on edge cases, end-to-end `-V` output sample, calculation accuracy vs. current array-of-values approach; hard prerequisite for #189 production code). **Decision 6** dissolved — no runtime gate in the unified contract. **Decision 9** dissolved — activation policy and release-engineering decisions are out of scope for #187; they belong to the per-consumer implementation tickets that consume this contract.
 
 #### D3 memo — the six decisions
 
@@ -985,7 +984,7 @@ The original framing presumed a dual-mode gate (R2) with concrete thresholds. Th
 | Component | Source posture | ltl mapping |
 |---|---|---|
 | **Structural failure guards** (no index, no `+Inf` bucket, zero observations) | Prometheus `bucketQuantile` returns NaN for these | R2.1 (no index) and R2.2 (tier mismatch) inherited from #179 |
-| **User choice of data structure** | All libraries treat this as an engineering/configuration choice, not an automatic gate | Practical decision item 7: user-facing `--exact-percentiles` / `--approximate-percentiles` flag |
+| **User choice of data structure** | All libraries treat this as an engineering/configuration choice, not an automatic gate | Practical decision item 7: user-facing per-surface `<raw\|bin>` data-model selectors |
 | **Numeric N threshold** | No source consulted defines one | **Gap. Any value ltl picks for "small-N opt-out per key" is ltl-specific and must be justified in ltl-specific terms.** |
 
 **ltl-specific framing** (not source-grounded, but mechanically derivable from ltl's substrate; flagged as ltl-divergence-from-industry-silence rather than source-grounded option):
@@ -1001,8 +1000,8 @@ Whichever framing ltl picks, the decision conversation must record that the valu
 
 Beyond the six analytical decisions above, the decision conversation must resolve four practical questions before Phase 2 implementation begins. The literature consulted in `features/187-histogram-industry-grounding.md` does not document conventions for any of these (the libraries leave configuration, observability format, activation policy, and prototyping triggers to the consumer); they are recorded here as ltl-specific decisions, distinct from the analytical decisions 1–6 above.
 
-7. **User-facing opt-out from the unified path** — **LOCKED (2026-05-19)**: visible `--exact-percentiles` flag with deprecation notice on every invocation, global scope, available one release cycle past each consumer's R9 migration. `-V` reports both a top-level banner and the per-consumer `user_opt_out` line per R10. Full lock recorded in *Locked decisions from research* § Decision 7 below.
-8. **`-V` reporting verbosity and format** — **LOCKED (2026-05-19)**: `=== BIN-COUNTER MODE ===` section with run-level header + per-consumer blocks, mirroring the existing `=== INDEX READ-BACK ===` block convention in ltl. Consumer names lowercase-with-underscores; `out_of_range_bounded:` reported inline per-quantile (Option A). Full lock recorded in *Locked decisions from research* § Decision 8 below.
+7. **User-facing opt-out from the unified path** — **LOCKED (2026-05-19)**: visible per-surface data-model selectors (`-dm`, `-mdm`, `-bdm`, `-hmdm`, `-hgdm`, each `<raw|bin>`), permanent rather than deprecated, with no run-level banner — `-V` reports the choice on each consumer's `path:` line per R10. Full lock recorded in *Locked decisions from research* § Decision 7 below.
+8. **`-V` reporting verbosity and format** — **LOCKED (2026-05-19)**: `=== histogram-bin-counters ===` section with run-level header + per-consumer blocks, mirroring the existing `=== INDEX READ-BACK ===` block convention in ltl. Consumer names lowercase-with-underscores; `out_of_range_bounded:` reported inline per-quantile (Option A). Full lock recorded in *Locked decisions from research* § Decision 8 below.
 9. **Phase 2 default activation policy** — **DISSOLVED (2026-05-19)**: this question is out of scope for #187, which is a research-and-architecture-foundation deliverable. Activation policy, shipping cadence, default-on-vs-default-off, and per-release ramp decisions belong to the per-consumer implementation tickets that consume this contract, not to #187. Full dissolution rationale recorded in *Locked decisions from research* § Decision 9 below.
 10. **Prototype validation scope — what #189 must validate before production code** — **LOCKED (2026-05-19)**: #187 specifies the aspects of the locked architecture that must be validated empirically through prototyping before #189 begins production implementation. Five aspects are in scope: (a) the in-bin interpolation formula's behavior on real data; (b) the auto-resize partition lifecycle's behavior on per-key fan-out at scale; (c) the initial partition seeding heuristic and overflow/underflow handling on edge-case data; (d) an end-to-end verbose output sample for downstream comparison; (e) calculation accuracy compared to the array-of-values approach currently in use. The prototype is a hard prerequisite for #189's production code; #189 owns where the prototype lives and how it's structured. Full lock recorded in *Locked decisions from research* § Decision 10 below.
 
@@ -1056,6 +1055,21 @@ This section records the binding values produced by the decision conversation th
 
 ### F1 — Design-philosophy framing — **LOCKED (2026-05-19)**
 
+> **Amendment 2026-08-26 (#462) — re-binning is reported per mechanism; retention and footprint become observable; the memory figure becomes reproducible.** Recorded in `features/bin-counter-accuracy-and-observability.md` § D4. Unlike the two amendments above, this one is applied **in the body below as well as here**, so the field list is true as written rather than superseded from the top.
+>
+> - **`total_rebin_events` is retired.** It reported a single summed figure that could not be acted on — a number that rises says nothing about whether a partition outgrew its range, a combination churned, or a histogram was rendered — and it was not even a reliable sum: a combination replaced the target's partition, discarding the history it should have been adding to, so consolidation of 17 partitions into 13 left every re-bin field byte-identical to the un-consolidated run.
+> - **Three per-mechanism counters replace it**, in this order: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`.
+> - **Re-bin history moves from the partition to the store entry.** `partition_new()` and `partition_rebin()` no longer carry a `rebins` slot and `partition_extend()` no longer increments one; the counters live on the `{partition, bins, overflow, underflow}` entry, which survives a combination. `rebins_per_partition:` keeps its name and now reports the distribution of per-entry **growth** events.
+> - **`overflow_total` and `underflow_total` are emitted.** Both were already produced and printed by nothing. They are guards expected to read zero, kept visible so that if one ever fires it can be investigated (§ D7 of the drop record).
+> - **Four retention fields are added** (the fourth, `members_per_partition`, added
+>   2026-08-27 by #459): `members_live`, `members_max`, `members_memory_bytes`,
+>   `members_per_partition`. They are defined for the shape the system is moving to (§ D1) and implemented against today's, where combination collapses members into one histogram: `members_live` equals `partition_count` plus the keys folded into clusters, `members_max` is the largest membership reached, and `members_memory_bytes` equalled `counter_memory_bytes` until #459 made retention real. That equality was itself the signal that no member histogram was being retained yet; it now holds only where nothing is retained.
+> - **`counter_memory_bytes` becomes a derived, reproducible figure.** It was `Devel::Size::total_size()` over the live store, which reports what the process *allocated*: measured 46277 / 45189 across six runs of one command with every content-derived field constant, because Perl's per-process hash seed changes when a bucket array doubles. It now reports the counters' payload — partition geometry plus the bin slots spanned — which is exact and content-defined. Allocation cannot be modelled deterministically (it depends on growth history, not content), so the field is an instrument for comparing two runs or configurations, not an absolute footprint; RSS remains the measure of record for that. Recorded in the drop file § D11.
+> - **The section name is `=== histogram-bin-counters ===`**, re-locked in Decision 8's own amendment note.
+>
+> All other Decision 8 field names, consumer-name strings, and per-consumer lockings remain in effect verbatim.
+
+
 #### Contract
 
 ltl occupies the **query-time analyzer** role, not the recording-side library role. The raw values live in the log file and are read by ltl at analysis time, which means the precision parameter is a query-time choice exposed to the analyst, not a fixed recording-time choice the way Prometheus Scale, DDSketch α, and HdrHistogram significant-digits typically are in their production deployments. `buckets_per_decade` is the analyst's lever; the in-bin rule uses `rank_in_bin` because that information is available to ltl in a way it is not to consumers of pre-aggregated metrics.
@@ -1107,8 +1121,8 @@ Non-binding guidance for #189's implementation — the contract above is what mu
 
 - **Log base**: Prometheus's source uses `math.Log2` and `math.Exp2`. ltl should match Prometheus's `log2 / exp2` convention for exact floating-point reproducibility against Prometheus reference output if a regression test is set up against Prometheus's output; otherwise natural log (`log` / `exp`) is mathematically equivalent and Perl-idiomatic. #189 picks based on its testing strategy.
 - **Edge case `bin_count = 1`**: `fraction = 1.0`; formula returns `upper`. No special-case logic needed.
-- **Edge case `lower = upper`** (degenerate single-value partition): formula returns `lower`. No special-case logic needed.
-- **Numerical robustness**: for ltl's value range (microseconds to hours), the log and exp evaluations are well within IEEE 754 double precision. No guards needed against overflow or denormal underflow.
+- **Geometry invariant `lower < upper`**: consecutive boundaries are never equal. `bin_boundary()` returns `min · exp(log_ratio · i / bin_count)` and a partition is always seeded across its full default span, so there is no degenerate single-value partition with `min == max`. The formula needs no equal-edge branch.
+- **Numerical robustness**: for ltl's positive value range (microseconds to hours), the log and exp evaluations are well within IEEE 754 double precision, and no guards are needed against overflow or denormal underflow. The guard that *is* required is a domain guard, not a numerical one: the primitives are defined only for `v > 0` — a zero value divides by zero when the seed span is computed and takes the log of zero, and a negative value leaves the growth loop unable to terminate. The caller must not pass zero or negative values (see R5).
 
 ### Decision 2 — `buckets_per_decade`, default value, CLI flags, valid range — **LOCKED (2026-05-19)**
 
@@ -1184,8 +1198,8 @@ The mapping is part of the locked feature contract; changes to the table require
 
 Non-binding guidance — the contract above is what must hold; the specifics below are starting points #189 may refine.
 
-- **Memory footprint at locked default**: 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale). **Measured overhead** (prototype evidence, PR #194; `prototype/189-bin-counter-primitives-validation-report.md` § V2 Part A): on real Tomcat data at 51,469 partitions, actual per-partition cost under Perl is 2,381 B (vs. the theoretical 2,136 B floor), and projected total at 10⁵ partitions is 227 MB (+12.3% over the 212 MB guidance). The delta is Perl hash-and-scalar overhead vs. the theoretical `(B+2) × 8` byte counter array; the closed-form R2 path assumption holds. Analysts comparing observed `counter_memory_bytes` in `-V` output against this guidance should expect the small positive offset.
-- **Memory at other levels** (informational, for sizing tests):
+- **Memory footprint at locked default — figures describe the dense counter layout, which is the one that ships**: a `(B+2) × 8` byte array spanned by the partition (`counter_store_bytes` = a per-partition constant plus 8 B per bin slot). 265 bins per partition over 5 decades; ~2.1 KB per partition at 8 B/counter; ~212 MB total across 10⁵ keys (Path A scale). Neither these figures nor the ladder below is layout-independent: the sparse alternatives measured in `features/426-per-message-statistics-store.md` (F31 / A11) cost 955 B and 600 B per key at bpd 53 against the dense array's 2,381 B, and — the load-bearing difference — grow 1.2× and 1.4× across the tier ladder against the dense array's 5.8×. **Measured overhead** (prototype evidence, PR #194; `prototype/189-bin-counter-primitives-validation-report.md` § V2 Part A): on real Tomcat data at 51,469 partitions, actual per-partition cost under Perl is 2,381 B (vs. the theoretical 2,136 B floor), and projected total at 10⁵ partitions is 227 MB (+12.3% over the 212 MB guidance). The delta is Perl hash-and-scalar overhead vs. the theoretical `(B+2) × 8` byte counter array; the closed-form R2 path assumption holds. Analysts comparing observed `counter_memory_bytes` in `-V` output against this guidance should expect the small positive offset.
+- **Memory at other levels** (informational, for sizing tests; dense layout, as above — the per-tier growth is a property of that layout, not of the bins-per-decade value):
   - L1 (bpd=4): 160 B/partition; ~16 MB at 10⁵ keys.
   - L2 (bpd=8): 320 B/partition; ~32 MB.
   - L3 (bpd=16): 640 B/partition; ~64 MB.
@@ -1223,13 +1237,13 @@ ltl adopts the Prometheus `histogram_quantile()` `+Inf` overflow convention verb
 - Underflow counts contribute to `total_N`.
 - When `target_rank` lies in the underflow counter, R4 returns `partition.boundary[0]`. No interpolation inside underflow. Semantic: "this quantile is at most this small; the bin-counter approach cannot say more."
 
-**Audit signal**: `-V` Layer 2 must surface, per quantile, whether the returned value came from interpolation or from an overflow/underflow boundary. The field name is `out_of_range_bounded` with three-value enum:
+**Guard signal**: `-V` Layer 2 must surface, per quantile, whether the returned value came from interpolation or from an overflow/underflow boundary. The field name is `out_of_range_bounded` with three-value enum:
 
 - `high`: target rank landed in the overflow counter; R4 returned `partition.boundary[B]`.
 - `low`: target rank landed in the underflow counter; R4 returned `partition.boundary[0]`.
 - `none`: target rank landed in a finite bin; R4 interpolated via Decision 1's formula.
 
-A single run's `-V` output may show different `out_of_range_bounded` values for different quantiles (e.g., P50 `none`, P99.9 `high`). The field name and the three-value enum are part of the locked feature contract.
+`none` is the only value a shipped run emits, for every quantile of every consumer. `high` and `low` are unreachable while the partition grows without a cap (see *Tied to Decision 5* below); the field is a guard whose expected reading is `none`, never an audit signal expected to go non-zero. The field name and the three-value enum are part of the locked feature contract, and remain so precisely because they are what would make a future growth cap visible the moment it fired.
 
 **Source citations**:
 - Prometheus `promql/quantile.go` — `BucketQuantile` function (classic histograms with `+Inf` bucket), lines 130–152 of commit `main` HEAD as of 2026-05-19. URL: https://github.com/prometheus/prometheus/blob/main/promql/quantile.go. Key lines verified verbatim:
@@ -1241,7 +1255,7 @@ A single run's `-V` output may show different `out_of_range_bounded` values for 
 
 **Divergence from Prometheus, documented**: ltl's `-Inf`-equivalent underflow handling has no direct Prometheus analog (Prometheus's negative-bucket handling is for distributions with genuinely negative values, not for positive-values-below-min). The ltl underflow convention is a symmetric extension of the Prometheus `+Inf` convention applied at the low end. Rationale: positive durations may be smaller than the partition's `min` early in the parse, before auto-resize (Decision 5) has had the chance to extend the low end. Conduct rule satisfied: where ltl's case differs from the industry-standard case, the divergence is documented explicitly.
 
-**Tied to Decision 5**: under Decision 5's locked auto-resize lifecycle, overflow and underflow are expected to be rare in practice — the partition adapts to contain observed values. Decision 4's mechanisms function primarily as a safety net rather than the primary handling path. The contract still holds; the practical hit rate is small.
+**Tied to Decision 5**: under Decision 5's locked auto-resize lifecycle the partition grows until it contains the value, with no cap on how far — so overflow and underflow are not rare, they are unreachable. The hit rate is exactly zero on every shipped path, and Decision 4's counters and the three-value enum stay in the contract as instrumentation that a future growth cap would make live, not as a handling path any run exercises. Should consolidated rows later move onto a shared bucket grid (#469), a grid row stores no range to fall outside of, and the guards become structurally unreachable there rather than merely unexercised — the reading is `none` and zero either way.
 
 **#34 contract surface**: `#34` R5/R6 already requires tracking values above and below the partition. Decision 4 consumes `#34` R5/R6 as-is — no new contract obligations on `#34`'s data structure. The primitive interface between #189 R4 and the counter store must expose the overflow/underflow counts; that interface design is `#189`'s concern.
 
@@ -1288,14 +1302,19 @@ ltl adopts a **two-stage stream → finalize-rebin lifecycle** for display-geome
 - Is constructed lazily on first observation per the same #189 primitive surface (`partition_new` with locked defaults `bpd=53`, `seed_decades=5`) — streaming phase.
 - Accumulates counts via `counter_update` with auto-resize during the parse — bounded memory throughout, no raw-value retention.
 - At end-of-parse, is **re-binned into a display-bound partition** via geometric-midpoint projection (the same remap loop used by `partition_extend`). The display-bound partition has:
-  - Streaming `bpd = 616` (Level 9, HdrHistogram 3-significant-digit reference per Decision 2 tier table) — **F2/F3 ONLY**. F1 (per-message percentile partitions) continues using Decision 2 default `bpd = 53`; the F1 partition count is unbounded (one per `(category, log_key)`) and cannot tolerate the ~12× per-partition memory increase that bpd=616 would impose. The F2/F3 streaming bpd is safe because partition count is bounded (~60 heatmap time buckets + ~10 histogram metrics ≈ 70 partitions × 25KB ≈ 1.75MB total). Validated empirically by V8 in `prototype/201-projection-comparison-report.md`.
+  - Streaming `bpd = 616` (Level 9, HdrHistogram 3-significant-digit reference per Decision 2 tier table) — **F2/F3 ONLY**. F1 (per-message percentile partitions) continues using Decision 2 default `bpd = 53`; the F1 partition count is unbounded (one per `(category, log_key)`) and cannot tolerate the ~12× per-partition memory increase that bpd=616 would impose. The F2/F3 streaming bpd is safe because partition count is bounded (~60 heatmap time buckets + ~10 histogram metrics ≈ 70 partitions × 25KB ≈ 1.75MB total). That total is arithmetic off the Decision 2 memory table for the dense counter layout, tabulated in `prototype/201-projection-comparison-report.md` § *Memory cost at locked bpd=616* — a sizing projection, not a measurement.
   - Finalize target partition shape:
     - **F2 (heatmap)**: `bin_count = $heatmap_width`, log-spaced over `[$heatmap_min, $heatmap_max]`. Display reads finalized partition directly (no render-time projection).
     - **F3 (histogram)**: `bin_count = int(decades × histogram_buckets_per_decade)` (existing `-hgbpd`, default 8), log-spaced over `[d_min, d_max]`. The shipped `calculate_histogram_display_buckets` (`ltl:7462`) is applied unchanged to the finalized partition for stretched-bar rendering.
   - Boundaries log-spaced over `[d_min, d_max]` (observed data extents — the same anchor ltl's pre-migration code uses).
 - Display reads the finalized partition directly — no projection step at render time. (For F3, an optional bar-widening render step preserving the shipped "wide bars" visual is a follow-on UX decision in the histogram migration ticket; see `features/201-*.md` § Open question.)
 
-The streaming partition is discarded after re-bin; only the finalized partition is retained for display.
+The two partitions carry two distinct roles, and neither substitutes for the other:
+
+- **Finalized (display-geometry) partition** — bar heights, heatmap cell colours, display boundaries, and the no-cross-bin-mass-splitting invariant. This is the render side, and it is unchanged.
+- **Streaming (bpd 616) partition** — the percentile source. Markers, legend values and tick placement are computed by R4 against it, at the resolution the counts were captured at, and the result is clamped to the display axis before it is published or mapped to a column. Nothing about the display projection stands between the counts and the number.
+
+The finalize step reads the streaming partition for both purposes — it projects it for display and queries it for percentiles — and only then discards it. From that point on, only the finalized partition is retained.
 
 **Why this lifecycle (not F1's auto-resize at display time):**
 1. Display column count is a hard constraint (`$heatmap_width = -hmw`; `$bar_area_width` derived from terminal width and active-metric count). Auto-resize cannot guarantee partition geometry matches display geometry at the moment display happens.
@@ -1306,7 +1325,7 @@ The streaming partition is discarded after re-bin; only the finalized partition 
 **Why the same #189 primitives:**
 The geometric-midpoint re-bin already exists at `ltl:613–622` (`partition_extend`'s remap loop). F2/F3 finalize re-bin reuses it via a new wrapper (`partition_rebin($src_partition, $src_bins, $new_min, $new_max, $new_bin_count)`) — see `features/189-histogram-bin-counter-primitives.md`. F1's auto-resize lifecycle is unchanged; the new wrapper composes existing pieces.
 
-**Empirical validation:** Prototype V6 (heatmap) and V7 (histogram) on the canonical 148 MB Tomcat dataset showed 100% mass retention, 100% peak retention, and 0-column peak X-offset. Algebraic worst-case X-offset bound at locked defaults is ≤1 column. Full evidence at `prototype/201-projection-comparison-report.md`.
+**Empirical validation:** the validation of record is **V8**, the per-column comparison. It prints every display column's count side by side and is what the F2/F3 shape is justified against; at bpd=616 it shows 0.0% deviation across the spike region on the smaller canonical dataset, with ±0.1–0.3% on three medium-density tail columns, and 5.78% on the 148 MB Tomcat dataset — under the visibility threshold (roughly one character row, ~11% at the default 9-row height) on both. The earlier V6 (heatmap) and V7 (histogram) aggregate metrics — 100% mass retention, 100% peak retention, 0-column peak X-offset — are superseded and are not evidence: the report records that those aggregates can be satisfied while spike-trough structure is destroyed, which is why V8 was run. Full evidence at `prototype/201-projection-comparison-report.md`.
 
 **Source of the F2/F3 contract**: `features/201-display-geometry-bound-consumers.md` § Recommendation, locked 2026-05-20.
 
@@ -1318,7 +1337,7 @@ The geometric-midpoint re-bin already exists at `ltl:613–622` (`partition_exte
 
 2. **Tighter per-key resolution.** Each per-key partition adapts to the values that key actually has, so its full bin budget (~265 bins at locked 53 bpd × 5 decades) is applied to the per-key value range rather than to a wider global range with most bins empty for narrow-range keys.
 
-3. **Decision 4 overflow/underflow becomes a safety net rather than the primary path.** With auto-resize, the partition extends to contain observed values, so values landing in overflow/underflow are rare.
+3. **Decision 4 overflow/underflow becomes a dormant guard rather than a handling path.** With uncapped auto-resize the partition always extends to contain the observed value, so nothing lands in overflow or underflow at all.
 
 **Accepted trade-off**: per-key partition boundaries are *not* aligned with the heatmap/histogram global boundaries. The future hover-to-redraw feature (if built) will need to re-bin per-key counts onto the heatmap/histogram global boundary array at render time — an O(bin count) operation paid per-render, per-API, on user demand. Cross-time-bucket heatmap re-projection (rather than just the histogram) is deferred — first-cut hover targets the histogram only.
 
@@ -1342,7 +1361,7 @@ The presence and semantic of these telemetry signals is contract; exact field na
 
 **Implications for related issues** (catalogued in *Downstream implications for related issues* above):
 - #179: index is no longer load-bearing for partition sizing under any consumer.
-- Decision 4: overflow/underflow become rare-in-practice safety nets rather than primary paths.
+- Decision 4: overflow/underflow become dormant guards, reading zero on every shipped run, rather than handling paths.
 - Future hover-to-redraw: per-key partition boundaries differ from heatmap/histogram global boundaries; re-binning at render time is the design pattern; first-cut targets histogram only.
 
 #### Implementation guidance for #189
@@ -1352,8 +1371,8 @@ Non-binding — the contract above is what must hold; specifics below are starti
 - **Initial seed arithmetic**: when the first value `v_0` for a new partition is observed, construct the partition with `min = v_0 / sqrt(10^decades_default)` and `max = v_0 · sqrt(10^decades_default)`, where `decades_default = 5` (matches ltl's existing heatmap/histogram convention at `ltl:4908`-area code). For 5 decades and locked Decision 2 default `buckets_per_decade = 53`, the partition opens with ~265 bins, centered geometrically on `v_0`.
 - **Rebin doubling arithmetic**: when a value exceeds `max`, extend the high end so that the new `max` is at least `current_max · 10^(decades_default / 2)` (effectively doubling the span at the affected end on a log-scale). Symmetric for values below `min`. Adding bins on the high end is conceptually `append`; on the low end is `prepend`. Both are O(bin count) per rebin.
 - **Suggested `-V` field names** (settled finally by practical decision 8):
-  - `total_rebin_events: N` — aggregate count, Layer 2.
-  - `rebins_per_partition: { p50, p95, p99, max }` — per-partition distribution, available under verbose flag.
+  - `rebin_growth_events: N` / `rebin_merge_events: N` / `rebin_finalize_events: N` — one count per re-binning mechanism, Layer 2 (amended 2026-08-26 by #462; a single aggregate was retired because it could not be acted on).
+  - `rebins_per_partition: { p50, p95, p99, max }` — per-partition distribution of growth events, available under verbose flag.
   - `max_partition_bins: N` — high-water-mark bin count, Layer 2.
   - `counter_memory_bytes: N` — aggregate counter-store memory, Layer 2 (matches R7's `state_budget_bytes`).
 - **Healthy-seed signal**: with the suggested seed (5 decades centered on first value), `rebins_per_partition.p99` should be in the 0–2 range on typical latency data. Higher values suggest tuning the seed wider or the doubling factor more aggressive.
@@ -1387,7 +1406,7 @@ Non-binding — the contract above is what must hold; specifics below are starti
 
 Non-binding.
 
-- **Observability path for analysts** (informational, not new contract): an analyst who wants to verify rank confidence for a specific quantile reads the `-V` output and uses (a) the partition's bin count from Decision 5's rebin telemetry (`max_partition_bins` aggregate), (b) the `out_of_range_bounded` per-quantile field from Decision 4, and (c) the aggregate `state_budget_bytes`. ltl does not pre-compute trust signals; the analyst inspects the underlying data themselves if they want to verify partition-level rank support.
+- **Observability path for analysts** (informational, not new contract): an analyst who wants to verify rank confidence for a specific quantile reads the `-V` output and uses (a) the partition's bin count from Decision 5's rebin telemetry (`max_partition_bins` aggregate) and (b) the aggregate `state_budget_bytes`. Decision 4's `out_of_range_bounded` is not one of the signals: it is a guard pinned at `none` on every shipped run, so it carries no information about rank confidence. ltl does not pre-compute trust signals; the analyst inspects the underlying data themselves if they want to verify partition-level rank support.
 - **No code surface required by this decision**: R4's implementation does not need special-case branching for small bin_count or small total_N. The Decision 1 formula computes correctly for any positive bin_count; the Decision 4 boundary-return path handles overflow/underflow. No additional code paths.
 
 ### Decision 6 — Runtime gating of approximate vs. exact mode — **DISSOLVED (2026-05-19): no runtime gate in the unified contract**
@@ -1416,7 +1435,7 @@ The question was structurally dissolved by the locked Decisions 1, 5, and the re
 
 **Source basis for the dissolution**: industry convention across all four consulted bin-based libraries. HdrHistogram and DDSketch run unconditionally — they don't have a runtime gate to "fall back to retaining raw values." Prometheus's `histogram_quantile()` runs unconditionally on whatever histogram is presented to it. The unified contract aligning with this posture is the source-grounded position.
 
-**Requirements alignment**: R1-R14 have been rewritten in the *Requirements* section above to reflect the dissolution. R2's dual-mode-gate language is removed; R10's reason codes are reduced to the set that survives (`unified`, `pre_migration`, `user_opt_out`, `feature_not_active`).
+**Requirements alignment**: R1-R14 have been rewritten in the *Requirements* section above to reflect the dissolution. R2's dual-mode-gate language is removed; R10's reason codes are reduced to the set that survives (`unified`, `user_opt_out`, `feature_not_active`).
 
 #### Implementation guidance for #189
 
@@ -1427,71 +1446,52 @@ Non-binding.
 - **No `mode` field on partition state**: a partition under the unified contract is unconditionally an auto-resize bin-counter partition (Decision 5). There is no `mode: bin_counter | raw_array` discriminator on the partition.
 - **Pre-migration code lives in consumer code**: the pre-migration sort-based code paths (e.g., the existing `calculate_statistics` at `ltl:5488`) live in the consumer's code, not in #189's primitive code. They are invoked by consumers whose migration phase has not yet validated, or by migrated consumers when the user-opt-out preference is active (per practical decision 7).
 
-### Decision 7 — User-facing opt-out flag — **LOCKED (2026-05-19)**
+### Decision 7 — User-facing opt-out: per-surface data-model selectors — **LOCKED (2026-05-19); re-locked onto the per-surface selectors 2026-08-27 via #460**
 
 #### Contract
 
-ltl exposes a global user-facing opt-out flag that reverts all migrated consumers to their pre-migration code paths for the current run. The flag is **visible** in `--help` but carries a **deprecation notice** on every invocation, signalling that it is a transitional surface.
+ltl exposes the opt-out as **per-surface data-model selectors**, not as a global flag. Each selector pins one analysis surface to a data model for the run — `raw` (the pre-migration retained-value path) or `bin` (the unified contract path). The selectors are permanent, first-class user surfaces: they are visible in `--help`, they carry no deprecation notice, and there is no retirement timeline.
 
-**Flag**:
-- Long form: `--exact-percentiles`
-- Short form: `-ep` (added 2026-05-19 per project requirement that every CLI option exposes both short and long forms; supersedes the prior "no short form" lock).
-- Boolean flag (no argument).
-- Default: not set (unified path runs for all migrated consumers).
+**Flags** — each takes a `<raw|bin>` argument, validated at parse time:
 
-**Scope**: global. When set, every migrated consumer reverts to its pre-migration code path for this run. There is no per-consumer scoping; the flag is all-or-nothing.
+| Long form | Short form | Surface |
+|---|---|---|
+| `--data-model` | `-dm` | Omnibus — every surface below |
+| `--message-stats-data-model` | `-mdm` | Per-message-key statistics (`summary_table`, `csv_output`) |
+| `--bucket-stats-data-model` | `-bdm` | Per-time-bucket statistics (`time_bucket_stats`) |
+| `--heatmap-data-model` | `-hmdm` | Heatmap (`heatmap_cells`, `heatmap_markers`) |
+| `--histogram-data-model` | `-hgdm` | Histogram view (`histogram_view`, `histogram_bins`) |
 
-**Deprecation notice contract**: when `--exact-percentiles` is set, ltl emits a deprecation notice on stderr at the start of the run, before any output is produced. The notice's content must convey:
-- That `--exact-percentiles` is a transitional opt-out for the unified contract migration.
-- That the flag will be removed one release cycle past the validation of the last R9 migration phase that affects the currently-active consumers in this run.
-- A pointer to documentation (`docs/usage.md` and/or the issue tracker) for migration guidance.
+**Scope**: per surface. A run may mix models freely — pinning the histogram to `raw` leaves every other surface on its own resolved model. Consumers that share a surface always share its model; that is what makes the surface, not the consumer, the unit of selection. Each surface's own default is its resolved model when no selector names it.
 
-**Retirement timeline**: `--exact-percentiles` is available for one release cycle past each affected consumer's R9 phase validation. Concretely, if a consumer's phase validates in release X.Y, the opt-out for that consumer remains available through X.(Y+1) and is removed in X.(Y+2). The flag itself is removed entirely when the last consumer's opt-out window expires.
+**Audit signal contract**: `-V` surfaces the choice per consumer, in the consumer's block: a consumer whose surface resolved to `raw` reports `path: user_opt_out`, one whose surface resolved to `bin` reports `path: unified` (matching the R10 reason-code lock). There is no run-level banner and no run-level opt-out line — with per-surface selection there is no single run-wide state for one to report.
 
-A separate locked decision (or release note) sets the retirement release for the flag once the last consumer's migration window is known. The retirement is not part of this lock; this lock fixes the *retirement policy* and *one-release-cycle window*, not the specific release number.
-
-**Audit signal contract**: `-V` must surface that the opt-out is active in two places:
-
-1. **Top-level run banner** at the top of `-V` output:
-   - Content: a clearly visible warning that `--exact-percentiles` is active and that output may differ from current ltl defaults.
-   - Format: practical decision 8 settles the exact wording and formatting, but the banner must be at the top of `-V`, before any consumer-specific sections, and must be the first thing an analyst sees in `-V` output for the run.
-2. **Per-consumer line per R10**: each migrated consumer reports `user_opt_out` in its `-V` block (matching the R10 reason-code lock).
-
-Both surfaces are part of the locked feature contract.
+Both the selector set and the per-consumer `-V` surface are part of the locked feature contract. The full selector semantics are owned by `features/266-data-model-selectors.md`.
 
 **Source basis**: no industry-standard reference for this decision; literature is silent on opt-out flags for histogram libraries (per `features/187-histogram-industry-grounding.md` § Decision 6 — the consulted libraries treat data-structure choice as user configuration rather than auto-gating; opt-out flags from one alternative path to another don't arise because none of them ships two alternative paths). This is an ltl-specific decision documented as such per the conduct rules.
 
 **Rationale**:
-- **Visible** rather than hidden: analysts who want byte-identical pre-feature output need to be able to find the flag without engineering documentation. Hiding it would create a knowledge gap that defeats its transitional purpose.
-- **Deprecated immediately** rather than permanent: the unified path is the architectural direction; keeping the opt-out as a first-class permanent surface would signal that ltl supports two paths long-term, which contradicts the migration's "the migration completes eventually" property.
-- **Global** rather than per-consumer: simplest CLI surface during a transitional period; if a real workflow surfaces that needs per-consumer scoping, this lock can be re-opened (the conduct rule for adding scope is "concrete need documented"). For the foreseeable transition, all-or-nothing is sufficient.
-- **One release cycle past phase validation**: gives users time to migrate workflows that depend on byte-identical output without keeping two paths forever.
-- **Banner + per-consumer line audit**: ensures analysts copying output (e.g., into bug reports or tickets) carry the opt-out signal with them; ensures programmatic tests can assert the path independently.
+- **Visible** rather than hidden: analysts who want byte-identical pre-feature output need to be able to find the selectors without engineering documentation. Hiding them would create a knowledge gap that defeats their purpose.
+- **Permanent** rather than deprecated: the two data models are not a migration transition with a winner, they are two representations with different accuracy and memory properties, and choosing between them per analysis is an analyst decision. A deprecation notice on a permanent choice would misdescribe it.
+- **Per surface** rather than global: a single run mixes surfaces with very different partition-cardinality regimes, and the reason to pin one to `raw` (byte-identical comparison against an older release, a nearest-rank reference for one output) rarely applies to all of them. The omnibus `-dm` covers the all-at-once case without forcing it.
+- **Per-consumer `-V` line** rather than a run banner: with per-surface selection, the state a reader needs is which consumer ran which path, and that is exactly what the per-consumer `path:` line reports. It also lets programmatic tests assert the path per consumer.
 
 #### Implementation guidance for #189
 
 Non-binding.
 
-- **No #189 surface for the opt-out**: `--exact-percentiles` is a consumer-level concern, not a primitive-level concern. #189's primitives are not invoked when the flag is active; the consumer's pre-migration code path runs instead. #189 does not need an "opt-out mode" or any equivalent.
-- **CLI parsing convention**: `--exact-percentiles` is a boolean flag handled in the same family as ltl's existing CLI flags (per CLAUDE.md's existing CLI conventions). Consistent with how ltl handles other boolean flags like `--ms`, `--hg`, `-hm`.
-- **Banner format suggestion** (practical decision 8 finalizes): something like:
-  ```
-  === BIN-COUNTER MODE ===
-  WARNING: --exact-percentiles is active. Output reflects the pre-#187 sort-based
-  computation path. This flag is deprecated and will be removed in a future release.
-  See docs/usage.md for the unified-path defaults.
-  ```
-  The exact phrasing, severity marker (`WARNING`/`NOTICE`/etc.), and any color/emphasis are practical decision 8.
-- **Deprecation-notice emission**: emit to stderr (not stdout) so it doesn't pollute structured output that downstream tools might consume. Emit once per run, at the start.
+- **No #189 surface for the opt-out**: the data model is a consumer-level concern, not a primitive-level concern. #189's primitives are not invoked for a surface resolved to `raw`; the consumer's pre-migration code path runs instead. #189 does not need an "opt-out mode" or any equivalent.
+- **CLI parsing convention**: each selector takes a `<raw|bin>` string argument and rejects anything else at parse time through one shared validator, so the five flags cannot diverge on what they accept.
 - **CLI documentation requirements** (CLAUDE.md):
-  - `print_help()` in `ltl` — `--exact-percentiles` documented with deprecation notice in the help text.
-  - `README.md` options reference — listed with deprecation notice.
-  - `docs/usage.md` — analyst-facing explanation of when to use the flag, what it does, and the migration path (use Decision 2's precision lever, or use an older ltl release if the analyst genuinely needs byte-identical pre-feature output).
-- **Retirement mechanism**: when the flag is removed in a future release, the removal is itself a release-process item — bump the major or minor version per ltl's release conventions, document the removal in release notes, ensure the deprecation notice appeared in the prior release.
+  - `print_help()` in `ltl` — every selector documented with its surface and its accepted values.
+  - `docs/usage.md` — the parallel options reference, kept in agreement with `--help` in the same change (per CLAUDE.md § Before writing or changing code).
+  - Analyst-facing guidance on when to pin a surface to `raw`: byte-identical comparison against a pre-migration release, or a nearest-rank reference to check a bin-model value against.
 
-### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20**
+### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473**
 
-> **Amendment 2026-05-20 (#34 Phase 2)**: section name changed from `=== PERCENTILE MODE ===` to `=== BIN-COUNTER MODE ===`. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The original name described the output of one consumer family; the amended name describes the substrate the entire contract is built on. Function name in code amended from `emit_percentile_mode_verbose` to `emit_bin_counter_mode_verbose` for the same reason. The user-facing `--exact-percentiles` / `-ep` flag is unchanged — it correctly names the user's choice rather than the substrate. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
+> **Amendment 2026-05-20 (#34 Phase 2)**: the section is named for the substrate rather than for one consumer family's output. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The emitting function is `emit_bin_counter_mode_verbose`, for the same reason. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
+>
+> **Amendment 2026-08-27 (#460)**: the locked section name is `=== histogram-bin-counters ===` — the registry key, the `@verbose_section_order` entry and the name `-V` accepts as a section selector, and the name the consuming harness file tracks (`tests/validate-histogram-bin-counters.sh`). Since Decision 8 makes the section name part of the stability contract, it is locked here to the name the emitter uses.
 
 > **Amendment 2026-05-27 (#293) — run-level precision lines.** The single precision lever (Decision 2 #293 amendment) re-locks the two run-level lines below:
 > - The `percentile_precision:` line is **renamed** to `data_model_precision: <TIER> (<source>)`, where `<TIER>` is 1..9 and `<source>` is `default` or `--data-model-precision N`. The `n/a` rendering (for non-tier `-pbpd` values) is dissolved — with only the tiered lever, every value maps to a tier, so `n/a` can no longer occur. The `; overridden` source annotation is dissolved — no competing flag remains.
@@ -1501,43 +1501,74 @@ Non-binding.
 
 #### Contract
 
-`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== BIN-COUNTER MODE ===`. The section is **always present** under `-V`, regardless of which consumers are active; if no consumer is computing percentiles or bin counts in the current run, the section reports `consumers_active: none` after the run-level header.
+`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== histogram-bin-counters ===`. The section is **always present** under `-V`, regardless of which consumers are active; if no consumer is computing percentiles or bin counts in the current run, the section reports `consumers_active: none` after the run-level header.
 
 The section's primary purpose is **testability and AI-agent debugging**. Field names are stable across releases; cosmetic changes to formatting that affect field-name greps require a new locked-decision entry. Reader-friendliness is secondary to grep-stability and coverage of the research-locked observability signals.
 
 **Conventions** (matching ltl's existing `=== INDEX READ-BACK ===` block, `ltl:836`):
-- Section header: `=== BIN-COUNTER MODE ===`.
+- Section header: `=== histogram-bin-counters ===`, closed by `=== END histogram-bin-counters ===`.
 - Top-level lines: `key: value` with lowercase-with-underscores keys.
 - Nested blocks: `block_opener: <name>` followed by two-space-indented `key: value` lines.
 - Inline multi-value lines: space-separated `key=value` pairs (used for the per-quantile `out_of_range_bounded:` audit, see below).
 
 **Run-level header** (always present, appears immediately after the section title):
 
-- `opt_out_active: yes | no` — whether `--exact-percentiles` is set this run (Decision 7).
-- `opt_out_notice: <message>` — present only when `opt_out_active: yes`. The line carries the deprecation-notice content (the stderr emission per Decision 7 is the human-facing notice; this line is the testable assertion that the deprecation surfaced in `-V`).
-- `percentile_precision: <LEVEL> (<source>)` — the resolved tier from Decision 2's `--percentile-precision` semantics, with source annotation (`default`, `--percentile-precision N`, `--percentile-precision N; overridden` when `-pbpd` also specified). When `opt_out_active: yes`, append `; not in effect this run` to the source annotation. When `-pbpd N` is the active source and `N` does not correspond to any of the nine LEVELs in Decision 2's locked tier table, render as `percentile_precision: n/a (-pbpd N specified)`. The literal string `n/a` is part of the locked stability contract for this field; alternative renderings require a new locked-decision entry.
-- `buckets_per_decade: <N> (<source>)` — the resolved numeric bpd value with source annotation (`default`, `-pbpd N`, `--percentile-precision N`, `-pbpd N; --percentile-precision N overridden`). When `opt_out_active: yes`, append `; not in effect this run` to the source annotation.
+- `data_model_precision: <TIER> (<source>)` — the resolved tier 1..9 from Decision 2's single precision lever, with source annotation (`default` or `--data-model-precision N`). This is the only run-level line. The per-surface bins-per-decade the tier resolves to is reported per surface as `effective_bpd:` in the `=== percentile-algorithm ===` section, which is authoritative for resolution.
+
+There is no run-level opt-out line. Decision 7's selectors are per surface, so the opt-out state is reported per consumer, on the consumer's `path:` line.
 
 **Per-consumer blocks** (one block per consumer catalogued in R12; ordered as below):
 
 Block opener: `consumer: <name>` where `<name>` is one of the locked consumer-name strings (see below).
 
 Block field set, in order:
-- `path: unified | pre_migration | user_opt_out | feature_not_active` — the locked R10 code identifying which path this consumer is running.
+- `path: unified | user_opt_out | feature_not_active` — the locked R10 code identifying which path this consumer is running.
 
 When `path: unified`, the following fields appear (in order):
 - `partition_keying: <description>` — human-readable description of the keying dimension (e.g., `(category, log_key)`, `time_bucket`, `metric_global`).
 - `partition_count: <N>` — number of distinct partitions managed by this consumer this run.
-- `total_rebin_events: <N>` — sum of rebin events across all partitions for this consumer (Decision 5 telemetry).
+- `rebin_growth_events: <N>` — re-binning caused by a partition outgrowing its range and doubling (Decision 5 telemetry). Counted on the store entry, so a combination adds to it rather than resetting it.
+- `rebin_merge_events: <N>` — re-binning caused by combining two histograms: one increment per side projected onto the union geometry, so zero, one or two per combination, since a side already congruent with the union is not projected. Non-zero only where a combination path exists.
+- `rebin_finalize_events: <N>` — re-binning caused by projecting a partition at
+  finalize. It counts **render** projections, not percentile computation: percentiles are
+  read from the streaming partition on every surface, so where this field is non-zero is
+  determined solely by whether the surface projects for display. One per partition per run
+  on the heatmap and histogram surfaces, where the projection is into display shape, on
+  every such run with no flags required — which is the `rebin_finalize_events ==
+  partition_count` invariant those surfaces are asserted against (D9,
+  `tests/validate-histogram-bin-counters.sh`). Exactly zero for `time_bucket_stats`, which
+  renders no projected geometry. **Amended 2026-08-27 by #459:** no longer zero for `summary_table` and
+  `csv_output`. Combination no longer projects as it goes — each absorbed key's counts
+  are held in their own geometry and every member is projected exactly once, together,
+  when its cluster is finalized — so this field carries that collapse. It reads zero on
+  a run with no consolidation, and otherwise counts one per member actually re-projected
+  into the union geometry.
 - `max_partition_bins: <N>` — high-water-mark bin count across all partitions for this consumer (Decision 5 telemetry).
-- `partitions_with_overflow_count: <N>` — number of partitions for this consumer with at least one overflow tally (Decision 4 audit aggregate).
-- `partitions_with_underflow_count: <N>` — number of partitions for this consumer with at least one underflow tally (Decision 4 audit aggregate).
-- `counter_memory_bytes: <N>` — aggregate counter-store memory for this consumer's partitions (Decision 5 telemetry; matches R7's `state_budget_bytes` requirement applied per consumer).
-- `rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — distribution of per-partition rebin counts across this consumer's partitions (Decision 5 telemetry). Format is space-separated `key=value` pairs.
+- `partitions_with_overflow_count: <N>` — number of partitions for this consumer with at least one overflow tally (Decision 4). A guard expected to read zero, not an audit signal expected to go non-zero.
+- `partitions_with_underflow_count: <N>` — the symmetric count for underflow, likewise expected to read zero.
+- `overflow_total: <N>` — summed overflow tally across this consumer's partitions. A guard expected to read zero, not an audit signal expected to go non-zero.
+- `underflow_total: <N>` — the symmetric summed underflow tally, likewise expected to read zero.
+- `counter_memory_bytes: <N>` — the counters' payload for this consumer's partitions: per partition, its geometry plus the bin slots it spans. Content-defined and reproducible across runs, unlike a measurement of the live structure, whose allocation depends on growth history. It is a comparison instrument, not an absolute footprint.
+- `members_live: <N>` — member histograms alive across combined keys. Conserved under combination: folding keys into clusters lowers `partition_count` but not this figure.
+- `members_max: <N>` — the largest membership reached by any single entry. At least 1, since an entry always stands for itself.
+- `members_memory_bytes: <N>` — footprint of the member histograms this store stands
+  for, on the same derived model as `counter_memory_bytes`. **Amended 2026-08-27 by
+  #459:** on `summary_table` and `csv_output` it is the live store plus the payload of
+  every member retained until its cluster collapsed, so it is a high-water figure and
+  diverges from `counter_memory_bytes` whenever consolidation retained anything. Equal
+  to `counter_memory_bytes` on every surface that retains nothing, and on any run with
+  no consolidation.
+- `members_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — **added 2026-08-27 by
+  #459.** The distribution of how many member histograms each surviving partition stands
+  for. `members_live` and `members_max` cannot size a retention ceiling between them: a
+  total says nothing about whether the load is spread across partitions or concentrated
+  in one, and on real logs it is heavily concentrated. Same four-field shape as
+  `rebins_per_partition`. `max` is `members_max`.
+- `rebins_per_partition: p50=<N> p95=<N> p99=<N> max=<N>` — distribution of per-entry **growth** events across this consumer's partitions (Decision 5 telemetry). Format is space-separated `key=value` pairs.
 - `percentiles_emitted: <space-separated list>` — the quantile set this consumer requested per R3 (e.g., `p1 p50 p75 p90 p95 p99 p999`).
 - `out_of_range_bounded: <inline per-quantile>` — per-quantile audit per Decision 4. **Format: Option A inline**, e.g., `out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high`. Space-separated `quantile_name=audit_value` pairs. The three-value enum `none | high | low` is locked verbatim from Decision 4.
 
-When `path: pre_migration` or `path: user_opt_out` or `path: feature_not_active`, no further fields appear in the block — the path line alone is the per-consumer report. The pre-migration code path's own observability (if any) is not extended by this lock.
+When `path: user_opt_out` or `path: feature_not_active`, no further fields appear in the block — the path line alone is the per-consumer report. The sort-based statistics path that `user_opt_out` reports keeps whatever observability it has of its own; this lock does not extend it.
 
 **Special case: shared-partition consumers**: when one consumer is a downstream rendering of another consumer's partitions (e.g., `csv_output` shares `%log_stats` with `summary_table`), the downstream consumer's block uses `shares_partitions_with: <upstream-consumer-name>` instead of repeating the partition-state fields. The block then carries only:
 - `path: unified` (or other R10 code).
@@ -1559,6 +1590,12 @@ When `path: pre_migration` or `path: user_opt_out` or `path: feature_not_active`
 
 The consumer-name strings are part of the locked feature contract. Future consumers (highlight subsets per Phase 4; future hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
 
+**Sub-section: `=== histogram-bin-counters / display-dimensions ===`** — **locked 2026-08-27 by #473.** When a histogram renders under the bin data model, the section additionally carries a per-metric line describing the geometry the chart is drawn on: sample count, observed min and max, decades spanned, bins per decade, and total buckets. It is produced in `finalize_histogram_unified()` and drained into the parent's brackets through the deferred sub-section buffer.
+
+The name is contractual, and the reason is the epoch it distinguishes: every field in the per-consumer blocks above describes the **streaming** partitions as they stood when the telemetry snapshot was taken, before the display projection; the lines in this sub-section describe the geometry that projection produced. The two are different by design on this surface, and without the name the section would present them as one measurement. `total_buckets` here is not comparable with the parent's `max_partition_bins` — different epochs, different geometry.
+
+The raw path emits the same per-metric line shape as `=== histogram-array / dimensions ===`. That name is unqualified because its parent section reports nothing measured at another moment.
+
 **Section presence**: always emitted when `-V` is active. When no consumer is computing percentiles or bin counts (e.g., `ltl -ll <file> -V` with no percentile-relevant features enabled), the section consists of the run-level header followed by:
 
 ```
@@ -1576,20 +1613,26 @@ No per-consumer blocks in that case.
 Default run with all consumers migrated:
 
 ```
-=== BIN-COUNTER MODE ===
-opt_out_active: no
-percentile_precision: 5 (default)
-buckets_per_decade: 53 (default)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
 
 consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: 1247
-  total_rebin_events: 14
+  rebin_growth_events: 14
+  rebin_merge_events: 0
+  rebin_finalize_events: 0
   max_partition_bins: 318
   partitions_with_overflow_count: 0
   partitions_with_underflow_count: 0
+  overflow_total: 0
+  underflow_total: 0
   counter_memory_bytes: 2643456
+  members_live: 1247
+  members_max: 1
+  members_memory_bytes: 2643456
+  members_per_partition: p50=1 p95=1 p99=1 max=1
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
@@ -1601,29 +1644,26 @@ consumer: csv_output
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
 
 consumer: time_bucket_stats
-  path: pre_migration
+  path: user_opt_out
 
 consumer: heatmap_markers
-  path: pre_migration
+  path: feature_not_active
 
 consumer: heatmap_cells
-  path: pre_migration
+  path: feature_not_active
 
 consumer: histogram_view
-  path: pre_migration
+  path: feature_not_active
 
 consumer: histogram_bins
-  path: pre_migration
+  path: feature_not_active
 ```
 
-Opt-out active:
+A surface pinned to `raw` (`ltl -mdm raw <F> -V`) — the per-message surface's consumers report `user_opt_out`, the rest are unaffected:
 
 ```
-=== BIN-COUNTER MODE ===
-opt_out_active: yes
-opt_out_notice: --exact-percentiles is set; all migrated consumers reverted to pre-#187 sort-based computation. This flag is deprecated and will be removed in a future release.
-percentile_precision: 5 (default; not in effect this run)
-buckets_per_decade: 53 (default; not in effect this run)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
 
 consumer: summary_table
   path: user_opt_out
@@ -1631,44 +1671,48 @@ consumer: summary_table
 consumer: csv_output
   path: user_opt_out
 
-[... remaining consumers reporting path: user_opt_out or pre_migration as appropriate ...]
+[... remaining consumers reporting their own surface's path ...]
 ```
 
-Precision override with conflict:
+Precision tier raised (`ltl -dmp 7 <F> -V`):
 
 ```
-=== BIN-COUNTER MODE ===
-opt_out_active: no
-percentile_precision: 4 (--percentile-precision 4; overridden)
-buckets_per_decade: 100 (-pbpd 100; --percentile-precision 4 overridden)
+=== histogram-bin-counters ===
+data_model_precision: 7 (--data-model-precision 7)
 
 [... per-consumer blocks ...]
 ```
 
-Tail-quantile overflow audit (pathological data):
+Out-of-range guards, as every shipped run reports them — the counters and the per-quantile field read zero and `none` because uncapped partition growth leaves nothing to fall outside the range. A non-zero reading here would mean a growth cap had been introduced:
 
 ```
 consumer: summary_table
   path: unified
   partition_keying: (category, log_key)
   partition_count: 1247
-  total_rebin_events: 14
+  rebin_growth_events: 14
+  rebin_merge_events: 0
+  rebin_finalize_events: 0
   max_partition_bins: 318
-  partitions_with_overflow_count: 3
+  partitions_with_overflow_count: 0
   partitions_with_underflow_count: 0
+  overflow_total: 0
+  underflow_total: 0
   counter_memory_bytes: 2643456
+  members_live: 1247
+  members_max: 1
+  members_memory_bytes: 2643456
+  members_per_partition: p50=1 p95=1 p99=1 max=1
   rebins_per_partition: p50=0 p95=0 p99=1 max=2
   percentiles_emitted: p1 p50 p75 p90 p95 p99 p999
-  out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=high p999=high
+  out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
 ```
 
 No consumers active:
 
 ```
-=== BIN-COUNTER MODE ===
-opt_out_active: no
-percentile_precision: 5 (default)
-buckets_per_decade: 53 (default)
+=== histogram-bin-counters ===
+data_model_precision: 5 (default)
 consumers_active: none
 ```
 
@@ -1686,17 +1730,17 @@ consumers_active: none
 
 Non-binding.
 
-- **Section emission point**: emit the `=== BIN-COUNTER MODE ===` block at the appropriate point in `@verbose_output` so it appears in the standard `-V` output order alongside `=== INDEX READ-BACK ===` and `=== Verbose ===`. Exact ordering relative to those other sections is implementation discretion; tests should not depend on inter-section ordering.
+- **Section emission point**: emit the `=== histogram-bin-counters ===` block at the appropriate point in `@verbose_output` so it appears in the standard `-V` output order alongside `=== INDEX READ-BACK ===` and `=== Verbose ===`. Exact ordering relative to those other sections is implementation discretion; tests should not depend on inter-section ordering.
 - **Per-consumer iteration order**: emit per-consumer blocks in the order listed in the locked consumer-name table. This is part of the contract — tests grep for consumer blocks in this order.
 - **Field-value formatting**:
   - Integer counts: bare decimal (`1247`, not `1,247`).
   - Byte counts (`counter_memory_bytes`): bare decimal bytes (`2643456`); do not format as KB/MB.
   - Percentile labels in inline lines: lowercase `p1`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999` (no period).
 - **`shares_partitions_with:`** is set by the implementer when the consumer reuses another consumer's `%log_stats` (or equivalent). For Phase 2's locked migrations, `csv_output` shares with `summary_table` (both consume `%log_stats` via the same `calculate_statistics` invocation today). Other shared-partition relationships should be declared explicitly in #189's audit findings or in the consumer's migration spec.
-- **`opt_out_notice:` content**: when `--exact-percentiles` is active, the notice content in `-V` should match (or paraphrase) the stderr deprecation notice. Recommended phrasing in the contract example above; minor variants acceptable provided the test surface (grep for `opt_out_active: yes`, then assert `opt_out_notice:` line present and non-empty) is preserved.
+- **Asserting the opt-out**: there is no run-level line to grep. A test that wants to assert a surface was pinned to `raw` reads that surface's consumer blocks and asserts `path: user_opt_out` on each, and asserts `path: unified` on the consumers of surfaces it left alone.
 - **`partition_keying:` description**: the human-readable string is free-form per consumer, but should be stable across runs for a given consumer. Suggested strings in the example above; consumer migrations may refine. The string should match what's in the spec's R12 audit for that consumer where possible.
 - **Empty `partition_count: 0`** edge case: when a consumer is on the `unified` path but no data triggered partition construction (e.g., zero matched values), the consumer's `path:` should be `feature_not_active`, not `unified`. Don't emit zero-partition blocks under `unified`.
-- **Tests for this section** in the `tests/baseline/` harness should be added per CLAUDE.md release process: at minimum a scenario asserting the section header and run-level fields exist; per migration phase, additional scenarios assert the migrated consumer's block appears with the expected `path:` value.
+- **Tests for this section** in the `tests/baseline/` harness should be added per docs/process/workflow.md: at minimum a scenario asserting the section header and run-level fields exist; per migration phase, additional scenarios assert the migrated consumer's block appears with the expected `path:` value.
 
 ### Decision 9 — Phase 2 default activation policy — **DISSOLVED (2026-05-19): out of scope for #187**
 
@@ -1726,10 +1770,10 @@ The original D3 framing of Decision 9 ("Phase 2 ships with default gating; the d
 
 Non-binding; addressed to the per-consumer migration tickets that consume this contract.
 
-- **Default-on vs. default-off**: each implementation ticket decides based on its consumer's surface and risk profile. The contract supports both: R11a guarantees byte-identical pre-feature output under `--exact-percentiles` opt-out; the unified path produces output within the R4 bin-resolution bound around the pre-migration output.
+- **Default-on vs. default-off**: each implementation ticket decides based on its consumer's surface and risk profile. The contract supports both: R11a guarantees byte-identical pre-feature output for a surface pinned to `raw` with a Decision 7 selector; the unified path produces output within the R4 bin-resolution bound around the pre-migration output.
 - **Validation harness**: each implementation ticket implements its own validation against the contract: byte-identity under opt-out (R11a); per-quantile error within R4 around pre-migration values on D2 datasets. The harness lives in `tests/baseline/` per CLAUDE.md, scoped to that consumer.
 - **Communication to users**: each implementation ticket plans its release-note coverage. The unified path produces different numeric values for percentiles (interpolated bin-derived vs. sorted-array-indexed) but more accurate ones; communication should frame this as a quality improvement, not a regression.
-- **Coordination with Decision 7's deprecation timeline**: each implementation ticket's release determines when `--exact-percentiles` may be retired for that consumer. The contract is "available one release cycle past phase validation" (Decision 7); the actual release number is set by the implementation ticket's release process.
+- **Coordination with Decision 7's selectors**: each implementation ticket wires its consumer's surface to the selector that governs it, and states which model that surface resolves to by default. Decision 7's opt-out is permanent, so there is no retirement window to coordinate against.
 - **Coordination with R9 grouping**: implementation tickets are recommended to migrate consumers within a phase together (e.g., Phase 2's `summary_table` and `csv_output` ship together; Phase 3's heatmap-and-histogram-area consumers ship together). Splitting consumers within a phase across releases leaves the codebase in an inconsistent partial-migration state for users.
 
 ### Decision 10 — Prototype validation scope (what #189 must validate empirically before production code) — **LOCKED (2026-05-19)**
@@ -1753,7 +1797,7 @@ Before #189 begins production implementation of the unified primitive helpers, t
    - The locked seed (partition opens at 5 decades centered on the first value seen) must be validated against real latency data to confirm p99 rebin counts fall in the expected 0–2 range. Surface any keys that rebin pathologically; document if the seed needs tuning before #189's production implementation locks in the heuristic.
    - The Decision 4 overflow/underflow handling (separate counters at the partition boundaries; R4 returns `boundary[B]` or `boundary[0]` when target rank lands in overflow/underflow) must be exercised against pathological inputs constructed from D2 datasets — extreme outliers, very narrow distributions, mixed scale regimes. Confirm the `out_of_range_bounded: high|low|none` audit field per Decision 8 fires correctly per quantile, and document the hit rate in normal vs. pathological scenarios.
 
-4. **End-to-end `-V` output sample for downstream comparison.** The prototype must produce a real `=== BIN-COUNTER MODE ===` verbose output block, per the locked Decision 8 format, against real log files. The output sample becomes a reference for downstream work: implementation tickets compare their migrated consumers' actual output against this prototype output to spot deviations; tests can grep against known-good output. The sample must exercise enough scenarios (default precision, `--percentile-precision` override, `-pbpd` override, flag conflict, overflow audit firing, opt-out active) to cover the format's locked surface.
+4. **End-to-end `-V` output sample for downstream comparison.** The prototype must produce a real `=== histogram-bin-counters ===` verbose output block, per the locked Decision 8 format, against real log files. The output sample becomes a reference for downstream work: implementation tickets compare their migrated consumers' actual output against this prototype output to spot deviations; tests can grep against known-good output. The sample must exercise enough scenarios (default precision, a raised precision tier, a surface pinned to `raw`, and the out-of-range guards reading zero) to cover the format's locked surface.
 
 5. **Calculation accuracy compared to the array-of-values approach currently in use.** Direct comparison between the unified contract's output (Decision 1 formula over auto-resize partitions per Decision 5) and ltl's *existing* `calculate_statistics` retained-array sort-and-index approach (`ltl:5488`). For every required percentile per consumer (per R3) across D2 datasets, the prototype must show that the unified output sits within the bin-resolution bound (per R4, ~1.1% midpoint error at locked default 53 bpd) of today's exact output. This is the operational accuracy validation — confirming that the locked architecture produces output users will accept as a quality improvement over the current implementation, not a regression.
 

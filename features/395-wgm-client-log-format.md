@@ -23,11 +23,13 @@ scenarios. No hot-loop code changes; the registry does the work.
 ### Line shape
 
 ```
-<YYYY-MM-DD>T<HH:MM:SS.mmm>Z: <msgtype>: P<pid-hex>: T<tid-hex>: <area>: <message>
+<YYYY-MM-DD>T<HH:MM:SS.mmm><zone>: <msgtype>: P<pid-hex>: T<tid-hex>: <area>: <message>
 ```
 
-Every field is separated by the literal `": "` the header declares. Verified
-over all twelve sample files (2,534,326 lines): every line matches; there are
+`<zone>` is `Z` or a numeric offset (see § *Zone forms*). Every other field is
+separated by the literal `": "` the header declares. Verified
+over all twelve UTC-form sample files (2,534,326 lines) and the four
+local-offset files (7,143,655 lines): every line matches; there are
 no continuation lines, no blank lines, no lines without a timestamp, no BOM.
 Some messages end in a carriage return (HTTP response headers echoed into
 trace lines) — that is message content under a `\r?\n` line ending, which the
@@ -43,14 +45,37 @@ read loop already strips.
 | message | `(.*)` | `message` | Free text; freely carries further `: ` sub-structure (`UWGMCLNT_UI: UwgmApp::init Entered`, `$generic: columns "…"`). |
 
 `instance`, `user`, `session`, `bytes`, `duration` are undef; `status_code` and
-`is_access_log` are 0. Occurrences only: no line-level duration, bytes or
+`metrics_observed` are 0. Occurrences only: no line-level duration, bytes or
 count, `stats_eligible => 0`, `duration_unit => undef`.
 
 ### Time contract
 
-`layout iso_ms`, `precision ms`, `tz utc` (the header's `use_local_time NO`
-and the `Z` suffix agree), `frac fixed3`. Every timestamp in the corpus is
-UTC; the time axis is therefore in UTC for these files.
+`layout iso_ms`, `precision ms`, `tz utc`, `frac fixed3`. The epoch is
+computed from the timestamp's own digits by fixed-offset arithmetic; the zone
+marker sits past offset 19 and is never read, so the time axis is the wall
+clock the file states, whichever zone form it uses.
+
+### Zone forms (#512)
+
+The producer writes the zone according to its header's `use_local_time`
+declaration, and both forms are one entry:
+
+| Header | Zone written | Example |
+|---|---|---|
+| `use_local_time NO` | `Z` | `2025-10-29T10:56:53.239Z` |
+| `use_local_time YES` | numeric offset, hour **not** zero-padded | `2026-04-27T21:54:35.962+2:00`, `2026-04-30T13:29:13.168+0:00` |
+
+The pattern matches the zone as `(?:Z|[+-]\d{1,2}:\d{2})` in a non-capturing
+group: the offset is recognised so the line is claimed, and discarded because
+nothing consumes it. A one- or two-digit hour and a signed offset are both
+accepted; the offset form is therefore not strictly ISO-8601.
+
+The entry keeps a single slug rather than becoming a variant group (architect,
+2026-09-01): the two forms differ only in a zone that has no consumer, so a
+member split would divide the format's identity on a distinction nothing
+downstream can act on. `tz` stays `utc` and the zone is not captured into the
+record; making the offset addressable would mean a fourteenth record field,
+which is its own change if a consumer ever wants it.
 
 ### msgtype vocabulary (D54)
 
@@ -217,6 +242,93 @@ above. A structural assertion that every non-`empty`, non-rate member of
 outside the Perl source (no `-V` key lists it), so it would need new
 machinery — a `log_levels:` key in the `csv-output` section plus a one-line
 harness check is the cheapest option if wanted.
+
+## Success/failure classification (#510, 2026-09-01)
+
+**The entry declares no classification: it inherits the global default —
+failure on `category_bucket ^(?:ERROR|FATAL|CRITICAL)$`, no success
+criterion — and carries no event-ledger flag.** Only `ERROR` is reachable
+from the letter vocabulary (D54); there is no fatal code. The survey below is
+why, and in particular why the structured records that *do* state outcomes
+are not used.
+
+### Corpus surveyed
+
+All 17 WGM-format files across the four capture sets in `docs/test-logs.md`
+§ *WGM/*, 9,677,981 matched lines. Letter totals: `D` 5,927,621 · `I`
+3,145,754 · `T` 437,198 · `E` 80,251 · `S` 19,019 · `F` 19,019 · `X` 17,170 ·
+`Y` 17,043 · `W` 14,719 · `C` 187.
+
+### Provenance of the letter vocabulary
+
+The header block declares the schema (`columns`, `columns_sep`,
+`date_format`, `time_format`, `time_precision`, `log_base_name`,
+`use_local_time`, `verbose_level`) but **never names the msgtype letters** —
+the D54 mapping is inferred from message content, and the lifecycle half is
+evidenced without exception across the corpus:
+
+| Letter | Mapped to | Lines | Messages ending in the matching verb |
+|---|---|---|---|
+| `X` | CREATE | 17,170 | 17,170 (100%) end `… created` |
+| `Y` | DESTROY | 17,043 | 17,043 (100%) end `… destroyed` |
+| `S` | START | 19,019 | 19,019 (100%) end `… started` |
+| `F` | FINISH | 19,019 | 19,019 (100%) end `… finished` |
+
+`S` and `F` are exactly equal; `X` exceeds `Y` by 127, the objects still
+alive when logging stops. The severity letters `D/E/I/T/W` have no comparable
+in-log proof and are read as the conventional initials.
+
+### Where outcomes are actually stated
+
+Two structured record families appear in the message as
+`IndexLogging: Ver-0.1 <id>$<Tag>…</Tag>`:
+
+| Record | Count | Outcome vocabulary |
+|---|---|---|
+| `$<ContentDownloadFinish>` | 65,979 | `…_RETRY` 37,351 · `…_SUCCESS` 24,651 · `…_ALREADY_CACHED` 3,202 · `…_FAIL` 437 · `…_RETRY_IMMIDIATELY` 338 (the producer's spelling of "immediately") |
+| `$<ActionState>` | 1,543 | `finished: SUCCEEDED` 1,537 · `started` 6 — **no failed value in any capture** |
+
+A download record is emitted once per action tracking the content, so the
+same attempt appears under each concurrent action (two dominate a session);
+records are distinct on content + attempt + status + action.
+
+### Why failure rests on `ERROR` alone
+
+Measured on one session file (13,742 finish records, 5,298 distinct failed
+attempts):
+
+- `E: Download failed, deleting all streams` — 5,345 lines, one per failed
+  attempt; the first finish record following an `E` on the same thread is
+  `RETRY` 4,882, `FAIL` 220, `RETRY_IMMIDIATELY` 167.
+- `W: HTTP Download failed. Marked (immedidate) retry for:` — 5,125 lines,
+  **all 5,125 paired one-to-one with an `E` line on the same thread** (89.4%
+  within 4 lines, 100% within 20). The `W` is a second announcement of the
+  retry-marked subset, not an alternative to the `E`; the 5,345 − 5,125 = 220
+  difference is exactly the terminal `FAIL` cases, which are not retried.
+
+So `ERROR` already counts every failed download attempt exactly once.
+Classifying `WARN` as a failure would double-count the retried subset, and
+classifying the download records as failures would double-count every failed
+attempt again — in one capture exactly twice (27,542 `E` lines against 27,542
+`RETRY` records). Failure therefore stays the inherited `ERROR` criterion,
+with `WARN` out.
+
+### Why there is no success criterion
+
+`…_SUCCESS` and `…_ALREADY_CACHED` are genuine producer statements that a
+download completed, and nothing else in the file reports them — a successful
+attempt has no severity line at all. They are nonetheless not declared as
+success, because **they are emitted at `D` (DEBUG)**: a reliability figure
+that exists only when the client is running at debug verbosity is not a
+figure this tool can offer for the format (architect, 2026-09-01). The same
+applies to `$<ActionState>finished: SUCCEEDED`, which is emitted at `I` but
+covers 1,543 records against 9.7M lines and has no failed counterpart in any
+capture, so it cannot support both sides of a ratio.
+
+Establishing success for this format needs different logs from the producer,
+not a different criterion here. For the same reason the entry is not an event
+ledger: the download sub-stream has maximal coverage of download attempts,
+but the file as a whole is not a ledger of the operations it describes.
 
 ## Open items
 

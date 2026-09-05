@@ -18,6 +18,8 @@ When multiple files are specified, logtimeline processes them sequentially and c
 
 Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped.
 
+That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
+
 ## Options
 
 ### Time & Buckets
@@ -26,19 +28,21 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 
 | Option | Description |
 |--------|-------------|
-| `-bs, --bucket-size <N>` | Set the width of each time bucket on the timeline (default unit: minutes; `-s` switches the unit to seconds, `-ms` switches it to milliseconds) |
-| `-s, --seconds` | Interpret bucket size as seconds instead of minutes |
-| `-ms, --milliseconds` | Switch the `-bs <N>` bucket width to milliseconds (and render timestamps with `.fff` precision). Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
-| `-pr, --profile <mode>` | Fold the timeline onto a single day or week so every date overlays into one profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. `day` and `workday` collapse to a 24-hour axis (time-of-day labels only); `week` and `workweek` collapse to a weekday axis (the weekday is shown once per day, in bold). `workday`/`workweek` keep only work days (Mon–Fri); the `-alt` variants use a Sunday-anchored week and a Sun–Thu work week. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Modes: `day`, `week`, `week-alt`, `workweek`, `workweek-alt`, `workday`, `workday-alt`. |
+| `-bs, --bucket-size <width>` | Set the width of each time bucket on the timeline: a bare number in minutes (seconds under `-s`, milliseconds under `-ms`), or a number with a unit such as `90s`, `1.5h`, `1d` or `1w` (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; `m` is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with `-s` and `-ms`. |
+| `-s, --seconds` | Read a bare `-bs` number as seconds, and render timestamps with seconds precision |
+| `-ms, --milliseconds` | Read a bare `-bs` number as milliseconds, and render timestamps with `.fff` precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
+| `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Each mode has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
-| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`) |
+| `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`) |
 | `-lf, --log-format <name>` | Read every file as this log format instead of detecting it — the escape hatch when detection picks the wrong variant; an unknown name lists the known formats |
-| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day) |
+| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day), or any other unit of the same ladder (`ns`, `us`, `ms`, `w`, `month`, `year`) |
 
 ```bash
 # 5-minute buckets (default unit is minutes)
 ltl -bs 5 access.log
+# Daily buckets: a unit on -bs sets the width, the timestamps keep minute precision
+ltl -bs 1d access.log
 # 30-second buckets
 ltl -s -bs 30 access.log
 # 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
@@ -47,24 +51,34 @@ ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.
 ltl -bs 60 -pr week access.log
 # Workday-morning profile: only the 09:00–11:00 window, work days, folded onto one 24h axis
 ltl -bs 15 -pr workday -st 09:00 -et 11:00 access.log
+# Weekend profile: Saturday and Sunday only, folded onto one 24h axis
+ltl -bs 60 -pr weekend access.log
+# Weekend profile keeping each day apart: a Sat→Sun axis, so the two days can be compared
+ltl -bs 60 -pr weekends access.log
 ```
 
 ### Filtering & Highlighting
 
-logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns or numeric thresholds. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
+logtimeline's investigative power comes from combining filtering and highlighting: filter criteria shape the population being analyzed, while highlight criteria visually isolate a subset within that population. One set of conditions controls what is measured; an independent set controls what stands out — and both kinds accept text patterns, numeric thresholds, or the success/failure classification the log format declares. **Include** isolates lines matching a pattern, discarding everything else. **Exclude** removes matching lines, keeping everything else. **Highlight** renders matching lines as a separate colored bar alongside the main bar in every time bucket, allowing visual comparison of a subset against the full population. All three accept regex, can be specified multiple times, and support `&` for AND logic within a single pattern.
 
-The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-if`, `-ef`, `-hf`) allow reusable sets of patterns for common scenarios. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept). Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded — ltl reports how many entries were excluded this way after processing. An inverted range (minimum above maximum) is unsatisfiable — whether on a filter pair or a highlight pair — and ltl warns up front instead of producing a silently empty selection.
+The typical workflow is subtractive: start with all data, exclude known noise, narrow with includes until the signal is clear, then highlight to see your target in the context of the full population. Pattern files (`-ipf`, `-epf`, `-hpf`) allow reusable sets of patterns for common scenarios. Outcome filters (`-if`/`-ef` for failures, `-is`/`-es` for successes) select on the classification the log format declares rather than on text or values; excluding both successes and failures (`-ef -es`) leaves exactly the unclassified remainder, the direct way to inspect lines the format's classification rules did not attribute. Numeric threshold filters (`-dmin`, `-dmax`, `-bmin`, `-bmax`, `-cmin`, `-cmax`) complement regex filtering by selecting entries based on metric values rather than text content; all bounds are inclusive (an entry exactly at the threshold is kept). Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded — ltl reports how many entries were excluded this way after processing. An inverted range (minimum above maximum) is unsatisfiable — whether on a filter pair or a highlight pair — and ltl warns up front instead of producing a silently empty selection.
 
-Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric.
+Highlighting is available on the same numeric criteria: `-hdmin`/`-hdmax`, `-hbmin`/`-hbmax`, and `-hcmin`/`-hcmax` mark entries whose duration, response size, or count falls inside the given inclusive range — without removing anything from the analysis. This keeps the full timeline in view while a slow tail, oversized responses, or unusual counts light up in context. Numeric highlight criteria combine freely with the hard filters (trim noise with `-dmin` while highlighting the extreme cases with `-hdmin`) and with the regex highlight: when both `-h` and numeric criteria are given, an entry is highlighted only if it matches the pattern *and* satisfies every numeric criterion. An entry that carries no value for a metric is never highlighted by a criterion on that metric. Classification is a highlight criterion too: `-hf`/`-hs` mark the entries the format classifies as failures or successes — see where failures cluster in the timeline without losing the surrounding traffic. Outcome highlights AND-compose with the other highlight families like everything else, and an entry classified to neither outcome never satisfies them.
 
 | Option | Description |
 |--------|-------------|
 | `-i, --include <regex>` | Only process lines matching this pattern, discard everything else. Can be specified multiple times; patterns are combined with OR. Use `&` for AND: `A&B` matches lines containing both A and B. `&&` for literal `&`. `&` binds tighter than `\|`. |
 | `-e, --exclude <regex>` | Discard lines matching this pattern before analysis. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
 | `-h, --highlight <regex>` | Show matching lines as a separate colored bar alongside the main bar for visual comparison. Can be specified multiple times; patterns are combined with OR. Supports `&` (AND) and `&&` (literal `&`). |
-| `-if, --include-file <file>` | Load include patterns from a file (one pattern per line) |
-| `-ef, --exclude-file <file>` | Load exclude patterns from a file (one pattern per line) |
-| `-hf, --highlight-file <file>` | Load highlight patterns from a file (one pattern per line) |
+| `-ipf, --include-pattern-file <file>` | Load include patterns from a file (one pattern per line) |
+| `-epf, --exclude-pattern-file <file>` | Load exclude patterns from a file (one pattern per line) |
+| `-hpf, --highlight-pattern-file <file>` | Load highlight patterns from a file (one pattern per line) |
+| `-if, --include-failure` | Only include lines the log format classifies as failures; lines without a classification are dropped too |
+| `-ef, --exclude-failure` | Drop lines the log format classifies as failures; unclassified lines are kept |
+| `-hf, --highlight-failure` | Highlight lines the log format classifies as failures, without filtering anything out |
+| `-is, --include-success` | Only include lines the log format classifies as successes; lines without a classification are dropped too |
+| `-es, --exclude-success` | Drop lines the log format classifies as successes; unclassified lines are kept. Combine `-ef` and `-es` to see only the unclassified remainder |
+| `-hs, --highlight-success` | Highlight lines the log format classifies as successes, without filtering anything out |
 | `-dmin, --duration-min <N>` | Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept) |
 | `-dmax, --duration-max <N>` | Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept) |
 | `-bmin, --bytes-min <N>` | Hide log entries with response size below this threshold (inclusive) |
@@ -90,7 +104,7 @@ ltl -hdmin 5000 access.log
 ltl -h "/api/v2/orders" -hdmin 5000 access.log
 ```
 
-> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Numeric filters only keep entries that carry the filtered metric; entries with no value for it are excluded and their count is reported. Highlight criteria (`-h`/`-hf` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
+> **Note:** Filters affect all computed statistics. For example, `-dmin 1000` will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population of data in the file. Numeric filters only keep entries that carry the filtered metric; entries with no value for it are excluded and their count is reported. Highlight criteria (`-h`, `-hpf`, `-hf`, `-hs` and the `-h*min`/`-h*max` options) never change which entries are analyzed — they only mark a subset within the full population.
 
 ### Recording & Processing
 
@@ -99,10 +113,11 @@ These options control which metrics logtimeline extracts and computes during pro
 | Option | Description |
 |--------|-------------|
 | `-ov, --omit-values` | Hide the per-bucket numeric values on the bar graph |
+| `-pv, --precise-values` | Show exact category totals in the legend, unshortened |
 | `-os, --omit-stats` | Deprecated: use `-od, --omit-durations` to skip capturing durations, or `-hst, --hide-stats` to hide the statistics panel |
 | `-oe, --omit-empty` | Skip time buckets that contain zero log entries |
 | `-ni, --no-index` | Do not read or update `ltl-index.csv`, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it |
-| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `logs/access/*.log` becomes every `.log` file anywhere under `logs/access`; `*.log` recurses from the current directory. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
+| `-r, --recursive` | Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. `"logs/access/*.log"` becomes every `.log` file anywhere under `logs/access`; `"*.log"` recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end. |
 | `-or, --omit-rate` | Hide the error/message rate from the legend |
 | `-od, --omit-durations` | Suppress duration extraction and related columns (significantly reduces memory and processing time on large files) |
 | `-ob, --omit-bytes` | Suppress byte-size extraction and related columns |
@@ -124,14 +139,15 @@ Log messages frequently contain variable parameters — user IDs, UUIDs, session
 
 **How it works:** During parsing, logtimeline discovers patterns by comparing unique messages using Dice coefficient scoring on character trigrams. When two messages are sufficiently similar, it aligns them character-by-character to identify which parts are constant and which vary, producing a canonical form like `GET /Thingworx/Things/*/Services/* HTTP/1.1`. Discovered patterns are compiled into regex and applied inline to all subsequent messages — matched messages never enter the main data structures, which is why consolidation reduces memory at scale.
 
-Consolidated entries are marked with `~` in the summary table output. All statistics (occurrences, duration, bytes, percentiles, etc.) are aggregated across matched messages.
+Consolidated entries are marked with `~` in the summary table output; that marker position also carries the row's classification as a colour (a bullet `•` on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. All statistics (occurrences, duration, bytes, percentiles, etc.) are aggregated across matched messages.
 
 | Option | Description |
 |--------|-------------|
 | `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
-| `-iqs, --include-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
-| `-is, --include-session` | Keep session/user IDs when grouping messages, so each session is tracked separately |
+| `-xqs, --expose-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
+| `-xs, --expose-session` | Keep session IDs when grouping messages, so each session is tracked separately |
+| `-xu, --expose-user` | Keep user names when grouping messages, so each user is tracked separately |
 | `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
@@ -140,27 +156,39 @@ ltl -g access.log
 # Don't consolidate messages with more than 5000 occurrences
 ltl -g -gc 5000 access.log
 # Consolidate but keep query strings and sessions as separate entries
-ltl -g 80 -iqs -is access.log
+ltl -g 80 -xqs -xs access.log
 ```
 
 **Performance characteristics:** Time overhead is ~20-30% at all scales. Memory overhead depends on data size — at small scale (< 200 MB) consolidation uses more memory due to trigram structures during checkpoint processing, but at production scale (1+ GB) it saves memory dramatically (up to 88% reduction on 7.9 GB) because matched keys are absorbed inline and never stored.
 
 ### Display & Output
 
-These options control what is shown and how. After the timeline bar graph, logtimeline prints a summary table ranking the top contributing messages — `-n` controls how many entries appear, and `-osum` suppresses it entirely. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+These options control what is shown and how. After the timeline bar graph, logtimeline prints the table ranking the top contributing messages — `-n` controls how many entries appear. The run summary — category totals, line counts, timing, memory and the files that were read — comes after all the analysis content, at the end of the output, and `-osum` suppresses it. The hide options hide individual columns from the bar graph while still processing the underlying data — useful for freeing horizontal space on narrow terminals or focusing on the metrics that matter. The CSV output option (`-o`) writes the full analysis data to a file for external processing, archival, or baseline comparison. The light background mode (`-lbg`) switches color gradients for white or light terminal backgrounds. The dark background mode (`-dbg`) forces the dark gradients and overrides `-lbg` if both are passed. The pause option (`-p`) is useful when output exceeds the terminal height.
+
+Alongside the messages ranking, logtimeline prints a **Category** table totalling every log level or event class it found — `INFO`, `ERROR`, the GC pause kinds, the HTTP status families, and so on. Where a category name is not self-explanatory the table names it descriptively: HTTP status families read as `2xx Success`, `3xx Redirection`, `4xx Client error`, `5xx Server error` and `1xx Informational`. When a highlight is active a category that has highlighted lines gets a second row of its own, ending in `, highlighted`, directly above the row for the rest of that category. Every other category keeps its own name unchanged. The short name is what the per-bucket legend beside the timeline shows, and it is also what names the columns in the CSV (`-o`), so both stay compact and stable for tooling.
+
+Each category row shows its share of the lines included beside its total — `2 (20.0%)` — to three significant digits, so a small category still reads exactly rather than collapsing to `0%`. Where a long name leaves too little room the share gives up its decimals first and then the percentage itself; the count is always shown. Behind the row's text a bar is filled in the category's own colour, the text staying legible inside the fill and outside it, so the distribution reads without going through the numbers. By default the largest category fills the row and every other bar is drawn relative to it, which gives the small categories the whole row width to be distinguished in — the percentage beside each one carries the absolute share. `-sba` scales against every included line instead, so the bar lengths sum to the full row. `-sbl` scales logarithmically, which is what makes the tail visible when one category holds almost everything. `-sbr` draws from the right, and `-sbo` removes the bar and leaves the numbers. `-sm` renders the summary table without colour — every row plain, the bar drawn as a plain fill — so the bar's length can be read apart from the category colours; the file listing beside the table keeps its own colour.
 
 | Option | Description |
 |--------|-------------|
-| `-n, --top-messages <N>` | Number of unique messages to show in the summary table (default: 10) |
-| `-o, --output-csv` | Write all extracted data to a CSV file for external analysis |
+| `-n, --top-messages <N>` | Number of unique messages to show in the top-messages table (default: 10). `0` keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (`-g`), the message statistics data model (`-mdm`) and the message ranking (`-so`) then have nothing to act on and are ignored, with a note saying so |
+| `-o, --output-csv` | Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content (see *Aggregate export* below). The YAML file's name carries no argument text; which blocks it holds follows the run's options (`-hg` for population-wide percentiles, `-hm` for per-bucket heatmap percentiles) |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from `-du`), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
-| `-osum, --omit-summary` | Hide the summary table printed after the bar graph |
+| `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
+| `-sm, --summary-mono` | Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours |
+| `-sbo, --summary-bar-off` | Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays) |
+| `-sba, --summary-bar-absolute` | Scale the contribution bar so the full row width is every included line, instead of the largest category filling the row |
+| `-sbl, --summary-bar-log` | Scale the contribution bar logarithmically, giving the smallest categories a visible length when one category dominates |
+| `-sbr, --summary-bar-reverse` | Draw the contribution bar from the right edge of the row towards the left |
 | `-hl, --hide-legend` | Hide the legend column (category breakdowns and rates) |
 | `-ho, --hide-occurrences` | Hide the occurrences bar graph column, freeing space for other metric columns |
 | `-hd, --hide-duration` | Hide the duration bar graph column |
 | `-hb, --hide-bytes` | Hide the bytes bar graph column |
 | `-hc, --hide-count` | Hide the count bar graph column |
-| `-hs, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
+| `-hses, --hide-session` | Hide the Sessions column that automatically appears when session IDs are found in the log data |
+| `-hu, --hide-user` | Hide the Users column that automatically appears when user names are found in the log data |
+| `-hcl, --hide-classification` | Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs |
+| `-scl, --show-classification` | Show the success and failure percentage columns for a format that declares both classifications without being an event ledger |
 | `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
 | `-dbg, --dark-background` | Force dark-background color gradients; overrides `-lbg` and disables auto-detect |
@@ -169,11 +197,11 @@ These options control what is shown and how. After the timeline bar graph, logti
 | `-V, --verbose [<section>...]` | Emit diagnostic sections. Bare `-V` emits all; `-V <name>[,<name>...]` or repeated `-V` selects sections; `-V list` prints known sections. See "Verbose output (`-V`)" section below |
 
 ```bash
-# Show top 50 messages in the summary table
+# Show top 50 messages in the top-messages table
 ltl -n 50 access.log
 # Export full analysis data to CSV
 ltl -o access.log
-# Hide the summary table, show only the timeline
+# Hide the run summary at the end of the output
 ltl -osum access.log
 # Use color gradients suited for light terminal backgrounds
 ltl -lbg access.log
@@ -190,12 +218,26 @@ The summary table is sorted by occurrence count by default. Use `-so` to rank me
 | `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
 
+A bare metric name means that metric's total: `bytes` is the sum of bytes,
+`duration` the total duration, `count` the sum of the count metric. The other
+aggregates name the metric first and what is being aggregated second, so
+`bytes_mean` and `count_mean` read the same way.
+
 | Group | Values |
 |-------|--------|
-| Aggregates | `occurrences`, `duration` (alias `time`), `bytes` (alias `size`), `mean_bytes`, `count`, `count_occurrences`, `count_min`, `count_mean`, `count_max`, `impact` |
+| Totals | `bytes` (alias `size`), `duration` (alias `time`), `count`, `occurrences`, `impact` |
+| Bytes | `bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` |
+| Count | `count_occurrences`, `count_min`, `count_mean`, `count_max` |
 | Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev` (alias `std_dev`), `cv` |
 | Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
 | Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
+
+The latency values rank on duration, which is the tool's subject, so they are
+spelled bare. Each also accepts a `duration_` prefix — `duration_p95` is
+`p95` — for consistency with the other metric families.
+
+`occurrences` counts the messages that matched; `bytes_occurrences` counts only
+those lines that carried a bytes value, which is what `bytes_mean` divides by.
 
 ```bash
 # Rank messages by total duration (heaviest hitters)
@@ -210,9 +252,9 @@ ltl -so bimodality_coef access.log
 ltl -so occurrences -sa access.log
 ```
 
-Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p999` ≥ ~1k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
+Percentile and shape metrics require a sufficient sample size to be statistically meaningful: `p99` ≥ ~1k, `p999` ≥ ~10k, `p9999` ≥ ~100k, `p99999` ≥ ~1M. `bimodality_coef` is a *screening* statistic — at n < 100 small-sample noise can produce false positives. Skewness/kurtosis/bimodality_coef are undefined (blank in CSV) when n < 4.
 
-When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones.
+When sorting on a statistic, messages that have no defined value for it (no recorded durations, or too few samples for that statistic) are not ranked by it: they are listed after the ranked messages, ordered by occurrence count. Their blank statistic column is the signal. With `-sa`, ascending means the smallest defined value first — never the undefined ones. When no message at all can be ranked — the metric was switched off with its `--omit-*` option, the run never observed it, or no message had enough values for the statistic — a note says so and the table is ordered by occurrences.
 
 ### Percentile data model and algorithm
 
@@ -221,6 +263,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 **Raw values data model.** Every observation is held in memory and the percentile is selected by **nearest-rank** — an actually-observed sample at the computed rank in the sorted array. The returned value is a real request that happened. Scales with observation count.
 
 **Bin counter data model.** Observations are accumulated into log-spaced bins and the percentile is computed by **exponential interpolation within the bucket** — a synthesised value placed inside the bin that contains the target rank, on the log scale spanning the bin's lower and upper edges. The returned value is generally not an observed sample. Bin resolution sets the interpolation tightness; it is governed by the precision lever (see *Tuning precision* below). Scales with partition count rather than observation count.
+
+**The trade.** The raw values model holds every observation and answers exactly: the reported percentile is a value that was actually measured. The bin counter model holds only a count per bucket — memory fixed by the precision lever rather than by how many observations arrive — and answers by interpolating inside the bucket that contains the target rank, so its value sits close to the exact one rather than on it. The one place that gap is routinely visible is fuzzy consolidation (`-g`) on the per-message-key surface: the merged messages' histograms are re-projected onto a single shared geometry, and a consolidated row's percentiles land within about one bucket of what the pooled observations would give. Pin that surface with `-mdm raw` when consolidated rows need exact percentiles.
 
 **Per-surface defaults.** Four consumer surfaces use percentile output; each has a default data model today:
 
@@ -238,8 +282,8 @@ ltl computes percentiles from one of two data models, each with its own algorith
 | `-dm, --data-model <raw\|bin>` | Pin the data model for every surface (overridden by any per-surface flag below). |
 | `-hgdm, --histogram-data-model <raw\|bin>` | Pin the histogram surface's data model. |
 | `-hmdm, --heatmap-data-model <raw\|bin>` | Pin the heatmap surface's data model. |
-| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
-| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters plus Welford-Pébay sidecar accumulators for exact-value statistics. Default is `raw`. |
+| `-mdm, --message-stats-data-model <raw\|bin>` | Pin the per-message-key statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays and returns exact percentiles; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters, so percentiles are interpolated rather than observed, alongside Welford-Pébay sidecar accumulators that keep `min`, `max`, `mean`, `std_dev` and the shape statistics exact. With `-g`, consolidated rows on the `bin` model carry the extra approximation described above. Default is `raw`. |
+| `-bdm, --bucket-stats-data-model <raw\|bin>` | Pin the per-time-bucket statistics data model. Both reductions are implemented end-to-end: `raw` uses nearest-rank percentile selection over retained duration arrays and returns exact percentiles; `bin` uses Prometheus-style exponential interpolation over HDR-style bin counters, so percentiles are interpolated rather than observed, alongside Welford-Pébay sidecar accumulators that keep `min`, `max`, `mean`, `std_dev` and the shape statistics exact. Default is `raw`. |
 
 Per-surface flag overrides `-dm`; `-dm` overrides the per-surface default. Invalid values (anything other than `raw` or `bin`) cause ltl to exit at option-parse time with a clear error. Conflicting flags on the same axis follow standard last-one-wins ordering.
 
@@ -281,6 +325,23 @@ ltl -hgdm raw -hm duration -hg access.log
 ltl -V runtime-config -dm raw -hgdm bin access.log
 ```
 
+### Aggregate export (YAML)
+
+With `-o`, every run also writes `<stamp>-LTL-AGGREGATE.yaml` beside the STATS CSV, sharing its timestamp stamp and carrying no argument text in its name. The file describes the whole analysed population with aggregates only — no message text, no URL, no per-message record — so a `-n 0 -o` run yields a complete machine-readable description of the population with nothing per message on disk. It holds what the run computed and nothing computed for the file alone, in four blocks:
+
+- **provenance** — the ltl version, when the file was generated (UTC), the option lines exactly as the terminal echoes them under the timeline, the population-selection signature `ltl-index.csv` records, the data model resolved for each surface and the precision tier, the duration source unit, and the `-pr` mode or `-lf` pin when given.
+- **population** — each matched log format with its event-ledger property and the file counts behind it, the observation window as the run summary heading states it with the population's duration in seconds and in words, the count of files read and matched and the directories they were read from (as the paths were given; the working directory itself is never recorded), and the line accounting: lines read, unmatched by any format, excluded by each criterion in force, included, highlighted.
+- **measurements** — the run summary in machine form: the classification totals with the success and failure percentages where the run was eligible for them, the category totals, the run's total time and peak memory, and for each metric `-hg` histogrammed, the population-wide statistics: count, observed extremes and the percentile ladder.
+- **series** — the bucket size, bucket count and rate unit, then one entry per time bucket carrying every STATS CSV column family that is active for the run — outcomes, categories, rates, the duration statistics, bytes, count, sessions, users, thread pools, user-defined metrics — and, when `-hm` ran, the heatmap's per-bucket percentile ladder under its metric's name.
+
+Every figure is the exact in-memory value: no rounding, no unit escalation, and `-cp` does not apply. Three fields are formatted strings by design — the population duration's readable form, and the run's total time and peak memory as the summary prints them. A percentile is written only when the block's own observation count reaches the sample-size rule (`pN` needs `10/(1-N/100)` observations); the count is written beside it as `occurrences`, so a missing key is explained and a reader renders it as a gap, never as zero. Counts, sums, minimum, mean and maximum are never withheld. Population-wide statistics exclude non-positive values, as the histogram does.
+
+<!-- ltl-test: skip -->
+<!-- the example writes files where it runs; the harness runs examples from the repository root -->
+```
+ltl -n 0 -o -hg duration -bs 240 -ni logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+```
+
 ### Distribution shape (CSV columns)
 
 The `-o` CSV outputs (MESSAGES and STATS) carry three distribution-shape statistics alongside the percentile columns, enabling characterization of a latency distribution's *shape* — not just its quantile values:
@@ -300,6 +361,8 @@ Sample-size requirements:
 The body percentiles `p5`, `p10`, and `p25` and the precomputed interquartile range `iqr` (= `p75 − p25`) are emitted in both CSV files, completing the body/tail percentile pairing recommended in the Google SRE book.
 
 For detailed explanations of every statistic ltl emits — including interpretation tables, operational use cases, and worked examples — run `ltl --explain <topic>` (e.g. `ltl --explain kurtosis`, `ltl --explain bimodality_coef`, `ltl --explain percentiles`). The full reference is also available on the [Statistics Reference](Statistics-Reference) wiki page. Use `ltl --help statistics` for a one-line index of all statistics, or `ltl --explain` (no argument) for the list of available `--explain` topics.
+
+`--explain` also carries a second kind of content: **analysis techniques**, the investigative moves you make with ltl rather than explanations of a figure it prints. Nineteen techniques in six groups — Time, Population, Shape, Comparison, Load and Correlation — each answering one question, showing what the signal looks like, how to read it and what would falsify the reading, with the worked command. Each group is a page of its own (`ltl --explain population`) listing its techniques. Start at `ltl --explain` for the full table of contents, or go straight to one: `ltl --explain resolution-zoom`, `ltl --explain outcome-isolation`, `ltl --explain timeout-clustering`. The full reference is also available on the [Analysis Techniques Reference](Analysis-Techniques-Reference) wiki page.
 
 ### Heatmap
 
@@ -345,7 +408,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 
 | Option | Description |
 |--------|-------------|
-| `-udm, --user-defined-metrics <spec>` | Extract a custom numeric metric from each log line (see format below) |
+| `-udm, --user-defined-metrics <spec>` | Extract a custom metric from each log line (see format below). Patterns match against the whole raw line, not only the message. A metric that produces nothing is reported after the read, with how its spec was read |
 | `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
 
@@ -354,10 +417,10 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | Part | Description |
 |------|-------------|
 | `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — omit for raw numbers. Ignored for counting aggregations |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
 | `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
-| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety` |
-| `/regex/` | Custom extraction pattern with one capture group around the value to extract (overrides default name/key matching). e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
+| `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety`. A fourth field without `/…/` is always a token key and is matched literally |
+| `/regex/` | Custom extraction pattern, recognised by its slashes at the end of the spec — `rows:/…/` and `rows:::/…/` read the same (overrides default name/key matching). A capture group narrows the value; without one the whole match is the value. e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
 
 **Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names):
 
@@ -368,6 +431,8 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `ratio` | Occurrences per unique value — the repetition factor: how many times the average value repeated |
 | `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
 | `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
+
+A spec that is wrong in a way provable from the spec alone — a function name in the unit slot, a fixed-string pattern under `distinct`, an invalid regex — is reported immediately and that metric is skipped; the run continues. A well-formed metric that produces nothing is reported after the read with how the spec was read (unit, aggregation, extraction method, the compiled pattern), and, when the token key contains regex characters, a hint to wrap it in slashes. `-V udm-specs` shows the same interpretation and what each metric produced on every run.
 
 Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting — whether by pattern (`-h`) or by numeric criteria (`-hdmin` and friends) — works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
 
@@ -400,6 +465,20 @@ ltl -tpas app.log
 # Track multiple thread pools
 ltl -tpa "http-" -tpa "async-" app.log
 ```
+
+### Log formats and classification
+
+`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger* and how it classifies its lines as successes and failures. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+
+An **event ledger** is a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened (an access log for requests, a garbage-collection log for pauses). A diagnostics log records what a component chose to log, and is not one. The distinction decides whether a success or failure percentage built on the counts can be read at face value — see `ltl --explain classification` and the [Classification Reference](Classification-Reference) wiki page.
+
+Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (`status_code`, `category_bucket`, `message`, or `line` for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist:
+
+- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL)$`; success: none;
+- a format that declares `none` declines to classify — no success/failure figure can be produced from it;
+- a format that declares one or both outcomes replaces the default for each outcome it names.
+
+A line the rules say nothing about is unclassified — neither a success nor a failure. Every line is classified under the rules of the format that recognised it: if the detected format changes part-way through a file, lines after the change follow the new format's rules, the file's event-ledger property follows the new format, and a note names the line and both formats. The totals appear in the run summary as `SUCCESS CLASSIFIED` and `FAILURE CLASSIFIED` rows beneath `LINES INCLUDED`, each with its share of all classified lines (a row is shown only when its outcome was declared by a detected format or observed; the share is omitted when no line was a success, since failures would always read 100%). An `UNCLASSIFIED` row beside them carries the count of lines that matched neither classification, with its share of included lines. On an event-ledger format the timeline shows a success and a failure percentage column per time bucket — successes (or failures) over the bucket's classified lines, unclassified lines outside the ratio — hidden with `-hcl`, or enabled with `-scl` for a format that declares both classifications without being an event ledger (a notice then explains the coverage caveat). The counts also feed `errRate`, the `successes`/`failures` columns of the MESSAGES and STATS CSVs, and the `classification` sub-section of `-V format-detection` (successes, failures, unclassified share, the overall success and failure percentages, `event_ledger_files`, `rule_changes`).
 
 ### Verbose output (`-V`)
 
@@ -442,6 +521,7 @@ Section content is governed by per-section stability contracts — additions are
 | `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
 | `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
+| `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A note reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
 
 To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
@@ -451,7 +531,7 @@ The `LTL_CONFIG` environment variable lets you define default options that apply
 
 | Variable | Description |
 |----------|-------------|
-| `LTL_CONFIG` | Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (`-i`, `-e`, `-h`, `-if`, `-ef`, `-hf`, `-tpa`, `-udm`, `-ucm`) combine from both sources. |
+| `LTL_CONFIG` | Default command-line options. Parsed at startup and merged with command-line arguments. CLI values override environment values for scalar options. Additive options (`-i`, `-e`, `-h`, `-ipf`, `-epf`, `-hpf`, `-tpa`, `-udm`, `-ucm`) combine from both sources. |
 
 ### Info
 
@@ -460,8 +540,8 @@ Version, help, and diagnostic options.
 | Option | Description |
 |--------|-------------|
 | `-v, --version` | Print the version number and exit |
-| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic (e.g. `statistics`) shows that topic's index |
-| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic; with no topic, lists available topics |
+| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes) or `formats` (the log formats it recognises and how each classifies successes and failures) |
+| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization, a method (e.g. `classification`) or an analysis technique (e.g. `resolution-zoom`); with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
 | `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 

@@ -1,0 +1,24 @@
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
+10.224.34.60 - - [05/May/2025:00:00:00 +0000] "POST /Thingworx/WS HTTP/1.1" 200 261 1
+2025-05-05 00:00:01.100+0000 [L: INFO] [O: S.c.t.d.e.DSLScript] [I: ] [U: Administrator] [S: F0000000-0000-0000-0000-00000000000F] [P: platform-1] [T: TWEventProcessor-4] Executed service durationMs=42 result bytes=1024 count=7
