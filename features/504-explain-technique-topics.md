@@ -24,7 +24,10 @@ by-product.
 
 Findings from the documentation and code-surface audit that opened the planning
 walkthrough. Each is stated as what was read, in what, and what a reader would
-observe.
+observe. F1 to F22 come from the audit and the interview; F26 and F27 were found
+during implementation and are recorded here with the rest. F23 to F25, which are
+observations about this work's own construction rather than about the tool, are
+under *Implementation*.
 
 ### F1 — `--explain` already carries three categories, not one
 
@@ -475,6 +478,44 @@ as it does on a highlight pattern (F3).
 This collided with File Attribution (D4) — the same mechanism, surface and signal,
 differing only in framing. Resolved by D8: the two are one technique.
 
+### F26 — the wiki was published by hand mid-issue, which is a release step
+
+Publishing to the wiki was done directly from this branch before the map was
+understood, so the live wiki briefly carried unreleased content and a
+hand-edited `Home`. Both pages happen to match what the release copy will
+write, so nothing is left inconsistent, but the act was wrong: the wiki is
+generated at release from `docs/`, and nothing else should write to it. The
+correction is that this issue changes only `docs/` and the map; the wiki
+reaches its published state at the next release like every other page.
+
+### F27 — the wiki is generated from `docs/`, and nothing asserted the map
+
+Read from `docs/process/workflow.md` § *Post-release*, step 14. The wiki is not
+a second document maintained alongside the repository: the release step clones
+`logtimeline.wiki`, overwrites each page with a byte-for-byte copy of its
+`docs/` source, stages the pages by name and pushes. The note beneath the step
+records that `docs/` is the source of truth and the wiki is overwritten each
+release.
+
+Two consequences the content has to respect, neither of which was written down
+anywhere a reader would meet them:
+
+- A page is copied verbatim, so a link to a sibling is written **in the source**
+  as its wiki page name — `[Statistics Reference](Statistics-Reference)`, which
+  is how `docs/usage.md` already writes its links. A file path resolves in the
+  repository and 404s for the wiki reader the mirror exists to serve.
+- The step names each source and each page explicitly, in two places: a `cp`
+  line and the `git add`. A source with no `cp` line never reaches the wiki; a
+  page copied but not staged is discarded with the clone at the end of the step,
+  silently.
+
+Nothing asserted that map, and the mirror requirement stopped at
+`docs/explain/`. Observed consequence: this work's mirror was written and the
+map was not touched, which would have shipped a release with no wiki page for
+the technique family. Three pre-existing symptoms of the same gap were found on
+the published wiki at the same time and filed as #539 (published wiki pages are
+behind the `docs/` sources they are copied from).
+
 ## Locked decisions
 
 ### D1 — Flat table of contents; group pages are leaves, not indexes (architect, 2026-09-04)
@@ -654,11 +695,17 @@ the reader observes, not how it is built.
   and across directories under `-r` (F3, F22); and the normalised message and error
   rates standing beside absolute counts that change with the bucket width (F4).
 - **R9** — Every technique-family topic's content is mirrored under `docs/explain/`,
-  as the statistics, heatmap, histogram and classification topics are.
+  as the statistics, heatmap, histogram and classification topics are, **and that
+  mirror reaches the wiki**: the release step that regenerates the wiki from
+  `docs/` copies it and commits it, like every other mirror (F27). A mirror the
+  release step does not name is a page the wiki reader never gets.
 - **R10** — The content carries no internals: no Perl identifiers, issue numbers or
   decision labels, in either the terminal pages or the mirror.
 - **R11** — A group page's *See also* names the group an analyst typically reaches
   for next; the six groups are not presented as an ordered pipeline (F7).
+- **R12** — A cross-reference in the mirror resolves on both surfaces it is
+  published to. The wiki page is a byte-for-byte copy of the source, so a link to
+  a sibling is written as its wiki page name rather than as a file path (F27).
 
 ## Acceptance criteria
 
@@ -669,49 +716,66 @@ extend.
 
 ### Assertable
 
-- [ ] **AC1 (R1, R2)** — `ltl --explain` with no argument emits the technique
+- [x] **AC1 (R1, R2)** — `ltl --explain` with no argument emits the technique
       category's top-level section heading, the six group subheadings beneath it,
       and all twenty-five topic names each with a one-line summary. Extends
       `scenario_registry`, which already asserts a heading per category transition
       and a listing per topic.
-- [ ] **AC2 (R2)** — For each of the twenty-five names, `ltl --explain <name>` exits
+- [x] **AC2 (R2)** — For each of the twenty-five names, `ltl --explain <name>` exits
       0, renders at least twenty lines, opens with an uppercase heading and carries
       a *See also* near the end. This is `scenario_all_topics_render` unchanged in
       shape, with the new names added to its topic list.
-- [ ] **AC3 (R4)** — Every technique page renders, in order, a paragraph, a *The
+- [x] **AC3 (R4)** — Every technique page renders, in order, a paragraph, a *The
       signal* subheading followed by a `pre` block, a *How to read it* subheading,
       a *Command* subheading followed by a `pre` block, and *See also*; and no
       technique page carries a *How ltl computes this* subheading.
-- [ ] **AC4 (R3)** — Every group page renders a paragraph, a *When to use it*
+- [x] **AC4 (R3)** — Every group page renders a paragraph, a *When to use it*
       subheading, a table, and *See also*; the table's row count equals the number
       of techniques the roster gives that group.
-- [ ] **AC5 (R5)** — At `--terminal-width` 80, 120 and 200, no rendered content line
+- [x] **AC5 (R5)** — At `--terminal-width` 80, 120 and 200, no rendered content line
       of any new page exceeds the width. This is `assert_max_line_width` as it
       stands: it already excludes the title banner and exempts verbatim `pre`
       blocks, so a signal block at its fixed cell width passes by the same rule the
       heatmap and histogram examples pass under today.
-- [ ] **AC6 (R5)** — Each technique page's signal survives to raw output with its
+- [x] **AC6 (R5)** — Each technique page's signal survives to raw output with its
       ANSI escape sequences intact, asserted the way `scenario_visualization_charts`
       asserts the heatmap and histogram examples: a CSI count over the page's raw
       bytes, so accidental stripping at authoring time fails the harness.
-- [ ] **AC7 (R6)** — No technique or group page carries the statistics intro
+- [x] **AC7 (R6)** — No technique or group page carries the statistics intro
       sentence, and no existing topic loses an introduction: every page's intro
       describes the kind of topic it actually is.
-- [ ] **AC8 (R7)** — `ltl --help statistics` lists none of the twenty-five
+- [x] **AC8 (R7)** — `ltl --help statistics` lists none of the twenty-five
       technique-family topic names, asserted the way the same scenario already
       excludes `heatmap` and `histogram`.
-- [ ] **AC9 (R8)** — The Cross-Log Correlation page names all three file-list marker
+- [x] **AC9 (R8)** — The Cross-Log Correlation page names all three file-list marker
       states and says that every include, exclude and highlight criterion drives
       them; the Resolution Zoom page states that absolute counts change with the
       bucket width while the normalised rates do not.
-- [ ] **AC10 (R10)** — No rendered page, and no mirror file, contains a Perl
+- [x] **AC10 (R10)** — No rendered page, and no mirror file, contains a Perl
       identifier, an issue number or a decision label.
-- [ ] **AC11 (R9)** — Every technique-family topic has mirrored content under
+- [x] **AC11 (R9)** — Every technique-family topic has mirrored content under
       `docs/explain/`.
+- [x] **AC13 (R9)** — The release step that regenerates the wiki from `docs/`
+      carries the technique mirror, and carries every other mirror under
+      `docs/explain/`: each has a copy line, each copied source exists, and each
+      copied page is also staged — a page written into the clone but not staged
+      is discarded when the step removes the clone. Asserted against the map read
+      out of `docs/process/workflow.md` itself, so the assertion cannot drift
+      from the procedure it guards. Scenario `wiki-sync-map`.
+- [x] **AC14 (R12)** — No mirror under `docs/explain/` links to a sibling by file
+      path; a cross-reference is written as the wiki page name, so it resolves in
+      the repository and on the wiki alike. Scenario `wiki-link-form`.
+- [x] **AC15 (R11)** — Every group page's *See also* names at least one group
+      other than itself, and the six do not simply name their successor in roster
+      order — a set of neighbours an analyst moves between, not a sequence to be
+      followed. Scenario `group-see-also`.
 
 ### Unassertable
 
-- [ ] **AC12 (R5)** — *That a signal faithfully depicts what `ltl` draws for that
+`[~]` marks a criterion met by its compensating practice rather than by an
+assertion.
+
+- [~] **AC12 (R5)** — *That a signal faithfully depicts what `ltl` draws for that
       technique.* AC6 proves a signal is present and its bytes survive; nothing
       mechanical proves the shape is the one the tool would actually produce on that
       data. `docs/test-driven-development.md` records that the general method for
@@ -981,9 +1045,95 @@ findings; and across mixed time bases the correlation fails silently (#155).
 | 2. Interview, group by group | Closed — F7 to F22 across all six groups; roster changes D4 to D8 |
 | 3. Content spec | Closed — one block per topic under *Content specification* |
 | 4. Acceptance criteria and harness plan | Closed — R1 to R11, AC1 to AC12, D9 |
+
+AC15 was added during implementation: R11 was the one requirement the triage
+left without a criterion, and an unasserted requirement is how the wiki gap
+happened. R12 and its criteria AC13 and AC14 were added from F27:
+the mirror requirement stopped at `docs/explain/` and said nothing about the
+release step that carries it to the wiki, which is the gap that let this work's
+mirror be written without the map being touched.
 | 5. Delivery shape | Closed — D11, three drops |
 
-Specification complete. Implementation of drop 1 has not started.
+Specification complete. All three drops implemented.
+
+## Implementation
+
+| Drop | State |
+|---|---|
+| 1 | Landed — the fourth category, the six group pages, the per-category introductions, Cross-Log Correlation |
+| 2 | Landed — Time (3 techniques) and Population (7) |
+| 3 | Landed — Shape (4), Comparison (2) and Load (2) |
+
+Twenty-five topics reachable and listed; nineteen techniques and six group
+pages. Every acceptance criterion but one — AC1 to AC11 and AC13 to AC15 — is
+asserted by `tests/validate-explain.sh`, which grew from 154 to 694 assertions
+across twelve new scenarios. AC12 stands on the compensating practice D9 settles:
+every signal was produced by running that technique's own worked command
+against a real log and matching the page to what came back.
+
+Three findings the implementation added to the record:
+
+- **F23 — the group page needed its own introduction.** R6 was written
+  against the per-topic sentence that misdescribed every non-statistic
+  topic. A per-category sentence fixes it for the technique leaves, but a
+  group page is not a technique, and being introduced as one is the same
+  defect in a smaller form. Group pages take a fourth sentence of their own.
+- **F24 — the group table's row count is read from the registry, not
+  declared in the harness.** A hardcoded count per group cannot detect the
+  failure it exists to catch: a technique added to a group's roster but
+  never given a row on its page. The harness reads the count from the
+  registry the tool prints, and a probe adding a technique without a row
+  now fails as it should.
+- **F25 — no page needs the `pre` exemption AC5 grants it.** The rendered
+  examples the heatmap and histogram pages carry run to 89 and 90 columns,
+  and AC5 exempts verbatim `pre` blocks for that reason. Every one of the
+  twenty-five new pages renders with no line over the terminal width at 80,
+  120 and 200, generated signals included, so the exemption is unused by
+  this work rather than relied on.
+
+### The wiki mirror
+
+R9 as originally written stopped at `docs/explain/`. F27 records why that was
+not enough and what the mechanism actually is; R9 now carries the release step
+too, R12 carries the link form, and AC13 and AC14 assert both. What was
+delivered against them:
+
+- `docs/explain/techniques.md` links its siblings by wiki page name, so it is
+  copy-ready. `docs/usage.md` already wrote its links that way.
+- The sync step in `docs/process/workflow.md` gains its copy and add lines for
+  the technique family, and the note beneath it states the link rule and names
+  the harness that enforces the map.
+- Scenarios `wiki-sync-map` and `wiki-link-form` in `tests/validate-explain.sh`,
+  reading the map out of the workflow document rather than restating it. Four
+  sabotage probes, each producing the expected diagnostic: a mirror with no copy
+  line, a copy line naming a source that does not exist, a page copied but never
+  staged, and a file-path link in a mirror.
+
+### Pre-existing drift, not repaired here
+
+`Statistics-Reference` is behind `docs/explain/statistics.md` by two content
+changes, and `Home` is behind `docs/usage.md` by around 150 lines. Both are
+evidence the same thing: the sync step has not run for some releases. The new
+scenarios assert the map, not the state of the remote — a check that cloned
+the wiki would put the network in the test suite and would fail on a stale
+remote the harness cannot fix. Filed as #539 (published wiki pages are behind
+the `docs/` sources they are copied from), which also records that
+`Classification-Reference` is absent from the wiki although the step copies
+it.
+
+### Completion gate
+
+Run on the commit being merged, with `$version_number` restored to
+`0.18.0` first.
+
+- **Full harness suite:** all 36 `tests/validate-*.sh` exit 0, each with a
+  summary line showing assertions ran. No failures.
+- **Before/after benchmark**, same machine, same session,
+  `single-day-access-log-standard`: total time 9.1 s → 8.8 s (-3.0%),
+  peak RSS 151.0 MB → 152.4 MB (+0.9%), lines read and included identical.
+  Both inside the 5% threshold; the memory difference is the content strings
+  the registry now holds. The before capture was taken from the base commit
+  in a worktree; both result files were deleted afterwards.
 
 ## Issues filed from this work
 
@@ -995,3 +1145,4 @@ All informational, none a gate on this issue.
 | #535 | Research: normalised message and error rates diverge at fine bucket widths | Resolution Zoom teaches the rates as the pair to watch across a zoom (F11) |
 | #536 | Expose the thread name as an attribute | Attribute Isolation cannot address the thread until it lands (F16) |
 | #537 | Expose the access-log remote host as an attribute | Attribute Isolation cannot address the caller until it lands (F16) |
+| #539 | Published wiki pages are behind the `docs/` sources they are copied from | Found while adding the technique family to the sync map (F26 and the drift section) |

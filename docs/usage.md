@@ -362,6 +362,8 @@ The body percentiles `p5`, `p10`, and `p25` and the precomputed interquartile ra
 
 For detailed explanations of every statistic ltl emits — including interpretation tables, operational use cases, and worked examples — run `ltl --explain <topic>` (e.g. `ltl --explain kurtosis`, `ltl --explain bimodality_coef`, `ltl --explain percentiles`). The full reference is also available on the [Statistics Reference](Statistics-Reference) wiki page. Use `ltl --help statistics` for a one-line index of all statistics, or `ltl --explain` (no argument) for the list of available `--explain` topics.
 
+`--explain` also carries a second kind of content: **analysis techniques**, the investigative moves you make with ltl rather than explanations of a figure it prints. Nineteen techniques in six groups — Time, Population, Shape, Comparison, Load and Correlation — each answering one question, showing what the signal looks like, how to read it and what would falsify the reading, with the worked command. Each group is a page of its own (`ltl --explain population`) listing its techniques. Start at `ltl --explain` for the full table of contents, or go straight to one: `ltl --explain resolution-zoom`, `ltl --explain outcome-isolation`, `ltl --explain timeout-clustering`. The full reference is also available on the [Analysis Techniques Reference](Analysis-Techniques-Reference) wiki page.
+
 ### Heatmap
 
 Heatmap mode replaces the per-bucket latency statistics with a color-intensity visualization showing how values are distributed within each time bucket. Where percentile statistics reduce a distribution to a handful of numbers, the heatmap reveals its full shape — bimodal distributions (cache hits vs. misses), shifting modes over time, outlier clustering, and long tails all become visually apparent. Each cell represents a value range, with color intensity proportional to the number of entries falling within that range. Logarithmic bucket boundaries provide resolution across the full range of values, from sub-millisecond to multi-second durations.
@@ -539,7 +541,7 @@ Version, help, and diagnostic options.
 |--------|-------------|
 | `-v, --version` | Print the version number and exit |
 | `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes) or `formats` (the log formats it recognises and how each classifies successes and failures) |
-| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization or a method (e.g. `classification`); with no topic, lists available topics |
+| `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization, a method (e.g. `classification`) or an analysis technique (e.g. `resolution-zoom`); with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
 | `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 
