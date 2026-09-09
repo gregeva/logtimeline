@@ -16,3 +16,5 @@ requires 'Time::Piece';
 requires 'Win32::API';
 requires 'YAML::PP';
 requires 'YAML::PP::Common';
+requires 'YAML::PP::Schema::Core';
+requires 'YAML::PP::Schema::YAML1_1';
