@@ -48,9 +48,7 @@ cpanm --notest PAR::Packer
 
 echo "[4/4] Generating cpanfile and installing dependencies..."
 cd "$SCRIPT_DIR"
-if [ ! -f cpanfile ]; then
-    ./generate-cpanfile.sh
-fi
+./generate-cpanfile.sh
 cpanm --notest --installdeps .
 
 echo ""
