@@ -185,15 +185,15 @@ shutdown — and every one was being discarded. Found while reproducing this
 issue's control-character case on a Method Server log.
 
 FATAL is added to all four surfaces a category must occupy (the three named in
-`features/395-wgm-client-log-format.md` § Log-category consistency, plus the
-error rate):
+`features/395-wgm-client-log-format.md` § Log-category consistency, plus
+failure classification):
 
 | Surface | Change |
 |---|---|
 | `@log_levels` / `%log_level_set` in `ltl` | `FATAL-HL`, `FATAL`, ordered ahead of ERROR as the more severe level |
 | `%colors` in `ltl` | red, as ERROR — both are failures |
 | `tests/csv-output/rules/stats-columns.tsv` | `FATAL` and `FATAL-HL` rows, `int`/`level` family |
-| Error-rate accumulation in `normalize_data_for_output()` | FATAL joins `ERROR|5xx|4xx` — it denotes a failure |
+| Failure classification | FATAL is a failure. It is named by the default failure rule in `%classification_default`, and the error rate follows from that: since `features/453-success-failure-classification-event-ledger.md` D13 (per-variant classification), `normalize_data_for_output()` reads the bucket's classification failure counter rather than re-deriving the error count from category names. Whether a level counts toward the error rate is therefore a question about that rule's alternation |
 
 The statistics oracle (`tests/statistics-drift/oracle/calculate-reference.py`)
 already listed FATAL in its own `LOG_LEVELS` filter, so the oracle had been
@@ -211,7 +211,10 @@ not wait on the expensive one:
 
 - [#475](https://github.com/gregeva/logtimeline/issues/475) — the missing
   severity names are added to the recognised set, the same four-surface change
-  this decision worked through for FATAL.
+  this decision worked through for FATAL. Its decisions and acceptance criteria
+  live in `features/475-log-level-vocabulary-completion.md`, which admits seven
+  names: the six above plus AUDIT, which the ThingWorx Edge C SDK format emits
+  and which is discarded today.
 - [#476](https://github.com/gregeva/logtimeline/issues/476) — log levels are a
   property of the format that emits them, so they belong in the format registry
   beside each format's duration unit and time contract; a level seen but not
