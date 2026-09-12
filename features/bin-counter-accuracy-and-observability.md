@@ -260,7 +260,7 @@ re-bin field byte-identical to the un-consolidated run. `partition_new()` and
 increments none — one carrier, not two.
 
 The finalize projection cannot be observed from a snapshot at all. It runs after the
-only snapshot and deletes the partitions it projects. It is counted at its four call
+only snapshot and deletes the partitions it projects. It is counted at its own call
 sites, into the consumer's telemetry hash, independently of the snapshot.
 
 **Rejected:** moving the snapshot to after the projection loops. It is the smaller
@@ -269,9 +269,31 @@ then describe the display geometry rather than the 616-bpd streaming geometry �
 same field names silently meaning something else.
 
 **Invariant this establishes:** `rebin_finalize_events == partition_count` on the
-heatmap and histogram surfaces, and exactly `0` on `summary_table`, `csv_output` and
-`time_bucket_stats`, which read percentiles from the streaming partition and never
-project. Both are asserted by `tests/validate-histogram-bin-counters.sh`.
+heatmap and histogram surfaces, and exactly `0` on `time_bucket_stats`, which reads
+percentiles from the streaming partition and never projects.
+
+> **Correction 2026-09-12 (#472).** Two statements above were wrong in the tree and
+> are restated here, because #472's highlight assertions are written against them.
+>
+> - **Three write sites, not four.** `rebin_finalize_events` is written in the
+>   parent loop of `finalize_heatmap_unified()`, in the parent loop of
+>   `finalize_histogram_unified()`, and by the assignment in
+>   `finalize_message_stats_unified()` that carries #459's collapse accounting.
+>   #472 adds a fourth and a fifth, one in each finalizer's highlight branch.
+> - **`summary_table` is no longer contractually zero.** Since #459 (bin-counter
+>   combination order) the field carries the per-message surface's collapse count:
+>   it reads zero on a run with no consolidation and otherwise counts one per
+>   member re-projected into the union geometry. Measured **167** under `-mdm bin
+>   -g 70` on the Tomcat access log fixture, with `ltl`'s own comment at the site
+>   saying so. Decision 8's field description was amended for this under #459; this
+>   summary sentence was not. `csv_output` shares `summary_table`'s snapshot and so
+>   carries the same figure. The only unconditional zero is `time_bucket_stats`.
+>
+> **What the harness actually asserts.** The `time_bucket_stats` zero is asserted
+> (`pattern '^  rebin_finalize_events: 0$'` in the bucket-stats bin scenario). The
+> heatmap and histogram equality is **not**: `tests/validate-histogram-bin-counters.sh`
+> asserts no heatmap or histogram consumer block at all. #472 adds those parent
+> assertions as the minimum its highlight assertions are stated against.
 
 ### D10 — Retention is emitted from stage 1, with today's values
 
@@ -625,6 +647,16 @@ anything else against it.
   not a counter question. `%bucket_stats_counters_hl` additionally has no consumer at
   all beyond `named_structure_sizes()`. Still open after #460, for the same reason —
   `460-bin-model-percentile-source.md` § 5 records what each disposition costs.
+  **Closed 2026-09-12 by #472**, specified in
+  [`472-highlight-bin-counter-telemetry.md`](472-highlight-bin-counter-telemetry.md):
+  the heatmap and histogram highlight stores each get their own locked consumer name
+  (`heatmap_cells_highlighted`, `histogram_view_highlighted`), reporting beside the
+  parent rather than folded into it, with both blocks present on every run and their
+  display projections counted at the highlight `partition_rebin()` sites;
+  `%bucket_stats_counters_hl` is retired rather than reported, since it derives
+  nothing. The attribution reading D3's ceiling needs is what decided it: folding
+  would have changed the meaning of six locked field descriptions with every existing
+  shape assertion still passing.
 - **`path: pre_migration` was unreachable, and is retired.** Every consumer name ran
   the unified path, so the value could no longer be produced — a locked D8 path value
   asserted by nothing. Removed from the emitter and from the contracts that locked it
