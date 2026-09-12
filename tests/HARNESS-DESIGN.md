@@ -222,6 +222,23 @@ A strict validation gate (all-or-nothing column coverage, refuse-on-unknown, for
 
 When adding a strict gate, enumerate the application surfaces it constrains and confirm at least one scenario traverses each; where a surface has no scenario, either add one or record the gap explicitly (a `log()`-style note in the harness header or a tracked ticket). "The gate has never fired" must be distinguishable between "the invariant holds" and "nothing ever put the invariant under test."
 
+## A run that renders to stdout does not exercise the writers
+
+An invocation whose assertion reads stdout exercises only what stdout needs. Every module reached exclusively from a code path that writes a file — the CSV writers, the YAML aggregate export — stays unloaded, so a defect in loading them is invisible to a suite of stdout assertions however many scenarios it runs. Coverage of "the tool ran and rendered" is not coverage of "the tool produced its outputs."
+
+A harness suite asserting the whole tool needs at least one invocation per writer, and the assertion is that the file exists **and parses**: a written file and a written-and-valid file are different outcomes, and only the parse distinguishes them. Run those invocations in a scratch directory, since `-o` writes its files into the current working directory.
+
+Precedent: #541. The v0.18.0 packaged binaries shipped with `-o` dying before it wrote the YAML aggregate export, on every platform. Measured on the macOS arm64 binary built from the fix commit and from its parent on one machine with the same `pp` 1.064 and the same 677-line access log, the parent exits 2 with `Can't locate YAML/PP/Schema/Core.pm in @INC` and writes the STATS and MESSAGES CSVs but no YAML, while the fix commit exits 0 and writes all three. No harness caught it: every existing one runs `perl ltl` and reads a rendered surface.
+
+## A harness that runs `perl ltl` proves nothing about the packaged binary
+
+The suite validates the script. The artefact users receive is a PAR::Packer bundle built from that same script, and the two disagree in one specific way: the bundle carries the modules `Module::ScanDeps` found by reading the source statically, and the generated `main.pl` discards the host's `@INC`, so at runtime the binary can reach nothing else. A module the script loads by a name it builds at runtime is invisible to that scan and absent from the bundle. `perl ltl` finds it on the host and passes; the binary raises `Can't locate .../X.pm in @INC` listing only the PAR extraction directory, and no CPAN install on the user's machine can help.
+
+Two consequences:
+
+- **Any assertion about what the shipped tool does must run the shipped tool.** A binary smoke harness is a separate instrument from the `perl ltl` suite, not a subset of it, and its absence is a coverage gap that no amount of script-level testing closes. `features/227-binary-smoke-coverage.md` scopes that harness.
+- **`Can't locate` on stderr is a distinct failure class from a Perl runtime warning.** The runtime-warning check above greps for ` at <file> line <N>`; a missing bundled module can surface as an exit code, as that pattern, or as neither. A harness that invokes a binary greps stderr for `Can't locate` explicitly.
+
 ## Proving a new assertion can fail
 
 Exit code 0 on a healthy input is not evidence that an assertion works — an assertion with a wrong anchor, a wrong file, or an over-permissive pattern also exits 0. Every **new** assertion (and every assertion whose anchor or logic changes) must be demonstrated to fail before it is trusted to pass:
