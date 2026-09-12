@@ -48,9 +48,9 @@ if ($cmd =~ /(^|[;&|(]\s*|\b(?:time|caffeinate\s+-s)\s+)(?:\.\/|\S*\/)?ltl(\s|$)
 
 # --- merges go through PRs; release branches are preserved
 deny "'git merge' is never used here - open a PR with gh pr create and merge it with gh pr merge"
-    if $cmd =~ /\bgit\s+merge\b/;
+    if $cmd =~ /\bgit\s+merge(?![\w-])/;
 deny "direct push to main - main is updated only by merging the release PR"
-    if $cmd =~ /\bgit\s+push\b[^;&|]*\bmain\b/;
+    if $cmd =~ /\bgit\s+push\b[^;&|]*\s(?:[^\s:]+:)?main(?:\s|$)/;
 deny "--delete-branch is never used - feature branches are deleted explicitly after release, release branches never"
     if $cmd =~ /--delete-branch\b/;
 

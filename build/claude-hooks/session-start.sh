@@ -6,7 +6,39 @@
 cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
 
 echo "== Outstanding state (session-start hook, $(date '+%Y-%m-%d %H:%M')) =="
-echo "branch: $(git branch --show-current 2>/dev/null)"
+current=$(git branch --show-current 2>/dev/null)
+echo "branch: $current"
+
+# Everything below compares against local main and local release branches, so
+# they are brought up to origin first: a stale local main reports releases as
+# unmerged that were merged from another machine. A branch that is checked out,
+# or that has diverged, is reported rather than moved.
+git fetch --quiet --prune --tags origin 2>/dev/null
+
+sync_branch() {
+    b=$1
+    git rev-parse --verify --quiet "refs/remotes/origin/$b" >/dev/null || return 0
+    git rev-parse --verify --quiet "refs/heads/$b" >/dev/null || return 0
+    [ "$(git rev-parse "$b")" = "$(git rev-parse "origin/$b")" ] && return 0
+    behind=$(git log --oneline "$b..origin/$b" | wc -l | tr -d ' ')
+    ahead=$(git log --oneline "origin/$b..$b" | wc -l | tr -d ' ')
+    if [ "$b" = "$current" ]; then
+        # Unpushed work on the checked-out branch is already listed above.
+        [ "$behind" != "0" ] && echo "FINDING: $b is checked out and $behind commit(s) behind origin/$b - pull before reading any file"
+        return 0
+    fi
+    if [ "$ahead" != "0" ]; then
+        echo "FINDING: $b is $ahead commit(s) ahead of origin/$b - unpushed work, not synced here"
+        return 0
+    fi
+    git fetch --quiet origin "$b:$b" 2>/dev/null \
+        && echo "synced $b from origin ($behind commit(s))" \
+        || echo "FINDING: $b is $behind commit(s) behind origin/$b and would not fast-forward"
+}
+sync_branch main
+for rb in $(git branch --list 'release/*' --format='%(refname:short)' 2>/dev/null); do
+    sync_branch "$rb"
+done
 
 dirty=$(git status --short 2>/dev/null | head -15)
 [ -n "$dirty" ] && { echo "uncommitted:"; echo "$dirty"; }
@@ -26,7 +58,8 @@ for rb in $(git branch --list 'release/*' --format='%(refname:short)' 2>/dev/nul
     fi
 done
 
-unmerged=$(git branch -a --no-merged main 2>/dev/null | grep -v 'release/' | head -15)
+unmerged=$(git branch -a --no-merged main --format='%(refname:short)' 2>/dev/null \
+    | sed 's|^origin/||' | grep -v -e 'release/' -e '^HEAD$' | sort -u | head -15)
 [ -n "$unmerged" ] && { echo "branches not merged to main:"; echo "$unmerged"; }
 
 prs=$(gh pr list --state open --limit 20 2>/dev/null)
