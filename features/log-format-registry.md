@@ -1160,6 +1160,7 @@ Discussion established that derived metrics require a fundamental change to the 
 - features/395-wgm-client-log-format.md — #395: first format added on the Drop 1.5 registry (single entry with a multi-stem filename family; msgtype → category mapping; D54–D56)
 - features/60-metric-visibility-demand-map.md — Drop 2 (#60)
 - features/396-windchill-method-server-log4j-format.md — Windchill Method Server log4j entry (`mt17`, #396): first entry declaring filename evidence on the Drop 1.5 mechanism after its landing; adds the `date_n` index form (D55)
+- features/476-per-format-log-level-declarations.md — #476 (log levels declared per format in the registry, with unregistered levels reported at end of run): each entry declares the log levels its producer emits, absent inheriting the standard severity set and present replacing it; `build_format_registry()` unions the declarations and gates two directions (no declared level outside the vocabulary, no classification-criterion name undeclared); a level seen in the level position and not registered is collected during the read and reported once at the end of the run, and per file under `-V format-detection`. The per-line gate is unchanged and an unregistered level is still rejected
 
 ### Documentation
 - features/duration-unit-autodetection.md

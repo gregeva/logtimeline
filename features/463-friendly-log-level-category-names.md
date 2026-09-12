@@ -65,6 +65,14 @@ surfaces — rather than inside any format registry entry. `features/395-wgm-cli
 § *Log-category consistency* lists the three surfaces a category already lives
 on; this is a fourth, and the only optional one.
 
+Boundary against the per-format level declarations: **membership is declared per
+format, naming stays global.** A registry entry states which levels its producer
+emits; what a level is called, what colour it takes and where it sits in the
+display order remain one global surface each, for the reason D1 gives. The
+declaration and this lookup answer different questions, so neither constrains the
+other, and D1 is not reopened by it. Specification:
+`features/476-per-format-log-level-declarations.md`.
+
 ### D2 — The highlighted twin is its own entry, with the indicator trailing
 
 Each category with a descriptive name carries a second entry for its `-HL`
