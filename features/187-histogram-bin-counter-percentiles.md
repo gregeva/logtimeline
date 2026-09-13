@@ -410,7 +410,7 @@ The algorithm substrate is fixed (HdrHistogram-style log-spaced bin counters, pe
 | Per-key value falls outside partition's current [min, max] | Triggers a rebin (Decision 5 doubling), repeated until the partition contains the value — there is no growth cap, so the rebinned partition always contains it however extreme it is. The Decision 4 overflow and underflow counters are guards against a growth cap that does not exist today: they stay at zero, and the per-quantile `out_of_range_bounded` field stays at `none`. |
 | Filtered run | The unified contract runs unconditionally. The filter context is reported in `-V` for analyst audit per R7. Filter-context audit is not a gate. |
 | User pins a surface to `raw` with a Decision 7 selector (`-dm`, `-mdm`, `-bdm`, `-hmdm`, `-hgdm`) | Every consumer on that surface runs its pre-migration code path; output is byte-identical to the pre-feature implementation per R11a. `-V` reports `user_opt_out` for those consumers per R10, and `unified` for consumers on surfaces left at `bin`. |
-| Highlight pattern present | The highlight subset streams its own parallel partitions and its percentiles come from them; it has no consumer name of its own in the `-V` block order, so no block reports it. |
+| Highlight pattern present | The highlight subset streams its own parallel partitions on the heatmap and histogram surfaces and its percentiles come from them. Each of those two stores has its own consumer name in the `-V` block order — `heatmap_cells_highlighted` and `histogram_view_highlighted` — reporting its own partitions, re-binning, payload and retention beside the parent's rather than folded into them (Decision 8's amendment of 2026-09-12). Both blocks are present on every run and report `path: feature_not_active` when no highlight is live. The per-message surface carries the highlight as a dimension of its compound `(category, log_key)` key, so its figures already move with the highlight and it has no separate name. |
 | Concurrent ltl processes | Inherited from #179; out of this feature's concern. |
 
 ## Acceptance criteria
@@ -1487,7 +1487,7 @@ Non-binding.
   - `docs/usage.md` — the parallel options reference, kept in agreement with `--help` in the same change (per CLAUDE.md § Before writing or changing code).
   - Analyst-facing guidance on when to pin a surface to `raw`: byte-identical comparison against a pre-migration release, or a nearest-rank reference to check a bin-model value against.
 
-### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473**
+### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473; highlight consumer names locked 2026-09-12 via #472**
 
 > **Amendment 2026-05-20 (#34 Phase 2)**: the section is named for the substrate rather than for one consumer family's output. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The emitting function is `emit_bin_counter_mode_verbose`, for the same reason. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
 >
@@ -1498,6 +1498,58 @@ Non-binding.
 > - The run-level `buckets_per_decade:` line is **removed**. Resolution is now per-surface (one tier yields a different bpd per surface), so a single run-level bpd would be ambiguous. The authoritative per-surface resolution is the `effective_bpd:` line in the `=== percentile-algorithm ===` section, one per surface.
 >
 > All other Decision 8 field names, consumer-name strings, and per-consumer lockings remain in effect verbatim.
+
+> **Amendment 2026-09-12 (#472) — the highlight subsets are named consumers.** The
+> heatmap and histogram surfaces each stream a second partition store for the
+> highlighted subset, and the histogram's store is the source of the percentile
+> ladder published in the `-o` YAML aggregate export's `highlighted:` block. Two
+> consumer-name strings are locked for them and appended to the display order:
+>
+> | consumer name | what it covers | partition keying | percentile fields |
+> |---|---|---|---|
+> | `heatmap_cells_highlighted` | heatmap cell counts for the highlighted subset | `time_bucket` | none |
+> | `histogram_view_highlighted` | the highlighted subset's percentile ladder, as published in the aggregate export | `metric_global` | `percentiles_emitted` and `out_of_range_bounded` |
+>
+> Both blocks carry the **existing full block field set** in the locked field
+> order, measured over the highlight store rather than the parent store. No field
+> is redefined, no new field name is introduced, and no parent block's figures
+> change: the highlight is reported **beside** its parent, never inside it, so a
+> run's total is the reader's sum of the two blocks and never a single printed
+> figure. Neither is a `shares_partitions_with` consumer — each owns its store.
+> `heatmap_markers` and `histogram_bins` get no highlight twin: they share their
+> siblings' partitions, so a twin would restate a highlight parent's figures.
+>
+> `percentiles_emitted` on `histogram_view_highlighted` is the twelve-slug export
+> ladder (`p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999`), a longer set
+> than the ten slugs `histogram_view` reports. The parent's set is the on-screen
+> legend's; the highlight's is the export's. A field that reports which quantiles
+> a consumer publishes reports the true ones, so the two differ by design.
+>
+> **Both blocks always print**, honouring the section's always-present rule: when
+> the parent surface is inactive, or active with no live highlight, the block
+> carries `path: feature_not_active` alone, and when the surface resolved to the
+> raw data model it carries `path: user_opt_out` alone.
+>
+> **Display order**: appended, per the order clause below as written —
+> `heatmap_cells_highlighted` then `histogram_view_highlighted`, after
+> `histogram_bins`. The clause is not amended.
+>
+> **Invariant.** `rebin_finalize_events == partition_count` holds on
+> `heatmap_cells_highlighted` whenever it reports `path: unified`: the highlight
+> loop in `finalize_heatmap_unified()` projects each highlight partition exactly
+> once, counted at that site like the parent's. On `histogram_view_highlighted`
+> the equality holds **when every highlight partition carries at least one
+> observation**: the highlight branch of `finalize_histogram_unified()` skips the
+> projection for a metric whose highlight store holds none, while the partition is
+> still counted in `partition_count`.
+>
+> **The per-time-bucket surface gets no highlight consumer.** Its parity store
+> derived nothing and is retired under #472; see
+> `features/472-highlight-bin-counter-telemetry.md` D2. Record for the whole
+> amendment, with the decisions and their rationale, is that document.
+>
+> All other Decision 8 field names, consumer-name strings, and per-consumer
+> lockings remain in effect verbatim.
 
 #### Contract
 
@@ -1587,8 +1639,10 @@ When `path: user_opt_out` or `path: feature_not_active`, no further fields appea
 | `heatmap_cells` | Path C2-cells | Heatmap cell colors themselves |
 | `histogram_view` | Path C1 | Histogram-mode global percentile indicators |
 | `histogram_bins` | Path C1-bins | Histogram-mode bin counts (bar heights) |
+| `heatmap_cells_highlighted` | Path C2-cells, highlighted subset | Heatmap cell counts for the highlighted subset, from its own streaming store (locked 2026-09-12 via #472) |
+| `histogram_view_highlighted` | Path C1, highlighted subset | The highlighted subset's percentile ladder, as published in the `-o` YAML aggregate export's `highlighted:` block, from its own streaming store (locked 2026-09-12 via #472) |
 
-The consumer-name strings are part of the locked feature contract. Future consumers (highlight subsets per Phase 4; future hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
+The consumer-name strings are part of the locked feature contract. The two highlight-subset names were locked under #472 (the 2026-09-12 amendment above); future consumers (hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
 
 **Sub-section: `=== histogram-bin-counters / display-dimensions ===`** — **locked 2026-08-27 by #473.** When a histogram renders under the bin data model, the section additionally carries a per-metric line describing the geometry the chart is drawn on: sample count, observed min and max, decades spanned, bins per decade, and total buckets. It is produced in `finalize_histogram_unified()` and drained into the parent's brackets through the deferred sub-section buffer.
 
@@ -1604,7 +1658,7 @@ consumers_active: none
 
 No per-consumer blocks in that case.
 
-**Display order of consumer blocks**: in the order listed in the consumer-name table above (`summary_table` first, then `csv_output`, then `time_bucket_stats`, then `heatmap_markers`, then `heatmap_cells`, then `histogram_view`, then `histogram_bins`). Deterministic ordering is required for regression testability; later-added consumers append to the end of this order.
+**Display order of consumer blocks**: in the order listed in the consumer-name table above (`summary_table` first, then `csv_output`, then `time_bucket_stats`, then `heatmap_markers`, then `heatmap_cells`, then `histogram_view`, then `histogram_bins`, then `heatmap_cells_highlighted`, then `histogram_view_highlighted`). Deterministic ordering is required for regression testability; later-added consumers append to the end of this order.
 
 **Stability contract**: the section name, all top-level field names, all consumer-name strings, and all per-consumer field names are part of the locked feature contract. Changing any of them requires a new locked-decision entry. Field *values* may evolve with the data; field *names* may not change without an explicit decision update.
 

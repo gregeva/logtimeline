@@ -1135,6 +1135,14 @@ data-model change does not absorb independent test-coverage work.
 6. **`%bucket_stats_counters_hl`.** Written on the hot path, read only by `Devel::Size`,
    its own comment concedes "store parity only". Is it in scope for #426 to remove, or does
    store parity have a purpose the code does not record?
+   **Closed 2026-09-12: claimed by #472 and answered there.** The store is retired —
+   the `counter_update()` call, the declaration and the `Devel::Size` line go together —
+   because it derives nothing and store parity is not a requirement any consumer
+   states; retiring it also removes a per-line site on highlighted runs that #478
+   (highlight bookkeeping evaluated on the hot path) would otherwise have to gate.
+   Decision and rationale:
+   [`472-highlight-bin-counter-telemetry.md`](472-highlight-bin-counter-telemetry.md) D2.
+   #472 owns it because #472 is the issue being worked and #426 is on hold.
 
 7. **Bucket-stats' place in the F1/F2/F3 taxonomy.** #201's taxonomy puts
    `time_bucket_stats` in F1 (precision-bound per-key fan-out), but its cardinality is
