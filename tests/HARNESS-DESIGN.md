@@ -141,6 +141,8 @@ These are mandatory. Names are part of the stability contract and a poorly chose
 
 **Harness file names track the section they validate.** A harness for the `histogram-bin-counters` section lives in `tests/validate-histogram-bin-counters.sh`. When a section is renamed, the harness file is `git mv`'d to match in the same commit. This makes the relationship between harness and section discoverable from the filesystem alone, and prevents the situation where the file name still reflects an old section name (and a reader has to open the file to find out what it actually validates).
 
+**A section with no owning harness is asserted by the harness owning the feature the rows describe.** `benchmark-data` is a transport: its rows carry figures produced elsewhere, and each row belongs to the feature that produces it. A harness asserting one of its rows is named for that feature, not for `benchmark-data`. `validate-format-registry.sh` asserts `MEMORY format_scan_subs`; `validate-statistics-demand.sh` asserts the `MEMORY log_analysis` row that carries the retained-duration representation (`features/528-record-lexical-retained-representation.md` § The assertion). The file name still tracks a section for every harness that owns one.
+
 **Naming is implementation work, not a one-time judgment.** When the user is not available to name something, the implementer reads the code and proposes a name on the same basis (semantic feature for sections, function for sub-sections). "I'll name it for what the user-facing capability is" is the right reflex; "I'll name it for the function in the source code that emits it" is the wrong one.
 
 ## Delimiter contract
