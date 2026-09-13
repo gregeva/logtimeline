@@ -6,10 +6,11 @@ Branch off `release/0.18.1`.
 
 ## Status
 
-Specification and acceptance criteria agreed. No harness or production code
-written yet. The `tests/HARNESS-DESIGN.md` rule and the
-`features/503-yaml-aggregate-export.md` corrections below are applied in the
-same commit as this document, because they are records rather than code.
+Implemented; the completion gate has not run. Every acceptance criterion below
+is measured and passing on this machine (§ *Implementation record*). The
+`tests/HARNESS-DESIGN.md` rule and the `features/503-yaml-aggregate-export.md`
+corrections were applied in the specification commit, being records rather than
+code.
 
 ## The reframe
 
@@ -397,7 +398,7 @@ documented and stays executed.
 
 ## Acceptance criteria
 
-- [ ] A chained run in the completion gate's order
+- [x] A chained run in the completion gate's order
       (`CI=1 ./tests/validate-csv-output.sh`, `CI=1 ./tests/validate-statistics.sh`,
       then `tests/validate-doc-examples.sh`, then
       `tests/validate-aggregate-export.sh`), with no intervening
@@ -406,36 +407,36 @@ documented and stays executed.
       from a clean repository root, capture each harness's output once to the
       scratchpad, and read the export harness's summary line and its three
       `directories-relative` lines from the file.
-- [ ] A repository root with no `ltl -o` product in it has none after each
+- [x] A repository root with no `ltl -o` product in it has none after each
       `tests/validate-*.sh` in the suite has run. **[assertable]** Method: list
       `*-LTL-AGGREGATE.yaml`, `*-LTL-STATS-*.csv` and `*-LTL-MESSAGES-*.csv` in
       the root before the suite and after it; the two listings are identical.
       The comparison is a listing, never a deletion.
-- [ ] An `ltl -o` product planted in the repository root survives a full suite
+- [x] An `ltl -o` product planted in the repository root survives a full suite
       run unchanged. **[assertable]** Method: plant one export with a stamp that
       sorts after any the run could write (`2099-01-01_000000-LTL-AGGREGATE.yaml`,
       the shape the investigation used), run the suite, confirm the file is
       still present with the same contents, and remove it afterwards. This is
       the assertion the old sweep passed while destroying the file.
-- [ ] A harness that finds an `ltl -o` product it did not write in its own
+- [x] A harness that finds an `ltl -o` product it did not write in its own
       working directory fails, and the failure names the file.
       **[assertable]** Method: plant a product inside the scenario's scratch
       directory before its `ltl` run and confirm the harness fails with the
       file name in the failure detail. This is the sabotage proof for the
       fail-fast guard: an assertion that cannot be made to fail has not been
       proved.
-- [ ] The documented `ltl -o access.log` example is still executed, not
+- [x] The documented `ltl -o access.log` example is still executed, not
       skipped. **[assertable]** Method: `tests/validate-doc-examples.sh` reports
       `PASS` for that example's line and the skip count is unchanged from the
       measured baseline of 49 passed, 0 failed, 10 skipped.
-- [ ] The `directories-relative` scenario still proves D9 of
+- [x] The `directories-relative` scenario still proves D9 of
       `features/503-yaml-aggregate-export.md` (relative paths stay relative to
       where `ltl` ran; the working directory is never recorded).
       **[assertable]** Method: the scenario's own three assertions, unchanged in
       what they compare (`tests/fixtures|1`, `2/2`, and the working directory
       absent from the file), now read against a scratch directory with
       `tests/fixtures/` mirrored into it.
-- [ ] No executed example in `docs/usage.md` depends on the working directory
+- [x] No executed example in `docs/usage.md` depends on the working directory
       being the repository root. **[assertable]** Method: the doc-examples
       harness's own pass count after the working-directory change equals the
       measured baseline of 49 passed, 0 failed, 10 skipped. The audit under D3
@@ -445,6 +446,117 @@ Unassertable: none identified.
 
 Unknown verification method: none identified. Every criterion above was
 demonstrated during the investigation on this machine.
+
+## Implementation record
+
+What was built, at which site, and what each measurement read. Every figure
+below was read from a captured harness run on this machine, on the branch
+commit that carries the change.
+
+### Sites
+
+- `assert_directory_owned()` in `tests/validate-aggregate-export.sh`,
+  `assert_working_directory_owned()` in `tests/validate-doc-examples.sh` and in
+  `tests/validate-histogram-bin-counters.sh`: the D4 fail-fast guard. Each
+  lists `*-LTL-AGGREGATE.yaml`, `*-LTL-STATS-*.csv` and `*-LTL-MESSAGES-*.csv`
+  in the directory the run is about to write into and, finding one, reports a
+  failure carrying the file's path and returns without running `ltl`. Nothing
+  is moved or deleted on that path: the directory is left exactly as found,
+  because removing it would destroy the file just reported. Three separate
+  implementations rather than one `tests/lib/` helper, per D6 (the eight
+  correct inline implementations stay as they are; no shared helper is
+  introduced under this issue).
+- `tests/validate-aggregate-export.sh`, the `directories-relative` scenario:
+  `run_export()` gains the guard, and the scenario now mirrors
+  `tests/fixtures/http-status-families.txt` and
+  `tests/fixtures/category-contribution-skew.txt` into
+  `$TMP_DIR/directories-relative/tests/fixtures/` and runs there, so the two
+  operands stay the relative paths D9 of
+  `features/503-yaml-aggregate-export.md` is about. The sweep of the repository
+  root and the `ls … | head -1` selection are gone; the export is read as the
+  only `*-LTL-AGGREGATE.yaml` in a directory the scenario owns, and a run that
+  writes none is a failure rather than an empty variable. The
+  working-directory-absence assertion now greps for the scratch path, which is
+  where the run happened.
+- `tests/validate-aggregate-export.sh`, the `environment-options` scenario:
+  the same guard and the same by-name file selection; it built its own
+  directory already.
+- `tests/validate-doc-examples.sh`, `run_doc_example()`: the `cd "$REPO_DIR"`
+  becomes a `cd` into `$TMP_DIR/run/<example slug>`, created per example and
+  removed with `$TMP_DIR` by the existing `EXIT` trap, with the guard ahead of
+  the run.
+- `tests/validate-histogram-bin-counters.sh`,
+  `scenario_message_stats_csv_shared()`: the `run_section -mdm bin -n 3 -o`
+  call runs inside a `mktemp -d` directory behind the guard, and the unguarded
+  `rm -f *MESSAGES-*.csv *STATS-*.csv *-LTL-AGGREGATE.yaml` is replaced by
+  removing that directory whole.
+
+### Measured
+
+- **The chained gate order passes.** `tests/validate-doc-examples.sh` then
+  `tests/validate-aggregate-export.sh`, no cleanup between, with a stranger
+  export planted in the repository root
+  (`2099-01-01_000000-LTL-AGGREGATE.yaml`, the shape the investigation used):
+  doc-examples 49 passed, 0 failed, 10 skipped; aggregate-export 146 passed,
+  0 failed; and all three `directories-relative` assertions pass
+  (`directory_list` reads `tests/fixtures|1`, `files/files_matched` reads
+  `2/2`, the working directory is absent from the file). Before the change the
+  same chain failed the first two of those three.
+- **The planted stranger survived unchanged.** Its checksum before the chain
+  and after it is identical, and it was the only export product in the
+  repository root afterwards — no harness in the chain wrote one. Before the
+  change a stranger with a stamp sorting after the run's own was deleted on a
+  run reporting 3 passed, 0 failed.
+- **No leak into the repository root.** The listing of
+  `*-LTL-AGGREGATE.yaml`, `*-LTL-STATS-*.csv` and `*-LTL-MESSAGES-*.csv` in the
+  root is identical before and after `tests/validate-doc-examples.sh` (empty in
+  both), and identical before and after
+  `tests/validate-histogram-bin-counters.sh`. The comparison is a listing; no
+  file was deleted to obtain it.
+- **The documented `ltl -o access.log` example is still executed.**
+  `docs/usage.md:203` reports `PASS`, and the run totals are 49 passed,
+  0 failed, 10 skipped — the measured baseline from the investigation,
+  unchanged. Every other example passes from the scratch directory too, which
+  is the proof behind D3's audit prediction that no executed example depends on
+  the working directory being the repository root.
+- **Each guard was proved by sabotage.** With an export planted inside the
+  scenario's own scratch directory before its `ltl` run, each of the three
+  harnesses fails on the `working directory owned` assertion and the failure
+  detail carries the planted file's full path. Without the plant all three run
+  green (aggregate-export 146 passed, histogram-bin-counters 84 passed,
+  doc-examples 49 passed).
+- **`perl -c ltl` passes** and no run produced an ` at <file> line <N>` on
+  stderr; every harness touched carries the runtime-warning check it already
+  had.
+
+### Findings from the build
+
+- **The skip marker on the `-hg duration` example in `docs/usage.md` is
+  defeated by the comment line beneath it, and the example is not executed for
+  a different reason than the records state.** `tests/extract-doc-examples.pl` sets
+  its pending-skip flag on a line matching the marker alone and clears it on
+  any subsequent non-blank line that is not a fence opener. The `-hg duration`
+  example carries the marker and then a second HTML comment giving the reason,
+  which clears the flag, so the extractor emits the example. Measured: running
+  the extractor over `docs/usage.md` returns 59 candidates, one of which is
+  that example. It is nonetheless never executed, because its operand is a
+  `logs/` path that `substitute_command()` has no mapping for, so
+  `run_doc_example()` skips it as "no substitution match for placeholder".
+  The acceptance criterion (no executed example depends on the repository root)
+  holds either way. Two consequences the architect may want to act on
+  separately: any future example whose marker is followed by a reason comment
+  is silently executed, and the reason comment beside that example
+  ("the harness runs examples from the repository root") no longer describes
+  what the harness does. Neither is changed here: the first is a change to the
+  extractor's marker rule, the second is `docs/usage.md` prose, and D3's scope
+  is `run_doc_example()`'s working directory.
+- **A fail-fast guard must not remove the directory it just reported on.** The
+  first implementation in `tests/validate-histogram-bin-counters.sh` called
+  `rmdir` on the guard's failure path; with a stranger present that both
+  printed `rmdir: Directory not empty` and, had the directory been otherwise
+  empty of the harness's own files, would have been an attempt to remove the
+  very file the guard exists to protect. The guard now returns leaving the
+  directory as found. The same applies wherever the rule is adopted.
 
 ## Completion gate
 
