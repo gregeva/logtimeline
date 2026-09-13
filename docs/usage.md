@@ -474,7 +474,7 @@ An **event ledger** is a format with maximum coverage of the operations it descr
 
 Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (`status_code`, `category_bucket`, `message`, or `line` for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist:
 
-- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL)$`; success: none;
+- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL|SEVERE|ALERT|EMERGENCY)$`; success: none;
 - a format that declares `none` declines to classify — no success/failure figure can be produced from it;
 - a format that declares one or both outcomes replaces the default for each outcome it names.
 

@@ -1092,11 +1092,23 @@ my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients,
 my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
 my $histogram_gridline_color = 8;             # Dark grey (bright black / ANSI 8)
 
-# Defines the log level/type buckets and their order for printing and processing
+# Defines the log level/type buckets and their order for printing and processing.
+# The severity names lead, ordered most serious first, and that order is the
+# print order of the category table, the legend, the aggregate export and the
+# STATS CSV header. EMERGENCY, ALERT, CRITICAL and NOTICE are syslog's
+# severities; SEVERE and WARNING are java.util.logging's spellings of the FATAL
+# and WARN bands and sit beside them. AUDIT records an action rather than an
+# outcome, so it has no rank within the severity run and sits after it, ahead of
+# the debugging levels. Each name is written as its highlighted twin followed by
+# itself.
 my @log_levels = (
-    'FORCE-HL', 'FORCE', 'FATAL-HL', 'FATAL',
-    'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
-    'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
+    'FORCE-HL', 'FORCE',
+    'EMERGENCY-HL', 'EMERGENCY', 'ALERT-HL', 'ALERT',
+    'CRITICAL-HL', 'CRITICAL', 'SEVERE-HL', 'SEVERE',
+    'FATAL-HL', 'FATAL',
+    'ERROR-HL', 'ERROR', 'WARNING-HL', 'WARNING', 'WARN-HL', 'WARN',
+    'NOTICE-HL', 'NOTICE', 'INFO-HL', 'INFO', 'AUDIT-HL', 'AUDIT',
+    'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx',
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
     'Pause Remark-HL', 'Pause Remark', 'Pause Cleanup-HL', 'Pause Cleanup',
@@ -1160,10 +1172,17 @@ my $default_chart_block = ($^O eq 'MSWin32') ? 'G' : 'A';
 # Load in ANSI color codes and configure presets for various log levels/types
 my %colors = (
     'FORCE' => "\033[0;35m",
+    'EMERGENCY' => "\033[0;31m",
+    'ALERT' => "\033[0;31m",
+    'CRITICAL' => "\033[0;31m",
+    'SEVERE' => "\033[0;31m",
     'FATAL' => "\033[0;31m",
     'ERROR' => "\033[0;31m",
+    'WARNING' => "\033[0;33m",
     'WARN'  => "\033[0;33m",
+    'NOTICE' => "\033[0;32m",
     'INFO'  => "\033[0;32m",
+    'AUDIT' => "\033[0;36m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
     'DATA'  => "\033[0;34m",
@@ -2693,7 +2712,7 @@ my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
 # generated block (format_classification_src). The tables below are the
 # build-time products the generated code references.
 my %classification_default = (
-    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL)$' } ],
+    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL|SEVERE|ALERT|EMERGENCY)$' } ],
 );
 my @format_cls_sets;      # literal-alternation criteria as hash sets (D25),
                           # indexed by the id spliced into the generated code;
@@ -7613,7 +7632,7 @@ my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important c
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
 
 # --- classification (--explain classification) ---
-my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. Two further states keep those figures honest. A line that satisfies both the success and the failure rule is a *classification conflict*: the rules contradict each other on it, so it is counted as neither, under its own CLASSIFICATION CONFLICT row. A message row whose lines were not all of one state is *mixed*: its lines are counted under MIXED rather than as successes or failures, so the run-level figures say only what the data supports. In the message tables the marker position of every row carries its state as a colour (green success, red failure, violet conflict, terracotta mixed; no mark when the row's lines are unclassified). Either state withholds the percentages, as does an unclassified line on a format that declares both rules: in each case the classified pair has stopped being the whole population, and the counts are shown instead. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL, CRITICAL, SEVERE, ALERT and EMERGENCY are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. Two further states keep those figures honest. A line that satisfies both the success and the failure rule is a *classification conflict*: the rules contradict each other on it, so it is counted as neither, under its own CLASSIFICATION CONFLICT row. A message row whose lines were not all of one state is *mixed*: its lines are counted under MIXED rather than as successes or failures, so the run-level figures say only what the data supports. In the message tables the marker position of every row carries its state as a colour (green success, red failure, violet conflict, terracotta mixed; no mark when the row's lines are unclassified). Either state withholds the percentages, as does an unclassified line on a format that declares both rules: in each case the classified pair has stopped being the whole population, and the counts are shown instead. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
 my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. The success percentage -- successes over classified lines -- is therefore trustworthy at face value only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
 my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted. The classification is also actionable: -if/-ef and -is/-es filter on failures and successes, -hf/-hs highlight them within the full population, and excluding both (-ef -es) leaves exactly the unclassified remainder for inspection.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};

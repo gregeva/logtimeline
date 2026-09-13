@@ -1,0 +1,8 @@
+2026-03-04 09:12:01,100 EMERGENCY [main] app.service.boot  - Emergency level line
+2026-03-04 09:12:02,100 ALERT     [main] app.service.boot  - Alert level line
+2026-03-04 09:12:03,100 CRITICAL  [main] app.service.boot  - Critical level line
+2026-03-04 09:12:04,100 SEVERE    [main] app.service.boot  - Severe level line
+2026-03-04 09:12:05,100 WARNING   [main] app.service.boot  - Warning level line
+2026-03-04 09:12:06,100 NOTICE    [main] app.service.boot  - Notice level line
+2026-03-04 09:12:07,100 AUDIT     [main] app.service.boot  - Audit level line
+2026-03-04 09:12:08,100 INFO      [main] app.service.boot  - Info level line
