@@ -289,11 +289,16 @@ percentiles from the streaming partition and never projects.
 >   summary sentence was not. `csv_output` shares `summary_table`'s snapshot and so
 >   carries the same figure. The only unconditional zero is `time_bucket_stats`.
 >
-> **What the harness actually asserts.** The `time_bucket_stats` zero is asserted
-> (`pattern '^  rebin_finalize_events: 0$'` in the bucket-stats bin scenario). The
-> heatmap and histogram equality is **not**: `tests/validate-histogram-bin-counters.sh`
-> asserts no heatmap or histogram consumer block at all. #472 adds those parent
-> assertions as the minimum its highlight assertions are stated against.
+> **What the harness asserts.** The `time_bucket_stats` zero is asserted
+> (`pattern '^  rebin_finalize_events: 0$'` in the bucket-stats bin scenario).
+> The heatmap and histogram equality is now asserted too, on each parent block
+> and on each highlight block, in the five scenarios #472 added to
+> `tests/validate-histogram-bin-counters.sh` — before #472 that harness asserted
+> no heatmap or histogram consumer block at all. On the two parents and on
+> `heatmap_cells_highlighted` the equality is unconditional; on
+> `histogram_view_highlighted` it holds when every highlight partition carries at
+> least one observation, and the scenario asserting it is constructed to satisfy
+> that, never stated as a general invariant.
 
 ### D10 — Retention is emitted from stage 1, with today's values
 

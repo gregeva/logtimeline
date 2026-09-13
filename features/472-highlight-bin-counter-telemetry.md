@@ -6,7 +6,8 @@
   telemetry, so a highlighted run under-reports its own partitions and memory)
 - **Branch**: `472-the-highlight-bin-counter-sub-stores-are-absent-from-the-v-telemetry-so-a-highlighted-run-under-reports-its-own-partitions-and-memory`
 - **Target release**: v0.18.1
-- **Phase**: specification and acceptance criteria agreed; no production code written
+- **Phase**: implemented and asserted on this branch; the completion gate (full
+  harness suite plus the before/after benchmark) has not run yet
 
 ## Governing contracts, read before planning
 
@@ -602,59 +603,59 @@ the triage.
 
 **Assertable**
 
-- [ ] When a heatmap renders under the bin data model with a live highlight, a
+- [x] When a heatmap renders under the bin data model with a live highlight, a
       block named `consumer: heatmap_cells_highlighted` reports `path: unified`
       with a `partition_count` of at least 1 and a `counter_memory_bytes` of at
       least 1. *Method: `tests/validate-histogram-bin-counters.sh` scenario
       `highlight-blocks-active`, `assert_line` on each field.*
-- [ ] When a histogram renders under the bin data model with a live highlight, a
+- [x] When a histogram renders under the bin data model with a live highlight, a
       block named `consumer: histogram_view_highlighted` reports `path: unified`
       with a `partition_count` of at least 1 and a `counter_memory_bytes` of at
       least 1. *Same scenario.*
-- [ ] On two runs of one invocation differing only in the highlight flag, the
+- [x] On two runs of one invocation differing only in the highlight flag, the
       `partition_count` and `counter_memory_bytes` of `heatmap_cells` and
       `histogram_view` are unchanged, and only the highlight blocks differ.
       This is the attribution invariant: the highlight is reported beside the
       parent, never inside it. *Method: the `heatmap-cells-bin` /
       `histogram-view-bin` arms compared against `highlight-blocks-active`.*
-- [ ] `heatmap_cells_highlighted` reports `rebin_finalize_events` equal to its
+- [x] `heatmap_cells_highlighted` reports `rebin_finalize_events` equal to its
       own `partition_count` on every run where it reports `path: unified`,
       because the highlight loop in `finalize_heatmap_unified()` projects each
       highlight partition exactly once, the same mechanism the parent loop is
       counted by. *Method: `assert_command` comparing the two extracted values
       inside the block.*
-- [ ] `histogram_view_highlighted` reports `rebin_finalize_events` equal to its
+- [x] `histogram_view_highlighted` reports `rebin_finalize_events` equal to its
       own `partition_count` on a run where every highlight partition carries at
       least one observation. *Same method, on a scenario constructed to satisfy
       that condition; the conditionality is stated in the assertion's `asserts`
       field so a later reader does not generalise it.*
-- [ ] `histogram_view_highlighted` reports `percentiles_emitted` as the
+- [x] `histogram_view_highlighted` reports `percentiles_emitted` as the
       twelve-slug ladder the aggregate export's `highlighted:` block publishes,
       and an `out_of_range_bounded` line carrying one `pN=` pair per slug in the
       same order. *Method: exact-line assertion on both lines.*
-- [ ] `heatmap_cells_highlighted` reports neither `percentiles_emitted` nor
+- [x] `heatmap_cells_highlighted` reports neither `percentiles_emitted` nor
       `out_of_range_bounded`, mirroring `heatmap_cells`. *Method: an
       `assert_command` that extracts the block's line range and confirms neither
       key appears within it.*
-- [ ] On a run with the heatmap and histogram active under the bin data model
+- [x] On a run with the heatmap and histogram active under the bin data model
       and no highlight flag of any kind, both highlight blocks are present and
       each reports `path: feature_not_active` as its only field. *Method:
       scenario `highlight-blocks-inactive`.*
-- [ ] The parent `heatmap_cells` and `histogram_view` blocks report the locked
+- [x] The parent `heatmap_cells` and `histogram_view` blocks report the locked
       Decision 8 field list, in the locked order, with
       `rebin_finalize_events` equal to `partition_count` on each. *Method:
       scenarios `heatmap-cells-bin` and `histogram-view-bin`; this is the
       coverage D9 already claims and the harness does not have.*
-- [ ] No `-V` output and no `-mem` output names `bucket_stats_counters_hl`, and
+- [x] No `-V` output and no `-mem` output names `bucket_stats_counters_hl`, and
       a run under `-bdm bin` with a live highlight produces the same
       `time_bucket_stats` block as before the retirement. *Method: an
       `assert_command` grepping a `-mem` capture for the absent name, plus the
       existing `bucket-stats-bin` scenario, which asserts that block today and
       must continue to pass unchanged.*
-- [ ] Every new capture is free of Perl runtime warnings on stderr. *Method:
+- [x] Every new capture is free of Perl runtime warnings on stderr. *Method:
       `check_capture_warnings` on each new capture, already the harness's
       pattern.*
-- [ ] Each new assertion fails on a deliberately broken capture, with its
+- [x] Each new assertion fails on a deliberately broken capture, with its
       `asserts`, `produced_by` and `contract` fields surfaced. *Method: the
       sabotage probe run at authoring time per `tests/HARNESS-DESIGN.md`
       § Proving a new assertion can fail.*
@@ -668,6 +669,86 @@ None.
 None. The verification method is known and was demonstrated during the
 investigation: two runs of one invocation differing only in the highlight flag,
 compared field by field.
+
+---
+
+## Implementation record
+
+Built against the specification above; every decision was implementable as
+written and none was substituted. What the run produces, measured on the
+5,000-line Tomcat access log slice this harness uses, under `-ni -bs 1440 -oe
+-hm duration -hmdm bin -hg duration -hgdm bin`, with and without `-hdmin 100`:
+
+| block | highlighted arm | un-highlighted arm |
+|---|---|---|
+| `heatmap_cells` | `partition_count: 1`, `counter_memory_bytes: 24744`, `rebin_finalize_events: 1` | identical, byte for byte |
+| `histogram_view` | `partition_count: 1`, `counter_memory_bytes: 24744`, `rebin_finalize_events: 1` | identical, byte for byte |
+| `heatmap_cells_highlighted` | `path: unified`, `partition_count: 1`, `counter_memory_bytes: 12928`, `rebin_finalize_events: 1`, `max_partition_bins: 3080` | `path: feature_not_active`, no further field |
+| `histogram_view_highlighted` | the same figures plus the twelve-slug ladder and its twelve-verdict audit line | `path: feature_not_active`, no further field |
+
+The attribution invariant is therefore observed rather than argued: turning the
+highlight on adds 12,928 bytes and one partition to the section's total and
+moves no parent figure. Before this change the two arms' sections were
+byte-identical, so that payload was reported nowhere.
+
+### Findings established while implementing
+
+- **The benchmark comparison tolerates a metric present on one side only.** The
+  released baseline TSVs carry a `MEMORY bucket_stats_counters_hl` row that no
+  new capture will produce once the store is retired (D2). Read in
+  `tests/baseline/compare-results.sh`: a key absent from either side is kept and
+  rendered as an `N/A` value with a `?` indicator, deliberately, so that a metric
+  added, removed or renamed between two versions is surfaced rather than hidden;
+  the script is a report and exits 0 regardless of what it renders. The retired
+  row will appear once in the gate's comparison as a baseline-only `N/A` line,
+  which is the designed behaviour and not a gate failure. No harness, script or
+  fixture anywhere under `tests/` references the store name — only the released
+  baseline TSVs, which are read-only, and feature docs.
+- **The last consumer block in the display order is followed by the
+  `display-dimensions` sub-section drain, inside the parent's brackets.** Any
+  block extraction that stops only at the next `consumer:` line or at the section
+  end therefore swallows the sub-section into whichever block sorts last. The
+  harness's `consumer_block()` stops at any `=== ` marker for this reason. This
+  is a constraint every future consumer of the section shares, and it grew teeth
+  here because appending the highlight blocks (D5) moved a new block into that
+  last position.
+- **The histogram highlight snapshot is taken beside the parent's, before the
+  per-metric loop.** Taking it inside the `if ($highlight_active && $src_hl)`
+  branch would have missed a metric whose highlight store exists but holds no
+  observation, which is exactly the case D6's conditional equality is about. With
+  the snapshot outside the loop, such a metric is counted in `partition_count`
+  and absent from `rebin_finalize_events`, which is what the contract states.
+- **No option surface changed.** The work adds no flag, so `print_help()` and
+  `docs/usage.md` are untouched and their agreement check is unaffected.
+
+### What was asserted, and proved able to fail
+
+`tests/validate-histogram-bin-counters.sh` gains five scenarios and two shared
+assertion helpers (`assert_command` per `tests/HARNESS-DESIGN.md` § When the
+assertion isn't a simple line grep, and a block extractor so a figure is never
+read from a sibling block carrying the same key). The suite runs 129 assertions,
+all passing.
+
+| scenario | invocation adds | what it pins |
+|---|---|---|
+| `heatmap-cells-bin` | `-hm duration -hmdm bin` | the parent heatmap block: `path: unified`, `partition_keying: time_bucket`, the locked field list in the locked order, and the projection count equal to the partition count |
+| `histogram-view-bin` | `-hg duration -hgdm bin` | the parent histogram block: the same, with `metric_global` keying and the ten-slug on-screen legend set |
+| `highlight-blocks-active` | both surfaces on the bin model, plus `-hdmin 100` | both highlight blocks at `path: unified` with positive partition counts and payloads, the projection equality on each, the twelve-slug export ladder and its audit line on the histogram highlight, the absence of both percentile fields on the heatmap highlight, and the parent figures unchanged against the un-highlighted arm |
+| `highlight-blocks-inactive` | the same arm without the highlight flag | both highlight blocks present, each reporting `path: feature_not_active` as its only field |
+| `no-bucket-stats-highlight-store` | `-bdm bin -hdmin 100` | no `-V` field and no per-structure memory row names a per-time-bucket highlight store, on the run that would have populated one; the per-time-bucket store itself is asserted present, so the absence is measured rather than a missing capture |
+
+Per `tests/HARNESS-DESIGN.md` § Proving a new assertion can fail, every new
+assertion was run against a deliberately broken capture before the healthy path:
+a renamed consumer line, a `path:` flipped to the opposite state, a
+`rebin_finalize_events` edited off the equality, a field deleted from the locked
+order, the ladder shortened to the parent's ten slugs, the percentile fields
+leaked onto the heatmap highlight, a telemetry field grown under an inactive
+block, a parent figure moved by the highlight, the retired store name
+reintroduced into the memory listing, and a block name that does not exist. All
+eleven probes failed as required. The end-to-end proof was a sabotage of `ltl`
+itself: pinning `histogram_view_highlighted`'s percentile set to the parent's
+ten slugs makes the harness exit 1 with both ladder assertions failing and the
+`asserts` / `produced_by` / `contract` triple surfaced.
 
 ---
 

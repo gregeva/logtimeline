@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.1";
+my $version_number = "0.18.1-472";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -743,7 +743,8 @@ my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 =>
 # partitions are discarded. Consumed by emit_bin_counter_mode_verbose() to
 # populate the locked #187 Decision 8 -V fields.
 # Keyed by Decision-8 consumer name ('heatmap_cells', 'heatmap_markers',
-# 'histogram_view', 'histogram_bins').
+# 'histogram_view', 'histogram_bins', and the two highlighted-subset names
+# 'heatmap_cells_highlighted' and 'histogram_view_highlighted').
 my %bin_counter_telemetry;
 
 # Special heatmap gradients for colors not in @column_colors
@@ -1028,11 +1029,9 @@ my $message_stats_member_bytes = 0;
 # uses for %heatmap_counters. Populated under $bucket_stats_capture_mode eq 'bin'
 # by counter_update() during the parsing loop, observing $duration. Consumed by
 # calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
-# %bucket_stats_counters_hl carries the highlight subset for store parity with
-# the heatmap pattern; no highlight statistics are derived from it (the
-# per-time-bucket surface has no highlight statistics — only highlight totals).
+# The per-time-bucket surface derives no highlight statistics — only highlight
+# totals — so it keeps no parallel highlight store.
 my %bucket_stats_counters;
-my %bucket_stats_counters_hl;
 
 # Issue #289: per-quantile out_of_range_bounded audit aggregation for the
 # time_bucket_stats consumer. Same worst-case-per-quantile rule as
@@ -1488,8 +1487,9 @@ sub snapshot_counter_telemetry {
     # histograms no longer projects anything. The field stays because a
     # non-zero value would mean a combination path had reintroduced the
     # order-dependent loss D1 removed. Projections at finalize are counted at
-    # their own call sites, after this snapshot (see finalize_heatmap_unified /
-    # finalize_histogram_unified / finalize_message_stats_unified).
+    # their own call sites, after this snapshot (see finalize_heatmap_unified
+    # and finalize_histogram_unified, each counting a parent loop and a
+    # highlight loop, and finalize_message_stats_unified).
     my ($store) = @_;
     my $n = scalar keys %$store;
     my ($growth, $merge, $max_bins, $with_over, $with_under, $over_sum, $under_sum)
@@ -6010,6 +6010,11 @@ sub emit_bin_counter_mode_verbose {
     push @verbose_output,
         "data_model_precision: $data_model_precision_level ($data_model_precision_source)";
 
+    # The two highlight consumers report the parallel partition stores the
+    # heatmap and histogram surfaces stream for the highlighted subset. They
+    # are active only when their parent surface is active AND a highlight is
+    # live; otherwise their block is the path: line alone, like any other
+    # inactive consumer.
     my %feature_active = (
         summary_table     => 1,
         csv_output        => $write_messages_to_csv ? 1 : 0,
@@ -6018,6 +6023,8 @@ sub emit_bin_counter_mode_verbose {
         heatmap_cells     => $heatmap_enabled ? 1 : 0,
         histogram_view    => $histogram_enabled ? 1 : 0,
         histogram_bins    => $histogram_enabled ? 1 : 0,
+        heatmap_cells_highlighted  => ($heatmap_enabled   && $highlight_active) ? 1 : 0,
+        histogram_view_highlighted => ($histogram_enabled && $highlight_active) ? 1 : 0,
     );
 
     my @consumer_order = qw(
@@ -6028,6 +6035,8 @@ sub emit_bin_counter_mode_verbose {
         heatmap_cells
         histogram_view
         histogram_bins
+        heatmap_cells_highlighted
+        histogram_view_highlighted
     );
 
     # Every consumer above runs the unified path, so the only distinctions a
@@ -6045,12 +6054,17 @@ sub emit_bin_counter_mode_verbose {
     );
 
     # Per-consumer percentile sets (R3 of #34 / #287, locked in #187 Decision 8).
+    # histogram_view_highlighted publishes the whole ladder rather than the
+    # parent's legend set: its consumer is the aggregate export's highlighted
+    # block, which writes every quantile in @percentile_ladder. The heatmap
+    # highlight derives cell counts, not percentiles, and carries no set.
     my %percentile_set = (
         heatmap_markers => [qw(p50 p95 p99 p999)],
         histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
         summary_table   => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
         csv_output      => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
         time_bucket_stats => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
+        histogram_view_highlighted => [ map { $_->[0] } @percentile_ladder ],
     );
 
     # Per-consumer partition keying (Decision 8 field).
@@ -6061,6 +6075,8 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins  => 'metric_global',
         summary_table   => '(category, log_key)',
         time_bucket_stats => 'time_bucket',
+        heatmap_cells_highlighted  => 'time_bucket',
+        histogram_view_highlighted => 'metric_global',
     );
 
     # Per-consumer path determination is uniform across all four data-model
@@ -6076,6 +6092,8 @@ sub emit_bin_counter_mode_verbose {
         histogram_view  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
         histogram_bins  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
         time_bucket_stats => ($bucket_stats_capture_mode && $bucket_stats_capture_mode   eq 'raw') ? 1 : 0,
+        heatmap_cells_highlighted  => ($heatmap_capture_mode   && $heatmap_capture_mode   eq 'raw') ? 1 : 0,
+        histogram_view_highlighted => ($histogram_capture_mode && $histogram_capture_mode eq 'raw') ? 1 : 0,
     );
 
     for my $consumer (@consumer_order) {
@@ -11845,7 +11863,6 @@ sub named_structure_sizes {
         heatmap_counters       => Devel::Size::total_size(\%heatmap_counters),
         heatmap_counters_hl    => Devel::Size::total_size(\%heatmap_counters_hl),
         bucket_stats_counters    => Devel::Size::total_size(\%bucket_stats_counters),
-        bucket_stats_counters_hl => Devel::Size::total_size(\%bucket_stats_counters_hl),
         histogram_values       => Devel::Size::total_size(\%histogram_values),
         histogram_counters     => Devel::Size::total_size(\%histogram_counters),
         histogram_counters_hl  => Devel::Size::total_size(\%histogram_counters_hl),
@@ -15018,8 +15035,6 @@ sub read_and_process_logs {
                                 my $entry = $log_analysis{$bucket};
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
-                                counter_update(\%bucket_stats_counters_hl, $bucket, $duration, $bucket_stats_buckets_per_decade)
-                                    if $duration > 0 && $category_bucket =~ /-HL$/;   # store parity only
 
                                 $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
                                 $entry->{max} = $duration if !defined $entry->{max} || $duration > $entry->{max};
@@ -15537,6 +15552,10 @@ sub finalize_heatmap_unified {
     # #189 R7 / #187 Decision 8 shares_partitions_with.
     $bin_counter_telemetry{heatmap_cells}   = snapshot_counter_telemetry(\%heatmap_counters);
     $bin_counter_telemetry{heatmap_markers} = $bin_counter_telemetry{heatmap_cells};
+    # The highlighted subset streams its own partitions and is sized on its own
+    # consumer name, beside the parent rather than folded into it.
+    $bin_counter_telemetry{heatmap_cells_highlighted}
+        = snapshot_counter_telemetry(\%heatmap_counters_hl);
 
     print "\rCalculating heatmap buckets..." unless $disable_progress;
 
@@ -15635,6 +15654,10 @@ sub finalize_heatmap_unified {
             next if $c == 0;
             $heatmap_data_hl{$bucket}{$i} = $c;
         }
+
+        # Counted at the site, symmetric with the parent loop above: every
+        # highlight partition is projected into display shape exactly once.
+        $bin_counter_telemetry{heatmap_cells_highlighted}{rebin_finalize_events}++;
 
         delete $heatmap_counters_hl{$bucket};
     }
@@ -15867,6 +15890,12 @@ sub finalize_histogram_unified {
     # histogram_view and histogram_bins share streaming partitions.
     $bin_counter_telemetry{histogram_view} = snapshot_counter_telemetry(\%histogram_counters);
     $bin_counter_telemetry{histogram_bins} = $bin_counter_telemetry{histogram_view};
+    # The highlighted subset streams its own partitions and is sized on its own
+    # consumer name. Snapshotted here rather than inside the highlight branch
+    # below, so a metric whose highlight store exists but holds no observation
+    # is still counted as a partition it holds.
+    $bin_counter_telemetry{histogram_view_highlighted}
+        = snapshot_counter_telemetry(\%histogram_counters_hl);
 
     print "Calculating histogram statistics..." unless $disable_progress;
 
@@ -15971,6 +16000,12 @@ sub finalize_histogram_unified {
                 }
                 $histogram_stats_hl{$metric} = \%stats_hl;
                 @{$histogram_buckets_hl{$metric}} = @$final_bins_hl;
+
+                # Counted at the site, symmetric with the parent above. The
+                # count reaches partition_count only for the metrics whose
+                # highlight store carried an observation: one holding none is
+                # snapshotted as a partition and never projected.
+                $bin_counter_telemetry{histogram_view_highlighted}{rebin_finalize_events}++;
             }
             delete $histogram_counters_hl{$metric};
         }
