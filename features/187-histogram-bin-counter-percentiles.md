@@ -1803,6 +1803,12 @@ consumer: histogram_view
 
 consumer: histogram_bins
   path: feature_not_active
+
+consumer: heatmap_cells_highlighted
+  path: feature_not_active
+
+consumer: histogram_view_highlighted
+  path: feature_not_active
 === END histogram-bin-counters ===
 ```
 
