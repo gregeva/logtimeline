@@ -43,12 +43,22 @@ neutralize_colour_env
 ACCESS_LOG="$LOGS_DIR/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt"
 SHAPE="-bs 1440 -oe"
 
+# The no-value input. 44 lines whose every line carries an occurrence tally and
+# no duration, bytes or count value, which is the one shape that puts the
+# "nothing was observed" branch of the activity gate under test. Committed and
+# tracked, so this scenario runs in a checkout with no log corpus.
+NO_VALUE_LOG="$REPO_DIR/tests/fixtures/format-detection/wgm-client.txt"
+
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
 if [[ ! -f "$ACCESS_LOG" ]]; then
     echo "ERROR: ACCESS_LOG not found: $ACCESS_LOG"
+    exit 1
+fi
+if [[ ! -f "$NO_VALUE_LOG" ]]; then
+    echo "ERROR: NO_VALUE_LOG not found: $NO_VALUE_LOG"
     exit 1
 fi
 
@@ -65,6 +75,20 @@ run_section() {
     outfile=$(mktemp)
     # shellcheck disable=SC2086
     "$LTL" --disable-progress -ni $SHAPE -V histogram-bin-counters "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    echo "$outfile"
+}
+
+# The same run against a named input file instead of the shared access log.
+# Only the no-value scenario needs this: every other assertion here reads a
+# contract surface the 5k slice carries, and the slice carries a duration on
+# every line, so it cannot produce the state where nothing was observed.
+run_section_on() {
+    local logfile="$1"
+    shift
+    local outfile
+    outfile=$(mktemp)
+    # shellcheck disable=SC2086
+    "$LTL" --disable-progress -ni $SHAPE -V histogram-bin-counters "$@" "$logfile" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -533,8 +557,8 @@ scenario_message_stats_bin() {
 
     assert_line "$out" \
         pattern     '^  path: feature_not_active$' \
-        asserts     'Without -o, csv_output reports path: feature_not_active. csv_output is gated on $write_messages_to_csv (the -o flag); when not active, no telemetry block is emitted.' \
-        produced_by 'emit_bin_counter_mode_verbose() in ltl - %feature_active map' \
+        asserts     'Without -o, csv_output reports path: feature_not_active, and no telemetry block is emitted. Its activity is decided by the sub that already resolves the STATS CSV duration columns - the CSV being active, durations being extracted, and a duration having been observed - rather than by a restatement of those three terms in the emitter.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl - the %feature_active entry for csv_output, which calls stats_csv_duration_columns_active()' \
         contract    'features/187-histogram-bin-counter-percentiles.md section R10 - feature_not_active is the no-op label.'
 
     rm -f "$out" "$out.stderr"
@@ -759,7 +783,7 @@ scenario_bucket_stats_bin() {
 
     assert_no_line "$out" \
         pattern     '^  shares_partitions_with: ' \
-        asserts     'time_bucket_stats has a DEDICATED counter store (not in %shares_with), so it emits the full telemetry block - never a shares_partitions_with short form. Inverting the heatmap sharing is a separate follow-up.' \
+        asserts     'time_bucket_stats has a DEDICATED counter store (not in %shares_with), so it emits the full telemetry block - never a shares_partitions_with short form. It belongs to no pair, so no sharing direction applies to it.' \
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %shares_with map has no time_bucket_stats entry' \
         contract    'features/289-bucket-stats-bin-counter-data-model.md section dedicated-store decision (divergence 2).'
 
@@ -1129,6 +1153,114 @@ scenario_always_present() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario 8b: a run on which no value any consumer would bin was observed.
+# Every consumer reports feature_not_active, and none reports unified.
+#
+# Invocation coherence: nothing rendered is read, every assertion reads a
+# path: line. -dm bin is load-bearing rather than decoration - without it the
+# per-message surface resolves to raw and summary_table reports user_opt_out,
+# which masks the label under test. -hm duration -hg duration switch the
+# heatmap and histogram on so their four consumers are demanded and can only
+# be excused by the observation half of the gate.
+# ---------------------------------------------------------------------------
+assert_block_path() {
+    local out="$1" consumer="$2" expected="$3"
+    assert_command \
+        command     "[[ \"\$(block_field '$out' '$consumer' path)\" == '$expected' ]]" \
+        label       "$consumer reports path: $expected on a run that observed no value" \
+        asserts     "A consumer whose feature is switched on but which observed no value it would bin reports path: $expected and no further fields, rather than claiming the unified path over a partition set that was never constructed." \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl - the %feature_active map, whose every entry conjoins the consumer demand term with an observed-value term' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section R10 (feature_not_active means no values were matched and no partition was constructed) + section Decision 8 implementation guidance (do not emit zero-partition blocks under unified) + section Edge cases, row for no matched messages'
+}
+
+scenario_no_values_observed() {
+    current_scenario="no-values-observed"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_section_on "$NO_VALUE_LOG" -dm bin -hm duration -hg duration)
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    # Every consumer in the locked block order, so a consumer added to the
+    # order without a gate of its own is a failure here rather than a silent
+    # gap. Block-scoped, so a label is never read from a sibling block.
+    local consumer
+    for consumer in summary_table csv_output time_bucket_stats \
+                    heatmap_markers heatmap_cells \
+                    histogram_view histogram_bins \
+                    heatmap_cells_highlighted histogram_view_highlighted; do
+        assert_block_path "$out" "$consumer" feature_not_active
+    done
+
+    # Rides on the nine positive assertions above rather than standing alone:
+    # on its own an absence check would pass against an empty section.
+    assert_no_line "$out" \
+        pattern     '^  path: unified$' \
+        asserts     'No consumer claims the unified path on a run that matched no value, so a reader debugging blank percentiles is not sent downstream of a partition that was never built.' \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl - the %feature_active map gating the path label' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 implementation guidance - do not emit zero-partition blocks under unified'
+
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 8c: the shared-partition direction, on a run where all three pairs
+# are live. The downstream consumer of each pair emits the short block naming
+# its upstream; each upstream emits the full block instead of being reduced to
+# a short one. Direction is the store's: the upstream is the consumer whose
+# counter store the telemetry was snapshotted from.
+#
+# -o is what switches csv_output on, so the pair it belongs to is live in the
+# same run as the other two rather than asserted somewhere else.
+# ---------------------------------------------------------------------------
+assert_shares_with() {
+    local out="$1" downstream="$2" upstream="$3" store="$4"
+    assert_command \
+        command     "[[ \"\$(block_field '$out' '$downstream' shares_partitions_with)\" == '$upstream' ]]" \
+        label       "$downstream declares it shares partitions with $upstream" \
+        asserts     "$downstream is the downstream consumer of $upstream: the run's telemetry is snapshotted from $store, which $upstream owns, and $downstream is assigned that same snapshot. It therefore emits the short block naming $upstream rather than repeating the partition-state fields. Asserted inside the $downstream block, because the target name alone does not say which block carried it." \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl - the %shares_with map, against the snapshot_counter_telemetry() assignments in the finalize subs' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - shared-partition consumers: the three pairs and the direction rule are locked; display order is independent of direction, so direction is never inferred from block position'
+}
+
+assert_owns_partitions() {
+    local out="$1" consumer="$2"
+    assert_command \
+        command     "[[ -n \"\$(block_field '$out' '$consumer' partition_keying)\" && \"\$(block_field '$out' '$consumer' partition_count)\" =~ ^[0-9]+\$ ]]" \
+        label       "$consumer reports its own partition_keying and partition_count" \
+        asserts     "$consumer is the upstream of its pair, so it reports the partition-state fields rather than a shares_partitions_with short form. An upstream reduced to a short block would mean the direction had inverted." \
+        produced_by 'emit_bin_counter_mode_verbose() in ltl - the full-block branch taken when %shares_with carries no entry for the consumer' \
+        contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - shared-partition consumers: the upstream of each locked pair emits the full block'
+}
+
+scenario_shared_partition_direction() {
+    current_scenario="shared-partition-direction"
+    echo "[$current_scenario]"
+    # -o writes its products into the working directory, so this scenario runs
+    # in a scratch directory it created and removes (tests/HARNESS-DESIGN.md
+    # section A harness owns the directory it runs ltl in).
+    local run_dir out
+    run_dir=$(mktemp -d)
+    assert_working_directory_owned "$run_dir" || return
+    out=$(cd "$run_dir" && run_section -dm bin -n 3 -o -hm duration -hg duration)
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    assert_shares_with "$out" csv_output      summary_table  'the per-message per-key counters'
+    assert_shares_with "$out" heatmap_markers heatmap_cells  'the per-time-bucket heatmap counters'
+    assert_shares_with "$out" histogram_bins  histogram_view 'the per-metric histogram counters'
+
+    assert_owns_partitions "$out" summary_table
+    assert_owns_partitions "$out" heatmap_cells
+    assert_owns_partitions "$out" histogram_view
+
+    rm -rf "$run_dir"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
 # Scenario 9: the display-dimensions sub-section, and the epoch its name
 # carries. Needs -hg: the sub-section exists only when a histogram renders.
 # ---------------------------------------------------------------------------
@@ -1206,6 +1338,10 @@ echo ""
 scenario_no_bucket_stats_highlight_store
 echo ""
 scenario_always_present
+echo ""
+scenario_no_values_observed
+echo ""
+scenario_shared_partition_direction
 echo ""
 scenario_display_dimensions
 

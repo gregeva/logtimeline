@@ -825,3 +825,135 @@ direction under D10 and the stability-contract checklist under D11.
    This belongs with #548's stale-prose sweep or with #545 (harnesses accept an
    unknown scenario selector or flag silently), not here: it is in a different
    harness, about a different section, and touches nothing this change opens.
+
+---
+
+## Implementation status
+
+**Implemented on this branch, rebased onto `release/0.18.1` after #472 (the
+highlight bin-counter sub-stores are absent from the `-V` telemetry) merged.**
+The ordering D8 asked for held: #472 added `heatmap_cells_highlighted` and
+`histogram_view_highlighted` to the locked consumer table and the block order,
+and this change re-gated the enlarged map. Two textual conflicts arose in
+Decision 8 and were resolved by appending this issue's amendment to #472's
+heading and keeping #472's nine-consumer display order, exactly as D8
+prescribed ("the second branch rebases and appends rather than merging prose").
+
+### Findings established during implementation
+
+1. **The no-value defect is over nine consumers, not seven, and the count in
+   the retirement amendment was replaced rather than raised.** Re-measured on
+   the branch head after the rebase, with
+   `-ni -bs 1440 -oe -dm bin -hm duration -hg duration` on the 44-line
+   `tests/fixtures/format-detection/wgm-client.txt`, five consumers mislabelled:
+   `summary_table`, `heatmap_markers`, `heatmap_cells`, `histogram_view` and
+   `histogram_bins`. The two highlight consumers already reported
+   `feature_not_active`, because no highlight was live. The amendment's phrase
+   "the seven per-consumer blocks" is now "every per-consumer block in the
+   locked display order", so a later consumer addition cannot make it false
+   again — which is the failure mode that produced this issue twice.
+
+2. **A gate on the counter store alone would have relabelled every run the user
+   pinned to `raw`, and was rejected for it.** `partition_count` is available at
+   emit time and reads zero on a no-value run, which makes it a tempting
+   observation term. Measured on the same fixture with `-dm raw`, the four
+   surface consumers report `user_opt_out` today. The loop tests
+   `%feature_active` **before** `%consumer_opted_out_to_raw`, so a
+   store-derived term would have turned those four into `feature_not_active`
+   and silently destroyed the opt-out report that § R10 and Decision 7 (the
+   per-surface data-model selectors, re-locked 2026-08-27 via #460) both
+   require. **The constraint this establishes**: the observation term in
+   `%feature_active` must be a property of the *values seen*, never of the
+   counter stores, because the stores are empty by construction on the raw
+   path. Every term used here satisfies that.
+
+3. **The heatmap's observation is `$heatmap_min`; the histogram's needed a
+   resolution sub of its own.** The heatmap tracks its min and max above the
+   raw/bin branch in the read loop, so `$heatmap_min` being defined is one
+   observation that holds under either data model — the property finding 2
+   requires. The histogram has no equivalent: the raw path pushes onto
+   `%histogram_values` and the bin path records `%histogram_data_min`, and
+   neither is written by the other. `histogram_value_observed()` therefore
+   answers from both stores. It tests the arrays for *holding a value*, not the
+   keys for existing, because `%histogram_values` is pre-seeded with an empty
+   array per built-in metric and a `keys` test over it would report an
+   observation on every run.
+
+4. **The heatmap's index pre-seed does not make the observation term lie, and
+   was checked rather than assumed.** `$heatmap_min` is also set before the
+   parse pass from the index's stored min and max for the heatmap's metric
+   column, when an index is used and the pre-seed population is the correct
+   one. That is not a false observation: the index carries a min and max for
+   that column only because the metric was observed when the index was built
+   over the same population, so `unified` is the right label there. Verified by
+   running each of the two fixtures twice, once building the index and once
+   using it: on the no-value fixture the heatmap consumers read
+   `feature_not_active` on both passes (no index min or max exists to pre-seed
+   from), and on a 3,000-line slice of the access log they read `unified` on
+   both passes. The indexed and non-indexed labels are identical in both cases.
+
+5. **`summary_table` moved from a hard literal `1` to the conjunction the
+   messages table already uses.** `print_message_summary()` resolves its
+   statistics variant as `$message_duration_stats_demand && $durations_observed`,
+   the same demand-plus-observation pair the contract's edge-case guidance
+   describes. The emitter now reads that pair rather than asserting the
+   consumer is unconditionally active, which is what made `summary_table` the
+   one consumer that could never report `feature_not_active`.
+
+6. **No value-bearing label changed.** Every consumer's `path:` line was
+   captured before and after the change across the eleven invocation shapes the
+   harness's existing scenarios use (default, per-message bin and raw,
+   per-bucket bin and raw, heatmap bin, histogram bin, highlight active and
+   inactive, always-present, display-dimensions), on the 5,000-line access log.
+   The two captures are byte-identical, which is criterion 4 discharged by
+   measurement rather than by the suite passing.
+
+### Harness
+
+`tests/validate-histogram-bin-counters.sh` goes from 84 to 147 passing
+assertions across 18 scenarios, 0 failing.
+
+- **`scenario_no_values_observed`** runs `-dm bin -hm duration -hg duration` on
+  the committed fixture through `run_section_on()`, a sibling of `run_section`
+  taking the input file (the existing helper hard-codes the shared access log).
+  It asserts `path: feature_not_active` block-scoped on all nine consumers in
+  the locked order, then one `assert_no_line` for `^  path: unified$` riding on
+  those nine. Iterating the whole locked order means a consumer added without a
+  gate of its own fails here rather than passing silently.
+- **Fail-first, recorded.** Run against the unchanged `ltl` the scenario failed
+  6 of its 11 assertions, and exactly the ones predicted: the five mislabelling
+  consumers named in finding 1, plus the `path: unified` absence check. The
+  other four consumers passed because their features were off, which is why the
+  fail-first capture rather than the scenario alone is the evidence.
+- **`scenario_shared_partition_direction`** (D10) runs `-dm bin -n 3 -o
+  -hm duration -hg duration` so all three pairs are live in one run, and
+  asserts each downstream's `shares_partitions_with:` naming its locked
+  upstream, block-scoped, plus each upstream emitting its own
+  `partition_keying:` and `partition_count:` rather than being reduced to a
+  short block. It runs in a scratch directory it creates and removes, because
+  `-o` writes export products into the working directory. This closes the
+  coverage gap the specification measured: `shares_partitions_with:
+  heatmap_cells` and `shares_partitions_with: histogram_view` had no assertion
+  anywhere before this change.
+- The withdrawn follow-up clause on the `time_bucket_stats` negative assertion
+  is removed (D10), and the `csv_output` inactive assertion's `asserts` text no
+  longer names the single option flag, since that consumer is now decided by
+  `stats_csv_duration_columns_active()`.
+
+### Acceptance criteria
+
+All sixteen hold. Criteria 1, 2 and 3 (no-value labels and the absence of
+`unified`) are asserted by `scenario_no_values_observed`; criterion 4 by the
+before/after capture in the finding that no value-bearing label changed, and
+the unchanged existing scenarios;
+criterion 5 by the `csv_output` entry being a call to
+`stats_csv_duration_columns_active()`; criterion 6 by `time_bucket_stats`'s map
+entry being untouched; criterion 7 by `scenario_display_dimensions` still
+asserting its `=== END histogram-bin-counters ===` line; criterion 8 by
+`consumers_active` surviving only inside the dated amendment that retires it;
+criterion 9 by the doc's worked invocation exiting 0 with clean stderr;
+criteria 10 to 13 by `scenario_shared_partition_direction` and the value sweep;
+criterion 14 by the three numbered steps of `tests/HARNESS-DESIGN.md`
+§ Stability contract; criterion 15 by the follow-up wording returning no line;
+criterion 16 by eye on the rendered section, where all nine blocks read
+`feature_not_active` and none reads `unified`.
