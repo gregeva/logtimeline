@@ -370,6 +370,43 @@ runs eight gates over every sample of every entry. Nothing per line.
 *Architect decision, 2026-09-12, with the two directions and the union equality
 as the architect stated them.*
 
+### Amendment of 2026-09-13: the vocabulary is the global list plus what the formats declare
+
+The architect's direction, given in dialog on 2026-09-13, replaces the
+inheritance and gate framing above. It supersedes R1, R2, D4 and D5 where they
+differ; the text of those sections is kept as the record of what was planned.
+
+- **A format may declare levels or not.** Nothing is inferred from an entry that
+  declares nothing. There is no "standard severity set" distinct from the global
+  list: the global list is what the tool works from today and it stays the base.
+- **The vocabulary a run uses is the global list combined with the levels the
+  formats declare.** A declared level joins the vocabulary; it does not have to
+  already be a member of the global list, and the global list does not have to
+  be covered by declarations. R2's equality, D5's "every declared level is a
+  member of the global vocabulary" direction and its union equality are dropped.
+  What remains of D5 is the classification cross-check: a level named in a
+  classification criterion that is neither in the global list nor declared by
+  any entry fails the build, naming it, because that is the case that produced
+  the `CRITICAL` divergence.
+- **D4's table stands as the list of what each declaring entry adds**, read as
+  additions rather than replacements. "Every other entry declares nothing and
+  inherits the standard severity set" becomes "every other entry declares
+  nothing". `--help formats` (D8) states the declared levels for an entry that
+  declares any and says nothing about levels for one that does not.
+- **Acceptance criteria.** AC6 (a declaration outside the global vocabulary
+  fails the build) and AC8 (the union equals the vocabulary) fall. AC7 is
+  restated: a level named in a classification criterion that is in neither the
+  global list nor any declaration fails the build, naming it. AC9's "an entry
+  that inherits says so" becomes "an entry that declares nothing shows no level
+  line". Every other criterion stands.
+- **Open before implementation:** whether every registry entry's declaration
+  joins the vocabulary at build time, as D2 (the build unions every
+  declaration into one global set) locks, or only the declarations of the
+  formats detected for the run, as the architect's phrasing on 2026-09-13
+  ("the defined levels from the detected formats") reads. The two differ only
+  when a file is read under one format while another format declares a level
+  the file carries. Raised with the architect; implementation waits on it.
+
 ### D6: One report line per format, each token with its line count, always printed
 
 At the end of the run, one line per format that produced unregistered levels,
