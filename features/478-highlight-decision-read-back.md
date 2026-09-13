@@ -2,9 +2,11 @@
 
 ## Status
 
-Specified, not implemented. The issue was reframed on 2026-09-13 from a
-performance bug into a convergence fix; the performance premise is recorded
-below as refuted, with the measurements.
+Implemented, awaiting the completion gate. The issue was reframed on 2026-09-13
+from a performance bug into a convergence fix; the performance premise is
+recorded below as refuted, with the measurements. The twelve in-loop read-back
+sites now read the per-line boolean the tag point sets; § Implementation record
+carries what the work measured and confirmed.
 
 ---
 
@@ -443,31 +445,47 @@ Triaged per `docs/test-driven-development.md`.
       assertions actually run, unchanged from the base commit.
       *Method: the full harness suite at the completion gate; the eleven are
       named in § Harness plan.*
-- [ ] The regression baselines in `tests/validate-regression.sh` match byte for
+      **Six of the eleven were run individually during implementation and all
+      exited 0 (§ Implementation record); the criterion stays open until the
+      full suite runs at the gate, which is what it is stated against.**
+- [x] The regression baselines in `tests/validate-regression.sh` match byte for
       byte, with no baseline re-blessed. A re-blessed baseline on this change is
       a behaviour change and therefore a defect.
       *Method: `CI=1 ./tests/validate-regression.sh`, captured once to the
       scratchpad and inspected there.*
-- [ ] The STATS CSV comparison in `tests/validate-csv-output.sh` shows no cell
+      **Met at implementation: 74 passed, 0 failed, 0 skipped, and `git status`
+      afterwards showed `ltl` as the only modified file. Re-run at the gate.**
+- [x] The STATS CSV comparison in `tests/validate-csv-output.sh` shows no cell
       change, including every `-HL` column.
       *Method: `CI=1 ./tests/validate-csv-output.sh` before
       `CI=1 ./tests/validate-statistics.sh`, per the shared-cache ordering.*
-- [ ] `ltl`'s stderr carries no ` at <file> line <N>` runtime warning on any
+      **Met at implementation: 28 pass, 0 fail, and a direct before/after diff of
+      the STATS CSV produced on the status-families fixture under a highlight was
+      byte-identical across its `2xx-HL`, `4xx-HL` and `5xx-HL` columns.**
+- [x] `ltl`'s stderr carries no ` at <file> line <N>` runtime warning on any
       harness run, in particular no uninitialized-value warning naming the new
       boolean.
       *Method: `tests/lib/runtime-warnings.sh`, already included by every
       harness that invokes `ltl`.*
-- [ ] Under `-bdm bin` with an active highlight, the highlight bin-counter
+      **Met at implementation: no capture from any A/B arm carried one, and the
+      six harnesses run all exited 0.**
+- [x] Under `-bdm bin` with an active highlight, the highlight bin-counter
       blocks report the same `partition_count` and `counter_memory_bytes` as on
       the base commit.
       *Method: #472's `highlight-blocks-active` scenario in
       `tests/validate-histogram-bin-counters.sh`. This criterion is not
       assertable before #472 lands, which is why #478 is blocked by it.*
-- [ ] No occurrence of `=~ /-HL$/` remains between the tag point and the end of
+      **Met at implementation: 129 passed, 0 failed, and a direct before/after
+      diff of the whole `histogram-bin-counters` section under
+      `-hdmin 100 -hm duration -hmdm bin -hg duration -hgdm bin` was identical,
+      with both highlight consumer blocks reporting a real partition rather than
+      an inactive path.**
+- [x] No occurrence of `=~ /-HL$/` remains between the tag point and the end of
       the per-line loop in `read_and_process_logs()`.
       *Method: manual grep at review time (`grep -c -- '=~ */-HL\$/'` over the
       sub's line range), not a harness. Stated as a review check rather than an
       automated assertion for the reasons in § Harness plan.*
+      **Met at implementation: twelve before the change, zero after.**
 
 **Unassertable**
 
@@ -605,6 +623,92 @@ scale) but it blocks every future line-level profiling task in the repository.
 Recorded as a finding to be filed separately by the architect; deliberately not
 filed from this issue, because folding it in would be the scope creep the #432
 analysis refused.
+
+---
+
+## Implementation record
+
+What the implementation measured and confirmed, on the tree rebased onto
+`release/0.18.1` at the merge of #472 (the highlight bin-counter sub-stores are
+absent from the `-V` telemetry, so a highlighted run under-reports its own
+partitions and memory).
+
+### The site count on the merged tree is twelve, as D1 predicted
+
+Counted with the recipe in § 4: `awk` over the line range of
+`read_and_process_logs()` (the sub start to the following `sub`), then
+`grep -c -- '=~ */-HL\$/'`. **Twelve** before the change, **zero** after. The
+thirteenth, the `counter_update(\%bucket_stats_counters_hl, …)` call annotated
+`# store parity only`, is absent from the tree: #472's D2 (the per-time-bucket
+parity store is retired, because it derives nothing and store parity is not a
+requirement any consumer states) deleted it, exactly as D1 anticipated. No
+activation gate was planned around it.
+
+### D7's equivalence argument re-verified before the first edit
+
+D7 requires that `$category_bucket` is never reassigned between the tag point
+and the last suffix test, and that the argument is re-checked before editing.
+Grepping the sub for writes to `$category_bucket` found three and only three:
+the two `$category_bucket = "DATA"` assignments on the CSV data paths, both
+several hundred lines *above* the tag point, and the `.= '-HL'` at the tag point
+itself. All twelve read-back sites sit below the tag point in the same loop
+iteration. No new assignment has appeared below it, so the substitution is
+value-preserving at every site and the argument stands.
+
+### The four post-loop tests and the message-path substitution are where D2 and D3 say
+
+After the change, five `-HL` suffix operations remain in the file, and each is
+one D2 or D3 names: the `$log_level =~ s/-HL$//` display transform on the
+message path inside `read_and_process_logs()`, two tests in
+`normalize_data_for_output()`, one in `print_bar_graph()`, and one in
+`summary_category_row()` for the bar-fill colour. The last is the "bar-fill
+colour selection" D3 names; `summary_category_row()` is the sub that holds it.
+
+### The histogram block keeps its local alias
+
+Per § 4, the histogram capture block's
+`my $is_highlighted = ($category_bucket =~ /-HL$/);` became
+`my $is_highlighted = $line_is_highlighted;`. The alias is kept rather than
+removed so the block's eight downstream `$is_highlighted` reads are untouched,
+which is what § 6 specifies.
+
+### Behaviour is unchanged: measured, not asserted
+
+Each arm below ran the same invocation against the commit being changed and
+against the working tree, both stamped `0.18.1-478` so the version string could
+not differ. Every capture went to the scratchpad once and was diffed there.
+Differences found: only the `TOTAL TIME` and `MAXIMUM MEMORY USED` summary rows,
+which vary run to run.
+
+| Input and options | Sites reached | Result |
+|---|---|---|
+| `tests/fixtures/http-status-families.txt`, `-h '/store/orders' -hm duration -hg duration` | duration and bytes totals, heatmap raw capture, histogram capture | Rendered output identical |
+| `tests/fixtures/udm-counting-tokens.txt`, `-h alice -s -V udm-counting` with distinct, count and a regex-captured session metric | both user-defined-metric arms, session and user tallies, thread-pool tallies | Rendered output and the `udm-counting` section identical |
+| `logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`, `-hdmin 100 -hm duration -hmdm bin -hg duration -hgdm bin -V histogram-bin-counters` | heatmap and histogram bin-counter feeds under an active highlight | Every block identical, `heatmap_cells_highlighted` and `histogram_view_highlighted` both reporting `partition_count: 1` rather than an inactive path |
+| `tests/fixtures/http-status-families.txt`, `-h '/store/orders' -o -n 5` | the STATS CSV `-HL` columns (`2xx-HL`, `4xx-HL`, `5xx-HL`), the MESSAGES CSV, the aggregate export | All three byte-identical apart from the aggregate's `total_time` line |
+| A ThingWorx application log, `-h ERROR -n 10` | the message path under an active highlight | Rendered output identical, and no TOP MESSAGES row carries a `-HL` suffix, so D2's substitution still fires |
+
+No capture's stderr carried a ` at <file> line <N>` runtime warning; the only
+stderr text produced by any arm was the behavioural notice that `-n 0` writes no
+MESSAGES CSV, identical on both arms.
+
+### Harnesses executed during implementation
+
+Run individually while working, not as the gate. Each exited 0 with assertions
+actually run, and no regression baseline was re-blessed (the only modified file
+in the tree after the runs was `ltl`).
+
+| Harness | Result |
+|---|---|
+| `tests/validate-histogram-bin-counters.sh` | 129 passed, 0 failed — includes the highlight-blocks-active scenarios #472 added |
+| `tests/validate-regression.sh` | 74 passed, 0 failed, 0 skipped — includes the highlighted heatmap and histogram bin baselines |
+| `tests/validate-csv-output.sh` | 23 scenarios, 28 pass, 0 fail |
+| `tests/validate-udm-counting.sh` | 35 passed, 0 failed |
+| `tests/validate-outcome-criteria.sh` | 26 passed, 0 failed |
+| `tests/validate-category-names.sh` | 26 passed, 0 failed |
+
+The remaining highlight-referencing harnesses named in § Harness plan are the
+completion gate's to run, with the full suite.
 
 ---
 
