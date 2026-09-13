@@ -552,6 +552,14 @@ Each is assertable by grep and by reading. Triage below.
 
 ## Completion gate
 
+**Architect decision, 2026-09-13: all parts land together.** The two edits to
+`tests/validate-runtime-config.sh` (the header comment naming a warning that no
+longer fires, and the dead `--exact-percentiles is deprecated` alternative in
+the clean-run scenario's `assert_no_line` pattern) stay in this sweep. Nothing is
+refiled onto #545 (harnesses accept an unknown scenario selector or flag
+silently). The gate is therefore the full harness suite plus a before/after
+benchmark on this machine, per the scope table's last row.
+
 Per `docs/process/workflow.md` § 3, the scope test is applied to the diff, not to how the
 change feels.
 
