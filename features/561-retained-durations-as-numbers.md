@@ -267,6 +267,12 @@ the numbers are unchanged, and the new spelling agrees with what the option
 already documents itself as producing. But it is a user-observable export change,
 so it is the architect's call rather than one to make inside the implementation.
 
+**Architect decision, 2026-09-13: accept.** The `-cp full` spelling change on
+fractional-duration formats is accepted as the trade for halving the two
+duration-sample stores. The acceptance criteria below carry it as an accepted,
+asserted drift on the fractional fixture, and the release note names it beside
+the memory reduction.
+
 ## Acceptance criteria
 
 Triaged per `docs/test-driven-development.md` before implementation. Criteria are
@@ -373,7 +379,10 @@ reaching the retention sites.
 
 ## Release note
 
-**Pending the blocking decision.**
+**Decided 2026-09-13: one bullet, naming both.** The architect accepted the
+`-cp full` spelling change, so the bullet says that `--csv-precision full` no
+longer carries a log line's trailing zeros into the exported duration columns,
+and that raw-mode runs use about half the memory for duration samples.
 
 If the `-cp full` spelling change is accepted, a bullet is owed: it is a
 user-observable change to an exported figure. Wording would name what a user
