@@ -15,21 +15,22 @@ represents as a double — stands unchanged here and is not reopened.
 
 ## Status
 
-**Specification and acceptance criteria written; implementation is blocked on one
-architect decision.**
+**Specification and acceptance criteria agreed; the blocking decision is taken
+and implementation proceeds.**
 
-The change itself is five lines and behaves as the prototype measured: the two
+The change is five lines and behaves as the prototype measured: the two
 duration-sample stores halve, the wall clock does not rise, and every rendered
-terminal figure is identical. But a surface the prototype did not exercise does
+terminal figure is identical. One surface the prototype did not exercise does
 change: under `-cp full` (`--csv-precision full`) on a format whose durations are
 written with fractional milliseconds, the exported percentile and min/max columns
 lose the trailing zeros the log line carried — `5.000` is exported as `5`, and
 `35.010` as `35.01`. The numbers are equal; the spelling is not.
 
-The issue's second "done when" clause requires every exported figure to be
-identical, so this is a stop rather than a judgement to make here. The finding,
-the measurement and the decision it needs are under *§ The exported-spelling
-finding* below.
+**The architect accepted that trade on 2026-09-13**, so the second "done when"
+clause is read as "identical except for the accepted spelling change", and the
+acceptance criteria below assert the accepted spelling on the fractional fixture
+rather than treat it as a defect. The measurement that produced the finding is
+under *§ The exported-spelling finding*.
 
 ## The motivating consumer
 
@@ -284,8 +285,9 @@ derived from the issue's three "done when" clauses.
       `./ltl --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1
       tests/fixtures/tomcat-access-duration-spread.txt` reports a
       `MEMORY log_analysis` row at or below a ceiling derived from the normalised
-      representation, and a `MEMORY log_messages` row likewise, both materially
-      below today's figures on the same fixture.
+      representation and set below today's figure on the same fixture, so that a
+      revert of the normalisation — which can only make the row larger — fails the
+      assertion.
       *Method:* a new scenario in `tests/validate-statistics-demand.sh`, following
       the shape #528 landed there (scenario-13, the retained-duration ceiling):
       exact `MEMORY` rows of `-V benchmark-data` rather than the rounded `-mem`
@@ -293,9 +295,17 @@ derived from the issue's three "done when" clauses.
       the number larger, the fixture's line count asserted beside the threshold so
       a regenerated fixture re-derives the ceiling rather than absorbing it, and a
       missing row failing hard rather than reading as a value under the ceiling.
-      The two ceilings are derived by running both builds five times each on the
-      pinned fixture and placing each ceiling between the figures, as #528 derived
-      its 33,000.
+      The ceiling is derived by running both builds five times each on the
+      pinned fixture and placing it between the figures, as #528 derived its
+      33,000. Pre-change half, measured on this machine over five runs of the
+      committed build under that invocation: `MEMORY log_analysis` 32,329 bytes
+      on all five runs; `MEMORY log_messages` 49,875 on four and 48,851 on one.
+      The `log_messages` row moves by one 1,024-byte hash-bucket resize step
+      between runs of the same build, which is the instability #528 recorded and
+      the reason its scenario reads `log_analysis` only. The new scenario
+      therefore also asserts `log_analysis`, whose figure is bit-identical across
+      runs; the `log_messages` saving is reported by the gate's benchmark rather
+      than by a harness threshold sitting on a row that resizes.
       *Note:* #528's existing scenario-13 ceiling of 33,000 bytes is an upper bound
       on `log_analysis` and this change lowers that row, so that scenario continues
       to pass unchanged; the new scenario asserts the lower figure the saving
@@ -315,12 +325,21 @@ derived from the issue's three "done when" clauses.
       the pre-change and post-change builds.
       *Method:* a scenario asserting the rendered figures on that fixture. Measured
       identical on both surfaces during specification.
-- [ ] **Assertable — clause 2, the drift that is not identical.** The `-cp full`
-      export on a fractional-duration format changes spelling as recorded under
-      *§ The exported-spelling finding*.
-      *Method:* measured during specification, both builds, recorded above.
-      **This criterion currently fails clause 2 as the issue words it**, and is the
-      subject of the blocking decision.
+- [ ] **Assertable — clause 2, the accepted drift, asserted rather than tolerated.**
+      On `tests/fixtures/format-detection/access-thread-session.txt` under
+      `-o -cp full`, the exported duration columns carry the numeric spelling of
+      each retained value and not the log line's: the STATS row's `duration_min`
+      reads `5` rather than `5.000`, and `duration_p95` reads `35.01` rather than
+      `35.010`, while the values remain equal to the spellings the log line
+      carried (`5` == `5.000`, `35.01` == `35.010` numerically).
+      *Method:* a new scenario asserting both halves on the committed fractional
+      fixture — the spelling, so that the accepted drift is a stated invariant a
+      future change cannot silently reverse or extend, and the numeric equality,
+      so that a truncation (which `int($duration)` would produce and D1 rejects)
+      fails rather than passes the spelling half.
+      *Why it is asserted rather than merely recorded:* the architect accepted a
+      user-observable export change on the strength of the values being unchanged.
+      An assertion is what keeps those two halves bound together.
 
 ### Unassertable
 
@@ -354,7 +373,7 @@ section, its keys and its gating do not.
 | `tests/validate-statistics-demand.sh` | new scenario asserting the normalised memory figures |
 | `features/561-retained-durations-as-numbers.md` | this document |
 | `--help`, `docs/usage.md` | none — no option is added or changed |
-| `-cp full` exported spelling on fractional formats | changed; the blocking decision |
+| `-cp full` exported spelling on fractional formats | changed; accepted by the architect and asserted by the new fractional scenario |
 
 ## Completion gate
 
@@ -384,14 +403,10 @@ reaching the retention sites.
 longer carries a log line's trailing zeros into the exported duration columns,
 and that raw-mode runs use about half the memory for duration samples.
 
-If the `-cp full` spelling change is accepted, a bullet is owed: it is a
-user-observable change to an exported figure. Wording would name what a user
-sees — that `--csv-precision full` no longer carries a log line's trailing zeros
-into the exported duration columns — and the memory reduction alongside it, since
-a large run using about half the memory for duration samples is user-observable.
-
-If the change is declined or narrowed, the release note follows whatever
-disposition the architect takes, and the memory bullet stands on its own.
+The bullet is owed because the export change is user-observable, and it names the
+memory reduction alongside it, since a large run using about half the memory for
+duration samples is user-observable too. It is written at close-out, not on this
+branch.
 
 ## Ordering against the other issues
 
