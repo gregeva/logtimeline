@@ -6029,21 +6029,36 @@ sub emit_bin_counter_mode_verbose {
     push @verbose_output,
         "data_model_precision: $data_model_precision_level ($data_model_precision_source)";
 
+    # A consumer is active only when its feature is switched on AND a value
+    # the consumer would bin was observed. Both halves are required: a gate on
+    # demand alone reports the unified path over a partition set that was never
+    # constructed, which the contract forbids, and a gate on the partitions
+    # alone would relabel a surface the user pinned to raw, whose values are
+    # observed but held outside the counter stores.
+    #
+    # The observation term is the one the surface's own consumers read, so it
+    # holds under either data model: the per-key and per-bucket duration stores
+    # read $durations_observed, the CSV columns read the sub that already
+    # resolves their three-part gate, and the heatmap and histogram read the
+    # metric their own flag names rather than a single family.
+    #
     # The two highlight consumers report the parallel partition stores the
     # heatmap and histogram surfaces stream for the highlighted subset. They
     # are active only when their parent surface is active AND a highlight is
     # live; otherwise their block is the path: line alone, like any other
     # inactive consumer.
+    my $heatmap_observed   = heatmap_value_observed();
+    my $histogram_observed = histogram_value_observed();
     my %feature_active = (
-        summary_table     => 1,
-        csv_output        => $write_messages_to_csv ? 1 : 0,
+        summary_table     => ($durations_observed && $message_duration_stats_demand) ? 1 : 0,
+        csv_output        => stats_csv_duration_columns_active(),
         time_bucket_stats => ($durations_observed && $bucket_duration_stats_demand) ? 1 : 0,
-        heatmap_markers   => $heatmap_enabled ? 1 : 0,
-        heatmap_cells     => $heatmap_enabled ? 1 : 0,
-        histogram_view    => $histogram_enabled ? 1 : 0,
-        histogram_bins    => $histogram_enabled ? 1 : 0,
-        heatmap_cells_highlighted  => ($heatmap_enabled   && $highlight_active) ? 1 : 0,
-        histogram_view_highlighted => ($histogram_enabled && $highlight_active) ? 1 : 0,
+        heatmap_markers   => ($heatmap_enabled   && $heatmap_observed)   ? 1 : 0,
+        heatmap_cells     => ($heatmap_enabled   && $heatmap_observed)   ? 1 : 0,
+        histogram_view    => ($histogram_enabled && $histogram_observed) ? 1 : 0,
+        histogram_bins    => ($histogram_enabled && $histogram_observed) ? 1 : 0,
+        heatmap_cells_highlighted  => ($heatmap_enabled   && $heatmap_observed   && $highlight_active) ? 1 : 0,
+        histogram_view_highlighted => ($histogram_enabled && $histogram_observed && $highlight_active) ? 1 : 0,
     );
 
     my @consumer_order = qw(
@@ -17737,6 +17752,28 @@ sub stats_csv_duration_columns_active {
 # rendered layout.
 sub stats_csv_bytes_columns_active {
     return ($write_messages_to_csv && !$omit_bytes && $bytes_observed) ? 1 : 0;
+}
+
+# Whether the heatmap observed a value of its metric this run. The heatmap's
+# metric is whichever family -hm names, so the answer cannot be read off a
+# single family flag; $heatmap_min is set on the first value the metric
+# resolves to and is tracked under both data models, which makes it the one
+# observation that holds whether the surface captured raw values or streamed
+# counters. Demand is the separate half of the conjunction.
+sub heatmap_value_observed {
+    return defined $heatmap_min ? 1 : 0;
+}
+
+# Whether the histogram observed a value of any metric it draws. The two data
+# models accumulate into different stores — raw pushes onto %histogram_values,
+# bin counts into %histogram_data_min — so the observation is that either
+# received something. %histogram_values is pre-seeded with an empty array per
+# built-in metric, so the test is on the arrays holding a value, never on the
+# key existing.
+sub histogram_value_observed {
+    return 1 if grep { @{$histogram_values{$_} || []} } keys %histogram_values;
+    return 1 if keys %histogram_data_min;
+    return 0;
 }
 
 # Key function used to normalize data for output, graphing, and data scaling.

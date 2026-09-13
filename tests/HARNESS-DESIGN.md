@@ -202,11 +202,11 @@ A section's name and content are a contract with the harnesses that consume it.
 
 **Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`opt_out_active` → `exact_percentiles_optout`) requires:
 
-1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` or the equivalent.
+1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` **and** `grep -rn "old-name" features/`, searching for both the section name and the key. The owning feature doc's locked decision is a consumer of the name even though it runs nothing, and a `tests/`-only search cannot see it.
 2. Running each affected harness end-to-end and confirming it still **asserts**, not merely exits 0.
-3. Updating this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
+3. Updating the owning feature doc's section contract and the locked decision that fixes it, in the same commit. This is mandatory for **any key or value change**, not only a rename: a locked decision that still names a removed key, or that omits a key the tool emits, is a contract nothing can satisfy, and it is invisible to a search of `tests/`. Then this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
 
-This rule exists because of a specific class of failure observed in this repository: a section header was renamed without updating the harness that asserted on it. The harness's assertions for that header failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that.
+This rule exists because of two classes of failure observed in this repository. A section header was renamed without updating the harness that asserted on it: the harness's assertions failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that. Separately, two unrelated changes each removed a key from the `histogram-bin-counters` section while complying with this checklist as it was then written, and each left the owning locked decision promising output the tool no longer produced; the drift stood until an audit found it. Step 3 is what catches that, and it is why the owning decision is named rather than left to "any per-feature reference".
 
 ## Shared specification files
 
@@ -614,7 +614,7 @@ Consequences for harness authors:
 
 **Every assertion must answer three questions at the moment of failure, without the reader leaving the harness output:**
 
-1. **What invariant of the application is being asserted?** A plain-language statement of the contract, not the regex. ("When no bin-counter consumer is migrated and active, the section emits `consumers_active: none` as a placeholder line.")
+1. **What invariant of the application is being asserted?** A plain-language statement of the contract, not the regex. ("When no value a consumer would bin was observed this run, that consumer's block reports `path: feature_not_active` and no further fields.")
 2. **Where in the application is that invariant produced?** A function name in `ltl` (not a line number — those drift). ("emit_bin_counter_mode_verbose() in ltl")
 3. **What contract makes the invariant stable?** A pointer to the contract that lets the reader judge whether the failure is a real regression, a stale assertion, or a removed feature that should be restored. ("features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted to harnesses; renames are breaking.")
 
@@ -632,20 +632,20 @@ The exact API may evolve, but every assertion-runner in this repository must acc
 
 ```bash
 assert_line "$out" \
-    pattern     '^consumers_active: none$' \
-    asserts     'Section reports `consumers_active: none` when no bin-counter consumer is migrated and active' \
-    produced_by 'emit_bin_counter_mode_verbose() in ltl' \
-    contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted; renames are breaking'
+    pattern     '^  path: feature_not_active$' \
+    asserts     'A consumer whose feature is on but which observed no value it would bin reports `path: feature_not_active` and no further fields' \
+    produced_by 'emit_bin_counter_mode_verbose() in ltl (the %feature_active observed-value gate)' \
+    contract    'features/187-histogram-bin-counter-percentiles.md § R10 and § Decision 8 — stability-contracted; renames are breaking'
 ```
 
 On failure, the harness prints:
 
 ```
-  FAIL  default
-        pattern:     ^consumers_active: none$
-        asserts:     Section reports `consumers_active: none` when no bin-counter consumer is migrated and active
-        produced_by: emit_bin_counter_mode_verbose() in ltl
-        contract:    features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted; renames are breaking
+  FAIL  no-values-observed
+        pattern:     ^  path: feature_not_active$
+        asserts:     A consumer whose feature is on but which observed no value it would bin reports `path: feature_not_active` and no further fields
+        produced_by: emit_bin_counter_mode_verbose() in ltl (the %feature_active observed-value gate)
+        contract:    features/187-histogram-bin-counter-percentiles.md § R10 and § Decision 8 — stability-contracted; renames are breaking
         (not found in /tmp/xxxxxx)
 ```
 
