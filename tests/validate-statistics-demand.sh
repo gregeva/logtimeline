@@ -5,6 +5,12 @@
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
 # (Issues #305, #303), and the resolution when the run retains no message at
 # all (-n 0, or any non-positive count, Issue #458).
+#
+# Also asserts the representation of what the per-time-bucket store retains,
+# read from the `MEMORY log_analysis` row of `-V benchmark-data` (Issue #528):
+# `benchmark-data` is a transport with no owning harness, so each of its rows
+# is asserted by the harness owning the feature that produces it
+# (tests/HARNESS-DESIGN.md section Naming rules).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -745,6 +751,91 @@ assert_command \
     asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
     produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+echo
+
+############################################################
+# What the per-time-bucket store retains is not only how many durations, but
+# how wide each retained scalar is. A Perl scalar's body grows on demand and
+# never shrinks, every copy inherits a body able to carry what its source
+# carries, and the record lexicals are shared by every format for the whole
+# run — so one format transform assigning a value Perl represents as a double
+# into $duration widens every duration retained afterwards, for every format,
+# on every file. The startup extraction-parity gate executes every entry's
+# transforms against those lexicals before line 1, so the breach does not need
+# the run to encounter the offending format.
+#
+# The ceiling is one-sided, because the defect can only make the store larger.
+# On this fixture the two forms are separated by 8 bytes per retained duration:
+# 32,329 bytes as committed against 35,801 bytes with the coercion removed, a
+# 3,472-byte gap over 434 lines, each figure bit-identical across five runs.
+# The 33,000-byte ceiling sits 671 bytes above the committed figure and 2,801
+# below the breached one, so a hash-bucket resize or a fixture edit of a few
+# lines cannot trip it and a breach cannot hide under it. One run is therefore
+# enough; the tolerance carries the margin instead of repetition.
+#
+# The fixture's line count is stated with the threshold: a regeneration that
+# changed it changes the retained population, and that must surface as a
+# failure to be re-derived rather than pass as drift.
+#
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# `-mem` because the structure rows are gated on it; `-bs 1440` folds the
+# fixture's 14.5 h span into one bucket, removing per-bucket hash overhead
+# that is unrelated to the signal and is the only observed source of variance;
+# `-oe` switches off the empty-bucket fill; `-n 1` because no rendered row is
+# read; `-V benchmark-data` narrows the output to the transport. The exact
+# byte counts are read rather than the `-mem` summary's whole-KiB rows, whose
+# rounding boundary sits close enough to the signal to move between runs of
+# the same build.
+current_scenario="scenario-13-retained-duration-representation"
+echo "--- $current_scenario ---"
+DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
+DURATION_SPREAD_LINES=434
+LOG_ANALYSIS_CEILING=33000
+REPRESENTATION_ASSERTS='The retained per-bucket durations carry no floating-point slot: a transform that assigns a double into a shared record lexical enlarges every duration retained afterwards, and the per-bucket statistics store grows by 8 bytes per retained duration when one does'
+REPRESENTATION_PRODUCED_BY='named_structure_sizes() in ltl, reached through measure_memory_structures(); the retained values come from the per-bucket durations push in read_and_process_logs()'
+REPRESENTATION_CONTRACT='features/528-record-lexical-retained-representation.md section The contract, and features/log-format-registry.md F11a: a transform may not leave a shared record lexical holding a value Perl represents as a double'
+
+if [[ ! -f "$DURATION_SPREAD_FIXTURE" ]]; then
+    echo "ERROR: fixture not found: $DURATION_SPREAD_FIXTURE"
+    exit 1
+fi
+
+rep_out=$(mktemp)
+"$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
+    "$DURATION_SPREAD_FIXTURE" > "$rep_out" 2>"$rep_out.stderr" || true
+check_capture_warnings "$rep_out"
+
+# The fixture's retained population is part of the threshold's derivation, so a
+# regeneration that changed the line count invalidates the ceiling rather than
+# drifting under it.
+actual_lines=$(wc -l < "$DURATION_SPREAD_FIXTURE" | tr -d ' ')
+assert_command \
+    command     "[[ '$actual_lines' -eq $DURATION_SPREAD_LINES ]]" \
+    label       "the fixture still carries $DURATION_SPREAD_LINES lines, the population the ceiling was derived from" \
+    asserts     "The retained-duration ceiling is derived from this fixture's $DURATION_SPREAD_LINES durations; a regenerated fixture with a different line count changes the retained population and the threshold must be re-derived rather than silently absorb the change" \
+    produced_by 'tests/duration-display/generate-fixture.py (fixture generator); the population is retained by the per-bucket durations push in read_and_process_logs()' \
+    contract    "$REPRESENTATION_CONTRACT"
+
+# A missing row is a hard failure: the assertion below compares a number, and an
+# absent row must never read as a value under the ceiling.
+log_analysis_bytes=$(awk -F'\t' '$1 == "MEMORY" && $2 == "log_analysis" { print $3; found=1 } END { exit !found }' "$rep_out") || log_analysis_bytes=""
+if [[ -z "$log_analysis_bytes" ]]; then
+    echo "  FAIL  $current_scenario"
+    echo "        pattern:     MEMORY<TAB>log_analysis<TAB><bytes>"
+    echo "        asserts:     $REPRESENTATION_ASSERTS"
+    echo "        produced_by: $REPRESENTATION_PRODUCED_BY"
+    echo "        contract:    $REPRESENTATION_CONTRACT"
+    echo "        (row absent from $rep_out — the size of the per-bucket statistics store could not be read, so nothing was measured)"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: memory-log_analysis-row-missing")
+else
+    assert_command \
+        command     "[[ '$log_analysis_bytes' -le $LOG_ANALYSIS_CEILING ]]" \
+        label       "MEMORY log_analysis is $log_analysis_bytes bytes, at or below the $LOG_ANALYSIS_CEILING ceiling" \
+        asserts     "$REPRESENTATION_ASSERTS" \
+        produced_by "$REPRESENTATION_PRODUCED_BY" \
+        contract    "$REPRESENTATION_CONTRACT"
+fi
 echo
 
 ############################################################

@@ -14,6 +14,22 @@ and its memory use are unchanged by the work described here. What ships is a
 written contract, one harness assertion, and a prototype whose output is a
 measured recommendation for the architect to decide on.
 
+## Status
+
+**The contract and the regression assertion are built, proven able to fail, and
+committed.** `tests/validate-statistics-demand.sh` carries the retained-duration
+scenario; the committed tree reads 32,329 bytes against a 33,000-byte ceiling,
+and a build with the string coercion removed from the `duration_from_unit_token`
+transform reads 35,801 and fails the harness. The contract is stated here under
+*The contract* and beside F11a in `features/log-format-registry.md`. The harness
+alone reports 97 passed, 0 failed against 95 before the change; the full suite is
+the completion gate's to run.
+
+**The prototype is not built.** It is the separate later stage described under
+*The prototype*, and it waits on #544 (the profiling workflow cannot run on the
+development machine). Nothing in the candidate it measures is implemented, and
+no decision about retained-duration normalisation has been taken.
+
 ## The motivating consumer
 
 Two consumers pay for what a transform leaves behind, and neither of them is the
@@ -417,16 +433,68 @@ contract    'features/528-record-lexical-retained-representation.md § The contr
 Required before the assertion is called done, per the rule that a new assertion
 is proven able to fail.
 
-The known-bad build already exists: the settling captures hold a copy of `ltl`
-identical to the committed tree except that `duration_from_unit_token` assigns
-`convert_duration_to_ms($duration, $duration_unit_token)` without the `'' .`
-coercion. Running the assertion's invocation against it produces 35,801 bytes
-against the 33,000 ceiling, and the assertion must report FAIL with the three
-fields above. The proof is recorded here as the run, both numbers, and the
-one-character diff between the two builds.
+`duration_from_unit_token` is not a sub. It is a key in `%format_transform_code`
+whose value is a `q{}` string of Perl source, named in the
+`access_common_duration_bracketed` entry's `transforms` list and compiled into
+the generated scan sub. The sabotage is therefore an edit to that one string,
+not to a function body.
 
-The sabotage is one deletion in one string of `%format_transform_code` and is
-reverted by restoring the two characters. Nothing else in the tree changes.
+**The precondition stated when this section was written no longer holds.** The
+settling captures do hold two builds, one with the coercion and one without, but
+neither is identical to the committed tree: both carry an extra instrumentation
+line at the per-bucket retention push in `read_and_process_logs()` that calls
+`Devel::Size::size()` under an environment-variable guard. `diff` against the
+committed `ltl` reports two differing lines for the no-coercion build, not one.
+A build that allocates a probe array and loads two modules is not a build whose
+memory figure proves anything about the committed one, so the proof was produced
+against a build reproduced for it rather than against the settling capture.
+
+**What was done instead.** A copy of the committed `ltl` was taken into the
+scratchpad and the two characters `'' .` deleted from the
+`duration_from_unit_token` value, giving a build whose `diff` against the
+committed tree is exactly one line, the transform string itself. It was never
+committed and never placed in the working tree except for the duration of the
+harness run below, after which the tree was restored and verified to differ from
+the branch point only by `$version_number`.
+
+**The run.** The assertion's invocation, against
+`tests/fixtures/tomcat-access-duration-spread.txt`, 434 lines, five repetitions
+of each build on this machine:
+
+| build | `MEMORY log_analysis` | `MEMORY log_messages` |
+|---|---|---|
+| committed tree | 32,329 bytes on all five runs | 49,875 bytes on all five runs |
+| one-line reproduction without the `'' .` coercion | 35,801 bytes on all five runs | 53,387 on four runs, 52,363 on one |
+
+Both `log_analysis` figures reproduce the ones recorded under *The fields read
+and the threshold* exactly, and the separation is 3,472 bytes, which is eight
+bytes for each of the fixture's 434 retained durations. `log_messages` again
+moves by one 1,024-byte hash-bucket resize step between runs of the same build,
+which is why the assertion reads `log_analysis` alone.
+
+**The harness result.** Running `tests/validate-statistics-demand.sh` with the
+no-coercion build in place: 96 passed, 1 failed, exit 1. The failing assertion
+reports the measured value, the ceiling, and all three documentation fields:
+
+```
+  FAIL  scenario-13-retained-duration-representation
+        command:     [[ '35801' -le 33000 ]]
+        label:       MEMORY log_analysis is 35801 bytes, at or below the 33000 ceiling
+        asserts:     The retained per-bucket durations carry no floating-point slot: ...
+        produced_by: named_structure_sizes() in ltl, reached through measure_memory_structures(); ...
+        contract:    features/528-record-lexical-retained-representation.md section The contract, ...
+```
+
+Against the committed tree the same harness reports 97 passed, 0 failed, exit 0,
+with the scenario's assertion reading 32,329 bytes.
+
+**Finding, for whoever next needs a known-bad build of this defect.** Reproducing
+it costs one `cp` and one two-character deletion at the
+`duration_from_unit_token` entry of `%format_transform_code`; that is cheaper and
+more trustworthy than locating a capture from an earlier session and checking
+what else it carries. A capture kept for a memory measurement is only a valid
+comparison build if it differs from the tree by the change under test alone, and
+an instrumented capture does not.
 
 ## Acceptance criteria
 
@@ -434,28 +502,47 @@ Triaged per `docs/test-driven-development.md` before implementation.
 
 ### Assertable
 
-- [ ] **Assertable.** A run of `./ltl --disable-progress -mem -bs 1440 -oe -V
+- [x] **Assertable.** A run of `./ltl --disable-progress -mem -bs 1440 -oe -V
       benchmark-data -n 1 tests/fixtures/tomcat-access-duration-spread.txt`
       reports a `MEMORY log_analysis` row of at most 33,000 bytes.
       *Method:* the new scenario in `tests/validate-statistics-demand.sh`.
-- [ ] **Assertable.** The same run against a build whose
+      *Met:* the row reads 32,329 bytes, identical on five consecutive runs of
+      the committed tree; the scenario passes.
+- [x] **Assertable.** The same run against a build whose
       `duration_from_unit_token` transform assigns the conversion result without
       the string coercion reports a row above the ceiling, and the assertion
       fails, naming the contract.
       *Method:* the sabotage run described above, recorded in this document with
       both figures.
-- [ ] **Assertable.** The assertion's failure output names the invariant, the
+      *Met:* 35,801 bytes against the 33,000 ceiling; the harness reports 96
+      passed, 1 failed, exit 1. The build was reproduced for the proof rather
+      than taken from the settling captures, for the reason recorded under
+      *Sabotage proof*.
+- [x] **Assertable.** The assertion's failure output names the invariant, the
       producing function in `ltl`, and this document, so a reader can tell a
       regression from a stale assertion without opening another file.
       *Method:* inspection of the FAIL output produced by the sabotage run.
-- [ ] **Assertable.** `features/log-format-registry.md` states, beside F11,
+      *Met:* the FAIL block carries the measured value against the ceiling,
+      `asserts` naming the eight-bytes-per-retained-duration invariant,
+      `produced_by` naming `named_structure_sizes()` and the per-bucket
+      durations push in `read_and_process_logs()`, and `contract` naming this
+      document and the registry document's F11a line.
+- [x] **Assertable.** `features/log-format-registry.md` states, beside F11,
       which startup gate executes extraction closures against the record
       lexicals and which does not, and points here.
       *Method:* inspection of the committed diff.
+      *Met:* the F11a line, committed with the specification, names gate 2 (the
+      extraction-parity loop) as the gate that executes transforms against the
+      record lexicals and gate 5's startup half (interpreted classification
+      through `format_classify_interpreted()`) as the gate that does not.
 - [ ] **Assertable.** The full harness suite exits 0 with assertions reported as
       having run, and the new scenario's count appears in
       `validate-statistics-demand.sh`'s summary.
       *Method:* the completion gate.
+      *Pending:* the gate stage runs the suite. The owning harness on its own
+      reports 97 passed, 0 failed, exit 0, against 95 before this change: the
+      new scenario contributes two assertions, the retained-duration ceiling and
+      the fixture line-count guard that the ceiling's derivation depends on.
 
 ### Unassertable
 
@@ -528,6 +615,17 @@ restated names its source symbol in a comment beside it.
 
 **Normalised.** Identical, except that each retention site pushes a numeric
 normalisation of the lexical rather than the lexical.
+
+**A constraint the sabotage proof established, which applies to both arms.** A
+build used as a memory comparand is valid only if it differs from its comparand
+by the change under test alone. Instrumentation that reads a scalar's size is
+itself an allocation: the settling captures of this issue carry a probe at the
+per-bucket retention push that pushes onto its own array and loads
+`Devel::Size` and `B`, and a figure taken from such a build cannot be compared
+with one taken from a clean build. Each arm is therefore measured with its
+instrumentation off, through the `-V benchmark-data` rows the tool already
+emits, and any probing arm is kept as a third build whose figures are never
+compared against the other two.
 
 ### The retention sites, enumerated
 
@@ -638,6 +736,15 @@ commit, each affected harness executed and seen to assert, the reserved-names
 list updated. As specified, no such change is expected: the row the assertion
 reads exists today, is produced by `named_structure_sizes()`, is gated on `-mem`
 as every structure row is, and was read from a live run of the committed tree.
+
+**As built, the condition did not fire.** The assertion reads
+`MEMORY log_analysis` from the committed tool exactly as specified: no `-V`
+section, key or gating changed, and no executable line of `ltl` was edited. The
+only edit to `ltl` on this branch is `$version_number`, stamped to the branch
+form at the start of the work and restored to `0.18.1` by the gate stage before
+it runs, so the commit the gate measures carries no `ltl` change at all. The
+benchmark skip therefore stands as specified, and the full harness suite is
+required because `tests/validate-statistics-demand.sh` changed.
 
 ## Release note
 
