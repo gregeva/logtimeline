@@ -11,7 +11,7 @@ This feature is the **implementation ticket for the heatmap and histogram consum
 | `histogram_view` | Histogram-mode global percentile indicators (legend values, x-axis ticks) | `%histogram_stats{$metric}{p*}` derived from `%histogram_values` sort |
 | `histogram_bins` | Histogram-mode bin counts (bar heights) | `%histogram_buckets{$metric}` derived from end-of-parse binning |
 
-Under the unified contract, each of these consumers uses #189's primitives directly: partition with HdrHistogram-style auto-resize (per #187 Decision 5), bin assignment via log-spaced boundary computation, counter update with the consumer's keying, percentile interpolation via the locked Prometheus formula (per #187 Decision 1). The dual-mode "raw-value mode vs. bin-counter mode" framing that pre-dated #187's locked contract is **dissolved** — there is no runtime gate (per #187 Decision 6's dissolution). The consumer either runs the unified path (post-migration) or its pre-migration code path (pre-migration or under `--exact-percentiles` opt-out per #187 Decision 7).
+Under the unified contract, each of these consumers uses #189's primitives directly: partition with HdrHistogram-style auto-resize (per #187 Decision 5), bin assignment via log-spaced boundary computation, counter update with the consumer's keying, percentile interpolation via the locked Prometheus formula (per #187 Decision 1). The dual-mode "raw-value mode vs. bin-counter mode" framing that pre-dated #187's locked contract is **dissolved** — there is no runtime gate (per #187 Decision 6's dissolution). The consumer either runs the unified path (post-migration) or its pre-migration code path (pre-migration, or when its surface resolves to the raw data model per #187 Decision 7, user-facing opt-out through the per-surface data-model selectors).
 
 ## GitHub Issue
 
@@ -53,7 +53,7 @@ This feature uses the terminology locked in #187:
 - **Consumer** — a code path that needs percentile values or histogram bin counts. The four consumers in scope here are `heatmap_cells`, `heatmap_markers`, `histogram_view`, `histogram_bins`.
 - **Partition** — one instance of the bin counter structure with its own `[min, max]` boundaries, owned by one consumer for one keying dimension.
 - **Auto-resize** — the partition lifecycle locked in #187 Decision 5 (lazy construction, full-default-span seed centered on first value, HdrHistogram-convention doubling on rebin).
-- **Pre-migration path** — the consumer's current end-of-parse-from-retained-arrays code (in `calculate_heatmap_buckets`, `calculate_histogram_buckets`). Survives post-migration as the `--exact-percentiles` opt-out path per #187 Decision 7.
+- **Pre-migration path** — the consumer's current end-of-parse-from-retained-arrays code (in `calculate_heatmap_buckets`, `calculate_histogram_buckets`). Survives post-migration as the path a surface runs when it resolves to the raw data model per #187 Decision 7 (user-facing opt-out through the per-surface data-model selectors).
 - **Unified path** — the consumer's post-migration code, using #189's primitives.
 
 No new terminology introduced by #34.
@@ -79,7 +79,7 @@ Per #187 Decision 6's dissolution, there is **no runtime gate** between an "appr
 
 The pre-migration code path survives per-consumer:
 - During the migration's validation phase, as the regression-validation reference per #187 R11.
-- Post-validation, as the path engaged when the user opts out via `--exact-percentiles` (per #187 Decision 7).
+- Post-validation, as the path engaged when the user pins the surface to the raw data model with `-hmdm raw`, `-hgdm raw` or the omnibus `-dm raw` (per #187 Decision 7).
 
 R10 reports per-consumer which path is active for any given run.
 
@@ -191,7 +191,7 @@ The partitions are independent in `[min, max]` as each per-time-bucket partition
 Each consumer's `path:` line in its `=== BIN-COUNTER MODE ===` block per #187 Decision 8 reports the active path for that consumer:
 
 - `unified` — consumer is on the migrated path.
-- `user_opt_out` — `--exact-percentiles` is active per #187 Decision 7.
+- `user_opt_out` — the consumer's surface resolved to the raw data model per #187 Decision 7.
 - `feature_not_active` — the consumer's feature is not engaged in this run (`-hm` not requested for heatmap consumers; `-hg` not requested for histogram consumers; or no values matched).
 
 ### R11 — Pre-migration code path preserved through phase validation per #187 R11
@@ -199,10 +199,10 @@ Each consumer's `path:` line in its `=== BIN-COUNTER MODE ===` block per #187 De
 The pre-migration code paths (`calculate_heatmap_buckets`, `%heatmap_raw`, `find_heatmap_bucket`, `calculate_histogram_buckets`, `%histogram_values`, `find_histogram_bucket_index`, related globals) are preserved through this feature's validation phase per #187 R11.
 
 During validation, the implementation ticket runs both paths against the D2 datasets and confirms:
-- Under `--exact-percentiles`, byte-identical pre-feature output per #187 R11a.
+- Under the raw data model, byte-identical pre-feature output per #187 R11a.
 - Under the unified path, per-quantile error within the bin-resolution bound per #187 R4 for every required quantile.
 
-After phase validation passes, the pre-migration code is retained as the `--exact-percentiles` opt-out surface per #187 Decision 7. The decision of whether and when to retire the pre-migration code post-validation is the implementation ticket's call (per #187 Decision 9's dissolution).
+After phase validation passes, the pre-migration code is retained as the raw data model's execution path per #187 Decision 7. The decision of whether and when to retire the pre-migration code post-validation is the implementation ticket's call (per #187 Decision 9's dissolution).
 
 ### R12 — Boundaries with other features
 
@@ -256,7 +256,7 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 | Multi-file run | Each file's values feed the same per-`time_bucket` (heatmap) and per-metric (histogram) partitions. Auto-resize accommodates the combined range. No special multi-file handling required at this feature's layer. |
 | User specifies `-hmw <W1>` (heatmap display width) | Display has W1 columns. The internal partition has more bins than W1; render-time re-projection (R5) projects partition counts onto W1 columns. |
 | User specifies different `-hmw` and `-hgw` | Heatmap displays at W1 columns; histogram at W2 columns. Independent per #189 R7. Internal partitions are independent. |
-| `--exact-percentiles` is set | All four consumers report `path: user_opt_out` and run the pre-migration code paths per #187 Decision 7 and R11 of this feature. |
+| `-dm raw` is set (or `-hmdm raw` and `-hgdm raw` together) | All four consumers report `path: user_opt_out` and run the pre-migration code paths per #187 Decision 7 and R11 of this feature. |
 | Concurrent ltl processes | Out of this feature's concern. |
 
 ## Acceptance criteria
@@ -273,14 +273,14 @@ The pre-migration code paths that this feature's implementation replaces. Line r
 - [x] R8 holds (revised): display geometry unchanged; precision improvements via bpd=616 streaming + finalize re-bin to legacy partition shape.
 - [x] R9 holds: heatmap and histogram have independent counter stores; per-family stream bpd constants (`$heatmap_stream_bpd`, `$histogram_stream_bpd`).
 - [x] R10 holds: per-consumer `path:` line reports correctly under all four states.
-- [x] R11 holds: pre-migration code preserved verbatim as `calculate_heatmap_buckets_exact` and `calculate_histogram_buckets_exact`; dispatched via `--exact-percentiles`.
+- [x] R11 holds: pre-migration code preserved verbatim as `calculate_heatmap_buckets_exact` and `calculate_histogram_buckets_exact`; dispatched on the resolved data model.
 - [x] R12 holds: boundary responsibilities respected (this ticket consumes #189 R12 `partition_rebin`).
 
 ### Validation phase
 
-- [x] Under `--exact-percentiles`, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a (validated on 148MB Tomcat).
+- [x] Under the raw data model, all four consumers' output is byte-identical to the pre-feature implementation per #187 R11a (validated on 148MB Tomcat).
 - [x] Under the unified path, all four consumers' percentile values fall within the bin-resolution bound per #187 R4 / #201 V8 evidence (worst-case 1.10% / 5.78% per-bucket displacement, below ~11% visibility threshold).
-- [x] `tests/validate-regression.sh` passes 19/19 — heatmap regression tests re-keyed against `--exact-percentiles` (PR #206) to keep them byte-stable across future precision tweaks; bin-counter accuracy is independently covered by `tests/validate-percentile-mode.sh`.
+- [x] `tests/validate-regression.sh` passes 19/19 — heatmap regression tests keyed to the raw data model (PR #206) to keep them byte-stable across future precision tweaks; bin-counter accuracy is independently covered by the bin-model scenarios in `tests/validate-statistics.sh`.
 - [x] `-V` `=== BIN-COUNTER MODE ===` output matches the locked format per #187 Decision 8 (all four path codes exercised, locked field names emitted, shares_partitions_with topology correct).
 
 ## Progress
@@ -295,7 +295,7 @@ Phase 3 (consumer migrations) re-attempted under the post-#201 architecture afte
 - Commit 5: this doc update + release notes.
 
 Validation on the canonical 148MB Tomcat log:
-- `--exact-percentiles` output byte-identical to HEAD (pre-migration code preserved).
+- Raw-data-model output byte-identical to HEAD (pre-migration code preserved).
 - Unified path renders bars byte-identical to exact path; percentile values within ~1.3% (bin-resolution bound).
 - HEATMAP STATISTICS: ~580 ms → ~5 ms (~120× faster).
 - Peak memory drops by ~40 MiB (`heatmap_raw` + `histogram_values` eliminated; replaced by ~2 MiB total of streaming partitions, each of which serves its key's percentiles at finalize (R5) and is released as that key completes).
@@ -324,7 +324,7 @@ The contract-level validation scenarios specified in #187 § Validation apply to
 ### Cross-consumer scenarios
 
 - **Both heatmap and histogram active simultaneously**: per #189 R7 (consumer independence), the two pairs of consumers (`heatmap_cells` + `heatmap_markers`; `histogram_view` + `histogram_bins`) hold independent partitions. Verifiable via `-V` per-consumer telemetry.
-- **Per-consumer opt-out**: confirm that `--exact-percentiles` applies to all four consumers uniformly per #187 Decision 7 (global scope).
+- **Per-surface opt-out**: confirm that `-hmdm raw` pins `heatmap_cells` and `heatmap_markers` and that `-hgdm raw` pins `histogram_view` and `histogram_bins`, each surface independently, per #187 Decision 7 (per-surface scope). The omnibus `-dm raw` pins all four at once.
 
 ## Related issues
 
