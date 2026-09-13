@@ -46,6 +46,11 @@ dirty=$(git status --short 2>/dev/null | head -15)
 unpushed=$(git log --oneline '@{u}..' 2>/dev/null | head -10)
 [ -n "$unpushed" ] && { echo "unpushed on this branch:"; echo "$unpushed"; }
 
+# What git is hiding, beside what git is showing: an artifact left at depth one
+# of this root or of the main checkout that .gitignore covers. Reports only; the
+# exit code is discarded so a dirty root can never fail a session.
+[ -x ./build/check-root-clean.sh ] && ./build/check-root-clean.sh || true
+
 # A release branch ahead of main is normal while the release is open; it is a
 # finding once the release tag exists (the release PR was never merged).
 for rb in $(git branch --list 'release/*' --format='%(refname:short)' 2>/dev/null); do
