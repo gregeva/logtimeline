@@ -1217,7 +1217,7 @@ scenario_classification_access() {
         contract    "$CLASSIFICATION_CONTRACT - rule_change: is absent when the count is 0"
 
     assert_line "$out" \
-        pattern     '^default_failure: category_bucket=\^\(\?:ERROR\|FATAL\|CRITICAL\)\$$' \
+        pattern     '^default_failure: category_bucket=\^\(\?:ERROR\|FATAL\|CRITICAL\|SEVERE\|ALERT\|EMERGENCY\)\$$' \
         asserts     'The capture is self-describing about the global default failure rule in force: the canonical field=pattern signature of the resolved default failure list' \
         produced_by "$CLASSIFICATION_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - signature is field=pattern conditions, criteria joined by | and conditions by & (D15)"

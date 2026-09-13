@@ -148,7 +148,7 @@ name `read_and_process_logs()`, the array `@log_levels`, the harness
 | `NOTICE` | syslog severity 5, between informational and warning. | syslog |
 | `ALERT` | syslog severity 1, above `CRITICAL`. | syslog |
 | `EMERGENCY` | syslog severity 0, the highest. | syslog |
-| `AUDIT` | Emitted in the level position by the ThingWorx Edge C SDK format (`tw_edge_c_sdk`): 180 lines across the three Edge C SDK files in the test corpus, every one discarded today. Their per-file `-V filter-summary` `excluded_other` counts are 97, 72 and 14. Also already present as an inert entry in the statistics oracle's own level set. | ThingWorx Edge C SDK |
+| `AUDIT` | Emitted in the level position by the ThingWorx Edge C SDK format (`tw_edge_c_sdk`): 180 lines across the three Edge C SDK files in the test corpus, every one discarded before this drop. Per-file counts of lines whose level position holds `AUDIT`, measured directly: 96, 72 and 12. Also already present as an entry in the statistics oracle's own level set. | ThingWorx Edge C SDK |
 
 The first six are the names in the issue's table. `AUDIT` was found by scanning
 the corpus for level tokens the vocabulary does not carry, and is the only one
@@ -409,6 +409,10 @@ level plus controls, in the Windchill Method Server shape the existing
 vocabulary fixture uses. Messages are neutral placeholders; no corpus text is
 copied in.
 
+Delivered as `tests/fixtures/log-level-vocabulary-extended.txt`: eight lines,
+one per added level plus one `INFO` control, so a run over it has both
+classified and unclassified lines.
+
 It carries the seven added names and enough already-recognised levels to make
 the classification assertions two-sided: at minimum one `INFO` line, so a run
 over the fixture has both classified and unclassified lines.
@@ -417,6 +421,12 @@ One detail for whoever writes the error-rate style assertion: the existing one
 builds its downgraded arm with `sed 's/ FATAL / INFO  /'`, padding to preserve
 column width. A longer name such as `EMERGENCY` needs a different downgrade
 expression; the fixture is written so the substitution is unambiguous.
+
+The new scenario avoids substitution entirely. Both comparison arms are built by
+removing whole lines (`grep -v` on the level token) rather than rewriting a level
+in place, so no padding has to be preserved and the arm cannot accidentally
+change a message body. The fixture's level field is padded to a fixed width, so
+each level token is surrounded by spaces and the removal is unambiguous.
 
 ### `tests/validate-log-level-vocabulary.sh`: the owning harness
 
@@ -527,6 +537,67 @@ Each criterion is triaged **before** implementation, per
 | AC12 | Every assertion added here has been demonstrated to fail against a deliberately broken input before being trusted to pass. | assertable | the sabotage proof above, its output captured to the scratchpad and reported in the completion comment |
 
 There is no criterion for the silence. D7 puts it outside this drop.
+
+## Implementation status
+
+Delivered. The seven names are in the vocabulary, coloured, ruled on by the
+default classification, and asserted by the `extended-severity-vocabulary`
+scenario of `tests/validate-log-level-vocabulary.sh` over the new fixture
+`tests/fixtures/log-level-vocabulary-extended.txt`.
+
+### Findings established during implementation
+
+**The per-file `AUDIT` counts and the `excluded_other` counts are not the same
+number.** The evidence table above first recorded 97, 72 and 14 for `AUDIT`;
+those are the `-V filter-summary` `excluded_other` figures, which count every
+cause of an "other" exclusion, not `AUDIT` alone. Measured directly on the three
+ThingWorx Edge C SDK files in the corpus, the lines whose level position holds
+`AUDIT` number 96, 72 and 12 — 180 in total, which is the figure the table
+always carried. The difference is accounted for exactly:
+
+| File | `AUDIT` lines | `excluded_other` before | The rest |
+|---|---|---|---|
+| `2026-02-18_REA_CONN_MON_healthy.log` | 96 | 97 | one `AUTH` line |
+| `combined_318.log` | 72 | 72 | none |
+| `rea-assets-5402_-TW_SSL_READ-Read_0_bytes-trace_logs.log` | 12 | 14 | one `AUTH`, one `TRAFFIC_CONTROL` |
+
+Measured after the change on `2026-02-18_REA_CONN_MON_healthy.log`:
+`lines_included` rises from 3,664 to 3,760 and `excluded_other` falls from 97 to
+1, the remaining exclusion being the `AUTH` line. That is the direct
+confirmation that the 96 recovered lines are the `AUDIT` ones and that the
+tokens D1 declines stay declined.
+
+**`START` was already in the vocabulary.** The corpus scan listed `START`,
+`AUTH` and `TRAFFIC_CONTROL` as tokens found in the level position and declined
+all three. `START` is in fact already a recognised category — the Windchill
+Workgroup Manager severity-letter table maps `S` to it — so its Edge C SDK lines
+were never at the category gate. Only `AUTH` and `TRAFFIC_CONTROL` are actually
+declined, and they are what remains in `excluded_other` after this drop.
+
+**The statistics oracle's level set is no longer a comment about ltl's
+vocabulary being narrower than its own.** `LOG_LEVELS` in
+`tests/statistics-drift/oracle/calculate-reference.py` carried `AUDIT` with a
+comment saying `AUDIT` is not in `ltl`'s vocabulary. It now is, so the comment
+no longer describes the code; the set is extended to all seven names and its
+comment states the invariant that governs it — the set is kept a superset of the
+levels the ThingWorx formats can put in the level position, so the oracle never
+drops a line `ltl` would keep.
+
+**A STATS CSV carrying the added levels has no committed scenario.** AC7 (each
+new level column has a rule row in the `level` family) was verified out of
+harness: a `-o` run over the new fixture writes a STATS CSV whose header is
+`timestamp, EMERGENCY, ALERT, CRITICAL, SEVERE, WARNING, NOTICE, INFO, AUDIT,
+err-rate_min, msg-rate_min, occurrences, successes, failures, conflicts`, and
+`tests/csv-output/validate-csv-output.pl` against
+`tests/csv-output/rules/stats-columns.tsv` reports
+`PASS ... file=stats rows=1 cells_checked=15 fails=0`. The same run under a
+highlight pattern file emits the `-HL` twin columns (`EMERGENCY-HL`,
+`AUDIT-HL`, ...) and validates likewise —
+`PASS ... file=stats rows=2 cells_checked=40 fails=0` — so both halves of each
+added level's pair of rule rows are reached. No scenario in
+`tests/csv-output/scenarios.tsv` produces such a file, so the committed suite
+proves the rule rows are well-formed but never exercises them; a scenario over
+the new fixture would close that, and is not in this drop's scope.
 
 ## Completion gate
 

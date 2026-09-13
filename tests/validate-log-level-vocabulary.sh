@@ -9,9 +9,13 @@
 # vocabulary is therefore invisible data loss, which is what this harness exists
 # to prevent.
 #
-# FATAL was absent until #447. Windchill Method Server logs emit it for server
-# shutdown ("MethodServer stopped"), so those events — among the most
-# consequential lines in the file — were being dropped.
+# Two scenarios cover the vocabulary. One reads the levels the Windchill Method
+# Server format emits, including FATAL, which the format uses for server
+# shutdown ("MethodServer stopped") — among the most consequential lines in the
+# file. The other reads the severity names the syslog and java.util.logging
+# vocabularies emit and the ThingWorx Edge C SDK's AUDIT, and also asserts which
+# of them the default classification rule calls a failure, since a level that
+# reaches the category table has not thereby reached the failure count.
 #
 # This is a RENDER-INVARIANT harness (tests/HARNESS-DESIGN.md § Render-invariant
 # harnesses): the assertion reads the rendered category table, which is where a
@@ -40,6 +44,12 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 # six-line fixture spanning seconds. -ni keeps the developer's ltl-index.csv out
 # of the run.
 FIXTURE="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+# The second fixture carries the severity names a supported format can emit that
+# the six-line one does not: the syslog severities, java.util.logging's
+# spellings, and the ThingWorx Edge C SDK's AUDIT, plus one INFO line so a run
+# over it has both classified and unclassified lines. Same invocation shape as
+# above: the assertions read the category table and the summary counts.
+FIXTURE_EXTENDED="$REPO_DIR/tests/fixtures/log-level-vocabulary-extended.txt"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -54,6 +64,9 @@ if [[ ! -x "$LTL" ]]; then
 fi
 if [[ ! -f "$FIXTURE" ]]; then
     echo "ERROR: fixture not found: $FIXTURE"; exit 1
+fi
+if [[ ! -f "$FIXTURE_EXTENDED" ]]; then
+    echo "ERROR: fixture not found: $FIXTURE_EXTENDED"; exit 1
 fi
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
@@ -167,6 +180,111 @@ check_all_lines_included() {
     ' "$1" "$2"
 }
 
+# FAILURE CLASSIFIED, read from the run summary rather than the category table.
+# A level's presence in the category table proves only that the per-line
+# category gate let it through; reaching the failure count proves the default
+# failure rule names it. The two measure different things, so they are asserted
+# separately.
+check_failure_classified() {
+    "$PERL" -e '
+        my ($render, $expected) = @ARGV;
+        open my $fh, "<", $render or die "cannot open $render: $!\n";
+        my $failures;
+        while (my $line = <$fh>) {
+            $failures = $1 if $line =~ /FAILURE CLASSIFIED\s+(\d+)/;
+        }
+        close $fh;
+        unless (defined $failures) {
+            print "anchor not found: FAILURE CLASSIFIED absent from the render\n";
+            exit 1;
+        }
+        unless ($failures == $expected) {
+            print "expected FAILURE CLASSIFIED $expected, got $failures\n";
+            exit 1;
+        }
+        print "FAILURE CLASSIFIED $failures\n";
+        exit 0;
+    ' "$1" "$2"
+}
+
+# The added failure severities raise the failure count. Runs the fixture twice —
+# once as-is, and once with every SEVERE, ALERT and EMERGENCY line removed — and
+# requires the first to report a strictly higher FAILURE CLASSIFIED than the
+# second. Comparing two runs keeps the assertion independent of how many other
+# levels in the fixture are failures.
+check_failure_count_rises_with_added_severities() {
+    local fixture="$1"
+    local removed="$TMP_DIR/added-severities-removed.txt"
+    grep -vE ' (SEVERE|ALERT|EMERGENCY) ' "$fixture" > "$removed"
+
+    local render_with="$TMP_DIR/failures-with.txt"
+    local render_without="$TMP_DIR/failures-without.txt"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 \
+        --terminal-width "$WIDTH" "$fixture" ) 2>/dev/null | strip_ansi > "$render_with"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 \
+        --terminal-width "$WIDTH" "$removed" ) 2>/dev/null | strip_ansi > "$render_without"
+
+    "$PERL" -e '
+        my ($a, $b) = @ARGV;
+        sub failures {
+            my ($render) = @_;
+            open my $fh, "<", $render or return undef;
+            my $n;
+            while (my $line = <$fh>) {
+                $n = $1 if $line =~ /FAILURE CLASSIFIED\s+(\d+)/;
+            }
+            close $fh;
+            return $n;
+        }
+        my $with    = failures($a);
+        my $without = failures($b);
+        unless (defined $with && defined $without) {
+            print "anchor not found: FAILURE CLASSIFIED absent from one of the renders\n";
+            exit 1;
+        }
+        unless ($with > $without) {
+            printf "failure count did not rise with SEVERE, ALERT and EMERGENCY present: with %d, without %d — they are not named by the default failure rule\n",
+                $with, $without;
+            exit 1;
+        }
+        printf "FAILURE CLASSIFIED %d with SEVERE/ALERT/EMERGENCY vs %d without\n", $with, $without;
+        exit 0;
+    ' "$render_with" "$render_without"
+}
+
+# The category table prints in the order of the vocabulary, so the rows the
+# fixture produces must appear in the expected sequence. Reads the rows in the
+# order they are rendered and compares against the expected list.
+check_category_order() {
+    "$PERL" -e '
+        my ($render, @expected) = @ARGV;
+        my $row_width = 41;
+        open my $fh, "<", $render or die "cannot open $render: $!\n";
+        my @seen;
+        while (my $line = <$fh>) {
+            next if length($line) < 2 + $row_width;
+            next unless substr($line, 0, 2) eq "  ";
+            my $row = substr($line, 2, $row_width);
+            push @seen, $1
+                if $row =~ /^(\S+(?: \S+)*?)\s+\d+(?: \(\d+(?:\.\d+)?%\))?$/
+                   && grep { $_ eq $1 } @expected;
+        }
+        close $fh;
+        unless (@seen) {
+            print "anchor not found: no category rows in the render\n";
+            exit 1;
+        }
+        my $got = join ", ", @seen;
+        my $want = join ", ", @expected;
+        unless ($got eq $want) {
+            print "category table order is [$got], expected [$want]\n";
+            exit 1;
+        }
+        print "category rows in order: $got\n";
+        exit 0;
+    ' "$@"
+}
+
 # The error rate counts FATAL. Runs the fixture twice — once as-is (one FATAL,
 # one ERROR) and once with the FATAL line downgraded to INFO (one ERROR) — and
 # requires the first to report a strictly higher error rate than the second.
@@ -273,6 +391,95 @@ assert_command \
     asserts     'FATAL denotes a failure and must contribute to the error rate alongside ERROR and the 4xx/5xx status classes. Measured by comparing a FATAL-and-ERROR run against an ERROR-only run: the two-failure run must report a strictly higher error rate than the one-failure run.' \
     produced_by 'normalize_data_for_output() in ltl — the error-rate accumulation' \
     contract    'features/447-message-control-character-normalisation.md § D6 — FATAL counts toward the error rate'
+
+# ---------------------------------------------------------------------------
+# Scenario: the severity names the syslog and java.util.logging vocabularies
+# emit, plus the ThingWorx Edge C SDK's AUDIT.
+# ---------------------------------------------------------------------------
+
+current_scenario="extended-severity-vocabulary"
+echo "[$current_scenario]"
+
+RENDER_EXT="$TMP_DIR/render-extended.txt"
+STDERR_EXT="$TMP_DIR/render-extended.stderr"
+
+set +e
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 \
+    --terminal-width "$WIDTH" "$FIXTURE_EXTENDED" ) 2>"$STDERR_EXT" | strip_ansi > "$RENDER_EXT"
+render_ext_status=("${PIPESTATUS[@]}")
+set -e
+
+if [[ "${render_ext_status[0]}" -ne 0 ]]; then
+    echo "  FAIL  $current_scenario :: ltl exited ${render_ext_status[0]} while rendering" >&2
+    sed 's/^/        /' "$STDERR_EXT" >&2
+    exit 1
+fi
+if [[ ! -s "$RENDER_EXT" ]]; then
+    echo "  FAIL  $current_scenario :: rendered output is empty" >&2
+    exit 1
+fi
+
+if ! assert_no_runtime_warnings "$STDERR_EXT" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+fi
+
+for level in CRITICAL SEVERE WARNING NOTICE ALERT EMERGENCY AUDIT; do
+    assert_command \
+        command     "check_level_present '$RENDER_EXT' '$level'" \
+        label       "$level is recognised and reaches the category table" \
+        asserts     "A line whose captured level is outside ltl's vocabulary is discarded by the per-line category gate — read, format-matched, then silently dropped, so it counts in LINES READ but not LINES INCLUDED and nothing tells the user. CRITICAL, SEVERE, WARNING, NOTICE, ALERT, EMERGENCY and AUDIT are severity names a supported format can emit and must therefore be in the vocabulary." \
+        produced_by '@log_levels / %log_level_set in ltl, gated per line in read_and_process_logs(); rendered by print_summary_table() in ltl' \
+        contract    'features/475-log-level-vocabulary-completion.md § D1 (the vocabulary is a static list and names are added by hand) — the seven names admitted are CRITICAL, SEVERE, WARNING, NOTICE, ALERT, EMERGENCY and AUDIT'
+done
+
+assert_command \
+    command     "check_all_lines_included '$RENDER_EXT' 8" \
+    label       'every fixture line is analysed, none discarded by the category gate' \
+    asserts     'The fixture carries eight lines — one per added level plus one INFO control — and all eight match the Windchill Method Server format. LINES READ and LINES INCLUDED must both be 8; a shortfall is the count of lines the category gate discarded.' \
+    produced_by '@log_levels / %log_level_set in ltl, gated per line in read_and_process_logs()' \
+    contract    'features/475-log-level-vocabulary-completion.md § R1 (a line carrying one of the seven names is counted in LINES INCLUDED and appears as its own row in the category table)'
+
+assert_command \
+    command     "check_category_order '$RENDER_EXT' EMERGENCY ALERT CRITICAL SEVERE WARNING NOTICE INFO AUDIT" \
+    label       'the added levels print in severity order, AUDIT after INFO' \
+    asserts     'The vocabulary order is the print order of the category table, the legend, the aggregate export and the STATS CSV header. The syslog severities lead most-serious-first, SEVERE sits in the FATAL band and WARNING in the WARN band, NOTICE sits between WARN and INFO, and AUDIT — which records an action rather than an outcome — follows the whole severity run.' \
+    produced_by '@log_levels in ltl, read in order by print_summary_table()' \
+    contract    'features/475-log-level-vocabulary-completion.md § D4 (colours reuse existing exact colour strings; AUDIT takes cyan) — position in @log_levels is by severity, with AUDIT after INFO and before DEBUG'
+
+assert_command \
+    command     "check_failure_classified '$RENDER_EXT' 4" \
+    label       'CRITICAL is counted under FAILURE CLASSIFIED' \
+    asserts     'The shipped default failure rule names CRITICAL, so a CRITICAL line must reach the failure count and not merely appear as a category row. The fixture carries four lines the rule names — EMERGENCY, ALERT, CRITICAL and SEVERE — so FAILURE CLASSIFIED must read 4; being in the category table only proves the gate let the line through.' \
+    produced_by '%classification_default in ltl, compiled into each entry through format_classification_src(); counted in read_and_process_logs() and rendered by print_summary_table()' \
+    contract    'features/475-log-level-vocabulary-completion.md § D2 (CRITICAL is admitted with the others and gets its own criterion)'
+
+assert_command \
+    command     "check_failure_count_rises_with_added_severities '$FIXTURE_EXTENDED'" \
+    label       'SEVERE, ALERT and EMERGENCY are counted as failures' \
+    asserts     "SEVERE is java.util.logging's highest severity and ALERT and EMERGENCY sit above CRITICAL in syslog, so the default failure rule names all three. Measured by comparing a run carrying them against a run with those lines removed: the first must report a strictly higher FAILURE CLASSIFIED than the second." \
+    produced_by '%classification_default in ltl, compiled into each entry through format_classification_src(); counted in read_and_process_logs()' \
+    contract    'features/475-log-level-vocabulary-completion.md § D3 (the default failure rule gains SEVERE, ALERT and EMERGENCY)'
+
+WARNLESS="$TMP_DIR/non-failure-levels-only.txt"
+grep -vE ' (SEVERE|ALERT|EMERGENCY|CRITICAL) ' "$FIXTURE_EXTENDED" > "$WARNLESS"
+RENDER_WARNLESS="$TMP_DIR/render-non-failure-levels-only.txt"
+STDERR_WARNLESS="$TMP_DIR/render-non-failure-levels-only.stderr"
+
+set +e
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 \
+    --terminal-width "$WIDTH" "$WARNLESS" ) 2>"$STDERR_WARNLESS" | strip_ansi > "$RENDER_WARNLESS"
+set -e
+
+if ! assert_no_runtime_warnings "$STDERR_WARNLESS" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr-non-failure-arm")
+fi
+
+assert_command \
+    command     "check_failure_classified '$RENDER_WARNLESS' 0" \
+    label       'WARNING, NOTICE and AUDIT are recognised levels that are not failures' \
+    asserts     "WARNING is java.util.logging's spelling of WARN and WARN is not a failure; NOTICE sits below informational in syslog; AUDIT records an action rather than an outcome. A run whose only non-INFO lines carry those three must report FAILURE CLASSIFIED 0, so admitting them to the vocabulary does not silently widen what the tool calls a failure." \
+    produced_by '%classification_default in ltl, compiled into each entry through format_classification_src(); counted in read_and_process_logs() and rendered by print_summary_table()' \
+    contract    'features/475-log-level-vocabulary-completion.md § D3 (the default failure rule gains SEVERE, ALERT and EMERGENCY) — WARNING, NOTICE and AUDIT stay outside the rule'
 
 echo
 echo "─────────────────────────────────────────"
