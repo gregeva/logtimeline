@@ -578,6 +578,18 @@ A helper that caches an `ltl` capture so several harnesses can share it (`tests/
 
 The rules themselves are under test: `tests/validate-csv-output.sh` § cache-validity asserts each decision against a crafted artifact — no `ltl` run — and proves the refresh end to end on the smallest fixture scenario.
 
+## A harness owns the directory it runs `ltl` in
+
+A harness that invokes `ltl` with `-o` runs it in a directory the harness created and removes, never in the repository root or any other shared directory. Two rules follow, and both were broken at once by one scenario (Issue #527).
+
+**A harness never identifies a produced artifact by its position in a directory it does not own.** The `directories-relative` scenario of `tests/validate-aggregate-export.sh` ran `ltl -o` from the repository root, swept every `*-LTL-AGGREGATE.yaml` and `*-LTL-STATS-*.csv` it found there into its own directory, and read `ls … | head -1`. `run_file_stamp()` names every product `YYYY-MM-DD_HHMMSS-…`, so lexical order is chronological order and `head -1` is "the oldest file present", not "the file this run wrote". A harness earlier in the chain had left an export in the root, and the scenario reported a directory list and a file count belonging to a run it had never performed, against a contract it appeared to be testing. Identify the artifact by what the run published (`-V aggregate-export` prints `file: <name>`) or, as there, by owning the only directory it can be in.
+
+**A harness never deletes a file it did not create.** The same sweep and its `EXIT` trap ran unconditionally, whatever `head -1` had selected. A stranger export whose stamp sorted after the run's own was destroyed on a run that reported 3 passed, 0 failed — a user's `-o` output removed with no symptom. A glob `rm -f` aimed at the current working directory is the same defect wherever it appears.
+
+**A product found and not written is a fail-fast diagnosis, not a cleanup.** When a harness finds an `ltl -o` product it did not write in its working directory, it fails naming the file, before any other action. The guard sits before any sweep, because destruction otherwise happens on green runs too. `.gitignore` covers all three product classes, so a leak never appears in `git status` and never reaches the session-start outstanding-state sweep: the harness is the only place it can surface.
+
+Same failure class as § *Cached capture artifacts expire* (Issue #448): an artifact read back without establishing which run produced it.
+
 ## Colour rendering is controlled, never inherited
 
 `ltl` decides whether to emit ANSI from two environment variables, checked in this order by `help_ansi_enabled()`: `FORCE_COLOR` (npm/chalk convention) turns ANSI on, then `NO_COLOR` (no-color.org) turns it off, then `-t STDOUT` decides. That precedence is deliberate and is not a harness concern. What *is* a harness concern is that both variables arrive from whatever shell launched the suite.
