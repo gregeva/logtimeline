@@ -25,10 +25,20 @@ transform reads 35,801 and fails the harness. The contract is stated here under
 alone reports 97 passed, 0 failed against 95 before the change; the full suite is
 the completion gate's to run.
 
-**The prototype is not built.** It is the separate later stage described under
-*The prototype*, and it waits on #544 (the profiling workflow cannot run on the
-development machine). Nothing in the candidate it measures is implemented, and
-no decision about retained-duration normalisation has been taken.
+**The prototype is built, run and reported.** It lives in
+`prototype/528-record-lexical-retained-representation/`, its findings report is
+`FINDINGS.md` there, and its measured recommendation is recorded below under
+*The measured result* and *The disposition*. On the 761,698-line access log the
+candidate takes the per-bucket statistics store down 54.7% and the per-message
+store down 52.9%, the wall-clock median does not rise (it falls 1.33%, with the
+two arms' ranges overlapping at every stage), and every retained value is
+identical between the arms on both the integer-millisecond corpus and the
+fractional-millisecond specimen. Every exit condition is met, so the rule this
+document states produces *worth filing as its own performance issue*.
+
+**No decision about retained-duration normalisation has been taken, and no code
+is promoted.** The prototype ships nothing into `ltl`; the recommendation is the
+architect's to accept or decline.
 
 ## The motivating consumer
 
@@ -709,6 +719,93 @@ thread-session shape
 fractional milliseconds to three places) is added as a correctness-only arm for
 that reason, without timing, since fractional durations are where a spelling
 change would show.
+
+### The measured result
+
+**Built, run and reported.** The prototype is
+`prototype/528-record-lexical-retained-representation/`; the findings report is
+`FINDINGS.md` in that directory, and it carries the full tables, the sliced
+production lines, the correctness diffs and the ceiling analysis. What follows
+is the exit condition this section asked for.
+
+Twelve timed runs per arm per stage, pooled from two independent staged runs of
+five and seven, on a quiet machine with instrumentation off. Memory from a
+probed third build, never mixed with the timed arms.
+
+**The two structure rows, on the 761,698-line corpus.**
+
+| row | baseline | normalised | change |
+|---|---:|---:|---:|
+| `log_analysis` | 55,742,644 | 25,274,724 | **−54.7%** |
+| `log_messages` | 57,600,664 | 27,132,744 | **−52.9%** |
+
+The retained scalar's body is 64 bytes in the baseline and 24 in the normalised
+arm: 40 bytes saved on each of the 761,698 retained durations in each of the two
+stores, 29.1 MB per store and 58.1 MB across both. The prototype's baseline is
+within 0.16% of `ltl`'s own `MEMORY log_analysis` row (55,831,053 bytes) and
+within 1.79% of its `MEMORY log_messages` row (58,650,211), so the same change
+projected onto the tool's rows is −54.6% and −51.9%.
+
+**The wall-clock median, and the ranges.**
+
+| stage | baseline median (range) | normalised median (range) | change | overlap |
+|---|---|---|---:|---|
+| 5,000 lines | 0.0188 s (0.0187–0.0192) | 0.0185 s (0.0184–0.0187) | −1.33% | yes |
+| 100,000 lines | 0.3660 s (0.3640–0.3677) | 0.3606 s (0.3576–0.3658) | −1.49% | yes |
+| 761,698 lines | 2.7919 s (2.7767–2.8376) | 2.7548 s (2.7332–2.8269) | −1.33% | yes |
+
+**The median does not rise. It falls**, by 1.33% on the 761,698-line corpus, and
+the two arms' ranges overlap at every stage. The direction reproduced in both
+independent staged runs at every stage. The gain sits inside the overlap, so what
+is established is that the operation is free, not that it is an optimisation:
+`0 + $duration` replaces the copy of a 64-byte three-representation body with the
+construction of a 24-byte integer-only one, and the integer it reads is already
+in the lexical because the index block's `$fd->{duration_sum} += $duration` has
+put it there on the same line.
+
+**Does any rendered figure differ.** No. Every retained value was dumped in full
+from both arms and diffed at full scale on both specimens: 4,052 retained-value
+lines on the 761,698-line integer-millisecond corpus and 23,990 on 200,000 lines
+of the fractional-millisecond thread-session specimen, **identical in both
+cases**. The per-arm checksums match on every stage of every run. The spelling
+risk this section named did not materialise.
+
+**One finding the plan did not anticipate.** On the fractional-millisecond
+thread-session shape the baseline's retained scalar is 72 bytes rather than 64,
+because the fractional string's numeric read produces a double as well as an
+integer. The normalised arm retains 24 bytes there too, so the saving is larger
+on that shape: `log_analysis` −58.1% on 200,000 lines of that specimen. Sixty of
+the ninety really-big access files are that shape, so the saving on the large
+corpus would exceed the one measured here.
+
+### The disposition
+
+**Every condition in the exit criteria is met, and none of the not-worth-pursuing
+conditions fires.** The memory saving is more than five times the ten percent
+threshold; the wall-clock median does not rise at all, let alone by more than one
+percent; the ranges overlap; no rendered figure differs. This is not the split
+case.
+
+**The rule this section states therefore produces: worth filing as its own
+performance issue.** The recommendation is to file it, with the measured figures
+above as its premise, and to note in it that it touches the same hot-path lines
+as #478 (highlight bookkeeping is evaluated on the hot path when no highlight is
+active and when the metric is absent) and so should not be in flight at the same
+time.
+
+What such an issue would change, stated in what it means: the tool would use
+about half as much memory for the two stores that hold per-bucket and
+per-message duration samples — 58 MB less on a 762,000-line access log, and
+proportionally more on the fractional-millisecond shape — with no change to any
+number it prints and no measurable change to how long a run takes. What it would
+not change: the tool's output, its options, its behaviour, or the contract this
+document already carries about what a transform may leave in a shared record
+lexical. The consequence of not doing it is that every raw-mode run keeps paying
+40 bytes per retained duration for a string buffer no consumer reads, on every
+format and every file.
+
+**The architect decides.** Nothing is filed and no code is promoted under this
+issue.
 
 ## Completion gate
 
