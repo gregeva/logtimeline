@@ -89,6 +89,37 @@ and `features/266`. No file in the brief's list is missing from this run, and `d
 Classes: **(a)** record of the removal, stays as is; **(b)** history that must not be
 rewritten; **(c)** live intent, trued up by this issue; **(d)** #546's, untouched here.
 
+**Re-run 2026-09-13 on the rebased tree, before the sweep: 196 hits across 25 files.** The
+tree moved between the inventory above (taken 2026-09-12) and the rebase onto
+`release/0.18.1`, and the sweep follows the re-run rather than the table. Three differences,
+all of them #546's and #472's work landing:
+
+- `features/187-histogram-bin-counter-percentiles.md` falls from 5 hits to 2, and
+  `tests/HARNESS-DESIGN.md` from 6 to 1. #546 (the histogram bin-counter `-V` emitter labels
+  a consumer unified when no value was observed) retired `consumers_active: none` and
+  rewrote the three worked examples under "Self-documenting assertions". The two surviving
+  `features/187` hits are inside the dated Decision 8 amendment that records the retirement;
+  the one surviving `tests/HARNESS-DESIGN.md` hit is the "Stability contract" key-rename
+  example this issue owns. Both are class (a) or this issue's, so the division of labour
+  holds as written.
+- `features/426-per-message-statistics-store.md` falls from 7 hits to 6. #546 rewrote the
+  locked-decision inventory row for #187 Decision 7 (user-facing opt-out through the
+  per-surface data-model selectors), which now records the 2026-08-27 re-lock under #460
+  (bin-model percentiles computed from the counters that captured them) and no longer names
+  the removed vocabulary. The row this issue was told not to touch is done; the remaining
+  six hits are the class (b) audit findings, unchanged and not edited here.
+- Two feature docs new since the inventory return hits:
+  `features/546-bin-counter-verbose-path-label-gate.md` (21) and
+  `features/472-highlight-bin-counter-telemetry.md` (7). Both are specification records of
+  the retirement itself — class (a) under D1 (three classes, and only one of them is
+  edited): each already says the true thing, that the four names are locked clauses with no
+  emission site. Neither is edited.
+
+After the sweep the same grep over `features`, `docs`, `tests` and `prototype` returns 170
+hits, every one of them class (a), class (b), one of the seven inside
+`scenario_error_unknown_exact_percentiles`, the new dated note in `features/225`, or the new
+prototype-report annotation.
+
 | File | Hits | Class | Disposition |
 |---|---|---|---|
 | `features/266-data-model-selectors.md` | 20 | a | The record of the selectors that replaced the flag, including the sentence "This issue does not remove `--exact-percentiles`. Removal is a separate follow-up gated on user migration." True as written when written. No edit. |
@@ -391,12 +422,19 @@ rename of a key that does not exist. Replacement, using a key rename that happen
 
 > **Renames and removals are breaking changes.** Renaming a section
 > (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key
-> (`buckets_per_decade` → `data_model_precision`) requires:
+> (`percentile_precision` → `data_model_precision`) requires:
 
-The `buckets_per_decade` to `data_model_precision` rename is the run-level header change
-that shipped under #293 (precision lever unification) and is recorded in
+**Finding, 2026-09-13, established while applying this replacement.** The pair this section
+first named, `buckets_per_decade` → `data_model_precision`, is not a rename that happened.
+What shipped under #293 (precision lever unification) is two separate changes, and
 `features/426-per-message-statistics-store.md`'s locked-decision inventory row for #187
-Decision 8.
+Decision 8 (the `-V` reporting contract) records them as such: the run-level
+`buckets_per_decade:` line was **removed**, and the content key `percentile_precision:` was
+**renamed** to `data_model_precision:`. `features/293-precision-lever-unification.md` § Tier
+line locks the rename in those words and calls it a breaking `-V` content-key rename
+requiring exactly the consultation this passage describes, and `ltl` emits
+`data_model_precision: <tier> (<source>)` with no `buckets_per_decade:` line anywhere. So
+the illustration uses the renamed pair, which is the one change of the two that is a rename.
 
 ### `tests/validate-runtime-config.sh`
 
@@ -462,7 +500,20 @@ sub-heading, with every word of the original section left intact. Annotation tex
 > below stand as the record of what was measured on the prototype in 2026-05; they are not
 > a statement about the shipped tool's current flag surface. The same four scenarios were
 > re-mapped onto the shipped tool under #426, recorded in
-> `prototype/426-bin-primitives-revalidation-report.md` Finding H.
+> `prototype/426-bin-primitives-revalidation-report.md` § V4 (its Method paragraph and
+> Surprises 2 and 3).
+
+**Finding, 2026-09-13, established while writing this annotation.** The pointer this section
+first carried, "Finding H", names nothing in the target: that report labels its findings with
+numbers, not letters, and has no Finding H. The re-mapping the annotation defers to is in its
+§ V4 (`-V histogram-bin-counters` (Decision 8) output under the proposed representation): the
+Method paragraph enumerates the six #189 V4 scenarios against what today's lever can express,
+Surprise 2 records that the two `-pbpd` forms are unreachable and that Decision 8's
+`; overridden` annotation and `buckets_per_decade:` line no longer exist, and Surprise 3
+records that today's emitter has no `opt_out_active` / `opt_out_notice` header lines and no
+`--exact-percentiles` flag, naming that drift as pre-existing and not caused by #426. The
+annotation cites the section, per the rule that a deferral pointer names a committed artifact
+verified to contain the thing.
 
 The cross-aspect table row reading "Decision 7 (opt-out flag) | V4 scenario 6 |
 `--exact-percentiles` produces the locked banner + per-consumer `user_opt_out` line" is left
@@ -587,6 +638,59 @@ is the table, not a hypothesis.
 **Release notes: none.** The sweep is documentation, and the one harness line is a test-side
 correction with no user-observable change. If the harness line is dropped per the paragraph
 above, the answer is the same. Recorded so the close-out does not re-open the question.
+
+## Progress
+
+**Status 2026-09-13: the sweep is applied; the completion gate has not run.** Branch rebased
+onto `release/0.18.1` after #546 (the histogram bin-counter `-V` emitter labels a consumer
+unified when no value was observed) and #472 (the highlight bin-counter sub-stores are absent
+from the `-V` telemetry) merged; the rebase was clean, with no conflict in any shared record.
+`$version_number` is stamped `0.18.1-548` and is restored by the gate stage, not here.
+
+Nine files edited: `features/34-histogram-bin-counter-mode.md` (all twelve hits),
+`features/225-test-harness-coverage-gaps.md` (the two policy sections rewritten, the two
+sub-issue record rows kept and given the dated note),
+`features/189-bin-counter-primitives-implementation-readiness-audit.md` (the four
+recommendation passages; its three class (b) hits kept),
+`features/189-histogram-bin-counter-primitives.md`,
+`features/224-validate-statistics-test-harness.md`, `tests/HARNESS-DESIGN.md` (the
+stability-contract key-rename example only), `tests/validate-runtime-config.sh` (header
+comment and the dead pattern alternative), `prototype/189-bin-counter-primitives-validation-report.md`
+(the dated annotation, original text intact) and this record.
+
+Acceptance criteria, measured on the rebased tree:
+
+1. **The inventory grep returns only class (a), class (b), the rejection assertion, and the
+   dated annotation.** Pass. 170 hits over `features`, `docs`, `tests`, `prototype`; every
+   one read and classified, per the re-run recorded under *Inventory*.
+2. **No passage instructs a reader to pass `--exact-percentiles` or promises `opt_out_active`,
+   `opt_out_notice` or `consumers_active` output.** Pass. The four files that carried live
+   intent (`features/34`, `features/189-histogram-bin-counter-primitives.md`, `features/224`,
+   `tests/HARNESS-DESIGN.md`) return zero hits; `features/225` and the readiness audit return
+   only their record rows and the new dated note. Each replacement was read against #187
+   Decision 7 (user-facing opt-out through the per-surface data-model selectors) and
+   Decision 8 (the `-V` reporting contract) as #546 amends it.
+3. **`ltl --disable-progress` accepts every flag the replacement text names.** Pass, by
+   execution against `tests/fixtures/access-classification-buckets.txt` with `-bs 1440 -oe`:
+   `-dm raw`, `-hmdm raw`, `-hgdm raw`, `-mdm raw`, `-bdm raw`, `-dmp 7`, `-dm bin` and the
+   combined `-hmdm raw -hgdm raw` each exit 0 with empty stderr — no ` at ltl line N`.
+4. **`releases/` is byte-identical.** Pass. `git diff --stat origin/release/0.18.1 -- releases/`
+   is empty, and neither release note appears in `git diff --name-only`.
+5. **`tests/validate-runtime-config.sh` still asserts.** Pass. The harness runs end-to-end:
+   **36 passed, 0 failed**. The rejection scenario asserts among them (exit 1 plus
+   `unknown option '--exact-percentiles'`), and both surviving alternatives of the clean-run
+   pattern are the two warnings that exist, each asserted by its own scenario against its
+   exact text (`warning-g-non-numeric`, `warning-hm-non-builtin`). Assertions ran; exit 0
+   alone was not taken as the result, per the stability contract's step 2.
+6. **No file #546 owns is touched.** Pass. `git diff --name-only origin/release/0.18.1`
+   contains neither `features/187-histogram-bin-counter-percentiles.md` nor
+   `features/426-per-message-statistics-store.md`, and the `tests/HARNESS-DESIGN.md` diff is
+   the single stability-contract line.
+
+Two corrections the implementation established are recorded in place, under
+*`tests/HARNESS-DESIGN.md`* and *The prototype report annotation*: the key-rename pair this
+document first named was not a rename that happened, and the deferral pointer to the #426
+revalidation report named a finding label that report does not use.
 
 ## Ordering
 
