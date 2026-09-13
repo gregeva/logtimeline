@@ -14972,7 +14972,12 @@ sub read_and_process_logs {
                                     # (seeded below) carry the equivalent information and the
                                     # consumer (calculate_statistics_bin) reads neither
                                     # $stats_source->{durations} nor any descendant copy of it.
-                                    $stats_source->{durations} = [$duration] unless $message_stats_capture_mode eq 'bin';
+                                    # Issue #561: retain the number, not the string the log line
+                                    # carried. $duration is a copy of a shared record lexical whose
+                                    # body carries both the source string and the integer the
+                                    # per-file index block's duration_sum read out of it, so a plain
+                                    # copy retains a string buffer no consumer of this array reads.
+                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
                                     # sample stats_source. merge_consolidation_stats's
@@ -15116,7 +15121,11 @@ sub read_and_process_logs {
                                 # this is the dominant memory consumer at high (category, log_key)
                                 # cardinality. The bin-counter store and Welford-Pébay sidecars
                                 # below carry equivalent information for the consumer.
-                                push @{$log_messages{$category}{$log_key}{durations}}, $duration
+                                # Issue #561: the number is retained, not the string the log line
+                                # carried; the percentile path sorts and indexes numerically and the
+                                # moments path sums and squares, so the string buffer a plain copy
+                                # would inherit from the shared record lexical has no reader.
+                                push @{$log_messages{$category}{$log_key}{durations}}, 0 + $duration
                                     unless $message_stats_capture_mode eq 'bin';
     
                                 # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
@@ -15275,7 +15284,11 @@ sub read_and_process_logs {
                             $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
                             # Raw samples feed the percentile computation; under -bdm bin the
                             # bin-counter partition + sidecars below carry equivalent information.
-                            push @{$log_analysis{$bucket}{durations}}, $duration
+                            # Issue #561: the number is retained, not the string the log line
+                            # carried; the percentile path sorts and indexes numerically and the
+                            # moments path sums and squares, so the string buffer a plain copy
+                            # would inherit from the shared record lexical has no reader.
+                            push @{$log_analysis{$bucket}{durations}}, 0 + $duration
                                 unless $bucket_stats_capture_mode eq 'bin';
 
                             # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
@@ -15441,8 +15454,12 @@ sub read_and_process_logs {
                         # once before this loop (set near the parsing-loop entry).
                         if ($histogram_capture_mode eq 'raw') {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
-                                push @{$histogram_values{duration}}, $duration;
-                                push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
+                                # Issue #561: the number is retained, not the string the log line
+                                # carried; the histogram bins numerically and no consumer of these
+                                # arrays reads the string buffer a plain copy would inherit from
+                                # the shared record lexical.
+                                push @{$histogram_values{duration}}, 0 + $duration;
+                                push @{$histogram_values_hl{duration}}, 0 + $duration if $is_highlighted;
                             }
                             if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
                                 push @{$histogram_values{bytes}}, $bytes;
