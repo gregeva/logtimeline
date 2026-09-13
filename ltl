@@ -14190,6 +14190,11 @@ sub read_and_process_logs {
             # (or by the CSV branches' explicit resets), not re-declared here.
             my ( $log_level, $category, $threadpool ) = ("") x 3;
             my ( $is_line_match, $match_type ) = ( 0, 0 );
+            # The highlight decision for this line. Resolved once at the tag
+            # point below, which is the only surface that answers it; every
+            # consumer further down the loop reads this value rather than
+            # testing the -HL suffix the tag point appends to $category_bucket.
+            my $line_is_highlighted = 0;
             my ( $occurrences, $count ) = ( undef, undef );
             my ( $threadname );
             my $line_entry;                                 # winning registry entry for this line (drives timestamp-parse dispatch)
@@ -14706,9 +14711,11 @@ sub read_and_process_logs {
                         && ( !defined( $highlight_count_max )    || ( defined( $count )    && $count <= $highlight_count_max ) ) ) ) ) {
                     $category_bucket .= '-HL';
                     $category = 'highlight';
+                    $line_is_highlighted = 1;
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
                 } else {
                     $category = 'plain';
+                    $line_is_highlighted = 0;
                 }
 
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection).
@@ -15133,7 +15140,7 @@ sub read_and_process_logs {
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
                         $log_analysis{$bucket}{total_duration} += $duration;
 
-                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
@@ -15210,7 +15217,7 @@ sub read_and_process_logs {
                         my $e = $log_analysis{$bucket};
                         if( $bytes ) {
                             $e->{total_bytes} += $bytes;
-                            $e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                            $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         }
                         if( $bytes_aggregate_demand ) {
                             if( $e->{bytes_occurrences}++ ) {
@@ -15225,8 +15232,8 @@ sub read_and_process_logs {
                     if( defined $count ) {
                         $log_analysis{$bucket}{count_sum} += $count;
                         $log_analysis{$bucket}{count_occurrences}++;
-                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $category_bucket =~ /-HL$/;
-                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $line_is_highlighted;
+                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $line_is_highlighted;
 
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
                         $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
@@ -15243,7 +15250,7 @@ sub read_and_process_logs {
                             # value set per bucket, mirroring the %log_sessions pattern
                             $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
                             $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
-                            if ($category_bucket =~ /-HL$/) {
+                            if ($line_is_highlighted) {
                                 $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
                                 $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
                             }
@@ -15251,7 +15258,7 @@ sub read_and_process_logs {
                         }
                         $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
                         $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                        if ($category_bucket =~ /-HL$/) {
+                        if ($line_is_highlighted) {
                             $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
                             $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
                             $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
@@ -15290,11 +15297,11 @@ sub read_and_process_logs {
                             # once before this loop (set near the parsing-loop entry).
                             if ($heatmap_capture_mode eq 'raw') {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
-                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $line_is_highlighted;
                             } else {
                                 counter_update(\%heatmap_counters, $bucket, $heatmap_value, $heatmap_stream_bpd);
                                 counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)
-                                    if $category_bucket =~ /-HL$/;
+                                    if $line_is_highlighted;
                             }
                         }
                     }
@@ -15302,7 +15309,7 @@ sub read_and_process_logs {
                     ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
                     # Histogram collects values across entire population (not per time-bucket like heatmap)
                     if ($histogram_enabled) {
-                        my $is_highlighted = ($category_bucket =~ /-HL$/);
+                        my $is_highlighted = $line_is_highlighted;
 
                         # Issue #266: dispatch via $histogram_capture_mode resolved
                         # once before this loop (set near the parsing-loop entry).
@@ -15374,7 +15381,7 @@ sub read_and_process_logs {
                     # Time Window Based Statistics Capture (Time Window Graphs) #
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
-                    if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
+                    if( $line_is_highlighted ) {                       # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
                 }
@@ -15383,7 +15390,7 @@ sub read_and_process_logs {
                 if( defined $session && $session ne "" && $session ne "-" ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
-                    if( $category_bucket =~ /-HL$/ ) {
+                    if( $line_is_highlighted ) {
                         $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
                 }
@@ -15392,7 +15399,7 @@ sub read_and_process_logs {
                 if( defined $user && $user ne "" && $user ne "-" ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
-                    if( $category_bucket =~ /-HL$/ ) {
+                    if( $line_is_highlighted ) {
                         $log_users{$bucket}{highlight}{$user} += 1;
                     }
                 }

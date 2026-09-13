@@ -123,3 +123,69 @@ Perl **5.42.0**; the installed toolchain is **5.42.2** (`/opt/homebrew/Cellar/pe
 The doc anticipates exactly this drift and says to update the paths when Homebrew
 upgrades Perl. `run-profile.sh` resolves `nytprofhtml` from the same versioned path
 and was run here with `--no-html`, so the drift did not surface as a failure.
+
+---
+
+## Amendment, 2026-09-13: the highlight-suffix projection above is wrong by 25 to 50 times
+
+Appended under the never-overwrite rule; nothing above this line is changed. The
+section "The largest hot-path cost here is not this change" stands as the record
+of what the instrument reported. This amendment records what the projection
+turned out to be worth when it was measured directly, so that no future reader
+acts on the 2.0 s / 12 percent figure. That figure is what caused #478 (the
+highlight decision is re-derived from the `-HL` category suffix throughout the
+read loop instead of kept once at the tag point) to be filed as a performance
+bug; the issue has since been reframed as a convergence fix, and the full record
+is `features/478-highlight-decision-read-back.md`.
+
+**The corrected figure.** An A/B against a probe build with every in-loop `-HL`
+suffix regex replaced by a scalar flag measured **about 0.08 seconds on 16.5
+seconds, roughly 0.5 percent**, inside the run-to-run spread. An independent
+second pass measured about 0.07 s on 16.3 s. The arithmetic ceiling from
+isolated per-operation cost is about 0.04 s, so even 0.08 s is generous. The
+projection above reads 2.0 s and about 12 percent. Both are wall-clock on a
+machine running other work concurrently, so the timings are indicative; the
+order of magnitude is the point.
+
+**Why the arithmetic above is internally consistent and still wrong.** 2.0 s of
+a 16.44 s baseline really is 12 percent, and 0.14 s per 100k lines really does
+scale to about 2.0 s on 1.43M lines. The error is not in the arithmetic: it is
+in the attribution model. The profiler charges a statement's whole cost to its
+line, and two of the three lines in the table above carry a hash-element
+autovivify-and-add beside the guard:
+
+```perl
+$log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
+$e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+```
+
+The hash write is the expensive half, and it is the work the program is there to
+do; only the guard is the redundancy. This same analysis establishes, in "Where
+the time goes, per 100k lines", that hash element access dominates on this path.
+That finding was simply not applied to its own three `-HL` lines.
+
+**The third line did no work at all.** The most expensive line in the table,
+`$log_level =~ s/-HL$//`, **matched zero times in 20,000 lines** of the profiled
+access-log corpus. It sits on the message path, where `$log_level = $status_code
+> 0 ? $status_code : $category_bucket`, and a status code can never carry the
+suffix. Its 0.0651 s per 100k is the scalar copy and the ternary sharing the
+statement, not a substitution doing work. A probe that gated the line measured
+no improvement. The substitution is nonetheless load-bearing on formats with no
+status code: commenting it out regresses TOP MESSAGES rows from `[WARN]` to
+`[WARN-HL]`.
+
+**Two smaller corrections to the same section.** "Three of these run per line;
+the pattern is a constant" does not hold. An instrumented build counting
+executions per site measured **1.38 per line** on the reference access log under
+the profiled options (the duration site on every line, the bytes site on 38
+percent), and the maximum reached on any corpus and option set tried was 7 per
+line. It is also not monotonic in feature count: adding `-hm duration -hg
+duration` *removed* a site by changing the resolved bucket-statistics demand.
+And the line numbers in the table are from the #432 branch; the file has since
+grown to about 21,060 lines and `read_and_process_logs` has moved about 3,600
+lines, so the sites must be located by snippet rather than by number.
+
+**The lesson, stated as the lessons above are.** A line-level profile attributes
+cost to a statement, not to a clause within it. Before a guard's profiled cost
+becomes a projection, check what else shares its statement, and check that the
+operation being blamed actually executes on the profiled corpus.

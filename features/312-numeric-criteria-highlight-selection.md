@@ -45,6 +45,8 @@ All rendering machinery for "highlighted subset within a bucket" already exists 
 - Hot-loop discipline: the numeric predicate is evaluated only when `$numeric_highlight_active`; runs without these options pay one falsy check per line.
 - The restructured tag-point condition must keep the per-file highlight state update (`$in_files_matched{$in_file} = 2`, feeding the file-legend indicator) inside the unified highlight branch, so numeric-only matches mark their file identically to regex matches.
 
+**Note added 2026-09-13 (from #478, the highlight decision is re-derived from the `-HL` category suffix throughout the read loop instead of kept once at the tag point).** The tag point above is the single place the highlight decision is *computed*, and this design records that correctly. It does not say how the decision is *read back* inside the same loop, and thirteen sites below the tag point re-derive it with `$category_bucket =~ /-HL$/` rather than reading a value the tag point kept. That read-back surface is specified in `features/478-highlight-decision-read-back.md`, which converges the thirteen onto one per-line boolean set in both arms of this tag point. The `-HL` suffix stays the storage and rendering carrier locked here; only the in-loop read-back changes.
+
 ### The `defined $highlight_regex` gate sweep
 
 Several render surfaces gate on `defined $highlight_regex` and would silently skip numeric-only highlighting. Each must switch to the unified `$highlight_active`. Sites found during planning (line numbers approximate as of v0.15.1; re-grep `highlight_regex` at implementation time — this is the primary correctness risk):
