@@ -179,6 +179,15 @@ on 'develop' => sub {
   `--with-develop` printed both. Every build path (`build/install-deps.sh`, the Ubuntu
   Docker block in `build/ubuntu-package.sh`, the CI workflow) calls the default form and
   is therefore unaffected.
+- **How the append is implemented.** The decision gives the block as a plain literal, but
+  the generator writes each cpanfile through a `case` statement with three branches
+  (`unix`, `windows`, `all`), so a literal appended at one call site would reach only one
+  of them. The scan-and-filter pipeline for each target is therefore wrapped in a named
+  function — one that writes the Unix file and appends the block, one that writes the
+  Windows file without it — and the three branches call those. The `unix` and `all`
+  branches consequently produce a byte-identical Unix cpanfile, which is what makes the
+  determinism criterion meaningful across branches rather than only within one.
+
 - **The packagers cannot pick it up.** `build/macos-package.sh` and
   `build/ubuntu-package.sh` both invoke `pp` with no inclusion flags (no `-M`, no `-a`).
   `pp` decides what to bundle by tracing the script's own dependencies, not by reading the
@@ -262,11 +271,18 @@ development-only dependency is named, so a second development module added later
 up by the same run and the same README command with no further edit. Naming the module on
 a command line in a second place would recreate the drift this issue is about.
 
-**D12 (delegated, smaller): a release-notes bullet is written.**
-The release notes carry developer-tooling entries: `releases/v0.15.0.md` and
-`releases/v0.16.0.md` both describe harness and test-infrastructure changes as user-visible
-lines. A profiling workflow that installs its own toolchain and stops instead of degrading
-is the same class. One line under Bug Fixes, naming the issue.
+**D12 (delegated, smaller; amended at implementation): no release-notes bullet is
+written.**
+The bullet is withheld. `docs/process/workflow.md` § 4 step 6 states that a bullet is
+written when the issue changed what a user of `ltl` observes — the tool, its CLI, its
+output, its user-facing docs — and that work confined to `build/`, `tests/`, `features/`,
+`CLAUDE.md` or process gets no bullet. This diff is confined to those paths plus
+`README.md`, and changes nothing a user of `ltl` observes: no option, no output, no
+behaviour of the tool itself. The precedent this decision originally cited (developer
+tooling described in earlier release notes) does not override the rule as written.
+Issue #547 (standing detection of a dirty repository root) reads the same rule the same
+way. The withheld bullet is recorded in the completion comment, so the omission is a
+decision rather than a gap.
 
 **D13 (locked by the architect, 2026-09-13): no automated fixture; testing and validation
 are manual during the fix.**
@@ -288,8 +304,17 @@ environment it is testing and is disproportionate to a developer-tooling fix.
 | Input | Source | Default |
 |---|---|---|
 | `LTL_PROFILING_INSTALL` | environment | `1` (attempt the install on a miss); `0` means check only and fail on a miss |
+| `LTL_PROFILING_SCRIPT_DIR` | environment | unset; when set, it replaces the interpreter's own script directory as the place the HTML tool is looked for |
 | Repository root | derived from the script's own location | n/a |
 | The interpreter | `perl` from PATH | n/a |
+
+`LTL_PROFILING_SCRIPT_DIR` was added during implementation and is not a second resolution
+surface: the resolution order is unchanged, and the variable only substitutes the
+directory that step searches. It exists because the criterion "a missing HTML tool stops
+the run" has no other way to be observed on a machine where the tool is correctly
+installed — the alternative would be deleting the tool from the developer's own Perl.
+Unset, which is how every real run invokes the preflight, the behaviour is exactly the
+contract above.
 
 **Checks, in order**
 
@@ -340,9 +365,29 @@ before it creates any output directory, and exits with the preflight's status on
 non-zero. Nothing is written under `tests/profile/results/` when the preflight fails.
 
 **The HTML step in `run-profile.sh`** stops swallowing failure: the invocation is no longer
-wrapped in a fallback that prints a warning, and a non-zero exit from the HTML tool fails
-the run. `--no-html` remains the documented way to skip the report deliberately, and when it
-is passed the preflight's HTML check is not required to pass.
+wrapped in a fallback that prints a warning, and a failure of the HTML tool fails the run.
+`--no-html` remains the documented way to skip the report deliberately, and when it is
+passed the preflight's HTML check is not required to pass.
+
+**Finding, established while implementing this: exit status alone cannot detect a degraded
+HTML step, and the existing invocation passed an option the tool does not have.**
+Measured on the development machine against `nytprofhtml` from `Devel::NYTProf` 6.15,
+invoked as `run-profile.sh` invoked it: given `--no-mergeforks`, the tool printed
+`Unknown option: no-mergeforks` followed by its usage message, wrote no report directory,
+and **exited 0**. A reader would observe a run that reports success and leaves no
+`nytprof/index.html`. The option is not in that version's option list, which offers
+`--no-mergeevals`; the run that produced the thin capture in
+`tests/profile/results/432-bytes-parity-capture/` carried the same flag.
+
+Two consequences, both implemented:
+
+- `--no-mergeforks` is dropped from the invocation, because the tool does not accept it.
+- The HTML step is verified by **the report file existing**, not by the exit status. A run
+  whose `nytprof/index.html` is absent after the step fails with a message naming the path
+  and pointing at `--no-html` for a deliberate skip.
+
+This is what makes requirement 3 (a profiling run never silently degrades) hold against
+this tool rather than only against a tool that signals failure through its exit status.
 
 ---
 
@@ -410,7 +455,11 @@ To be inserted in `README.md` § Developer Setup, after the maintainer-tools par
 | `tests/profile/extract-profile.pl` | Shebang |
 | `features/nytprof-profiling-workflow.md` | Environment, Quick Start, What NOT to Do |
 | `README.md` | § Developer Setup gains the profiling subsection |
-| `releases/` | One bug-fix line in the open release notes |
+| `ltl` | `$version_number` stamped for the branch, restored by the gate stage; no executable line changed |
+
+`releases/` is **not** touched: the bullet is withheld under the amended D12 (no
+release-notes bullet is written, because the diff changes nothing a user of `ltl`
+observes).
 
 Not touched: `build/cpanfile.windows`, `build/install-deps.sh`,
 `build/ubuntu-package.sh`, `build/windows-package.sh`,
@@ -422,7 +471,13 @@ the tools are installed), `ltl`.
 
 ## Acceptance criteria
 
-- [ ] **On a machine where the profiler module is missing, `tests/profile/run-profile.sh`
+**Status: implemented; every criterion checked by hand on the development machine, per
+D13 (no automated fixture; testing and validation are manual during the fix).** What was
+observed is recorded under each criterion. The machine state at the start of the work was
+the defect itself: `perl` on PATH resolved to Homebrew Perl 5.44.0, the profiler module
+did not load for it, and the keg the old pinned path named no longer existed.
+
+- [x] **On a machine where the profiler module is missing, `tests/profile/run-profile.sh`
       installs it and completes with an HTML report present.** Observable: after removing
       the module (or on a Perl that never had it), a profiling run prints that it is
       installing, exits 0, and `results/<label>/<sample>/nytprof/index.html` exists.
@@ -430,7 +485,7 @@ the tools are installed), `ltl`.
       network operation and the state to set up is "module absent for the current Perl",
       which cannot be created inside a harness without uninstalling from the developer's
       environment.
-- [ ] **With the install made to fail, the run exits non-zero, names the manual command,
+- [x] **With the install made to fail, the run exits non-zero, names the manual command,
       and writes no partial results.** Observable: with `LTL_PROFILING_INSTALL=0` set and
       the module absent, the run exits with code 2, its output contains
       `cpanm --notest --installdeps --with-develop .`, and
@@ -438,22 +493,22 @@ the tools are installed), `ltl`.
       environment override in the preflight contract is the specified simulation of a
       failed install; it exercises the same failure branch without needing a network
       outage. Checked by hand alongside the criterion above.
-- [ ] **A missing HTML tool stops the run rather than warning.** Observable: with the HTML
+- [x] **A missing HTML tool stops the run rather than warning.** Observable: with the HTML
       tool unresolvable and `--no-html` not passed, the run exits non-zero before profiling
       and nothing is written under `results/`. *Assertable.* Method: by hand, with the
       preflight's resolution pointed at an empty directory. This is the criterion the
       capture in `tests/profile/results/432-bytes-parity-capture/` would have failed.
-- [ ] **No mechanism names a Perl version or a keg path.** Observable:
+- [x] **No mechanism names a Perl version or a keg path.** Observable:
       `git grep -nE 'Cellar|5\.4[0-9]' -- build/ tests/profile/*.sh tests/profile/*.pl
       README.md` returns nothing, and in `features/nytprof-profiling-workflow.md` the only
       matches are inside the fenced § Example Output block. *Assertable.* Method: the grep
       itself, run at gate time and recorded in the completion comment.
-- [ ] **The README verification lines succeed after the documented command.** Observable:
+- [x] **The README verification lines succeed after the documented command.** Observable:
       running `LTL_INSTALL_DEV_DEPS=1 ./build/macos-setup.sh`, then each of the two
       verification lines from the subsection, gives exit 0 from both. *Assertable.* Method:
       by hand on the development machine. The command is the one a reader will copy, so it
       is checked as copied, not as paraphrased.
-- [ ] **The macOS release build does not install the profiler.** Observable:
+- [x] **The macOS release build does not install the profiler.** Observable:
       `./build/macos-setup.sh` run with `LTL_INSTALL_DEV_DEPS` unset prints the default
       install form and not the `--with-develop` form; the CI step invokes the script bare.
       *Assertable* from the script's own flag handling, without running a release build.
@@ -463,16 +518,16 @@ the tools are installed), `ltl`.
       *Unassertable in full*: that a real GitHub Actions macOS run installs nothing extra
       is not observable from this machine and is not worth a release build to prove; the
       script's behaviour plus the bare invocation is the evidence.
-- [ ] **The generated cpanfile is deterministic.** Observable: running
+- [x] **The generated cpanfile is deterministic.** Observable: running
       `./build/generate-cpanfile.sh` twice produces byte-identical `build/cpanfile` and
       `build/cpanfile.windows`, and the second run leaves `git status` clean.
       *Assertable.* Method: two runs and a `cmp` against a copy taken between them.
-- [ ] **The default dependency resolution is unchanged.** Observable:
+- [x] **The default dependency resolution is unchanged.** Observable:
       `cpanm --installdeps --showdeps .` from `build/` lists the same nineteen runtime
       modules and not the profiler; `--with-develop` lists the profiler too. *Assertable.*
       Method: the two `--showdeps` invocations, which resolve without installing. This is
       the criterion that protects the Ubuntu and Windows build paths.
-- [ ] **A profiling run on a prepared machine is unchanged in its output shape.**
+- [x] **A profiling run on a prepared machine is unchanged in its output shape.**
       Observable: a small run (`--samples 1k`) produces `nytprof.out`, `verbose.txt`,
       `summary.txt`, and the HTML directory, and the summary's cross-validation section
       prints as before. *Assertable.* Method: one 1k run, by hand, compared against the
@@ -485,6 +540,25 @@ development machine during the fix, not by a harness. Profiling is not a validat
 surface, the failure states involve removing a module from the developer's own Perl, and
 the install step needs a network.
 
+### What was observed, criterion by criterion
+
+Run on the development machine with `perl` on PATH resolving to Homebrew Perl 5.44.0.
+
+| Criterion | What was run | What was observed |
+|---|---|---|
+| A missing profiler self-installs and the run completes with a report | `./build/profiling-preflight.sh` with the module absent, then a 1k profiling run | The preflight printed that it was installing, installed `Devel::NYTProf` 6.15, re-checked and exited 0; the run exited 0 and wrote `nytprof/index.html` at 45,963 bytes |
+| A failed install stops the run and names the manual command | `LTL_PROFILING_INSTALL=0 ./tests/profile/run-profile.sh --label <probe> -- …` | Exit 2, output carried `cd build && cpanm --notest --installdeps --with-develop .`, and no directory was created under `tests/profile/results/` |
+| A missing HTML tool stops the run | the same run with the preflight's script directory pointed at an empty directory | Exit 2 before profiling, nothing written under `results/`; with `--no-html` added, the run continued and printed that it was doing so |
+| No mechanism names a Perl version or a keg path | `git grep -nE 'Cellar\|5\.4[0-9]' -- build/ tests/profile/*.sh tests/profile/*.pl README.md` | No matches. In `features/nytprof-profiling-workflow.md` the single match is the `Perl: 5.42.0` line inside the fenced § Example Output sample |
+| The README verification lines succeed | both lines of the README subsection, as written | `module ok` and exit 0; the preflight printed the resolved interpreter, `Devel::NYTProf 6.15`, and the resolved HTML tool, exit 0 |
+| The release build does not install the profiler | the dependency step of `build/macos-setup.sh` with the variable unset and set | Unset announced `cpanm --notest --installdeps .`; set to `1` announced `cpanm --notest --installdeps --with-develop .`. `.github/workflows/release-build.yml` invokes `./build/macos-setup.sh` bare and sets the variable nowhere |
+| The generated cpanfile is deterministic | `./build/generate-cpanfile.sh` twice, plus once per `unix`, `windows` and `all` target | Byte-identical both times; the `unix` and `all` branches produce an identical Unix cpanfile and the `windows` and `all` branches an identical Windows one; a regeneration leaves no diff |
+| The default dependency resolution is unchanged | `cpanm --installdeps --showdeps .` and the same with `--with-develop`, from `build/` | Default listed the nineteen runtime modules and no profiler; `--with-develop` listed the profiler as well |
+| A profiling run is unchanged in its output shape | `./tests/profile/run-profile.sh --samples 1k --label <probe> -- --disable-progress <fixture>` | `nytprof.out`, `verbose.txt`, `summary.txt` and the HTML directory all present; the summary carried the same header fields, ranking table and `[OK] All cross-validation checks within tolerance` as § Example Output |
+
+The probe result directories created for these checks were removed afterwards; no
+deliverable under `tests/profile/results/` was written to or overwritten.
+
 ---
 
 ## Completion gate
@@ -496,12 +570,23 @@ Per `docs/process/workflow.md` § 3, the diff touches `build/`, `docs`-class doc
 **Proposed skip: the full harness suite and the before/after benchmark are both skipped,
 with the reason recorded in the completion comment.** The scope table's row "Only
 `tests/baseline/`, `build/`, `features/`, `docs/`, `releases/`, `patterns/`, `CLAUDE.md`"
-is a skip on both counts. `tests/profile/` is not named in the table, and it is not a
-`tests/validate-*.sh` harness, not `tests/lib/`, and not a fixture or expectation any
-harness reads: nothing under `tests/profile/` is invoked by the suite, so changing it
-cannot change what passing means. Naming the behaviour this change could have altered, per
-the checkpoint: it alters what a profiling run does and what `build/macos-setup.sh`
-installs, and neither is exercised by any harness or by the benchmark.
+is a skip on both counts.
+
+**Correction made at implementation: the premise "nothing under `tests/profile/` is
+invoked by the suite" is false, and the skip is restated per file.** Three harnesses do
+invoke files under `tests/profile/`: `tests/validate-profile.sh` and
+`tests/validate-csv-output.sh` invoke `tests/profile/generate-profile-log.py`, and
+`tests/validate-profile-render.sh` invokes that generator and
+`tests/profile/check-profile-labels.pl`. The correct statement is per file, not per
+directory: **none of the files this issue changes or adds is read or invoked by any
+harness.** The changed files under `tests/profile/` are `run-profile.sh` and
+`extract-profile.pl`, neither of which any `tests/validate-*.sh` invokes; the generator
+and the label checker that harnesses do invoke are untouched. So the scope-table row that
+applies is the exempt one, and it applies on the corrected premise.
+
+Naming the behaviour this change could have altered, per the checkpoint: it alters what a
+profiling run does and what `build/macos-setup.sh` installs, and neither is exercised by
+any harness or by the benchmark.
 
 **This skip is the architect's to confirm at gate time.**
 
