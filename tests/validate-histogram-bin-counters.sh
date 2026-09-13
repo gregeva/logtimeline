@@ -80,6 +80,28 @@ check_capture_warnings() {
     fi
 }
 
+# A working directory a -o run is about to write into carries no export
+# product this harness did not create. Finding one is a diagnosis, not
+# something to clean up: the file is named and the scenario stops, before any
+# other action (tests/HARNESS-DESIGN.md section A harness owns the directory it
+# runs ltl in).
+assert_working_directory_owned() {
+    local dir="$1" found
+    found="$(ls "$dir"/*-LTL-AGGREGATE.yaml "$dir"/*-LTL-STATS-*.csv "$dir"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
+    if [[ -n "$found" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        label:       working directory owned"
+        echo "        asserts:     The directory a -o run writes into holds no export product this harness did not create; a stranger is named and the scenario stops, never swept or deleted"
+        echo "        produced_by: assert_working_directory_owned() in tests/validate-histogram-bin-counters.sh"
+        echo "        contract:    tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in"
+        echo "        detail:      pre-existing product not written by this run: $found"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: working directory owned")
+        return 1
+    fi
+    return 0
+}
+
 # Self-documenting assertion: a line matching `pattern` must be present.
 # Required named fields: pattern, asserts, produced_by, contract.
 # On failure, all four are surfaced alongside the captured output path.
@@ -462,8 +484,17 @@ scenario_message_stats_bin() {
 scenario_message_stats_csv_shared() {
     current_scenario="message-stats-csv-shared"
     echo "[$current_scenario]"
-    local out
-    out=$(run_section -mdm bin -n 3 -o)
+    # -o writes its products into the working directory, so this scenario runs
+    # in a scratch directory it created and removes, never in whichever
+    # directory the operator launched the harness from (tests/HARNESS-DESIGN.md
+    # section A harness owns the directory it runs ltl in). Nothing this
+    # scenario did not write is read, moved or deleted.
+    local run_dir out
+    run_dir=$(mktemp -d)
+    # A directory holding a stranger is left exactly as found: removing it
+    # would destroy the file the guard just reported.
+    assert_working_directory_owned "$run_dir" || return
+    out=$(cd "$run_dir" && run_section -mdm bin -n 3 -o)
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -480,8 +511,9 @@ scenario_message_stats_csv_shared() {
         produced_by 'emit_bin_counter_mode_verbose() in ltl - %shares_with map carrying csv_output => summary_table' \
         contract    'features/189-histogram-bin-counter-primitives.md section R7 - shared partitions across consumers; features/187 section Decision 8 - locked short-form block; features/287 section R8.1.'
 
-    # Cleanup: -o leaves its two CSVs and the aggregate export in the cwd
-    rm -f *MESSAGES-*.csv *STATS-*.csv *-LTL-AGGREGATE.yaml 2>/dev/null || true
+    # The -o products are inside the directory this scenario created, so the
+    # directory goes as a whole; no glob is aimed at a shared directory.
+    rm -rf "$run_dir"
     rm -f "$out" "$out.stderr"
 }
 
