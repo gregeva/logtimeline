@@ -5,9 +5,13 @@ Issue #547 (BUG: `ltl -o` products left in the repository root are hidden by
 
 ## Status
 
-Specification and acceptance criteria agreed. No script and no hook wiring
-written yet. This document is the record; the corrections below are applied to
-it rather than to the issue body, and the issue comment points here.
+Implemented. `build/check-root-clean.sh` exists to the contract below and
+`build/claude-hooks/session-start.sh` calls it. Every acceptance criterion was
+executed against a scratch clone under the scratchpad and passes; the results
+and the two findings the implementation established are in
+§ *Implementation record*. This document is the record; the corrections below
+are applied to it rather than to the issue body, and the issue comment points
+here.
 
 ## Motivating consumer
 
@@ -369,6 +373,14 @@ index is present and not stale, it is folded into the closing line instead, as
 `(1 run index not listed, current)`. On a clean root the script prints nothing
 and the closing line is not printed either.
 
+*Refined during implementation, where the two sentences above meet.* A root
+whose only ignored depth-one entry is a current run index has no finding to
+print, but the third acceptance criterion requires the trailing clause to be
+observable in exactly that case. The closing line is therefore printed whenever
+there is anything to say — a finding, or a folded run index — and withheld only
+when the root has neither, which is the clean root the fourth criterion checks.
+The exit status in the folded case stays 0: a current index is not a finding.
+
 **Exit codes.** `0` when every probed root is clean after exclusions and
 acknowledgements; `1` when at least one finding was printed; `2` on a usage
 error or when a root cannot be probed. The caller in
@@ -401,7 +413,7 @@ Every criterion below is exercised in a scratch clone or scratch directory under
 the scratchpad, never in the worktree root, and no `ltl` run in any of them
 omits `--disable-progress`.
 
-- [ ] With an `ltl -o` product planted at depth one of a scratch clone's root,
+- [x] With an `ltl -o` product planted at depth one of a scratch clone's root,
       the script lists it with its size and its age and exits non-zero.
       **[assertable]** Method: create a scratch clone, run
       `ltl --disable-progress -o -bs 1440 -oe` against the smallest fixture
@@ -409,46 +421,46 @@ omits `--disable-progress`.
       clone's root, run `build/check-root-clean.sh <clone-root>` capturing
       output once to the scratchpad, and read from the file that the line names
       the file with a non-zero size and an age, and that the exit status is 1.
-- [ ] With the planted product's name in `.claude/root-clean-ack.txt` in that
+- [x] With the planted product's name in `.claude/root-clean-ack.txt` in that
       root, the script prints nothing for it. **[assertable]** Method: repeat
       the previous step, write the basename into the acknowledgement file, run
       again, and confirm the output contains no line naming that file. With that
       file the only finding, the exit status is 0 and the closing line is absent.
-- [ ] With `ltl-index.csv` the only ignored artifact at depth one and newer than
+- [x] With `ltl-index.csv` the only ignored artifact at depth one and newer than
       the newest tracked file, it is not listed and is reported only in the
       closing clause. **[assertable]** Method: in a scratch clone with a
       freshly written index and no other ignored depth-one entry, confirm no
       `FINDING:` line names it and the trailing clause reports one run index not
       listed. Then set its modification time behind every tracked file and
       confirm it is listed as a finding.
-- [ ] On a clean root the script produces no output at all. **[assertable]**
+- [x] On a clean root the script produces no output at all. **[assertable]**
       Method: in a scratch clone with only the excluded entries present, confirm
       the captured output file is empty and the exit status is 0. This is the
       criterion that keeps the block quiet, and it is the one a future exclusion
       change breaks first.
-- [ ] Nothing is deleted, moved or modified. **[assertable]** Method: checksum
+- [x] Nothing is deleted, moved or modified. **[assertable]** Method: checksum
       every file at depth one of both probed roots before and after a run that
       reports findings, and compare the two listings, including modification
       times. The comparison is a listing, never a deletion. This is the
       sabotage-resistant form of D2: a detector that cleans up would pass every
       other criterion here.
-- [ ] Run from a worktree session, the script probes the main checkout and
+- [x] Run from a worktree session, the script probes the main checkout and
       reports its findings labelled as such. **[assertable]** Method: run the
       script from a scratch worktree of a scratch clone with a product planted
       in the clone's main root and the worktree root clean, and confirm the
       output carries a `main checkout` line and no `session` line. This is the
       criterion the naive anchoring on the session's own toplevel fails.
-- [ ] Run from the main checkout, the script probes one root, not two.
+- [x] Run from the main checkout, the script probes one root, not two.
       **[assertable]** Method: the same scratch clone, run from its own root,
       with each finding appearing exactly once.
-- [ ] The session-start sweep still exits 0 and prints its existing block when
+- [x] The session-start sweep still exits 0 and prints its existing block when
       the script reports findings, and when the script is absent or not
       executable. **[assertable]** Method: run
       `build/claude-hooks/session-start.sh` in a scratch clone with a planted
       product, confirm exit 0 and the findings inside the existing
       `== Outstanding state` block; then with the script bit cleared, confirm
       exit 0 and an unchanged block.
-- [ ] An unknown argument is rejected. **[assertable]** Method: run the script
+- [x] An unknown argument is rejected. **[assertable]** Method: run the script
       with a flag it does not define and confirm a non-zero exit and a usage
       line, rather than a probe of the default roots.
 
@@ -458,6 +470,108 @@ D9, and it is not recorded as a gap.
 
 **Unknown verification method: none.** Every criterion above was demonstrated
 in shape during the investigation, on both this worktree and the main checkout.
+
+## Implementation record
+
+`build/check-root-clean.sh` implements the script contract above;
+`build/claude-hooks/session-start.sh` gains the one guarded call, placed after
+the `unpushed on this branch:` probe. `.claude/settings.json` and
+`build/setup-hooks.sh` are unchanged, as the wiring section states.
+
+### How the criteria were executed
+
+Every criterion was run by hand against a scratch git repository created under
+the scratchpad, carrying the same ignore rules as this repository, one tracked
+file, and the script copied into its `build/`. The products planted in it are
+real: one `ltl --disable-progress -o -bs 1440 -oe` run against
+`tests/fixtures/tomcat-access-single-sample-keys.txt` (twelve lines, the
+smallest fixture that produces a full product set) inside a scratch directory,
+whose aggregate export, STATS CSV and run index were then copied to the scratch
+repository's root. That run wrote nothing to stderr, so no runtime warning was
+raised by the invocation the criteria are built on. No criterion was exercised
+in the worktree root and no `ltl` invocation omitted `--disable-progress`.
+
+The nine criteria are hand-executed rather than asserted by a harness, which is
+D1 (the detector is a script under `build/` called from the session-start sweep,
+not a harness assertion and not a change to `ltl`) taking effect: a
+`tests/validate-*.sh` file would move the diff into the required/required row of
+the scope table in `docs/process/workflow.md` § 3 and, per D3 (making a leaking
+harness fail is a follow-up), would fail today on the live leak from #527 (the
+export harness asserts against an aggregate export it did not write). What each
+criterion observed:
+
+- The planted aggregate export was reported as
+  `FINDING: dirty root session: <name> (aggregate export, 2 KB, today)` with
+  exit status 1.
+- With that basename written into `.claude/root-clean-ack.txt` — surrounded by
+  whitespace, below a `#` comment and a blank line — the run printed zero bytes
+  and exited 0, with no line naming the file and no closing line.
+- With the run index the only ignored depth-one entry and newer than the newest
+  tracked file, no `FINDING:` line named it and the closing line carried
+  `(1 run index not listed, current)` at exit 0. With its modification time set
+  behind every tracked file, it was listed as
+  `(run index, 1 KB, 43 days old)` at exit 1.
+- With only the corpus symlink and `.DS_Store` present, the captured output file
+  was zero bytes and the exit status 0.
+- Across a run reporting three findings, a listing of every depth-one file's
+  SHA-1, size and modification time was byte-identical before and after: seven
+  entries, nothing deleted, moved or modified.
+- Run from a scratch worktree whose own root was clean, all three findings were
+  labelled `main checkout` and no `session` line appeared.
+- Run from that scratch repository's own root, each finding appeared exactly
+  once and only the `session` label was present.
+- `build/claude-hooks/session-start.sh` run against the dirty scratch
+  repository exited 0 with the findings inside the existing
+  `== Outstanding state` block, adjacent to the `uncommitted:` probe; with the
+  script's executable bit cleared it exited 0 with the block otherwise
+  unchanged.
+- An undefined flag produced `[error] unknown option: ...` plus the usage text
+  at exit 2, with no `FINDING:` line, so the default roots were not probed.
+  `--quiet` on a dirty root printed zero bytes at exit 1, and a directory that
+  is not a git repository exited 2.
+
+### Finding: the staleness comparison reads checkout time in a worktree
+
+**What was measured.** In the main checkout on 2026-09-13, `ltl-index.csv`
+carried modification time 1789235311 (12 September 19:48:31) and the newest
+tracked file, `tests/validate-explain.sh`, carried 1789228950 (12 September
+18:02:30) — the index newer by 6,361 seconds, so it folds into the closing
+clause rather than being listed. In this worktree on the same day, every tracked
+file carried a modification time within two seconds of the checkout that created
+it, because that is what git sets when it writes a worktree's files.
+
+**What a reader would observe.** The rule in D6 (the run index is listed only
+when it is older than the newest tracked file in that root) behaves as intended
+in a long-lived checkout, where tracked modification times track the developer's
+own edits. In a freshly created worktree the newest tracked file is the checkout
+moment, so a run index written before that checkout is reported as stale however
+recently it was written, and one written after it is treated as current until
+the next file is edited there. The effect is conservative in the direction that
+matters: it over-reports a stale index in a young worktree rather than hiding a
+genuinely abandoned one, and the reported line is accurate about the index's own
+age either way, because the age printed is measured from the file's own
+modification time and never from the comparison.
+
+**Not changed here.** D6 is the locked rule and is implemented as written. An
+alternative threshold — the newest tracked file's *commit* time rather than its
+modification time, which is stable across checkouts — would remove the
+worktree-age effect at the cost of a `git log` call per probed root. It is
+recorded for the architect rather than substituted.
+
+### Finding: one stat process per tracked file cost two seconds per session start
+
+**What was measured.** The first implementation of the newest-tracked-file
+comparison invoked `stat` once per tracked file. Against the main checkout's 881
+tracked files it ran in 2.06, 2.19 and 2.01 seconds (three consecutive runs,
+`/usr/bin/time -p`, real time, `--quiet`). Passing the whole tracked set to one
+batched `stat` invocation instead brought the same probe to 0.41, 0.11 and 0.11
+seconds, with output byte-identical to the slower form on the same roots.
+
+**Why it mattered.** Requirement 4 of this document says the hook never blocks or
+delays a session. Two seconds added to every startup, resume, clear and
+compaction is a delay a developer would attribute to the session rather than to
+this probe, and it is paid even on a clean root because the comparison runs
+whenever a run index is present. The batched form is what is committed.
 
 ## Completion gate
 
