@@ -15,8 +15,14 @@ represents as a double — stands unchanged here and is not reopened.
 
 ## Status
 
-**Specification and acceptance criteria agreed; the blocking decision is taken
-and implementation proceeds.**
+**Implemented and asserted on the branch; the completion gate has not yet run.**
+
+The five-line change is in, `tests/validate-statistics-demand.sh` carries the two
+new scenarios (102 passed, 0 failed, against 97 before this work), and every
+assertion has been shown to fail on a build that lacks the change. What the
+change measures and what it does and does not alter on the user surfaces are
+under *§ The implementation record*. The full harness suite and the before/after
+benchmark are the gate's, on a quiet machine.
 
 The change is five lines and behaves as the prototype measured: the two
 duration-sample stores halve, the wall clock does not rise, and every rendered
@@ -281,7 +287,7 @@ derived from the issue's three "done when" clauses.
 
 ### Assertable
 
-- [ ] **Assertable — clause 1, memory.** A run of
+- [x] **Assertable — clause 1, memory.** A run of
       `./ltl --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1
       tests/fixtures/tomcat-access-duration-spread.txt` reports a
       `MEMORY log_analysis` row at or below a ceiling derived from the normalised
@@ -318,14 +324,14 @@ derived from the issue's three "done when" clauses.
       heatmap, histogram and highlight duration paths at four terminal widths and
       in both raw and bin capture modes, which is the population of rendered
       figures derived from the retained arrays.
-- [ ] **Assertable — clause 2, correctness on the fractional shape.** On
+- [x] **Assertable — clause 2, correctness on the fractional shape.** On
       `tests/fixtures/format-detection/access-thread-session.txt`, the committed
       fractional-millisecond fixture from `docs/test-logs.md`'s family, the
       rendered output and the `-cp default` CSV export are byte-identical between
       the pre-change and post-change builds.
       *Method:* a scenario asserting the rendered figures on that fixture. Measured
       identical on both surfaces during specification.
-- [ ] **Assertable — clause 2, the accepted drift, asserted rather than tolerated.**
+- [x] **Assertable — clause 2, the accepted drift, asserted rather than tolerated.**
       On `tests/fixtures/format-detection/access-thread-session.txt` under
       `-o -cp full`, the exported duration columns carry the numeric spelling of
       each retained value and not the log line's: the STATS row's `duration_min`
@@ -374,6 +380,110 @@ section, its keys and its gating do not.
 | `features/561-retained-durations-as-numbers.md` | this document |
 | `--help`, `docs/usage.md` | none — no option is added or changed |
 | `-cp full` exported spelling on fractional formats | changed; accepted by the architect and asserted by the new fractional scenario |
+
+## The implementation record
+
+Built as specified: `0 + $duration` at each of the five retention sites D2
+enumerates, located by grepping the current `read_and_process_logs()`. The diff
+against the base commit is five changed lines of executable code and nothing
+else; no sub was added, no option, no `-V` key. D4's check was repeated against
+the current tree before writing — `normalize` still strips a trailing `.0` from a
+string for display comparison and `convert_duration_to_ms` still converts units,
+so neither normalises a representation and there is no existing surface to call.
+
+### What the change measures on the pinned fixture
+
+`./ltl --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1
+tests/fixtures/tomcat-access-duration-spread.txt`, five runs of each build on
+this machine:
+
+| row | retaining the string | retaining the number | change |
+|---|---:|---:|---:|
+| `MEMORY log_analysis` | 32,329 | 14,969 | **−53.7%** |
+| `MEMORY log_messages` | 49,875 (48,851 on one run) | 32,315 | **−35.2%** |
+
+`log_analysis` falls by 17,360 bytes, which is exactly 40 bytes on each of the
+fixture's 434 retained durations — the per-duration saving the prototype
+measured, reproduced at fixture scale. Both rows are now bit-identical across
+five runs; the `log_messages` hash-bucket resize step that moved between runs of
+the string-retaining build no longer straddles a boundary at the smaller size.
+
+### What changed on the user surfaces, and what did not
+
+Both builds run against each other on the committed fractional-millisecond
+fixture `tests/fixtures/format-detection/access-thread-session.txt`, whose
+durations carry three decimal places:
+
+| surface | result |
+|---|---|
+| rendered output, default / `-ms` / `-hg duration` / `-hm duration` | identical |
+| STATS and MESSAGES CSV, `-cp default`, `-cp 3`, `-cp 6` | byte-identical |
+| STATS and MESSAGES CSV, `-cp full`, integer-millisecond fixture | byte-identical |
+| aggregate YAML export | identical |
+| `ltl-index.csv`, every data column | identical, `duration_min 5.000` included |
+| STATS and MESSAGES CSV, `-cp full`, fractional fixture | the accepted spelling change, and nothing else |
+
+The `-cp full` drift is exactly what was accepted and no wider: `5.000` exports
+as `5`, `35.010` as `35.01`, on the retained columns only. The MESSAGES row makes
+the internal-consistency argument visible — the string-retaining build already
+exported the computed `duration_mean` as `35.01` beside a retained `duration_p50`
+of `35.010`, and the normalised build exports `35.01` in both.
+
+### One finding the specification's surface sweep did not have
+
+**`ltl-index.csv` differs between the two builds on every precision mode, in its
+instrumentation columns only.** The specification recorded the index CSV as
+byte-identical; a whole-file diff is not, because `read_rate`, `memory_used` and
+`processing_time` carry the run's own timing and RSS, and the run stamp moves
+when two runs straddle a second boundary. With those columns masked every data
+column is identical, `duration_min` and `duration_max` included. So D2's claim
+stands — the index block's `$fd->{duration_min}` / `duration_max` assignments are
+untouched and still carry the log line's spelling — and the correction is to the
+method of checking, not to the result: an index CSV is compared with its
+instrumentation columns masked, the same way `TOTAL TIME` and
+`MAXIMUM MEMORY USED` are excluded from a rendered diff.
+
+### The assertions, and the proof that each can fail
+
+Two scenarios in `tests/validate-statistics-demand.sh`, five assertions, each
+declaring `asserts`, `produced_by` and `contract`, each covered by the harness's
+runtime-warning check, and each with a missing row or missing file failing hard
+rather than reading as a pass. The harness reports 102 passed, 0 failed, against
+97 before this work.
+
+`scenario-14-retained-durations-are-numbers` asserts `MEMORY log_analysis` at or
+below **20,000 bytes**, a ceiling 5,031 above the normalised figure and 12,329
+below the string one. One-sided in the same direction as #528's scenario-13
+ceiling (the retained-duration representation ceiling of 33,000 bytes, which this
+change lowers the row well under and which therefore continues to pass unchanged):
+a revert of the normalisation at any of the five sites can only make the row
+larger.
+
+`scenario-15-exported-spelling-on-fractional-durations` asserts the accepted
+drift on the fractional fixture under `-o -cp full`, in two halves that must hold
+together: `duration_min` exports as `5` and `duration_p90` as `35.01` (the
+spelling), and each is numerically equal to the `5.000` and `35.010` the log line
+carried (the values). It reads the two columns by name from the CSV header rather
+than by position.
+
+Each assertion was demonstrated to fail before being trusted to pass, per
+`tests/HARNESS-DESIGN.md` § *Proving a new assertion can fail*:
+
+| arm | what fails |
+|---|---|
+| the base commit, retaining the string | the memory ceiling (32,329 against 20,000) and both spelling assertions (`5.000`, `35.010`) |
+| `int($duration)` at the five sites, the truncating form D1 rejects | both numeric-equality assertions — `duration_p90` exports `35`, which is neither `35.01` nor equal to `35.010` |
+
+The second arm is why the numeric half is asserted beside the spelling half: a
+truncation satisfies "no trailing zeros" while changing the value, and the
+accepted decision rests on the values being unchanged.
+
+**The percentile column carrying the signal depends on the invocation.** Under
+this scenario's shape (`-bs 1440 -oe -n 1`, folding the fixture's 11 seconds into
+one bucket) the `35.010` value lands on `duration_p90`; under a default bucket
+axis it lands on `duration_p95`, which is what the specification's measurement
+recorded. The scenario asserts the column its own invocation produces, read from
+a run rather than carried over from a measurement taken under a different shape.
 
 ## Completion gate
 
