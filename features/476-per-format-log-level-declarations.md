@@ -29,13 +29,16 @@ the format, the token and how many lines carried it.
 
 ## Requirements
 
-- **R1**: Every registry entry states the log levels it emits. An entry that
-  states nothing is taken to emit the standard severity set; an entry that
-  states a list emits exactly that list.
-- **R2**: The union of every entry's declared levels is exactly the recognised
-  level vocabulary. A declared level absent from the global vocabulary fails
-  the build, and so does a level named in a classification rule that no entry
-  declares.
+- **R1**: A registry entry may state the log levels it emits, or state none.
+  Nothing is inferred from an entry that states none: there is no standard
+  severity set distinct from the global list, which is the base a run works
+  from. An entry that states a list adds that list to the vocabulary.
+- **R2**: The vocabulary a run uses is the global list combined with the levels
+  the formats it detects declare. A declared level does not have to be a member
+  of the global list, and the global list does not have to be covered by
+  declarations. The one build check that remains is the cross-check in the other
+  direction: a level named in a classification criterion that is in neither the
+  global list nor any registry declaration fails the build, naming it.
 - **R3**: A level seen in the level position and not registered is collected
   during the read, with the format that produced it and a count of the lines
   that carried it.
@@ -298,21 +301,21 @@ The per-entry declaration carries membership and nothing else.
 *Decision by the architect's delegate, 2026-09-12, within the architect's
 instruction that membership only travels.*
 
-### D4: The declaration follows the classification shape: absent inherits the standard set, present replaces it
+### D4: An entry declares the levels it writes, or declares none
 
-The new per-entry key takes the shape #453 D3 (global default classification,
-overridden per entry by replacement) already locked for classification on the
-same structure. An entry that declares nothing inherits the standard severity
-set. An entry that declares a list replaces it entirely.
+*Superseded in part by the amendment of 2026-09-13 below, which is the governing
+text. The declaration is an **addition** to the vocabulary, not a replacement of
+an inherited set: an entry that declares nothing declares nothing, and no
+standard severity set is inherited. The table of what each declaring entry adds
+stands as written, read as additions.*
 
-The registry gains no new idiom: a reader who knows how an entry's classification
-resolves already knows how its levels resolve, and the user-facing sentence in
-`docs/usage.md` and `ltl --help formats` about classification ("a format that
-declares nothing inherits the default ... a format that declares one or both
-outcomes replaces the default") reads the same way for levels.
+The original framing, kept as the record of what was planned: the new per-entry
+key would take the shape #453 D3 (global default classification, overridden per
+entry by replacement) already locked for classification on the same structure,
+with an entry declaring nothing inheriting the standard severity set and an
+entry declaring a list replacing it entirely.
 
-Every entry whose declaration is not the plain inherited default states what it
-declares and why:
+Every entry that declares states what it declares and why:
 
 | Entry (name, slug) | Declares | Why |
 |---|---|---|
@@ -323,7 +326,7 @@ declares and why:
 | `mtvfy` (`classification_verification`) | `INFO`, `WARN`, `ERROR`, `FATAL` | The pin-only verification producer captures `level=([A-Z]+)`. It declares the levels its samples and the fixture that exercises it carry, so the declaration describes the entry rather than accidentally widening the union. Note the known limit below |
 | `mt11` (`tw_edge_c_sdk`) | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FORCE`, `AUDIT` | The Edge C SDK writes `FORCE` and `AUDIT` alongside the standard severities, so it declares rather than inherits. `AUDIT` is admitted to the vocabulary by #475 (severity levels a supported format can emit are missing from the log-level array and are silently discarded); this entry's declaration is the record of which producer emits it. It does **not** declare `START`, `AUTH` or `TRAFFIC_CONTROL`; see D9 |
 
-Every other entry declares nothing and inherits the standard severity set.
+Every other entry declares nothing.
 
 **Known limit, stated so it is not discovered later.** The build gate in D5
 checks declarations against each entry's samples where samples exist. It can
@@ -335,28 +338,27 @@ unnoticed, and the union check in D5 is what still constrains them.
 *Decision by the architect's delegate, 2026-09-12, following the declaration
 shape the architect named.*
 
-### D5: One build gate over two directions: declarations are in the vocabulary, and classified names are declared
+### D5: One build gate: a classified level must be something the tool can recognise
+
+*Superseded in part by the amendment of 2026-09-13 below, which is the governing
+text. The "every declared level is a member of the global vocabulary" direction
+and the union equality are dropped; the classification cross-check stated here
+is what was built, evaluated over the global list plus every registry
+declaration.*
 
 A further gate in `build_format_registry()`, in the family of the gates already
-there and using the same `die` mechanism with a `produced_by` clause, asserts
-two things.
+there and using the same `die` mechanism with a `produced_by` clause.
 
-- **Every declared level is a member of the global vocabulary.** An entry that
-  declares a level the vocabulary does not carry fails the build, naming the
-  entry and the level. This is what makes the union in D2 a statement rather
-  than a side effect: the union cannot silently enlarge the vocabulary, so a
-  declaration and the vocabulary can never drift apart in the direction where a
-  level is declared and then dropped.
-- **Every level named in a classification criterion is a member of the union.**
-  Names read out of `%classification_default` and out of every entry's own
-  `classification` key must each be declared by at least one entry. This is the
-  cross-check that would have caught `CRITICAL` at startup instead of leaving it
-  to be found by a run reporting `FAILURE CLASSIFIED 0` on a file whose only
-  failure line was present.
-
-The union of every entry's declarations must equal the recognised vocabulary at
-the moment this work lands, which is what makes both directions checkable rather
-than one.
+- **Every level named in a classification criterion is recognisable.** Names
+  read out of `%classification_default` and out of every entry's own
+  `classification` key must each be a member of the global vocabulary or
+  declared by some entry. This is the cross-check that would have caught
+  `CRITICAL` at startup instead of leaving it to be found by a run reporting
+  `FAILURE CLASSIFIED 0` on a file whose only failure line was present.
+- **A declaration is a non-empty list of non-empty names.** A malformed
+  declaration fails the build naming the entry. This is a shape check, not a
+  membership check: a declared level joins the vocabulary and therefore cannot
+  be "outside" it.
 
 A criterion pattern is a regex, so the names are read from the literal
 alternations the criteria use, the same shape the registry already compiles into
@@ -544,29 +546,30 @@ gains the boundary sentence D3 names. Neither grows a second subject.
 
 ## The registry spec change
 
-**The new per-entry key.** One key in each entry of `format_registry_specs()`,
-holding the list of levels that entry emits. Absent means the standard severity
-set; present replaces it (D4).
+**The new per-entry key.** `levels` in each entry of `format_registry_specs()`
+that writes categories of its own, holding the list of names it writes. Absent
+means the entry declares nothing, and nothing is inferred from that.
 
-**Its default.** Resolved once in `build_format_registry()`, at the same point
-the classification default is resolved per entry, so every compiled entry
-carries a fully resolved level list and nothing consults the default after
-build.
+**Its live slot.** `FR_LEVELS => 29`, on the end of the contiguous numbered
+block, carrying the declared list or `undef`. No existing slot is renumbered.
 
-**Its live slot.** One new `FR_*` constant on the end of the contiguous numbered
-block (the block runs to `FR_CLS_BOTH => 28` today, so the new slot is the next
-integer). No existing slot is renumbered.
+**Its build gate.** D24 gate 7 in `build_format_registry()`, alongside the gates
+already there: the shape check on each declaration, and the classification
+cross-check of D5 as amended, evaluated over the global list plus every
+registry declaration, failing the build with a `die` naming the source, the
+level and the sub that produced the fault.
 
-**Its build gate.** The two-direction check of D5, in
-`build_format_registry()`, alongside the gates already there, failing the build
-with a `die` naming the entry, the level and the sub that produced the fault.
+**When it reaches the vocabulary.** `format_seat_declared_levels()`, at
+detection. Every entry the file's evidence sample recognised seats its levels
+before the file's first line is gated; the first-match bind seats the bound
+entry's for a file that could not be sampled or that `-lf` pinned. The set only
+grows during a run, so a file read under one format is unaffected by a later
+detection.
 
-**Its union.** `build_format_registry()` unions every resolved declaration; the
-result is asserted equal to the global level set rather than allowed to define
-it (D5). `@log_levels` keeps its other three jobs unchanged: display order,
-highlight pairing of each level with its `-HL` twin, and the non-level members
-`err-rate`, `msg-rate` and `empty` that every consumer excludes by regex. Those
-three are not levels any producer emits and are outside every declaration.
+`@log_levels` keeps its other three jobs unchanged: display order, highlight
+pairing of each level with its `-HL` twin, and the non-level members `err-rate`,
+`msg-rate` and `empty` that every consumer excludes by regex. Those three are
+not levels any producer emits and are outside every declaration.
 
 ## The report contract
 
@@ -625,9 +628,10 @@ as the key, and run to see it assert.
 
 | Surface | What changes |
 |---|---|
-| `format_registry_specs()` | One new key per entry that declares; the entries in D4's table state theirs, every other entry inherits |
-| `build_format_registry()` | Resolves the declaration per entry against the standard set, unions the result, assigns the new slot, and runs the D5 two-direction gate |
-| The `FR_*` constant block | One new slot on the end; no renumbering |
+| `format_registry_specs()` | One `levels` key per entry that declares; the entries in D4's table state theirs, every other entry declares nothing |
+| `build_format_registry()` | Assigns the new slot and runs D24 gate 7: the declaration shape check and the classification cross-check |
+| `format_seat_declared_levels()` | New: seats an entry's declared levels in the run vocabulary, called from the detection sample and the first-match bind, never per line |
+| The `FR_*` constant block | `FR_LEVELS => 29` on the end; no renumbering |
 | `read_and_process_logs()`, the category gate | The vocabulary arm of the conditional chain gains the collection of the rejected token against the bound entry. `$excluded_other++` and `next` are unchanged; the accept path is untouched |
 | `read_and_process_logs()`, the notice block at the tail | The report of D6, beside the numeric-filter and unreadable-directory notices |
 | `emit_format_detection_verbose()` | The per-file `unregistered_levels:` key of the section contract above |
@@ -709,11 +713,11 @@ assertion is demonstrated to fail before it is trusted to pass. The method: take
 a copy of `ltl` in the scratchpad, suppress the collection at the gate, and
 confirm the report assertions fail naming the missing token while the
 count assertions still pass, which proves the two are measuring different
-things. Then separately declare a level on an entry that the vocabulary does not
-carry and confirm the build gate dies naming the entry and the level; and name a
-level in a classification criterion that no entry declares and confirm the gate
-dies on the other direction. Then run the healthy path and confirm it passes.
-Nothing tracked is modified by the probe.
+things. Then separately give an entry a malformed declaration and confirm the
+build gate dies naming the entry; and name a level in a classification criterion
+that is in neither the global list nor any declaration and confirm the gate dies
+naming it. Then run the healthy path and confirm it passes. Nothing tracked is
+modified by the probe.
 
 ## Acceptance criteria
 
@@ -727,10 +731,10 @@ Each criterion is triaged **before** implementation, per
 | AC3 | `LINES READ`, `LINES INCLUDED` and the category table over that fixture are what they are before the change: nothing is retained. | assertable | Same scenario, asserting the counts directly; and `tests/validate-regression.sh` returning the committed reference renders byte-identical |
 | AC4 | `-V format-detection` reports the file's unregistered levels with counts in the per-file block, and reports `-` for a file that has none. | assertable | Two assertions in `tests/validate-format-detection.sh`, one per form |
 | AC5 | `excluded_other` over that fixture is unchanged, and `tests/validate-filter-summary.sh`'s `vocabulary-rejection` scenario passes with its existing expected count. | assertable | The existing scenario, run unchanged |
-| AC6 | An entry declaring a level the global vocabulary does not carry fails the build, naming the entry and the level. | assertable | Sabotage probe against a scratchpad copy of `ltl`; the gate dies and the message names both |
-| AC7 | A level named in `%classification_default` or in an entry's own `classification` key that no entry declares fails the build, naming what is undeclared. | assertable | Sabotage probe against a scratchpad copy; this is the check that would have caught the `CRITICAL` divergence |
-| AC8 | The union of every entry's declared levels equals the recognised vocabulary when this work lands. | assertable | The same build gate asserts it; a run of `ltl` on any input exits 0, which is the assertion, since the gate runs at every startup |
-| AC9 | `ltl --help formats` states the levels each format declares, the access family states its five status families once, and an entry that inherits says so rather than restating the list. | assertable | A new scenario reading the `--help formats` render in `tests/validate-log-level-vocabulary.sh`. It is a new positive assertion over that listing, which carries only a negative one today (D8) |
+| AC6 | ~~An entry declaring a level the global vocabulary does not carry fails the build.~~ **Falls** under the amendment of 2026-09-13: a declared level joins the vocabulary, so there is no such condition to fail on. Replaced by a shape check — a declaration that is not a non-empty list of non-empty names fails the build naming the entry. | assertable | Sabotage probe against a scratchpad copy of `ltl`; the gate dies naming the entry |
+| AC7 | A level named in `%classification_default` or in an entry's own `classification` key that is in neither the global list nor any registry declaration fails the build, naming it. | assertable | Sabotage probe against a scratchpad copy; this is the check that would have caught the `CRITICAL` divergence |
+| AC8 | ~~The union of every entry's declared levels equals the recognised vocabulary.~~ **Falls** under the amendment of 2026-09-13: the vocabulary is the global list plus what the formats declare, and neither side has to cover the other. | — | — |
+| AC9 | `ltl --help formats` states the levels each format declares, the access family states its five status families once, and a format that declares nothing shows no level line. | assertable | A new scenario reading the `--help formats` render in `tests/validate-log-level-vocabulary.sh`. It is a new positive assertion over that listing, which carries only a negative one today (D8) |
 | AC10 | The Edge C SDK entry declares `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FORCE` and `AUDIT`, and a file carrying `AUTH` and `TRAFFIC_CONTROL` in the level position has each reported with its count. `START` is not reported, because it is a member of the global vocabulary (D9). | assertable | A fixture in the Edge C SDK line shape, with neutral placeholder messages, in the vocabulary harness, asserting the two reported tokens and the absence of the third |
 | AC11 | The report reads sensibly for all three producer shapes: a level word, a folded status, and an unmapped Workgroup Manager letter. | unassertable by harness | `docs/test-driven-development.md` § *Visual surfaces*: the rendered report is read on real input for each shape before the work is called done. Recorded as a known gap, because no harness here asserts that a rendered line reads correctly to a person; the general method is open research in this repository |
 | AC12 | Every assertion added here has been demonstrated to fail against a deliberately broken input before being trusted to pass. | assertable | The sabotage proof above, its output captured once to the scratchpad and reported in the completion comment |
@@ -830,6 +834,126 @@ per-line accept path is byte-identical, the only new per-line work is on a
 reject branch that runs zero times on every corpus measured, and the
 verification method is known and demonstrated by two harnesses that already
 assert on this invariant and this counter.
+
+## Implementation record (2026-09-13)
+
+Status: implemented on branch
+`476-log-levels-declared-per-format-in-the-registry-with-unregistered-levels-reported-at-end-of-run`,
+rebased onto `release/0.18.1`. Every acceptance criterion that stands under the
+amendment of 2026-09-13 is met; AC6 and AC8 fell with the amendment.
+
+### What was built
+
+- `levels` on twelve entries: the seven access entries (`1xx`–`5xx`), `mt6`
+  (`java_gc_g1`, six pause kinds), `mt16` (`windchill_workgroup_manager`, the
+  ten letter-map names), `mt11` (`tw_edge_c_sdk`, `TRACE, DEBUG, INFO, WARN,
+  ERROR, FORCE, AUDIT`), `mtvfy` (`classification_verification`, `INFO, WARN,
+  ERROR, FATAL`) and `csv` (`DATA`). Every other entry declares nothing.
+- `FR_LEVELS => 29`; no slot renumbered.
+- `format_seat_declared_levels()`, called from two per-file points and from
+  neither per line.
+- D24 gate 7 in `build_format_registry()`: declaration shape, plus the
+  classification cross-check over the global list and every declaration.
+- The collection on the reject branch of the category gate, the end-of-run
+  report at the tail of `read_and_process_logs()`, the `unregistered_levels:`
+  per-file `-V` key in both branches of `emit_format_detection_verbose()`, and
+  the level statement in `print_help_formats()`.
+
+### Findings established during implementation
+
+**F1 — the mid-file rule-change path is one line too late to seat levels, and
+does not need to be.** `format_classification_rule_change()` runs at the include
+point, below the category gate, so seating there would leave the first line of a
+newly-arrived format gated under the previous vocabulary. Seating from the
+file's detection sample instead covers a mixed-format file completely: the
+sample recognises every entry present in the file before line 1, so both
+vocabularies are seated before anything is gated. The first-match bind is the
+second seat point and covers what the sample cannot: a file that could not be
+sampled (the fallback-window path) and a file read under `-lf`. Neither point
+is per line.
+
+**F2 — the three producer shapes were read on rendered output and all three
+read sensibly (AC11).** Measured on this machine, `--disable-progress`,
+`-bs 1440 -oe`:
+
+| Shape | Input | Report line | Counts |
+|---|---|---|---|
+| Level word | the committed three-line fixture whose middle line carries a token outside the vocabulary | `Note: windchill_method_server lines carried 1 level ltl does not recognise: NOTAREALLEVEL (1 line) - 1 line was not counted` | `LINES READ 3`, `LINES INCLUDED 2` |
+| Level word, real data | the four-line Edge C SDK fixture | `Note: tw_edge_c_sdk lines carried 2 levels ltl does not recognise: AUTH (1 line), TRAFFIC_CONTROL (1 line) - 2 lines were not counted` | `LINES READ 4`, `LINES INCLUDED 2` |
+| Folded status | a six-line synthetic access file carrying 200, 200, 404, 600, 000, 999 | `Note: access_common_duration lines carried 3 levels ltl does not recognise: 0xx (1 line), 6xx (1 line), 9xx (1 line) - 3 lines were not counted` | `LINES READ 6`, `LINES INCLUDED 3` |
+| Mapped letter | a four-line synthetic Workgroup Manager file carrying I, Q, E, Z | `Note: windchill_workgroup_manager lines carried 2 levels ltl does not recognise: Q (1 line), Z (1 line) - 2 lines were not counted` | `LINES READ 4`, `LINES INCLUDED 2` |
+
+A bare letter and a bare status family both read as what they are when the
+format is named beside them, which is why the format name leads the line. The
+two synthetic inputs were scratchpad files, not committed fixtures: the two
+committed fixtures carry the assertions, and these two were read once to answer
+a question about rendering.
+
+**F3 — D9's prediction holds exactly on real-shaped data.** On the Edge C SDK
+fixture, `AUTH` and `TRAFFIC_CONTROL` are reported and `START` is not: `START`
+is a member of the global vocabulary through the Workgroup Manager letter map,
+so the line carrying it passes the gate and is counted as a category of a format
+that does not declare it. That is the global-union limit D2 and D9 name, now
+visible rather than inferred, and it is not closed here.
+
+**F4 — a pre-existing defect in `--help formats`, untouched by this work.** The
+access family heading renders "Every member classifies the same way: success:
+none; failure: none", although every access entry classifies `1xx|2xx|3xx` as a
+success and `4xx|5xx` as a failure. `print_help_formats()` reads
+`$members[0]{_cls}` from a fresh `format_registry_specs()` call, whose specs
+have not been through `build_format_registry()` and therefore carry no `_cls`.
+Confirmed present on the base commit (`git show HEAD:ltl`), so it is not caused
+by this drop and is not fixed by it. Worth its own issue.
+
+**F5 — admitting a token to `%log_level_set` alone does not give it a category
+row.** The category table renders from `@log_levels` in order, so a token in the
+membership set but not in the display array is counted into `LINES INCLUDED`
+without appearing as a row. This was found while proving the "the reported token
+does not become a category" assertion can fail: the sabotage had to add the
+token to `@log_levels`, not to `%log_level_set`. It bears on any future work
+that admits a level: the two structures must move together.
+
+### Assertions added, and the proof each can fail
+
+Fourteen assertions across two harnesses, every one demonstrated to fail against
+a deliberately broken `ltl` in the scratchpad before being trusted (AC12).
+Nothing tracked was modified by any probe.
+
+`tests/validate-log-level-vocabulary.sh`, twelve assertions in three new
+scenarios (`unregistered-level-report`, `edge-c-sdk-unregistered-levels`,
+`declared-levels-in-help`), harness total 32 passed / 0 failed:
+
+| Probe | What was broken | Result |
+|---|---|---|
+| Report suppressed (`if (0)` on the observation-count gate) | 5 fail (both report assertions of the first scenario, all three of the second), 27 pass — the count assertions are unmoved, proving report and counts measure different things | proven |
+| The dropped line retained (`next` removed from the reject branch) | 2 fail, both count assertions; every report assertion still passes | proven |
+| The token added to `@log_levels` | all 4 assertions of the first scenario fail, including the category-row absence | proven |
+| The level statement suppressed in the listing | 3 fail; "a format that declares nothing shows no level line" still passes | proven |
+| A level statement forced onto every entry | 1 fail, exactly the "declares nothing" assertion | proven |
+| The family statement repeated per member | the "stated once" assertion fails, reporting 8 occurrences against the expected 1 | proven |
+
+`tests/validate-format-detection.sh`, two assertions in the new
+`unregistered-levels-per-file` scenario, harness total 257 passed / 0 failed:
+
+| Probe | What was broken | Result |
+|---|---|---|
+| The key suppressed in both branches | both fail, 255 pass | proven |
+| The value forced to `-` always | the populated form fails, the dash form passes | proven |
+| The empty case forced to a populated value | the dash form fails, the populated form passes | proven |
+
+Build-gate probes, run directly against a scratchpad copy of `ltl`:
+
+| Probe | Result |
+|---|---|
+| The default failure rule renamed to carry a level in neither the global list nor any declaration | exit 25, `ltl: format registry: the default classification rules classify 'failure' on level 'NOSUCHLEVEL', which is neither in the recognised level vocabulary nor declared by any entry …` |
+| The same, with that level then added to the Edge C SDK entry's declaration | exit 0 — the declaration satisfies the cross-check, which is the amended direction working |
+| A malformed declaration (empty list) on the `csv` entry | exit 25, `ltl: format registry: entry 'csv' levels must be a non-empty list of level names …` |
+
+### Fixture added
+
+`tests/fixtures/edge-c-sdk-unregistered-levels.txt`, four lines in the Edge C
+SDK line shape carrying `START`, `AUTH`, `TRAFFIC_CONTROL` and `INFO`, with
+neutral placeholder messages and no provenance. Committed as `.txt`.
 
 ## Sources
 

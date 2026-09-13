@@ -41,6 +41,15 @@ and the HTTP status families are common to every access-log format, so
 declaring them per format would duplicate the same five rows across every
 access entry and let them drift.
 
+**Boundary with `features/476-per-format-log-level-declarations.md` (levels
+declared per format in the registry).** That work moves *membership* into the
+registry: an entry states which categories it writes. Naming stays here and
+stays global, and this decision is not reopened by it — a category means the
+same thing whichever producer emitted it, whether or not the producer is now
+the thing that says it emits it. The same boundary holds for colour and for the
+category table's display order, both of which remain properties of the table
+rather than of any producer.
+
 The shipped entries, all of them HTTP status families:
 
 | Category | Displayed as |

@@ -470,7 +470,9 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Log formats and classification
 
-`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger* and how it classifies its lines as successes and failures. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger*, how it classifies its lines as successes and failures, and — for a format that writes categories of its own — which categories those are. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+
+A format that writes categories of its own states them in the listing: the garbage-collection format's pause kinds, the access family's HTTP status families, a producer's own severity names beside the usual ones. A format that writes only the usual severity names states nothing there. A line whose category is none ltl recognises is not counted — it appears in `LINES READ` and not in `LINES INCLUDED` — and the end of the run names the format, each unrecognised category it produced and how many lines carried it, so the loss is attributed rather than left as a gap between two totals. `-V format-detection` records the same per file under `unregistered_levels`.
 
 An **event ledger** is a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened (an access log for requests, a garbage-collection log for pauses). A diagnostics log records what a component chose to log, and is not one. The distinction decides whether a success or failure percentage built on the counts can be read at face value — see `ltl --explain classification` and the [Classification Reference](Classification-Reference) wiki page.
 
