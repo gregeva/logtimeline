@@ -40,21 +40,48 @@ generate_cpanfile() {
     ' ${SCRIPT_NAME} | sort -u
 }
 
+# Development-only dependencies, appended verbatim after the scanned runtime
+# list so the generator stays the sole author of the file and two runs produce
+# byte-identical output. ltl never loads these, so no scan can emit them.
+# cpanm resolves this phase only when passed --with-develop, so every build and
+# packaging path that calls the default form is unaffected.
+append_develop_block() {
+    local target="$1"
+    {
+        echo ""
+        echo "on 'develop' => sub {"
+        echo "    requires 'Devel::NYTProf';"
+        echo "};"
+    } | tee -a "$target"
+}
+
+# Write the Unix cpanfile: the scanned runtime list, then the develop block.
+generate_unix_cpanfile() {
+    generate_cpanfile | grep -v "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
+    append_develop_block "$SCRIPT_DIR/cpanfile"
+}
+
+# Write the Windows cpanfile: runtime modules only. There is no profiling on
+# the Windows path, so the develop block is deliberately absent.
+generate_windows_cpanfile() {
+    generate_cpanfile | grep -v "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
+}
+
 case "$TARGET_PLATFORM" in
     unix)
         echo "Generating build/cpanfile for Unix..."
-        generate_cpanfile | grep -v "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
+        generate_unix_cpanfile
         ;;
     windows)
         echo "Generating build/cpanfile.windows for Windows..."
-        generate_cpanfile | grep -v "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
+        generate_windows_cpanfile
         ;;
     all)
         echo "Generating build/cpanfile (Unix)..."
-        generate_cpanfile | grep -v "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
+        generate_unix_cpanfile
         echo ""
         echo "Generating build/cpanfile.windows (Windows)..."
-        generate_cpanfile | grep -v "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
+        generate_windows_cpanfile
         ;;
     *)
         echo "Unknown platform: $TARGET_PLATFORM"

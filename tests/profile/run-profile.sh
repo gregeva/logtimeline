@@ -44,10 +44,7 @@ LTL="$PROJECT_DIR/ltl"
 RESULTS_DIR="$SCRIPT_DIR/results"
 SAMPLES_DIR="$SCRIPT_DIR/samples"
 EXTRACT_SCRIPT="$SCRIPT_DIR/extract-profile.pl"
-
-# Hardcoded tool paths — no PATH dependency
-PERL=/opt/homebrew/bin/perl
-NYTPROFHTML=/opt/homebrew/Cellar/perl/5.42.0/bin/nytprofhtml
+PREFLIGHT="$PROJECT_DIR/build/profiling-preflight.sh"
 
 # Defaults
 LABEL="$(date +%Y%m%d-%H%M%S)"
@@ -59,6 +56,34 @@ SAMPLES="1k,10k,100k"
 NO_SAMPLES=0
 LTL_ARGS=()
 PARSING_LTL=0
+
+# --- Preflight ---
+# The environment is verified before any argument is parsed and before any
+# output directory is created, so a run that cannot produce a complete result
+# stops without leaving a partial one behind. The interpreter and the HTML
+# report tool are resolved by the preflight, never pinned here.
+#
+# A run that asks for no HTML report does not need the HTML tool, so exit
+# code 2 (a profiling tool is missing) is tolerated for --no-html only when the
+# profiler module itself loads. Every other non-zero status stops the run.
+for arg in "$@"; do
+    [[ "$arg" == "--" ]] && break
+    [[ "$arg" == "--no-html" ]] && NO_HTML=1
+done
+
+PREFLIGHT_STATUS=0
+PREFLIGHT_OUTPUT="$("$PREFLIGHT" 2>&1)" || PREFLIGHT_STATUS=$?
+echo "$PREFLIGHT_OUTPUT"
+if [[ $PREFLIGHT_STATUS -ne 0 ]]; then
+    if [[ $NO_HTML -eq 1 && $PREFLIGHT_STATUS -eq 2 ]] && perl -MDevel::NYTProf::Data -e 1 >/dev/null 2>&1; then
+        echo "[info] Continuing without an HTML report, as requested by --no-html." >&2
+    else
+        exit $PREFLIGHT_STATUS
+    fi
+fi
+
+PERL="$(command -v perl)"
+NYTPROFHTML="$(printf '%s\n' "$PREFLIGHT_OUTPUT" | awk '/^\[ok\] HTML report:/ {print $NF}')"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -280,14 +305,21 @@ run_one_profile() {
     )
     echo "  Profile data: $output_dir/nytprof.out ($(du -sh "$output_dir/nytprof.out" 2>/dev/null | cut -f1 || echo '?'))"
 
-    # Generate HTML
+    # Generate HTML. A failure here fails the run: a profiling result that is
+    # quietly thinner than the method describes reads as complete and is not.
+    # The report file is checked rather than the exit status, because the tool
+    # answers an option it does not recognise with a usage message and a zero
+    # exit, writing nothing.
     if [[ $NO_HTML -eq 0 ]]; then
         echo "  Generating HTML report..."
         "$NYTPROFHTML" --file="$output_dir/nytprof.out" \
-                       --out="$output_dir/nytprof" \
-                       --no-mergeforks 2>/dev/null \
-            && echo "  HTML: $output_dir/nytprof/index.html" \
-            || echo "  [WARN] nytprofhtml failed or not available"
+                       --out="$output_dir/nytprof"
+        if [[ ! -f "$output_dir/nytprof/index.html" ]]; then
+            echo "ERROR: the HTML report was not produced at $output_dir/nytprof/index.html" >&2
+            echo "Re-run with --no-html to skip the report deliberately." >&2
+            exit 1
+        fi
+        echo "  HTML: $output_dir/nytprof/index.html"
     fi
 
     # Extract and cross-validate
@@ -361,7 +393,7 @@ echo ""
 echo "Results: $OUTPUT_BASE"
 echo ""
 echo "Next steps:"
-echo "  1. Extract profile:  /opt/homebrew/bin/perl tests/profile/extract-profile.pl \\"
+echo "  1. Extract profile:  perl tests/profile/extract-profile.pl \\"
 echo "       --file $OUTPUT_BASE/<sample>/nytprof.out \\"
 echo "       --verbose-file $OUTPUT_BASE/<sample>/verbose.txt \\"
 echo "       --checks-file tests/profile/checks/<feature>.tsv --sort excl"
