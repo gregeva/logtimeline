@@ -767,6 +767,38 @@ resolution and a gate of the same class as the eight it already runs over every
 sample of every entry. The expectation recorded here is no measurable change; a
 metric worse by more than 5% is stop-and-investigate.
 
+### Gate result (2026-09-13, commit 6a5a46c, rebased onto `release/0.18.1` 95c5802)
+
+`$version_number` restored to `0.18.1` before the gate ran; the gate ran on the
+commit being merged.
+
+- **Full harness suite**: all 36 `tests/validate-*.sh` exit 0, every summary
+  line shows assertions actually ran, 0 failures. Totals include
+  validate-log-level-vocabulary 32 passed / 0 failed,
+  validate-format-detection 257 / 0, validate-filter-summary 87 / 0,
+  validate-format-registry 24 / 0, validate-regression 74 / 0 / 0 skipped (no
+  golden drift, as predicted), validate-explain 689 / 0, validate-help-content
+  11 / 0. `validate-statistics.sh` reports 22 scenarios, 22 pass, 0 fail, with
+  0 T3 and 0 T4 failures on every layer; its 9 XFAIL cells are the entries
+  registered in `tests/statistics-drift/known-failures.tsv` against #469 (one
+  projection onto the shared bin geometry), not a result of this work. No
+  ` at ltl line <N>` runtime warning in any capture.
+- **Before/after benchmark**, `single-day-access-log-standard`, three runs per
+  arm on this machine, medians: total 8.88 s → 8.95 s (+0.8%),
+  `parse/read_files` 8.734 s → 8.804 s (+0.8%),
+  `finalize/calculate_statistics` 134 ms → 135 ms (+0.7%),
+  `rss_peak` 152.3 MB → 152.1 MB (−0.1%), `format_scan_subs` 1.26 MB → 1.18 MB
+  (−6.5%). `lines_read` and `lines_included` identical at 761,698. Every
+  per-line and memory metric is flat or improved.
+- **The one metric past the 5% threshold**, investigated with three runs per arm
+  as the rule requires: `detect/registry_build`, medians 11 ms → 12 ms (+9.1%),
+  a reproducible +1 ms at the instrument's 1 ms resolution. It is where the cost
+  was expected and nowhere else: the registry build now walks each entry's
+  declared level list once at startup and runs the declaration gate, one more
+  loop of the class already running over every sample line of every entry. It is
+  a one-time startup cost outside the per-line path, 0.01% of an 8.9 s run.
+  Not a blocker.
+
 ## Release notes
 
 One bullet, user-observable:
