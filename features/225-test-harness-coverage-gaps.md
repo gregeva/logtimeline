@@ -283,6 +283,8 @@ Semicolon-separated form matches the `histogram-bin-counters` (#189) precedent.
 | 11 | error-no-files | Exit 2, stdout has `unable to open any files` |
 | 12 | no-warning-on-clean-run | No new warnings fire on baseline invocation |
 
+**2026-09-13:** the `--exact-percentiles` deprecation warning (site 4, scenario 7) no longer exists. The flag was removed in #287 (message-stats bin-counter data model) as a declared breaking change; `tests/validate-runtime-config.sh` now asserts that `ltl` rejects the flag as an unknown option. The three remaining silent-override warnings are unaffected.
+
 Self-test result on landing: **23 passed, 0 failed.**
 
 ### Pinned current behavior (intentionally deferred)
@@ -337,11 +339,9 @@ No `ltl` code changes — fixtures + harness wiring only.
 | Custom histogram dimensions | `hg-hgw30-duration-w160`, `hg-hgw50-multi-w160`, `hg-hgh4-duration-w160`, `hg-hgh16-duration-w160` |
 | Composition (heatmap + histogram) | `hm-hg-duration-w160` |
 
-### `--exact-percentiles` policy
+### Data-model policy for regression fixtures
 
-All new fixtures use `--exact-percentiles` for the same reason as the existing heatmap fixtures: pins to the sort-and-index path so the reference stays byte-stable while bin-counter precision work (#34/#187/#201) lands. `calculate_histogram_buckets()` at `ltl:5630-5635` dispatches through the same opt-out flag, so the policy applies to histogram fixtures too.
-
-A future audit (separate issue) should re-capture all fixtures without `--exact-percentiles` once the unified path is locked, and migrate the harness off the deprecated flag.
+All new fixtures pin the raw data model with `-dm raw`, for the same reason the existing heatmap fixtures do: it holds the surface on the sort-and-index path, so the reference stays byte-stable across precision changes on the bin-counter path. The histogram surface resolves its data model through the same selector chain, in `calculate_histogram_buckets()`, so the policy covers histogram fixtures too. The selector set and its per-surface scope are locked in `features/187-histogram-bin-counter-percentiles.md` Decision 7 (user-facing opt-out through the per-surface data-model selectors) and owned by `features/266-data-model-selectors.md`.
 
 ### Logs used
 
@@ -373,7 +373,7 @@ Light-background auto-detection is **inert under shell redirection** — `ltl:27
 
 ### Stability notes for future maintainers
 
-- The `--exact-percentiles` flag is documented-deprecated (warning now fires per #231); when it's removed, this harness needs to be re-captured against whatever the new opt-out mechanism is, OR the harness has to migrate to non-byte-identical assertions for heatmap/histogram (probably bin-counter-precision-aware tolerance bands). Captured behavior here is anchored on the current opt-out flag.
+- Captured behaviour here is anchored on the raw data model, pinned per fixture with `-dm raw`. The selectors are permanent and carry no retirement timeline per `features/187-histogram-bin-counter-percentiles.md` Decision 7 (user-facing opt-out through the per-surface data-model selectors), so the fixtures stay byte-stable without a migration to tolerance bands. A fixture that needs to exercise the bin data model instead asserts through the algorithm-aware oracle in `tests/validate-statistics.sh`, not byte-identity.
 - The light-background fixture (`heatmap-lbg-duration-w160`) is deterministic today only because of the non-TTY pipe check at `ltl:2722`. If `detect_light_terminal_background()` is ever refactored to engage under piped stdout, this fixture will perturb across machines. Issue #250 should land as the defensive measure before any such refactor.
 - The `APACHE_LOG` variable is the canonical clean small-access-log fixture for new tests. Use it (not the corrupt 2025-03-21 file) for any future access-log-flavoured fixture.
 - Both scripts must move in lockstep when fixtures are added — `validate-regression.sh` asserts on what `capture-regression.sh` produces.

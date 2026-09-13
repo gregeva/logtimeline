@@ -180,7 +180,7 @@ The cross-reference. For each affected symbol/line, captures (a) the prototype's
 
 **Prototype evidence:** V5 measured the rank-convention difference between Prometheus `ceil(q · N)` (locked Decision 1) and ltl's `int(N · q)` (existing). Invisible at locked default bpd=53 (masked by binning noise); becomes the dominant user-visible error source at bpd ≥ 256. At bpd=616, P90 binning_max = 0.33% but raw_max (including rank-convention difference) = 1.87%.
 
-**Recommended change:** `calculate_statistics` is **not deleted by #189 production** — it stays in place for any consumer that has not yet migrated (#187 R10/R11 retain it through the migration phases). Each consumer migration replaces its `calculate_statistics` *call* with an R4 invocation. After every consumer migrates, the function can be retired or kept as the `--exact-percentiles` opt-out path (#187 R11a / Decision 7).
+**Recommended change:** `calculate_statistics` is **not deleted by #189 production** — it stays in place for any consumer that has not yet migrated (#187 R10/R11 retain it through the migration phases). Each consumer migration replaces its `calculate_statistics` *call* with an R4 invocation. After every consumer migrates, the function can be retired or kept as the raw data model's execution path (#187 R11a / Decision 7).
 
 **User-visible behavior change:** P50 of a low-N key today is `sorted[int(0.5 · N)] = sorted[N/2]` (the (N/2+1)-th element); under the unified contract it becomes the R4 interpolation against `ceil(0.5 · N) = N/2` rank (the (N/2)-th element). Different element for any non-trivial N. Release notes for each consumer migration must call this out; framing per the validation report: industry-standard query-time analyzer convention (Prometheus + New Relic), a quality improvement, not a regression.
 
@@ -244,7 +244,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Today:** documents existing CLI flags including `-hgbpd`.
 
-**Recommended change:** #189 production adds `--percentile-precision`, `-pbpd`, and `--exact-percentiles` to `print_help()` per Decision 2 line 1190-1193 and Decision 7 line 1429.
+**Recommended change:** #189 production documents the precision lever and the data-model selectors in `print_help()` per #187 Decision 2 (the `buckets_per_decade` lever) and Decision 7 (user-facing opt-out through the per-surface data-model selectors). The lever is the single `-dmp` flag after #293 (precision lever unification) and the opt-out is the selector set `-dm` / `-mdm` / `-bdm` / `-hmdm` / `-hgdm`, each `<raw|bin>`.
 
 **Owning ticket:** #189 production.
 
@@ -254,7 +254,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Sweep finding (flag-name conflict):** Decision 2 introduces `-pbpd` (universal percentile-mode buckets-per-decade, default 53) — same letter pattern as the existing `-hgbpd` (histogram-only). The two flags differ in scope (`-hgbpd` is histogram-only; `-pbpd` is universal across all consumers) and default (8 vs. 53), and they would coexist literally in `adapt_to_command_line_options` unless production picks a migration path. See new **C7** for the production decision required.
 
-**Recommended change:** #189 production adds parsing for `--percentile-precision N`, `-pbpd N`, and `--exact-percentiles` per Decision 2's flag interaction contract (`-pbpd` wins on conflict against `--percentile-precision`). Validation rules per Decision 2 line 1130 (`4 ≤ -pbpd ≤ 616`; `1 ≤ --percentile-precision ≤ 9`). The `-hgbpd`/`-pbpd` interaction is a separate question — recorded in C7.
+**Recommended change:** #189 production adds parsing for the precision lever and the data-model selectors. The lever is the single `-dmp` flag after #293 (precision lever unification), validated over the tier range #187 Decision 2 locks; the selectors each take a `<raw|bin>` argument validated at parse time through one shared validator per Decision 7 (user-facing opt-out through the per-surface data-model selectors). The two-flag conflict contract Decision 2 originally carried no longer arises, because there is one lever.
 
 **Owning ticket:** #189 production.
 
@@ -270,7 +270,7 @@ The unified contract eliminates four raw value arrays. Each migration ticket del
 
 **Today:** analyst-facing documentation, synced to the public wiki on each release. Heatmap options reference at `docs/usage.md:180+`; histogram options reference at `docs/usage.md:202+`. **`-hgbpd` is not documented in `docs/usage.md` today** (sweep confirmed: no `-hgbpd` references in the file) — a pre-existing gap that the migration can incidentally close by documenting the percentile-precision tier table alongside it.
 
-**Recommended change:** #189 production adds analyst-facing explanation of when to use the new flags (per Decision 2 line 1194 and Decision 7 line 1431). Specifically: the `--percentile-precision 1..9` tier table; how to read `=== BIN-COUNTER MODE ===` output; when to consider `--exact-percentiles` opt-out. The natural insertion point sits between the heatmap section and the histogram section, since percentile mode now applies to all consumers.
+**Recommended change:** #189 production adds analyst-facing explanation of when to use the new flags (per Decision 2 line 1194 and Decision 7 line 1431). Specifically: the `-dmp` tier table; how to read `=== BIN-COUNTER MODE ===` output; when to pin a surface to the raw data model with `-dm raw` or a per-surface selector. The natural insertion point sits between the heatmap section and the histogram section, since percentile mode now applies to all consumers.
 
 **Owning ticket:** #189 production.
 

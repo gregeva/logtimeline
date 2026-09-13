@@ -200,7 +200,7 @@ A section's name and content are a contract with the harnesses that consume it.
 
 **Additions are non-breaking.** New keys, new sub-sections, new lines may be added at any time. Harnesses should not assert on the *absence* of unexpected lines unless that absence is itself a contracted invariant.
 
-**Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`opt_out_active` → `exact_percentiles_optout`) requires:
+**Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`percentile_precision` → `data_model_precision`) requires:
 
 1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` **and** `grep -rn "old-name" features/`, searching for both the section name and the key. The owning feature doc's locked decision is a consumer of the name even though it runs nothing, and a `tests/`-only search cannot see it.
 2. Running each affected harness end-to-end and confirming it still **asserts**, not merely exits 0.
