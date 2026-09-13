@@ -804,8 +804,10 @@ lexical. The consequence of not doing it is that every raw-mode run keeps paying
 40 bytes per retained duration for a string buffer no consumer reads, on every
 format and every file.
 
-**The architect decides.** Nothing is filed and no code is promoted under this
-issue.
+**Architect decision, 2026-09-13: filed as #561 (retained durations keep a
+string buffer no consumer reads, doubling the two duration-sample stores), to
+be worked once every other bug fix of this release has merged.** No code is
+promoted under this issue.
 
 ## Completion gate
 
