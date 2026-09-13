@@ -28,6 +28,13 @@ LTL="$REPO_DIR/ltl"
 # fixture; -du ms names the producer so the format's unit note stays out of
 # the stderr being asserted.
 FIXTURE="$REPO_DIR/tests/fixtures/udm-specs.txt"
+# Colliding-name scenarios need a field that moves, which udm-specs.txt does not
+# carry: its one rows= line cannot produce a delta at all. udm-collision.txt is
+# 4 lines in one bucket with rows= 10, 30, 60, 100 and a second numeric field
+# (pages=), so the hand-computed answers are raw 200 over 4 occurrences (10..100),
+# delta 90 over 3 (20..40, the first occurrence seeding the state), and pages is
+# a second extraction target for the same metric name.
+COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -39,13 +46,19 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-if [[ ! -f "$FIXTURE" ]]; then
-    echo "ERROR: fixture not found: $FIXTURE"
-    exit 1
-fi
+for f in "$FIXTURE" "$COLLISION_FIXTURE"; do
+    if [[ ! -f "$f" ]]; then
+        echo "ERROR: fixture not found: $f"
+        exit 1
+    fi
+done
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+ONLY_SCENARIO=""
+[[ "${1:-}" == "--scenario" ]] && ONLY_SCENARIO="${2:?--scenario needs a name}"
+want() { [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$1" ]]; }
 
 pass=0
 fail=0
@@ -53,6 +66,12 @@ failures=()
 current_scenario=""
 
 CONTRACT='features/user-defined-metrics.md section Diagnostics and -V udm-specs (Issues #443, #449) - decisions D1-D12 locked 2026-08-28; section content stability-contracted per tests/HARNESS-DESIGN.md'
+# Issue #482 (two -udm specs with the same name and aggregation but different
+# transforms collapse into one column): specs differing in aggregation,
+# transform or unit are separate metrics whose resolved names carry what
+# differs within the colliding group; specs a name cannot tell apart are
+# refused, and a repeated identical argument is dropped with a notice.
+CONTRACT_482='features/user-defined-metrics.md section Colliding metric names become separate metrics (Issue #482) - decisions D1-D13; section content stability-contracted per tests/HARNESS-DESIGN.md'
 
 # Run ltl with the given args against the fixture; stdout to the echoed file,
 # stderr beside it as <capture>.stderr.
@@ -60,6 +79,19 @@ run_ltl() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
     "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    echo "$outfile"
+}
+
+# Same shape against the collision fixture. The exit status is recorded rather
+# than swallowed, because one scenario's subject is that the run no longer dies.
+LAST_EXIT=0
+run_collision() {
+    local outfile
+    outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
+    LAST_EXIT=$?
+    set -e
     echo "$outfile"
 }
 
@@ -430,12 +462,559 @@ scenario_no_udm() {
     rm -f "$out" "$out.stderr"
 }
 
-scenario_undelimited_regex
-scenario_whole_match
-scenario_absent_field
-scenario_parse_time_rejections
-scenario_delta_single_match
-scenario_no_udm
+# ---------------------------------------------------------------------------
+# Scenario: collision-transform — the reported case. One name, one aggregation,
+# different transforms: two metrics, two names, each carrying its own correct
+# answer rather than a mixture of both.
+# ---------------------------------------------------------------------------
+scenario_collision_transform() {
+    current_scenario="collision-transform"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm rows -udm 'rows::delta')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows:sum spec='rows'" \
+        asserts     'D3: within a group differing in the function field, the spec that named no function shows the default sum' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:delta spec='rows::delta'" \
+        asserts     'D3: the transform spec is named by its function field in the shorthand spelling' \
+        produced_by 'resolve_udm_metric_names() + udm_function_field() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' \
+        asserts     'D1: the raw metric produces its own answer (10+30+60+100 over 4 lines), matching the single-spec control' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=3 buckets=1 sum=90 min=20 max=40' \
+        asserts     'D1: the delta metric produces its own answer (20+30+40 over 3, the first line seeding the state)' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_absent "$out.stderr" \
+        pattern     'Warning:' \
+        asserts     'D1: specs a name can tell apart are separated silently, not refused' \
+        produced_by 'parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-unit — the unit discriminates, and only the spec carrying
+# one gains a suffix; the unitless metric keeps its bare name (D6).
+# ---------------------------------------------------------------------------
+scenario_collision_unit() {
+    current_scenario="collision-unit"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm rows -udm 'rows:s')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows spec='rows'" \
+        asserts     'D6: when only the unit differs, the spec without one keeps the name exactly as typed' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:s spec='rows:s'" \
+        asserts     'D6: the spec carrying a unit is named by that unit as typed' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' \
+        asserts     'D6: the unitless metric reports unconverted values, which were unobtainable before' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200000 min=10000 max=100000' \
+        asserts     'D6: the second metric reports the same field converted from seconds to milliseconds' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-three-way — a raw spec plus two transforms. The plain
+# spec carries no transform and was zeroed by the shared delta state before.
+# ---------------------------------------------------------------------------
+scenario_collision_three_way() {
+    current_scenario="collision-three-way"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm rows -udm 'rows::delta' -udm 'rows::idelta')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows:sum spec='rows'" \
+        asserts     'Three specs on one base name resolve to three distinct names' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:delta spec='rows::delta'" \
+        asserts     'The clamped transform is named by its own function field' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:idelta spec='rows::idelta'" \
+        asserts     'The unclamped transform is named by its own function field' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' \
+        asserts     'D1: the well-formed plain spec reports its own total, not the zero the shared delta state produced' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_absent "$out" \
+        pattern     '  produced: occurrences=12' \
+        asserts     'D1: no metric counts the per-line value once per colliding config' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep -c '  produced: occurrences=3 buckets=1 sum=90 min=20 max=40' '$out')\" = 2 ]" \
+        label       'both transform metrics report the single-spec answer, neither zero' \
+        asserts     'D1: separate delta state per metric, so each transform computes against its own previous value' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-two-transforms — two transforms and no raw spec; both
+# reported a fabricated zero before.
+# ---------------------------------------------------------------------------
+scenario_collision_two_transforms() {
+    current_scenario="collision-two-transforms"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm 'rows::delta' -udm 'rows::idelta')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows:delta spec='rows::delta'" \
+        asserts     'Two transforms on one name resolve to two distinct names' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:idelta spec='rows::idelta'" \
+        asserts     'Two transforms on one name resolve to two distinct names' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep -c '  produced: occurrences=3 buckets=1 sum=90 min=20 max=40' '$out')\" = 2 ]" \
+        label       'both metrics report their single-spec control answer' \
+        asserts     'D1: neither metric reports the zero the shared delta state fabricated' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-refused — specs differing only in what they extract have
+# no readable name to tell them apart, so the later one is refused (D4).
+# ---------------------------------------------------------------------------
+scenario_collision_refused() {
+    current_scenario="collision-refused"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm rows -udm 'rows:/(\d+) rows/')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out.stderr" \
+        pattern     "Warning: -udm 'rows:/(\\d+) rows/' and -udm 'rows' both resolve to the metric name 'rows' - give them different names, skipping the later one" \
+        asserts     'D4: the refusal names both specs and the name they contend for, and says what to change' \
+        produced_by 'parse_udm_configs() (identity refusal) in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: spec='rows:/(\\d+) rows/' rejected=duplicate_metric_identity" \
+        asserts     'D4: the refused spec is listed on the section with its reason token' \
+        produced_by 'parse_udm_configs() (reject) + emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows spec='rows'" \
+        asserts     'D4: the earlier spec keeps the name and the run continues' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' \
+        asserts     'D4: the surviving metric produces its own correct answer' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-identical — a repeated identical argument is one metric,
+# the repeat dropped with a notice (D5). This pair exited 255 before.
+# ---------------------------------------------------------------------------
+scenario_collision_identical() {
+    current_scenario="collision-identical"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm 'rows::ratio' -udm 'rows::ratio')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out.stderr" \
+        pattern     "Note: -udm 'rows::ratio' was given more than once - keeping one metric, dropping the repeat" \
+        asserts     'D5: the drop is a behavioural notice, always spoken so a typo is not hidden' \
+        produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: spec='rows::ratio' rejected=duplicate_metric_identity" \
+        asserts     'D5: the dropped repeat is listed on the section with its reason token' \
+        produced_by 'parse_udm_configs() (reject) + emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep -c '^udm: name=' '$out')\" = 1 ]" \
+        label       'exactly one metric survives two identical arguments' \
+        asserts     'D5: identical arguments can name only one metric' \
+        produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ '$LAST_EXIT' = 0 ]" \
+        label       'the run exits 0 where it previously died with a division by zero' \
+        asserts     'D7: the duplicate drop removes the second config that read an already-freed distinct set' \
+        produced_by 'parse_udm_configs() (duplicate-argument drop) + calculate_all_statistics() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "grep -q 'TOP OVERALL MESSAGES' '$out'" \
+        label       'the run renders its output rather than producing none' \
+        asserts     'D7: exiting 0 is not enough - the run must produce the report it was asked for' \
+        produced_by 'print_message_summary() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-safe-boundary — the same-name pairs that worked before
+# keep their names and their figures (D10). Regression guard for #99 (same UDM
+# name with different aggregation functions showed duplicate values).
+# ---------------------------------------------------------------------------
+scenario_collision_safe_boundary() {
+    current_scenario="collision-safe-boundary"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm 'rows::sum' -udm 'rows::max')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows:sum spec='rows::sum'" \
+        asserts     'D10: an aggregation-only pair resolves exactly as it did before this change' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:max spec='rows::max'" \
+        asserts     'D10: an aggregation-only pair resolves exactly as it did before this change' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep -c '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' '$out')\" = 2 ]" \
+        label       'both metrics see all four occurrences, as the single-spec run reports' \
+        asserts     'D10: separating on the function field does not change what an aggregation-only pair accumulates' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+
+    out=$(run_collision -udm 'rows::count' -udm 'rows::distinct')
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     "udm: name=rows:count spec='rows::count'" \
+        asserts     'D10: a counting pair resolves exactly as it did before this change' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=rows:distinct spec='rows::distinct'" \
+        asserts     'D10: a counting pair resolves exactly as it did before this change' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep -c '  produced: occurrences=4 buckets=1 distinct_max=4' '$out')\" = 2 ]" \
+        label       'both counting metrics see four occurrences over four distinct values' \
+        asserts     'D10: the counting pair keeps its per-bucket distinct sets, which the freed-set defect emptied' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: no-collision-names-as-typed — a command line with no shared base
+# name is untouched by the rule: every name is exactly what the user wrote.
+# ---------------------------------------------------------------------------
+scenario_no_collision_names_as_typed() {
+    current_scenario="no-collision-names-as-typed"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_collision -udm rows -udm 'pages::max')
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    assert_line "$out" \
+        pattern     "udm: name=rows spec='rows'" \
+        asserts     'D3: a base name no other spec uses keeps the name as typed, with no suffix' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     "udm: name=pages spec='pages::max'" \
+        asserts     'D3: a named function adds no suffix when nothing collides with it' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_absent "$out.stderr" \
+        pattern     'Note: -udm' \
+        asserts     'Distinct names produce neither a refusal nor a duplicate-drop notice' \
+        produced_by 'parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: delta-shorthand-canonical — 'delta' and 'sum(delta)' are the same
+# spec, so a resolved name must not depend on which the user wrote.
+# ---------------------------------------------------------------------------
+scenario_delta_shorthand_canonical() {
+    current_scenario="delta-shorthand-canonical"
+    echo "[$current_scenario]"
+    local shorthand expanded
+    shorthand=$(run_collision -udm 'rows::delta' -udm 'rows::max')
+    check_capture_warnings "$shorthand"
+    expanded=$(run_collision -udm 'rows::sum(delta)' -udm 'rows::max')
+    check_capture_warnings "$expanded"
+    assert_section_present "$expanded"
+
+    assert_line "$expanded" \
+        pattern     "udm: name=rows:delta spec='rows::sum(delta)'" \
+        asserts     'The shorthand is the canonical spelling: sum(delta) is named delta, so the name never depends on how it was typed' \
+        produced_by 'udm_function_field() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(grep '^udm: name=' '$shorthand' | sed 's/ spec=.*//')\" = \"\$(grep '^udm: name=' '$expanded' | sed 's/ spec=.*//')\" ]" \
+        label       'both spellings resolve to the same pair of names' \
+        asserts     'Two spellings of one spec produce one naming outcome' \
+        produced_by 'resolve_udm_metric_names() + udm_function_field() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$shorthand" "$shorthand.stderr" "$expanded" "$expanded.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-csv-and-export — the written surfaces. Every UDM column
+# appears once on the timeline header and in the STATS CSV, and the aggregate
+# export carries one entry per metric rather than losing one to a shared key.
+# ---------------------------------------------------------------------------
+scenario_collision_csv_and_export() {
+    current_scenario="collision-csv-and-export"
+    echo "[$current_scenario]"
+    local work="$TMP_DIR/csv" render
+    mkdir -p "$work"
+    render="$TMP_DIR/render.out"
+    ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe --terminal-width 200 -o \
+        -udm rows -udm 'rows::delta' -udm 'rows::idelta' "$COLLISION_FIXTURE" ) \
+        > "$render" 2>"$render.stderr" || true
+    current_scenario="collision-csv-and-export"
+    if ! assert_no_runtime_warnings "$render.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+
+    local stats
+    stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1)
+    assert_command \
+        command     "[ -n '$stats' ] && [ -f '$stats' ]" \
+        label       'the STATS CSV was written' \
+        asserts     'The written surfaces are exercised, not only the rendered one' \
+        produced_by 'print_bar_graph() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "head -1 '$stats' | tr ',' '\\n' | grep -c '^rows:sum\$' | grep -qx 1" \
+        label       'the STATS CSV header carries rows:sum exactly once' \
+        asserts     'D8: the disambiguated CSV column is the resolved name verbatim, and it is unique' \
+        produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "head -1 '$stats' | tr ',' '\\n' | grep -c '^rows:delta\$' | grep -qx 1" \
+        label       'the STATS CSV header carries rows:delta exactly once' \
+        asserts     'D8: each separated metric gets its own CSV column' \
+        produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "head -1 '$stats' | tr ',' '\\n' | grep -c '^rows:idelta\$' | grep -qx 1" \
+        label       'the STATS CSV header carries rows:idelta exactly once' \
+        asserts     'D8: each separated metric gets its own CSV column' \
+        produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c '^rows')\" = \"\$(head -1 '$stats' | tr ',' '\\n' | grep '^rows' | sort -u | grep -c .)\" ]" \
+        label       'no UDM column name repeats in the STATS CSV header' \
+        asserts     'D12: resolved-name uniqueness makes column ids unique by construction' \
+        produced_by 'udm_csv_columns() + normalize_data_for_output() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(head -2 '$stats' | tail -1 | tr ',' '\\n' | grep -c .)\" -le \"\$(head -1 '$stats' | tr ',' '\\n' | grep -c .)\" ]" \
+        label       'the STATS CSV data row fits its header' \
+        asserts     'One resolution sub means the header and the row beneath it cannot disagree about shape' \
+        produced_by 'udm_csv_columns() in ltl' \
+        contract    "$CONTRACT_482"
+
+    local yaml
+    yaml=$(ls "$work"/*AGGREGATE*.yaml 2>/dev/null | head -1)
+    assert_command \
+        command     "[ -n '$yaml' ] && [ -f '$yaml' ]" \
+        label       'the YAML aggregate export was written' \
+        asserts     'The export is the one surface that lost a metric to a shared key' \
+        produced_by 'write_aggregate_export() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "grep -q 'rows:sum:' '$yaml' && grep -q 'rows:delta:' '$yaml' && grep -q 'rows:idelta:' '$yaml'" \
+        label       'the export carries one entry per separated metric' \
+        asserts     'D1: the name-keyed export no longer overwrites one metric with another' \
+        produced_by 'write_aggregate_export() in ltl' \
+        contract    "$CONTRACT_482"
+
+    assert_command \
+        command     "[ \"\$(grep -o 'rows:sum' '$render' | grep -c .)\" -ge 1 ] && [ \"\$(head -40 '$render' | grep -o 'rows:delta' | grep -c .)\" -ge 1 ]" \
+        label       'the rendered timeline header names each separated metric' \
+        asserts     'D12: each metric gets its own column on the rendered surface' \
+        produced_by 'add_dynamic_column() + print_bar_graph() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -rf "$work" "$render" "$render.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-operands — the -hg and -hm operand surfaces bind without
+# ambiguity, and the unknown-metric error lists no name twice.
+# ---------------------------------------------------------------------------
+scenario_collision_operands() {
+    current_scenario="collision-operands"
+    echo "[$current_scenario]"
+    local hg control unknown
+    hg="$TMP_DIR/hg.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe --terminal-width 200 -hg rows \
+        -udm rows -udm 'rows::delta' "$COLLISION_FIXTURE" > "$hg" 2>"$hg.stderr" || true
+    if ! assert_no_runtime_warnings "$hg.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+    control="$TMP_DIR/hg-control.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe --terminal-width 200 -hg rows \
+        -udm rows "$COLLISION_FIXTURE" > "$control" 2>/dev/null || true
+
+    assert_command \
+        command     "grep -q 'rows:sum Distribution' '$hg' && grep -q 'rows:delta Distribution' '$hg'" \
+        label       'two distribution panels render, titled by their resolved names' \
+        asserts     'A base name shared by two specs resolves to both panels rather than one merged panel' \
+        produced_by 'resolve_metric_operand() + print_histograms() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$hg' | grep -o 'P50: 30   P99: 100' | grep -c .)\" -ge 1 ] && [ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$control' | grep -o 'P50: 30' | grep -c .)\" -ge 1 ]" \
+        label       'the raw panel percentiles match the single-spec control' \
+        asserts     'The separated metric distributes its own values, not a mixture of both specs' \
+        produced_by 'print_histograms() in ltl' \
+        contract    "$CONTRACT_482"
+
+    unknown="$TMP_DIR/unknown.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -hm nosuchmetric \
+        -udm rows -udm 'rows::delta' "$COLLISION_FIXTURE" > "$unknown" 2>"$unknown.stderr" || true
+    assert_command \
+        command     "cat '$unknown' '$unknown.stderr' | grep 'Available:' | grep -q 'rows:sum, rows:delta'" \
+        label       'the unknown-metric error lists both resolved names' \
+        asserts     'available_metric_names() reports the separated metrics under their resolved names' \
+        produced_by 'available_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_command \
+        command     "[ \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | grep -c .)\" = \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | sort -u | grep -c .)\" ]" \
+        label       'the Available list contains no repeated name' \
+        asserts     'Resolved names are unique, so the operand list no longer shows one name twice' \
+        produced_by 'available_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$hg" "$hg.stderr" "$control" "$unknown" "$unknown.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: collision-columnar — the -ucm CSV columnar path is a second
+# extraction route into the same structures, so it is asserted, not assumed.
+# ---------------------------------------------------------------------------
+scenario_collision_columnar() {
+    current_scenario="collision-columnar"
+    echo "[$current_scenario]"
+    local columnar="$TMP_DIR/columnar.txt" out
+    cat > "$columnar" <<'COLUMNAR'
+timestamp,job,rows
+2026-01-26 10:00:01,alpha,10
+2026-01-26 10:00:05,alpha,30
+2026-01-26 10:00:12,beta,60
+2026-01-26 10:00:20,beta,100
+COLUMNAR
+
+    out="$TMP_DIR/columnar.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs -ucm job \
+        -udm rows -udm 'rows::delta' "$columnar" > "$out" 2>"$out.stderr" || true
+    if ! assert_no_runtime_warnings "$out.stderr" "$current_scenario"; then
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+    assert_section_present "$out"
+    assert_line "$out" \
+        pattern     "udm: name=rows:sum spec='rows'" \
+        asserts     'The columnar path resolves names through the same rule as the line-oriented path' \
+        produced_by 'resolve_udm_metric_names() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=4 buckets=1 sum=200 min=10 max=100' \
+        asserts     'The columnar raw metric produces its own answer, as it does on a line-oriented log' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=3 buckets=1 sum=90 min=20 max=40' \
+        asserts     'The columnar delta metric produces its own answer, as it does on a line-oriented log' \
+        produced_by 'derive_udm_production() in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr"
+
+    out="$TMP_DIR/columnar-ratio.out"
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -ucm job \
+        -udm 'rows::ratio' -udm 'rows::ratio' "$columnar" > "$out" 2>"$out.stderr"
+    local ratio_exit=$?
+    set -e
+    assert_command \
+        command     "[ '$ratio_exit' = 0 ]" \
+        label       'two identical ratio specs exit 0 on the columnar path too' \
+        asserts     'D5/D7: the duplicate drop stops the division by zero on both extraction paths' \
+        produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
+        contract    "$CONTRACT_482"
+    rm -f "$out" "$out.stderr" "$columnar"
+}
+
+want undelimited-regex           && scenario_undelimited_regex || true
+want whole-match                 && scenario_whole_match || true
+want absent-field                && scenario_absent_field || true
+want parse-time-rejections       && scenario_parse_time_rejections || true
+want delta-single-match          && scenario_delta_single_match || true
+want no-udm                      && scenario_no_udm || true
+want collision-transform         && scenario_collision_transform || true
+want collision-unit              && scenario_collision_unit || true
+want collision-three-way         && scenario_collision_three_way || true
+want collision-two-transforms    && scenario_collision_two_transforms || true
+want collision-refused           && scenario_collision_refused || true
+want collision-identical         && scenario_collision_identical || true
+want collision-safe-boundary     && scenario_collision_safe_boundary || true
+want no-collision-names-as-typed && scenario_no_collision_names_as_typed || true
+want delta-shorthand-canonical   && scenario_delta_shorthand_canonical || true
+want collision-csv-and-export    && scenario_collision_csv_and_export || true
+want collision-operands          && scenario_collision_operands || true
+want collision-columnar          && scenario_collision_columnar || true
+
+if [[ $pass -eq 0 && $fail -eq 0 ]]; then
+    echo "ERROR: no scenarios ran (check --scenario '$ONLY_SCENARIO')"
+    exit 2
+fi
 
 echo
 echo "Results: $pass passed, $fail failed"

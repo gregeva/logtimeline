@@ -231,7 +231,7 @@ This implementation serves as a proving ground for Issue #23's derived metrics a
 
 ## Known Issues
 
-- **Same metric name with different functions is not supported**: Using the same metric name in multiple `-udm` flags with different aggregations or transforms (e.g., `-udm "x::sum" -udm "x::max"`) does not produce two separate columns. Both configs share the same `%udm_values` key and `%udm_last_value` delta state, so the second config's extracted value overwrites the first during per-line processing. Use distinct names instead (e.g., `-udm "x_sum::sum" -udm "x_max::max"` with custom regex patterns).
+- **Specs differing only in extraction cannot share a name**: two `-udm` flags with one name, one function field and one unit, differing only in the token key or the regex they extract with, have no readable way to be told apart in a column header. The later spec is refused at parse time with a warning naming both and `rejected=duplicate_metric_identity` on `-V udm-specs`; give them different names. Specs differing in aggregation, transform or unit are separate metrics and need no workaround — see § *Colliding metric names become separate metrics (Issue #482)*.
 
 ### Resolved
 
@@ -282,7 +282,7 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 **Limitations:**
 - No support for quoted fields with embedded separators (uses simple `split()`)
 - Timestamp column must be named `timestamp` (case-insensitive) or defaults to column 0
-- ~~Same metric name with different aggregation functions~~ — Resolved (#99): duplicate names are auto-disambiguated with `:aggregation` suffix (e.g., `request_size:min`, `request_size:avg`, `request_size:max`)
+- ~~Same metric name with different aggregation functions~~ — Resolved (#99, extended by #482: two `-udm` specs with the same name and aggregation but different transforms collapse into one column): specs sharing a name are separated, each name carrying the fields that differ within the group — the function field then the unit field (e.g. `request_size:min`, `request_size:mean`, `request_size:max`; `rows:sum` and `rows:delta`; `rows` and `rows:s`). The columnar path resolves names through the same rule as the line-oriented path
 
 **Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The `-du` flag overrides the epoch unit if values aren't seconds (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
 
@@ -441,13 +441,13 @@ udm: spec='<raw argument>' rejected=<reason-token>                        # pars
 
 | key | meaning |
 |---|---|
-| `name` | the resolved metric name (after the #99 duplicate-name `:aggregation` suffix, if applied) |
+| `name` | the resolved metric name; on a duplicate-name collision it carries the fields that differ within the colliding group, the function field then the unit field, each as the spec carries it (the naming rule of #482 — two `-udm` specs with the same name and aggregation but different transforms collapse into one column) |
 | `spec` | the argument as given, unmodified |
 | `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source (`line`, or `csv:<column>` when the file is columnar and the metric is bound to a column) |
 | `pattern[i]` | the source of each compiled pattern, in scan order — as compiled, not as typed |
 | `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice |
 | `hint` | the token of the D6 rule that fired; absent otherwise |
-| `rejected` | the parse-time check that skipped the spec: `invalid_regex`, `missing_name`, `key_and_regex`, `counting_with_transform`, `unknown_function`, `unit_slot_holds_function`, `literal_pattern_under_distinct` |
+| `rejected` | the parse-time check that skipped the spec: `invalid_regex`, `missing_name`, `key_and_regex`, `counting_with_transform`, `unknown_function`, `unit_slot_holds_function`, `literal_pattern_under_distinct`, `duplicate_metric_identity` (the spec's resolved name is already claimed — it differs from an earlier spec only in what it extracts, or repeats it byte for byte) |
 
 Stability: keys above are the contract; additions are non-breaking, renames and removals follow HARNESS-DESIGN. Consumer: `tests/validate-udm-specs.sh`.
 
@@ -474,7 +474,10 @@ Stability: keys above are the contract; additions are non-breaking, renames and 
 - **Issue**: #482 (two `-udm` specs with the same name and aggregation but different transforms collapse into one column)
 - **Branch**: `482-two-udm-specs-with-the-same-name-and-aggregation-but-different-transforms-collapse-into-one-column`
 - **Target release**: v0.18.x
-- **Phase**: Specification, acceptance criteria agreed before code.
+- **Phase**: Implemented. Every assertable acceptance criterion asserts in
+  `tests/validate-udm-specs.sh` (118 assertions over 18 scenarios, the 12 new
+  collision scenarios each proven to fail under sabotage of the naming rule,
+  the duplicate drop and the identity refusal). Completion gate outstanding.
 
 ### Motivating consumer
 
@@ -712,7 +715,7 @@ spelling after alias normalisation and needs no rule.
 | `-udm rows -udm rows::delta -udm rows::idelta` | function | `rows:sum`, `rows:delta`, `rows:idelta` |
 | `-udm rows -udm rows:s` | unit | `rows`, `rows:s` |
 | `-udm rows:s -udm rows:ms` | unit | `rows:s`, `rows:ms` |
-| `-udm rows -udm rows:s::delta` | function and unit | `rows:sum`, `rows:delta:s` |
+| `-udm rows -udm rows:s:delta` | function and unit | `rows:sum`, `rows:delta:s` |
 | `-udm 'rows::mean(delta)' -udm rows::delta -udm rows:s` | function and unit | `rows:mean(delta)`, `rows:delta`, `rows:sum:s` |
 | `-udm rows -udm 'rows:/(\d+) rows/'` | neither | refused (D4): both would resolve to `rows` |
 | `-udm 'rows::ratio' -udm 'rows::ratio'` | identical arguments | one metric `rows`, duplicate dropped with a notice (D5) |
@@ -720,7 +723,7 @@ spelling after alias normalisation and needs no rule.
 Two rows repay a second look. In `-udm rows -udm rows:s` the unit differs and
 the function does not, so the unitless spec's name is the bare `rows`: an
 absent field shows nothing, and the spec that carries a unit is the only one
-that gains a suffix. In `-udm rows -udm rows:s::delta` both dimensions differ,
+that gains a suffix. In `-udm rows -udm rows:s:delta` both dimensions differ,
 so the function field appears on both members even though only one carries a
 unit, and the member without one shows no unit segment.
 
@@ -1002,6 +1005,40 @@ not touch that block, and #478 does not touch naming. The two will conflict
 the first.
 
 No other issue in the next-up set names anything in this change's blast radius.
+
+### Findings from implementation
+
+**The worked example `-udm rows -udm rows:s::delta` was written with one colon
+too many, and the error is in this document, not in the tool.** The spec
+grammar is `name[:unit[:function]][:key|:/regex/]`, so when a unit is present
+the function is the *third* field: `rows:s:delta`. Written as `rows:s::delta`,
+the empty third field means no function and `delta` lands in the fourth slot,
+where it is read as a token key and matched literally. Measured on
+`release/0.18.1` before any change on this branch and on the finished code,
+both report `unit=s(time) aggregation=sum transform=none extraction=token_key
+key='delta'`: identical, so this is the shipped parse of that spelling and not
+a regression. Corrected to `rows:s:delta` in the worked-examples table, which
+resolves to `rows:sum` and `rows:delta:s` as the table intends, and is what the
+`collision-unit` and naming scenarios exercise.
+
+**The duplicate drop and the identity refusal overlap, and the overlap is
+wanted.** Two byte-identical arguments are caught by the drop; if only the drop
+is disabled they are still caught by the refusal, because identical arguments
+resolve to one name. Verified by sabotage: disabling the drop alone leaves the
+former `Illegal division by zero` fixed (the refusal removes the second
+config), and only disabling both reproduces exit 255. Each mechanism is
+asserted on what is its own to prove — the drop on its notice and the single
+surviving metric, the refusal on its warning and its `rejected=` token — and
+the exit-0 assertions bite when both are gone.
+
+**The five CSV-naming sites converged onto `udm_csv_columns()` (D9).** It
+answers both questions the sites shared: the emission shape (`single` for one
+value column, `family` for the five-column occurrences/min/mean/max/sum set)
+and the column spelling, with `stats` naming the accumulator each column reads
+positionally so a header and the row beneath it are built from one list. The
+counting column keeps `{base_name}_{aggregation}` with the rate-unit suffix
+exactly as shipped — no `lc()` was introduced, since the shipped sites do not
+lowercase and adding it would change the column of a capitalised metric name.
 
 ### Findings forwarded
 

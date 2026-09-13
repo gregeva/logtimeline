@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.1";
+my $version_number = "0.18.1-482";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -6484,10 +6484,11 @@ sub write_aggregate_export {
                 my $name = $1;
                 my ($config) = grep { $_->{name} eq $name } @udm_configs;
                 $udm //= aggregate_mapping();
-                if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
+                my $csv = $config ? udm_csv_columns($config) : undef;
+                if ($csv && $csv->{shape} eq 'single') {
                     next unless defined $stats->{$key};
                     my $block = aggregate_mapping();
-                    $block->{ $config->{aggregation} } = aggregate_number($stats->{$key});
+                    $block->{ $csv->{stats}[0] } = aggregate_number($stats->{$key});
                     $udm->{$name} = $block;
                 } else {
                     next unless defined $stats->{"${key}_occurrences"};
@@ -9531,6 +9532,7 @@ sub print_help {
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
+    $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
@@ -9812,6 +9814,71 @@ sub get_pattern_file_indicator {
 }
 
 # User-defined metrics parsing (Issue #22)
+# The CSV columns one user-defined metric contributes, on the STATS and the
+# MESSAGES surface alike: the single resolution every emission site reads, so a
+# header and the row beneath it can never disagree about shape or spelling.
+# 'shape' is 'single' for one value column and 'family' for the five-column
+# occurrences/min/mean/max/sum set; 'stats' lists the accumulator each column
+# reads, positionally; 'columns' is the header spelling, name parts first and
+# the stat last.
+sub udm_csv_columns {
+    my ($config) = @_;
+    my $name = $config->{name};
+
+    if ($config->{agg_kind} eq 'counting') {
+        my $col = "$config->{base_name}_$config->{aggregation}";
+        $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(?:rate|drate)$/;
+        return { shape => 'single', stats => [ $config->{aggregation} ], columns => [$col] };
+    }
+
+    my $prefix = defined $config->{unit} ? "${name}_$config->{unit}" : $name;
+    return { shape => 'single', stats => [ $config->{aggregation} ], columns => [$prefix] }
+        if $name ne $config->{base_name};
+
+    my @stats = qw(occurrences min mean max sum);
+    return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };
+}
+
+# The function field as it is spelled into a resolved metric name. 'delta' and
+# 'sum(delta)' are the same spec, so the shorthand is the one spelling a name
+# ever carries; a spec that named no function shows the default the tool applied.
+sub udm_function_field {
+    my ($config) = @_;
+    my $function = $config->{transform}
+                 ? ($config->{aggregation} eq 'sum' ? $config->{transform}
+                                                    : "$config->{aggregation}($config->{transform})")
+                 : $config->{aggregation};
+    return $function;
+}
+
+# Metrics sharing a name are told apart by the fields that differ between them:
+# the function field, then the unit field, each appended after a colon and
+# spelled from the spec's own value. A dimension the group agrees on adds
+# nothing, so a command line with no shared name keeps every name as typed.
+sub resolve_udm_metric_names {
+    my ($configs) = @_;
+    my %group;
+    push @{ $group{ $_->{base_name} } }, $_ for @$configs;
+
+    for my $members (values %group) {
+        $_->{name} = $_->{base_name} for @$members;
+        next if @$members < 2;
+
+        my %distinct_function = map { udm_function_field($_) => 1 } @$members;
+        my %distinct_unit     = map { ($_->{unit} // '') => 1 } @$members;
+        my $function_differs  = keys(%distinct_function) > 1;
+        my $unit_differs      = keys(%distinct_unit) > 1;
+
+        for my $config (@$members) {
+            my $name = $config->{base_name};
+            $name .= ':' . udm_function_field($config) if $function_differs;
+            $name .= ":$config->{unit}" if $unit_differs && defined $config->{unit};
+            $config->{name} = $name;
+        }
+    }
+    return;
+}
+
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
@@ -9823,8 +9890,8 @@ sub parse_udm_configs {
     my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );
     my $spec_index = -1;
     my $reject = sub {
-        my ($spec, $reason) = @_;
-        push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $spec_index };
+        my ($spec, $reason, $at_index) = @_;
+        push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $at_index // $spec_index };
     };
 
     # Case normalization: map lowercase variants to canonical forms (time
@@ -10000,14 +10067,34 @@ sub parse_udm_configs {
         };
     }
 
-    # Disambiguate duplicate metric names by appending :aggregation (#99)
-    my %name_counts;
-    $name_counts{$_->{name}}++ for @udm_configs;
+    # A repeated identical argument can name only one metric, so the later copy
+    # is dropped and the drop is spoken.
+    my (@kept_configs, %seen_raw_arg);
     for my $config (@udm_configs) {
-        if ($name_counts{$config->{name}} > 1) {
-            $config->{name} = "$config->{base_name}:$config->{aggregation}";
+        if ($seen_raw_arg{$config->{raw_arg}}++) {
+            print STDERR "Note: -udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat\n";
+            $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
+            next;
         }
+        push @kept_configs, $config;
     }
+    @udm_configs = @kept_configs;
+
+    resolve_udm_metric_names(\@udm_configs);
+
+    # Specs a name cannot tell apart are refused: extraction has no readable
+    # spelling in a column header, so the user is asked for distinct names.
+    my (@named_configs, %claimed_by);
+    for my $config (@udm_configs) {
+        if (defined(my $owner = $claimed_by{$config->{name}})) {
+            print STDERR "Warning: -udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one\n";
+            $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
+            next;
+        }
+        $claimed_by{$config->{name}} = $config->{raw_arg};
+        push @named_configs, $config;
+    }
+    @udm_configs = @named_configs;
 
     push @graph_user_defined_metrics, $_->{name} for @udm_configs;
 
@@ -17894,20 +17981,9 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                if ($cfg && $cfg->{agg_kind} eq 'counting') {
-                    # Counting aggregation (Issue #313): single value column with
-                    # the aggregation as the stat; rate columns carry the -ru suffix
-                    my $col = "$cfg->{base_name}_$cfg->{aggregation}";
-                    $col .= $rate_csv_suffix{$rate_unit} if $cfg->{aggregation} =~ /^(rate|drate)$/;
-                    push @output_columns, $col;
-                } elsif ($cfg && $cfg->{name} ne $cfg->{base_name}) {
-                    # Disambiguated metric: single value column (#99)
-                    my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                    push @output_columns, $csv_prefix;
-                } else {
-                    my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                    push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
-                }
+                push @output_columns, $cfg
+                    ? @{ udm_csv_columns($cfg)->{columns} }
+                    : map { "${csv_key}_$_" } qw(occurrences min mean max sum);
             } else {
                 push @output_columns, $key;
                 # #444 D13: whatever is captured as a metric is exported — the
@@ -18797,12 +18873,11 @@ sub print_bar_graph {
                 } elsif( $key =~ /^udm_(.+)$/ ) {
                     my $metric_name = $1;
                     my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                    if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
-                        # Single value column: counting aggregation (#313) or
-                        # disambiguated metric (#99)
+                    my $csv = $config ? udm_csv_columns($config) : undef;
+                    if ($csv && $csv->{shape} eq 'single') {
                         push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                     } else {
-                        foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                        foreach my $metric ( @{ $csv ? $csv->{stats} : [ qw( occurrences min mean max sum ) ] } ) {
                             push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
                         }
                     }
@@ -20300,24 +20375,17 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
+                            my $csv = udm_csv_columns($config);
                             if ($config->{agg_kind} eq 'counting') {
                                 # count -> per-message occurrences; distinct/ratio/rate/drate
                                 # have no per-message value (distinct sets are bucket-scoped)
-                                my $col = "$config->{base_name}_$config->{aggregation}";
-                                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
                                 push @udm_csv_values, $config->{aggregation} eq 'count'
-                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $col)
+                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $csv->{columns}[0])
                                     : undef;
-                            } elsif ($config->{name} ne $config->{base_name}) {
-                                # Disambiguated metric: single aggregated value (#99)
-                                my $stat_key = $config->{aggregation};
-                                push @udm_csv_values, format_csv_value(
-                                    $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"}, $csv_prefix);
                             } else {
                                 push @udm_csv_values,
-                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$_"}, "${csv_prefix}_$_") }
-                                        qw(occurrences min mean max sum);
+                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$csv->{stats}[$_]"}, $csv->{columns}[$_]) }
+                                        0 .. $#{ $csv->{columns} };
                             }
                         }
                         # Issue #268: format each numeric column per the resolved
@@ -20882,23 +20950,7 @@ sub pipeline_render {
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('MESSAGES');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-        my @udm_csv_headers;
-        foreach my $config (@udm_configs) {
-            my $name = $config->{name};
-            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-            if ($config->{agg_kind} eq 'counting') {
-                # Counting aggregation (Issue #313): single value column with
-                # the aggregation as the stat; rate columns carry the -ru suffix
-                my $col = "$config->{base_name}_$config->{aggregation}";
-                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
-                push @udm_csv_headers, $col;
-            } elsif ($config->{name} ne $config->{base_name}) {
-                # Disambiguated metric: single value column (#99)
-                push @udm_csv_headers, $csv_prefix;
-            } else {
-                push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
-            }
-        }
+        my @udm_csv_headers = map { @{ udm_csv_columns($_)->{columns} } } @udm_configs;
         # Metric-first, aggregate-last throughout, matching the user-defined-metric
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
