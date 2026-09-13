@@ -692,6 +692,36 @@ Two corrections the implementation established are recorded in place, under
 document first named was not a rename that happened, and the deferral pointer to the #426
 revalidation report named a finding label that report does not use.
 
+## Completion gate result
+
+**Run 2026-09-13 on the commit being merged, in the `548-...` worktree, with
+`$version_number` restored to `0.18.1` first (its own commit).** The scope row applied is the
+table's last one, an exempt path plus a required path in the same commit: `features/`,
+`prototype/` and `tests/HARNESS-DESIGN.md` are exempt, `tests/validate-runtime-config.sh` is
+required. With the version stamp restored, `git diff -w origin/release/0.18.1...HEAD -- ltl`
+is empty, so the two benchmark arms run the same bytes.
+
+**Harness suite: all 36 `tests/validate-*.sh` exit 0, every summary line shows assertions
+ran, 0 failures.** `CI=1 ./tests/validate-csv-output.sh` first (23 scenarios, 28 pass, 0 fail),
+then `CI=1 ./tests/validate-statistics.sh` (22 scenarios, 22 pass, 0 fail, **0 T3 and 0 T4 on
+every scenario summary**; the 9 L3 XFAILs are the entries registered in
+`tests/statistics-drift/known-failures.tsv` for #469, one projection onto the shared
+geometry), then the remaining 33. `tests/validate-runtime-config.sh`, the harness this issue
+edits, reports 36 passed, 0 failed; `tests/validate-help-content.sh` reports 11 passed,
+0 failed, so `--help` and `docs/usage.md` agree. `tests/validate-regression.sh` reports
+74 passed, 0 failed, 0 skipped: the version stamp re-blessed no golden, as predicted.
+No ` at ltl line N` runtime warning in any of the 36 captures. No pre-existing failure was
+observed, so none is recorded.
+
+**Benchmark: flat, as predicted, on `single-day-access-log-standard`.** Before on the
+`release/0.18.1` tip in the main checkout, after in the worktree, same machine, same session.
+Total 9.0 s to 8.9 s (-54 ms, -0.6%, IMPROVE); `parse/read_files` 8.8 s to 8.8 s (-53 ms,
+-0.6%); `finalize/calculate_statistics` 136 ms unchanged; peak RSS 151.7 MB to 153.2 MB
+(+1.5 MB, +1.0%); `lines_read` and `lines_included` identical at 761,698. The largest single
+delta is `group_calc` at 39 ms to 40 ms (+2.6%), a 1 ms move. Nothing is worse by more than
+5%, so no stop-and-investigate arose. Both label TSVs were deleted afterwards; no `vX.Y.Z.tsv`
+was written or removed.
+
 ## Ordering
 
 **#546 lands first.** Both issues are delivered together and no `blocked_by` edge is needed,
