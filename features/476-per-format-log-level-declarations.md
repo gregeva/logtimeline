@@ -399,13 +399,19 @@ differ; the text of those sections is kept as the record of what was planned.
   global list nor any declaration fails the build, naming it. AC9's "an entry
   that inherits says so" becomes "an entry that declares nothing shows no level
   line". Every other criterion stands.
-- **Open before implementation:** whether every registry entry's declaration
-  joins the vocabulary at build time, as D2 (the build unions every
-  declaration into one global set) locks, or only the declarations of the
-  formats detected for the run, as the architect's phrasing on 2026-09-13
-  ("the defined levels from the detected formats") reads. The two differ only
-  when a file is read under one format while another format declares a level
-  the file carries. Raised with the architect; implementation waits on it.
+- **When a declaration joins the vocabulary: at detection, not at build.** The
+  architect's direction of 2026-09-13, given with its reason: with a hundred
+  defined formats, their levels should not all be loaded all of the time, only
+  once a format has been detected. So the global list is loaded up front, and a
+  format's declared levels are added to the vocabulary set at the moment that
+  format is detected for a file. D2's "the build unions every declaration into
+  the existing global level set" is superseded on that one point; the rest of
+  D2 stands: the per-line gate stays one constant-time `exists` on one global
+  hash, and there is no per-format gate. The set only ever grows during a run,
+  so a file read under one format is not affected by a later detection, and
+  the classification cross-check that remains of D5 is evaluated over the
+  global list plus every registry declaration, since it is a property of the
+  registry rather than of a run.
 
 ### D6: One report line per format, each token with its line count, always printed
 
