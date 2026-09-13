@@ -290,6 +290,14 @@ my $total_lines_included = 0;
 # drops are $profile_dropped_samples. Reported by -V filter-summary.
 my $total_lines_unmatched = 0;
 my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );
+# Levels seen in the category position that the vocabulary does not carry, the
+# share of $excluded_other the category gate is responsible for. The line is
+# dropped either way; keeping the token, the format that produced it and the
+# count of lines that carried it is what lets the run say what it lost, instead
+# of leaving a reader to infer it from a gap between two totals.
+my %unregistered_levels;          # format slug => token => lines carrying it
+my %unregistered_levels_by_file;  # file => token => lines carrying it (-V format-detection)
+my $unregistered_level_lines = 0; # observation count gating both surfaces
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my $total_conflicts    = 0;   # lines whose success and failure criteria both fired (CLASSIFICATION CONFLICT, #456 D3)
 my $total_unclassified = 0;   # lines the rules said nothing about, counted per line (#456 D5)
@@ -509,6 +517,10 @@ use constant {
                                # declares both outcomes (#452 D4 usability
                                # floor, unfolded — column visibility reads it
                                # per file, independent of the run mode)
+    FR_LEVELS          => 29,  # [ level names this entry emits ] or undef when
+                               # the entry declares none; joined into the run's
+                               # category vocabulary when the entry first binds
+                               # a file, never consulted per line
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -2919,6 +2931,7 @@ sub format_registry_specs {
       transforms => [ 'wgm_msgtype' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
+      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the wgm_msgtype letter map produces
       expect_ancestors => [],
       samples => [
         '2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"',
@@ -2993,6 +3006,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3019,6 +3033,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3048,6 +3063,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3072,6 +3088,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3096,6 +3113,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3119,6 +3137,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3143,6 +3162,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3193,6 +3213,7 @@ sub format_registry_specs {
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
       event_ledger => 1,
       classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
       expect_ancestors => [],
@@ -3289,6 +3310,7 @@ sub format_registry_specs {
       transforms => [ 'chop_message', 'strip_pid', 'hoist_cpp_object' ],
       time => { layout => 'iso_flex_frac', precision => 'ms', tz => 'local', frac => 'generic' },
       duration_unit => undef, stats_eligible => 0,
+      levels => [ qw(TRACE DEBUG INFO WARN ERROR FORCE AUDIT) ],   # the Edge C SDK writes FORCE and AUDIT beside the standard severities
       expect_ancestors => [],
       samples => [
         'INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received',
@@ -3321,6 +3343,7 @@ sub format_registry_specs {
       transforms => [],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(INFO WARN ERROR FATAL) ],
       event_ledger => 1,
       classification => { success => [ { duration => '^\d{1,3}$' } ],
                           failure => [ { duration => '^[5-9]\d{2,}$' } ] },
@@ -3343,6 +3366,7 @@ sub format_registry_specs {
       field_map => [], transforms => [],
       time => { layout => 'csv', precision => 'ms', tz => 'utc' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(DATA) ],   # no level slot: both assembly branches assign DATA
       expect_ancestors => [],
       samples => [], expect => [] },
     );
@@ -3754,6 +3778,19 @@ sub bin_consolidation_notice {
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
     print STDERR "Note: $detail, so their percentiles are approximate"
         . " - use -mdm raw for exact percentiles\n";
+    return;
+}
+
+# Seat the levels an entry declares in the run's category vocabulary. Called
+# when an entry binds a file, never per line: the set only grows during a run,
+# so a file already read under one format is unaffected by a later detection,
+# and the per-line gate stays one constant-time lookup on one global hash.
+# Loading every entry's declaration up front would put a vocabulary of formats
+# no file uses in front of every line of every run.
+sub format_seat_declared_levels {
+    my ($entry) = @_;
+    my $levels = $entry && $entry->[FR_LEVELS] or return;
+    $log_level_set{$_} = 1 for @$levels;
     return;
 }
 
@@ -4707,6 +4744,51 @@ sub build_format_registry {
         }
     }
 
+    # D24 gate 7: level declarations, and the classification cross-check
+    # over them. An entry may declare the levels it emits or declare none;
+    # a declaration is a non-empty list of non-empty names, and it joins the
+    # run's category vocabulary when the entry binds a file, so it does not
+    # have to be a member of the static list already.
+    #
+    # The cross-check runs the other way. A level named in a classification
+    # criterion must be something the tool can recognise: either a member of
+    # the static vocabulary or a level some entry declares. A name in neither
+    # can never reach the counter it was written for, because the category
+    # gate drops the line before classification is read — the shipped failure
+    # rule named CRITICAL while the vocabulary did not carry it, and a file
+    # whose only failure line was CRITICAL reported none.
+    my %declarable = %log_level_set;
+    for my $spec (@specs) {
+        my $decl = $spec->{levels};
+        next unless defined $decl;
+        die "ltl: format registry: entry '$spec->{name}' levels must be a non-empty list of level names (produced_by format_registry_specs())\n"
+            unless ref $decl eq 'ARRAY' && @$decl;
+        for my $level (@$decl) {
+            die "ltl: format registry: entry '$spec->{name}' declares a level that is not a non-empty name (produced_by format_registry_specs())\n"
+                unless defined $level && !ref $level && length $level;
+            $declarable{$level} = 1;
+        }
+    }
+    my @cls_sources = ( [ 'the default classification rules classify', \%classification_default ] );
+    push @cls_sources, [ "entry '$_->{name}' classifies", $_->{_cls} ] for grep { $_->{_cls} } @specs;
+    for my $source (@cls_sources) {
+        my ($where, $cls) = @$source;
+        for my $outcome (sort keys %$cls) {
+            for my $crit (@{ $cls->{$outcome} }) {
+                my $pattern = $crit->{category_bucket};
+                next unless defined $pattern;
+                # Only a literal alternation over the category is readable
+                # here; anything else is skipped rather than guessed at.
+                next unless $pattern =~ /^\^\(\?:([^()\[\]|]+(?:\|[^()\[\]|]+)*)\)\$$/
+                         || $pattern =~ /^\^([A-Za-z0-9 -]+)\$$/;
+                for my $level (split /\|/, $1) {
+                    die "ltl: format registry: $where '$outcome' on level '$level', which is neither in the recognised level vocabulary nor declared by any entry — a line carrying it is dropped by the category gate before the classification is counted (produced_by format_registry_specs())\n"
+                        unless $declarable{$level};
+                }
+            }
+        }
+    }
+
     # Freeze the live registry (CLI-gated options baked into extractors).
     my $opts = { include_query_string => $include_query_string, include_session => $include_session, include_user => $include_user };
     @format_registry = ();
@@ -4746,6 +4828,7 @@ sub build_format_registry {
         $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
         $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
+        $entry->[FR_LEVELS]          = $spec->{levels};
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -5079,6 +5162,18 @@ sub format_ledger_file_counts {
     return ($ledger_files, $bound_files);
 }
 
+# The `unregistered_levels:` per-file value: each token the category gate
+# rejected in this file with the number of lines that carried it, descending by
+# count and ascending by token within an equal count so the value is the same
+# across runs on the same input. The literal '-' when the file lost nothing.
+sub format_unregistered_levels_value {
+    my ($file) = @_;
+    my $tokens = $unregistered_levels_by_file{$file};
+    return '-' unless $tokens && %$tokens;
+    return join ',', map { "$_=$tokens->{$_}" }
+                     sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens;
+}
+
 sub emit_format_detection_verbose {
     return unless section_requested('format-detection');
 
@@ -5108,6 +5203,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  first_match_line: -";
             push @verbose_output, "  scan_attempts: 0";
             push @verbose_output, "  scan_failed_attempts: 0";
+            push @verbose_output, "  unregistered_levels: " . format_unregistered_levels_value($file);
             emit_format_detection_sample_verbose($file);
             next;
         }
@@ -5123,6 +5219,7 @@ sub emit_format_detection_verbose {
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
         push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
         push @verbose_output, "  scan_failed_attempts: " . ($fdd->{scan_failed_attempts} // 0);
+        push @verbose_output, "  unregistered_levels: " . format_unregistered_levels_value($file);
         emit_format_detection_sample_verbose($file);
     }
 
@@ -7353,7 +7450,7 @@ sub print_help_formats {
     ) . "\n";
     $out .= help_heading("KNOWN FORMATS");
     $out .= help_wrap(
-        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one.",
+        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one. A format that writes categories of its own - pause kinds, HTTP status families, a producer's own severity names - states them here; one that writes the usual severity names states nothing. A line whose category is none ltl recognises is not counted, and the end of the run names the category and how many lines carried it.",
         indent       => 0,
         first_indent => 0,
     ) . "\n\n";
@@ -7361,6 +7458,14 @@ sub print_help_formats {
         my ($list) = @_;
         return 'none' unless $list && @$list;
         return join(' or ', map { my $c = $_; join(' and ', map { "$_ matches $c->{$_}" } sort keys %$c) } @$list);
+    };
+    # A format that states the categories it writes gets them listed; one that
+    # states none says nothing here rather than claiming a set it never named.
+    my $describe_levels = sub {
+        my ($spec) = @_;
+        my $levels = $spec->{levels};
+        return '' unless $levels && @$levels;
+        return ' Writes the categories ' . join(', ', @$levels) . '.';
     };
     # Grouped by family (#444 D5): the members of a family are listed
     # together under the family's own heading, in the order the registry
@@ -7373,7 +7478,9 @@ sub print_help_formats {
     for my $family (@family_order) {
         my @members = grep { ($_->{family} // '') eq $family } format_registry_specs();
         $out .= help_subheading(ucfirst($family) . " log family");
-        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . ". A trailing duration is read in milliseconds unless -du names the unit the producer writes (Apache HTTP Server and Tomcat 10.1 and later write %D in microseconds); nothing on the line tells them apart.", indent => 4, first_indent => 4) . "\n";
+        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . "."
+            . $describe_levels->($members[0])
+            . " A trailing duration is read in milliseconds unless -du names the unit the producer writes (Apache HTTP Server and Tomcat 10.1 and later write %D in microseconds); nothing on the line tells them apart.", indent => 4, first_indent => 4) . "\n";
         for my $spec (@members) {
             next if $seen_slug{ $spec->{slug} }++;
             $out .= help_opt($spec->{slug}, ($spec->{event_ledger} ? 'event ledger' : 'not an event ledger') . '. '
@@ -7400,7 +7507,7 @@ sub print_help_formats {
                 "$o: " . $describe->($spec->{_cls}{$o}) . $src
             } qw(success failure));
         }
-        $out .= help_opt($spec->{slug}, "$ledger. $cls.");
+        $out .= help_opt($spec->{slug}, "$ledger. $cls." . $describe_levels->($spec));
     }
     $out .= "\n";
     $out .= help_heading("HOW A FORMAT DECLARES CLASSIFICATION");
@@ -14101,6 +14208,11 @@ sub read_and_process_logs {
             # and compile that order now, so line 1 already scans under
             # the order the whole file will use.
             format_elect_scan_front( $sample->{formats} ) unless defined $log_format_pin;
+            # Every entry the sample recognised in this file seats the levels
+            # it declares, so a file carrying two formats has both vocabularies
+            # before its first line is gated.
+            format_seat_declared_levels( $format_registry_entry{$_} )
+                for keys %{ $sample->{formats} };
             delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
@@ -14466,6 +14578,10 @@ sub read_and_process_logs {
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
+                    # The levels the bound format declares join the run's
+                    # category vocabulary here, once per file rather than for
+                    # every format at startup.
+                    format_seat_declared_levels($line_entry);
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
@@ -14524,6 +14640,16 @@ sub read_and_process_logs {
                 }
 
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                    # The reject branch, and only the reject branch: keep the
+                    # token, the format that produced it and the count of lines
+                    # that carried it, so the end of the run can say what was
+                    # dropped. The elsif below handles an unparseable CSV row
+                    # and increments the same counter, which is why the
+                    # collection attaches here rather than after the chain.
+                    my $slug = $format_detection{$in_file}{slug} // 'unknown';
+                    $unregistered_levels{$slug}{$category_bucket}++;
+                    $unregistered_levels_by_file{$in_file}{$category_bucket}++;
+                    $unregistered_level_lines++;
                     $excluded_other++;
                     next;
                 } elsif (!$csv_epoch_timestamp && $match_type == 13) {
@@ -15481,6 +15607,28 @@ sub read_and_process_logs {
     # Notices raised while the read was running, held back so they did not
     # print into the progress line's row.
     flush_deferred_notices();
+
+    # Surface the levels the tool did not recognise. A line whose level slot
+    # holds a token the vocabulary does not carry is matched against its format
+    # and then dropped, so it counts in LINES READ and not in LINES INCLUDED
+    # with nothing to attribute the gap to. One line per format, each token
+    # with the number of lines that carried it, so a reader can tell a rounding
+    # error from a loss that matters. The token is whatever the producer wrote:
+    # a level word, an out-of-range status family, or a single letter.
+    if ($unregistered_level_lines > 0) {
+        for my $slug (sort keys %unregistered_levels) {
+            my $tokens = $unregistered_levels{$slug};
+            my $lines  = 0;
+            $lines += $_ for values %$tokens;
+            print STDERR "Note: $slug lines carried " . scalar(keys %$tokens)
+                . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
+                . join( ', ', map { "$_ (" . format_number( $tokens->{$_}, 'medium' )
+                                    . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
+                              sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens )
+                . " - " . format_number( $lines, 'medium' )
+                . ( $lines == 1 ? " line was" : " lines were" ) . " not counted\n";
+        }
+    }
 
     # Surface how many lines a numeric filter removed solely because the line
     # carried no value for the filtered metric; without this the totals shrink

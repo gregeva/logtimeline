@@ -41,6 +41,15 @@ and the HTTP status families are common to every access-log format, so
 declaring them per format would duplicate the same five rows across every
 access entry and let them drift.
 
+**Boundary with `features/476-per-format-log-level-declarations.md` (levels
+declared per format in the registry).** That work moves *membership* into the
+registry: an entry states which categories it writes. Naming stays here and
+stays global, and this decision is not reopened by it — a category means the
+same thing whichever producer emitted it, whether or not the producer is now
+the thing that says it emits it. The same boundary holds for colour and for the
+category table's display order, both of which remain properties of the table
+rather than of any producer.
+
 The shipped entries, all of them HTTP status families:
 
 | Category | Displayed as |
@@ -64,6 +73,14 @@ category colours (`%colors`) it parallels — the existing global per-category
 surfaces — rather than inside any format registry entry. `features/395-wgm-client-log-format.md`
 § *Log-category consistency* lists the three surfaces a category already lives
 on; this is a fourth, and the only optional one.
+
+Boundary against the per-format level declarations: **membership is declared per
+format, naming stays global.** A registry entry states which levels its producer
+emits; what a level is called, what colour it takes and where it sits in the
+display order remain one global surface each, for the reason D1 gives. The
+declaration and this lookup answer different questions, so neither constrains the
+other, and D1 is not reopened by it. Specification:
+`features/476-per-format-log-level-declarations.md`.
 
 ### D2 — The highlighted twin is its own entry, with the indicator trailing
 
