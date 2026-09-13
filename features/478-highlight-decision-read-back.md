@@ -2,8 +2,10 @@
 
 ## Status
 
-Implemented, awaiting the completion gate. The issue was reframed on 2026-09-13
-from a performance bug into a convergence fix; the performance premise is
+Complete. The completion gate passed on the commit merged into
+`release/0.18.1`: 35 of 35 harnesses at 0 failures and a before/after benchmark
+showing no measurable change (§ Implementation record). The issue was reframed
+on 2026-09-13 from a performance bug into a convergence fix; the premise is
 recorded below as refuted, with the measurements. The twelve in-loop read-back
 sites now read the per-line boolean the tag point sets; § Implementation record
 carries what the work measured and confirmed.
@@ -709,6 +711,47 @@ in the tree after the runs was `ltl`).
 
 The remaining highlight-referencing harnesses named in § Harness plan are the
 completion gate's to run, with the full suite.
+
+### The completion gate
+
+Run on the commit being merged, on this machine, after `$version_number` was
+restored to `0.18.1`. Scope: the first row of the table in
+`docs/process/workflow.md` § 3 ("any executable line of `ltl`"), so both columns
+required. Each harness captured once to the scratchpad and inspected there.
+
+**Full harness suite: 35 of 35 exit 0, no failures, no runtime warning.**
+No ` at ltl line <N>` warning appears in any capture, and no regression baseline
+was re-blessed — `tests/validate-regression.sh` reports 74 passed, 0 failed,
+**0 skipped**, which is the criterion § Completion gate states for a drifted
+golden. `tests/validate-statistics.sh` reports 22 scenarios, 22 pass, 0 fail,
+with **0 T3 and 0 T4** on every layer; its nine XFAILs are the entries already
+registered in `tests/statistics-drift/known-failures.tsv` against #469 (one
+projection onto the shared geometry), not new. `tests/validate-help-content.sh`
+passes 11 assertions, so `--help` and `docs/usage.md` agree. The harnesses that
+read the surfaces this change could have altered all assert clean:
+`validate-histogram-bin-counters` 147, `validate-udm-counting` 35,
+`validate-csv-output` 23 scenarios / 28 assertions, `validate-aggregate-export`
+146, `validate-summary-contribution-bar` 39 (including its highlighted-and-plain
+twin shading), `validate-heatmap-palette` 85.
+
+**Before/after benchmark: no measurable change, as § Completion gate predicted.**
+`single-day-access-log-heatmap-histogram`, three runs per arm, medians compared.
+
+| Metric | Before (median of 3) | After (median of 3) | Delta |
+|---|---|---|---|
+| `TIMING/total` | 11.391 s (11.349–11.398) | 11.487 s (11.463–11.516) | +0.84% |
+| `TIMING/parse/read_files` | 11.295 s (11.253–11.302) | 11.391 s (11.363–11.420) | +0.85% |
+| `TIMING/finalize/heatmap_statistics` | 0.030 s | 0.030 s | 0.00% |
+| `TIMING/finalize/histogram_statistics` | 0.011 s | 0.011 s | 0.00% |
+| `MEMORY/rss_peak` | 129.4 MB | 129.9 MB | +0.39% |
+
+No metric is worse by more than 5 percent on medians. The first single-run
+comparison showed `finalize/heatmap_statistics` at +10.0% and
+`finalize/histogram_statistics` at +18.2%; those are +3 ms and +2 ms on 30 ms
+and 11 ms stages that run *after* the read loop and that this change does not
+touch, and both medians came back identical to the before arm across three runs.
+Line counts are identical on both arms (761,698 read, 761,698 included). Both
+label TSVs, and the two extra pairs, were deleted afterwards.
 
 ---
 
