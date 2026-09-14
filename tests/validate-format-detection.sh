@@ -1217,7 +1217,7 @@ scenario_classification_access() {
         contract    "$CLASSIFICATION_CONTRACT - rule_change: is absent when the count is 0"
 
     assert_line "$out" \
-        pattern     '^default_failure: category_bucket=\^\(\?:ERROR\|FATAL\|CRITICAL\)\$$' \
+        pattern     '^default_failure: category_bucket=\^\(\?:ERROR\|FATAL\|CRITICAL\|SEVERE\|ALERT\|EMERGENCY\)\$$' \
         asserts     'The capture is self-describing about the global default failure rule in force: the canonical field=pattern signature of the resolved default failure list' \
         produced_by "$CLASSIFICATION_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - signature is field=pattern conditions, criteria joined by | and conditions by & (D15)"
@@ -2021,6 +2021,50 @@ scenario_format_pin() {
     fi
 }
 
+# The per-file record of the levels the category gate rejected in that file.
+# Two files in one run: one carrying a token outside the vocabulary and one
+# carrying none, so both forms of the key are read from the same capture. A key
+# only ever seen populated cannot tell an absent key from an empty one, which is
+# what the '-' form exists to distinguish.
+scenario_unregistered_levels_per_file() {
+    current_scenario="unregistered-levels-per-file"
+    echo "[$current_scenario]"
+
+    local dropped="$REPO_DIR/tests/fixtures/log-level-outside-vocabulary.txt"
+    local clean="$REPO_DIR/tests/fixtures/log-level-vocabulary.txt"
+    for f in "$dropped" "$clean"; do
+        if [[ ! -f "$f" ]]; then
+            echo "  FAIL  $current_scenario :: fixture missing: $f" >&2
+            fail=$((fail + 1)); failures+=("$current_scenario :: fixture missing"); return
+        fi
+    done
+
+    local outfile="$TMP_DIR/unregistered-levels.out"
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection \
+        "$dropped" "$clean" > "$outfile" 2>"$outfile.stderr"
+    local ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $ec" >&2
+        sed 's/^/    /' "$outfile.stderr" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl non-zero exit"); return
+    fi
+    check_capture_warnings "$outfile"
+
+    assert_line "$outfile" \
+        pattern     '^  unregistered_levels: NOTAREALLEVEL=1$' \
+        asserts     'A file whose level slot held a token the vocabulary does not carry records that token and the number of lines that carried it, so a harness reads a deterministic key rather than notice prose. The fixture carries one such line, so the key names the token at a count of 1.' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file unregistered_levels field, fed by the collection on the reject branch of the category gate in read_and_process_logs())' \
+        contract    'features/log-format-registry.md § `-V format-detection` section-contract (per-file unregistered_levels key) and features/476-per-format-log-level-declarations.md § D7 (a new -V key under format-detection; excluded_other is untouched)'
+
+    assert_line "$outfile" \
+        pattern     '^  unregistered_levels: -$' \
+        asserts     'A file that lost nothing at the category gate reports the literal dash rather than omitting the key, so a harness asserting the key per file can tell "none observed" from "the key is gone". The second fixture of this run carries only levels the vocabulary holds.' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file unregistered_levels field, the empty form)' \
+        contract    'features/log-format-registry.md § `-V format-detection` section-contract (the literal - when the file produced none; the key is always emitted) and tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors'
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating format-detection -V section (issue #228)"
@@ -2072,6 +2116,7 @@ scenario_variant_mixed_legend; echo ""
 scenario_windchill_workgroup_manager; echo ""
 scenario_wgm_filename_family;   echo ""
 scenario_wgm_client_localtime;  echo ""
+scenario_unregistered_levels_per_file; echo ""
 scenario_format_pin
 
 echo ""

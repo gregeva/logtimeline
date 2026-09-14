@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/perl
+#!/usr/bin/env perl
 #
 # extract-profile.pl — Extract subroutine profile data from nytprof.out
 #

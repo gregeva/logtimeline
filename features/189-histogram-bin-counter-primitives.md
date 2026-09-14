@@ -253,7 +253,7 @@ The primitives must expose:
 
 - A consumer that has not yet migrated continues to use its pre-migration code path (e.g., `calculate_statistics` at `ltl:5488` for `summary_table`); it does not invoke #189 primitives.
 - A consumer that has migrated uses #189 primitives unconditionally for the unified path.
-- A migrated consumer with `--exact-percentiles` opt-out (per #187 Decision 7) reverts to its pre-migration code path for that run.
+- A migrated consumer whose surface resolves to the raw data model (per #187 Decision 7, user-facing opt-out through the per-surface data-model selectors) reverts to its pre-migration code path for that run.
 
 This is per the consumer's discretion (not the primitive's): #189 does not implement a mode-switch within the primitives. The primitives run unconditionally when invoked by a migrated consumer on the unified path.
 

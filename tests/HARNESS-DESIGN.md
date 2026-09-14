@@ -141,6 +141,8 @@ These are mandatory. Names are part of the stability contract and a poorly chose
 
 **Harness file names track the section they validate.** A harness for the `histogram-bin-counters` section lives in `tests/validate-histogram-bin-counters.sh`. When a section is renamed, the harness file is `git mv`'d to match in the same commit. This makes the relationship between harness and section discoverable from the filesystem alone, and prevents the situation where the file name still reflects an old section name (and a reader has to open the file to find out what it actually validates).
 
+**A section with no owning harness is asserted by the harness owning the feature the rows describe.** `benchmark-data` is a transport: its rows carry figures produced elsewhere, and each row belongs to the feature that produces it. A harness asserting one of its rows is named for that feature, not for `benchmark-data`. `validate-format-registry.sh` asserts `MEMORY format_scan_subs`; `validate-statistics-demand.sh` asserts the `MEMORY log_analysis` row that carries the retained-duration representation (`features/528-record-lexical-retained-representation.md` § The assertion). The file name still tracks a section for every harness that owns one.
+
 **Naming is implementation work, not a one-time judgment.** When the user is not available to name something, the implementer reads the code and proposes a name on the same basis (semantic feature for sections, function for sub-sections). "I'll name it for what the user-facing capability is" is the right reflex; "I'll name it for the function in the source code that emits it" is the wrong one.
 
 ## Delimiter contract
@@ -171,7 +173,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `runtime-config` — effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool regexes, resolved duration-statistics demand booleans (Issue #349), and per-flag resolved values (including the numeric highlight criteria, Issue #312)
 - `index-read-back` — index pre-seed lookups, freshness, aggregated bounds, drift detection (Issue #179); `heatmap_preseed_min`/`heatmap_preseed_max` expose the live post-preseed heatmap bounds when a heatmap is active (Issue #310)
 - `histogram-array` — raw-array histogram dimensions; active when a surface resolves to the raw values data model
-- `histogram-bin-counters` — HDR-style bin-counter histogram state (Issue #187; field set amended by #462, contract in features/187-histogram-bin-counter-percentiles.md § Decision 8)
+- `histogram-bin-counters` — HDR-style bin-counter histogram state (Issue #187; field set amended by #462, contract in features/187-histogram-bin-counter-percentiles.md § Decision 8). Two consumer blocks report the highlighted subset's own partition stores — `heatmap_cells_highlighted` and `histogram_view_highlighted` — beside their parents rather than folded into them, each carrying the full locked field set measured over its own store, and each present on every run that emits the section (`path: feature_not_active` when no highlight is live). Both names are locked from the moment they ship; amending issue #472 (the highlight bin-counter sub-stores are absent from the `-V` telemetry, so a highlighted run under-reports its own partitions and memory), record in features/472-highlight-bin-counter-telemetry.md
   - sub-section `histogram-bin-counters / display-dimensions` (Issue #473): the geometry the chart is drawn on — per-metric sample counts, min/max, decades, bucket layout — built after the display projection. The name carries the epoch: the parent section's fields describe the streaming partitions as they stood before that projection, and the two are different by design. Emitted from `finalize_histogram_unified()` through the deferred sub-section buffer, so it appears inside the parent's brackets although a different code path produces it.
 - `histogram-percentile-ticks` — the inputs of the histogram percentile tick mapping, at full precision: per metric the bar width, axis min and max, and each selected percentile value (Issue #462). The computed columns are deliberately absent: a harness reading them back would compare `ltl` with itself. This section is printed by `print_histograms()` rather than pushed to `@verbose_output`, because the layout it describes does not exist until the render runs, after `print_verbose_output()` has flushed — so it appears after the histogram, not with the other sections.
 - `message-grouping` — fuzzy message consolidation (Issue #96)
@@ -179,7 +181,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `heatmap-palette` — heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250)
 - `profile` — timeline folding (--profile): resolved mode, the rendered profile window (`profile_window_seconds` = kept days × 86400; the internal fold modulus is not exposed), included weekdays in the mode's axis order, included vs dropped sample counts (Issues #256, #451; contract in features/451-weekday-weekend-profile-modes.md § `-V profile` section contract)
 - `udm-counting` — per-bucket counting-aggregation UDM state: occurrences, distinct cardinality, display and highlight values, plus sessions oracle reference (Issue #313)
-- `udm-specs` — per `-udm` specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived after the read loop from the bucket accumulators, the intent hint if any, and parse-time rejections with their reason (Issues #443, #449; contract in features/user-defined-metrics.md § `-V udm-specs` section-contract)
+- `udm-specs` — per `-udm` specification: how the spec was read (unit, aggregation, transform, extraction method, key, source), each compiled pattern, the run-wide production derived after the read loop from the bucket accumulators, the intent hint if any, and parse-time rejections with their reason. The `name` key carries the resolved metric name, which on a duplicate-name collision gains the fields that differ within the colliding group, and `rejected` includes `duplicate_metric_identity` for a spec whose resolved name is already claimed (Issues #443, #449, #482 — two `-udm` specs with the same name and aggregation but different transforms collapse into one column; contract in features/user-defined-metrics.md § `-V udm-specs` section-contract)
 - `statistics-demand` — per-store resolved statistics-group demand with raising consumers, per-store moment source, per-store statistics-calculation counters (`stats_calls` invocations plus per-group `group_calc` computed/skipped_demand/ineligible outcomes), calculated-statistic sort selection (`sort_selection` defined/fill/demoted split, `sort_calc` per-pass attribution), and block-boundary populations (per-store `population`, phase-level `threadpool_population` — the sub-stage timing denominators, Issue #417) (Issues #305, #303, #417)
 - `benchmark-data` — machine-parseable TSV: version, files, line counts, timings (per-stage `TIMING` rows, the `finalize/calculate_statistics/*` sub-stage rows, Issue #417 — contract in features/417-substage-statistics-timing.md — and the `detect/scan_sub_compile` accumulator, Issue #413), memory, structure counts (including the re-emitted block-boundary populations per the one-source-two-surfaces rule above)
 - `format-detection` — per-file detected format slug/match_type and matched/unmatched/scan-attempt counts, plus the `format-detection / scan` sub-section: registry scan-order telemetry (final MTF order, promotions, per-entry match counts, sampled no-match cost) (Issues #228, #58, #388, #384; contract in features/log-format-registry.md § `-V format-detection` section-contract)
@@ -198,13 +200,13 @@ A section's name and content are a contract with the harnesses that consume it.
 
 **Additions are non-breaking.** New keys, new sub-sections, new lines may be added at any time. Harnesses should not assert on the *absence* of unexpected lines unless that absence is itself a contracted invariant.
 
-**Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`opt_out_active` → `exact_percentiles_optout`) requires:
+**Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`percentile_precision` → `data_model_precision`) requires:
 
-1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` or the equivalent.
+1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` **and** `grep -rn "old-name" features/`, searching for both the section name and the key. The owning feature doc's locked decision is a consumer of the name even though it runs nothing, and a `tests/`-only search cannot see it.
 2. Running each affected harness end-to-end and confirming it still **asserts**, not merely exits 0.
-3. Updating this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
+3. Updating the owning feature doc's section contract and the locked decision that fixes it, in the same commit. This is mandatory for **any key or value change**, not only a rename: a locked decision that still names a removed key, or that omits a key the tool emits, is a contract nothing can satisfy, and it is invisible to a search of `tests/`. Then this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
 
-This rule exists because of a specific class of failure observed in this repository: a section header was renamed without updating the harness that asserted on it. The harness's assertions for that header failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that.
+This rule exists because of two classes of failure observed in this repository. A section header was renamed without updating the harness that asserted on it: the harness's assertions failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that. Separately, two unrelated changes each removed a key from the `histogram-bin-counters` section while complying with this checklist as it was then written, and each left the owning locked decision promising output the tool no longer produced; the drift stood until an audit found it. Step 3 is what catches that, and it is why the owning decision is named rather than left to "any per-feature reference".
 
 ## Shared specification files
 
@@ -221,6 +223,23 @@ Some harnesses consume a shared machine-readable specification of application ou
 A strict validation gate (all-or-nothing column coverage, refuse-on-unknown, format checks) asserts nothing about surfaces no scenario traverses. The bin-counter drift engine would always have refused a highlight-bearing STATS CSV — but since no statistics-drift scenario used highlights, the gate's incompatibility with a whole feature surface went unnoticed until #320.
 
 When adding a strict gate, enumerate the application surfaces it constrains and confirm at least one scenario traverses each; where a surface has no scenario, either add one or record the gap explicitly (a `log()`-style note in the harness header or a tracked ticket). "The gate has never fired" must be distinguishable between "the invariant holds" and "nothing ever put the invariant under test."
+
+## A run that renders to stdout does not exercise the writers
+
+An invocation whose assertion reads stdout exercises only what stdout needs. Every module reached exclusively from a code path that writes a file — the CSV writers, the YAML aggregate export — stays unloaded, so a defect in loading them is invisible to a suite of stdout assertions however many scenarios it runs. Coverage of "the tool ran and rendered" is not coverage of "the tool produced its outputs."
+
+A harness suite asserting the whole tool needs at least one invocation per writer, and the assertion is that the file exists **and parses**: a written file and a written-and-valid file are different outcomes, and only the parse distinguishes them. Run those invocations in a scratch directory, since `-o` writes its files into the current working directory.
+
+Precedent: #541. The v0.18.0 packaged binaries shipped with `-o` dying before it wrote the YAML aggregate export, on every platform. Measured on the macOS arm64 binary built from the fix commit and from its parent on one machine with the same `pp` 1.064 and the same 677-line access log, the parent exits 2 with `Can't locate YAML/PP/Schema/Core.pm in @INC` and writes the STATS and MESSAGES CSVs but no YAML, while the fix commit exits 0 and writes all three. No harness caught it: every existing one runs `perl ltl` and reads a rendered surface.
+
+## A harness that runs `perl ltl` proves nothing about the packaged binary
+
+The suite validates the script. The artefact users receive is a PAR::Packer bundle built from that same script, and the two disagree in one specific way: the bundle carries the modules `Module::ScanDeps` found by reading the source statically, and the generated `main.pl` discards the host's `@INC`, so at runtime the binary can reach nothing else. A module the script loads by a name it builds at runtime is invisible to that scan and absent from the bundle. `perl ltl` finds it on the host and passes; the binary raises `Can't locate .../X.pm in @INC` listing only the PAR extraction directory, and no CPAN install on the user's machine can help.
+
+Two consequences:
+
+- **Any assertion about what the shipped tool does must run the shipped tool.** A binary smoke harness is a separate instrument from the `perl ltl` suite, not a subset of it, and its absence is a coverage gap that no amount of script-level testing closes. `features/227-binary-smoke-coverage.md` scopes that harness.
+- **`Can't locate` on stderr is a distinct failure class from a Perl runtime warning.** The runtime-warning check above greps for ` at <file> line <N>`; a missing bundled module can surface as an exit code, as that pattern, or as neither. A harness that invokes a binary greps stderr for `Can't locate` explicitly.
 
 ## Proving a new assertion can fail
 
@@ -561,6 +580,18 @@ A helper that caches an `ltl` capture so several harnesses can share it (`tests/
 
 The rules themselves are under test: `tests/validate-csv-output.sh` § cache-validity asserts each decision against a crafted artifact — no `ltl` run — and proves the refresh end to end on the smallest fixture scenario.
 
+## A harness owns the directory it runs `ltl` in
+
+A harness that invokes `ltl` with `-o` runs it in a directory the harness created and removes, never in the repository root or any other shared directory. Two rules follow, and both were broken at once by one scenario (Issue #527).
+
+**A harness never identifies a produced artifact by its position in a directory it does not own.** The `directories-relative` scenario of `tests/validate-aggregate-export.sh` ran `ltl -o` from the repository root, swept every `*-LTL-AGGREGATE.yaml` and `*-LTL-STATS-*.csv` it found there into its own directory, and read `ls … | head -1`. `run_file_stamp()` names every product `YYYY-MM-DD_HHMMSS-…`, so lexical order is chronological order and `head -1` is "the oldest file present", not "the file this run wrote". A harness earlier in the chain had left an export in the root, and the scenario reported a directory list and a file count belonging to a run it had never performed, against a contract it appeared to be testing. Identify the artifact by what the run published (`-V aggregate-export` prints `file: <name>`) or, as there, by owning the only directory it can be in.
+
+**A harness never deletes a file it did not create.** The same sweep and its `EXIT` trap ran unconditionally, whatever `head -1` had selected. A stranger export whose stamp sorted after the run's own was destroyed on a run that reported 3 passed, 0 failed — a user's `-o` output removed with no symptom. A glob `rm -f` aimed at the current working directory is the same defect wherever it appears.
+
+**A product found and not written is a fail-fast diagnosis, not a cleanup.** When a harness finds an `ltl -o` product it did not write in its working directory, it fails naming the file, before any other action. The guard sits before any sweep, because destruction otherwise happens on green runs too. `.gitignore` covers all three product classes, so a leak never appears in `git status` and never reaches the session-start outstanding-state sweep: the harness is the only place it can surface.
+
+Same failure class as § *Cached capture artifacts expire* (Issue #448): an artifact read back without establishing which run produced it.
+
 ## Colour rendering is controlled, never inherited
 
 `ltl` decides whether to emit ANSI from two environment variables, checked in this order by `help_ansi_enabled()`: `FORCE_COLOR` (npm/chalk convention) turns ANSI on, then `NO_COLOR` (no-color.org) turns it off, then `-t STDOUT` decides. That precedence is deliberate and is not a harness concern. What *is* a harness concern is that both variables arrive from whatever shell launched the suite.
@@ -583,7 +614,7 @@ Consequences for harness authors:
 
 **Every assertion must answer three questions at the moment of failure, without the reader leaving the harness output:**
 
-1. **What invariant of the application is being asserted?** A plain-language statement of the contract, not the regex. ("When no bin-counter consumer is migrated and active, the section emits `consumers_active: none` as a placeholder line.")
+1. **What invariant of the application is being asserted?** A plain-language statement of the contract, not the regex. ("When no value a consumer would bin was observed this run, that consumer's block reports `path: feature_not_active` and no further fields.")
 2. **Where in the application is that invariant produced?** A function name in `ltl` (not a line number — those drift). ("emit_bin_counter_mode_verbose() in ltl")
 3. **What contract makes the invariant stable?** A pointer to the contract that lets the reader judge whether the failure is a real regression, a stale assertion, or a removed feature that should be restored. ("features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted to harnesses; renames are breaking.")
 
@@ -601,20 +632,20 @@ The exact API may evolve, but every assertion-runner in this repository must acc
 
 ```bash
 assert_line "$out" \
-    pattern     '^consumers_active: none$' \
-    asserts     'Section reports `consumers_active: none` when no bin-counter consumer is migrated and active' \
-    produced_by 'emit_bin_counter_mode_verbose() in ltl' \
-    contract    'features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted; renames are breaking'
+    pattern     '^  path: feature_not_active$' \
+    asserts     'A consumer whose feature is on but which observed no value it would bin reports `path: feature_not_active` and no further fields' \
+    produced_by 'emit_bin_counter_mode_verbose() in ltl (the %feature_active observed-value gate)' \
+    contract    'features/187-histogram-bin-counter-percentiles.md § R10 and § Decision 8 — stability-contracted; renames are breaking'
 ```
 
 On failure, the harness prints:
 
 ```
-  FAIL  default
-        pattern:     ^consumers_active: none$
-        asserts:     Section reports `consumers_active: none` when no bin-counter consumer is migrated and active
-        produced_by: emit_bin_counter_mode_verbose() in ltl
-        contract:    features/187-histogram-bin-counter-percentiles.md § Decision 8 — stability-contracted; renames are breaking
+  FAIL  no-values-observed
+        pattern:     ^  path: feature_not_active$
+        asserts:     A consumer whose feature is on but which observed no value it would bin reports `path: feature_not_active` and no further fields
+        produced_by: emit_bin_counter_mode_verbose() in ltl (the %feature_active observed-value gate)
+        contract:    features/187-histogram-bin-counter-percentiles.md § R10 and § Decision 8 — stability-contracted; renames are breaking
         (not found in /tmp/xxxxxx)
 ```
 

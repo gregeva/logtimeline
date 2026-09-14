@@ -51,6 +51,8 @@ use Text::CSV;
 use Text::CSV_PP;
 use YAML::PP;
 use YAML::PP::Common ();
+use YAML::PP::Schema::Core ();
+use YAML::PP::Schema::YAML1_1 ();
 use JSON::PP ();
 use Text::ParseWords qw(shellwords);
 
@@ -60,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.0";
+my $version_number = "0.18.1";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -288,6 +290,14 @@ my $total_lines_included = 0;
 # drops are $profile_dropped_samples. Reported by -V filter-summary.
 my $total_lines_unmatched = 0;
 my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );
+# Levels seen in the category position that the vocabulary does not carry, the
+# share of $excluded_other the category gate is responsible for. The line is
+# dropped either way; keeping the token, the format that produced it and the
+# count of lines that carried it is what lets the run say what it lost, instead
+# of leaving a reader to infer it from a gap between two totals.
+my %unregistered_levels;          # format slug => token => lines carrying it
+my %unregistered_levels_by_file;  # file => token => lines carrying it (-V format-detection)
+my $unregistered_level_lines = 0; # observation count gating both surfaces
 my ( $total_successes, $total_failures ) = ( 0, 0 );   # run-level classification outcomes (#453 R5)
 my $total_conflicts    = 0;   # lines whose success and failure criteria both fired (CLASSIFICATION CONFLICT, #456 D3)
 my $total_unclassified = 0;   # lines the rules said nothing about, counted per line (#456 D5)
@@ -507,6 +517,10 @@ use constant {
                                # declares both outcomes (#452 D4 usability
                                # floor, unfolded — column visibility reads it
                                # per file, independent of the run mode)
+    FR_LEVELS          => 29,  # [ level names this entry emits ] or undef when
+                               # the entry declares none; joined into the run's
+                               # category vocabulary when the entry first binds
+                               # a file, never consulted per line
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -741,7 +755,8 @@ my %heatmap_percentiles;                    # {$bucket} = { p50 => index, p95 =>
 # partitions are discarded. Consumed by emit_bin_counter_mode_verbose() to
 # populate the locked #187 Decision 8 -V fields.
 # Keyed by Decision-8 consumer name ('heatmap_cells', 'heatmap_markers',
-# 'histogram_view', 'histogram_bins').
+# 'histogram_view', 'histogram_bins', and the two highlighted-subset names
+# 'heatmap_cells_highlighted' and 'histogram_view_highlighted').
 my %bin_counter_telemetry;
 
 # Special heatmap gradients for colors not in @column_colors
@@ -1026,11 +1041,9 @@ my $message_stats_member_bytes = 0;
 # uses for %heatmap_counters. Populated under $bucket_stats_capture_mode eq 'bin'
 # by counter_update() during the parsing loop, observing $duration. Consumed by
 # calculate_statistics_bin() and snapshot_counter_telemetry() at end-of-parse.
-# %bucket_stats_counters_hl carries the highlight subset for store parity with
-# the heatmap pattern; no highlight statistics are derived from it (the
-# per-time-bucket surface has no highlight statistics — only highlight totals).
+# The per-time-bucket surface derives no highlight statistics — only highlight
+# totals — so it keeps no parallel highlight store.
 my %bucket_stats_counters;
-my %bucket_stats_counters_hl;
 
 # Issue #289: per-quantile out_of_range_bounded audit aggregation for the
 # time_bucket_stats consumer. Same worst-case-per-quantile rule as
@@ -1091,11 +1104,23 @@ my $histogram_color_gradient_enabled = 0;     # Toggle: 1 = intensity gradients,
 my $histogram_gridlines_enabled = 1;          # Toggle: horizontal gridlines at Y-axis tick positions
 my $histogram_gridline_color = 8;             # Dark grey (bright black / ANSI 8)
 
-# Defines the log level/type buckets and their order for printing and processing
+# Defines the log level/type buckets and their order for printing and processing.
+# The severity names lead, ordered most serious first, and that order is the
+# print order of the category table, the legend, the aggregate export and the
+# STATS CSV header. EMERGENCY, ALERT, CRITICAL and NOTICE are syslog's
+# severities; SEVERE and WARNING are java.util.logging's spellings of the FATAL
+# and WARN bands and sit beside them. AUDIT records an action rather than an
+# outcome, so it has no rank within the severity run and sits after it, ahead of
+# the debugging levels. Each name is written as its highlighted twin followed by
+# itself.
 my @log_levels = (
-    'FORCE-HL', 'FORCE', 'FATAL-HL', 'FATAL',
-    'ERROR-HL', 'ERROR', 'WARN-HL', 'WARN', 'INFO-HL', 'INFO', 
-    'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx', 
+    'FORCE-HL', 'FORCE',
+    'EMERGENCY-HL', 'EMERGENCY', 'ALERT-HL', 'ALERT',
+    'CRITICAL-HL', 'CRITICAL', 'SEVERE-HL', 'SEVERE',
+    'FATAL-HL', 'FATAL',
+    'ERROR-HL', 'ERROR', 'WARNING-HL', 'WARNING', 'WARN-HL', 'WARN',
+    'NOTICE-HL', 'NOTICE', 'INFO-HL', 'INFO', 'AUDIT-HL', 'AUDIT',
+    'DEBUG-HL', 'DEBUG', 'TRACE-HL', 'TRACE', '5xx-HL', '5xx',
     '4xx-HL', '4xx', '3xx-HL', '3xx', '2xx-HL', '2xx', '1xx-HL', 
     '1xx', 'Pause Young-HL', 'Pause Young', 'Pause Full-HL', 'Pause Full',
     'Pause Remark-HL', 'Pause Remark', 'Pause Cleanup-HL', 'Pause Cleanup',
@@ -1159,10 +1184,17 @@ my $default_chart_block = ($^O eq 'MSWin32') ? 'G' : 'A';
 # Load in ANSI color codes and configure presets for various log levels/types
 my %colors = (
     'FORCE' => "\033[0;35m",
+    'EMERGENCY' => "\033[0;31m",
+    'ALERT' => "\033[0;31m",
+    'CRITICAL' => "\033[0;31m",
+    'SEVERE' => "\033[0;31m",
     'FATAL' => "\033[0;31m",
     'ERROR' => "\033[0;31m",
+    'WARNING' => "\033[0;33m",
     'WARN'  => "\033[0;33m",
+    'NOTICE' => "\033[0;32m",
     'INFO'  => "\033[0;32m",
+    'AUDIT' => "\033[0;36m",
     'DEBUG' => "\033[0;34m",
     'TRACE' => "\033[0;35m",
     'DATA'  => "\033[0;34m",
@@ -1486,8 +1518,9 @@ sub snapshot_counter_telemetry {
     # histograms no longer projects anything. The field stays because a
     # non-zero value would mean a combination path had reintroduced the
     # order-dependent loss D1 removed. Projections at finalize are counted at
-    # their own call sites, after this snapshot (see finalize_heatmap_unified /
-    # finalize_histogram_unified / finalize_message_stats_unified).
+    # their own call sites, after this snapshot (see finalize_heatmap_unified
+    # and finalize_histogram_unified, each counting a parent loop and a
+    # highlight loop, and finalize_message_stats_unified).
     my ($store) = @_;
     my $n = scalar keys %$store;
     my ($growth, $merge, $max_bins, $with_over, $with_under, $over_sum, $under_sum)
@@ -2691,7 +2724,7 @@ my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
 # generated block (format_classification_src). The tables below are the
 # build-time products the generated code references.
 my %classification_default = (
-    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL)$' } ],
+    failure => [ { category_bucket => '^(?:ERROR|FATAL|CRITICAL|SEVERE|ALERT|EMERGENCY)$' } ],
 );
 my @format_cls_sets;      # literal-alternation criteria as hash sets (D25),
                           # indexed by the id spliced into the generated code;
@@ -2898,6 +2931,7 @@ sub format_registry_specs {
       transforms => [ 'wgm_msgtype' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
+      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the wgm_msgtype letter map produces
       expect_ancestors => [],
       samples => [
         '2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"',
@@ -2972,6 +3006,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -2998,6 +3033,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3027,6 +3063,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3051,6 +3088,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3075,6 +3113,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3098,6 +3137,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3122,6 +3162,7 @@ sub format_registry_specs {
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
                           failure => [ { category_bucket => '^(?:4xx|5xx)$' } ] },
@@ -3172,6 +3213,7 @@ sub format_registry_specs {
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
       event_ledger => 1,
       classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
       expect_ancestors => [],
@@ -3268,6 +3310,7 @@ sub format_registry_specs {
       transforms => [ 'chop_message', 'strip_pid', 'hoist_cpp_object' ],
       time => { layout => 'iso_flex_frac', precision => 'ms', tz => 'local', frac => 'generic' },
       duration_unit => undef, stats_eligible => 0,
+      levels => [ qw(TRACE DEBUG INFO WARN ERROR FORCE AUDIT) ],   # the Edge C SDK writes FORCE and AUDIT beside the standard severities
       expect_ancestors => [],
       samples => [
         'INFO 2025-08-09 18:19:04,479 8012 change_notification_source.cpp:11 OnProvisioningChanged provisioning change update received',
@@ -3300,6 +3343,7 @@ sub format_registry_specs {
       transforms => [],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 1,
+      levels => [ qw(INFO WARN ERROR FATAL) ],
       event_ledger => 1,
       classification => { success => [ { duration => '^\d{1,3}$' } ],
                           failure => [ { duration => '^[5-9]\d{2,}$' } ] },
@@ -3322,6 +3366,7 @@ sub format_registry_specs {
       field_map => [], transforms => [],
       time => { layout => 'csv', precision => 'ms', tz => 'utc' },
       duration_unit => undef, stats_eligible => 1,
+      levels => [ qw(DATA) ],   # no level slot: both assembly branches assign DATA
       expect_ancestors => [],
       samples => [], expect => [] },
     );
@@ -3733,6 +3778,19 @@ sub bin_consolidation_notice {
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
     print STDERR "Note: $detail, so their percentiles are approximate"
         . " - use -mdm raw for exact percentiles\n";
+    return;
+}
+
+# Seat the levels an entry declares in the run's category vocabulary. Called
+# when an entry binds a file, never per line: the set only grows during a run,
+# so a file already read under one format is unaffected by a later detection,
+# and the per-line gate stays one constant-time lookup on one global hash.
+# Loading every entry's declaration up front would put a vocabulary of formats
+# no file uses in front of every line of every run.
+sub format_seat_declared_levels {
+    my ($entry) = @_;
+    my $levels = $entry && $entry->[FR_LEVELS] or return;
+    $log_level_set{$_} = 1 for @$levels;
     return;
 }
 
@@ -4686,6 +4744,51 @@ sub build_format_registry {
         }
     }
 
+    # D24 gate 7: level declarations, and the classification cross-check
+    # over them. An entry may declare the levels it emits or declare none;
+    # a declaration is a non-empty list of non-empty names, and it joins the
+    # run's category vocabulary when the entry binds a file, so it does not
+    # have to be a member of the static list already.
+    #
+    # The cross-check runs the other way. A level named in a classification
+    # criterion must be something the tool can recognise: either a member of
+    # the static vocabulary or a level some entry declares. A name in neither
+    # can never reach the counter it was written for, because the category
+    # gate drops the line before classification is read — the shipped failure
+    # rule named CRITICAL while the vocabulary did not carry it, and a file
+    # whose only failure line was CRITICAL reported none.
+    my %declarable = %log_level_set;
+    for my $spec (@specs) {
+        my $decl = $spec->{levels};
+        next unless defined $decl;
+        die "ltl: format registry: entry '$spec->{name}' levels must be a non-empty list of level names (produced_by format_registry_specs())\n"
+            unless ref $decl eq 'ARRAY' && @$decl;
+        for my $level (@$decl) {
+            die "ltl: format registry: entry '$spec->{name}' declares a level that is not a non-empty name (produced_by format_registry_specs())\n"
+                unless defined $level && !ref $level && length $level;
+            $declarable{$level} = 1;
+        }
+    }
+    my @cls_sources = ( [ 'the default classification rules classify', \%classification_default ] );
+    push @cls_sources, [ "entry '$_->{name}' classifies", $_->{_cls} ] for grep { $_->{_cls} } @specs;
+    for my $source (@cls_sources) {
+        my ($where, $cls) = @$source;
+        for my $outcome (sort keys %$cls) {
+            for my $crit (@{ $cls->{$outcome} }) {
+                my $pattern = $crit->{category_bucket};
+                next unless defined $pattern;
+                # Only a literal alternation over the category is readable
+                # here; anything else is skipped rather than guessed at.
+                next unless $pattern =~ /^\^\(\?:([^()\[\]|]+(?:\|[^()\[\]|]+)*)\)\$$/
+                         || $pattern =~ /^\^([A-Za-z0-9 -]+)\$$/;
+                for my $level (split /\|/, $1) {
+                    die "ltl: format registry: $where '$outcome' on level '$level', which is neither in the recognised level vocabulary nor declared by any entry — a line carrying it is dropped by the category gate before the classification is counted (produced_by format_registry_specs())\n"
+                        unless $declarable{$level};
+                }
+            }
+        }
+    }
+
     # Freeze the live registry (CLI-gated options baked into extractors).
     my $opts = { include_query_string => $include_query_string, include_session => $include_session, include_user => $include_user };
     @format_registry = ();
@@ -4725,6 +4828,7 @@ sub build_format_registry {
         $entry->[FR_CLS_SIG]         = $spec->{_cls_sig};
         $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
         $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
+        $entry->[FR_LEVELS]          = $spec->{levels};
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -5058,6 +5162,18 @@ sub format_ledger_file_counts {
     return ($ledger_files, $bound_files);
 }
 
+# The `unregistered_levels:` per-file value: each token the category gate
+# rejected in this file with the number of lines that carried it, descending by
+# count and ascending by token within an equal count so the value is the same
+# across runs on the same input. The literal '-' when the file lost nothing.
+sub format_unregistered_levels_value {
+    my ($file) = @_;
+    my $tokens = $unregistered_levels_by_file{$file};
+    return '-' unless $tokens && %$tokens;
+    return join ',', map { "$_=$tokens->{$_}" }
+                     sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens;
+}
+
 sub emit_format_detection_verbose {
     return unless section_requested('format-detection');
 
@@ -5087,6 +5203,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  first_match_line: -";
             push @verbose_output, "  scan_attempts: 0";
             push @verbose_output, "  scan_failed_attempts: 0";
+            push @verbose_output, "  unregistered_levels: " . format_unregistered_levels_value($file);
             emit_format_detection_sample_verbose($file);
             next;
         }
@@ -5102,6 +5219,7 @@ sub emit_format_detection_verbose {
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
         push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
         push @verbose_output, "  scan_failed_attempts: " . ($fdd->{scan_failed_attempts} // 0);
+        push @verbose_output, "  unregistered_levels: " . format_unregistered_levels_value($file);
         emit_format_detection_sample_verbose($file);
     }
 
@@ -6008,14 +6126,36 @@ sub emit_bin_counter_mode_verbose {
     push @verbose_output,
         "data_model_precision: $data_model_precision_level ($data_model_precision_source)";
 
+    # A consumer is active only when its feature is switched on AND a value
+    # the consumer would bin was observed. Both halves are required: a gate on
+    # demand alone reports the unified path over a partition set that was never
+    # constructed, which the contract forbids, and a gate on the partitions
+    # alone would relabel a surface the user pinned to raw, whose values are
+    # observed but held outside the counter stores.
+    #
+    # The observation term is the one the surface's own consumers read, so it
+    # holds under either data model: the per-key and per-bucket duration stores
+    # read $durations_observed, the CSV columns read the sub that already
+    # resolves their three-part gate, and the heatmap and histogram read the
+    # metric their own flag names rather than a single family.
+    #
+    # The two highlight consumers report the parallel partition stores the
+    # heatmap and histogram surfaces stream for the highlighted subset. They
+    # are active only when their parent surface is active AND a highlight is
+    # live; otherwise their block is the path: line alone, like any other
+    # inactive consumer.
+    my $heatmap_observed   = heatmap_value_observed();
+    my $histogram_observed = histogram_value_observed();
     my %feature_active = (
-        summary_table     => 1,
-        csv_output        => $write_messages_to_csv ? 1 : 0,
+        summary_table     => ($durations_observed && $message_duration_stats_demand) ? 1 : 0,
+        csv_output        => stats_csv_duration_columns_active(),
         time_bucket_stats => ($durations_observed && $bucket_duration_stats_demand) ? 1 : 0,
-        heatmap_markers   => $heatmap_enabled ? 1 : 0,
-        heatmap_cells     => $heatmap_enabled ? 1 : 0,
-        histogram_view    => $histogram_enabled ? 1 : 0,
-        histogram_bins    => $histogram_enabled ? 1 : 0,
+        heatmap_markers   => ($heatmap_enabled   && $heatmap_observed)   ? 1 : 0,
+        heatmap_cells     => ($heatmap_enabled   && $heatmap_observed)   ? 1 : 0,
+        histogram_view    => ($histogram_enabled && $histogram_observed) ? 1 : 0,
+        histogram_bins    => ($histogram_enabled && $histogram_observed) ? 1 : 0,
+        heatmap_cells_highlighted  => ($heatmap_enabled   && $heatmap_observed   && $highlight_active) ? 1 : 0,
+        histogram_view_highlighted => ($histogram_enabled && $histogram_observed && $highlight_active) ? 1 : 0,
     );
 
     my @consumer_order = qw(
@@ -6026,6 +6166,8 @@ sub emit_bin_counter_mode_verbose {
         heatmap_cells
         histogram_view
         histogram_bins
+        heatmap_cells_highlighted
+        histogram_view_highlighted
     );
 
     # Every consumer above runs the unified path, so the only distinctions a
@@ -6043,12 +6185,17 @@ sub emit_bin_counter_mode_verbose {
     );
 
     # Per-consumer percentile sets (R3 of #34 / #287, locked in #187 Decision 8).
+    # histogram_view_highlighted publishes the whole ladder rather than the
+    # parent's legend set: its consumer is the aggregate export's highlighted
+    # block, which writes every quantile in @percentile_ladder. The heatmap
+    # highlight derives cell counts, not percentiles, and carries no set.
     my %percentile_set = (
         heatmap_markers => [qw(p50 p95 p99 p999)],
         histogram_view  => [qw(p1 p10 p25 p50 p75 p90 p95 p99 p999 p9999)],
         summary_table   => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
         csv_output      => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
         time_bucket_stats => [qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999)],
+        histogram_view_highlighted => [ map { $_->[0] } @percentile_ladder ],
     );
 
     # Per-consumer partition keying (Decision 8 field).
@@ -6059,6 +6206,8 @@ sub emit_bin_counter_mode_verbose {
         histogram_bins  => 'metric_global',
         summary_table   => '(category, log_key)',
         time_bucket_stats => 'time_bucket',
+        heatmap_cells_highlighted  => 'time_bucket',
+        histogram_view_highlighted => 'metric_global',
     );
 
     # Per-consumer path determination is uniform across all four data-model
@@ -6074,6 +6223,8 @@ sub emit_bin_counter_mode_verbose {
         histogram_view  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
         histogram_bins  => ($histogram_capture_mode      && $histogram_capture_mode      eq 'raw') ? 1 : 0,
         time_bucket_stats => ($bucket_stats_capture_mode && $bucket_stats_capture_mode   eq 'raw') ? 1 : 0,
+        heatmap_cells_highlighted  => ($heatmap_capture_mode   && $heatmap_capture_mode   eq 'raw') ? 1 : 0,
+        histogram_view_highlighted => ($histogram_capture_mode && $histogram_capture_mode eq 'raw') ? 1 : 0,
     );
 
     for my $consumer (@consumer_order) {
@@ -6445,10 +6596,11 @@ sub write_aggregate_export {
                 my $name = $1;
                 my ($config) = grep { $_->{name} eq $name } @udm_configs;
                 $udm //= aggregate_mapping();
-                if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
+                my $csv = $config ? udm_csv_columns($config) : undef;
+                if ($csv && $csv->{shape} eq 'single') {
                     next unless defined $stats->{$key};
                     my $block = aggregate_mapping();
-                    $block->{ $config->{aggregation} } = aggregate_number($stats->{$key});
+                    $block->{ $csv->{stats}[0] } = aggregate_number($stats->{$key});
                     $udm->{$name} = $block;
                 } else {
                     next unless defined $stats->{"${key}_occurrences"};
@@ -7298,7 +7450,7 @@ sub print_help_formats {
     ) . "\n";
     $out .= help_heading("KNOWN FORMATS");
     $out .= help_wrap(
-        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one.",
+        "'event ledger' marks a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened. A diagnostics log records what a component chose to log, and is not one. A format that writes categories of its own - pause kinds, HTTP status families, a producer's own severity names - states them here; one that writes the usual severity names states nothing. A line whose category is none ltl recognises is not counted, and the end of the run names the category and how many lines carried it.",
         indent       => 0,
         first_indent => 0,
     ) . "\n\n";
@@ -7306,6 +7458,14 @@ sub print_help_formats {
         my ($list) = @_;
         return 'none' unless $list && @$list;
         return join(' or ', map { my $c = $_; join(' and ', map { "$_ matches $c->{$_}" } sort keys %$c) } @$list);
+    };
+    # A format that states the categories it writes gets them listed; one that
+    # states none says nothing here rather than claiming a set it never named.
+    my $describe_levels = sub {
+        my ($spec) = @_;
+        my $levels = $spec->{levels};
+        return '' unless $levels && @$levels;
+        return ' Writes the categories ' . join(', ', @$levels) . '.';
     };
     # Grouped by family (#444 D5): the members of a family are listed
     # together under the family's own heading, in the order the registry
@@ -7318,7 +7478,9 @@ sub print_help_formats {
     for my $family (@family_order) {
         my @members = grep { ($_->{family} // '') eq $family } format_registry_specs();
         $out .= help_subheading(ucfirst($family) . " log family");
-        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . ". A trailing duration is read in milliseconds unless -du names the unit the producer writes (Apache HTTP Server and Tomcat 10.1 and later write %D in microseconds); nothing on the line tells them apart.", indent => 4, first_indent => 4) . "\n";
+        $out .= help_wrap("Every member classifies the same way: " . join('; ', map { "$_: " . $describe->($members[0]{_cls}{$_}) } qw(success failure)) . "."
+            . $describe_levels->($members[0])
+            . " A trailing duration is read in milliseconds unless -du names the unit the producer writes (Apache HTTP Server and Tomcat 10.1 and later write %D in microseconds); nothing on the line tells them apart.", indent => 4, first_indent => 4) . "\n";
         for my $spec (@members) {
             next if $seen_slug{ $spec->{slug} }++;
             $out .= help_opt($spec->{slug}, ($spec->{event_ledger} ? 'event ledger' : 'not an event ledger') . '. '
@@ -7345,7 +7507,7 @@ sub print_help_formats {
                 "$o: " . $describe->($spec->{_cls}{$o}) . $src
             } qw(success failure));
         }
-        $out .= help_opt($spec->{slug}, "$ledger. $cls.");
+        $out .= help_opt($spec->{slug}, "$ledger. $cls." . $describe_levels->($spec));
     }
     $out .= "\n";
     $out .= help_heading("HOW A FORMAT DECLARES CLASSIFICATION");
@@ -7593,7 +7755,7 @@ my $explain_bc_caveats = q{Sarle's BC is a *screen*, not a test. Two important c
 my $explain_bc_compute = q{Sarle's formula with sample-size correction: `BC = (skewness^2 + 1) / (kurtosis + 3 * (n-1)^2 / ((n-2)(n-3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version -- it prevents small-sample false positives from being even worse. Requires n >= 4 and non-zero std_dev; emitted blank otherwise. Total cost: three arithmetic operations on numbers (skewness, kurtosis, n) already computed for the other shape moments.};
 
 # --- classification (--explain classification) ---
-my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL and CRITICAL are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. Two further states keep those figures honest. A line that satisfies both the success and the failure rule is a *classification conflict*: the rules contradict each other on it, so it is counted as neither, under its own CLASSIFICATION CONFLICT row. A message row whose lines were not all of one state is *mixed*: its lines are counted under MIXED rather than as successes or failures, so the run-level figures say only what the data supports. In the message tables the marker position of every row carries its state as a colour (green success, red failure, violet conflict, terracotta mixed; no mark when the row's lines are unclassified). Either state withholds the percentages, as does an unclassified line on a format that declares both rules: in each case the classified pair has stopped being the whole population, and the counts are shown instead. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
+my $explain_classification_intuition = q{Every line ltl includes is classified as a success, a failure, or neither, under rules that belong to the log format that recognised the line. For an access log the rule reads the HTTP status family: 1xx/2xx/3xx are successes and 4xx/5xx are failures. For a diagnostics log (an application or script log) the default rule reads the log level: ERROR, FATAL, CRITICAL, SEVERE, ALERT and EMERGENCY are failures, and nothing is declared a success -- an INFO line is not evidence that an operation succeeded, only that something was logged. A line the rules say nothing about is *unclassified*: it is neither counted as a success nor as a failure. The run summary shows the totals as SUCCESS CLASSIFIED and FAILURE CLASSIFIED beneath LINES INCLUDED, each with its share of all classified lines, and an UNCLASSIFIED row with its share of included lines; on an event-ledger format the timeline adds a success and a failure percentage column per time bucket, over the same classified denominator (hide them with -hcl, or show them on a classifying non-ledger format with -scl); the classification sub-section of -V format-detection adds the overall success and failure percentages and how many lines were unclassified. Two further states keep those figures honest. A line that satisfies both the success and the failure rule is a *classification conflict*: the rules contradict each other on it, so it is counted as neither, under its own CLASSIFICATION CONFLICT row. A message row whose lines were not all of one state is *mixed*: its lines are counted under MIXED rather than as successes or failures, so the run-level figures say only what the data supports. In the message tables the marker position of every row carries its state as a colour (green success, red failure, violet conflict, terracotta mixed; no mark when the row's lines are unclassified). Either state withholds the percentages, as does an unclassified line on a format that declares both rules: in each case the classified pair has stopped being the whole population, and the counts are shown instead. A format may also decline to classify altogether (a garbage-collection log, say), in which case no success/failure figure can be produced from it and any consumer says so.};
 my $explain_classification_ledger = q{Whether a success/failure figure means anything depends less on the rules than on the log. An *event ledger* is a format with maximum coverage of the operations it describes: every operation of that kind produces exactly one line, so a count over its lines is a count over everything that happened. An access log is an event ledger for requests; a garbage-collection log is one for pauses. A diagnostics log is not: it records what a component chose to write, at whatever level it chose, and says nothing about the operations that produced no line. This is the coverage argument of the Google SRE Workbook chapter on implementing SLOs (https://sre.google/workbook/implementing-slos/): a service-level indicator is a ratio of good events to all events, and the denominator is only honest when the source sees all events. The success percentage -- successes over classified lines -- is therefore trustworthy at face value only over an event ledger. Each format declares whether it is one, the property is reported per file on -V format-detection (event_ledger), and consumers that compute a ratio read it to decide whether to show one.};
 my $explain_classification_reading = q{What a diagnostics log can legitimately tell you: how many failure-level lines there were, when they clustered, and which messages produced them -- the errRate column, and the per-message failure counts in the MESSAGES CSV. What it cannot tell you: a success rate, an availability, or any ratio whose denominator is "all operations", because most operations never wrote a line. The unclassified share is the warning sign: on a diagnostics log it is usually most of the file. On an event ledger the same share is a data-quality figure -- lines that carried a status the rules do not cover -- and a low value means the ratio can be trusted. The classification is also actionable: -if/-ef and -is/-es filter on failures and successes, -hf/-hs highlight them within the full population, and excluding both (-ef -es) leaves exactly the unclassified remainder for inspection.};
 my $explain_classification_compute = q{Classification runs as each line is recognised, so it costs nothing to re-derive later: each format's rules are compiled once at startup into its recognition step, and the outcome is accumulated per time bucket (errRate reads the bucket's failure count, normalised to the -ru rate unit as before) and per message key (the successes and failures columns of -o CSV, which survive -g consolidation). If the detected format changes part-way through a file, lines after the change are classified under the new format's rules, the file's event-ledger property follows the new format, a note names the line and both formats, and -V format-detection lists the change. Lines already classified are not revisited. The rules themselves are documented per format under 'ltl --help formats', which also shows how a format declares them.};
@@ -9492,6 +9654,7 @@ sub print_help {
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
+    $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
@@ -9773,6 +9936,71 @@ sub get_pattern_file_indicator {
 }
 
 # User-defined metrics parsing (Issue #22)
+# The CSV columns one user-defined metric contributes, on the STATS and the
+# MESSAGES surface alike: the single resolution every emission site reads, so a
+# header and the row beneath it can never disagree about shape or spelling.
+# 'shape' is 'single' for one value column and 'family' for the five-column
+# occurrences/min/mean/max/sum set; 'stats' lists the accumulator each column
+# reads, positionally; 'columns' is the header spelling, name parts first and
+# the stat last.
+sub udm_csv_columns {
+    my ($config) = @_;
+    my $name = $config->{name};
+
+    if ($config->{agg_kind} eq 'counting') {
+        my $col = "$config->{base_name}_$config->{aggregation}";
+        $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(?:rate|drate)$/;
+        return { shape => 'single', stats => [ $config->{aggregation} ], columns => [$col] };
+    }
+
+    my $prefix = defined $config->{unit} ? "${name}_$config->{unit}" : $name;
+    return { shape => 'single', stats => [ $config->{aggregation} ], columns => [$prefix] }
+        if $name ne $config->{base_name};
+
+    my @stats = qw(occurrences min mean max sum);
+    return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };
+}
+
+# The function field as it is spelled into a resolved metric name. 'delta' and
+# 'sum(delta)' are the same spec, so the shorthand is the one spelling a name
+# ever carries; a spec that named no function shows the default the tool applied.
+sub udm_function_field {
+    my ($config) = @_;
+    my $function = $config->{transform}
+                 ? ($config->{aggregation} eq 'sum' ? $config->{transform}
+                                                    : "$config->{aggregation}($config->{transform})")
+                 : $config->{aggregation};
+    return $function;
+}
+
+# Metrics sharing a name are told apart by the fields that differ between them:
+# the function field, then the unit field, each appended after a colon and
+# spelled from the spec's own value. A dimension the group agrees on adds
+# nothing, so a command line with no shared name keeps every name as typed.
+sub resolve_udm_metric_names {
+    my ($configs) = @_;
+    my %group;
+    push @{ $group{ $_->{base_name} } }, $_ for @$configs;
+
+    for my $members (values %group) {
+        $_->{name} = $_->{base_name} for @$members;
+        next if @$members < 2;
+
+        my %distinct_function = map { udm_function_field($_) => 1 } @$members;
+        my %distinct_unit     = map { ($_->{unit} // '') => 1 } @$members;
+        my $function_differs  = keys(%distinct_function) > 1;
+        my $unit_differs      = keys(%distinct_unit) > 1;
+
+        for my $config (@$members) {
+            my $name = $config->{base_name};
+            $name .= ':' . udm_function_field($config) if $function_differs;
+            $name .= ":$config->{unit}" if $unit_differs && defined $config->{unit};
+            $config->{name} = $name;
+        }
+    }
+    return;
+}
+
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
@@ -9784,8 +10012,8 @@ sub parse_udm_configs {
     my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );
     my $spec_index = -1;
     my $reject = sub {
-        my ($spec, $reason) = @_;
-        push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $spec_index };
+        my ($spec, $reason, $at_index) = @_;
+        push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $at_index // $spec_index };
     };
 
     # Case normalization: map lowercase variants to canonical forms (time
@@ -9961,14 +10189,34 @@ sub parse_udm_configs {
         };
     }
 
-    # Disambiguate duplicate metric names by appending :aggregation (#99)
-    my %name_counts;
-    $name_counts{$_->{name}}++ for @udm_configs;
+    # A repeated identical argument can name only one metric, so the later copy
+    # is dropped and the drop is spoken.
+    my (@kept_configs, %seen_raw_arg);
     for my $config (@udm_configs) {
-        if ($name_counts{$config->{name}} > 1) {
-            $config->{name} = "$config->{base_name}:$config->{aggregation}";
+        if ($seen_raw_arg{$config->{raw_arg}}++) {
+            print STDERR "Note: -udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat\n";
+            $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
+            next;
         }
+        push @kept_configs, $config;
     }
+    @udm_configs = @kept_configs;
+
+    resolve_udm_metric_names(\@udm_configs);
+
+    # Specs a name cannot tell apart are refused: extraction has no readable
+    # spelling in a column header, so the user is asked for distinct names.
+    my (@named_configs, %claimed_by);
+    for my $config (@udm_configs) {
+        if (defined(my $owner = $claimed_by{$config->{name}})) {
+            print STDERR "Warning: -udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one\n";
+            $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
+            next;
+        }
+        $claimed_by{$config->{name}} = $config->{raw_arg};
+        push @named_configs, $config;
+    }
+    @udm_configs = @named_configs;
 
     push @graph_user_defined_metrics, $_->{name} for @udm_configs;
 
@@ -11843,7 +12091,6 @@ sub named_structure_sizes {
         heatmap_counters       => Devel::Size::total_size(\%heatmap_counters),
         heatmap_counters_hl    => Devel::Size::total_size(\%heatmap_counters_hl),
         bucket_stats_counters    => Devel::Size::total_size(\%bucket_stats_counters),
-        bucket_stats_counters_hl => Devel::Size::total_size(\%bucket_stats_counters_hl),
         histogram_values       => Devel::Size::total_size(\%histogram_values),
         histogram_counters     => Devel::Size::total_size(\%histogram_counters),
         histogram_counters_hl  => Devel::Size::total_size(\%histogram_counters_hl),
@@ -13961,6 +14208,11 @@ sub read_and_process_logs {
             # and compile that order now, so line 1 already scans under
             # the order the whole file will use.
             format_elect_scan_front( $sample->{formats} ) unless defined $log_format_pin;
+            # Every entry the sample recognised in this file seats the levels
+            # it declares, so a file carrying two formats has both vocabularies
+            # before its first line is gated.
+            format_seat_declared_levels( $format_registry_entry{$_} )
+                for keys %{ $sample->{formats} };
             delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
             $format_detection_sample{$in_file} = $sample;
         }
@@ -14050,6 +14302,11 @@ sub read_and_process_logs {
             # (or by the CSV branches' explicit resets), not re-declared here.
             my ( $log_level, $category, $threadpool ) = ("") x 3;
             my ( $is_line_match, $match_type ) = ( 0, 0 );
+            # The highlight decision for this line. Resolved once at the tag
+            # point below, which is the only surface that answers it; every
+            # consumer further down the loop reads this value rather than
+            # testing the -HL suffix the tag point appends to $category_bucket.
+            my $line_is_highlighted = 0;
             my ( $occurrences, $count ) = ( undef, undef );
             my ( $threadname );
             my $line_entry;                                 # winning registry entry for this line (drives timestamp-parse dispatch)
@@ -14321,6 +14578,10 @@ sub read_and_process_logs {
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
+                    # The levels the bound format declares join the run's
+                    # category vocabulary here, once per file rather than for
+                    # every format at startup.
+                    format_seat_declared_levels($line_entry);
                     # D18: the bound format's duration unit varies across
                     # producers and no -du was given — tell the user which
                     # assumption is in effect, once per run. Phrased run-level
@@ -14379,6 +14640,16 @@ sub read_and_process_logs {
                 }
 
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
+                    # The reject branch, and only the reject branch: keep the
+                    # token, the format that produced it and the count of lines
+                    # that carried it, so the end of the run can say what was
+                    # dropped. The elsif below handles an unparseable CSV row
+                    # and increments the same counter, which is why the
+                    # collection attaches here rather than after the chain.
+                    my $slug = $format_detection{$in_file}{slug} // 'unknown';
+                    $unregistered_levels{$slug}{$category_bucket}++;
+                    $unregistered_levels_by_file{$in_file}{$category_bucket}++;
+                    $unregistered_level_lines++;
                     $excluded_other++;
                     next;
                 } elsif (!$csv_epoch_timestamp && $match_type == 13) {
@@ -14566,9 +14837,11 @@ sub read_and_process_logs {
                         && ( !defined( $highlight_count_max )    || ( defined( $count )    && $count <= $highlight_count_max ) ) ) ) ) {
                     $category_bucket .= '-HL';
                     $category = 'highlight';
+                    $line_is_highlighted = 1;
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
                 } else {
                     $category = 'plain';
+                    $line_is_highlighted = 0;
                 }
 
                 # sets earliest and latest timestamp values being displayed (after the range filtering selection).
@@ -14699,7 +14972,12 @@ sub read_and_process_logs {
                                     # (seeded below) carry the equivalent information and the
                                     # consumer (calculate_statistics_bin) reads neither
                                     # $stats_source->{durations} nor any descendant copy of it.
-                                    $stats_source->{durations} = [$duration] unless $message_stats_capture_mode eq 'bin';
+                                    # Issue #561: retain the number, not the string the log line
+                                    # carried. $duration is a copy of a shared record lexical whose
+                                    # body carries both the source string and the integer the
+                                    # per-file index block's duration_sum read out of it, so a plain
+                                    # copy retains a string buffer no consumer of this array reads.
+                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
                                     # sample stats_source. merge_consolidation_stats's
@@ -14843,7 +15121,11 @@ sub read_and_process_logs {
                                 # this is the dominant memory consumer at high (category, log_key)
                                 # cardinality. The bin-counter store and Welford-Pébay sidecars
                                 # below carry equivalent information for the consumer.
-                                push @{$log_messages{$category}{$log_key}{durations}}, $duration
+                                # Issue #561: the number is retained, not the string the log line
+                                # carried; the percentile path sorts and indexes numerically and the
+                                # moments path sums and squares, so the string buffer a plain copy
+                                # would inherit from the shared record lexical has no reader.
+                                push @{$log_messages{$category}{$log_key}{durations}}, 0 + $duration
                                     unless $message_stats_capture_mode eq 'bin';
     
                                 # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
@@ -14993,7 +15275,7 @@ sub read_and_process_logs {
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
                         $log_analysis{$bucket}{total_duration} += $duration;
 
-                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
@@ -15002,7 +15284,11 @@ sub read_and_process_logs {
                             $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
                             # Raw samples feed the percentile computation; under -bdm bin the
                             # bin-counter partition + sidecars below carry equivalent information.
-                            push @{$log_analysis{$bucket}{durations}}, $duration
+                            # Issue #561: the number is retained, not the string the log line
+                            # carried; the percentile path sorts and indexes numerically and the
+                            # moments path sums and squares, so the string buffer a plain copy
+                            # would inherit from the shared record lexical has no reader.
+                            push @{$log_analysis{$bucket}{durations}}, 0 + $duration
                                 unless $bucket_stats_capture_mode eq 'bin';
 
                             # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
@@ -15016,8 +15302,6 @@ sub read_and_process_logs {
                                 my $entry = $log_analysis{$bucket};
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
-                                counter_update(\%bucket_stats_counters_hl, $bucket, $duration, $bucket_stats_buckets_per_decade)
-                                    if $duration > 0 && $category_bucket =~ /-HL$/;   # store parity only
 
                                 $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
                                 $entry->{max} = $duration if !defined $entry->{max} || $duration > $entry->{max};
@@ -15072,7 +15356,7 @@ sub read_and_process_logs {
                         my $e = $log_analysis{$bucket};
                         if( $bytes ) {
                             $e->{total_bytes} += $bytes;
-                            $e->{'total_bytes-HL'} += $bytes if $category_bucket =~ /-HL$/;
+                            $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         }
                         if( $bytes_aggregate_demand ) {
                             if( $e->{bytes_occurrences}++ ) {
@@ -15087,8 +15371,8 @@ sub read_and_process_logs {
                     if( defined $count ) {
                         $log_analysis{$bucket}{count_sum} += $count;
                         $log_analysis{$bucket}{count_occurrences}++;
-                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $category_bucket =~ /-HL$/;
-                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $category_bucket =~ /-HL$/;
+                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $line_is_highlighted;
+                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $line_is_highlighted;
 
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
                         $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
@@ -15105,7 +15389,7 @@ sub read_and_process_logs {
                             # value set per bucket, mirroring the %log_sessions pattern
                             $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
                             $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
-                            if ($category_bucket =~ /-HL$/) {
+                            if ($line_is_highlighted) {
                                 $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
                                 $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
                             }
@@ -15113,7 +15397,7 @@ sub read_and_process_logs {
                         }
                         $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
                         $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                        if ($category_bucket =~ /-HL$/) {
+                        if ($line_is_highlighted) {
                             $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
                             $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
                             $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
@@ -15152,11 +15436,11 @@ sub read_and_process_logs {
                             # once before this loop (set near the parsing-loop entry).
                             if ($heatmap_capture_mode eq 'raw') {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
-                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $category_bucket =~ /-HL$/;
+                                push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $line_is_highlighted;
                             } else {
                                 counter_update(\%heatmap_counters, $bucket, $heatmap_value, $heatmap_stream_bpd);
                                 counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)
-                                    if $category_bucket =~ /-HL$/;
+                                    if $line_is_highlighted;
                             }
                         }
                     }
@@ -15164,14 +15448,18 @@ sub read_and_process_logs {
                     ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
                     # Histogram collects values across entire population (not per time-bucket like heatmap)
                     if ($histogram_enabled) {
-                        my $is_highlighted = ($category_bucket =~ /-HL$/);
+                        my $is_highlighted = $line_is_highlighted;
 
                         # Issue #266: dispatch via $histogram_capture_mode resolved
                         # once before this loop (set near the parsing-loop entry).
                         if ($histogram_capture_mode eq 'raw') {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
-                                push @{$histogram_values{duration}}, $duration;
-                                push @{$histogram_values_hl{duration}}, $duration if $is_highlighted;
+                                # Issue #561: the number is retained, not the string the log line
+                                # carried; the histogram bins numerically and no consumer of these
+                                # arrays reads the string buffer a plain copy would inherit from
+                                # the shared record lexical.
+                                push @{$histogram_values{duration}}, 0 + $duration;
+                                push @{$histogram_values_hl{duration}}, 0 + $duration if $is_highlighted;
                             }
                             if ((!%histogram_metrics || $histogram_metrics{bytes}) && defined $bytes && $bytes > 0 && !$omit_bytes) {
                                 push @{$histogram_values{bytes}}, $bytes;
@@ -15236,7 +15524,7 @@ sub read_and_process_logs {
                     # Time Window Based Statistics Capture (Time Window Graphs) #
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
-                    if( $category_bucket =~ /-HL$/ ) {                  # capture total duration and bytes for highlighted rows
+                    if( $line_is_highlighted ) {                       # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
                 }
@@ -15245,7 +15533,7 @@ sub read_and_process_logs {
                 if( defined $session && $session ne "" && $session ne "-" ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
-                    if( $category_bucket =~ /-HL$/ ) {
+                    if( $line_is_highlighted ) {
                         $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
                 }
@@ -15254,7 +15542,7 @@ sub read_and_process_logs {
                 if( defined $user && $user ne "" && $user ne "-" ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
-                    if( $category_bucket =~ /-HL$/ ) {
+                    if( $line_is_highlighted ) {
                         $log_users{$bucket}{highlight}{$user} += 1;
                     }
                 }
@@ -15336,6 +15624,28 @@ sub read_and_process_logs {
     # Notices raised while the read was running, held back so they did not
     # print into the progress line's row.
     flush_deferred_notices();
+
+    # Surface the levels the tool did not recognise. A line whose level slot
+    # holds a token the vocabulary does not carry is matched against its format
+    # and then dropped, so it counts in LINES READ and not in LINES INCLUDED
+    # with nothing to attribute the gap to. One line per format, each token
+    # with the number of lines that carried it, so a reader can tell a rounding
+    # error from a loss that matters. The token is whatever the producer wrote:
+    # a level word, an out-of-range status family, or a single letter.
+    if ($unregistered_level_lines > 0) {
+        for my $slug (sort keys %unregistered_levels) {
+            my $tokens = $unregistered_levels{$slug};
+            my $lines  = 0;
+            $lines += $_ for values %$tokens;
+            print STDERR "Note: $slug lines carried " . scalar(keys %$tokens)
+                . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
+                . join( ', ', map { "$_ (" . format_number( $tokens->{$_}, 'medium' )
+                                    . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
+                              sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens )
+                . " - " . format_number( $lines, 'medium' )
+                . ( $lines == 1 ? " line was" : " lines were" ) . " not counted\n";
+        }
+    }
 
     # Surface how many lines a numeric filter removed solely because the line
     # carried no value for the filtered metric; without this the totals shrink
@@ -15535,6 +15845,10 @@ sub finalize_heatmap_unified {
     # #189 R7 / #187 Decision 8 shares_partitions_with.
     $bin_counter_telemetry{heatmap_cells}   = snapshot_counter_telemetry(\%heatmap_counters);
     $bin_counter_telemetry{heatmap_markers} = $bin_counter_telemetry{heatmap_cells};
+    # The highlighted subset streams its own partitions and is sized on its own
+    # consumer name, beside the parent rather than folded into it.
+    $bin_counter_telemetry{heatmap_cells_highlighted}
+        = snapshot_counter_telemetry(\%heatmap_counters_hl);
 
     print "\rCalculating heatmap buckets..." unless $disable_progress;
 
@@ -15633,6 +15947,10 @@ sub finalize_heatmap_unified {
             next if $c == 0;
             $heatmap_data_hl{$bucket}{$i} = $c;
         }
+
+        # Counted at the site, symmetric with the parent loop above: every
+        # highlight partition is projected into display shape exactly once.
+        $bin_counter_telemetry{heatmap_cells_highlighted}{rebin_finalize_events}++;
 
         delete $heatmap_counters_hl{$bucket};
     }
@@ -15865,6 +16183,12 @@ sub finalize_histogram_unified {
     # histogram_view and histogram_bins share streaming partitions.
     $bin_counter_telemetry{histogram_view} = snapshot_counter_telemetry(\%histogram_counters);
     $bin_counter_telemetry{histogram_bins} = $bin_counter_telemetry{histogram_view};
+    # The highlighted subset streams its own partitions and is sized on its own
+    # consumer name. Snapshotted here rather than inside the highlight branch
+    # below, so a metric whose highlight store exists but holds no observation
+    # is still counted as a partition it holds.
+    $bin_counter_telemetry{histogram_view_highlighted}
+        = snapshot_counter_telemetry(\%histogram_counters_hl);
 
     print "Calculating histogram statistics..." unless $disable_progress;
 
@@ -15969,6 +16293,12 @@ sub finalize_histogram_unified {
                 }
                 $histogram_stats_hl{$metric} = \%stats_hl;
                 @{$histogram_buckets_hl{$metric}} = @$final_bins_hl;
+
+                # Counted at the site, symmetric with the parent above. The
+                # count reaches partition_count only for the metrics whose
+                # highlight store carried an observation: one holding none is
+                # snapshotted as a partition and never projected.
+                $bin_counter_telemetry{histogram_view_highlighted}{rebin_finalize_events}++;
             }
             delete $histogram_counters_hl{$metric};
         }
@@ -17596,6 +17926,28 @@ sub stats_csv_bytes_columns_active {
     return ($write_messages_to_csv && !$omit_bytes && $bytes_observed) ? 1 : 0;
 }
 
+# Whether the heatmap observed a value of its metric this run. The heatmap's
+# metric is whichever family -hm names, so the answer cannot be read off a
+# single family flag; $heatmap_min is set on the first value the metric
+# resolves to and is tracked under both data models, which makes it the one
+# observation that holds whether the surface captured raw values or streamed
+# counters. Demand is the separate half of the conjunction.
+sub heatmap_value_observed {
+    return defined $heatmap_min ? 1 : 0;
+}
+
+# Whether the histogram observed a value of any metric it draws. The two data
+# models accumulate into different stores — raw pushes onto %histogram_values,
+# bin counts into %histogram_data_min — so the observation is that either
+# received something. %histogram_values is pre-seeded with an empty array per
+# built-in metric, so the test is on the arrays holding a value, never on the
+# key existing.
+sub histogram_value_observed {
+    return 1 if grep { @{$histogram_values{$_} || []} } keys %histogram_values;
+    return 1 if keys %histogram_data_min;
+    return 0;
+}
+
 # Key function used to normalize data for output, graphing, and data scaling.
 sub normalize_data_for_output {
 
@@ -17838,20 +18190,9 @@ sub normalize_data_for_output {
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                if ($cfg && $cfg->{agg_kind} eq 'counting') {
-                    # Counting aggregation (Issue #313): single value column with
-                    # the aggregation as the stat; rate columns carry the -ru suffix
-                    my $col = "$cfg->{base_name}_$cfg->{aggregation}";
-                    $col .= $rate_csv_suffix{$rate_unit} if $cfg->{aggregation} =~ /^(rate|drate)$/;
-                    push @output_columns, $col;
-                } elsif ($cfg && $cfg->{name} ne $cfg->{base_name}) {
-                    # Disambiguated metric: single value column (#99)
-                    my $csv_prefix = $cfg->{unit} ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                    push @output_columns, $csv_prefix;
-                } else {
-                    my $csv_prefix = ($cfg && $cfg->{unit}) ? "${csv_key}_$cfg->{unit}" : $csv_key;
-                    push @output_columns, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
-                }
+                push @output_columns, $cfg
+                    ? @{ udm_csv_columns($cfg)->{columns} }
+                    : map { "${csv_key}_$_" } qw(occurrences min mean max sum);
             } else {
                 push @output_columns, $key;
                 # #444 D13: whatever is captured as a metric is exported — the
@@ -18741,12 +19082,11 @@ sub print_bar_graph {
                 } elsif( $key =~ /^udm_(.+)$/ ) {
                     my $metric_name = $1;
                     my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                    if ($config && ($config->{agg_kind} eq 'counting' || $config->{name} ne $config->{base_name})) {
-                        # Single value column: counting aggregation (#313) or
-                        # disambiguated metric (#99)
+                    my $csv = $config ? udm_csv_columns($config) : undef;
+                    if ($csv && $csv->{shape} eq 'single') {
                         push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                     } else {
-                        foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                        foreach my $metric ( @{ $csv ? $csv->{stats} : [ qw( occurrences min mean max sum ) ] } ) {
                             push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
                         }
                     }
@@ -20244,24 +20584,17 @@ sub print_message_summary {
                         my @udm_csv_values;
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
-                            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
+                            my $csv = udm_csv_columns($config);
                             if ($config->{agg_kind} eq 'counting') {
                                 # count -> per-message occurrences; distinct/ratio/rate/drate
                                 # have no per-message value (distinct sets are bucket-scoped)
-                                my $col = "$config->{base_name}_$config->{aggregation}";
-                                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
                                 push @udm_csv_values, $config->{aggregation} eq 'count'
-                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $col)
+                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $csv->{columns}[0])
                                     : undef;
-                            } elsif ($config->{name} ne $config->{base_name}) {
-                                # Disambiguated metric: single aggregated value (#99)
-                                my $stat_key = $config->{aggregation};
-                                push @udm_csv_values, format_csv_value(
-                                    $log_messages{$grouping}{$key}{"udm_${name}_${stat_key}"}, $csv_prefix);
                             } else {
                                 push @udm_csv_values,
-                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$_"}, "${csv_prefix}_$_") }
-                                        qw(occurrences min mean max sum);
+                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$csv->{stats}[$_]"}, $csv->{columns}[$_]) }
+                                        0 .. $#{ $csv->{columns} };
                             }
                         }
                         # Issue #268: format each numeric column per the resolved
@@ -20826,23 +21159,7 @@ sub pipeline_render {
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('MESSAGES');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-        my @udm_csv_headers;
-        foreach my $config (@udm_configs) {
-            my $name = $config->{name};
-            my $csv_prefix = $config->{unit} ? "${name}_$config->{unit}" : $name;
-            if ($config->{agg_kind} eq 'counting') {
-                # Counting aggregation (Issue #313): single value column with
-                # the aggregation as the stat; rate columns carry the -ru suffix
-                my $col = "$config->{base_name}_$config->{aggregation}";
-                $col .= $rate_csv_suffix{$rate_unit} if $config->{aggregation} =~ /^(rate|drate)$/;
-                push @udm_csv_headers, $col;
-            } elsif ($config->{name} ne $config->{base_name}) {
-                # Disambiguated metric: single value column (#99)
-                push @udm_csv_headers, $csv_prefix;
-            } else {
-                push @udm_csv_headers, "${csv_prefix}_occurrences", "${csv_prefix}_min", "${csv_prefix}_mean", "${csv_prefix}_max", "${csv_prefix}_sum";
-            }
-        }
+        my @udm_csv_headers = map { @{ udm_csv_columns($_)->{columns} } } @udm_configs;
         # Metric-first, aggregate-last throughout, matching the user-defined-metric
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this

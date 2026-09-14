@@ -12,17 +12,25 @@ Issue: #138
 
 ## Environment
 
-- macOS, Homebrew Perl 5.42.0, NYTProf 6.14
-- **Hardcoded tool paths — no PATH dependency:**
-  - `perl`:         `/opt/homebrew/bin/perl`
-  - `nytprofhtml`:  `/opt/homebrew/Cellar/perl/5.42.0/bin/nytprofhtml`
-  - `nytprofcsv`:   `/opt/homebrew/Cellar/perl/5.42.0/bin/nytprofcsv`
-  - `nytprofcalls`: `/opt/homebrew/Cellar/perl/5.42.0/bin/nytprofcalls`
+- macOS, Homebrew Perl. The Perl that profiles is the Perl that builds the release
+  binaries, so a profile and a benchmark describe the same interpreter.
+- Two tools are needed: the `Devel::NYTProf` module, which `extract-profile.pl` loads
+  through its data API, and `nytprofhtml`, which renders the HTML report.
 
-**If Homebrew upgrades Perl:** update the `NYTPROFHTML` path in `run-profile.sh` and
-paths above. The `/opt/homebrew/bin/perl` symlink updates automatically; the nytprof
-tool paths in `/opt/homebrew/Cellar/perl/<version>/bin/` do not.
-Verify: `/opt/homebrew/bin/perl -MDevel::NYTProf::Data -e 'print "ok\n"'`
+**Nothing names a Perl version or a keg path.** The interpreter is `perl` from PATH.
+The HTML report tool is found by asking that interpreter where it installs scripts,
+falling back to a PATH search, so both follow a Perl upgrade without an edit here.
+
+**If Homebrew upgrades Perl**, nothing needs updating. Homebrew installs CPAN modules
+per Perl minor version, so an upgrade leaves the profiler behind rather than migrating
+it; a profiling run installs it again when it finds it missing, and stops with the
+manual command if it cannot.
+
+Check the environment without starting a profiling session:
+
+```bash
+./build/profiling-preflight.sh
+```
 
 ---
 
@@ -269,8 +277,6 @@ runs these checks automatically and prints `[WARN]` for any discrepancy > tolera
 ## Quick Start
 
 ```bash
-cd /Users/gregeva/Documents/GitHub/logtimeline
-
 # Standard run: 1k/10k/100k samples of a real log file
 ./tests/profile/run-profile.sh -- \
     --disable-progress \
@@ -302,26 +308,26 @@ cd /Users/gregeva/Documents/GitHub/logtimeline
     logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log
 
 # Re-extract from existing results with different options
-/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+perl tests/profile/extract-profile.pl \
     --file tests/profile/results/issue-138/10k/nytprof.out \
     --verbose-file tests/profile/results/issue-138/10k/verbose.txt \
     --sort excl --top 40
 
 # Re-extract with declarative cross-validation (consolidation)
-/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+perl tests/profile/extract-profile.pl \
     --file tests/profile/results/issue-138/10k/nytprof.out \
     --verbose-file tests/profile/results/issue-138/10k/verbose.txt \
     --checks-file tests/profile/checks/consolidation.tsv
 
 # Focus on consolidation functions
-/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+perl tests/profile/extract-profile.pl \
     --file tests/profile/results/issue-138/100k/nytprof.out \
     --match "consolidat|dice|candidate|checkpoint" \
     --verbose-file tests/profile/results/issue-138/100k/verbose.txt \
     --checks-file tests/profile/checks/consolidation.tsv
 
 # Line-level hotspots for a specific sub
-/opt/homebrew/bin/perl tests/profile/extract-profile.pl \
+perl tests/profile/extract-profile.pl \
     --file tests/profile/results/issue-138/100k/nytprof.out \
     --lines dice_coefficient
 ```
@@ -388,8 +394,9 @@ Cross-Validation: NYTProf call counts vs ltl -V output
   Never open `nytprof/index.html` or parse it with scripts — it is slow, fragile, and
   the API gives you everything you need.
 
-- **Do not assume nytprofhtml is in PATH.** It is not symlinked to `/opt/homebrew/bin`.
-  Always use the full path: `/opt/homebrew/Cellar/perl/5.42.0/bin/nytprofhtml`.
+- **Do not assume nytprofhtml is in PATH.** Homebrew does not link the Perl keg's own
+  `bin` onto PATH, which is where cpanm installs it. `run-profile.sh` resolves it
+  through `build/profiling-preflight.sh`; call that rather than pinning a path.
 
 - **Do not write nytprof.out to the project root.** `run-profile.sh` handles this by
   `cd`-ing to the output directory before running perl. Never run `perl -d:NYTProf ltl`

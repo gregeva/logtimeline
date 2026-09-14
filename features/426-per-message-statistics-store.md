@@ -826,7 +826,7 @@ Findings carried forward:
 | **#187 D4** | Structurally distinct overflow/underflow, both in `total_N`, boundary-return with no interpolation; `out_of_range_bounded: high\|low\|none` **per quantile** | Partition layout (B+2); `percentile`'s return tuple; three `-V` fields | none locked. **Vacuous under a shared grid** (proposed A2) |
 | **#187 D5** | HdrHistogram auto-resize: lazy construct, 5-decade seed on `v_0`, doubling, counts preserved, rebin telemetry mandatory. Seed heuristic revisitable; **the auto-resize lifecycle itself is not** | `partition_new`/`partition_extend`; per-key memory; `-V` telemetry | **#201, 2026-05-20**: scope narrowed to F1; F2/F3 get the separate stream-616 → finalize-rebin contract |
 | **#187 D6, D9** | Dissolved (no runtime gate; activation policy out of scope) | — | — |
-| **#187 D7** | Visible-but-deprecated `--exact-percentiles`/`-ep`, stderr notice, `-V` banner + per-consumer `user_opt_out` | CLI; `-V` header | **Never amended; contradicted by shipped code** (V8: zero hits). #287 re-reads it as `-mdm raw` via `choose_data_model` without amending D7 |
+| **#187 D7** | Per-surface data-model selectors (`-dm`, `-mdm`, `-bdm`, `-hmdm`, `-hgdm`); no run-level banner, no run-level opt-out line; per-consumer `user_opt_out` on the `path:` line | CLI; `-V` per-consumer block | **Amended 2026-08-27 via #460**, which re-locked D7 onto the per-surface selectors and removed the run-level opt-out surface #287 had already dropped from the code. This row's earlier reading of D7 as "never amended, contradicted by shipped code" predated that amendment |
 | **#187 D8** | Section name, run-level fields, ordered per-consumer field set, seven locked consumer names, deterministic block order. **Stability contract: names may not change without a new locked entry** | `emit_bin_counter_mode_verbose`; every harness greping the section | **Twice in place** (#34 rename to `BIN-COUNTER MODE`; #293 `data_model_precision:` + removal of run-level `buckets_per_decade:`). **A third rename shipped un-recorded** — see R3 |
 | **#187 D10** | Prototype validation mandatory before production bin code | Gate on all bin work | Discharged for message-stats by #287; re-opened in practice by `prototype/426-*` |
 | **#187 R4** | **The accuracy contract**: bin-resolution error bounded uniformly by geometry, "**structural … not empirical**" | The one-bin bound every harness and the L3 oracle assert | Not amended. **Contradicted by #426 F25** — proposed correction A4 |
@@ -1135,6 +1135,14 @@ data-model change does not absorb independent test-coverage work.
 6. **`%bucket_stats_counters_hl`.** Written on the hot path, read only by `Devel::Size`,
    its own comment concedes "store parity only". Is it in scope for #426 to remove, or does
    store parity have a purpose the code does not record?
+   **Closed 2026-09-12: claimed by #472 and answered there.** The store is retired —
+   the `counter_update()` call, the declaration and the `Devel::Size` line go together —
+   because it derives nothing and store parity is not a requirement any consumer
+   states; retiring it also removes a per-line site on highlighted runs that #478
+   (highlight bookkeeping evaluated on the hot path) would otherwise have to gate.
+   Decision and rationale:
+   [`472-highlight-bin-counter-telemetry.md`](472-highlight-bin-counter-telemetry.md) D2.
+   #472 owns it because #472 is the issue being worked and #426 is on hold.
 
 7. **Bucket-stats' place in the F1/F2/F3 taxonomy.** #201's taxonomy puts
    `time_bucket_stats` in F1 (precision-bound per-key fan-out), but its cardinality is

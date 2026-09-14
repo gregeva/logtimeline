@@ -432,6 +432,8 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `rate` | Occurrences per rate unit (see `-ru`; default per-minute) |
 | `drate` | Unique values per rate unit (see `-ru`; default per-minute) |
 
+When two metrics share a name, each name gains what tells them apart — its function, then its unit — so `-udm rows -udm rows::delta` labels its columns `rows:sum` and `rows:delta`, and `-udm rows -udm rows:s` labels them `rows` and `rows:s`. Only the parts that differ are added, so a name no other spec uses is always shown exactly as it was written. Two specs that a name cannot tell apart — differing only in the token key or the pattern they extract with — are reported and one is skipped: give them different names. A spec repeated identically is kept once, and the repeat is reported.
+
 A spec that is wrong in a way provable from the spec alone — a function name in the unit slot, a fixed-string pattern under `distinct`, an invalid regex — is reported immediately and that metric is skipped; the run continues. A well-formed metric that produces nothing is reported after the read with how the spec was read (unit, aggregation, extraction method, the compiled pattern), and, when the token key contains regex characters, a hint to wrap it in slashes. `-V udm-specs` shows the same interpretation and what each metric produced on every run.
 
 Counting metrics ignore the `unit` field and cannot be combined with `delta`/`idelta` transforms. Highlighting — whether by pattern (`-h`) or by numeric criteria (`-hdmin` and friends) — works as it does for the sessions column: highlighted lines contribute to both the bucket total and the highlight value. In the STATS CSV, each counting metric emits one column named `name_function` (e.g. `users_distinct`), with the rate-unit suffix appended for `rate`/`drate` (e.g. `logins_rate_min`); in the MESSAGES CSV, `count` carries per-message occurrences while `distinct`/`ratio`/`rate`/`drate` are blank — unique values are counted per time bucket, not per message.
@@ -468,13 +470,15 @@ ltl -tpa "http-" -tpa "async-" app.log
 
 ### Log formats and classification
 
-`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger* and how it classifies its lines as successes and failures. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+`ltl --help formats` lists every log format ltl recognises and, for each, whether it is an *event ledger*, how it classifies its lines as successes and failures, and — for a format that writes categories of its own — which categories those are. Detection is automatic per file; `-lf <name>` reads every file as one named format instead.
+
+A format that writes categories of its own states them in the listing: the garbage-collection format's pause kinds, the access family's HTTP status families, a producer's own severity names beside the usual ones. A format that writes only the usual severity names states nothing there. A line whose category is none ltl recognises is not counted — it appears in `LINES READ` and not in `LINES INCLUDED` — and the end of the run names the format, each unrecognised category it produced and how many lines carried it, so the loss is attributed rather than left as a gap between two totals. `-V format-detection` records the same per file under `unregistered_levels`.
 
 An **event ledger** is a format with maximum coverage of the operations it describes: every operation of that kind produces a line, so a rate computed over its lines is a rate over everything that happened (an access log for requests, a garbage-collection log for pauses). A diagnostics log records what a component chose to log, and is not one. The distinction decides whether a success or failure percentage built on the counts can be read at face value — see `ltl --explain classification` and the [Classification Reference](Classification-Reference) wiki page.
 
 Each format carries a classification declaration beside its pattern, field map and time contract. A criterion names a record field (`status_code`, `category_bucket`, `message`, or `line` for the raw text) and a pattern the field's value must match; an outcome lists criteria, any one of which classifies the line; one criterion may name several fields, all of which must match. Three forms exist:
 
-- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL)$`; success: none;
+- a format that declares nothing inherits the default — failure: `category_bucket` matches `^(?:ERROR|FATAL|CRITICAL|SEVERE|ALERT|EMERGENCY)$`; success: none;
 - a format that declares `none` declines to classify — no success/failure figure can be produced from it;
 - a format that declares one or both outcomes replaces the default for each outcome it names.
 

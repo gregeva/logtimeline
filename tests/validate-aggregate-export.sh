@@ -112,11 +112,30 @@ yget() { perl "$CHECKER" get --yaml "$YAML_FILE" --path "$1" 2>/dev/null || true
 section_value() { grep -E "^$2: " "$1" | head -1 | sed -E 's/^[^:]+: //'; }
 strip_colour() { sed 's/\x1b\[[0-9;]*m//g'; }
 
+# A working directory a -o run is about to write into carries no product this
+# harness did not create. Finding one is a diagnosis, not something to clean up:
+# the file is named and the harness stops, before any other action
+# (tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in).
+assert_directory_owned() {
+    local dir="$1" found
+    found="$(ls "$dir"/*-LTL-AGGREGATE.yaml "$dir"/*-LTL-STATS-*.csv "$dir"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
+    if [[ -n "$found" ]]; then
+        fail_with "working directory owned" \
+            'The directory a -o run writes into holds no export product this harness did not create; a stranger is named and the run stops, never swept or deleted' \
+            'assert_directory_owned() in tests/validate-aggregate-export.sh' \
+            'tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in' \
+            "pre-existing product not written by this run: $found"
+        return 1
+    fi
+    return 0
+}
+
 # Run ltl with -o in a scratch directory of its own; the file paths and the
 # stdout capture are exported. Extra args precede the log operands.
 YAML_FILE=""; STATS_CSV=""; MSG_CSV=""; OUT=""
 run_export() {
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
+    assert_directory_owned "$dir" || return 1
     OUT="$dir/stdout"
     set +e
     ( cd "$dir" && "$LTL" --disable-progress -ni -o -V aggregate-export,filter-summary,format-detection,benchmark-data,histogram-percentile-ticks,profile "$@" > "$OUT" 2> "$OUT.stderr" )
@@ -305,18 +324,32 @@ fi
 # ---------------------------------------------------------------------------
 current_scenario="directories-relative"
 if want "$current_scenario"; then
-    dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"; OUT="$dir/stdout"
-    set +e
-    ( cd "$REPO_DIR" && "$LTL" --disable-progress -ni -o -bs 1440 -oe -n 0 -osum tests/fixtures/http-status-families.txt tests/fixtures/category-contribution-skew.txt > "$OUT" 2> "$OUT.stderr" )
-    ec=$?; set -e
-    [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; sed 's/^/    /' "$OUT.stderr" >&2; exit 1; }
-    assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
-    # the run wrote into the repository root: move the products out at once
-    for f in "$REPO_DIR"/*-LTL-AGGREGATE.yaml "$REPO_DIR"/*-LTL-STATS-*.csv; do [[ -f "$f" ]] && mv "$f" "$dir/"; done
-    YAML_FILE="$(ls "$dir"/*.yaml | head -1)"
-    assert_equal "directory_list" "$(yget population.sources.directory_list.0)|$(yget population.sources.directories)" "tests/fixtures|1" asserts 'Relative paths as given, file part removed, de-duplicated; the count counts the list' produced_by "$PRODUCER" contract "$CONTRACT (D9)"
-    assert_equal "files/files_matched" "$(yget population.sources.files)/$(yget population.sources.files_matched)" "2/2" asserts 'Two files read, both contributed an included line' produced_by "$PRODUCER" contract "$CONTRACT (R8)"
-    if grep -q "$REPO_DIR" "$YAML_FILE"; then fail_with "no working directory" 'The working directory never appears in the file' "$PRODUCER" "$CONTRACT (D9)" "$(grep -m1 "$REPO_DIR" "$YAML_FILE")"; else pass_with "the working directory appears nowhere in the file"; fi
+    # The run needs a working directory in which `tests/fixtures/<name>` is a
+    # valid relative operand, and it must be a directory this harness owns, so
+    # that the file read back is the one this run wrote and nothing outside is
+    # read, moved or removed. The two fixtures are mirrored into a scratch tree
+    # under the same relative path the operands use.
+    dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir/tests/fixtures"; OUT="$dir/stdout"
+    cp "$FIXTURES/http-status-families.txt" "$FIXTURES/category-contribution-skew.txt" "$dir/tests/fixtures/"
+    relative_ok=0
+    assert_directory_owned "$dir" || relative_ok=1
+    if [[ $relative_ok -eq 0 ]]; then
+        set +e
+        ( cd "$dir" && "$LTL" --disable-progress -ni -o -bs 1440 -oe -n 0 -osum tests/fixtures/http-status-families.txt tests/fixtures/category-contribution-skew.txt > "$OUT" 2> "$OUT.stderr" )
+        ec=$?; set -e
+        [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; sed 's/^/    /' "$OUT.stderr" >&2; exit 1; }
+        assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
+        YAML_FILE="$(ls "$dir"/*-LTL-AGGREGATE.yaml 2>/dev/null | head -1 || true)"
+        if [[ -z "$YAML_FILE" ]]; then
+            fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no export in $dir"
+        else
+            assert_equal "directory_list" "$(yget population.sources.directory_list.0)|$(yget population.sources.directories)" "tests/fixtures|1" asserts 'Relative paths as given, file part removed, de-duplicated; the count counts the list' produced_by "$PRODUCER" contract "$CONTRACT (D9)"
+            assert_equal "files/files_matched" "$(yget population.sources.files)/$(yget population.sources.files_matched)" "2/2" asserts 'Two files read, both contributed an included line' produced_by "$PRODUCER" contract "$CONTRACT (R8)"
+            # The directory the run happened in is this scenario's scratch
+            # directory, so the absence proved here is the absence of that path.
+            if grep -q "$dir" "$YAML_FILE"; then fail_with "no working directory" 'The working directory never appears in the file' "$PRODUCER" "$CONTRACT (D9)" "$(grep -m1 "$dir" "$YAML_FILE")"; else pass_with "the working directory appears nowhere in the file"; fi
+        fi
+    fi
 fi
 current_scenario="directories-absolute"
 if want "$current_scenario"; then
@@ -328,15 +361,23 @@ fi
 current_scenario="environment-options"
 if want "$current_scenario"; then
     dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"; OUT="$dir/stdout"
-    set +e
-    ( cd "$dir" && LTL_CONFIG="-oe" "$LTL" --disable-progress -ni -o -bs 1440 -n 0 "$FIXTURES/http-status-families.txt" > "$OUT" 2> "$OUT.stderr" )
-    ec=$?; set -e
-    [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; exit 1; }
-    assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
-    YAML_FILE="$(ls "$dir"/*.yaml | head -1)"
-    env_line="$(strip_colour < "$OUT" | grep -E '^environment options: ' | head -1 | sed 's/^environment options: //')"
-    assert_equal "options.environment = echoed line" "$(yget provenance.determining.options.environment)" "$env_line" asserts 'The environment option string is the text after environment options:' produced_by "$PRODUCER" contract "$CONTRACT (D5)"
-    assert_equal "omit_empty from the environment" "$(yget series.omit_empty)" true asserts 'The option took effect and the series records it' produced_by "$PRODUCER" contract "$CONTRACT (R2)"
+    env_ok=0
+    assert_directory_owned "$dir" || env_ok=1
+    if [[ $env_ok -eq 0 ]]; then
+        set +e
+        ( cd "$dir" && LTL_CONFIG="-oe" "$LTL" --disable-progress -ni -o -bs 1440 -n 0 "$FIXTURES/http-status-families.txt" > "$OUT" 2> "$OUT.stderr" )
+        ec=$?; set -e
+        [[ $ec -eq 0 ]] || { echo "FAIL: ltl exited $ec for $current_scenario" >&2; exit 1; }
+        assert_no_runtime_warnings "$OUT.stderr" "$current_scenario" || { fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); }
+        YAML_FILE="$(ls "$dir"/*-LTL-AGGREGATE.yaml 2>/dev/null | head -1 || true)"
+        if [[ -z "$YAML_FILE" ]]; then
+            fail_with "file written" 'A -o run writes exactly one YAML file beside the STATS CSV' "$PRODUCER" "$CONTRACT" "no export in $dir"
+        else
+            env_line="$(strip_colour < "$OUT" | grep -E '^environment options: ' | head -1 | sed 's/^environment options: //')"
+            assert_equal "options.environment = echoed line" "$(yget provenance.determining.options.environment)" "$env_line" asserts 'The environment option string is the text after environment options:' produced_by "$PRODUCER" contract "$CONTRACT (D5)"
+            assert_equal "omit_empty from the environment" "$(yget series.omit_empty)" true asserts 'The option took effect and the series records it' produced_by "$PRODUCER" contract "$CONTRACT (R2)"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------

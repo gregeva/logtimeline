@@ -1627,79 +1627,76 @@ scenario_technique_mirror() {
 # its docs/ source, so the two surfaces are in sync by construction and what
 # has to be asserted is the map that keeps them so. Three ways it can be
 # wrong, each of which ships a stale or missing wiki page at the next
-# release, and none of which anything caught before now:
+# release:
 #
-#   1. A source file exists and no copy line names it (the technique family
+#   1. A source file exists and no map line names it (the technique family
 #      was written and the map was not touched).
-#   2. A copy line names a source that does not exist (a renamed or deleted
+#   2. A map line names a source that does not exist (a renamed or deleted
 #      doc leaves the release step failing mid-way).
-#   3. A copy line has no matching entry in the git add, so the page is
-#      written into the clone and never committed.
+#   3. The release procedure no longer runs the script that owns the map, so
+#      the map is current and nothing applies it.
 #
-# The map is read out of the workflow document rather than restated here, so
-# this scenario cannot drift from the procedure it guards.
+# The map is read out of build/sync-wiki.sh, which is the single place it is
+# written down, so this scenario cannot drift from the script it guards.
 scenario_wiki_sync_map() {
     current_scenario="wiki-sync-map"
     echo "[$current_scenario]"
+    local sync_script="$REPO_DIR/build/sync-wiki.sh"
     local workflow="$REPO_DIR/docs/process/workflow.md"
 
-    if [[ ! -f "$workflow" ]]; then
+    if [[ ! -x "$sync_script" ]]; then
         echo "  FAIL  $current_scenario"
-        echo "        asserts:     The wiki sync map is read from the release procedure that owns it."
-        echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
-        echo "        contract:    Issue #504 R9: docs/ is the source of truth and the wiki is overwritten from it each release"
-        echo "        (not found: $workflow)"
+        echo "        asserts:     The wiki sync map is read from the executable script that owns it."
+        echo "        produced_by: build/sync-wiki.sh (the source-to-page map)"
+        echo "        contract:    Issue #539: build/sync-wiki.sh is the single source of the map; the release procedure and this harness both read it from there"
+        echo "        (not found or not executable: $sync_script)"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: docs/process/workflow.md missing")
+        failures+=("$current_scenario :: build/sync-wiki.sh missing or not executable")
         return
     fi
 
-    # The copy lines of the sync step: "cp <source> /tmp/ltl-wiki/<Page>.md".
+    # The map, straight from the script: one "<source> <page>" pair per line.
     local map_file="$TMP_DIR/wiki-sync-map.txt"
-    grep -o "cp [^ ]*\.md /tmp/ltl-wiki/[^ ]*\.md" "$workflow" \
-        | sed "s/^cp //; s| /tmp/ltl-wiki/| |" > "$map_file" || true
+    if ! ( cd "$REPO_DIR" && ./build/sync-wiki.sh map ) > "$map_file" 2>"$TMP_DIR/wiki-sync-map.err"; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     The sync script prints its source-to-page map on demand."
+        echo "        produced_by: build/sync-wiki.sh (cmd_map)"
+        echo "        contract:    Issue #539: the map is machine-readable so its consumers read it rather than restating it"
+        sed 's/^/        /' "$TMP_DIR/wiki-sync-map.err"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ./build/sync-wiki.sh map failed")
+        return
+    fi
 
     local mapped
-    mapped=$(wc -l < "$map_file" | tr -d " ")
+    mapped=$(grep -c . "$map_file" || true)
     if [[ "$mapped" -eq 0 ]]; then
         echo "  FAIL  $current_scenario"
-        echo "        asserts:     The release procedure carries a wiki sync step naming a source and a page per copy."
-        echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
-        echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors: a grep matching nothing is a failure, never a pass"
+        echo "        asserts:     The sync script carries a map naming a source and a page per copy."
+        echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+        echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors: a lookup matching nothing is a failure, never a pass"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: no cp lines found in the wiki sync step")
+        failures+=("$current_scenario :: the sync map is empty")
         return
     fi
     echo "  PASS  $current_scenario :: sync map carries $mapped page(s)"
     pass=$((pass + 1))
 
-    # (2) every mapped source exists, and (3) its page is committed.
+    # (2) every mapped source exists.
     local src page
     while read -r src page; do
+        [[ -n "$src" ]] || continue
         if [[ -f "$REPO_DIR/$src" ]]; then
             echo "  PASS  $current_scenario :: $src -> $page (source present)"
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"
-            echo "        the sync step copies '$src', which does not exist"
-            echo "        asserts:     Every source the wiki sync step copies is a file that exists, so the release step cannot fail part-way through."
-            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
-            echo "        contract:    Issue #504 R9: the wiki is overwritten from docs/ each release; a copy line naming a moved or deleted file breaks that release"
+            echo "        the sync map copies '$src', which does not exist"
+            echo "        asserts:     Every source the wiki sync map copies is a file that exists, so the release step cannot fail part-way through."
+            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        contract:    Issue #504 R9: the wiki is overwritten from docs/ each release; a map line naming a moved or deleted file breaks that release"
             fail=$((fail + 1))
             failures+=("$current_scenario :: sync source missing: $src")
-        fi
-
-        if grep -q "git add[^&]*$page" "$workflow"; then
-            echo "  PASS  $current_scenario :: $page is committed by the sync step"
-            pass=$((pass + 1))
-        else
-            echo "  FAIL  $current_scenario"
-            echo "        '$page' is copied into the clone but never added"
-            echo "        asserts:     Every page the sync step writes is also staged, so the copy reaches the wiki rather than being discarded with the clone."
-            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
-            echo "        contract:    Issue #504 R9: the step ends by removing the clone, so an unstaged page is silently lost"
-            fail=$((fail + 1))
-            failures+=("$current_scenario :: page copied but not added: $page")
         fi
     done < "$map_file"
 
@@ -1714,12 +1711,31 @@ scenario_wiki_sync_map() {
             pass=$((pass + 1))
         else
             echo "  FAIL  $current_scenario"
-            echo "        '$base' has no copy line in the wiki sync step"
+            echo "        '$base' has no line in the wiki sync map"
             echo "        asserts:     Every docs/explain mirror is copied to the wiki by the release step, so a topic family reachable in the terminal is reachable on the wiki."
-            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
-            echo "        contract:    Issue #504 R9, AC11: the mirror exists so a wiki reader reaches the same content as the terminal; a mirror the sync step does not name never gets there"
+            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        contract:    Issue #504 R9, AC11: the mirror exists so a wiki reader reaches the same content as the terminal; a mirror the sync map does not name never gets there"
             fail=$((fail + 1))
             failures+=("$current_scenario :: mirror not in the sync map: $base")
+        fi
+    done
+
+    # (3) the release procedure still applies the map, publishing and then
+    # verifying. A correct map nothing runs is what shipped the drift #539
+    # reports: the step was there to be skipped and skipping it left no trace.
+    local invocation
+    for invocation in "sync-wiki.sh publish" "sync-wiki.sh verify"; do
+        if grep -q "$invocation" "$workflow"; then
+            echo "  PASS  $current_scenario :: the release procedure runs '$invocation'"
+            pass=$((pass + 1))
+        else
+            echo "  FAIL  $current_scenario"
+            echo "        the release procedure does not run '$invocation'"
+            echo "        asserts:     The release procedure both publishes the wiki from the map and verifies the published result."
+            echo "        produced_by: docs/process/workflow.md (Post-release, Sync the wiki)"
+            echo "        contract:    Issue #539: the sync was skippable because nothing recorded whether it ran; the verify step is what makes a skipped publish fail the release"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: release procedure does not run: $invocation")
         fi
     done
 }

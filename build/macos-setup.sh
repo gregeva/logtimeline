@@ -8,6 +8,13 @@
 #
 # Usage:
 #   ./build/macos-setup.sh
+#   LTL_INSTALL_DEV_DEPS=1 ./build/macos-setup.sh   # also install development-only tools
+#
+# Environment:
+#   LTL_INSTALL_DEV_DEPS  Set to 1 to install the cpanfile's development-only
+#                         phase (the profiler) alongside the runtime modules.
+#                         Unset or 0 installs runtime modules only, which is
+#                         what a release build wants.
 #
 # Note: macOS system Perl is known to be problematic — this script installs
 #       Homebrew Perl to ensure a reliable build environment.
@@ -48,10 +55,15 @@ cpanm --notest PAR::Packer
 
 echo "[4/4] Generating cpanfile and installing dependencies..."
 cd "$SCRIPT_DIR"
-if [ ! -f cpanfile ]; then
-    ./generate-cpanfile.sh
+./generate-cpanfile.sh
+if [ "${LTL_INSTALL_DEV_DEPS:-0}" = "1" ]; then
+    echo "[info] Installing runtime and development-only dependencies (cpanm --notest --installdeps --with-develop .)"
+    cpanm --notest --installdeps --with-develop .
+else
+    echo "[info] Installing runtime dependencies only (cpanm --notest --installdeps .)"
+    echo "[info] Set LTL_INSTALL_DEV_DEPS=1 to also install the development-only profiling tools."
+    cpanm --notest --installdeps .
 fi
-cpanm --notest --installdeps .
 
 echo ""
 echo "=========================================="

@@ -152,8 +152,8 @@ The contract surface includes (full detail in Decision 8):
 
 - **Run-level header**: `data_model_precision` (resolved tier with source).
 - **Per-consumer blocks** (one per consumer catalogued in R12): `consumer:` opener, `path:` (R10 code), and when on the unified path, the locked per-consumer field set (`partition_keying`, `partition_count`, rebin telemetry from Decision 5, the Decision 4 overflow/underflow guard counters and their per-quantile companion — all expected to read zero and `none` respectively, `percentiles_emitted`, `out_of_range_bounded:` inline per-quantile).
-- **Shared-partition consumers**: `shares_partitions_with:` short-form blocks.
-- **Section presence**: always emitted under `-V`; reports `consumers_active: none` when no consumer is computing.
+- **Shared-partition consumers**: `shares_partitions_with:` short-form blocks, emitted by the downstream consumer of each pair and naming the upstream whose store the telemetry was snapshotted from. Decision 8 locks the three pairs and the direction.
+- **Section presence**: always emitted under `-V`. When no consumer is computing, every per-consumer block reports `path: feature_not_active`; there is no run-level no-consumer line (Decision 8, amended 2026-09-13 via #546).
 
 The section name (`=== histogram-bin-counters ===`), all field names, and all consumer-name strings are part of the locked feature contract per Decision 8. Field-name changes require a new locked-decision entry.
 - **Rebin telemetry (per-consumer using the unified path)**: `rebin_growth_events`, `rebin_merge_events`, `rebin_finalize_events`, `rebins_per_partition { p50, p95, p99, max }`, `members_per_partition { p50, p95, p99, max }`, `max_partition_bins` (Decision 5 lock, as amended 2026-08-26 by #462; intended to support empirical seed-heuristic tuning).
@@ -410,7 +410,7 @@ The algorithm substrate is fixed (HdrHistogram-style log-spaced bin counters, pe
 | Per-key value falls outside partition's current [min, max] | Triggers a rebin (Decision 5 doubling), repeated until the partition contains the value — there is no growth cap, so the rebinned partition always contains it however extreme it is. The Decision 4 overflow and underflow counters are guards against a growth cap that does not exist today: they stay at zero, and the per-quantile `out_of_range_bounded` field stays at `none`. |
 | Filtered run | The unified contract runs unconditionally. The filter context is reported in `-V` for analyst audit per R7. Filter-context audit is not a gate. |
 | User pins a surface to `raw` with a Decision 7 selector (`-dm`, `-mdm`, `-bdm`, `-hmdm`, `-hgdm`) | Every consumer on that surface runs its pre-migration code path; output is byte-identical to the pre-feature implementation per R11a. `-V` reports `user_opt_out` for those consumers per R10, and `unified` for consumers on surfaces left at `bin`. |
-| Highlight pattern present | The highlight subset streams its own parallel partitions and its percentiles come from them; it has no consumer name of its own in the `-V` block order, so no block reports it. |
+| Highlight pattern present | The highlight subset streams its own parallel partitions on the heatmap and histogram surfaces and its percentiles come from them. Each of those two stores has its own consumer name in the `-V` block order — `heatmap_cells_highlighted` and `histogram_view_highlighted` — reporting its own partitions, re-binning, payload and retention beside the parent's rather than folded into them (Decision 8's amendment of 2026-09-12). Both blocks are present on every run and report `path: feature_not_active` when no highlight is live. The per-message surface carries the highlight as a dimension of its compound `(category, log_key)` key, so its figures already move with the highlight and it has no separate name. |
 | Concurrent ltl processes | Inherited from #179; out of this feature's concern. |
 
 ## Acceptance criteria
@@ -1487,7 +1487,9 @@ Non-binding.
   - `docs/usage.md` — the parallel options reference, kept in agreement with `--help` in the same change (per CLAUDE.md § Before writing or changing code).
   - Analyst-facing guidance on when to pin a surface to `raw`: byte-identical comparison against a pre-migration release, or a nearest-rank reference to check a bin-model value against.
 
-### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473**
+### Decision 8 — `-V` reporting verbosity and format — **LOCKED (2026-05-19); section name amended 2026-05-20, re-locked to the shipped name 2026-08-27 via #460; display-dimensions sub-section locked 2026-08-27 via #473; highlight consumer names locked 2026-09-12 via #472; `consumers_active: none` retired 2026-09-13 via #546**
+
+> **Amendment 2026-09-13 (#546)**: `consumers_active: none` is retired. The state it announced — no consumer computing percentiles or bin counts this run — is reported by the per-consumer `path:` lines, which read `feature_not_active` on every consumer when no value the consumer would bin was observed. A second reporting surface for a state an existing locked field already carries is redundant contract, and the retirement follows the `path: pre_migration` precedent set on 2026-08-27 by #460. The section stays always present under `-V`: the run-level header and every per-consumer block in the locked display order are emitted on every run, including a run where nothing was matched. The same amendment locks the shared-partition **direction** and all three shipped pairs in the paragraph below, where only one pair was previously illustrated: the upstream is the consumer whose counter store the run's telemetry is snapshotted from. No field name, consumer-name string or per-consumer locking changes; all remain in effect verbatim. Record: `features/546-bin-counter-verbose-path-label-gate.md`.
 
 > **Amendment 2026-05-20 (#34 Phase 2)**: the section is named for the substrate rather than for one consumer family's output. The substrate is HdrHistogram-style histogram bin counters; percentiles are one of three derivations from it, alongside bin counts (`histogram_bins`) and cell colors (`heatmap_cells`), which are not percentiles. The emitting function is `emit_bin_counter_mode_verbose`, for the same reason. All field names, consumer-name strings, and per-consumer field-name lockings within Decision 8 remain in effect verbatim.
 >
@@ -1499,9 +1501,61 @@ Non-binding.
 >
 > All other Decision 8 field names, consumer-name strings, and per-consumer lockings remain in effect verbatim.
 
+> **Amendment 2026-09-12 (#472) — the highlight subsets are named consumers.** The
+> heatmap and histogram surfaces each stream a second partition store for the
+> highlighted subset, and the histogram's store is the source of the percentile
+> ladder published in the `-o` YAML aggregate export's `highlighted:` block. Two
+> consumer-name strings are locked for them and appended to the display order:
+>
+> | consumer name | what it covers | partition keying | percentile fields |
+> |---|---|---|---|
+> | `heatmap_cells_highlighted` | heatmap cell counts for the highlighted subset | `time_bucket` | none |
+> | `histogram_view_highlighted` | the highlighted subset's percentile ladder, as published in the aggregate export | `metric_global` | `percentiles_emitted` and `out_of_range_bounded` |
+>
+> Both blocks carry the **existing full block field set** in the locked field
+> order, measured over the highlight store rather than the parent store. No field
+> is redefined, no new field name is introduced, and no parent block's figures
+> change: the highlight is reported **beside** its parent, never inside it, so a
+> run's total is the reader's sum of the two blocks and never a single printed
+> figure. Neither is a `shares_partitions_with` consumer — each owns its store.
+> `heatmap_markers` and `histogram_bins` get no highlight twin: they share their
+> siblings' partitions, so a twin would restate a highlight parent's figures.
+>
+> `percentiles_emitted` on `histogram_view_highlighted` is the twelve-slug export
+> ladder (`p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999`), a longer set
+> than the ten slugs `histogram_view` reports. The parent's set is the on-screen
+> legend's; the highlight's is the export's. A field that reports which quantiles
+> a consumer publishes reports the true ones, so the two differ by design.
+>
+> **Both blocks always print**, honouring the section's always-present rule: when
+> the parent surface is inactive, or active with no live highlight, the block
+> carries `path: feature_not_active` alone, and when the surface resolved to the
+> raw data model it carries `path: user_opt_out` alone.
+>
+> **Display order**: appended, per the order clause below as written —
+> `heatmap_cells_highlighted` then `histogram_view_highlighted`, after
+> `histogram_bins`. The clause is not amended.
+>
+> **Invariant.** `rebin_finalize_events == partition_count` holds on
+> `heatmap_cells_highlighted` whenever it reports `path: unified`: the highlight
+> loop in `finalize_heatmap_unified()` projects each highlight partition exactly
+> once, counted at that site like the parent's. On `histogram_view_highlighted`
+> the equality holds **when every highlight partition carries at least one
+> observation**: the highlight branch of `finalize_histogram_unified()` skips the
+> projection for a metric whose highlight store holds none, while the partition is
+> still counted in `partition_count`.
+>
+> **The per-time-bucket surface gets no highlight consumer.** Its parity store
+> derived nothing and is retired under #472; see
+> `features/472-highlight-bin-counter-telemetry.md` D2. Record for the whole
+> amendment, with the decisions and their rationale, is that document.
+>
+> All other Decision 8 field names, consumer-name strings, and per-consumer
+> lockings remain in effect verbatim.
+
 #### Contract
 
-`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== histogram-bin-counters ===`. The section is **always present** under `-V`, regardless of which consumers are active; if no consumer is computing percentiles or bin counts in the current run, the section reports `consumers_active: none` after the run-level header.
+`-V` output for percentile and histogram bin-counter state lives in a dedicated section named `=== histogram-bin-counters ===`. The section is **always present** under `-V`, regardless of which consumers are active; when no consumer is computing percentiles or bin counts in the current run, every per-consumer block reports `path: feature_not_active`.
 
 The section's primary purpose is **testability and AI-agent debugging**. Field names are stable across releases; cosmetic changes to formatting that affect field-name greps require a new locked-decision entry. Reader-friendliness is secondary to grep-stability and coverage of the research-locked observability signals.
 
@@ -1570,7 +1624,21 @@ When `path: unified`, the following fields appear (in order):
 
 When `path: user_opt_out` or `path: feature_not_active`, no further fields appear in the block — the path line alone is the per-consumer report. The sort-based statistics path that `user_opt_out` reports keeps whatever observability it has of its own; this lock does not extend it.
 
-**Special case: shared-partition consumers**: when one consumer is a downstream rendering of another consumer's partitions (e.g., `csv_output` shares `%log_stats` with `summary_table`), the downstream consumer's block uses `shares_partitions_with: <upstream-consumer-name>` instead of repeating the partition-state fields. The block then carries only:
+**Special case: shared-partition consumers**: when one consumer is a downstream rendering of another consumer's partitions, the downstream consumer's block uses `shares_partitions_with: <upstream-consumer-name>` instead of repeating the partition-state fields.
+
+**The direction is decided by the store** (locked 2026-09-13 via #546): the upstream is the consumer whose counter store the run's telemetry is snapshotted from, and the downstream is the consumer given that same snapshot. The three shipped pairs:
+
+| downstream (emits the short block) | upstream (named in it) | store |
+|---|---|---|
+| `csv_output` | `summary_table` | the per-message per-key counters |
+| `heatmap_markers` | `heatmap_cells` | the per-time-bucket heatmap counters |
+| `histogram_bins` | `histogram_view` | the per-metric histogram counters |
+
+`time_bucket_stats` has a store of its own and belongs to no pair, so it always emits the full block.
+
+A downstream block can appear **before** its upstream's, because the locked display order below is independent of the sharing direction: `heatmap_markers` precedes `heatmap_cells`, while `histogram_bins` follows `histogram_view`. Direction is never inferred from position.
+
+The downstream block then carries only:
 - `path: unified` (or other R10 code).
 - `shares_partitions_with: summary_table` (the upstream consumer's name).
 - `percentiles_emitted: <space-separated list>` (may differ from the upstream consumer's set).
@@ -1587,8 +1655,10 @@ When `path: user_opt_out` or `path: feature_not_active`, no further fields appea
 | `heatmap_cells` | Path C2-cells | Heatmap cell colors themselves |
 | `histogram_view` | Path C1 | Histogram-mode global percentile indicators |
 | `histogram_bins` | Path C1-bins | Histogram-mode bin counts (bar heights) |
+| `heatmap_cells_highlighted` | Path C2-cells, highlighted subset | Heatmap cell counts for the highlighted subset, from its own streaming store (locked 2026-09-12 via #472) |
+| `histogram_view_highlighted` | Path C1, highlighted subset | The highlighted subset's percentile ladder, as published in the `-o` YAML aggregate export's `highlighted:` block, from its own streaming store (locked 2026-09-12 via #472) |
 
-The consumer-name strings are part of the locked feature contract. Future consumers (highlight subsets per Phase 4; future hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
+The consumer-name strings are part of the locked feature contract. The two highlight-subset names were locked under #472 (the 2026-09-12 amendment above); future consumers (hover-to-redraw renders per Phase 5) get their canonical names when their migration phase locks them.
 
 **Sub-section: `=== histogram-bin-counters / display-dimensions ===`** — **locked 2026-08-27 by #473.** When a histogram renders under the bin data model, the section additionally carries a per-metric line describing the geometry the chart is drawn on: sample count, observed min and max, decades spanned, bins per decade, and total buckets. It is produced in `finalize_histogram_unified()` and drained into the parent's brackets through the deferred sub-section buffer.
 
@@ -1596,15 +1666,14 @@ The name is contractual, and the reason is the epoch it distinguishes: every fie
 
 The raw path emits the same per-metric line shape as `=== histogram-array / dimensions ===`. That name is unqualified because its parent section reports nothing measured at another moment.
 
-**Section presence**: always emitted when `-V` is active. When no consumer is computing percentiles or bin counts (e.g., `ltl -ll <file> -V` with no percentile-relevant features enabled), the section consists of the run-level header followed by:
+**Section presence**: always emitted when `-V` is active. When no consumer is computing percentiles or bin counts, the section consists of the run-level header followed by the full block order, every block reporting `path: feature_not_active`. There is no run-level no-consumer line. An invocation that reaches the state, on a fixture whose lines carry an occurrence tally and no duration, bytes or count value:
 
 ```
-consumers_active: none
+ltl --disable-progress -ni -bs 1440 -oe -dm bin \
+  -V histogram-bin-counters tests/fixtures/format-detection/wgm-client.txt
 ```
 
-No per-consumer blocks in that case.
-
-**Display order of consumer blocks**: in the order listed in the consumer-name table above (`summary_table` first, then `csv_output`, then `time_bucket_stats`, then `heatmap_markers`, then `heatmap_cells`, then `histogram_view`, then `histogram_bins`). Deterministic ordering is required for regression testability; later-added consumers append to the end of this order.
+**Display order of consumer blocks**: in the order listed in the consumer-name table above (`summary_table` first, then `csv_output`, then `time_bucket_stats`, then `heatmap_markers`, then `heatmap_cells`, then `histogram_view`, then `histogram_bins`, then `heatmap_cells_highlighted`, then `histogram_view_highlighted`). Deterministic ordering is required for regression testability; later-added consumers append to the end of this order.
 
 **Stability contract**: the section name, all top-level field names, all consumer-name strings, and all per-consumer field names are part of the locked feature contract. Changing any of them requires a new locked-decision entry. Field *values* may evolve with the data; field *names* may not change without an explicit decision update.
 
@@ -1708,12 +1777,39 @@ consumer: summary_table
   out_of_range_bounded: p1=none p50=none p75=none p90=none p95=none p99=none p999=none
 ```
 
-No consumers active:
+No consumers active — the run matched no value any consumer would bin:
 
 ```
 === histogram-bin-counters ===
 data_model_precision: 5 (default)
-consumers_active: none
+
+consumer: summary_table
+  path: feature_not_active
+
+consumer: csv_output
+  path: feature_not_active
+
+consumer: time_bucket_stats
+  path: feature_not_active
+
+consumer: heatmap_markers
+  path: feature_not_active
+
+consumer: heatmap_cells
+  path: feature_not_active
+
+consumer: histogram_view
+  path: feature_not_active
+
+consumer: histogram_bins
+  path: feature_not_active
+
+consumer: heatmap_cells_highlighted
+  path: feature_not_active
+
+consumer: histogram_view_highlighted
+  path: feature_not_active
+=== END histogram-bin-counters ===
 ```
 
 **Source basis**: no industry-standard reference. The format mirrors ltl's existing `=== INDEX READ-BACK ===` block (`ltl:836` and following), which is the established convention for verbose observability sections in this codebase. ltl-specific decision per the conduct rules; documented as such.
@@ -1722,7 +1818,7 @@ consumers_active: none
 - **Mirror existing `=== INDEX READ-BACK ===` style** so that the regression-test corpus stays internally consistent and the AI agent's pattern-matching against `-V` output transfers across sections.
 - **Per-consumer blocks** rather than flat key-value list because there are multiple consumers and per-consumer state needs to be cleanly attributable; flat with consumer-prefix fields would be ugly and brittle.
 - **Inline `out_of_range_bounded:`** (Option A) for grep-friendliness — a test can grep `"out_of_range_bounded.*high"` to detect any quantile-overflow condition with a single regex.
-- **Always present under `-V`** for consistency — tests and AI agents always know where to look; the `consumers_active: none` case handles the no-percentile-feature scenario.
+- **Always present under `-V`** for consistency — tests and AI agents always know where to look; the no-value run is reported by `path: feature_not_active` on every consumer block.
 - **Locked consumer-name strings** so consumer-name changes require explicit decision updates; this protects regression tests from cosmetic-name churn.
 - **Stability contract** is the load-bearing property for the testability purpose — field names locked, field values free to evolve.
 
@@ -1736,10 +1832,10 @@ Non-binding.
   - Integer counts: bare decimal (`1247`, not `1,247`).
   - Byte counts (`counter_memory_bytes`): bare decimal bytes (`2643456`); do not format as KB/MB.
   - Percentile labels in inline lines: lowercase `p1`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999` (no period).
-- **`shares_partitions_with:`** is set by the implementer when the consumer reuses another consumer's `%log_stats` (or equivalent). For Phase 2's locked migrations, `csv_output` shares with `summary_table` (both consume `%log_stats` via the same `calculate_statistics` invocation today). Other shared-partition relationships should be declared explicitly in #189's audit findings or in the consumer's migration spec.
+- **`shares_partitions_with:`** is set on the downstream consumer of a pair, naming the upstream. The test that decides which is which is mechanical: the upstream is the consumer whose counter store the finalize sub passes to the telemetry snapshot, and the downstream is the consumer assigned that snapshot. The three pairs this resolves to are locked in the contract above. A new consumer that reads an existing consumer's store declares the pair the same way; a new consumer with a store of its own emits the full block and appears in no pair.
 - **Asserting the opt-out**: there is no run-level line to grep. A test that wants to assert a surface was pinned to `raw` reads that surface's consumer blocks and asserts `path: user_opt_out` on each, and asserts `path: unified` on the consumers of surfaces it left alone.
 - **`partition_keying:` description**: the human-readable string is free-form per consumer, but should be stable across runs for a given consumer. Suggested strings in the example above; consumer migrations may refine. The string should match what's in the spec's R12 audit for that consumer where possible.
-- **Empty `partition_count: 0`** edge case: when a consumer is on the `unified` path but no data triggered partition construction (e.g., zero matched values), the consumer's `path:` should be `feature_not_active`, not `unified`. Don't emit zero-partition blocks under `unified`.
+- **Empty `partition_count: 0`** edge case: when no data triggered partition construction (e.g., zero matched values), the consumer's `path:` is `feature_not_active`, not `unified`. Don't emit zero-partition blocks under `unified`. The mechanism is the activity gate the emitter reads before choosing the label: it conjoins the consumer's **demand** term (is the feature switched on) with an **observation** term (was a value the consumer would bin seen this run), following the shape `time_bucket_stats` already uses and calling `stats_csv_duration_columns_active()` for the CSV consumer rather than restating its terms. A gate that tests demand alone reports `unified` over an empty partition set, which is the case this bullet forbids.
 - **Tests for this section** in the `tests/baseline/` harness should be added per docs/process/workflow.md: at minimum a scenario asserting the section header and run-level fields exist; per migration phase, additional scenarios assert the migrated consumer's block appears with the expected `path:` value.
 
 ### Decision 9 — Phase 2 default activation policy — **DISSOLVED (2026-05-19): out of scope for #187**

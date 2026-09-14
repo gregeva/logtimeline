@@ -5,8 +5,7 @@
 #   1. The runtime-config -V section emits command-line and
 #      environment-variable sub-sections per the locked contract.
 #   2. Silent-override warnings fire on the documented sites
-#      (-g non-numeric, -hm non-built-in without UDM,
-#      --exact-percentiles deprecation).
+#      (-g non-numeric, -hm non-built-in without UDM).
 #   3. Hard-error paths (-du / -ru / -so unknown enums; nonexistent
 #      input file) exit non-zero with the documented diagnostic.
 # Usage: ./tests/validate-runtime-config.sh
@@ -455,7 +454,7 @@ scenario_no_warning_on_clean_run() {
 
     # None of the silent-override warnings should fire on a clean run.
     assert_no_line "$RUN_STDERR" \
-        pattern     "is not numeric|is not a built-in metric|--exact-percentiles is deprecated" \
+        pattern     "is not numeric|is not a built-in metric" \
         asserts     'A clean run produces none of the silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
         produced_by 'adapt_to_command_line_options() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'

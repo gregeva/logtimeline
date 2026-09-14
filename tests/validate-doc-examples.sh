@@ -141,6 +141,25 @@ emit_failure() {
     failures+=("$current_scenario :: $label")
 }
 
+# A working directory an example is about to run in carries no export product
+# this harness did not create. Finding one is a diagnosis, not something to
+# clean up: the file is named and the example fails, before any other action
+# (tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in).
+assert_working_directory_owned() {
+    local dir="$1" found
+    found="$(ls "$dir"/*-LTL-AGGREGATE.yaml "$dir"/*-LTL-STATS-*.csv "$dir"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
+    if [[ -n "$found" ]]; then
+        emit_failure \
+            label       "working directory owned" \
+            asserts     'The directory an example runs in holds no export product this harness did not create; a stranger is named and the example fails, never swept or deleted' \
+            produced_by 'assert_working_directory_owned() in tests/validate-doc-examples.sh' \
+            contract    'tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in' \
+            detail      "pre-existing product not written by this run: $found"
+        return 1
+    fi
+    return 0
+}
+
 # Apply substitutions to a command. Returns the substituted command on
 # stdout. If the command contains a placeholder with no mapping, OR a
 # glob/path-form pattern we can't safely substitute, returns empty
@@ -217,8 +236,21 @@ run_doc_example() {
     local ltl_args="${subbed#./ltl }"
     ltl_args="${ltl_args#ltl }"
 
-    local stdout_file="$TMP_DIR/$(echo "$current_scenario" | tr -c 'A-Za-z0-9._-' '_').stdout"
+    local slug; slug="$(echo "$current_scenario" | tr -c 'A-Za-z0-9._-' '_')"
+    local stdout_file="$TMP_DIR/$slug.stdout"
     local stderr_file="${stdout_file%.stdout}.stderr"
+
+    # The example runs in a scratch directory this harness created, so an
+    # example carrying -o writes its products there and never into the
+    # repository root (tests/HARNESS-DESIGN.md section A harness owns the
+    # directory it runs ltl in). Every file operand an executed example
+    # carries is an absolute path built by substitute_command(), so nothing
+    # depends on which directory the run happens in.
+    local run_dir="$TMP_DIR/run/$slug"
+    mkdir -p "$run_dir"
+    if ! assert_working_directory_owned "$run_dir"; then
+        return
+    fi
 
     # HARNESS-DESIGN.md Trap 1: preserve stderr, check the exit code
     # without set -e aborting the harness.
@@ -228,7 +260,7 @@ run_doc_example() {
     # The text is the repository's own documentation, not external input.
     set +e
     # shellcheck disable=SC2086
-    (cd "$REPO_DIR" && eval "\"\$LTL\" \$LTL_INJECT $ltl_args" > "$stdout_file" 2> "$stderr_file")
+    (cd "$run_dir" && eval "\"\$LTL\" \$LTL_INJECT $ltl_args" > "$stdout_file" 2> "$stderr_file")
     local ec=$?
     set -e
 

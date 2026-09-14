@@ -175,4 +175,8 @@ defects with one correct fix, and are not taken here:
   becomes its own consumer name or folds into the parent's figures is a Decision 8
   consumer-name question. Disposition A is a new locked-decision entry plus new harness
   scenarios; disposition B changes what six already-locked field descriptions mean.
-  Filed as #473's sibling, #472.
+  Filed as #473's sibling, #472. **Settled by the architect on 2026-09-12 and
+  specified in [`472-highlight-bin-counter-telemetry.md`](472-highlight-bin-counter-telemetry.md):**
+  the highlight subset gets its own consumer name on each surface that derives
+  something from a highlight store, so parent and highlight are sized separately;
+  the per-time-bucket parity store, which derives nothing, is retired instead.

@@ -15,3 +15,9 @@ requires 'Time::Local';
 requires 'Time::Piece';
 requires 'YAML::PP';
 requires 'YAML::PP::Common';
+requires 'YAML::PP::Schema::Core';
+requires 'YAML::PP::Schema::YAML1_1';
+
+on 'develop' => sub {
+    requires 'Devel::NYTProf';
+};

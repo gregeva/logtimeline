@@ -126,6 +126,25 @@ sudo apt-get install git-filter-repo  # Debian/Ubuntu
 
 Not needed for normal development.
 
+**Profiling tools:** performance work uses `Devel::NYTProf`, which is declared as a development-only dependency. Install it once:
+
+```bash
+LTL_INSTALL_DEV_DEPS=1 ./build/macos-setup.sh
+```
+
+Run the same command after `brew upgrade perl`. Homebrew installs CPAN modules per Perl minor version, inside that version's own directory, so an upgrade leaves your modules behind rather than migrating them; nothing is broken, they simply are not visible to the new Perl.
+
+Verify the install landed for the Perl that will run the profiler:
+
+```bash
+perl -MDevel::NYTProf::Data -e 'print "module ok\n"'
+./build/profiling-preflight.sh
+```
+
+The first line checks the module. The second also checks that the HTML report tool resolves, which is the part that fails quietly: `cpanm` installs scripts into the Perl keg's own `bin`, which Homebrew does not put on your PATH.
+
+A profiling run installs the tools itself if they are missing, and stops with the manual command if it cannot. See `features/nytprof-profiling-workflow.md` for how to profile.
+
 ## License
 
 LogTimeLine is licensed under the [Apache License, Version 2.0](LICENSE).

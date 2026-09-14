@@ -5,6 +5,12 @@
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
 # (Issues #305, #303), and the resolution when the run retains no message at
 # all (-n 0, or any non-positive count, Issue #458).
+#
+# Also asserts the representation of what the per-time-bucket store retains,
+# read from the `MEMORY log_analysis` row of `-V benchmark-data` (Issue #528):
+# `benchmark-data` is a transport with no owning harness, so each of its rows
+# is asserted by the harness owning the feature that produces it
+# (tests/HARNESS-DESIGN.md section Naming rules).
 # Usage: ./tests/validate-statistics-demand.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md
@@ -745,6 +751,255 @@ assert_command \
     asserts     'The MESSAGES CSV is the per-message store written out: with nothing retained no file is created, not even a header-only one' \
     produced_by 'pipeline_render() in ltl (MESSAGES CSV open gated on message retention)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
+echo
+
+############################################################
+# What the per-time-bucket store retains is not only how many durations, but
+# how wide each retained scalar is. A Perl scalar's body grows on demand and
+# never shrinks, every copy inherits a body able to carry what its source
+# carries, and the record lexicals are shared by every format for the whole
+# run — so one format transform assigning a value Perl represents as a double
+# into $duration widens every duration retained afterwards, for every format,
+# on every file. The startup extraction-parity gate executes every entry's
+# transforms against those lexicals before line 1, so the breach does not need
+# the run to encounter the offending format.
+#
+# The ceiling is one-sided, because the defect can only make the store larger.
+# On this fixture the two forms are separated by 8 bytes per retained duration:
+# 32,329 bytes as committed against 35,801 bytes with the coercion removed, a
+# 3,472-byte gap over 434 lines, each figure bit-identical across five runs.
+# The 33,000-byte ceiling sits 671 bytes above the committed figure and 2,801
+# below the breached one, so a hash-bucket resize or a fixture edit of a few
+# lines cannot trip it and a breach cannot hide under it. One run is therefore
+# enough; the tolerance carries the margin instead of repetition.
+#
+# The fixture's line count is stated with the threshold: a regeneration that
+# changed it changes the retained population, and that must surface as a
+# failure to be re-derived rather than pass as drift.
+#
+# Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
+# `-mem` because the structure rows are gated on it; `-bs 1440` folds the
+# fixture's 14.5 h span into one bucket, removing per-bucket hash overhead
+# that is unrelated to the signal and is the only observed source of variance;
+# `-oe` switches off the empty-bucket fill; `-n 1` because no rendered row is
+# read; `-V benchmark-data` narrows the output to the transport. The exact
+# byte counts are read rather than the `-mem` summary's whole-KiB rows, whose
+# rounding boundary sits close enough to the signal to move between runs of
+# the same build.
+current_scenario="scenario-13-retained-duration-representation"
+echo "--- $current_scenario ---"
+DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
+DURATION_SPREAD_LINES=434
+LOG_ANALYSIS_CEILING=33000
+REPRESENTATION_ASSERTS='The retained per-bucket durations carry no floating-point slot: a transform that assigns a double into a shared record lexical enlarges every duration retained afterwards, and the per-bucket statistics store grows by 8 bytes per retained duration when one does'
+REPRESENTATION_PRODUCED_BY='named_structure_sizes() in ltl, reached through measure_memory_structures(); the retained values come from the per-bucket durations push in read_and_process_logs()'
+REPRESENTATION_CONTRACT='features/528-record-lexical-retained-representation.md section The contract, and features/log-format-registry.md F11a: a transform may not leave a shared record lexical holding a value Perl represents as a double'
+
+if [[ ! -f "$DURATION_SPREAD_FIXTURE" ]]; then
+    echo "ERROR: fixture not found: $DURATION_SPREAD_FIXTURE"
+    exit 1
+fi
+
+rep_out=$(mktemp)
+"$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
+    "$DURATION_SPREAD_FIXTURE" > "$rep_out" 2>"$rep_out.stderr" || true
+check_capture_warnings "$rep_out"
+
+# The fixture's retained population is part of the threshold's derivation, so a
+# regeneration that changed the line count invalidates the ceiling rather than
+# drifting under it.
+actual_lines=$(wc -l < "$DURATION_SPREAD_FIXTURE" | tr -d ' ')
+assert_command \
+    command     "[[ '$actual_lines' -eq $DURATION_SPREAD_LINES ]]" \
+    label       "the fixture still carries $DURATION_SPREAD_LINES lines, the population the ceiling was derived from" \
+    asserts     "The retained-duration ceiling is derived from this fixture's $DURATION_SPREAD_LINES durations; a regenerated fixture with a different line count changes the retained population and the threshold must be re-derived rather than silently absorb the change" \
+    produced_by 'tests/duration-display/generate-fixture.py (fixture generator); the population is retained by the per-bucket durations push in read_and_process_logs()' \
+    contract    "$REPRESENTATION_CONTRACT"
+
+# A missing row is a hard failure: the assertion below compares a number, and an
+# absent row must never read as a value under the ceiling.
+log_analysis_bytes=$(awk -F'\t' '$1 == "MEMORY" && $2 == "log_analysis" { print $3; found=1 } END { exit !found }' "$rep_out") || log_analysis_bytes=""
+if [[ -z "$log_analysis_bytes" ]]; then
+    echo "  FAIL  $current_scenario"
+    echo "        pattern:     MEMORY<TAB>log_analysis<TAB><bytes>"
+    echo "        asserts:     $REPRESENTATION_ASSERTS"
+    echo "        produced_by: $REPRESENTATION_PRODUCED_BY"
+    echo "        contract:    $REPRESENTATION_CONTRACT"
+    echo "        (row absent from $rep_out — the size of the per-bucket statistics store could not be read, so nothing was measured)"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: memory-log_analysis-row-missing")
+else
+    assert_command \
+        command     "[[ '$log_analysis_bytes' -le $LOG_ANALYSIS_CEILING ]]" \
+        label       "MEMORY log_analysis is $log_analysis_bytes bytes, at or below the $LOG_ANALYSIS_CEILING ceiling" \
+        asserts     "$REPRESENTATION_ASSERTS" \
+        produced_by "$REPRESENTATION_PRODUCED_BY" \
+        contract    "$REPRESENTATION_CONTRACT"
+fi
+echo
+
+############################################################
+# The retained duration is the number, not the string the log line carried.
+# $duration is a shared record lexical whose body carries both the source
+# string and the integer the per-file index block's duration_sum read out of
+# it on the same line, and every copy inherits a body able to carry what its
+# source carries. No consumer of either duration-sample store reads that
+# string — the percentile path sorts numerically and indexes the sorted array,
+# the moments path sums and squares — so a plain copy retains 40 bytes of
+# string buffer per duration that nothing will ever read.
+#
+# The ceiling is one-sided in the same direction as scenario 13's: a revert of
+# the normalisation, at any of the five retention sites, can only make the
+# store larger. Measured on this fixture over five runs of each build under
+# the invocation below: 32,329 bytes retaining the string, 14,969 bytes
+# retaining the number, each bit-identical across its five runs. The delta is
+# 17,360 bytes, which is 40 bytes on each of the 434 retained durations. The
+# 20,000-byte ceiling sits 5,031 above the normalised figure and 12,329 below
+# the string one, so a hash-bucket resize cannot trip it and a revert cannot
+# hide under it.
+#
+# log_messages moves by one 1,024-byte hash-bucket resize step between runs of
+# the same build (49,875 on four runs and 48,851 on one, retaining the string),
+# which is why the assertion reads log_analysis alone — the same reason
+# scenario 13 gives. The per-message store's saving is read from the gate's
+# before/after benchmark instead.
+#
+# Invocation shape: identical to scenario 13's, and for the same reasons, so
+# that the two ceilings are read from the same measurement.
+current_scenario="scenario-14-retained-durations-are-numbers"
+echo "--- $current_scenario ---"
+NUMERIC_RETENTION_CEILING=20000
+NUMERIC_RETENTION_ASSERTS='Every duration the raw statistics model retains is normalised to a number at the copy, so the per-bucket store keeps no string buffer: retaining the string the log line carried costs 40 bytes per retained duration that no consumer of the store reads'
+NUMERIC_RETENTION_PRODUCED_BY='named_structure_sizes() in ltl, reached through measure_memory_structures(); the retained values come from the per-bucket durations push in read_and_process_logs()'
+NUMERIC_RETENTION_CONTRACT='features/561-retained-durations-as-numbers.md section The decisions carried over from the prototype section measured result, D1: the numeric normalisation happens at the copy, at each of the five retention sites'
+
+num_out=$(mktemp)
+"$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
+    "$DURATION_SPREAD_FIXTURE" > "$num_out" 2>"$num_out.stderr" || true
+check_capture_warnings "$num_out"
+
+# A missing row is a hard failure: an absent row must never read as a value
+# under the ceiling.
+num_analysis_bytes=$(awk -F'\t' '$1 == "MEMORY" && $2 == "log_analysis" { print $3; found=1 } END { exit !found }' "$num_out") || num_analysis_bytes=""
+if [[ -z "$num_analysis_bytes" ]]; then
+    echo "  FAIL  $current_scenario"
+    echo "        pattern:     MEMORY<TAB>log_analysis<TAB><bytes>"
+    echo "        asserts:     $NUMERIC_RETENTION_ASSERTS"
+    echo "        produced_by: $NUMERIC_RETENTION_PRODUCED_BY"
+    echo "        contract:    $NUMERIC_RETENTION_CONTRACT"
+    echo "        (row absent from $num_out — the size of the per-bucket statistics store could not be read, so nothing was measured)"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: memory-log_analysis-row-missing")
+else
+    assert_command \
+        command     "[[ '$num_analysis_bytes' -le $NUMERIC_RETENTION_CEILING ]]" \
+        label       "MEMORY log_analysis is $num_analysis_bytes bytes, at or below the $NUMERIC_RETENTION_CEILING ceiling the numeric retention produces" \
+        asserts     "$NUMERIC_RETENTION_ASSERTS" \
+        produced_by "$NUMERIC_RETENTION_PRODUCED_BY" \
+        contract    "$NUMERIC_RETENTION_CONTRACT"
+fi
+echo
+
+############################################################
+# Retaining the number rather than the string is visible on exactly one user
+# surface: `-cp full` passes a retained scalar to the file unformatted, so the
+# exported duration columns now carry the number's own spelling instead of the
+# log line's. On a format whose durations are written with fractional decimals
+# that drops trailing zeros the line carried — `5.000` exports as `5` and
+# `35.010` as `35.01`. The architect accepted that change as the trade for
+# halving the two duration-sample stores.
+#
+# Both halves of what was accepted are asserted here, because the decision
+# rests on them together: the spelling, so the accepted change is a stated
+# invariant that a later change cannot silently reverse or widen; and the
+# numeric equality with the spelling the log line carried, so that a
+# truncation — which int($duration) would produce, and which D1 rejects for
+# exactly this reason — fails rather than passes the spelling half.
+#
+# Invocation shape: `-o -cp full` because the export path under that one
+# precision mode is the whole subject; `-bs 1440 -oe` folds the fixture's
+# 11-second span into one bucket and switches off the empty-bucket fill, so
+# the STATS CSV carries a single row to read; `-n 1` because no rendered row
+# is read. The run gets a directory it owns, since -o writes into the CWD.
+current_scenario="scenario-15-exported-spelling-on-fractional-durations"
+echo "--- $current_scenario ---"
+FRACTIONAL_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-thread-session.txt"
+SPELLING_PRODUCED_BY='format_csv_value() in ltl, which returns the value unchanged under -cp full; the value is retained by the per-bucket durations push in read_and_process_logs()'
+SPELLING_CONTRACT='features/561-retained-durations-as-numbers.md section The exported-spelling finding: the -cp full spelling change on fractional-duration formats is accepted, the values unchanged'
+
+if [[ ! -f "$FRACTIONAL_FIXTURE" ]]; then
+    echo "ERROR: fixture not found: $FRACTIONAL_FIXTURE"
+    exit 1
+fi
+
+SPELLING_DIR="$WORKDIR/exported-spelling"
+mkdir -p "$SPELLING_DIR"
+# The directory a -o run writes into carries no product this harness did not
+# create; a stranger is named and the run stops, never swept or deleted
+# (tests/HARNESS-DESIGN.md section A harness owns the directory it runs ltl in).
+stranger="$(ls "$SPELLING_DIR"/*-LTL-STATS-*.csv "$SPELLING_DIR"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1 || true)"
+if [[ -n "$stranger" ]]; then
+    echo "ERROR: $current_scenario: pre-existing CSV product not written by this run: $stranger"
+    exit 1
+fi
+
+spell_out=$(mktemp)
+( cd "$SPELLING_DIR" && "$LTL" --disable-progress -bs 1440 -oe -n 1 -o -cp full \
+    "$FRACTIONAL_FIXTURE" > "$spell_out" 2>"$spell_out.stderr" ) || true
+check_capture_warnings "$spell_out"
+
+SPELLING_STATS_CSV="$(ls "$SPELLING_DIR"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)"
+if [[ -z "$SPELLING_STATS_CSV" ]]; then
+    echo "  FAIL  $current_scenario"
+    echo "        asserts:     A -cp full run writes the STATS CSV whose duration columns carry the retained spelling"
+    echo "        produced_by: $SPELLING_PRODUCED_BY"
+    echo "        contract:    $SPELLING_CONTRACT"
+    echo "        (no STATS CSV in $SPELLING_DIR — nothing was measured)"
+    fail=$((fail + 1))
+    failures+=("$current_scenario :: stats-csv-not-written")
+else
+    # Read the two columns by name from the header rather than by position, so
+    # a column added elsewhere in the row cannot move what is asserted. A
+    # header name that matches nothing yields an empty value, which fails the
+    # assertions below rather than passing them.
+    csv_column() {
+        awk -F',' -v want="$1" '
+            NR == 1 { for (i = 1; i <= NF; i++) { h = $i; gsub(/^"|"$/, "", h); if (h == want) col = i } next }
+            NR == 2 && col { v = $col; gsub(/^"|"$/, "", v); print v; found = 1 }
+            END { exit !found }
+        ' "$SPELLING_STATS_CSV"
+    }
+    dmin="$(csv_column duration_min || true)"
+    dp90="$(csv_column duration_p90 || true)"
+
+    assert_command \
+        command     "[[ '$dmin' == '5' ]]" \
+        label       "duration_min exports as '$dmin', the number's spelling and not the log line's 5.000" \
+        asserts     'Under -cp full a retained duration reaches the file with the number spelling, so a trailing zero the log line carried is not exported' \
+        produced_by "$SPELLING_PRODUCED_BY" \
+        contract    "$SPELLING_CONTRACT"
+    assert_command \
+        command     "[[ '$dp90' == '35.01' ]]" \
+        label       "duration_p90 exports as '$dp90', the number's spelling and not the log line's 35.010" \
+        asserts     'Under -cp full a retained fractional duration keeps its significant digits and loses only the trailing zeros the log line carried' \
+        produced_by "$SPELLING_PRODUCED_BY" \
+        contract    "$SPELLING_CONTRACT"
+    # The accepted change is a spelling change and nothing more: each exported
+    # value still equals the spelling the log line carried. A truncation would
+    # satisfy neither comparison.
+    assert_command \
+        command     "awk -v v='$dmin' 'BEGIN { exit !(v == 5.000) }'" \
+        label       "duration_min is numerically equal to the 5.000 the log line carried" \
+        asserts     'The accepted export change is a spelling change only: the exported duration equals the value the log line carried, so no consumer parsing the column numerically is affected' \
+        produced_by "$SPELLING_PRODUCED_BY" \
+        contract    "$SPELLING_CONTRACT"
+    assert_command \
+        command     "awk -v v='$dp90' 'BEGIN { exit !(v == 35.010) }'" \
+        label       "duration_p90 is numerically equal to the 35.010 the log line carried" \
+        asserts     'A retained fractional duration is normalised, never truncated: the exported value equals the log lines value rather than its integer part' \
+        produced_by "$SPELLING_PRODUCED_BY" \
+        contract    "$SPELLING_CONTRACT"
+fi
 echo
 
 ############################################################
