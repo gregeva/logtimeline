@@ -1892,6 +1892,20 @@ Readings: the combined search is as fast as shipped or faster everywhere except 
 
 Readings: the cutoff cuts the download cases at 80 and 85 from 270.9 and 218.3 s to 91.6 and 107.6 s, and leaves their grouping identical (the patterns at 80 and 85, and on the application log at 85, match the run without the cutoff exactly; the script log at 85 has the same 157 rows but a different pattern set, consistent with the hash-order dependence of the run without it). They remain 1.9–3.1× shipped. Peak memory rises because this copy builds both indexes. At `-g 80` on the download requests: 4,725 streaming searches in 55.4 s parse and 7,361 final-pass searches in 36.1 s. NYTProf on the day's first 25,000 download lines at `-g 80` (search count 4,686, equal to `-V`): 54 s CPU against 160 s without the cutoff; Dice 17.6 s (32%, 291,840 calls, the budget), the search's own walk 11.2 s (21%), both index builds 9.9 s (18%), `compute_mask` 7.7 s (14%). The hash index is read only by the candidate search, so the next variant does not fill it in cutoff mode, and tests replacing the budget with scoring a candidate once its hits reach a fraction of its bound.
 
+**Trigger by a fraction of the bound (`run-e2e-focus.sh`, bare `-V`, one run each, other prototype work sharing the machine).** With a fraction f, a candidate is scored once its hits reach ⌈f × bound⌉; Dice is exact, so one that fails cannot qualify and is dropped, which loses nothing. The hash index is not built. Total seconds and rows after grouping, same load within each case:
+
+| Case | Shipped | Budget 64 | Budget 0, f = ½ | Budget 0, f = ¼ | Budget 8, f = ½ |
+|---|---|---|---|---|---|
+| PLM download requests `-g 50` | 50.2 s, 74,305 | 5.5 s, 5 | 11.2 s, 8 | 7.9 s, 7 | 5.5 s, 5 |
+| same `-g 75` | 49.4 s, 74,305 | 6.2 s, 8 | 9.0 s, 8 | 7.7 s, 8 | 6.7 s, 8 |
+| same `-g 80` | 49.7 s, 74,305 | 82.7 s, 13,770 | **53.7 s**, 13,701 | 59.7 s, 13,770 | 62.9 s, 13,701 |
+| same `-g 85` (no partners) | 53.3 s, 74,305 | 64.7 s, 74,305 | **38.6 s**, 74,305 | 38.2 s, 74,305 | 54.8 s, 74,305 |
+| Application platform log `-g 85` | 7.0 s, 136 | 5.6 s, 106 | 6.0 s, 98 | 6.2 s, 106 | |
+
+Candidate searches made: at `-g 50` on the download requests, 72 with budget 64 against shipped's 38,305 (early patterns absorb the rest); at 85, 38,305 for every arm.
+
+**Memory.** Under `-mem` on the day's first 25,000 download lines at `-g 80`, shipped's candidate index peaks at 135.1 MB of postings plus 13.9 MB of posting sizes; the integer index reports 222.3 MB, a figure that includes the per-key trigram sets it only references (118.1 MB, also counted under `consolidation_key_trigrams`). Peak RSS: shipped 335.7 MB, cutoff search 359.5 MB (f = ½) and 359.8 MB (budget 64); total time 17.4, 18.0 and 25.2 s. The full-day runs above peaked at 563–571 MB because that copy kept each batch's integer index until the next was built; with it freed where the hash index is freed, the full day at f = ½ peaks at 388 MB at `-g 80` (45.2 s, 13,701 rows) and 352 MB at 85 (37.8 s, 74,305 rows), against shipped's 354–363 MB.
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
