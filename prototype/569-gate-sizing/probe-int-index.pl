@@ -188,8 +188,11 @@ my ($cut_visits, $cut_counting) = (0, 0);
 # $rare_max, when given, limits first-seen scoring to posting lists of at most that
 # many keys: a key's near-duplicate shares its rare trigrams, while a search with
 # no partner meets only failing candidates in the common lists.
+# $frac, when above 0, scores a candidate once its hits reach ceil(frac * bound);
+# Dice is exact, so a candidate that fails there cannot qualify and is dropped.
 sub hybrid_int_cut {
-    my ($source_key, $threshold_pct, $want, $budget, $rare_max) = @_;
+    my ($source_key, $threshold_pct, $want, $budget, $rare_max, $frac) = @_;
+    $frac //= 0;
     my $sid = $iid{$source_key};
     my $source_size = $isize[$sid];
     return () if $source_size == 0;
@@ -218,7 +221,7 @@ sub hybrid_int_cut {
         }
     }
 
-    my (@hits, @need, @deadline, @dying, @results);
+    my (@hits, @need, @verify_at, @deadline, @dying, @results);
     my $live = 0;
     $need[$sid] = -1;
     my $score_it = sub {
@@ -245,6 +248,7 @@ sub hybrid_int_cut {
                     if ($source_normalised || $inorm[$cid]) { $need = 1; }
                     else { $need = int(($sum_const + $threshold_pct * $cand_size) / 200) - $outside; $need = 1 if $need < 1; }
                     $need[$cid] = $need;
+                    $verify_at[$cid] = $frac > 0 ? max(1, int($need * $frac + 0.999)) : $need;
                     if ($need > 1) {
                         # With h hits after position i the candidate can still reach its bound
                         # while i <= p - 1 - need + h; one hit now gives deadline p - need.
@@ -260,7 +264,7 @@ sub hybrid_int_cut {
                     next;
                 }
                 my $h = ++$hits[$cid];
-                if ($h == $need) {
+                if ($h == $verify_at[$cid]) {
                     if ($need > 1) { $dying[$deadline[$cid]]--; $live--; }
                     $need[$cid] = -1;
                     $score_it->($cid);
@@ -311,7 +315,9 @@ my %arm  = (
     cut_rare64_b64_1  => sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 64, 64) },
     cut_rare256_b64_1 => sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 64, 256) },
 );
-my @arms = qw(shipped hybrid_str_b64_1 hybrid_int_b64_1 cut_int_b64_1 cut_int_b64_5 cut_int_b0_1);
+$arm{cut_int_f50_b0_1} = sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 0, undef, 0.5) };
+$arm{cut_int_f25_b0_1} = sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 0, undef, 0.25) };
+my @arms = qw(shipped hybrid_str_b64_1 hybrid_int_b64_1 cut_int_b64_1 cut_int_b0_1 cut_int_f50_b0_1 cut_int_f25_b0_1);
 my @src  = @keys[0 .. min($n_src, scalar @keys) - 1];
 
 my %best;
