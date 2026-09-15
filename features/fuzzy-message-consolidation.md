@@ -2251,6 +2251,30 @@ Shipped left 74,305 → 74,305 at every setting from 50 to 95. The range where g
 
 *The accepted case (D569-3).* The unfiltered day at `-du us -xqs -bs 1440 -n 15 -g 80`, `-V benchmark-data` `TIMING`: total 54.2 s (parse/read_files 41.4 s, finalize/group_similar 12.7 s), against the accepted about 76 s and shipped's 47.6 s.
 
+**Completion gate, before/after on this machine (2026-09-16).** Commit `22a7e8f`, `$version_number` restored, against the four `569-rebased-before` cases. Single run each; the benchmark ran with nothing else on the machine.
+
+| Case | `total` before → after | `rss_peak` before → after |
+|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.2 s → 9.5 s (+2.6%) | 98.5 → 98.3 MB |
+| `single-day-access-log-top25-consolidate` | 13.3 s → 12.0 s (−9.7%) | 130.9 → 130.3 MB |
+| `single-day-application-log-top25-consolidate` | 6.9 s → 9.0 s (**+31.4%**) | 131.7 → 172.7 MB (**+31.2%**) |
+| `humungous-log-uniqueness-top25-consolidate` | 12.2 s → 6.3 s (−48.7%) | 264.4 → 225.0 MB (−14.9%) |
+
+The application-log case breaches the 5% bound (criterion 6). Its cost sits in `finalize/group_similar` (0.287 s → 3.609 s) while `parse/read_files` falls (6.569 s → 5.401 s), and its surviving message rows rise from 136 to 4,498 (`COUNTS log_messages_entries`). That log carries a hex UUID on 13,996 of its 479,904 lines, 10,954 of them a `PersistentSession` entity name, which is the family § Pre-filter misses across log families measured at raw Dice 81 against normalised 100.
+
+*Attribution, three runs per arm on this machine, same case and options, medians with ranges.* Each arm is a worktree at that commit; `rows` is `COUNTS log_messages_entries`.
+
+| Arm | `total` | `finalize/group_similar` | `rss_peak` | rows |
+|---|---|---|---|---|
+| `8e6dd17` fixed pre-filter, Dice scored with UUIDs replaced | 7.011 s (6.804–7.468) | 0.283 s (0.264–0.302) | 131.7 MB | 136 |
+| `0c7c950` UUIDs compared as written, fixed pre-filter | 24.317 s (23.563–24.734) | 12.932 s (12.698–13.664) | 163.1 MB | 3,573 |
+| `22a7e8f` UUIDs as written **and** the new search | 8.786 s (8.759–8.909) | 3.524 s (3.509–3.539) | 172.9 MB | 4,498 |
+| `22a7e8f` with `-uuid` (two runs) | 5.492, 5.539 s | 0.320, 0.340 s | 112.7 MB | 103 |
+
+**The cost belongs to D569-2, not to the search.** Comparing UUIDs as written alone takes the case from 7.0 s to 24.3 s: keys that scored 100 against a placeholder score about 81 as written and stop grouping at the default 85, so surviving rows rise from 136 to 3,573 and the final pass carries them. The new search then recovers most of that, 24.3 s back to 8.8 s, leaving the case 25% slower and 31% heavier than before this issue. On this log it groups slightly less than the fixed pre-filter does with the same scoring (4,498 rows against 3,573), the pairing effect measured above.
+
+**The remedy D569-6 documents is measured.** With `-uuid`, the same run takes 5.5 s at 112.7 MB and 103 rows: faster, lighter and more grouped than before this issue, because masking applies before the key is built and the analyst chooses it.
+
 **Decision (architect, 2026-09-16): the mixed grouping change is accepted; the three references are re-captured.** `tests/statistics-drift/baselines/{tomcat,thingworx,thingworx-bin}-consolidated/messages.csv` are re-captured from the new search, and each scenario then passes: the change comes from the search, not from UUIDs being compared as written, which left every reference identical at the step before. The bin scenario's registered known failures still reproduce, none stale.
 
 ## Final pass follows the sensitivity (#571)
