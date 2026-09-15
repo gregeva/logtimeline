@@ -1725,7 +1725,17 @@ After firing, the counter resets to 0 and accumulation resumes.
 
 ## Finding: no groupings on keys whose rarest trigrams are per-request values (#569)
 
-**Status:** investigated — cause confirmed on the production code path, pre-filter misses measured across log families, industry grounding recorded, final-pass threshold measured against `-g`; no fix designed.
+**Status (2026-09-15):** investigation in progress; no fix designed. Cause of the download case confirmed on the production code path; pre-filter misses measured across log families; industry grounding recorded. The final-pass threshold part is resolved by #571 (final pass groups at a fixed 85% instead of the -g sensitivity), merged into this branch (`b94ea08`). After that merge the reproducing invocation is unchanged: 74,305 keys, 0 patterns, 74,305 evicted, 1,000 streaming and 37,305 final-pass candidate searches, all empty, 48 s; the final pass now scores at 50 and the pre-filter still blocks both passes.
+
+### Open items and next steps
+
+| # | Item | State | Next step |
+|---|---|---|---|
+| 1 | **Candidate pre-filter**: the fixed 50 rarest trigrams and 15 required hits in `find_consolidation_candidates()` miss 100% of download partners at T ≤ 80 | Cause proven (§ Mechanism, § Proof of cause). Direction from research (§ Industry grounding): probe length set by the threshold and the key's size with one shared token required. Architect's idea under discussion: slices of both the rare (different) and the common (same) trigrams, from counts rather than the trigrams themselves, adapting to how alike the population is. No design | Design after item 2, so it covers both miss mechanisms |
+| 2 | **UUID-bearing error keys**: 30–46% of partners missed at every T, including 95, on a small application ERROR batch (§ Pre-filter misses across log families) | Every miss at 95 contains a UUID; Dice is scored on UUID-normalised trigrams, the pre-filter on raw trigrams. Not the singleton mechanism (mean 0.6 selected trigrams unique to the source). Mechanism not established | **Next:** investigate why the pre-filter rejects these partners |
+| 3 | **Catch-all pattern**: without the include filters, `[200] GET /Windchill/*` absorbs every GET at T ≤ 65 (§ Related behaviour observed on the way) | Observed; not investigated. Not resolved by a pre-filter change | After item 1 |
+| 4 | **Literal values kept in patterns**: with the pre-filter opened, one download variant splits on the signing time's leading digits and one row keeps a literal file id and size (§ Proof of cause) | Observed; not investigated | After item 1 |
+
 
 ### Input and invocation
 
