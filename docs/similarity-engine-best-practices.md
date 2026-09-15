@@ -55,30 +55,21 @@ Similarity scoring should operate on the **message content only**, not the full 
 
 **Grouping key pattern:** `"$log_level|$thread|$object"` — only messages sharing the same grouping key enter pairwise comparison.
 
-### UUID Normalization Before Scoring
+### Score the Message as Written; Masking Is the Analyst's Step
 
-UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. A single UUID (36 chars) in a ~180-char message generates ~34 unique trigrams, dragging scores to 74-76% (below the 80% threshold).
+Similarity is scored on the message text as written, by every stage that reads it: candidate search, Dice scoring and alignment. Do not replace values (UUIDs, numbers, IDs) with placeholders inside the scorer:
 
-**Solution:** Normalize UUIDs to a placeholder (`<UUID>`) in the trigrams used for Dice scoring only. Do not normalize in the alignment pipeline — UUIDs get wildcarded naturally by character-level alignment.
+- **It hides information the analyst needs.** Whether the same identifiers recur, or change in only a few characters, is visible in a pattern that keeps the constant characters of an identifier and wildcards the ones that vary. A placeholder makes every identifier score alike.
+- **It splits what the stages read.** A candidate search whose bounds are computed on the raw text cannot guarantee anything about a score computed on normalised text; partners the scorer would accept are passed over.
 
-```perl
-my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-# Build normalized trigrams only for keys containing UUIDs
-if ($key =~ $uuid_re) {
-    my $normalized = $key;
-    $normalized =~ s/$uuid_re/<UUID>/g;
-    $key_trigrams_norm{$key} = get_trigrams($normalized);
-}
-```
-
-This fixes both a correctness gap (UUID-varying messages can now be consolidated) and a performance problem (414K fruitless Dice calls → 7.5K on diverse data).
+Masking values is an explicit step the analyst chooses, applied before consolidation (`-uuid`). It has a real effect on cost and grouping: a single UUID (36 chars) in a ~180-char message contributes ~34 trigrams no partner shares, holding Dice for otherwise identical messages at 74-76%. Where a log carries many UUIDs, masking them avoids a large amount of fruitless candidate scoring.
 
 ### Default Threshold: 85%
 
 `-g` without a value uses 85%. In ltl, 90% ran 2-3× slower on the benchmarks because fewer keys matched discovered patterns inline, and 85% is the default that balances that cost against grouping.
 
 The prototype's own iteration on its test data:
-- **85%** (initial design) — too high. Real messages with UUIDs scored 80-82% even after normalization.
+- **85%** (initial design) — too high for that data. Real messages carrying UUIDs scored 80-82% with the UUIDs replaced by a placeholder.
 - **75%** (first prototype fix) — too low. Caused false merges after merge-first generalization was added.
 - **80%** — the prototype's balance between false merges and missed patterns.
 
@@ -88,18 +79,21 @@ The prototype's own iteration on its test data:
 
 Before computing Dice coefficient, filter candidates by trigram set size. If source has S trigrams and threshold is T%, candidates must have between `S * T / (200 - T)` and `S * (200 - T) / T` trigrams. This rejects impossible matches without any set intersection work.
 
-### Discriminative Trigram Pre-filter
+### Candidate Search Sized From the Threshold (Prefix Filtering)
 
-When posting lists are large (common trigrams like `[WA`, `ARN`, `] [` appear in thousands of keys), use only the most discriminative trigrams for candidate search:
+When posting lists are large (common trigrams like `[WA`, `ARN`, `] [` appear in thousands of keys), candidate search must not walk them all, but every trigram it skips has to be justified by the requested similarity. Prefix filtering, the standard candidate generation for set-similarity joins, gives that justification for Dice: a key with |r| distinct trigrams can reach similarity T only with a partner sharing at least one of its p = |r| − ⌈T·|r|/(200 − T)⌉ + 1 rarest trigrams. The probe shrinks as T rises: for a 286-trigram key it is 191 trigrams at T=50, 96 at 80 and 28 at 95.
 
-1. Sort source trigrams by posting list size (ascending = most discriminative)
-2. Use only top-K trigrams (K=50) to build candidate set
-3. Require a loose minimum hit count (30% of K) for candidates
-4. Apply full Dice verification on the pre-filtered set
+1. **Index keys by integer id in size order.** Each batch gives its keys ids ordered by trigram count; each trigram maps to an ascending array of ids, so a range of sizes is a range of ids.
+2. **Probe sized from T.** Sort the source's trigrams by posting length (ties by trigram) and keep the first p.
+3. **Size filter as an id range.** The size bounds of § Size Filter Before Expensive Comparison become one id range, found by binary search; each posting array is walked from its first id in range.
+4. **Discovery bound by size.** At probe position i a candidate not yet seen can gather at most p − i hits, so only sizes s whose required hit count ⌈T·(|r| + s)/200⌉ − (|r| − p) is at most p − i are admitted.
+5. **Count bound, scored early.** Score a candidate with exact Dice once it holds a quarter of its required hits; drop it if Dice fails, or once the remaining probe positions cannot bring it to its requirement.
+6. **Skip consumed keys.** Keys the pass has already absorbed into a pattern are not discovered, so they cannot crowd out usable candidates.
+7. **Stop early.** Stop after the posting array that yields a partner, or once no seen candidate can still reach its requirement and no new size is admissible.
 
-This gave 4.8× speedup with zero missed matches at K=50, ratio=0.30 on one 200-key sample of a varied application log. Lower K values (20, 30) caused missed matches.
+Every bound follows from T and the two key sizes, so a key with a partner scoring at or above T always gets a candidate. The quarter is a cost choice, not a recall choice: on a batch of signed download requests, scoring at half the requirement cost 8.6-11.5 ms per search against 2.4-3.4 ms at a quarter, and neither lost a partner the bound finds.
 
-**Measured limitation:** K and the minimum hit count are fixed, independent of the threshold, the key's trigram count and the population. On keys whose rarest trigrams are per-line values (signed download URLs, UUIDs scored through normalisation but pre-filtered on raw trigrams) the pre-filter rejects partners that score above the threshold, up to every candidate. Measurements across log families: `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
+**Why a fixed filter fails.** Keeping a fixed number of rarest trigrams (50) and requiring a fixed number of them to be shared (15) ignores T and the key's size. It measured 4.8× faster with zero missed matches on one 200-key sample of a varied application log, and is nearly lossless on many logs, but for a 286-trigram key it is lossless only from about T=90. On keys whose rarest trigrams are per-request values (signatures and signing times in signed download URLs), those values fill the 50 with trigrams no other key shares, and every true partner falls short of 15: on a batch of such requests it passed over every partner at T ≤ 80. Any speed-motivated candidate filter needs a recall check against direct Dice scoring on real batches from several log families, at several thresholds. Measurements: `features/fuzzy-message-consolidation.md` § Pre-filter misses across log families and § Design: candidate search that finds every partner (#569).
 
 ## Pattern Management
 
@@ -134,11 +128,11 @@ Messages already appearing N or more times are excluded from discovery. They are
 
 **Ceiling=2 is too aggressive** — it shields too many keys from discovery, causing remaining count to balloon (58 → 217 on diverse data). Ceiling 3-5 produce nearly identical results. Err on the side of letting more keys through.
 
-### Final Pass (on by default, fixed threshold 85%, ceiling 1M)
+### Final Pass (on by default, threshold follows `-g`, ceiling 1M)
 
 A separate pass after main processing that consolidates ceiling-excluded stragglers sharing obvious patterns (e.g., same message across 16 thread pools). A 95% threshold missed access-log targets entirely: their keys are shorter with smaller variable regions and score 85-87%.
 
-The final pass scores at a fixed 85% (hidden `--final-threshold`) whatever `-g` is set to, so a `-g` below 85 is not applied to the keys it handles and a `-g` above 85 is loosened there. This bounds final-pass effort and is an open gap, tracked with final-pass performance in #142 and recorded in `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
+The final pass scores at the same threshold as main discovery: the `-g` value, or its default. A separate final-pass threshold silently loosens or tightens the requested grouping for every key the final pass handles. The hidden `--final-threshold` remains as an explicit diagnostic override. At high sensitivity the final pass absorbs less per pattern and makes more candidate searches, so it is slower; that cost is accepted and tracked with final-pass performance in #142. Measurements: `features/fuzzy-message-consolidation.md` § Final pass follows the sensitivity (#571).
 
 ### Message Length Cap
 

@@ -665,8 +665,8 @@ my %option_overrides;
 
 # Consolidation data structures (Issue #96 - Fuzzy Message Consolidation)
 my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_message );
-my ( %consolidation_unmatched, %consolidation_ngram_index, %consolidation_posting_size );
-my ( %consolidation_key_trigrams, %consolidation_key_trigrams_norm );
+my ( %consolidation_unmatched, %consolidation_id_index );
+my %consolidation_key_trigrams;
 my %consolidation_cat_stats;
 my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
@@ -684,13 +684,10 @@ my $consolidation_occurrence_ceiling = 3;
 my $consolidation_max_patterns       = 0;  # 0 = unlimited (adaptive eviction bounds the working set)
 my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorption rate (higher = faster response)
 my $consolidation_final_pass         = 1;
-my $consolidation_final_threshold    = 85;
+my $consolidation_final_threshold;          # unset: the final pass scores at the -g sensitivity; --final-threshold overrides it
 my $consolidation_final_ceiling      = 1_000_000;
-my $consolidation_discriminative_topk = 50;
-my $consolidation_prefilter_ratio    = 0.30;
 my $max_observed_message_length      = 0;
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
-my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -9583,7 +9580,7 @@ sub print_help {
 
     # Message Grouping
     $out .= help_subheading("Message Grouping");
-    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified.");
+    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with -uuid is advisable, as they make the similarity comparison do much more work.");
     $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
     $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
     $out .= help_opt("-xs,  --expose-session",       "Keep session IDs when grouping messages, so each session is tracked separately");
@@ -10474,17 +10471,16 @@ sub group_similar_messages {
         %consolidation_key_message_cat_gk = ();
         %consolidation_key_generation = ();
         %consolidation_key_checkpoint_count = ();
-        %consolidation_ngram_index = ();
+        %consolidation_id_index = ();
         %consolidation_key_trigrams = ();
-        %consolidation_key_trigrams_norm = ();
-        %consolidation_posting_size = ();
         %consolidation_category_unmatched_count = ();
         %consolidation_absorption_ema = ();
         # Preserved: %consolidation_patterns, %consolidation_clusters, %consolidation_pattern_generation, %consolidation_cat_stats
 
-        # Swap threshold for final pass (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
+        # The final pass scores at the -g sensitivity unless --final-threshold was given
+        # (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
         my $saved_threshold = $consolidation_threshold;
-        $consolidation_threshold = $consolidation_final_threshold;
+        $consolidation_threshold = $consolidation_final_threshold // $consolidation_threshold;
 
         $consolidation_phase = 'final_pass';
         my $fp_total_new_patterns = 0;
@@ -10738,98 +10734,131 @@ sub dice_coefficient {
     return int((2 * $intersection * 100) / ($size_a + $size_b));
 }
 
-# Build ngram index for a set of keys within a consolidation category
+# Build the candidate index for a set of keys within a consolidation category.
+# Keys get integer ids in order of trigram count, then batch order, so every
+# posting array (trigram -> ids) is ordered by key size and a search can crop it
+# to the sizes its threshold admits.
 sub build_consolidation_ngram_index {
     my ($cat_gk, $log_keys_ref) = @_;
-    my $indexed = 0;
+    my (@batch, %batch_pos, %trigram_count);
     for my $log_key (@$log_keys_ref) {
         my $msg = $consolidation_key_message{$log_key};
         next unless defined $msg;
+        next if exists $batch_pos{$log_key};
         # Reuse existing trigrams for surviving keys (#135: avoid recomputing across checkpoints)
-        my $trigrams = $consolidation_key_trigrams{$log_key};
-        if (!$trigrams) {
-            $trigrams = get_consolidation_trigrams($msg);
-            $consolidation_key_trigrams{$log_key} = $trigrams;
-            # Build UUID-normalized trigrams for Dice scoring
-            if ($msg =~ $uuid_re) {
-                (my $normalized = $msg) =~ s/$uuid_re/<UUID>/g;
-                $consolidation_key_trigrams_norm{$log_key} = get_consolidation_trigrams($normalized);
-            }
-        }
-        for my $trig (keys %$trigrams) {
-            $consolidation_ngram_index{$cat_gk}{$trig}{$log_key} = 1;
-        }
-        $indexed++;
+        my $trigrams = $consolidation_key_trigrams{$log_key} //= get_consolidation_trigrams($msg);
+        $batch_pos{$log_key} = scalar @batch;
+        $trigram_count{$log_key} = scalar keys %$trigrams;
+        push @batch, $log_key;
     }
-    # Cache posting list sizes for discriminative trigram selection
-    delete $consolidation_posting_size{$cat_gk};
-    for my $trig (keys %{$consolidation_ngram_index{$cat_gk}}) {
-        $consolidation_posting_size{$cat_gk}{$trig} = scalar keys %{$consolidation_ngram_index{$cat_gk}{$trig}};
+    my (%ids, @keys, @size, @trig, %post);
+    for my $log_key (sort { $trigram_count{$a} <=> $trigram_count{$b} || $batch_pos{$a} <=> $batch_pos{$b} } @batch) {
+        my $id = scalar @keys;
+        push @keys, $log_key;
+        $ids{$log_key} = $id;
+        $size[$id] = $trigram_count{$log_key};
+        $trig[$id] = $consolidation_key_trigrams{$log_key};
+        push @{$post{$_}}, $id for keys %{$trig[$id]};
     }
-    return $indexed;
+    $consolidation_id_index{$cat_gk} = { ids => \%ids, keys => \@keys, size => \@size, trig => \@trig, post => \%post };
+    return scalar @keys;
 }
 
-# Find candidate keys similar to source_key using discriminative trigram pre-filter + Dice verification
+# Find keys whose Dice score against $source_key reaches $threshold_pct, skipping keys
+# in %$consumed_ref. The probe is the source's rarest trigrams, as many as guarantee a
+# partner at the threshold shares at least one. A candidate needs a number of shared
+# probe trigrams set by its size; it is scored once it holds a quarter of them and
+# dropped once the positions left cannot supply the rest. The walk ends after the probe
+# trigram that yields a partner, or once no candidate seen or still unseen can qualify.
+# Returns { key, score } records, best score first, then by key.
 sub find_consolidation_candidates {
-    my ($cat_gk, $source_key, $threshold_pct, $max_candidates) = @_;
-    $max_candidates //= 50;
-    my $source_trigrams = $consolidation_key_trigrams{$source_key};
-    return () unless defined $source_trigrams;
-
-    my $source_size = scalar keys %$source_trigrams;
+    my ($cat_gk, $source_key, $threshold_pct, $consumed_ref) = @_;
+    my $index = $consolidation_id_index{$cat_gk} or return ();
+    my $sid = $index->{ids}{$source_key};
+    return () unless defined $sid;
+    my ($keys, $size, $trig, $post) = @{$index}{qw(keys size trig post)};
+    my $source_size = $size->[$sid];
     return () if $source_size == 0;
+    my $t = $threshold_pct;
 
-    # Length pre-filter: Dice >= T% requires |B| >= |A|*T/(200-T)
-    my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
-    my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
+    # Probe length p = |r| - ceil(T*|r|/(200-T)): a partner at T shares one of these
+    my %posting_length = map { $_ => scalar @{$post->{$_}} } keys %{$trig->[$sid]};
+    my @probe = sort { $posting_length{$a} <=> $posting_length{$b} || $a cmp $b } keys %posting_length;
+    my $p = $source_size - int(($source_size * $t + (200 - $t) - 1) / (200 - $t)) + 1;
+    $p = 1 if $p < 1;
+    $p = @probe if $p > @probe;
+    my $outside = $source_size - $p;
+    # Size filter: Dice >= T% requires |r|*T/(200-T) <= |c| <= |r|*(200-T)/T
+    my $min_cand_size = int($source_size * $t / (200 - $t));
+    my $max_cand_size = int($source_size * (200 - $t) / $t) + 1;
+    # int(($sum_const + T*s) / 200) = ceil(T*(|r|+s)/200)
+    my $sum_const = $t * $source_size + 199;
 
-    # Phase 1: top-K most discriminative trigrams (smallest posting lists)
-    my $ps = $consolidation_posting_size{$cat_gk};
-    my @disc_trigrams = sort { (($ps->{$a} // 0) <=> ($ps->{$b} // 0)) || ($a cmp $b) }
-                        grep { exists $consolidation_ngram_index{$cat_gk}{$_} }
-                        keys %$source_trigrams;
-    my $topk_actual = min($consolidation_discriminative_topk, scalar @disc_trigrams);
-    splice(@disc_trigrams, $topk_actual) if @disc_trigrams > $topk_actual;
+    # Ids are ordered by size, so the size filter is the id range [$id_lo, $id_hi]
+    my ($lo, $hi) = (0, scalar @$size);
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] < $min_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_lo = $lo;
+    $hi = scalar @$size;
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $max_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_hi = $lo - 1;
 
-    my $loose_min = max(1, int($consolidation_prefilter_ratio * $topk_actual));
-
-    my %candidate_hits;
-    for my $trig (@disc_trigrams) {
-        for my $cand_key (keys %{$consolidation_ngram_index{$cat_gk}{$trig}}) {
-            next if $cand_key eq $source_key;
-            $candidate_hits{$cand_key}++;
+    # $need[id]: shared probe trigrams the candidate requires (-1 once scored or dropped)
+    my (@need, @hits, @score_at, @deadline, @dying, @results);
+    my $live = 0;
+    $need[$sid] = -1;
+    for my $i (0 .. $p - 1) {
+        # A candidate first seen here gathers at most p - i hits, so only sizes s with
+        # ceil(T*(|r|+s)/200) - (|r| - p) <= p - i can still qualify; those end at $new_hi
+        my $s_max = int(200 * ($p - $i + $outside) / $t) - $source_size;
+        ($lo, $hi) = ($id_lo, $id_hi + 1);
+        while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $s_max) { $lo = $mid + 1 } else { $hi = $mid } }
+        my $new_hi = $lo - 1;
+        # While candidates are live they keep gathering hits across the whole size range
+        my $end_id = $live > 0 ? $id_hi : $new_hi;
+        if ($end_id >= $id_lo) {
+            my $list = $post->{$probe[$i]};
+            ($lo, $hi) = (0, scalar @$list);
+            while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($list->[$mid] < $id_lo) { $lo = $mid + 1 } else { $hi = $mid } }
+            for my $k ($lo .. $#$list) {
+                my $cid = $list->[$k];
+                last if $cid > $end_id;
+                my $need = $need[$cid];
+                if (!defined $need) {
+                    next if $cid > $new_hi;
+                    if ($consumed_ref && $consumed_ref->{$keys->[$cid]}) { $need[$cid] = -1; next; }
+                    $need = int(($sum_const + $t * $size->[$cid]) / 200) - $outside;
+                    $need = 1 if $need < 1;
+                    $need[$cid] = $need;
+                    $score_at[$cid] = int(($need + 3) / 4);
+                    if ($need > 1) {
+                        # With h hits it can still reach its bound while the position is at most p - need + h - 1
+                        my $d = $p - $need;
+                        if ($d < $i) { $need[$cid] = -1; next; }
+                        $deadline[$cid] = $d;
+                        $dying[$d]++;
+                        $live++;
+                    }
+                }
+                next if $need < 0;
+                if ($need > 1 && defined $hits[$cid] && $deadline[$cid] < $i - 1) { $need[$cid] = -1; next; }
+                my $h = ++$hits[$cid];
+                if ($h == $score_at[$cid]) {
+                    if ($need > 1) { $dying[$deadline[$cid]]--; $live--; }
+                    $need[$cid] = -1;
+                    my $score = dice_coefficient($trig->[$sid], $trig->[$cid]);
+                    push @results, { key => $keys->[$cid], score => $score } if $score >= $t;
+                } elsif ($h > 1) {
+                    $dying[$deadline[$cid]]--;
+                    $deadline[$cid]++;
+                    $dying[$deadline[$cid]]++;
+                }
+            }
         }
+        $live -= $dying[$i - 1] // 0 if $i > 0;
+        last if @results;
+        last if $new_hi < $id_lo && $live <= 0;
     }
-
-    # Phase 2: Full Dice verification using UUID-normalized trigrams when available
-    my $source_trig_dice = $consolidation_key_trigrams_norm{$source_key} // $source_trigrams;
-    my $source_size_dice = scalar keys %$source_trig_dice;
-    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
-    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
-
-    my @results;
-    for my $cand_key (keys %candidate_hits) {
-        next if $candidate_hits{$cand_key} < $loose_min;
-
-        my $cand_trigrams = $consolidation_key_trigrams{$cand_key};
-        next unless defined $cand_trigrams;
-
-        my $cand_size = scalar keys %$cand_trigrams;
-        next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
-
-        my $cand_trig_dice = $consolidation_key_trigrams_norm{$cand_key} // $cand_trigrams;
-        my $cand_size_dice = scalar keys %$cand_trig_dice;
-        next if $cand_size_dice < $min_dice_size || $cand_size_dice > $max_dice_size;
-
-        my $score = dice_coefficient($source_trig_dice, $cand_trig_dice);
-        if ($score >= $threshold_pct) {
-            push @results, { key => $cand_key, score => $score };
-        }
-    }
-
-    @results = sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
-    splice(@results, $max_candidates) if @results > $max_candidates;
-    return @results;
+    return sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
 }
 
 # Pure Perl banded edit distance with backtrace — returns mask arrayref (1=keep, 0=variable)
@@ -11559,7 +11588,7 @@ sub run_consolidation_pass {
     my $index_limit = min($consolidation_trigger, scalar @gate2_survivors);
     my @index_batch = @gate2_survivors[0 .. $index_limit - 1];
 
-    delete $consolidation_ngram_index{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
     build_consolidation_ngram_index($cat_gk, \@index_batch);
 
     my $patterns_discovered = 0;
@@ -11583,7 +11612,7 @@ sub run_consolidation_pass {
 
         $keys_searched++;
         $fc_calls++;
-        my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_threshold);
+        my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_threshold, \%consumed);
 
         for my $match (@matches) {
             next if $consumed{$match->{key}};
@@ -11702,7 +11731,7 @@ sub process_final_pass_window {
     }
 
     # Build trigram index for window
-    delete $consolidation_ngram_index{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
     build_consolidation_ngram_index($cat_gk, \@key_list);
 
     # Build window-local partition buckets for re-scan
@@ -11727,7 +11756,7 @@ sub process_final_pass_window {
 
         $keys_searched++;
         $fc_calls++;
-        my @matches = find_consolidation_candidates($cat_gk, $log_key, $consolidation_threshold);
+        my @matches = find_consolidation_candidates($cat_gk, $log_key, $consolidation_threshold, \%consumed);
 
         for my $match (@matches) {
             next if $consumed{$match->{key}};
@@ -11836,10 +11865,8 @@ sub process_final_pass_window {
     for my $log_key (@key_list) {
         delete $consolidation_key_message{$log_key};
         delete $consolidation_key_trigrams{$log_key};
-        delete $consolidation_key_trigrams_norm{$log_key};
     }
-    delete $consolidation_ngram_index{$cat_gk};
-    delete $consolidation_posting_size{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
 
     return ($patterns_discovered, $messages_absorbed - $rescan_absorbed, $rescan_absorbed, $fc_calls, $messages_absorbed, $cross_merges);
 }
@@ -11957,7 +11984,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 delete $consolidation_unmatched{$cat_gk}{$key};
@@ -11996,14 +12022,12 @@ sub run_consolidation_checkpoint {
         delete $consolidation_key_message{$key};
         delete $consolidation_key_message_cat_gk{$key};
         delete $consolidation_key_trigrams{$key};
-        delete $consolidation_key_trigrams_norm{$key};
         delete $consolidation_key_generation{$key};
         delete $consolidation_key_checkpoint_count{$key};
     }
 
     # Free index structures (per-checkpoint, not per-key)
-    delete $consolidation_ngram_index{$cat_gk};
-    delete $consolidation_posting_size{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
 
     # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
@@ -12049,7 +12073,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 $evicted++;
@@ -12098,10 +12121,8 @@ sub named_structure_sizes {
         consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
         consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
         consolidation_unmatched => Devel::Size::total_size(\%consolidation_unmatched),
-        consolidation_ngram_index => Devel::Size::total_size(\%consolidation_ngram_index),
-        consolidation_posting_size => Devel::Size::total_size(\%consolidation_posting_size),
+        consolidation_id_index => Devel::Size::total_size(\%consolidation_id_index),
         consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
-        consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
 }
 
@@ -18699,9 +18720,8 @@ sub print_verbose_output {
         printf "MEMORY_FINAL\tconsolidation_patterns\t%d\n", Devel::Size::total_size(\%consolidation_patterns);
         printf "MEMORY_FINAL\tconsolidation_key_message\t%d\n", Devel::Size::total_size(\%consolidation_key_message);
         printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
-        printf "MEMORY_FINAL\tconsolidation_ngram_index\t%d\n", Devel::Size::total_size(\%consolidation_ngram_index);
+        printf "MEMORY_FINAL\tconsolidation_id_index\t%d\n", Devel::Size::total_size(\%consolidation_id_index);
         printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
-        printf "MEMORY_FINAL\tconsolidation_key_trigrams_norm\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams_norm);
     }
 
     # Hash entry counts for key structures
@@ -20877,7 +20897,7 @@ sub pipeline_finalize {
             push @verbose_output, "=== message-grouping ===";
             push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
                 $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
-                $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
+                $consolidation_final_pass ? "on (threshold=" . ($consolidation_final_threshold // $consolidation_threshold) . "%, ceiling=${consolidation_final_ceiling})" : "off");
 
             my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
             my $grand_checkpoints = 0;

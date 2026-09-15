@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+errors-ERROR	50	500	499	0	0	11.087
+errors-ERROR	60	500	499	0	0	11.209
+errors-ERROR	70	500	498	0	0	9.431
+errors-ERROR	75	500	498	0	0	9.368
+errors-ERROR	80	500	496	0	0	7.442
+errors-ERROR	85	500	257	0	0	1.915
+errors-ERROR	90	500	0	0	0	0.695
+errors-ERROR	95	500	0	0	0	0.396

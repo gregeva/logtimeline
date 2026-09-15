@@ -1,0 +1,17 @@
+label	keys	sources	T	arm	partner	found	missed	miss_rate	probe_len_median	posting_visits_median	dice_per_search	returned_per_search	ms_median	ms_min	ms_max
+script-ERROR	209	209	50	shipped	208	207	1	0.5%	50	1408	30.5	28.0	0.504	0.499	0.515
+script-ERROR	209	209	50	sized	208	208	0	0.0%	95	4008	180.9	36.5	2.022	2.022	2.023
+script-ERROR	209	209	60	shipped	206	206	0	0.0%	50	1408	29.6	26.9	0.493	0.490	0.498
+script-ERROR	209	209	60	sized	206	206	0	0.0%	82	2676	123.9	29.3	1.419	1.394	1.431
+script-ERROR	209	209	70	shipped	204	204	0	0.0%	50	1408	29.1	22.6	0.491	0.481	0.498
+script-ERROR	209	209	70	sized	204	204	0	0.0%	66	1789	76.7	22.7	0.956	0.952	0.977
+script-ERROR	209	209	75	shipped	204	204	0	0.0%	50	1408	29.0	20.3	0.492	0.491	0.493
+script-ERROR	209	209	75	sized	204	204	0	0.0%	57	1393	59.5	20.4	0.783	0.769	0.785
+script-ERROR	209	209	80	shipped	201	201	0	0.0%	50	1408	28.5	18.3	0.484	0.479	0.496
+script-ERROR	209	209	80	sized	201	201	0	0.0%	48	1030	47.2	18.4	0.656	0.633	0.656
+script-ERROR	209	209	85	shipped	197	197	0	0.0%	50	1408	26.8	16.3	0.466	0.466	0.474
+script-ERROR	209	209	85	sized	197	197	0	0.0%	38	704	34.5	16.3	0.502	0.500	0.511
+script-ERROR	209	209	90	shipped	191	191	0	0.0%	50	1408	26.2	11.8	0.466	0.458	0.470
+script-ERROR	209	209	90	sized	191	191	0	0.0%	26	408	27.0	11.8	0.418	0.416	0.420
+script-ERROR	209	209	95	shipped	157	157	0	0.0%	50	1408	20.1	8.7	0.424	0.424	0.433
+script-ERROR	209	209	95	sized	157	157	0	0.0%	14	130	18.4	8.7	0.306	0.301	0.307

@@ -59,7 +59,7 @@ A checkpoint fires when the count of unmatched keys in any category exceeds a th
 
 ### Memory Lifecycle
 
-Transient data structures (trigram indices, posting lists, normalized trigram caches) are built and freed per checkpoint. Only compiled patterns and cluster metadata persist across checkpoints.
+Transient data structures (the per-key trigram cache and the integer-id candidate index with its posting arrays) are built and freed per checkpoint, and per final-pass window. Only compiled patterns and cluster metadata persist across checkpoints.
 
 ```
 Checkpoint lifecycle:

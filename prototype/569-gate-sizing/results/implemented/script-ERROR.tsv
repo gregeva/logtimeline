@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+script-ERROR	50	209	208	0	0	0.192
+script-ERROR	60	209	206	0	0	0.204
+script-ERROR	70	209	204	0	0	0.216
+script-ERROR	75	209	204	0	0	0.185
+script-ERROR	80	209	201	0	0	0.190
+script-ERROR	85	209	197	0	0	0.176
+script-ERROR	90	209	191	0	0	0.164
+script-ERROR	95	209	157	0	0	0.144

@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+script-INFO	50	500	500	0	0	0.381
+script-INFO	60	500	500	0	0	0.344
+script-INFO	70	500	500	0	0	0.326
+script-INFO	75	500	493	0	0	0.313
+script-INFO	80	500	493	0	0	0.324
+script-INFO	85	500	493	0	0	0.275
+script-INFO	90	500	488	0	0	0.223
+script-INFO	95	500	233	0	0	0.495

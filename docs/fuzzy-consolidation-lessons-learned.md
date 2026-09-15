@@ -89,9 +89,29 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **What happened on access logs:** Access log keys are shorter with smaller variable regions, producing Dice scores of 85-87% (below the 95% threshold). High-value targets had 10,000+ occurrences (above ceiling 100). The final pass was completely ineffective.
 
-**Resulting defaults:** final pass on by default, ceiling 1M. Its threshold in ltl is a fixed 85% (hidden `--final-threshold`) that does not follow the `-g` value; see #142 (final pass performance on XL consolidation benchmarks) and `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
+**Resulting defaults:** final pass on by default, ceiling 1M, scoring at the `-g` sensitivity (hidden `--final-threshold` overrides it). A fixed final-pass threshold was kept for a time to bound final-pass effort, and silently changed the grouping users asked for; see `features/fuzzy-message-consolidation.md` § Final pass follows the sensitivity (#571) and #142 (final pass performance on XL consolidation benchmarks).
 
 **Lesson:** Validate configuration defaults across all supported input formats. What works for one format can be useless for another. When in doubt, choose the more permissive setting — it does slightly more work but doesn't miss targets.
+
+### A Candidate Filter Tuned on One Sample Dropped Every Partner
+
+**What we assumed:** Candidate search could keep each key's 50 rarest trigrams and require 15 of them to be shared (PF-18). On a 200-key sample of a varied application log this was 4.8× faster with zero missed matches, and the two numbers became a best practice.
+
+**What happened:** Neither number follows the similarity threshold or the key's size. On signed download requests in an access log with the query string kept, the rarest trigrams are per-request values (signatures, signing times) that no other key shares. They fill the 50, and every true partner falls short of 15 shared: at similarity 80 and below, every download key with a partner was passed over, no pattern formed, and the final pass searched the same keys and missed them again. Most other log families lost nothing, which is why the sample never showed it.
+
+**What works:** A probe sized from the threshold and the key's trigram count (prefix filtering), with the size filter and a per-candidate hit bound derived from the same threshold. It cannot pass over a partner at or above the threshold. See `docs/similarity-engine-best-practices.md` § Candidate Search Sized From the Threshold.
+
+**Lesson:** A filter that skips work in candidate search is a recall decision. Its bound must come from the threshold and the key size, never from a constant. A filter introduced for speed needs a recall check against direct scoring on real batches from several log families, at several thresholds; zero misses on one sample at one threshold is a property of the sample, not of the filter.
+
+### Normalising Values Inside the Scorer Hid What the Analyst Needs
+
+**What we assumed:** Replacing UUIDs with a placeholder in the trigrams used for Dice scoring, while the displayed pattern kept the text, was a pure gain (PF-19): messages differing only by a UUID scored 97-100% instead of 74-76%, and a varied application log ran 3.3× faster.
+
+**What happened:** The scorer judged text the analyst never sees. Whether the same UUIDs recur, or change in only a few characters, is information an analyst may need, and a placeholder erases it before grouping decides anything. Candidate selection also read the raw key while scoring read the normalised one, so a candidate search sized on the raw text missed UUID-bearing partners the scorer would have accepted at high thresholds.
+
+**What works:** Scoring the message as written in every stage, and leaving masking to an explicit option the analyst chooses before consolidation (`-uuid`). Where a log carries many UUIDs, masking them is the advice, because they make the similarity check do much more work.
+
+**Lesson:** A transformation that changes what two messages are judged on belongs where the analyst can see and choose it, not inside the scorer. Every stage that reads a message (candidate selection, scoring, alignment) must read the same text; a normalisation hidden in one stage turns the other stages' guarantees into guesses.
 
 ## Algorithmic Dead Ends
 
