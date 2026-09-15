@@ -99,6 +99,9 @@ about anything else, these still hold.
       against. No retracted framings, no self-orienting context.
 - [ ] One question at a time. A clarification gets a short explanation plus a
       small table, not a discourse.
+- [ ] A decision that needs the architect's lock is asked as a direct question
+      in the same message ("Do you lock D33: <what it means>?"), never written
+      into a record as "awaiting lock" or parked as an open question in a feature doc.
 - [ ] No closing commentary ("worth keeping in mind", "one caveat"). A caveat
       that matters was raised before the decision.
 - [ ] His setup is not restated to him (gitignore, layout, what is generated).
@@ -133,6 +136,9 @@ about anything else, these still hold.
 - [ ] `ltl` always gets `--disable-progress`.
 - [ ] Will I look at this output more than once? Capture once to the scratchpad,
       then grep, sed, diff, python3 against the file.
+- [ ] A prototype, reproduction, profiling or benchmark run of `ltl` passes bare
+      `-V` and is captured, so a later question is answered from the file, not a
+      re-run. Harness assertions stay shaped to what they read.
 - [ ] A failing child process is invoked directly on minimal input, not through
       the parent harness. A harness under iteration uses `--scenario` or a
       single-test selector.
@@ -239,6 +245,9 @@ about anything else, these still hold.
 - [ ] **Issue:** release-notes decision, completion comment (with any recorded
       skip), close with label stripped, dependents released
       (`docs/process/workflow.md` § 4).
+- [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
+      without asking, including deleting the issue's own before/after benchmark
+      TSVs and removing its merged worktree. Only another issue's artifacts wait.
 - [ ] **Release:** `gh pr view` reports `MERGED` and `git log main..release/X.Y.Z`
       is empty. Otherwise the release is not finished.
 - [ ] **Session:** no open PRs, no unpushed branches, no issue moved but not resolved.
@@ -374,3 +383,7 @@ performed; a rule that can be checked mechanically goes into a hook under
 not go here; the commit message that makes the edit carries the incident.
 After each release, the checkpoints are reviewed against what actually went
 wrong, and anything that never fired is removed.
+
+Claude's auto-memory is never written. Development runs on several machines,
+and a rule held in one machine's memory makes Claude behave differently there;
+every rule lives in this file or another tracked file.
