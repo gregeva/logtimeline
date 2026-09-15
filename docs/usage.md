@@ -422,7 +422,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety`. A fourth field without `/…/` is always a token key and is matched literally |
 | `/regex/` | Custom extraction pattern, recognised by its slashes at the end of the spec — `rows:/…/` and `rows:::/…/` read the same (overrides default name/key matching). A capture group narrows the value; without one the whole match is the value. e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |
 
-**Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names):
+**Counting aggregations** count extracted values per time bucket instead of doing arithmetic on them, and fully support text tokens (IDs, usernames, class names). Without a `/regex/`, an extracted value ends at whitespace or any of `,` `;` `"` `'` `]` `)` `&` `?`, so each parameter of a URL query string is counted on its own; percent-encoded characters and `|` stay part of the value:
 
 | Function | Per-bucket value |
 |----------|------------------|

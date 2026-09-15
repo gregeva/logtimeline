@@ -571,6 +571,88 @@ scenario_mem() {
 
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Scenario: query-string-values (#574) - a counted value ends at `&` or `?`,
+# never at `%` or `|`. One bucket (`-bs 1440 -oe -n 0`): the per-bucket
+# distinct value is the subject; no message table is read.
+# Fixture: tests/fixtures/udm-counting-query-string.txt - six requests, each
+# /dl/item;ref=ABC?folderId=..&userid=42&fileName=..&path=..&kind=..&file%5Fid=..&sign=S<n>&site=..
+# with a sign unique per line, so any value that runs past its `&` is unique too.
+# ---------------------------------------------------------------------------
+QS_FIXTURE="$REPO_DIR/tests/fixtures/udm-counting-query-string.txt"
+QS_CONTRACT='features/user-defined-metrics.md section Query-string separators end a counted value (Issue #574) - D1 (& and ? end a value), D2 (| does not), D3 (% never ends a key or value)'
+scenario_query_string_values() {
+    current_scenario="query-string-values"
+    echo "[$current_scenario]"
+    local out
+    out=$(mktemp "$TMP_DIR/out.XXXXXX")
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-counting \
+        -udm "ref::distinct" \
+        -udm "folderId::distinct" \
+        -udm "userid::distinct" \
+        -udm "fileName::distinct" \
+        -udm "path::distinct" \
+        -udm "kind::distinct" \
+        -udm "fid::distinct:file%5Fid" \
+        -udm "site::distinct" \
+        "$QS_FIXTURE" > "$out" 2>"$out.stderr" || true
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    local produced='parse_udm_configs() in ltl (counting default token-capture pattern)'
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: fileName  occurrences: 6  .*  distinct: 3  ' \
+        asserts     'A value ends at the & before the next key: three file names across six requests count 3, not one per request' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: userid  occurrences: 6  .*  distinct: 1  ' \
+        asserts     'A mid-query key with the same value on every request counts 1, not one per request' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: folderId  occurrences: 6  .*  distinct: 2  ' \
+        asserts     'The first key of a query string, preceded by ?, is found and its value ends at the next &' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: site  occurrences: 6  .*  distinct: 2  ' \
+        asserts     'The last parameter, ended by the space after the query string, counts its whole percent-encoded value (two hosts)' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: ref  occurrences: 6  .*  distinct: 1  ' \
+        asserts     'A value ends at ? wherever it appears: ref=ABC followed by ? and a varying tail counts ABC once' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: path  occurrences: 6  .*  distinct: 2  ' \
+        asserts     'A percent-encoded sequence is part of the value: a%2Fb and a%2Fc count 2, not 1' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: fid  occurrences: 6  .*  distinct: 3  ' \
+        asserts     'A token key containing a percent-encoded sequence (file%5Fid) finds its value' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    assert_line "$out" \
+        pattern     '^bucket: [0-9]+  metric: kind  occurrences: 6  .*  distinct: 2  ' \
+        asserts     'A pipe is part of the value: cad|part and cad|asm count 2, not 1' \
+        produced_by "$produced" \
+        contract    "$QS_CONTRACT"
+
+    rm -f "$out" "$out.stderr"
+}
+
 scenario_fixture_values
 scenario_token_key
 scenario_rate_unit
@@ -580,6 +662,7 @@ scenario_csv_columns
 scenario_consolidation
 scenario_mem
 scenario_users_column
+scenario_query_string_values
 
 echo
 echo "Results: $pass passed, $fail failed"
