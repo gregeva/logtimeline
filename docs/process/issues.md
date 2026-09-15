@@ -43,6 +43,18 @@ toward the mechanism that exists rather than the capability that is wanted.
   abstraction he used, transcribed and organised, not reinterpreted
 - the problem it solves or the wrong behaviour observed; for a bug, the
   reproduction as described
+- **the reproduction essentials**: the log file or files used, named by their
+  path under `logs/` as `docs/test-logs.md` declares them, and the command-line
+  options used. Whoever picks the issue up has to see what the filer saw, and
+  what `ltl` does with a file depends on what it was asked to do with it.
+  `docs/test-logs.md` stays the record of what the corpus holds; naming a file
+  here is the issue's provenance, not a second index. The file name belongs to
+  the issue only: specifications, source code and comments describe the log by
+  its family and characteristics ("a web application access log carrying
+  execution time in the duration field"), because a file named there becomes
+  a failure the day it is no longer in the corpus. Test scripts are the
+  exception: a harness runs against a real file, found in `docs/test-logs.md`
+  among those available for what its scenarios need
 - the user-visible outcome that makes it done
 - **links**: the feature docs that govern the area (path and section heading),
   the issues it relates to, extends, supersedes or overlaps (number with
@@ -53,7 +65,9 @@ toward the mechanism that exists rather than the capability that is wanted.
 
 **A requirement body never contains:** line numbers or ranges; an
 implementation plan, phases, drops or task list; proposed data structures, sub
-names, option names, algorithms or code sketches; effort estimates or
+names, option names, algorithms or code sketches (the options *used* to
+reproduce are observed fact and belong in the reproduction essentials; a
+*proposed* option is a design sketch); effort estimates or
 sequencing; acceptance criteria the architect did not state; a framing he did
 not use presented as his.
 
