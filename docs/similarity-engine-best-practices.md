@@ -73,12 +73,14 @@ if ($key =~ $uuid_re) {
 
 This fixes both a correctness gap (UUID-varying messages can now be consolidated) and a performance problem (414K fruitless Dice calls → 7.5K on diverse data).
 
-### Default Threshold: 80%
+### Default Threshold: 85%
 
-The 80% Dice threshold was arrived at iteratively:
+`-g` without a value uses 85%. In ltl, 90% ran 2-3× slower on the benchmarks because fewer keys matched discovered patterns inline, and 85% is the default that balances that cost against grouping.
+
+The prototype's own iteration on its test data:
 - **85%** (initial design) — too high. Real messages with UUIDs scored 80-82% even after normalization.
 - **75%** (first prototype fix) — too low. Caused false merges after merge-first generalization was added.
-- **80%** (final) — correct balance. Strict enough to avoid false merges, loose enough to catch genuine patterns.
+- **80%** — the prototype's balance between false merges and missed patterns.
 
 **Key lesson:** Thresholds must be re-evaluated after each algorithmic change. Each improvement shifts the scoring dynamics.
 
@@ -95,7 +97,9 @@ When posting lists are large (common trigrams like `[WA`, `ARN`, `] [` appear in
 3. Require a loose minimum hit count (30% of K) for candidates
 4. Apply full Dice verification on the pre-filtered set
 
-This gave 4.8× speedup with zero missed matches at K=50, ratio=0.30. Lower K values (20, 30) caused missed matches.
+This gave 4.8× speedup with zero missed matches at K=50, ratio=0.30 on one 200-key sample of a varied application log. Lower K values (20, 30) caused missed matches.
+
+**Measured limitation:** K and the minimum hit count are fixed, independent of the threshold, the key's trigram count and the population. On keys whose rarest trigrams are per-line values (signed download URLs, UUIDs scored through normalisation but pre-filtered on raw trigrams) the pre-filter rejects partners that score above the threshold, up to every candidate. Measurements across log families: `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
 
 ## Pattern Management
 
@@ -130,9 +134,11 @@ Messages already appearing N or more times are excluded from discovery. They are
 
 **Ceiling=2 is too aggressive** — it shields too many keys from discovery, causing remaining count to balloon (58 → 217 on diverse data). Ceiling 3-5 produce nearly identical results. Err on the side of letting more keys through.
 
-### Final Pass (on by default, threshold 80%, ceiling 1M)
+### Final Pass (on by default, fixed threshold 85%, ceiling 1M)
 
-A separate pass after main processing that consolidates ceiling-excluded stragglers sharing obvious patterns (e.g., same message across 16 thread pools). Uses the same threshold as main discovery (80%), not a higher one — access log keys are shorter with smaller variable regions, producing Dice scores of 85-87% that the original 95% threshold missed entirely.
+A separate pass after main processing that consolidates ceiling-excluded stragglers sharing obvious patterns (e.g., same message across 16 thread pools). A 95% threshold missed access-log targets entirely: their keys are shorter with smaller variable regions and score 85-87%.
+
+The final pass scores at a fixed 85% (hidden `--final-threshold`) whatever `-g` is set to, so a `-g` below 85 is not applied to the keys it handles and a `-g` above 85 is loosened there. This bounds final-pass effort and is an open gap, tracked with final-pass performance in #142 and recorded in `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
 
 ### Message Length Cap
 
@@ -155,7 +161,7 @@ The #96 similarity engine directly addresses #54's research areas:
 The same engine serves both derived metric identity and group-similar display. The difference is configuration, not algorithm:
 
 - **Message identity** (for `idelta()` etc.): tight grouping key including all metadata fields, higher similarity threshold
-- **Group-similar display**: looser grouping, standard 80% threshold, visual consolidation of output
+- **Group-similar display**: looser grouping, default 85% threshold, visual consolidation of output
 
 The grouping key pattern — exact-match on metadata, fuzzy on message body — naturally supports both use cases.
 

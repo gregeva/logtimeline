@@ -1725,7 +1725,7 @@ After firing, the counter resets to 0 and accumulation resumes.
 
 ## Finding: no groupings on keys whose rarest trigrams are per-request values (#569)
 
-**Status:** investigated, cause confirmed on the production code path; no fix designed.
+**Status:** investigated — cause confirmed on the production code path, pre-filter misses measured across log families, industry grounding recorded, final-pass threshold measured against `-g`; no fix designed.
 
 ### Input and invocation
 
@@ -1796,7 +1796,45 @@ Reading:
 
 - **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%, with no pattern formed for the download requests. Neither side of the 65/70 boundary is correct grouping. The include filters are therefore not what makes the download keys ungroupable: at 70 and above they are ungrouped in the unfiltered population too, and at 50–65 the filters only remove the catch-all that absorbed them.
 - **A small Apache HTTP Server 2.x access log of a PLM application with microsecond durations (677 lines, 6 download requests) does group** with `-xqs -bs 1440 -n 15 -g N -V` at 50, 80 and 95 (54 keys → 15–18 rows); it does not reproduce the defect.
-- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes. `docs/similarity-engine-best-practices.md` § Final Pass states the final pass uses the same 80% as main discovery; the code and the doc disagree.
+- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes. Measured against `-g` in § Final pass threshold against `-g` below; open with final-pass performance in #142.
+
+### Pre-filter misses across log families
+
+How often the pre-filter rejects every partner that scores above the threshold, beyond the download case. Method:
+
+- A scratch copy of `ltl` whose only change writes out each group's first streaming checkpoint batch (the sorted unmatched keys `run_consolidation_checkpoint()` passes to discovery), run with `-bs 1440 -n 1 -g 80` (the first batch of a group is the same at any `-g`: no pattern exists for it before its first checkpoint).
+- Per batch with at least 200 keys: the first 500 source keys in that sorted order (`run_consolidation_pass()`'s own search order and 500-source limit); for each, the best partner by direct `dice_coefficient()` over the whole batch, on UUID-normalised trigrams where `ltl` scores on them, and `find_consolidation_candidates()` sliced verbatim.
+- *Partner at T*: the best partner scores ≥ T. *Missed at T*: a partner at T exists and the pre-filter returns no candidate.
+
+Cells are missed / sources with a partner at T:
+
+| Log family (group, batch keys) | T=50 | T=70 | T=80 | T=85 | T=95 |
+|---|---|---|---|---|---|
+| Application platform log, ~480,000 lines, the size the prototype record gives for its diverse data (DEBUG, 1,709) | 0/500 | 0/500 | 0/500 | 0/500 | 0/500 |
+| same (WARN, 3,048) | 0/500 | 0/500 | 0/500 | 0/500 | 0/493 |
+| same (ERROR, 238) | 69/232 | 99/224 | 100/218 | 100/216 | 75/175 |
+| Application log of hundreds of thousands of unique errors, power-law (ERROR, 4,990) | 1/499 | 0/498 | 0/496 | 0/496 | 0/496 |
+| Application script log with thread names and full metrics (ERROR, 209) | 1/208 | 0/204 | 0/201 | 0/197 | 0/157 |
+| same (INFO, 2,851) | 1/500 | 1/500 | 1/500 | 6/500 | 5/239 |
+| same (WARN, 1,940) | 0/500 | 0/500 | 0/500 | 0/500 | 0/495 |
+| Tomcat 9 access log, one day, query string stripped (200, 2,870) | 0/500 | 0/482 | 0/403 | 0/330 | 0/36 |
+| The PLM access log above, query string exposed, unfiltered (200, 4,990) | 298/500 | 296/489 | 247/408 | 0/132 | 0/22 |
+| same, download requests only (200, 5,000) | 500/500 | 500/500 | 446/446 | no partners | no partners |
+
+Keys containing a UUID, which `ltl` scores on UUID-normalised trigrams but pre-filters on raw trigrams:
+
+| Batch, T | Missed | Missed containing a UUID | Found containing a UUID | Selected top-50 trigrams unique to the source, mean (found / missed) |
+|---|---|---|---|---|
+| Application platform ERROR, 95 | 75 | 75 | 50 of 100 | 0.7 / 0.6 |
+| Application platform ERROR, 50 | 69 | 63 | 89 of 163 | 2.4 / 3.9 |
+| Script INFO, 95 | 5 | 5 | 1 of 234 | 0.1 / 27.0 |
+
+Reading:
+- The pre-filter is effectively lossless on the power-law error log, the thread-rich script log's WARN and ERROR groups, the Tomcat access log and the large application groups.
+- It loses badly in two places: the PLM access log with the query string exposed (about 60% of sources with a partner at T ≤ 80 unfiltered, 100% on downloads alone, none at T ≥ 85), and a small application ERROR batch (30–46% at every T, including 95).
+- **On the unfiltered PLM batch every miss is a download request.** Of its first 500 sources, 296 are download requests: all 296 are missed at T = 50 and 70, and 247 of 247 at 80. Of the 204 other keys, 2 are missed at 50 and none at 70 or 80. The failure follows the download keys, not the population around them.
+- Every miss in the application ERROR batch at 95, and in the script INFO batch, is a key containing a UUID. The script INFO misses carry a mean 27 of 50 selected trigrams unique to the source, the download mechanism. The application ERROR misses do not (0.6), so their mechanism is a different one and is not yet established.
+- Wall times from these probes are not reported: ten ran concurrently.
 
 ### Research record behind the pre-filter
 
@@ -1807,6 +1845,53 @@ What the repository records about how candidates are found, reviewed against the
 - **The pre-filter is an empirical speed fix.** PF-18 added it after profiling showed candidate search at 88.1% of runtime. Its basis is one experiment on a 200-key sample of a varied application log, varying only the number of rarest trigrams kept, at a single required share of 30%: 50 kept gave 4.8× and 0 missed matches, 30 gave 6.2× and 2 missed, 20 gave 8.1× and 5 missed. The record does not state the sensitivity it ran at or how a missed match was established, and the commit that introduced it (`4479cf6`) contains no benchmark script.
 - **The experiment became guidance.** `docs/similarity-engine-best-practices.md` § Discriminative Trigram Pre-filter restates K=50 and ratio 0.30 as a best practice with "zero missed matches".
 - **Neither value adapts.** Nothing in the record or the code ties the 50 kept trigrams or the 15 required hits to the `-g` sensitivity, to the key's trigram count, or to the composition of the population being consolidated.
+
+### Final pass threshold against `-g`
+
+`group_similar_messages()` swaps `$consolidation_threshold` for `$consolidation_final_threshold` (85) for the whole final pass, whatever `-g` is. `features/137-final-pass-redesign.md` § 6 (Threshold During Final Pass) records only that both default to 85 and that the hidden `--final-threshold` gives control. The fixed value was kept to bound final-pass effort so the feature could ship; the final pass's performance is open in #142 (final pass regression on XL consolidation benchmarks).
+
+Each log run twice with `-bs 1440 -n 1 -g N -V`: final pass at its default 85, and with `--final-threshold N`. Single sequential runs on one machine, counters summed over every group of the `message-grouping` section. Query string exposed (`-du us -xqs`) on the PLM access log only.
+
+| Log family | `-g` | Final pass at | Wall s | Final-pass keys | Final-pass candidate searches | Final-pass patterns | Rows after grouping |
+|---|---|---|---|---|---|---|---|
+| Application platform log, ~480,000 lines | 70 | 85 | 7.0 | 73 | 53 | 11 | 82 |
+| | 70 | 70 | 6.5 | 73 | 52 | 12 | 81 |
+| | 95 | 85 | 10.4 | 514 | 195 | 59 | 143 |
+| | 95 | 95 | 8.7 | 514 | 476 | 22 | 528 |
+| Application log of hundreds of thousands of unique errors | 70 | 85 | 12.0 | 106 | 57 | 7 | 68 |
+| | 70 | 70 | 9.6 | 106 | 49 | 7 | 59 |
+| | 95 | 85 | 12.5 | 198 | 81 | 20 | 81 |
+| | 95 | 95 | 9.2 | 198 | 167 | 15 | 178 |
+| Application script log with thread names | 70 | 85 | 11.5 | 432 | 315 | 13 | 351 |
+| | 70 | 70 | 11.6 | 432 | 313 | 13 | 106 |
+| | 95 | 85 | 114.9 | 39,412 | 607 | 216 | 457 |
+| | 95 | 95 | 246.4 | 39,412 | 9,553 | 2,594 | 8,142 |
+| Tomcat 9 access log, one day | 70 | 85 | 10.7 | 342 | 215 | 49 | 221 |
+| | 70 | 70 | 10.5 | 342 | 92 | 25 | 72 |
+| | 95 | 85 | 12.0 | 3,123 | 866 | 266 | 674 |
+| | 95 | 95 | 13.6 | 3,123 | 2,724 | 271 | 2,707 |
+| PLM access log, query string exposed | 70 | 85 | 42.3 | 75,450 | 37,425 | 42 | 74,399 |
+| | 70 | 70 | 42.2 | 75,450 | 37,381 | 28 | 74,374 |
+| | 95 | 85 | 43.9 | 75,647 | 37,519 | 65 | 74,473 |
+| | 95 | 95 | 44.0 | 75,647 | 37,897 | 61 | 74,869 |
+
+Reading:
+- **Above 85 the fixed value loosens the user's setting.** At `-g 95` the final pass at 85 leaves 143 rows where 95 leaves 528 (application), 81 against 178 (errors), 457 against 8,142 (script), 674 against 2,707 (Tomcat).
+- **Below 85 it tightens it.** At `-g 70`: 351 rows against 106 (script), 221 against 72 (Tomcat), 68 against 59 (errors), 82 against 81 (application).
+- **Cost of matching.** At `-g 70` matching cost at most 0.1 s (script 11.5 → 11.6 s), and errors ran faster (12.0 → 9.6 s). At `-g 95` the script log slows from 114.9 to 246.4 s: the stricter pass absorbs less per pattern and makes 9,553 candidate searches instead of 607 over the same 39,412 keys; the other three logs move within 3.3 s either way.
+- **On the PLM access log both settings cost the same 42–44 s** and about 37,400 final-pass candidate searches over ~75,500 keys: the pre-filter misses above leave every key for the final pass, which then misses them again.
+- Single runs, not medians.
+
+### Industry grounding
+
+Primary-source research on candidate generation for set-similarity joins and on log template mining: `features/569-candidate-search-industry-grounding.md`. What it establishes for this pre-filter:
+
+- **Prefix filtering** (AllPairs 2007, PPJoin 2008, Mann et al. 2016) guarantees no missed pair when each key probes its |r| − ⌈lb_r⌉ + 1 rarest tokens and one shared token suffices, with lb_r = T·|r|/(2 − T) for Dice. The probe length depends on the threshold and the key's size. For a 286-trigram key: 191, 164, 133, 115, 96, 75, 53 and 28 tokens at T = 50, 60, 70, 75, 80, 85, 90 and 95.
+- **The fixed rule is outside that bound below about 90.** Requiring 15 hits needs 14 more tokens than the one-hit prefix (205 at 50 … 42 at 95); only at 95 does that fit inside 50. By the counting argument behind the bound, 15 of 50 is lossless for a 286-trigram key only from about T = 90 (equal-size partner) or 93 (smallest admissible partner). At T ≤ 80 even one hit in 50 is not lossless.
+- **Tokens unique to one key do not break the exact bound**, which always reaches past them; they break the fixed 50. At T = 75 a true download partner needs one shared trigram among the source's 115 rarest.
+- **What pays off, empirically** (Mann et al. 2016, 7 algorithms, 12 datasets): the plain prefix filter with a length filter; AllPairs wins most data points; verification costs a small constant; heavier filters (suffix, adaptive prefix) rarely pay back, except that adaptive prefix extension wins on data with few infrequent tokens.
+- **MinHash/LSH** is approximate, with a false-negative rate set by the band/row choice, and treats per-line random tokens like any other shingle.
+- **Log template miners** (Drain, Spell, LogMine, and the Zhu et al. 2019 benchmark) compare token sequences, not q-gram sets, after masking variable values (IPs, numbers, IDs, paths) with simple regexes or type detection, because unmasked values make same-pattern lines look dissimilar.
 
 ### Constraints on a fix
 
