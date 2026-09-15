@@ -1054,7 +1054,7 @@ lowercase and adding it would change the column of a capitalised metric name.
 - **Issue**: #574 (a distinct-count metric on a query-string key counts the rest of the query string)
 - **Branch**: `574-udm-token-query-string-separators`
 - **Target release**: v0.18.2
-- **Phase**: Implemented 2026-09-15, acceptance criteria agreed and passing; completion gate pending
+- **Phase**: Implemented 2026-09-15, acceptance criteria agreed and passing; completion gate passed on `09a8844`
 
 ### Motivating consumer
 
@@ -1133,6 +1133,14 @@ every line. Assertions in `tests/validate-udm-counting.sh`, new scenario, run
 - **Harnesses run while working.** `tests/validate-udm-counting.sh` 44 passed,
   0 failed, with the new `query-string-values` scenario;
   `tests/validate-help-content.sh` 11 passed, 0 failed.
+- **Completion gate, commit `09a8844`.** All 36 `tests/validate-*.sh` exit 0
+  with assertions run (`validate-statistics.sh` 22 of 22 scenarios, L3 OK on
+  every scenario; its XFAIL lines are the harness's expected-failure markers).
+  `single-day-access-log-standard`, before on the release-branch head and after
+  on `09a8844`, this machine, one run each: total 9.7 s → 10.1 s (+3.5%, under
+  the 5% stop line), rss_peak 98.3 MB → 98.3 MB. The case passes no `-udm`, so
+  the changed pattern is never built or run there; the delta is run-to-run
+  variation.
 
 ### Prototype triggers
 
