@@ -1900,7 +1900,9 @@ Readings: the cutoff cuts the download cases at 80 and 85 from 270.9 and 218.3 s
 | same `-g 75` | 49.4 s, 74,305 | 6.2 s, 8 | 9.0 s, 8 | 7.7 s, 8 | 6.7 s, 8 |
 | same `-g 80` | 49.7 s, 74,305 | 82.7 s, 13,770 | **53.7 s**, 13,701 | 59.7 s, 13,770 | 62.9 s, 13,701 |
 | same `-g 85` (no partners) | 53.3 s, 74,305 | 64.7 s, 74,305 | **38.6 s**, 74,305 | 38.2 s, 74,305 | 54.8 s, 74,305 |
-| Application platform log `-g 85` | 7.0 s, 136 | 5.6 s, 106 | 6.0 s, 98 | 6.2 s, 106 | |
+| Application platform log `-g 85` | 7.0 s, 136 | 5.6 s, 106 | 6.0 s, 98 | 6.2 s, 106 | 5.8 s, 106 |
+| Unique-errors log `-g 85` | 13.4 s, 72 | 9.4 s, 77 | **5.7 s**, 75 | 6.2 s, 75 | 10.2 s, 77 |
+| Script log `-g 85` | 12.6 s, 417 | 11.2 s, 157 | 10.0 s, 179 | 9.7 s, 168 | 9.9 s, 162 |
 
 Candidate searches made: at `-g 50` on the download requests, 72 with budget 64 against shipped's 38,305 (early patterns absorb the rest); at 85, 38,305 for every arm.
 
