@@ -80,7 +80,7 @@ about anything else, these still hold.
       never route around it.
 - [ ] A named branch is checked out and synced from origin before any file is
       read (`docs/process/workflow.md` § 1).
-- [ ] Before the first line of code: branch name matches the issue title, status
+- [ ] Before the first line of code: branch name is a short description of the issue, status
       set to `in progress`, `$version_number` stamped, and a `before` benchmark
       captured on the base commit if the hot path is in scope.
 

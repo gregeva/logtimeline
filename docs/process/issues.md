@@ -155,5 +155,5 @@ gh api repos/{owner}/{repo}/issues/BLOCKER/dependencies/blocking --jq '[.[].numb
 
 When an issue's framing changes (the architect says "reframe it", or a finding
 overturns the title's hypothesis), every artifact carrying the old framing is
-trued up in the same action: title, body, branch name (the slug follows the
-title), feature doc, analysis records, comments. Nothing is asked per item.
+trued up in the same action: title, body, branch name (its description follows
+the new framing), feature doc, analysis records, comments. Nothing is asked per item.
