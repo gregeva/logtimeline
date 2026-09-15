@@ -25,11 +25,13 @@ that are invisible until they have propagated through a plan.
 
 ### Branch naming
 
-`{issue-number}-{slug-from-issue-title}`, the slug kebab-cased from the GitHub
-issue **title**, never from the activity being performed on the branch.
+`{issue-number}-{short-description}`: a few kebab-cased words naming what the
+issue is about. It describes the issue, never the activity being performed on
+the branch, and never transcribes the issue title word for word.
 
-- `224-percentile-value-harness`, `225-test-harness-coverage-gaps` — correct
+- `224-percentile-value-harness`, `569-consolidation-no-groupings-on-download-requests` — correct
 - `225-research`, `225-scaffolding`, `225-cleanup`, `225-fix-it`, a bare number — wrong
+- the full title kebab-cased (`569-message-consolidation-produces-no-groupings-on-windchill-apache-http-2-access-logs-with-the-query-string-exposed`) — wrong
 
 A second branch for the same issue takes a numeric suffix (`-2`), not an activity name.
 
@@ -54,7 +56,7 @@ so the gate runs on exactly the code being merged. Nothing hardcodes a version:
 ### Before the first line of code
 
 ```bash
-git branch --show-current                          # issue number + title slug
+git branch --show-current                          # issue number + short description
 ./build/issue-status.sh set {number} "in progress"
 # set $version_number = "X.Y.Z-{issue}" in ltl
 ```
