@@ -1875,6 +1875,8 @@ Each log run twice with `-bs 1440 -n 1 -g N -V`: final pass at its default 85, a
 | | 95 | 85 | 43.9 | 75,647 | 37,519 | 65 | 74,473 |
 | | 95 | 95 | 44.0 | 75,647 | 37,897 | 61 | 74,869 |
 
+**Decision (architect, 2026-09-15):** the final pass scores at the streaming threshold, the `-g` value given or the default when none is given, and never at a separate fixed value. The current behaviour silently loosens or tightens the requested grouping for every key the final pass handles, which corrupts results. The slower final pass at high sensitivity measured below is accepted until final-pass performance is improved (#142). Not yet implemented; which issue carries the change is open.
+
 Reading:
 - **Above 85 the fixed value loosens the user's setting.** At `-g 95` the final pass at 85 leaves 143 rows where 95 leaves 528 (application), 81 against 178 (errors), 457 against 8,142 (script), 674 against 2,707 (Tomcat).
 - **Below 85 it tightens it.** At `-g 70`: 351 rows against 106 (script), 221 against 72 (Tomcat), 68 against 59 (errors), 82 against 81 (application).

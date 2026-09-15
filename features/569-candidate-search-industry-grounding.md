@@ -30,6 +30,8 @@ Notation in quotes follows each source. The PDF text extraction garbles some typ
 
 ### 1.1 The principle, as stated
 
+**"Prefix" is not the start of the string.** Throughout this literature a record's prefix is its first tokens after all tokens are sorted in one global order (rarest first), wherever those tokens occur in the original text. It is independent of where variability sits in a line, and it is a different mechanism from comparing leading characters, the string-prefix gate evaluated and rejected in `features/fuzzy-message-consolidation.md` PF-19 (all 1,709 DEBUG keys had 100% prefix Dice similarity). The consolidation candidate pre-filter's rarest-50 selection is already a frequency-ordered prefix; what this research bears on is its fixed length and fixed 15-hit minimum.
+
 **PPJoin (WWW'08), Section 3, Lemma 1 (Prefix Filtering Principle)**, which PPJoin re-phrases from Chaudhuri et al.:
 
 > "Consider an ordering O of the token universe U and a set of records, each with tokens sorted in the order of O. Let the p-prefix of a record x be the first p tokens of x. If O(x, y) ≥ α, then the (|x| − α + 1)-prefix of x and the (|y| − α + 1)-prefix of y must share at least one token."
