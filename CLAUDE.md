@@ -168,8 +168,15 @@ about anything else, these still hold.
       `docs/explain/`, wiki, error messages): no Perl identifiers, issue numbers,
       decision labels, or other tools' internals.
 - [ ] Issue body at filing: am I describing HOW? Then it does not belong. No
-      line numbers; code is referenced by function name plus snippet.
+      line numbers; code is referenced by function name plus snippet. It does
+      name the log files and the command-line options that produced the behaviour.
       Full rule: `docs/process/issues.md` § Filing a requirement.
+- [ ] A specification, source code or a comment describes a sample log by its
+      family and characteristics ("a web application access log carrying
+      execution time in the duration field"), never by file name: a named file
+      that later leaves the corpus turns the reference into a failure. Test
+      scripts are exempt: a harness runs against a real file, chosen from
+      `docs/test-logs.md` for what its scenarios need.
 - [ ] A finding, contract, constraint or status change goes into the owning
       feature doc in the same action; the comment points at it.
 - [ ] A decision made anywhere else is transcribed onto the open issue now.
@@ -244,7 +251,7 @@ about anything else, these still hold.
 | Deriving acceptance criteria | `docs/test-driven-development.md` |
 | Deciding whether and how to prototype | `prototype/README.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
-| Choosing a test log | `docs/test-logs.md` (single source of truth; never cite files elsewhere) |
+| Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
