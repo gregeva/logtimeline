@@ -1796,7 +1796,17 @@ Reading:
 
 - **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%, with no pattern formed for the download requests. Neither side of the 65/70 boundary is correct grouping. The include filters are therefore not what makes the download keys ungroupable: at 70 and above they are ungrouped in the unfiltered population too, and at 50–65 the filters only remove the catch-all that absorbed them.
 - **A small Apache HTTP Server 2.x access log of a PLM application with microsecond durations (677 lines, 6 download requests) does group** with `-xqs -bs 1440 -n 15 -g N -V` at 50, 80 and 95 (54 keys → 15–18 rows); it does not reproduce the defect.
-- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes.
+- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes. `docs/similarity-engine-best-practices.md` § Final Pass states the final pass uses the same 80% as main discovery; the code and the doc disagree.
+
+### Research record behind the pre-filter
+
+What the repository records about how candidates are found, reviewed against the finding above:
+
+- **DD-01** (N-gram Indexing with Dice Coefficient) describes candidate search as "candidates sharing the most chunks are scored for actual similarity": ranking by overlap, with no rarest-K selection and no fixed minimum.
+- **Alternatives were listed and not pursued.** The first prototype performance assessment on issue #96 (fuzzy message consolidation) listed MinHash, Drain-style token grouping and locality-sensitive hashing as next steps. `docs/fuzzy-consolidation-lessons-learned.md` § Don't Optimize What You Haven't Scoped records "None of this research was necessary" once the checkpoint architecture fixed performance. Candidate search was not researched after that, and no record references prefix filtering or any set-similarity-join method.
+- **The pre-filter is an empirical speed fix.** PF-18 added it after profiling showed candidate search at 88.1% of runtime. Its basis is one experiment on a 200-key sample of a varied application log, varying only the number of rarest trigrams kept, at a single required share of 30%: 50 kept gave 4.8× and 0 missed matches, 30 gave 6.2× and 2 missed, 20 gave 8.1× and 5 missed. The record does not state the sensitivity it ran at or how a missed match was established, and the commit that introduced it (`4479cf6`) contains no benchmark script.
+- **The experiment became guidance.** `docs/similarity-engine-best-practices.md` § Discriminative Trigram Pre-filter restates K=50 and ratio 0.30 as a best practice with "zero missed matches".
+- **Neither value adapts.** Nothing in the record or the code ties the 50 kept trigrams or the 15 required hits to the `-g` sensitivity, to the key's trigram count, or to the composition of the population being consolidated.
 
 ### Constraints on a fix
 
