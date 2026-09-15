@@ -134,11 +134,11 @@ Messages already appearing N or more times are excluded from discovery. They are
 
 **Ceiling=2 is too aggressive** — it shields too many keys from discovery, causing remaining count to balloon (58 → 217 on diverse data). Ceiling 3-5 produce nearly identical results. Err on the side of letting more keys through.
 
-### Final Pass (on by default, fixed threshold 85%, ceiling 1M)
+### Final Pass (on by default, threshold follows `-g`, ceiling 1M)
 
 A separate pass after main processing that consolidates ceiling-excluded stragglers sharing obvious patterns (e.g., same message across 16 thread pools). A 95% threshold missed access-log targets entirely: their keys are shorter with smaller variable regions and score 85-87%.
 
-The final pass scores at a fixed 85% (hidden `--final-threshold`) whatever `-g` is set to, so a `-g` below 85 is not applied to the keys it handles and a `-g` above 85 is loosened there. This bounds final-pass effort and is an open gap, tracked with final-pass performance in #142 and recorded in `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
+The final pass scores at the same threshold as main discovery: the `-g` value, or its default. A separate final-pass threshold silently loosens or tightens the requested grouping for every key the final pass handles. The hidden `--final-threshold` remains as an explicit diagnostic override. At high sensitivity the final pass absorbs less per pattern and makes more candidate searches, so it is slower; that cost is accepted and tracked with final-pass performance in #142. Measurements: `features/fuzzy-message-consolidation.md` § Final pass follows the sensitivity (#571).
 
 ### Message Length Cap
 

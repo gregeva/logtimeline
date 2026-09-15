@@ -684,7 +684,7 @@ my $consolidation_occurrence_ceiling = 3;
 my $consolidation_max_patterns       = 0;  # 0 = unlimited (adaptive eviction bounds the working set)
 my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorption rate (higher = faster response)
 my $consolidation_final_pass         = 1;
-my $consolidation_final_threshold    = 85;
+my $consolidation_final_threshold;          # unset: the final pass scores at the -g sensitivity; --final-threshold overrides it
 my $consolidation_final_ceiling      = 1_000_000;
 my $consolidation_discriminative_topk = 50;
 my $consolidation_prefilter_ratio    = 0.30;
@@ -10482,9 +10482,10 @@ sub group_similar_messages {
         %consolidation_absorption_ema = ();
         # Preserved: %consolidation_patterns, %consolidation_clusters, %consolidation_pattern_generation, %consolidation_cat_stats
 
-        # Swap threshold for final pass (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
+        # The final pass scores at the -g sensitivity unless --final-threshold was given
+        # (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
         my $saved_threshold = $consolidation_threshold;
-        $consolidation_threshold = $consolidation_final_threshold;
+        $consolidation_threshold = $consolidation_final_threshold // $consolidation_threshold;
 
         $consolidation_phase = 'final_pass';
         my $fp_total_new_patterns = 0;
@@ -20877,7 +20878,7 @@ sub pipeline_finalize {
             push @verbose_output, "=== message-grouping ===";
             push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
                 $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
-                $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
+                $consolidation_final_pass ? "on (threshold=" . ($consolidation_final_threshold // $consolidation_threshold) . "%, ceiling=${consolidation_final_ceiling})" : "off");
 
             my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
             my $grand_checkpoints = 0;
