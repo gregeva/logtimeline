@@ -143,7 +143,7 @@ Consolidated entries are marked with `~` in the summary table output; that marke
 
 | Option | Description |
 |--------|-------------|
-| `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. |
+| `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. Where a log carries many UUIDs, masking them with `-uuid` is advisable, as they make the similarity comparison do much more work. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
 | `-xqs, --expose-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
 | `-xs, --expose-session` | Keep session IDs when grouping messages, so each session is tracked separately |

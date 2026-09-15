@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+app-WARN	50	500	500	0	0	2.064
+app-WARN	60	500	500	0	0	2.006
+app-WARN	70	500	500	0	0	1.743
+app-WARN	75	500	500	0	0	1.560
+app-WARN	80	500	259	0	0	1.077
+app-WARN	85	500	9	0	0	0.533
+app-WARN	90	500	9	0	0	0.273
+app-WARN	95	500	7	0	0	0.174

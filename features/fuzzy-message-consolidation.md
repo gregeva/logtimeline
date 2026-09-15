@@ -2218,6 +2218,41 @@ A variant of `ltl` built with the prototype's search settings reduces the downlo
 
 **UUIDs compared as written (D569-2).** `build_consolidation_ngram_index()` no longer builds a second trigram set with each UUID rewritten as `<UUID>`, and `find_consolidation_candidates()` scores Dice on the key's own trigrams. The placeholder sets, the pattern that matched UUIDs for them, every per-key and per-pass free of them, and their `-mem` rows (`consolidation_key_trigrams_norm` in the checkpoint measurement and `MEMORY_FINAL`) are gone; no harness or build script reads that row. `-uuid` is unchanged. The fixed pre-filter is still in place at this step. `tests/validate-message-grouping.sh`: 16 passed, 2 failed. Criterion 4 now passes (the UUID pair stays `Reduction 2 -> 2` at `-g 85`, one row with `-uuid`); criteria 1 and 5 still fail with the base's diagnostics, as they must until the search changes; #571's scenarios pass. `tests/validate-statistics.sh`, each of the seven `-g 90` consolidated scenarios run alone: all pass, every cell of `messages` and `stats` identical to its stored baseline (T1) with no row key changed, and the bin-model scenarios' registered known failures still reproduce, none stale. Comparing UUIDs as written changes none of those references, so none is re-captured at this step.
 
+**The search (D569-1), and what it does to grouping elsewhere (2026-09-16).** `build_consolidation_ngram_index()` builds the integer-id index (ids in trigram-count order then batch order; per id the key, its trigram count and its trigram set; each trigram an ascending id array) and `find_consolidation_candidates()` is the seven-step search, with both passes handing it their consumed set. The fixed rule's two constants are gone, as is the 50-candidate cap; `-mem` and `benchmark-data` report `consolidation_id_index` in place of the hash index and posting sizes. `tests/validate-message-grouping.sh`: 18 passed, 0 failed, so criteria 1, 2, 4 and 5 hold and #571's scenarios still pass.
+
+*Recall (criterion 3).* `prototype/569-gate-sizing/probe-implemented.pl`, which slices the implemented subs and the message cap out of `ltl`, over the ten first-checkpoint batches at T = 50, 60, 70, 75, 80, 85, 90 and 95: **25,449 partners by direct Dice, 0 missed, 0 returned candidate below T or above the best score**. Per search on the download batch: 3.2 ms at 50, 2.4 ms at 75, 1.9 ms at 80, 0.5 ms at 85 where no partner exists. Results in `prototype/569-gate-sizing/results/implemented/`.
+
+*Determinism.* Three runs of the same invocation on the one-day Tomcat access log (148 MB, `-cp full -bs 240 -g 90 -n 25`) produce identical consolidated message keys.
+
+*Grouping changes on two corpus logs, measured old search against new, same invocation, `-V message-grouping` `Reduction` per group.* The statistics-drift scenarios `tomcat-consolidated`, `thingworx-consolidated` and `thingworx-bin-consolidated` fail on row keys alone (24, 20 and 20 mismatches), every compared value still identical; the other four scenarios are unchanged.
+
+| Log, group | Old rows | New rows |
+|---|---|---|
+| Tomcat access, `plain\|200` (2,870 keys) | 1,023 | 986 |
+| Tomcat access, third group (135 keys) | 66 | 98 |
+| Tomcat access, all groups | 1,142 | 1,137 |
+| ScriptLog, `plain\|WARN` (3,388 keys) | 39 | 44 |
+| ScriptLog, all groups | 49 | 53 |
+
+The direction is mixed, not uniform: the largest group on each log moves one way and a smaller one the other. The mechanism is the stop rule (step 7). The search returns the partners found at the probe position that first yields one, so the pair a pattern is formed from is the best of those, not the best in the batch, and a different first pair generalises differently. Seen directly on the `MSAI-AnalyticsServer_*` family of the Tomcat log: the old search formed `MSAI-AnalyticsServer_*Thing/Properties/isConnected`, absorbing nine keys; the new one forms `MSAI-AnalyticsServer_*ingThing/Properties/isConnected` from the three keys ending in `ingThing`, and the other six stay as rows of their own. Recall is not the cause: criterion 3 shows no partner at or above T is passed over.
+
+**The reported case, swept (2026-09-16).** The issue's own invocation on the PLM access day (`-du us`, both download include filters, `-xqs -bs 1w -r -n 200 -o -hm bytes -hg bytes -hgh 13`), `plain|200`, no runtime warnings at any setting:
+
+| `-g` | Reduction |
+|---|---|
+| 50 | 74,305 → 7 |
+| 65 | 74,305 → 7 |
+| 75 | 74,305 → 8 |
+| 80 | 74,305 → 13,770 (81.5%) |
+| 85 | 74,305 → 74,305 |
+| 95 | 74,305 → 74,305 |
+
+Shipped left 74,305 → 74,305 at every setting from 50 to 95. The range where grouping happens is the range the data supports: about half the download keys have no partner at 80 and none at 85 (§ Similarity distribution between download keys), so 85 and 95 forming nothing is the correct outcome, not a miss.
+
+*The accepted case (D569-3).* The unfiltered day at `-du us -xqs -bs 1440 -n 15 -g 80`, `-V benchmark-data` `TIMING`: total 54.2 s (parse/read_files 41.4 s, finalize/group_similar 12.7 s), against the accepted about 76 s and shipped's 47.6 s.
+
+**Decision (architect, 2026-09-16): the mixed grouping change is accepted; the three references are re-captured.** `tests/statistics-drift/baselines/{tomcat,thingworx,thingworx-bin}-consolidated/messages.csv` are re-captured from the new search, and each scenario then passes: the change comes from the search, not from UUIDs being compared as written, which left every reference identical at the step before. The bin scenario's registered known failures still reproduce, none stale.
+
 ## Final pass follows the sensitivity (#571)
 
 **Requirement:** the final pass groups at the sensitivity given with `-g`, or at the default when `-g` is given without a value; the slower final pass this causes at high sensitivity is accepted until final-pass performance is improved (#142). Measurements and the architect's decision: § Finding: no groupings on keys whose rarest trigrams are per-request values (#569) → Final pass threshold against `-g`.
