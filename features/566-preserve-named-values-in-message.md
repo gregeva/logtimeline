@@ -32,8 +32,4 @@ In each case the value is still captured as the metric; only the message text lo
 
 ### The `N milliseconds` read is split out to #576
 
-The architect's direction (2026-09-16): the Integration Runtime format's read and mask predate user-defined metrics and are unnecessary, since a user-defined metric picks up that single pattern without format-specific logic; they are removed and deprecated under #576, not preserved here. Measured for the filing, `-bs 1440 -n 10 -V`: the Integration Runtime specimen carries no ` N milliseconds` line; a one-day Connection Server log carries 644, all the same WebSocket-authentication timeout notice (`not received within 15000 milliseconds`), read as a 15 s duration and 2.7 hr in total on its message row. Whether the Connection Server entry's identical declaration goes too is open on #576.
-
-## Open
-
-- The issue's first case, a named query-string parameter kept when the query string is stripped (the signed download requests of a Windchill access log), is not in the scope list above.
+The architect's direction (2026-09-16): the Integration Runtime format's read and mask predate user-defined metrics and are unnecessary, since a user-defined metric picks up that single pattern without format-specific logic; they are removed and deprecated under #576, not preserved here. Measured for the filing, `-bs 1440 -n 10 -V`: the Integration Runtime specimen carries no ` N milliseconds` line; a one-day Connection Server log carries 644, all the same WebSocket-authentication timeout notice (`not received within 15000 milliseconds`), read as a 15 s duration and 2.7 hr in total on its message row. The Connection Server entry declares the identical read and mask.
