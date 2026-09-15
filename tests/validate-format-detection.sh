@@ -470,6 +470,24 @@ scenario_family_shapes() {
     assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
+    # A bare - thread is absent from the message (R14); a literal null is the
+    # thread's text and stays (D18). The derived copy rewrites the thread to -
+    # on the first three lines, as family-fields-evidence rewrites the user.
+    # -bs 1440 -oe -n 20 -o: the twelve messages are read from the MESSAGES CSV.
+    local tdir="$TMP_DIR/$current_scenario/thread-dash"; mkdir -p "$tdir"
+    perl -pe 's/ \S+ (\S+)$/ - $1/ if $. <= 3' "$log" > "$tdir/localhost_access_log.2025-05-05.txt"
+    ( cd "$tdir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 20 -o localhost_access_log.2025-05-05.txt > run.out 2> run.out.stderr ) || true
+    check_capture_warnings "$tdir/run.out"
+    assert_command \
+        command "m=\$(ls '$tdir'/*-LTL-MESSAGES-*.csv) && grep -qF '\"[503] POST /store/catalog\"' \"\$m\" && ! grep -qF '[-]' \"\$m\"" \
+        label 'a - thread writes no thread segment: [503] POST /store/catalog, and no message carries [-]' \
+        asserts 'a bare - in the thread position is an absent thread, so the message carries no [-] segment (R14)' \
+        produced_by 'the thread-pool block in read_and_process_logs() (a bare - sets no thread name) feeding message-key construction in ltl' contract "$FAMILY_CONTRACT R14, D18"
+    assert_command \
+        command "m=\$(ls '$tdir'/*-LTL-MESSAGES-*.csv) && grep -qF '\"[200] [null] POST /store/account\"' \"\$m\" && grep -qF '\"[200] [https-jsse-nio-8443-] POST /store/checkout\"' \"\$m\"" \
+        label 'a null thread keeps [null] and a worker keeps its pool segment in the same run' \
+        asserts 'only a bare - is absent: the literal null is the thread text and stays in the message, and a worker name still contributes its pool segment (D18)' \
+        produced_by 'the thread-pool block in read_and_process_logs() feeding message-key construction in ltl' contract "$FAMILY_CONTRACT D18"
 }
 
 scenario_family_fields_evidence() {

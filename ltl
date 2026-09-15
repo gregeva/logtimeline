@@ -14487,8 +14487,8 @@ sub read_and_process_logs {
                 }
             }
 
-            ## THREAD POOL # populate if thread name was found
-            if( defined $thread && $thread ne "" ) {
+            ## THREAD POOL # populate if thread name was found; a bare - is an absent thread
+            if( defined $thread && $thread ne "" && $thread ne "-" ) {
                 ( $threadpool ) = $thread =~ /(.*)-\d+$/;
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
