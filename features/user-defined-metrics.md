@@ -107,7 +107,7 @@ Numeric aggregations get two patterns:
 2. `(number)\s*[=:]?\s*key\b` — matches `42 rows`, `42=rows`, etc.
 
 Counting aggregations get a single token-capture pattern:
-1. `\bkey\s*[=:]\s*([^\s,;"'\])]+)` — matches `userId=abc123`, `[U: Administrator]`, `JavaException: SomeClass`, capturing the token up to whitespace or a field delimiter (`]` and `)` excluded).
+1. `\bkey\s*[=:]\s*([^\s,;"'\])&?]+)` — matches `userId=abc123`, `[U: Administrator]`, `JavaException: SomeClass`, `?userid=42&fileName=…`, capturing the token up to whitespace or a field delimiter (`]` and `)` excluded, `&` and `?` end it, `%` and `|` do not).
 
 ### Examples
 
@@ -323,7 +323,7 @@ Adds counting aggregation functions to the UDM function field: `count` (occurren
 | Column headers | Today's rule unchanged: header = user-chosen name; `:agg` suffix only on duplicate-name collision (#99) | Same pattern for all aggregations; user controls the name; sessions precedent (label the meaning, not the mechanism) |
 | STATS CSV | Single value column per counting UDM, named `{name}_{agg}` (`userId_distinct`, `logins_count`); `rate`/`drate` additionally append the `-ru` CSV suffix (`logins_rate_min`). Gated on `agg_kind` at the four single-column sites that today test `name ne base_name` | Reads as the existing `name[_unit]_stat` family pattern with the aggregation as the stat (unit slot empty — units are ignored for counting); rate columns mirror `msg-rate_min`. The bare-name #99 path stays as-is for collision disambiguation; the agg suffix also means two counting configs on the same base name never collide in CSV |
 | MESSAGES CSV | `count` → occurrences; `distinct`/`ratio`/`rate`/`drate` → blank, documented | Per-message distinct is not tracked (would need per-key sets plus set-union in consolidation merges) |
-| Default pattern for counting configs | Token capture, form-1 only: `\bkey\s*[=:]\s*([^\s,;"'\])]+)` — `]` and `)` excluded from the token; `key` is the token key when given, else the metric name | The numeric default patterns can never match `userId=abc123`; the reversed form-2 pattern is too greedy for arbitrary tokens; excluding `]`/`)` keeps bracket-delimited fields clean (ThingWorx `[U: Administrator]` yields `Administrator`, not `Administrator]`) |
+| Default pattern for counting configs | Token capture, form-1 only: `\bkey\s*[=:]\s*([^\s,;"'\])&?]+)` — `]` and `)` excluded from the token; `&` and `?` end it (revised 2026-09-15, § *Query-string separators end a counted value (Issue #574)*); `key` is the token key when given, else the metric name | The numeric default patterns can never match `userId=abc123`; the reversed form-2 pattern is too greedy for arbitrary tokens; excluding `]`/`)` keeps bracket-delimited fields clean (ThingWorx `[U: Administrator]` yields `Administrator`, not `Administrator]`) |
 | Token key field (decided 2026-07-08) | Syntax becomes `name[:unit[:function]][:key|:/pattern/]`: a bare fourth field is the token key — default patterns (numeric form-1/form-2, counting token capture) are built from the key instead of the name. `/…/` = regex as today; bare word = token key; absent = name is the key. Supplying both a key and a regex (`name::agg:key:/re/`) warns + skips the config | The name otherwise does double duty as label and extraction key; wanting a readable column header forced a fall from zero-regex to full-regex (found while writing the #313 demo use cases). Applies to all UDMs, not just counting |
 | Rendering | No counting-specific decimal branch: values format through the existing renderers (`format_number` dynamic decimals on the terminal, existing CSV precision rules) | `ratio`/`rate`/`drate` are fractional; the terminal render already auto-adjusts decimals to magnitude and available space |
 | Time-axis folding (#256) | `distinct` counts across all periods folded into a display bucket (identical to the sessions column); `rate`/`drate` divide by the single-period `$bucket_size_seconds`, exactly as err-rate/msg-rate do | Counting UDMs inherit folding semantics from the columns they mirror — no #313-specific folding behavior |
@@ -1047,6 +1047,111 @@ lowercase and adding it would change the column of a capitalised metric name.
   establishes by construction (D12) and asserts (criterion 22). A future
   dynamic column source other than the UDM registration loop would have to
   keep it.
+
+## Query-string separators end a counted value (Issue #574)
+
+### Status
+- **Issue**: #574 (a distinct-count metric on a query-string key counts the rest of the query string)
+- **Branch**: `574-udm-token-query-string-separators`
+- **Target release**: v0.18.2
+- **Phase**: Implemented 2026-09-15, acceptance criteria agreed and passing; completion gate passed on `09a8844`
+
+### Motivating consumer
+
+Counting how many different files were downloaded, and by how many users,
+across Windchill direct-download requests: `-udm fileName::distinct` and
+`-udm userid::distinct` on a web server access log whose request URLs carry
+fifteen query parameters, one of them a signature unique to every request.
+
+### Problem (measured 2026-09-15)
+
+The counting default pattern ends a value at whitespace, `,`, `;`, `"`, `'`,
+`]` or `)`. In a query string parameters are separated by `&`, so the value of
+a key runs on to the end of the query string. The unique signature parameter
+makes every captured value unique, so `distinct` equals the number of matching
+lines for every key on those lines. On one day of Windchill Apache access log
+(84,876 lines, 74,305 signed download requests), `-bs 1440 -V` with both
+metrics reported 74,305 distinct for each; the values up to the next `&` hold
+22,431 distinct file names and 1 distinct user id.
+
+### Decisions (architect, 2026-09-15)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — `&` and `?` end a value, in every log format | The counting default pattern's value stops at `&` and `?` in addition to the characters it already stops at. This revises the #313 row *Default pattern for counting configs*. | In a query string a key is preceded by `?` or `&` and its value ends at the next `&` or the end of the query string. The rule is generic, not specific to access logs, so `?` ends a value wherever it appears. |
+| D2 — `\|` does not end a value | A pipe stays part of the captured value. | No log in the corpus separates `key=value` pairs with a pipe, and a real value containing one would be cut short. |
+| D3 — `%` never ends a key or a value | A percent-encoded sequence (`%2F`, `%3D`) is part of the key or value it sits in. | URL encoding is how a query string carries reserved characters inside a key or value; splitting on it would break the key or value apart. |
+
+Unchanged: the numeric default patterns (they capture a number and already stop
+at `&`), slash-delimited `/regex/` specs (the user's pattern is the whole
+extraction), and the set of characters the counting pattern already stopped at.
+
+### Acceptance criteria
+
+Fixture: a new synthetic access log `tests/fixtures/udm-counting-query-string.txt`,
+one bucket, request URLs whose query strings carry a unique `sign` value on
+every line. Assertions in `tests/validate-udm-counting.sh`, new scenario, run
+`-ni -bs 1440 -oe -n 0 -V udm-counting`.
+
+1. [x] A value ends at the `&` that precedes the next key: on six lines
+   `?folderId=…&userid=42&fileName=<one of three>&sign=<unique>`,
+   `fileName::distinct` reports 3 and `userid::distinct` reports 1. *Assertable.*
+2. [x] The first key of a query string, preceded by `?`, is found and its value
+   ends at the next `&`: `folderId::distinct` reports the number of distinct
+   folder ids, not distinct query strings. *Assertable.*
+3. [x] A value ends at the end of the query string: the last parameter,
+   followed by a space, counts its whole value. *Assertable.*
+4. [x] A value ends at `?` wherever it appears, not only in a query string:
+   `ref=ABC?folderId=…` counts `ABC`. *Assertable.*
+5. [x] A percent-encoded sequence is part of the value and of the key: values
+   `a%2Fb` and `a%2Fc` count as two distinct values (not one `a`), and a token
+   key containing `%5F` finds its value. *Assertable.*
+6. [x] A pipe inside a value stays part of it: `kind=cad|part` and
+   `kind=cad|asm` count as two distinct values. *Assertable.*
+7. [x] Every existing counting scenario (tokens followed by a space, bracketed
+   `[U: Administrator]` tokens, token keys) passes unchanged. *Assertable:
+   the existing scenarios in `tests/validate-udm-counting.sh`.*
+8. [x] On the one-day Windchill access log above, `fileName::distinct` reports
+   22,431 and `userid::distinct` reports 1. *Assertable once, by hand on the
+   corpus file; recorded under findings, not in a harness.*
+
+### Findings from implementation
+
+- **The new assertions fail without the fix.** On the new fixture, the
+  release-branch head reports distinct 6 (one per request) for `ref`,
+  `folderId`, `userid`, `fileName`, `path`, `kind` and `fid`, failing seven of
+  the eight assertions. `site`, the last parameter, reports 2 before and after:
+  its value already ended at the space after the query string.
+- **The `%` and `|` assertions fail against a fix that splits on them.** A copy
+  of the fixed build whose value also stops at `%` and `|` reports distinct 1
+  for `path`, `kind` and `site`, failing those three assertions.
+- **Criterion 8, measured 2026-09-15.** The fixed build on the one-day
+  Windchill access log (`-ni -bs 1440 -V -udm fileName::distinct -udm
+  userid::distinct`), one bucket: `fileName` 74,305 occurrences, 22,431
+  distinct; `userid` 74,305 occurrences, 1 distinct. Before the fix both
+  reported 74,305 distinct.
+- **Harnesses run while working.** `tests/validate-udm-counting.sh` 44 passed,
+  0 failed, with the new `query-string-values` scenario;
+  `tests/validate-help-content.sh` 11 passed, 0 failed.
+- **Completion gate, commit `09a8844`.** All 36 `tests/validate-*.sh` exit 0
+  with assertions run (`validate-statistics.sh` 22 of 22 scenarios, L3 OK on
+  every scenario; its XFAIL lines are the harness's expected-failure markers).
+  `single-day-access-log-standard`, before on the release-branch head and after
+  on `09a8844`, this machine, one run each: total 9.7 s → 10.1 s (+3.5%, under
+  the 5% stop line), rss_peak 98.3 MB → 98.3 MB. The case passes no `-udm`, so
+  the changed pattern is never built or run there; the delta is run-to-run
+  variation.
+
+### Prototype triggers
+
+None: no data model change; the per-line cost is two more characters in a
+negated character class already evaluated on the same lines.
+
+### Completion gate scope
+
+An executable line of `ltl` changes: full harness suite and before/after
+`single-day-access-log-standard` benchmark (before captured on the release
+branch head, 2026-09-15).
 
 ## Future Enhancements (Out of Scope)
 

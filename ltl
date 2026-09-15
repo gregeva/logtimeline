@@ -9655,7 +9655,7 @@ sub print_help {
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
-    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
+    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
@@ -10157,7 +10157,7 @@ sub parse_udm_configs {
             my $escaped_key = quotemeta($token_key // $name);
             if ($agg_kind eq 'counting') {
                 # Token capture: any run of characters that cannot end a field
-                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])]+)/;
+                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])&?]+)/;
             } else {
                 push @patterns, qr/\b${escaped_key}\s*[=:]\s*(${number})/;
                 push @patterns, qr/(${number})\s*[=:]?\s*${escaped_key}\b/;
