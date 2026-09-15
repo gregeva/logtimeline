@@ -19,6 +19,10 @@ An analyst who needs messages distinguished by a part of the line that the tool 
 - **Keys determined from the line itself (2026-09-16).** This is where the power of the enhancement lies. Attributes such as `fileName`, `adId` and `sT` in a Windchill download request's query string are not part of the tool's normal extraction; they are determined from the log line itself. The analyst names a piece of data in the line they want exposed without exposing the entire query string: `--expose fileName` tacks `fileName=<value>` onto the end of the message. The key-value pairs of interest are concatenated onto the message key, separated by a space, without everything else the query string carries.
 - **Loss, not presence** (issue body). The named keys and values are found before anything is stripped; only where they were removed does the value go back in.
 
+## Decisions
+
+- **D1 — LOCKED 2026-09-16 (architect) — An exposed key's value is found by the same rule as the counting user-defined metrics' token capture.** `--expose <key>` and `-udm <key>::distinct` read the same value from a line: the key followed by `=` or `:`, the value ending at whitespace, `,`, `;`, `"`, `'`, `]`, `)`, `&` or `?` (`features/user-defined-metrics.md` § Counting Aggregations, row *Default pattern for counting configs*, as revised by § Query-string separators end a counted value), matched against the raw line. One resolution surface: a change to that rule changes both.
+
 ## Findings (2026-09-16; release/0.18.2)
 
 ### Where a metric value is masked in the message
