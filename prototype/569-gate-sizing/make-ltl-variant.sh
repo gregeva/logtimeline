@@ -44,6 +44,7 @@ for old, new in [
 variants = r'''
 our $ltl569_search = $ENV{LTL569_SEARCH} // 'shipped';
 our $ltl569_want   = $ENV{LTL569_WANT} // 1;
+our $ltl569_budget = $ENV{LTL569_BUDGET} // 64;
 
 sub find_consolidation_candidates {
     my ($cat_gk, $source_key, $threshold_pct, $max_candidates, $skip) = @_;
@@ -51,7 +52,71 @@ sub find_consolidation_candidates {
     return find_consolidation_candidates_sized($cat_gk, $source_key, $threshold_pct, $max_candidates)   if $ltl569_search eq 'sized';
     return ltl569_hits_first($cat_gk, $source_key, $threshold_pct, $ltl569_want, $skip)                 if $ltl569_search eq 'hits_first';
     return ltl569_incremental($cat_gk, $source_key, $threshold_pct, $ltl569_want, $skip)                if $ltl569_search eq 'incremental';
+    return ltl569_hybrid($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip)     if $ltl569_search eq 'hybrid';
     die "LTL569_SEARCH=$ltl569_search is not a search strategy\n";
+}
+
+# Sized probe walked rarest first against the full index. The first $budget
+# candidates met are scored when first seen; after that a candidate is scored only
+# once its shared trigrams inside the probe reach ceil(T*(|r|+|s|)/200) - (|r| - p),
+# below which its Dice cannot reach T. Keys scored on UUID-normalised trigrams get
+# no bound. Stops after the posting list that yields $want partners.
+sub ltl569_hybrid {
+    my ($cat_gk, $source_key, $threshold_pct, $want, $budget, $skip) = @_;
+    my $source_trigrams = $consolidation_key_trigrams{$source_key};
+    return () unless $source_trigrams && %$source_trigrams;
+    my $source_size = scalar keys %$source_trigrams;
+    my $probe = ltl569_sized_probe($cat_gk, $source_key, $threshold_pct);
+    my $outside = $source_size - scalar @$probe;
+    my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
+    my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
+    my $source_trig_dice = $consolidation_key_trigrams_norm{$source_key} // $source_trigrams;
+    my $source_size_dice = scalar keys %$source_trig_dice;
+    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
+    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
+    my $source_normalised = exists $consolidation_key_trigrams_norm{$source_key};
+    my (%hits, %need, @results);
+    my $score_it = sub {
+        my ($cand_key) = @_;
+        my $cand_trig_dice = $consolidation_key_trigrams_norm{$cand_key} // $consolidation_key_trigrams{$cand_key};
+        my $cand_size_dice = scalar keys %$cand_trig_dice;
+        return if $cand_size_dice < $min_dice_size || $cand_size_dice > $max_dice_size;
+        my $score = dice_coefficient($source_trig_dice, $cand_trig_dice);
+        push @results, { key => $cand_key, score => $score } if $score >= $threshold_pct;
+    };
+    for my $trig (@$probe) {
+        for my $cand_key (keys %{$consolidation_ngram_index{$cat_gk}{$trig}}) {
+            next if $cand_key eq $source_key;
+            my $need = $need{$cand_key};
+            if (!defined $need) {
+                my $cand_trigrams = $consolidation_key_trigrams{$cand_key};
+                my $cand_size = defined $cand_trigrams ? scalar keys %$cand_trigrams : 0;
+                if (!$cand_size || $cand_size < $min_cand_size || $cand_size > $max_cand_size
+                    || ($skip && $skip->{$cand_key})) {
+                    $need{$cand_key} = -1;
+                    next;
+                }
+                if ($budget > 0) {
+                    $budget--;
+                    $need{$cand_key} = -1;
+                    $score_it->($cand_key);
+                    next;
+                }
+                if ($source_normalised || exists $consolidation_key_trigrams_norm{$cand_key}) {
+                    $need = 1;
+                } else {
+                    $need = int(($threshold_pct * ($source_size + $cand_size) + 199) / 200) - $outside;
+                    $need = 1 if $need < 1;
+                }
+                $need{$cand_key} = $need;
+            }
+            next if $need < 0;
+            next if ++$hits{$cand_key} != $need;
+            $score_it->($cand_key);
+        }
+        last if @results >= $want;
+    }
+    return sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
 }
 
 sub ltl569_sized_probe {

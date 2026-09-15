@@ -3,7 +3,7 @@
 # at a time, per search strategy: rows after grouping, patterns, evictions, the
 # patterns formed, parse / final-pass / total time and peak memory.
 #   usage: run-e2e.sh <variant ltl> <logs dir> <output dir> <arm>...
-#   arm: <search>[:<want>], e.g. shipped sized incremental:1 incremental:5 hits_first:1
+#   arm: <search>[:<want>[:<budget>]], e.g. shipped incremental:1 hybrid:1:64
 set -uo pipefail
 bin="$1"; logs="$2"; out="$3"; shift 3
 arms=("$@")
@@ -20,12 +20,13 @@ summary="$out/summary.tsv"
 
 run() {
     local case_name="$1"; shift
-    local arm search want name
+    local arm search want budget name
     for arm in "${arms[@]}"; do
-        search="${arm%%:*}"; want="${arm#*:}"; [[ "$want" == "$arm" ]] && want=1
-        name="$case_name--${arm/:/-}"
+        IFS=: read -r search want budget <<< "$arm"
+        want="${want:-1}"; budget="${budget:-64}"
+        name="$case_name--${arm//:/-}"
         echo "$(date +%H:%M:%S) $name" >> "$out/progress.txt"
-        ( cd "$out" && LTL569_SEARCH="$search" LTL569_WANT="$want" \
+        ( cd "$out" && LTL569_SEARCH="$search" LTL569_WANT="$want" LTL569_BUDGET="$budget" \
             "$bin" --disable-progress -ni "$@" -V message-grouping,benchmark-data > "$name.out" 2> "$name.err" )
         local rc=$?
         grep '^  cluster: ' "$out/$name.out" > "$out/$name.clusters"
@@ -35,8 +36,8 @@ run() {
             $1=="TIMING" && $2=="finalize/group_similar" {g=$3}
             $1=="MEMORY" && $2=="rss_peak" {m=$3/1048576}
             /^    Reduction: / {split($0, f, " "); rows+=f[4]}
-            /Total patterns:/ {split($0, f, ":"); pat=f[2]+0}
-            /Total S6 Evicted:/ {split($0, f, ":"); ev=f[2]+0}
+            /^    Keys seen: .*checkpoints, [0-9]+ patterns\)/ {match($0, /[0-9]+ patterns\)/); pat+=substr($0, RSTART, RLENGTH)+0}
+            /^    S6 Evicted: / {split($0, f, ":"); ev+=f[2]+0}
             END {printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.1f\t%d\t%d\t%d\n", c, a, rc, w, t, p, g, m, rows, pat, ev}
         ' "$out/$name.out" >> "$summary"
     done
