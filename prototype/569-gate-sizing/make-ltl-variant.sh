@@ -46,6 +46,7 @@ our $ltl569_search = $ENV{LTL569_SEARCH} // 'shipped';
 our $ltl569_want   = $ENV{LTL569_WANT} // 1;
 our $ltl569_budget = $ENV{LTL569_BUDGET} // 64;
 our $ltl569_frac   = $ENV{LTL569_FRAC} // 0;
+our $ltl569_sizeorder = $ENV{LTL569_SIZEORDER} // 0;
 our %ltl569_int;
 
 sub find_consolidation_candidates {
@@ -212,7 +213,17 @@ sub ltl569_incremental {
 sub ltl569_build_int_index {
     my ($cat_gk, $log_keys_ref) = @_;
     my (%ids, @keys, %post_plain, %post_norm, %post_size, @size, @size_dice, @trig_dice, @norm);
-    for my $log_key (@$log_keys_ref) {
+    # With LTL569_SIZEORDER ids follow raw trigram count (then batch order), so every
+    # posting array is ordered by key size and a search can crop it to its size filter
+    my @order = grep { $consolidation_key_trigrams{$_} } @$log_keys_ref;
+    if ($ltl569_sizeorder) {
+        my (%pos, %sz);
+        my $n = 0;
+        $pos{$_} //= $n++ for @order;
+        $sz{$_} = scalar keys %{$consolidation_key_trigrams{$_}} for @order;
+        @order = sort { $sz{$a} <=> $sz{$b} || $pos{$a} <=> $pos{$b} } @order;
+    }
+    for my $log_key (@order) {
         my $trigrams = $consolidation_key_trigrams{$log_key};
         next unless $trigrams;
         next if exists $ids{$log_key};
@@ -286,12 +297,30 @@ sub ltl569_cut {
         my $score = dice_coefficient($source_trig_dice, $trig_dice->[$cid]);
         push @results, { key => $ix->{keys}[$cid], score => $score } if $score >= $threshold_pct;
     };
+    # Size-ordered ids: the ids whose raw size is inside the size filter form one range
+    my ($id_lo, $id_hi) = (0, $#{$ix->{keys}});
+    if ($ltl569_sizeorder) {
+        my ($lo, $hi) = (0, scalar @$size);
+        while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] < $min_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+        $id_lo = $lo;
+        ($lo, $hi) = ($id_lo, scalar @$size);
+        while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $max_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+        $id_hi = $lo - 1;
+    }
     for my $i (0 .. $p - 1) {
         my $trig = $probe[$i];
         my @lists = ($source_normalised || $i <= $cut || $live > 0) ? ($post_plain->{$trig}, $post_norm->{$trig}) : ($post_norm->{$trig});
         for my $list (@lists) {
             next unless $list;
-            for my $cid (@$list) {
+            my $start = 0;
+            if ($ltl569_sizeorder) {
+                my ($lo, $hi) = (0, scalar @$list);
+                while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($list->[$mid] < $id_lo) { $lo = $mid + 1 } else { $hi = $mid } }
+                $start = $lo;
+            }
+            for my $k ($start .. $#$list) {
+                my $cid = $list->[$k];
+                last if $cid > $id_hi;
                 my $need = $need[$cid];
                 if (!defined $need) {
                     next if !$source_normalised && !$norm->[$cid] && $i > $cut;
