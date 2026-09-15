@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
 # validate-message-grouping.sh — harness for the message-grouping -V section.
 #
-# The system under test is the threshold message grouping (-g) applies in its
-# final pass. The final pass scores at the sensitivity the run resolved from
-# -g (or its default), unless --final-threshold is given explicitly, and the
-# section header reports the threshold the final pass used.
+# Two systems under test.
 #
-# The fixture's four request paths are each requested three times, so every
-# key reaches the occurrence ceiling, streaming discovery skips it, and only
-# the final pass can group them. They form two pairs at Dice 77 and Dice 89,
-# so the number of patterns the final pass creates says which threshold it
-# scored at.
+# 1. The threshold message grouping (-g) applies in its final pass. The final
+#    pass scores at the sensitivity the run resolved from -g (or its default),
+#    unless --final-threshold is given explicitly, and the section header
+#    reports the threshold the final pass used.
+#
+#    The fixture's four request paths are each requested three times, so every
+#    key reaches the occurrence ceiling, streaming discovery skips it, and only
+#    the final pass can group them. They form two pairs at Dice 77 and Dice 89,
+#    so the number of patterns the final pass creates says which threshold it
+#    scored at.
+#
+# 2. The candidate search finds every partner at the requested similarity, and
+#    grouping never replaces UUIDs.
+#
+#    The signed direct-download fixture is 400 scrubbed request lines whose
+#    message keys, under -xqs, each have a partner at Dice 75 to 79 and no pair
+#    at Dice 85; their rarest trigrams come from per-request values (signature,
+#    signing time, counter). The UUID fixture is two request lines whose keys
+#    differ only in a hex UUID sharing its first 18 characters: Dice 73 on the
+#    keys as written, 100 with the UUIDs replaced by one placeholder.
 #
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the invariant being tested
@@ -37,13 +49,17 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 neutralize_colour_env
 
 FIXTURE="$REPO_DIR/tests/fixtures/grouping-final-pass-threshold.txt"
+FIXTURE_DOWNLOADS="$REPO_DIR/tests/fixtures/grouping-signed-downloads.txt"
+FIXTURE_UUID="$REPO_DIR/tests/fixtures/grouping-uuid-pair.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-if [[ ! -f "$FIXTURE" ]]; then
-    echo "ERROR: fixture not found: $FIXTURE"; exit 1
-fi
+for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID"; do
+    if [[ ! -f "$f" ]]; then
+        echo "ERROR: fixture not found: $f"; exit 1
+    fi
+done
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -53,8 +69,12 @@ failures=()
 current_scenario=""
 
 CONTRACT='features/fuzzy-message-consolidation.md § Final pass follows the sensitivity (#571) — acceptance criteria and the -V message-grouping keys asserted'
+CONTRACT_SEARCH='features/fuzzy-message-consolidation.md § Design: candidate search that finds every partner (#569) — acceptance criteria'
 HEADER_PRODUCER='pipeline_finalize() in ltl (message-grouping header line)'
 FINAL_PASS_PRODUCER='group_similar_messages() in ltl (final-pass threshold), counted per group by process_final_pass_window()'
+REDUCTION_PRODUCER='pipeline_finalize() in ltl (per-group Reduction line), over the patterns run_consolidation_checkpoint() and process_final_pass_window() form from find_consolidation_candidates() results'
+PATTERNS_PRODUCER='run_consolidation_checkpoint() (streaming) and process_final_pass_window() via group_similar_messages() (final pass) in ltl, candidates from find_consolidation_candidates(); reported by pipeline_finalize()'
+MEMBERSHIP_PRODUCER='group_similar_messages() in ltl (message-grouping-membership buffer), emitted by pipeline_finalize()'
 
 # Run ltl, capture the message-grouping section, fail hard on a failed run, an
 # empty capture, a missing section, or a runtime warning (HARNESS-DESIGN.md
@@ -132,6 +152,102 @@ block_counter() {
     ' "$1"
 }
 
+# Prints "<keys> <rows>" from a group's "Reduction: N -> M" line; exits
+# non-zero when the group has no Reduction line.
+# Usage: group_reduction <file> <group>
+group_reduction() {
+    awk -v grp="  --- $2: " '
+        index($0, "===") == 1 { ingroup = 0 }
+        index($0, "  --- ") == 1 { ingroup = (index($0, grp) == 1) }
+        ingroup && $1 == "Reduction:" && $3 == "->" { print $2, $4; found = 1; exit }
+        END { if (!found) exit 1 }
+    ' "$1"
+}
+
+# Passes when the group's reduction ends at no more than <max> rows from
+# <keys> keys; prints the observed line on failure.
+# Usage: check_rows_at_most <file> <group> <keys> <max>
+check_rows_at_most() {
+    local r
+    if ! r=$(group_reduction "$1" "$2"); then
+        echo "no 'Reduction:' line for group $2 in $1"; return 1
+    fi
+    set -- "$@" $r
+    echo "observed: Reduction $5 -> $6 (expected $3 keys, at most $4 rows)"
+    [[ "$5" -eq "$3" && "$6" -le "$4" ]]
+}
+
+# Passes when the group's reduction is exactly <keys> -> <rows>.
+# Usage: check_rows_equal <file> <group> <keys> <rows>
+check_rows_equal() {
+    local r
+    if ! r=$(group_reduction "$1" "$2"); then
+        echo "no 'Reduction:' line for group $2 in $1"; return 1
+    fi
+    set -- "$@" $r
+    echo "observed: Reduction $5 -> $6 (expected $3 -> $4)"
+    [[ "$5" -eq "$3" && "$6" -eq "$4" ]]
+}
+
+# Passes when the group has at least one phase block and every block reports
+# zero patterns: the streaming block's "(N checkpoints, P patterns)" and the
+# final-pass block's "New patterns created:". A block whose count cannot be
+# read fails. Prints each block's count.
+# Usage: check_no_patterns <file> <group>
+check_no_patterns() {
+    awk -v grp="  --- $2: " '
+        function close_block() {
+            if (inblock != "" && !(inblock in count)) { missing = 1; print inblock ": no pattern count" }
+            inblock = ""
+        }
+        index($0, "===") == 1 { close_block() }
+        index($0, "  --- ") == 1 {
+            close_block()
+            if (index($0, grp) == 1) { inblock = $0; blocks++ }
+        }
+        inblock ~ /Streaming Phase/ && $1 == "Keys" && match($0, /, [0-9]+ patterns\)/) {
+            p = substr($0, RSTART + 2, RLENGTH - 2); sub(/ .*/, "", p); count[inblock] = p
+        }
+        inblock ~ /Final Pass/ && $1 == "New" && $2 == "patterns" { count[inblock] = $4 }
+        END {
+            close_block()
+            if (blocks == 0) { print "no phase block for group"; exit 1 }
+            bad = 0
+            for (b in count) { print b ": " count[b] " pattern(s)"; if (count[b] + 0 != 0) bad = 1 }
+            exit (missing || bad) ? 1 : 0
+        }
+    ' "$1"
+}
+
+# Writes the message-grouping / cluster-membership sub-section of <capture> to
+# <outfile>; fails when either delimiter is absent or no cluster is listed.
+# Usage: membership_section <capture> <outfile>
+membership_section() {
+    if ! grep -q '^=== message-grouping / cluster-membership ===$' "$1"; then
+        echo "no '=== message-grouping / cluster-membership ===' in $1"; return 1
+    fi
+    if ! grep -q '^=== END message-grouping / cluster-membership ===$' "$1"; then
+        echo "no '=== END message-grouping / cluster-membership ===' in $1"; return 1
+    fi
+    sed -n '/^=== message-grouping \/ cluster-membership ===$/,/^=== END message-grouping \/ cluster-membership ===$/p' "$1" > "$2"
+    if ! grep -q '^  cluster: ' "$2"; then
+        echo "cluster-membership in $1 lists no cluster"; return 1
+    fi
+}
+
+# Passes when both captures carry a non-empty cluster-membership sub-section
+# and the two are byte-identical.
+# Usage: check_membership_identical <capture-a> <capture-b>
+check_membership_identical() {
+    membership_section "$1" "$1.membership" || return 1
+    membership_section "$2" "$2.membership" || return 1
+    if ! cmp -s "$1.membership" "$2.membership"; then
+        echo "cluster-membership differs between runs:"
+        { diff "$1.membership" "$2.membership" || true; } | head -20
+        return 1
+    fi
+}
+
 # Asserts the header thresholds, that all fixture keys reach the final pass,
 # and the final pass's pattern count for one scenario.
 # Usage: check_scenario <capture> <streaming T> <final-pass T> <expected patterns> <why>
@@ -190,6 +306,77 @@ echo "[$current_scenario]"
 out="$TMP_DIR/g95-final70.out"
 if capture_section "$out" $SHAPE -g 95 --final-threshold 70 "$FIXTURE"; then
     check_scenario "$out" 95 70 2 'an explicit --final-threshold 70 overrides -g 95 for the final pass only'
+fi
+
+# Candidate search scenarios. -du us binds the fixture's microsecond durations
+# as the source log is read; -xqs keeps the query string, which carries the
+# per-request values the search must look past. Same SHAPE otherwise.
+DOWNLOAD_KEYS=$(wc -l < "$FIXTURE_DOWNLOADS" | tr -d ' ')
+
+current_scenario="signed-downloads-75"
+echo "[$current_scenario]"
+out_downloads_75="$TMP_DIR/downloads-g75.out"
+if capture_section "$out_downloads_75" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "check_rows_at_most '$out_downloads_75' 'plain|200' $DOWNLOAD_KEYS 10" \
+        label       "plain|200 reduces $DOWNLOAD_KEYS keys to at most 10 rows" \
+        asserts     "Every signed download key has a partner at Dice 75 or above, so at -g 75 the candidate search finds them and the group reduces to at most 10 rows; a search that passes over partners whose rarest trigrams are per-request values leaves every key ungrouped" \
+        produced_by "$REDUCTION_PRODUCER" \
+        contract    "$CONTRACT_SEARCH (criterion 1)"
+fi
+
+current_scenario="signed-downloads-85"
+echo "[$current_scenario]"
+out="$TMP_DIR/downloads-g85.out"
+if capture_section "$out" $SHAPE -du us -xqs -g 85 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "check_no_patterns '$out' 'plain|200'" \
+        label       'no pattern formed in any plain|200 block' \
+        asserts     "No two signed download keys score Dice 85, so at -g 85 no phase forms a pattern: the streaming block reports 0 patterns and a final-pass block, when present, creates 0" \
+        produced_by "$PATTERNS_PRODUCER" \
+        contract    "$CONTRACT_SEARCH (criterion 2)"
+fi
+
+current_scenario="uuid-pair-85"
+echo "[$current_scenario]"
+out="$TMP_DIR/uuid-g85.out"
+if capture_section "$out" $SHAPE -g 85 "$FIXTURE_UUID"; then
+    assert_command \
+        command     "! grep -n '<UUID>' '$out'" \
+        label       'no <UUID> placeholder anywhere in the output' \
+        asserts     "Consolidation never replaces a UUID, so no <UUID> placeholder reaches any pattern, row or verbose line" \
+        produced_by 'build_consolidation_ngram_index() and find_consolidation_candidates() in ltl (trigram sets scored by dice_coefficient())' \
+        contract    "$CONTRACT_SEARCH (criterion 4)"
+    assert_command \
+        command     "check_rows_equal '$out' 'plain|200' 2 2" \
+        label       'the two keys remain two rows' \
+        asserts     "The two keys differ only in a UUID and score Dice 73 as written, so at -g 85 they are not grouped; grouping them means Dice was scored with the UUIDs replaced" \
+        produced_by "$REDUCTION_PRODUCER" \
+        contract    "$CONTRACT_SEARCH (criterion 4)"
+fi
+
+current_scenario="uuid-pair-85-masked"
+echo "[$current_scenario]"
+out="$TMP_DIR/uuid-g85-masked.out"
+if capture_section "$out" $SHAPE -g 85 -uuid "$FIXTURE_UUID"; then
+    assert_command \
+        command     "check_rows_equal '$out' 'plain|200' 1 1" \
+        label       'with -uuid the two lines are one row' \
+        asserts     "-uuid masks the UUID before the message key is built, so the two lines share one key and report one row" \
+        produced_by "read_and_process_logs() in ltl (-uuid mask on the message), reported by pipeline_finalize()" \
+        contract    "$CONTRACT_SEARCH (criterion 4)"
+fi
+
+current_scenario="signed-downloads-75-repeat"
+echo "[$current_scenario]"
+out="$TMP_DIR/downloads-g75-repeat.out"
+if [[ -s "$out_downloads_75" ]] && capture_section "$out" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "check_membership_identical '$out_downloads_75' '$out'" \
+        label       'cluster-membership byte-identical across two runs' \
+        asserts     "The same invocation on the same input groups the same keys under the same canonical forms: the cluster-membership sub-section is non-empty and byte-identical between two runs" \
+        produced_by "$MEMBERSHIP_PRODUCER" \
+        contract    "$CONTRACT_SEARCH (criterion 5)"
 fi
 
 echo

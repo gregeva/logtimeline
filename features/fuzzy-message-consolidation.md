@@ -1776,6 +1776,15 @@ Captured 2026-09-15 on `044b25c` (this branch, `ltl` unchanged apart from `$vers
 | `single-day-application-log-top25-consolidate` | 7.015 s | 0.290 s | 131.7 MB |
 | `humungous-log-uniqueness-top25-consolidate` | 11.662 s | 4.379 s | 264.4 MB |
 
+The completion gate compares against a second capture, taken 2026-09-16 after this branch was rebased onto `release/0.18.2`. It runs on the commit before implementation (the final pass at the `-g` sensitivity from #571 included, `ltl` otherwise unchanged apart from `$version_number`). Same machine, single run each, `tests/baseline/results/569-rebased-before-<case>.tsv`, corpus read through `LTL_LOGS_DIR` from the worktree.
+
+| Case | `total` | `parse/read_files` | `finalize/group_similar` | `rss_peak` |
+|---|---|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.242 s | 9.126 s | 0.000 s | 98.5 MB |
+| `single-day-access-log-top25-consolidate` | 13.321 s | 10.596 s | 2.537 s | 130.9 MB |
+| `single-day-application-log-top25-consolidate` | 6.870 s | 6.569 s | 0.287 s | 131.7 MB |
+| `humungous-log-uniqueness-top25-consolidate` | 12.178 s | 7.307 s | 4.856 s | 264.4 MB |
+
 ### Prototype: candidate gate sized from the requested similarity
 
 2026-09-15, `prototype/569-gate-sizing/` (results in `results/`), at the architect's direction (open item 1).
@@ -2185,6 +2194,27 @@ The fraction ¼ is chosen from the prototype: on the download batch ½ costs 8.6
 | 5 | The same invocation run twice | byte-identical `message-grouping` cluster output | assertable |
 | 6 | Completion gate, the four `569-before` cases | no metric worse by more than 5% (`compare-results.sh summary`) | assertable |
 | 7 | `--help` and `docs/usage.md` for `-g` | both advise excluding UUIDs with `-uuid` where a log carries many | assertable (`validate-help-content.sh` parity; text reviewed) |
+
+### Implementation progress
+
+**Acceptance tests, shown failing before the change (2026-09-16).** `tests/validate-message-grouping.sh` gains scenarios for criteria 1, 2, 4 and 5 over two committed fixtures:
+- `tests/fixtures/grouping-signed-downloads.txt`: 400 scrubbed signed direct-download requests from the PLM access day, rebuilt by `tests/fixtures/regenerate-grouping-signed-downloads.sh`. Under `-xqs` each key's best partner scores Dice 75 to 79 (median 77) and no pair reaches 85.
+- `tests/fixtures/grouping-uuid-pair.txt`: two requests whose keys differ only in a UUID sharing its first 18 characters. They score Dice 73 as written and 100 with the UUIDs replaced by a placeholder.
+
+Run on the rebased base commit (`ltl` unchanged apart from `$version_number`): 15 passed, 3 failed. Every failure is expected:
+
+| Criterion | Assertion | Base result |
+|---|---|---|
+| 1 | `plain\|200` reduces 400 keys to at most 10 rows at `-g 75` | fails: `Reduction 400 -> 400` |
+| 4 | the two UUID-differing keys remain two rows at `-g 85` | fails: `Reduction 2 -> 1`; the base scores Dice with the UUIDs replaced and groups them as `3f9c2a71-8be4-4d0a-*` |
+| 5 | cluster membership byte-identical across two runs at `-g 75` | fails: the base forms no cluster, so there is no membership to compare |
+| 2 | no pattern in any `plain\|200` block at `-g 85` | passes, as it must before and after |
+| 4 | no `<UUID>` anywhere in the output; with `-uuid` the two lines are one row | passes: the base's placeholder never reaches output |
+| #571's final-pass threshold scenarios | all 12 assertions | pass |
+
+Each new check was also shown to fail on a doctored or violating capture (at most 10 rows against 400 → 400, 400 → 11 and a missing group; no patterns against streaming and final-pass pattern counts and a missing count line; membership against a changed member line, a missing section and an empty section).
+
+A variant of `ltl` built with the prototype's search settings reduces the download fixture 400 → 3 at `-g 75` and forms nothing at `-g 85`.
 
 ## Final pass follows the sensitivity (#571)
 
