@@ -71,10 +71,11 @@ sub find_consolidation_candidates {
     return ltl569_incremental($cat_gk, $source_key, $threshold_pct, $ltl569_want, $skip)                if $ltl569_search eq 'incremental';
     return ltl569_hybrid($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip)     if $ltl569_search eq 'hybrid';
     if ($ltl569_search eq 'cut') {
-        return ltl569_cut($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip) unless $ltl569_stats_on;
+        my $cut_fn = $ltl569_sizeorder >= 3 ? \&ltl569_cut3 : \&ltl569_cut;
+        return $cut_fn->($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip) unless $ltl569_stats_on;
         ($ltl569_visits, $ltl569_dice) = (0, 0);
         my $t0 = [gettimeofday];
-        my @r = ltl569_cut($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip);
+        my @r = $cut_fn->($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip);
         my $s = $ltl569_stats{"$cat_gk\t" . ($consolidation_phase // 'streaming')} //= { searches => 0, found => 0, visits => 0, dice => 0, seconds => 0 };
         $s->{searches}++;
         $s->{found}++ if @r;
@@ -336,8 +337,23 @@ sub ltl569_cut {
     }
     for my $i (0 .. $p - 1) {
         my $trig = $probe[$i];
-        my @lists = ($source_normalised || $i <= $cut || $live > 0) ? ($post_plain->{$trig}, $post_norm->{$trig}) : ($post_norm->{$trig});
-        for my $list (@lists) {
+        # LTL569_SIZEORDER=2: a non-UUID candidate first seen at position i gathers at most
+        # p - i hits, so only sizes s with ceil(T*(|r|+s)/200) - (|r| - p) <= p - i can still
+        # qualify; with size-ordered ids those end at $new_hi
+        my $new_hi = $id_hi;
+        if ($ltl569_sizeorder >= 2 && !$source_normalised) {
+            my $num = 200 * ($p - $i + $outside);
+            my $s_max = ($num - $num % $threshold_pct) / $threshold_pct - $source_size;
+            my ($lo, $hi) = ($id_lo, $id_hi + 1);
+            while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $s_max) { $lo = $mid + 1 } else { $hi = $mid } }
+            $new_hi = $lo - 1;
+        }
+        my $band = $ltl569_sizeorder >= 2;
+        my $plain_open = $source_normalised || $live > 0 || ($band ? $new_hi >= $id_lo : $i <= $cut);
+        my $plain_end = ($band && !$source_normalised && $live <= 0) ? $new_hi : $id_hi;
+        my @lists = $plain_open ? ([$post_plain->{$trig}, $plain_end], [$post_norm->{$trig}, $id_hi]) : ([$post_norm->{$trig}, $id_hi]);
+        for my $entry (@lists) {
+            my ($list, $end_id) = @$entry;
             next unless $list;
             my $start = 0;
             if ($ltl569_sizeorder) {
@@ -347,11 +363,11 @@ sub ltl569_cut {
             }
             for my $k ($start .. $#$list) {
                 my $cid = $list->[$k];
-                last if $cid > $id_hi;
+                last if $cid > $end_id;
                 $ltl569_visits++;
                 my $need = $need[$cid];
                 if (!defined $need) {
-                    next if !$source_normalised && !$norm->[$cid] && $i > $cut;
+                    next if !$source_normalised && !$norm->[$cid] && ($band ? $cid > $new_hi : $i > $cut);
                     my $cand_size = $size->[$cid];
                     if ($cand_size < $min_cand_size || $cand_size > $max_cand_size
                         || ($skip && $skip->{$ix->{keys}[$cid]})) { $need[$cid] = -1; next; }
@@ -381,7 +397,122 @@ sub ltl569_cut {
         }
         $live -= $dying[$i - 1] // 0 if $i > 0;
         last if @results >= $want;
-        last if !$source_normalised && $i >= $cut && $live <= 0 && !grep { $post_norm->{$probe[$_]} } $i + 1 .. $p - 1;
+        last if !$source_normalised && ($band ? $new_hi < $id_lo : $i >= $cut) && $live <= 0 && !grep { $post_norm->{$probe[$_]} } $i + 1 .. $p - 1;
+    }
+    return sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
+}
+
+# LTL569_SIZEORDER=3: the size band of ltl569_cut, but a non-UUID candidate already
+# seen whose id lies above the band is followed by looking the probe trigram up in its
+# own trigram set, so a few live mid-size candidates no longer keep whole posting
+# arrays open. Each candidate still receives every hit it would get from the arrays.
+sub ltl569_cut3 {
+    my ($cat_gk, $source_key, $threshold_pct, $want, $budget, $skip) = @_;
+    my $ix = $ltl569_int{$cat_gk} or return ();
+    my $sid = $ix->{ids}{$source_key};
+    return () unless defined $sid;
+    my ($size, $size_dice, $trig_dice, $norm, $keys) = @{$ix}{qw(size size_dice trig_dice norm keys)};
+    my ($post_plain, $post_norm, $post_size) = @{$ix}{qw(post_plain post_norm post_size)};
+    my $source_size = $size->[$sid];
+    return () if $source_size == 0;
+    my @probe = sort { ($post_size->{$a} <=> $post_size->{$b}) || ($a cmp $b) }
+                keys %{$consolidation_key_trigrams{$source_key}};
+    my $p = min(max(1, $source_size - int(($source_size * $threshold_pct + (200 - $threshold_pct) - 1) / (200 - $threshold_pct)) + 1), scalar @probe);
+    splice(@probe, $p);
+    my $outside = $source_size - $p;
+    my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
+    my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
+    my $source_trig_dice = $trig_dice->[$sid];
+    my $source_size_dice = $size_dice->[$sid];
+    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
+    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
+    my $source_normalised = $norm->[$sid];
+    my $sum_const = $threshold_pct * $source_size + 199;
+
+    my ($lo, $hi) = (0, scalar @$size);
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] < $min_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_lo = $lo;
+    ($lo, $hi) = ($id_lo, scalar @$size);
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $max_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_hi = $lo - 1;
+
+    my (@hits, @need, @verify_at, @deadline, @dying, @results, %live_ids);
+    my $live = 0;
+    my $i = 0;
+    $need[$sid] = -1;
+    my $score_it = sub {
+        my ($cid) = @_;
+        my $cs = $size_dice->[$cid];
+        return if $cs < $min_dice_size || $cs > $max_dice_size;
+        $ltl569_dice++;
+        my $score = dice_coefficient($source_trig_dice, $trig_dice->[$cid]);
+        push @results, { key => $keys->[$cid], score => $score } if $score >= $threshold_pct;
+    };
+    my $visit = sub {
+        my ($cid, $new_hi) = @_;
+        my $need = $need[$cid];
+        if (!defined $need) {
+            return if !$source_normalised && !$norm->[$cid] && $cid > $new_hi;
+            my $cand_size = $size->[$cid];
+            if ($cand_size < $min_cand_size || $cand_size > $max_cand_size
+                || ($skip && $skip->{$keys->[$cid]})) { $need[$cid] = -1; return; }
+            if ($budget > 0) { $budget--; $need[$cid] = -1; $score_it->($cid); return; }
+            if ($source_normalised || $norm->[$cid]) { $need = 1; }
+            else { $need = int(($sum_const + $threshold_pct * $cand_size) / 200) - $outside; $need = 1 if $need < 1; }
+            $need[$cid] = $need;
+            $verify_at[$cid] = $ltl569_frac > 0 ? max(1, int($need * $ltl569_frac + 0.999)) : $need;
+            if ($need > 1) {
+                # With h hits after position i it can still reach its bound while i <= p - 1 - need + h
+                my $d = $p - $need;
+                if ($d < $i) { $need[$cid] = -1; return; }
+                $deadline[$cid] = $d; $dying[$d]++; $live++;
+                $live_ids{$cid} = 1;
+            }
+        }
+        return if $need < 0;
+        if ($need > 1 && defined $hits[$cid] && $deadline[$cid] < $i - 1) { $need[$cid] = -1; delete $live_ids{$cid}; return; }
+        my $h = ++$hits[$cid];
+        if ($h == $verify_at[$cid]) {
+            if ($need > 1) { $dying[$deadline[$cid]]--; $live--; delete $live_ids{$cid}; }
+            $need[$cid] = -1;
+            $score_it->($cid);
+        } elsif ($h > 1) {
+            $dying[$deadline[$cid]]--; $deadline[$cid]++; $dying[$deadline[$cid]]++;
+        }
+    };
+    for ($i = 0; $i < $p; $i++) {
+        my $trig = $probe[$i];
+        my $new_hi = $id_hi;
+        if (!$source_normalised) {
+            my $num = 200 * ($p - $i + $outside);
+            my $s_max = ($num - $num % $threshold_pct) / $threshold_pct - $source_size;
+            my ($l, $h) = ($id_lo, $id_hi + 1);
+            while ($l < $h) { my $m = ($l + $h) >> 1; if ($size->[$m] <= $s_max) { $l = $m + 1 } else { $h = $m } }
+            $new_hi = $l - 1;
+        }
+        for my $entry ([$post_plain->{$trig}, $source_normalised ? $id_hi : $new_hi], [$post_norm->{$trig}, $id_hi]) {
+            my ($list, $end_id) = @$entry;
+            next unless $list && $end_id >= $id_lo;
+            my ($l, $h) = (0, scalar @$list);
+            while ($l < $h) { my $m = ($l + $h) >> 1; if ($list->[$m] < $id_lo) { $l = $m + 1 } else { $h = $m } }
+            for my $k ($l .. $#$list) {
+                my $cid = $list->[$k];
+                last if $cid > $end_id;
+                $ltl569_visits++;
+                $visit->($cid, $new_hi);
+            }
+        }
+        if (!$source_normalised && %live_ids) {
+            for my $cid (keys %live_ids) {
+                next if $cid <= $new_hi;
+                $ltl569_visits++;
+                next unless exists $consolidation_key_trigrams{$keys->[$cid]}{$trig};
+                $visit->($cid, $new_hi);
+            }
+        }
+        $live -= $dying[$i - 1] // 0 if $i > 0;
+        last if @results >= $want;
+        last if !$source_normalised && $new_hi < $id_lo && $live <= 0 && !grep { $post_norm->{$probe[$_]} } $i + 1 .. $p - 1;
     }
     return sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
 }
