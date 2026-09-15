@@ -1768,9 +1768,33 @@ The reproducing invocation on a scratch copy of `ltl` whose only change is `$con
 
 The groups formed are one per download variant (by the file-name template and extension in the path), with ids, sizes and signature wildcarded. Residual over-specificity: one variant splits in two on the leading digits of the signing time, and one row keeps a literal file id and size.
 
+### Similarity distribution between download keys
+
+Which sensitivities should group these keys at all. Scored with `get_consolidation_trigrams()` and `dice_coefficient()` sliced verbatim from `ltl`, on message keys built as `ltl` builds them (`[200] ` plus the request, query string kept, capped at 350 characters). Two samples of 5,000 download keys: the first 5,000 of the day (what the first checkpoint sees) and 5,000 spread evenly across the day. For each, the best-partner score of 500 source keys against the other 4,999, and the scores of 200,000 random pairs.
+
+Best partner per source (500 sources):
+
+| Sample | Min | Median | Max | ≥ 75 | ≥ 80 | ≥ 85 |
+|---|---|---|---|---|---|---|
+| First 5,000 | 78 | 80 | 81 | 100% | 87.2% | 0% |
+| Across the day | 74 | 79 | 81 | 99.8% | 40.6% | 0% |
+
+Random pairs (200,000):
+
+| Sample | Min | Median | Max | ≥ 65 | ≥ 70 | ≥ 75 | ≥ 80 |
+|---|---|---|---|---|---|---|---|
+| First 5,000 | 65 | 70 | 82 | 100% | 51.4% | 25.9% | 0% |
+| Across the day | 60 | 68 | 80 | 86.1% | 42.1% | 5.4% | 0% |
+
+Reading:
+- **85 to 95:** no pair of download keys reaches the threshold, so forming no groups is the correct outcome.
+- **75 and below:** every key has a partner above the threshold; forming no groups is the defect.
+- **80:** a boundary; 87.2% of keys have a partner at 80 in the first checkpoint's batch, 40.6% across the day.
+- The day-wide sample is more varied than one checkpoint batch (random pairs 60–80 against 65–82).
+
 ### Related behaviour observed on the way
 
-- **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%. Neither side of the 65/70 boundary is correct grouping.
+- **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%, with no pattern formed for the download requests. Neither side of the 65/70 boundary is correct grouping. The include filters are therefore not what makes the download keys ungroupable: at 70 and above they are ungrouped in the unfiltered population too, and at 50–65 the filters only remove the catch-all that absorbed them.
 - **A small Apache HTTP Server 2.x access log of a PLM application with microsecond durations (677 lines, 6 download requests) does group** with `-xqs -bs 1440 -n 15 -g N -V` at 50, 80 and 95 (54 keys → 15–18 rows); it does not reproduce the defect.
 - **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes.
 
