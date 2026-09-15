@@ -26,10 +26,19 @@
 # A consolidated row's percentiles are derived from the member histograms of the
 # keys the row absorbed, projected onto one shared geometry. The oracle derives
 # the same row by pooling those keys' raw durations into a single histogram. One
-# projection is not zero projections, so the two cannot agree closer than one
-# bucket - 4.44% at the per-message surface's default 53 buckets per decade.
-# Every entry below is inside that bound; IQR entries are larger because an IQR
-# is a difference of two percentiles and carries both.
+# projection is not zero projections: each source bin's count moves to the
+# shared bin holding the source bin's geometric midpoint, so a count can sit up
+# to one bucket (4.44% at the per-message surface's default 53 buckets per
+# decade) from where the pooled histogram holds it. When a percentile's rank
+# falls on a bin holding a single count, interpolation returns that bin's upper
+# edge, so the displacement and the bin width add: the bound for a percentile
+# column is about two buckets (~8.9%). Measured on apache-bin-consolidated's
+# v6/v7 DataAdmin $metadata row, p90 rank 47 of 52 is one 101.290 ms request:
+# the pooled histogram reports its bin's upper edge 101.836, the member's bin
+# [100.758, 105.232) projects by midpoint 102.971 into shared bin
+# [102.805, 107.382), and ltl reports 107.382 - 5.45%, reproduced exactly by
+# replaying the collapse. An IQR is a difference of two percentiles and
+# carries both.
 #
 # Attribution history, because it has moved twice and the reasoning is the point.
 # Registered against #459 (combination order) on 2026-08-26, on the assumption
@@ -51,7 +60,12 @@
 # insist.
 # ---------------------------------------------------------------------------
 scenario	file_kind	column	key_class	issue	note
+apache-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry, 3.8%
 apache-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry, 4.0% against a 4.44% bucket
+apache-bin-consolidated	messages	p75	merged	469	one projection onto the shared geometry, 3.6%
+apache-bin-consolidated	messages	p90	merged	469	projection plus upper edge of a single-count bin, 5.45% within the two-bucket bound
+apache-bin-consolidated	messages	p95	merged	469	one projection onto the shared geometry, 2.7%
+apache-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both, up to 6.7%
 codebeamer-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 3.0% against a 4.44% bucket
 codebeamer-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
 codebeamer-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
@@ -61,8 +75,10 @@ codebeamer-bin-consolidated	messages	iqr	merged	469	difference of two projected 
 thingworx-bin-consolidated	messages	p1	merged	469	one projection onto the shared geometry, 4.2% against a 4.44% bucket
 thingworx-bin-consolidated	messages	p5	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	p10	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p25	merged	469	one projection onto the shared geometry, up to 3.0%
 thingworx-bin-consolidated	messages	p50	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	p75	merged	469	one projection onto the shared geometry
+thingworx-bin-consolidated	messages	p90	merged	469	one projection onto the shared geometry, up to 3.6%
 thingworx-bin-consolidated	messages	p95	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	p999	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both
