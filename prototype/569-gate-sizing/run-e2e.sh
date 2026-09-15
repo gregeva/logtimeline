@@ -27,7 +27,7 @@ run() {
         name="$case_name--${arm//:/-}"
         echo "$(date +%H:%M:%S) $name" >> "$out/progress.txt"
         ( cd "$out" && LTL569_SEARCH="$search" LTL569_WANT="$want" LTL569_BUDGET="$budget" \
-            "$bin" --disable-progress -ni "$@" -V message-grouping,benchmark-data > "$name.out" 2> "$name.err" )
+            "$bin" --disable-progress -ni "$@" -V > "$name.out" 2> "$name.err" )
         local rc=$?
         grep '^  cluster: ' "$out/$name.out" > "$out/$name.clusters"
         awk -F'\t' -v c="$case_name" -v a="$arm" -v rc="$rc" -v w="$(grep -c ' at .* line [0-9]' "$out/$name.err")" '
