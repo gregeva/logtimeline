@@ -311,8 +311,7 @@ my %arm  = (
     cut_rare64_b64_1  => sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 64, 64) },
     cut_rare256_b64_1 => sub { my ($T, $s) = @_; hybrid_int_cut($s, $T, 1, 64, 256) },
 );
-my @arms = qw(shipped hybrid_str_b64_1 hybrid_int_b64_1 hybrid_int_b64_5 cut_int_b64_1 cut_int_b64_5 cut_int_b0_1
-              cut_rare16_b64_1 cut_rare64_b64_1 cut_rare256_b64_1);
+my @arms = qw(shipped hybrid_str_b64_1 hybrid_int_b64_1 cut_int_b64_1 cut_int_b64_5 cut_int_b0_1);
 my @src  = @keys[0 .. min($n_src, scalar @keys) - 1];
 
 my %best;
