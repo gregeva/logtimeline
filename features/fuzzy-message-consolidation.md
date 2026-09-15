@@ -1938,6 +1938,7 @@ Readings:
 - **Every case is as fast as shipped or faster except the unfiltered access day at `-g 80`**, and peak memory stays within 10% of shipped (lower on the download requests at 50–85 and the script log at 70).
 - **The unfiltered day's extra time is not in candidate search.** Against the download requests alone at `-g 80`, it makes about the same number of searches (4,827 streaming and 7,395 final-pass, against 4,725 and 7,292), but forms 21 streaming patterns instead of 5 and makes 25,539 checkpoint pattern-match attempts instead of 10,611; parse rises from 31.1 to 79.2 s. Being profiled.
 - **The catch-all `[200] GET /Windchill/*` forms at `-g 65` under shipped and both fractions** (open item 3 is untouched by candidate search).
+- **Repeatable.** A second run of f = ½ on the download requests at `-g 75`, the unique-errors log at 85 and the script log at 85 produced byte-identical patterns and `message-grouping` counters (timing and memory lines excluded); the integer index walks in batch order, where the hash index's budget depended on Perl's per-process hash order.
 
 **Documentation requirement (architect, 2026-09-15).** The user documentation that accompanies this fix states that excluding UUIDs from the message (today `-uuid`; `--discard uuid` under #567) is advisable when a log carries many of them, because every UUID-bearing key is scored on UUID-normalised trigrams without the count bound, which makes the similarity check do much more work.
 
