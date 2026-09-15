@@ -1914,6 +1914,33 @@ Candidate searches made: at `-g 50` on the download requests, 72 with budget 64 
 
 **Memory.** Under `-mem` on the day's first 25,000 download lines at `-g 80`, shipped's candidate index peaks at 135.1 MB of postings plus 13.9 MB of posting sizes; the integer index reports 222.3 MB, a figure that includes the per-key trigram sets it only references (118.1 MB, also counted under `consolidation_key_trigrams`). Peak RSS: shipped 335.7 MB, cutoff search 359.5 MB (f = ½) and 359.8 MB (budget 64); total time 17.4, 18.0 and 25.2 s. The full-day runs above peaked at 563–571 MB because that copy kept each batch's integer index until the next was built; with it freed where the hash index is freed, the full day at f = ½ peaks at 388 MB at `-g 80` (45.2 s, 13,701 rows) and 352 MB at 85 (37.8 s, 74,305 rows), against shipped's 354–363 MB.
 
+**Whole runs, v5 (cutoff search over the integer index only, index freed with each batch; budget 0; `run-e2e.sh`, bare `-V`, one run each).** Every run rc 0, no runtime warning. Total seconds, rows after grouping, peak memory; shipped → f = ½ → f = ¼:
+
+| Case | Shipped | f = ½ | f = ¼ |
+|---|---|---|---|
+| PLM download requests `-g 50` | 49.3 s, 74,305, 363 MB | 11.3 s, 8, 320 MB | 7.7 s, 7, 320 MB |
+| same `-g 70` | 47.5 s, 74,305 | 12.4 s, 8 | 7.9 s, 8 |
+| same `-g 75` | 46.9 s, 74,305 | 8.9 s, 8 | 7.9 s, 8 |
+| same `-g 80` | 44.7 s, 74,305, 363 MB | 43.8 s, 13,701, 388 MB | 45.5 s, 13,770, 388 MB |
+| same `-g 85` (no partners) | 47.0 s, 74,305, 363 MB | 37.1 s, 74,305, 352 MB | 35.9 s, 74,305, 352 MB |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 2.9 s, 30 | 2.8 s, 30 |
+| same `-g 80` | 47.6 s, 74,416, 363 MB | **91.8 s**, 13,818, 385 MB | **93.5 s**, 13,887 |
+| Application platform log `-g 70` | 6.7 s, 81 | 6.0 s, 85 | 5.9 s, 85 |
+| same `-g 85` | 7.1 s, 136 | 6.3 s, 98 | 6.1 s, 106 |
+| same `-g 95` | 8.8 s, 528 | 5.5 s, 540 | 5.5 s, 549 |
+| Unique-errors log `-g 85` | 12.7 s, 72, 262 MB | 5.4 s, 75, 289 MB | 5.7 s, 75 |
+| Script log `-g 70` | 12.0 s, 106, 148 MB | 8.9 s, 88, 109 MB | 9.7 s, 89 |
+| same `-g 85` | 13.0 s, 417 | 9.8 s, 179 | 9.4 s, 168 |
+| Tomcat 9 access log `-g 70` | 10.8 s, 72 | 10.8 s, 79 | 10.6 s, 79 |
+| same `-g 85` | 12.2 s, 615 | 11.2 s, 666 | 11.5 s, 656 |
+
+Readings:
+- **Every case is as fast as shipped or faster except the unfiltered access day at `-g 80`**, and peak memory stays within 10% of shipped (lower on the download requests at 50–85 and the script log at 70).
+- **The unfiltered day's extra time is not in candidate search.** Against the download requests alone at `-g 80`, it makes about the same number of searches (4,827 streaming and 7,395 final-pass, against 4,725 and 7,292), but forms 21 streaming patterns instead of 5 and makes 25,539 checkpoint pattern-match attempts instead of 10,611; parse rises from 31.1 to 79.2 s. Being profiled.
+- **The catch-all `[200] GET /Windchill/*` forms at `-g 65` under shipped and both fractions** (open item 3 is untouched by candidate search).
+
+**Documentation requirement (architect, 2026-09-15).** The user documentation that accompanies this fix states that excluding UUIDs from the message (today `-uuid`; `--discard uuid` under #567) is advisable when a log carries many of them, because every UUID-bearing key is scored on UUID-normalised trigrams without the count bound, which makes the similarity check do much more work.
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
