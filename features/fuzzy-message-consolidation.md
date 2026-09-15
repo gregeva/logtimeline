@@ -1727,6 +1727,22 @@ After firing, the counter resets to 0 and accumulation resumes.
 
 **Status (2026-09-15):** investigation in progress; no fix designed. Cause of the download case confirmed on the production code path; pre-filter misses measured across log families; industry grounding recorded. The final-pass threshold part is resolved by #571 (final pass groups at a fixed 85% instead of the -g sensitivity), merged into this branch (`b94ea08`). After that merge the reproducing invocation is unchanged: 74,305 keys, 0 patterns, 74,305 evicted, 1,000 streaming and 37,305 final-pass candidate searches, all empty, 48 s; the final pass now scores at 50 and the pre-filter still blocks both passes.
 
+### Interaction: the pre-filter opened, against the other mechanisms
+
+2026-09-15. The shipped `ltl` against a scratch copy whose only change is `$consolidation_prefilter_ratio = 0.0` (loose minimum 1), both from this branch after the #571 merge. Sequential single runs, `-V message-grouping`; wall time is indicative only, not a benchmark.
+
+| Input and options | Shipped: rows after grouping, wall | Pre-filter opened: rows after grouping, wall |
+|---|---|---|
+| PLM access log, one day, `-du us -xqs -bs 1440 -n 15 -g 80` | 74,416, 61.2 s | 13,880, 101.4 s (35,795 keys evicted) |
+| same, `-g 70` | 74,374, 44.3 s | 75, 11.3 s |
+| Application platform log, ~480,000 lines, `-bs 1440 -n 15 -g 85` | 136, 6.8 s (ERROR 265 → 81) | 92, 14.9 s (ERROR 414 → 37) |
+| Application log of hundreds of thousands of unique errors, `-bs 1440 -n 15 -g 85` | 72, 11.4 s; ERROR: 2 checkpoints, 281,453 matched inline | 71, 121.3 s; ERROR: 54 checkpoints, 18,616 inline, 267,489 evicted and matched in the final pass |
+
+Readings:
+- **Access log, `-g 70`, opened:** the 75 rows are genuine groups, not a catch-all. The largest are the three download variants (7,142, 4,655 and 2,484 member keys); the signing-time split of item 4 remains.
+- **Access log, `-g 80`, opened:** 13,880 rows remain. This is consistent with only 40.6% of download keys having a partner at 80 across the day (§ Similarity distribution between download keys); not verified row by row.
+- **Unique-errors log, opened:** the same final result by a different path. Both runs form the same first three pairs: keys identical but for the UUID, Dice 100, whose sorted neighbours share leading hex digits, so the canonicals keep them (`ErrorCode(000*)`, `001*`, `01*`, merged to `ErrorCode(0*)` absorbing 320 keys; item 4's literal residue again). Shipped, checkpoint 1 then keeps forming pairs and merges to `ErrorCode(*)`; opened, it forms no further `ErrorCode` pair in 500 candidate searches, absorption collapses, eviction takes over. Mechanism under investigation: the 50-candidate cap in `find_consolidation_candidates()`, sorted by score then key, returning only keys already consumed.
+
 ### Performance baseline before the pre-filter change
 
 Captured 2026-09-15 on `044b25c` (this branch, `ltl` unchanged apart from `$version_number`), same machine, single run each, `tests/baseline/results/569-before-<case>.tsv`. The pre-filter runs in streaming checkpoints (inside `parse/read_files`) and in the final pass (`finalize/group_similar`), so both are read.
