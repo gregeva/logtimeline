@@ -22,6 +22,7 @@ An analyst who needs messages distinguished by a part of the line that the tool 
 ## Decisions
 
 - **D1 — LOCKED 2026-09-16 (architect) — An exposed key's value is found by the same rule as the counting user-defined metrics' token capture.** `--expose <key>` and `-udm <key>::distinct` read the same value from a line: the key followed by `=` or `:`, the value ending at whitespace, `,`, `;`, `"`, `'`, `]`, `)`, `&` or `?` (`features/user-defined-metrics.md` § Counting Aggregations, row *Default pattern for counting configs*, as revised by § Query-string separators end a counted value), matched against the raw line. One resolution surface: a change to that rule changes both.
+- **D2 — LOCKED 2026-09-16 (architect) — Several exposed keys are appended in command-line order.** `--expose fileName --expose adId` appends `fileName=<value> adId=<value>` whatever order the line carries them in, so the same combination of values gives the same message however the producer orders its parameters.
 
 ## Findings (2026-09-16; release/0.18.2)
 
