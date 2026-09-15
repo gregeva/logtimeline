@@ -76,8 +76,10 @@ about anything else, these still hold.
       `git branch -a --no-merged main`, `./build/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
       session's.
-- [ ] Main behind a release branch is the finding: report it first, fix it first,
-      never route around it.
+- [ ] The open release branch is the base: new work, reads and comparisons start
+      from `release/X.Y.Z`, never from main, which trails it until the release
+      merges. Main behind a *tagged* release branch is the finding: report it
+      first, fix it first, never route around it.
 - [ ] A named branch is checked out and synced from origin before any file is
       read (`docs/process/workflow.md` § 1).
 - [ ] Before the first line of code: branch name is a short description of the issue, status

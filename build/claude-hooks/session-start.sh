@@ -12,7 +12,7 @@ echo "branch: $current"
 # Everything below compares against local main and local release branches, so
 # they are brought up to origin first: a stale local main reports releases as
 # unmerged that were merged from another machine. A branch that is checked out,
-# or that has diverged, is reported rather than moved.
+# or that carries commits no origin branch holds, is reported rather than moved.
 git fetch --quiet --prune --tags origin 2>/dev/null
 
 sync_branch() {
@@ -28,7 +28,17 @@ sync_branch() {
         return 0
     fi
     if [ "$ahead" != "0" ]; then
-        echo "FINDING: $b is $ahead commit(s) ahead of origin/$b - unpushed work, not synced here"
+        # Commits on local main that an origin release branch already carries
+        # are release work, not unpushed work: main is moved back to origin,
+        # which loses nothing, instead of being reported as ahead.
+        releases=$(git for-each-ref --format='^%(refname)' 'refs/remotes/origin/release/*')
+        stray=$(git log --oneline "origin/$b..$b" $releases | wc -l | tr -d ' ')
+        if [ "$b" = "main" ] && [ -n "$releases" ] && [ "$stray" = "0" ]; then
+            git update-ref "refs/heads/$b" "refs/remotes/origin/$b" \
+                && echo "reset main to origin/main: its $ahead local commit(s) are already on a release branch"
+            return 0
+        fi
+        echo "FINDING: $b is $stray commit(s) ahead of origin/$b and of every release branch - unpushed work, not synced here"
         return 0
     fi
     git fetch --quiet origin "$b:$b" 2>/dev/null \
@@ -52,7 +62,10 @@ unpushed=$(git log --oneline '@{u}..' 2>/dev/null | head -10)
 [ -x ./build/check-root-clean.sh ] && ./build/check-root-clean.sh || true
 
 # A release branch ahead of main is normal while the release is open; it is a
-# finding once the release tag exists (the release PR was never merged).
+# finding once the release tag exists (the release PR was never merged). The
+# open release branch, not main, is the base for new work and the branch that
+# merged work is measured against.
+base=main
 for rb in $(git branch --list 'release/*' --format='%(refname:short)' 2>/dev/null); do
     n=$(git log --oneline "main..$rb" 2>/dev/null | wc -l | tr -d ' ')
     [ "$n" = "0" ] && continue
@@ -63,9 +76,9 @@ for rb in $(git branch --list 'release/*' --format='%(refname:short)' 2>/dev/nul
     fi
 done
 
-unmerged=$(git branch -a --no-merged main --format='%(refname:short)' 2>/dev/null \
+unmerged=$(git branch -a --no-merged "$base" --format='%(refname:short)' 2>/dev/null \
     | sed 's|^origin/||' | grep -v -e 'release/' -e '^HEAD$' | sort -u | head -15)
-[ -n "$unmerged" ] && { echo "branches not merged to main:"; echo "$unmerged"; }
+[ -n "$unmerged" ] && { echo "branches not merged to $base:"; echo "$unmerged"; }
 
 prs=$(gh pr list --state open --limit 20 2>/dev/null)
 [ -n "$prs" ] && { echo "open PRs:"; echo "$prs"; }
