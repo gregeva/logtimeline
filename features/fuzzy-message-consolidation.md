@@ -1846,6 +1846,34 @@ Readings:
 
 Hits-first is ruled out by its application-log regression. Grouped row counts differ between arms on the benchmark cases (for example 136 shipped, 106 first-seen stop-at-1, 96 stop-at-5 on the application log); their content is compared in the whole-run stage.
 
+**Whole runs, combined search (budget 64, count bound, UUID exemption; `run-e2e.sh`, one run each, `-V message-grouping,benchmark-data`).** Every run rc 0 with no runtime warning. Total seconds and rows after grouping, shipped → stop at 1 → stop at 5:
+
+| Case | Shipped | Stop at 1 | Stop at 5 |
+|---|---|---|---|
+| PLM download requests `-g 50` | 47.7 s, 74,305 | 7.6 s, 5 | 8.7 s, 7 |
+| same `-g 70` | 49.2 s, 74,305 | 7.2 s, 6 | 8.0 s, 7 |
+| same `-g 75` | 45.2 s, 74,305 | 7.9 s, 8 | 11.5 s, 8 |
+| same `-g 80` | 46.8 s, 74,305 | **270.9 s**, 13,770 | **270.9 s**, 13,770 |
+| same `-g 85` (no partners exist) | 47.4 s, 74,305 | **218.3 s**, 74,305 | **217.4 s**, 74,305 |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 7.3 s, 50 | 3.3 s, 28 |
+| same `-g 80` | 49.5 s, 74,416 | **275.4 s**, 13,881 | **273.4 s**, 13,880 |
+| Application platform log `-g 70` | 6.7 s, 81 | 5.9 s, 93 | 6.4 s, 83 |
+| same `-g 85` | 7.2 s, 136 | 6.1 s, 106 | 7.4 s, 96 |
+| same `-g 95` | 9.4 s, 528 | 6.8 s, 550 | 6.9 s, 477 |
+| Unique-errors log `-g 85` | 13.0 s, 72 | 11.6 s, 77 | 8.5 s, 72 |
+| Script log `-g 70` | 15.0 s, 106 | 12.0 s, 100 | 10.2 s, 95 |
+| same `-g 85` | 13.2 s, 417 | 10.8 s, 157 | 10.6 s, 170 |
+| Tomcat 9 access log `-g 70` | 12.5 s, 72 | 11.3 s, 75 | 10.2 s, 72 |
+| same `-g 85` | 12.4 s, 615 | 11.3 s, 643 | 11.6 s, 615 |
+
+Readings: the combined search is as fast as shipped or faster everywhere except where most download keys have no partner (`-g 80` and 85), where it is 4.6–5.8× slower. On the unfiltered day at `-g 65`, shipped and stop-at-5 both form the catch-all `[200] GET /Windchill/*` (9 patterns); stop-at-1 does not, forming `/Windchill/com/ptc/*`, `/Windchill/netmarkets/*` and `/Windchill/ptc1/*?*` among 24 (open item 3's merge mechanism, reached through a different first pair).
+
+**Where the slow case's time goes (NYTProf, combined search, `-g 80`, the day's first 25,000 lines filtered to download requests).** The profile's `find_consolidation_candidates` count (4,686) equals the `-V` count (1,225 streaming + 3,461 final pass). Of 160 s CPU: the search's own walk 120 s (75%), Dice 18 s (11%, 295,675 calls, about 63 per search: the budget), `compute_mask` 8 s, index build 5 s. A streaming search costs about 2.6× a final-pass search, as streaming batches hold up to 5,000 keys against final-pass windows of 1,000.
+
+**Integer-id index (`probe-int-index.pl`).** The same combined search over posting arrays of integer key ids, with per-key sizes and per-search counters in arrays, returns identical candidates; on the download batch (50 sources) it is 1.3–1.4× faster per search (11.2 → 7.8 ms at 85) and builds the batch index 3.6× faster (983 → 271 ms for 5,000 keys). The hash index's per-search result can depend on Perl's per-process hash order: the budget is spent on candidates in `keys %$posting` order, and one of 50 searches at T = 80 returned a different candidate from the two indexes. The array index walks in batch order.
+
+**Discovery cutoff.** With s_min the smallest raw size among the batch's non-UUID keys inside the size filter, a candidate first seen at probe position i can gather at most p − i hits against a bound of at least ⌈T·(|r| + s_min)/200⌉ − (|r| − p), so past that position no new non-UUID candidate is tracked; once no seen candidate can still reach its bound the non-UUID posting lists are not walked. Download batch key sizes are 277–293 trigrams (median 286). Premise measured on 50 sources at T = 85: the walk can stop at probe position 48 of 75 for every source, visiting a median 334 posting entries instead of 20,332. Measured with a zero budget, where only the bound admits candidates, the cutoff misses no partner on the download batch at any T and returns the same candidates as the search without it on the download, application ERROR and script INFO batches. Per search on the download batch (50 sources), budget 64, without → with the cutoff: 3.3 → 1.4 ms at 80, 9.6 → 1.8 ms at 85, 1.9 → 0.66 ms at 90 (shipped 0.37–0.43 ms). The budget pulls the two regimes apart: at 85, budget 0 takes 0.37 ms and budget 64 takes 1.8 ms; at 80, budget 64 takes 1.4 ms and budget 16 takes 9.0 ms; at 50–75, budget 0 takes 18–31 ms against 0.23–0.27 ms with a budget.
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
