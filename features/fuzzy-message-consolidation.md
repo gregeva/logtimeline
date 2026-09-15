@@ -1874,6 +1874,24 @@ Readings: the combined search is as fast as shipped or faster everywhere except 
 
 **Discovery cutoff.** With s_min the smallest raw size among the batch's non-UUID keys inside the size filter, a candidate first seen at probe position i can gather at most p − i hits against a bound of at least ⌈T·(|r| + s_min)/200⌉ − (|r| − p), so past that position no new non-UUID candidate is tracked; once no seen candidate can still reach its bound the non-UUID posting lists are not walked. Download batch key sizes are 277–293 trigrams (median 286). Premise measured on 50 sources at T = 85: the walk can stop at probe position 48 of 75 for every source, visiting a median 334 posting entries instead of 20,332. Measured with a zero budget, where only the bound admits candidates, the cutoff misses no partner on the download batch at any T and returns the same candidates as the search without it on the download, application ERROR and script INFO batches. Per search on the download batch (50 sources), budget 64, without → with the cutoff: 3.3 → 1.4 ms at 80, 9.6 → 1.8 ms at 85, 1.9 → 0.66 ms at 90 (shipped 0.37–0.43 ms). The budget pulls the two regimes apart: at 85, budget 0 takes 0.37 ms and budget 64 takes 1.8 ms; at 80, budget 64 takes 1.4 ms and budget 16 takes 9.0 ms; at 50–75, budget 0 takes 18–31 ms against 0.23–0.27 ms with a budget. Spending the budget only on candidates met in posting lists of at most 16, 64 or 256 keys does not change that at 85 (1.46–1.70 ms): the candidates it scores there are the same file downloaded again, similar (about 80) but below the threshold.
 
+**Whole runs, cutoff search over the integer index (budget 64, hash index still built beside it; `run-e2e.sh`, bare `-V`, one run each).** Every run rc 0, no runtime warning. Total seconds, rows after grouping and peak memory, shipped → stop at 1 → stop at 5:
+
+| Case | Shipped | Stop at 1 | Stop at 5 |
+|---|---|---|---|
+| PLM download requests `-g 50` | 48.5 s, 74,305, 363 MB | 8.9 s, 5, 676 MB | 10.0 s, 7, 676 MB |
+| same `-g 75` | 45.4 s, 74,305 | 10.3 s, 8 | 12.5 s, 8 |
+| same `-g 80` | 48.6 s, 74,305 | **91.6 s**, 13,770, 713 MB | **92.0 s**, 13,770 |
+| same `-g 85` (no partners) | 47.4 s, 74,305 | **107.6 s**, 74,305, 705 MB | **110.0 s**, 74,305 |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 9.8 s, 50 | 3.8 s, 28 |
+| same `-g 80` | 49.4 s, 74,416 | **151.3 s**, 13,881 | **160.4 s**, 13,880 |
+| Application platform log `-g 85` | 8.1 s, 136, 132 MB | 7.2 s, 106, 201 MB | 7.4 s, 96 |
+| same `-g 95` | 10.1 s, 528 | 7.4 s, 550 | 7.1 s, 477 |
+| Unique-errors log `-g 85` | 15.4 s, 72, 262 MB | 12.9 s, 77, 356 MB | 9.4 s, 72 |
+| Script log `-g 85` | 15.6 s, 417 | 12.4 s, 157 | 12.7 s, 168 |
+| Tomcat 9 access log `-g 85` | 15.8 s, 615 | 12.5 s, 643 | 11.5 s, 615 |
+
+Readings: the cutoff cuts the download cases at 80 and 85 from 270.9 and 218.3 s to 91.6 and 107.6 s, and leaves their grouping identical (the patterns at 80 and 85, and on the application log at 85, match the run without the cutoff exactly; the script log at 85 has the same 157 rows but a different pattern set, consistent with the hash-order dependence of the run without it). They remain 1.9–3.1× shipped. Peak memory rises because this copy builds both indexes. At `-g 80` on the download requests: 4,725 streaming searches in 55.4 s parse and 7,361 final-pass searches in 36.1 s. NYTProf on the day's first 25,000 download lines at `-g 80` (search count 4,686, equal to `-V`): 54 s CPU against 160 s without the cutoff; Dice 17.6 s (32%, 291,840 calls, the budget), the search's own walk 11.2 s (21%), both index builds 9.9 s (18%), `compute_mask` 7.7 s (14%). The hash index is read only by the candidate search, so the next variant does not fill it in cutoff mode, and tests replacing the budget with scoring a candidate once its hits reach a fraction of its bound.
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
