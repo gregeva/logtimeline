@@ -666,7 +666,7 @@ my %option_overrides;
 # Consolidation data structures (Issue #96 - Fuzzy Message Consolidation)
 my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_message );
 my ( %consolidation_unmatched, %consolidation_ngram_index, %consolidation_posting_size );
-my ( %consolidation_key_trigrams, %consolidation_key_trigrams_norm );
+my %consolidation_key_trigrams;
 my %consolidation_cat_stats;
 my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
@@ -690,7 +690,6 @@ my $consolidation_discriminative_topk = 50;
 my $consolidation_prefilter_ratio    = 0.30;
 my $max_observed_message_length      = 0;
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
-my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -10476,7 +10475,6 @@ sub group_similar_messages {
         %consolidation_key_checkpoint_count = ();
         %consolidation_ngram_index = ();
         %consolidation_key_trigrams = ();
-        %consolidation_key_trigrams_norm = ();
         %consolidation_posting_size = ();
         %consolidation_category_unmatched_count = ();
         %consolidation_absorption_ema = ();
@@ -10751,11 +10749,6 @@ sub build_consolidation_ngram_index {
         if (!$trigrams) {
             $trigrams = get_consolidation_trigrams($msg);
             $consolidation_key_trigrams{$log_key} = $trigrams;
-            # Build UUID-normalized trigrams for Dice scoring
-            if ($msg =~ $uuid_re) {
-                (my $normalized = $msg) =~ s/$uuid_re/<UUID>/g;
-                $consolidation_key_trigrams_norm{$log_key} = get_consolidation_trigrams($normalized);
-            }
         }
         for my $trig (keys %$trigrams) {
             $consolidation_ngram_index{$cat_gk}{$trig}{$log_key} = 1;
@@ -10802,12 +10795,7 @@ sub find_consolidation_candidates {
         }
     }
 
-    # Phase 2: Full Dice verification using UUID-normalized trigrams when available
-    my $source_trig_dice = $consolidation_key_trigrams_norm{$source_key} // $source_trigrams;
-    my $source_size_dice = scalar keys %$source_trig_dice;
-    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
-    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
-
+    # Phase 2: Full Dice verification
     my @results;
     for my $cand_key (keys %candidate_hits) {
         next if $candidate_hits{$cand_key} < $loose_min;
@@ -10818,11 +10806,7 @@ sub find_consolidation_candidates {
         my $cand_size = scalar keys %$cand_trigrams;
         next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
 
-        my $cand_trig_dice = $consolidation_key_trigrams_norm{$cand_key} // $cand_trigrams;
-        my $cand_size_dice = scalar keys %$cand_trig_dice;
-        next if $cand_size_dice < $min_dice_size || $cand_size_dice > $max_dice_size;
-
-        my $score = dice_coefficient($source_trig_dice, $cand_trig_dice);
+        my $score = dice_coefficient($source_trigrams, $cand_trigrams);
         if ($score >= $threshold_pct) {
             push @results, { key => $cand_key, score => $score };
         }
@@ -11837,7 +11821,6 @@ sub process_final_pass_window {
     for my $log_key (@key_list) {
         delete $consolidation_key_message{$log_key};
         delete $consolidation_key_trigrams{$log_key};
-        delete $consolidation_key_trigrams_norm{$log_key};
     }
     delete $consolidation_ngram_index{$cat_gk};
     delete $consolidation_posting_size{$cat_gk};
@@ -11958,7 +11941,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 delete $consolidation_unmatched{$cat_gk}{$key};
@@ -11997,7 +11979,6 @@ sub run_consolidation_checkpoint {
         delete $consolidation_key_message{$key};
         delete $consolidation_key_message_cat_gk{$key};
         delete $consolidation_key_trigrams{$key};
-        delete $consolidation_key_trigrams_norm{$key};
         delete $consolidation_key_generation{$key};
         delete $consolidation_key_checkpoint_count{$key};
     }
@@ -12050,7 +12031,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 $evicted++;
@@ -12102,7 +12082,6 @@ sub named_structure_sizes {
         consolidation_ngram_index => Devel::Size::total_size(\%consolidation_ngram_index),
         consolidation_posting_size => Devel::Size::total_size(\%consolidation_posting_size),
         consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
-        consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
 }
 
@@ -18702,7 +18681,6 @@ sub print_verbose_output {
         printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
         printf "MEMORY_FINAL\tconsolidation_ngram_index\t%d\n", Devel::Size::total_size(\%consolidation_ngram_index);
         printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
-        printf "MEMORY_FINAL\tconsolidation_key_trigrams_norm\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams_norm);
     }
 
     # Hash entry counts for key structures
