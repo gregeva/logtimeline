@@ -1363,9 +1363,15 @@ scenario_classification_consolidation_reconciles() {
 
     # The S3 obligation: the per-message outcome slots ride through
     # consolidation. The same fixture is run twice - plain, and consolidated at
-    # -g 60, which merges the ten message keys into eight - and the successes
-    # and failures columns of the MESSAGES CSV must sum to the same totals in
-    # both runs, and to the run-level counts of their own capture.
+    # -g 60, which merges the ten message keys into seven, one of them mixed
+    # ([201] and [403] POST /store/orders, a success and a failure) - and the
+    # successes and failures columns of the MESSAGES CSV must sum to the same
+    # totals in both runs. The run-level counters are a partition of the
+    # included lines (#456 D4, D5): every line of a mixed row leaves the
+    # counter it was counted in for MIXED, so the consolidated run reconciles
+    # as successes + failures + mixed, and consolidation moves lines into
+    # MIXED and nowhere else. Every fixture line is classified, so the CSV's
+    # classified total equals that sum.
     local log="$REPO_DIR/tests/fixtures/http-status-families.txt"
 
     local plain_out cons_out
@@ -1390,9 +1396,15 @@ scenario_classification_consolidation_reconciles() {
         exit 1
     fi
 
-    local plain_section cons_section
-    plain_section="$(classification_value "$plain_out" successes) $(classification_value "$plain_out" failures)"
-    cons_section="$(classification_value "$cons_out" successes) $(classification_value "$cons_out" failures)"
+    local plain_s plain_f plain_mixed cons_s cons_f cons_mixed
+    plain_s=$(classification_value "$plain_out" successes)
+    plain_f=$(classification_value "$plain_out" failures)
+    plain_mixed=$(classification_value "$plain_out" mixed)
+    cons_s=$(classification_value "$cons_out" successes)
+    cons_f=$(classification_value "$cons_out" failures)
+    cons_mixed=$(classification_value "$cons_out" mixed)
+    local cons_csv_total
+    cons_csv_total=$(( ${cons_sums% *} + ${cons_sums#* } ))
 
     assert_command \
         command     "[[ '$plain_sums' == '6 4' ]]" \
@@ -1409,18 +1421,25 @@ scenario_classification_consolidation_reconciles() {
         contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation - a consolidated run's merged counts equal the unconsolidated totals"
 
     assert_command \
-        command     "[[ '$plain_sums' == '$cons_section' && '$cons_sums' == '$cons_section' ]]" \
-        label       "both CSV sums equal the consolidated run's own sub-section counts (section: $cons_section, plain CSV: $plain_sums, consolidated CSV: $cons_sums)" \
-        asserts     'The per-message store and the run-level counters are two views of one classification, so a consolidated run reconciles with its own sub-section and with the unconsolidated run' \
-        produced_by "the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; merge_consolidation_stats() sums them element-wise; run-level counts from $CLASSIFICATION_PRODUCER" \
-        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation"
+        command     "[[ '$plain_sums' == '$plain_s $plain_f' && '$plain_mixed' == '0' ]]" \
+        label       "the unconsolidated CSV sums equal its own sub-section counts, with nothing mixed (section: $plain_s $plain_f mixed $plain_mixed, CSV: $plain_sums)" \
+        asserts     'Without consolidation every message row is one key and so uniform: the per-message store and the run-level counters are two views of one classification, and no line is mixed' \
+        produced_by "the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; run-level counts from $CLASSIFICATION_PRODUCER; resolve_message_classification_states() in ltl" \
+        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation; features/456-per-message-success-failure-indicator.md D4, D5"
 
     assert_command \
-        command     "[[ '$plain_section' == '$cons_section' ]]" \
-        label       "the run-level successes/failures are unchanged by consolidation (plain: $plain_section, consolidated: $cons_section)" \
-        asserts     'Consolidation is a presentation of the message store, not a re-classification: the run-level counters are accumulated at the include point and cannot move when -g merges keys' \
-        produced_by "$CLASSIFICATION_PRODUCER" \
-        contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17)"
+        command     "[[ \$(( $cons_s + $cons_f + $cons_mixed )) -eq $cons_csv_total ]]" \
+        label       "the consolidated sub-section reconciles with its CSV as successes + failures + mixed (section: $cons_s + $cons_f + mixed $cons_mixed, CSV classified: $cons_csv_total)" \
+        asserts     'A consolidated run moves the lines of a mixed row out of the success and failure counters into MIXED, so its run-level successes, failures and mixed together account for every classified line its MESSAGES CSV carries' \
+        produced_by "resolve_message_classification_states() in ltl, after group_similar_messages(); run-level counts from $CLASSIFICATION_PRODUCER" \
+        contract    "features/456-per-message-success-failure-indicator.md D4, D5 - the run-level figures are a partition of the included lines"
+
+    assert_command \
+        command     "[[ $cons_s -le $plain_s && $cons_f -le $plain_f && \$(( ($plain_s - $cons_s) + ($plain_f - $cons_f) )) -eq $cons_mixed ]]" \
+        label       "consolidation moves lines only into MIXED (plain: $plain_s $plain_f, consolidated: $cons_s $cons_f mixed $cons_mixed)" \
+        asserts     'Consolidation is a presentation of the message store, not a re-classification: the only run-level movement it causes is lines of a mixed row leaving the counter they were counted in for MIXED' \
+        produced_by "resolve_message_classification_states() in ltl; successes/failures accumulated at the include point in read_and_process_logs()" \
+        contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17); features/456-per-message-success-failure-indicator.md D4, D5"
 }
 
 scenario_variant_ambiguity_note() {
