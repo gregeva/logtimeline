@@ -1,0 +1,12 @@
+192.0.2.10 - - [07/May/2025:00:00:01 +0000] "GET /store/catalog/electronics/televisions HTTP/1.1" 200 512 11
+192.0.2.11 - - [07/May/2025:00:00:02 +0000] "GET /store/catalog/electronics/headphones HTTP/1.1" 200 512 12
+192.0.2.12 - - [07/May/2025:00:00:03 +0000] "GET /store/inventory/warehouse/north/levels HTTP/1.1" 200 256 21
+192.0.2.13 - - [07/May/2025:00:00:04 +0000] "GET /store/inventory/warehouse/south/levels HTTP/1.1" 200 256 22
+192.0.2.14 - - [07/May/2025:00:00:05 +0000] "GET /store/catalog/electronics/televisions HTTP/1.1" 200 512 13
+192.0.2.15 - - [07/May/2025:00:00:06 +0000] "GET /store/catalog/electronics/headphones HTTP/1.1" 200 512 14
+192.0.2.16 - - [07/May/2025:00:00:07 +0000] "GET /store/inventory/warehouse/north/levels HTTP/1.1" 200 256 23
+192.0.2.17 - - [07/May/2025:00:00:08 +0000] "GET /store/inventory/warehouse/south/levels HTTP/1.1" 200 256 24
+192.0.2.18 - - [07/May/2025:00:00:09 +0000] "GET /store/catalog/electronics/televisions HTTP/1.1" 200 512 15
+192.0.2.19 - - [07/May/2025:00:00:10 +0000] "GET /store/catalog/electronics/headphones HTTP/1.1" 200 512 16
+192.0.2.20 - - [07/May/2025:00:00:11 +0000] "GET /store/inventory/warehouse/north/levels HTTP/1.1" 200 256 25
+192.0.2.21 - - [07/May/2025:00:00:12 +0000] "GET /store/inventory/warehouse/south/levels HTTP/1.1" 200 256 26

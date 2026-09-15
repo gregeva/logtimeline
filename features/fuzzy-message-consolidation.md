@@ -1875,7 +1875,7 @@ Each log run twice with `-bs 1440 -n 1 -g N -V`: final pass at its default 85, a
 | | 95 | 85 | 43.9 | 75,647 | 37,519 | 65 | 74,473 |
 | | 95 | 95 | 44.0 | 75,647 | 37,897 | 61 | 74,869 |
 
-**Decision (architect, 2026-09-15):** the final pass scores at the streaming threshold, the `-g` value given or the default when none is given, and never at a separate fixed value. The current behaviour silently loosens or tightens the requested grouping for every key the final pass handles, which corrupts results. The slower final pass at high sensitivity measured below is accepted until final-pass performance is improved (#142). Not yet implemented; which issue carries the change is open.
+**Decision (architect, 2026-09-15):** the final pass scores at the streaming threshold, the `-g` value given or the default when none is given, and never at a separate fixed value. The current behaviour silently loosens or tightens the requested grouping for every key the final pass handles, which corrupts results. The slower final pass at high sensitivity measured below is accepted until final-pass performance is improved (#142). Carried by #571 (final pass groups at a fixed 85% instead of the -g sensitivity): § Final pass follows the sensitivity (#571).
 
 Reading:
 - **Above 85 the fixed value loosens the user's setting.** At `-g 95` the final pass at 85 leaves 143 rows where 95 leaves 528 (application), 81 against 178 (errors), 457 against 8,142 (script), 674 against 2,707 (Tomcat).
@@ -1899,3 +1899,27 @@ Primary-source research on candidate generation for set-similarity joins and on 
 
 - The pre-filter exists for a 4.8× `find_candidates` speedup measured on a 200-key sample of a varied application log with zero missed matches (PF-18). Any change to the selection or the 15-of-50 minimum is re-measured there and on this input.
 - The catch-all pattern in the unfiltered case is a separate over-generalisation and is not resolved by a pre-filter change.
+
+## Final pass follows the sensitivity (#571)
+
+**Requirement:** the final pass groups at the sensitivity given with `-g`, or at the default when `-g` is given without a value; the slower final pass this causes at high sensitivity is accepted until final-pass performance is improved (#142). Measurements and the architect's decision: § Finding: no groupings on keys whose rarest trigrams are per-request values (#569) → Final pass threshold against `-g`.
+
+**Design:** `group_similar_messages()` scores the final pass at `$consolidation_threshold`, the resolved `-g` value. The hidden `--final-threshold` remains as an explicit diagnostic override: when given it replaces the threshold for the final pass only; when absent there is no separate final-pass value. The `message-grouping` header reports the threshold the final pass actually used.
+
+### Acceptance criteria
+
+Fixture: `tests/fixtures/grouping-final-pass-threshold.txt`, a Tomcat-shaped access log of four request paths, each requested three times. Every key reaches the occurrence ceiling, so streaming discovery skips it, its first checkpoint absorbs nothing and eviction removes it from the streaming working set; all four are left to the final pass. The paths form two pairs: catalog televisions/headphones at Dice 77 and warehouse north/south levels at Dice 89 (`dice_coefficient()` on the `[200] GET <path>` keys). Both pairs pass the candidate pre-filter (each key has at most 10 trigrams unique to it, of 45–46).
+
+| # | Condition | Observable outcome | Triage |
+|---|---|---|---|
+| 1 | `-g 70` | `message-grouping` header reports `Threshold: 70%` and `Final pass: on (threshold=70%`; the `plain\|200` final pass creates 2 patterns (both pairs grouped) | assertable |
+| 2 | `-g 95` | header reports `Final pass: on (threshold=95%`; the final pass creates 0 patterns (neither pair grouped) | assertable |
+| 3 | `-g` without a value | header reports `Threshold: 85%` and `Final pass: on (threshold=85%`; the final pass creates 1 pattern (only the Dice 89 pair) | assertable |
+| 4 | `-g 95 --final-threshold 70` | header reports `Threshold: 95%` and `Final pass: on (threshold=70%`; the final pass creates 2 patterns | assertable |
+| 5 | Every scenario above | the final pass receives all 4 keys (`Keys seen: 4` in its block): streaming grouped none of them, so the pattern counts are the final pass's own | assertable |
+
+Criteria 1 and 2 fail against the fixed 85: that final pass creates 1 pattern at any `-g`. Harness: `tests/validate-message-grouping.sh`.
+
+### `-V message-grouping` keys asserted
+
+The header line `Threshold: <T>%  Trigger: <N>  Ceiling: <C>  Final pass: on (threshold=<F>%, ceiling=<M>)` (emitted by `pipeline_finalize()`), where `<T>` is the resolved `-g` sensitivity and `<F>` the threshold the final pass scored at; and, per group, `Keys seen:` and `New patterns created:` in the `--- <category>|<group>: Final Pass (2-pass) ---` block. Renaming or removing any of these is a breaking change for that harness.

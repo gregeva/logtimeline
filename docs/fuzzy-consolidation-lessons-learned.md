@@ -89,7 +89,7 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **What happened on access logs:** Access log keys are shorter with smaller variable regions, producing Dice scores of 85-87% (below the 95% threshold). High-value targets had 10,000+ occurrences (above ceiling 100). The final pass was completely ineffective.
 
-**Resulting defaults:** final pass on by default, ceiling 1M. Its threshold in ltl is a fixed 85% (hidden `--final-threshold`) that does not follow the `-g` value; see #142 (final pass performance on XL consolidation benchmarks) and `features/fuzzy-message-consolidation.md` § Finding: no groupings on keys whose rarest trigrams are per-request values (#569).
+**Resulting defaults:** final pass on by default, ceiling 1M, scoring at the `-g` sensitivity (hidden `--final-threshold` overrides it). A fixed final-pass threshold was kept for a time to bound final-pass effort, and silently changed the grouping users asked for; see `features/fuzzy-message-consolidation.md` § Final pass follows the sensitivity (#571) and #142 (final pass performance on XL consolidation benchmarks).
 
 **Lesson:** Validate configuration defaults across all supported input formats. What works for one format can be useless for another. When in doubt, choose the more permissive setting — it does slightly more work but doesn't miss targets.
 
