@@ -1821,6 +1821,31 @@ Readings:
 - **What a search is used for.** `run_consolidation_pass()` takes the top 50 candidates by score and forms a pattern with the first unconsumed one that validates; it needs one usable partner per source, not every partner. The prefix bound guarantees every partner.
 - **Scale in production.** A checkpoint searches up to 500 sources: at the medians above that is about 58 s per checkpoint on the download batch at T = 80 (0.18 s shipped) and 45 s on the unique-errors batch at 85 (5.7 s shipped). End-to-end runs are not measured: re-scan absorption reduces the searches made, and open item 5 (consumed candidates filling the cap) interacts.
 
+### Prototype stages: making the sized search cheap
+
+2026-09-15, at the architect's direction to prototype a search that stops once it holds a usable partner, then to continue autonomously through the stages needed. All scripts in `prototype/569-gate-sizing/`. Timings in this section were taken while other prototype work shared a 4-core machine (1-minute load 3.6 to 12, peaking at 59), so they are indicative: partner, verification and visit counts are deterministic; times are compared only within the same run.
+
+**Stop at a partner (`probe-early-stop.pl`, download and application ERROR batches completed).** Walking the sized probe rarest first and scoring each candidate the first time it is seen, stopping once a partner is held, misses no partner the sized gate finds (download batch, every T; application ERROR batch up to 90). Where partners exist it is cheap: on the download batch at T = 50–75 a search scores 1.0–2.7 candidates and takes 0.27–0.31 ms (shipped 0.36–0.39 ms, finding none). Where no partner exists it cannot stop: at T = 85 every search scores 4,674 candidates (108 ms), and at 80 a median 576 (14 ms). Counting hits first and scoring from the highest count down (`hits_first`) pays the full counting cost, 85.7 ms per search at T = 50.
+
+**Prefix filtering on both sides (`probe-prefix-index.pl`, smoke run: 50 sources, one pass).** Indexing each key by its own sized prefix keeps the guarantee (0 missed) but does not cut the work on download keys: at T = 85 the prefix index holds 377,182 of the full index's 1,435,715 entries and a search with no partner still scores 4,543 candidates (113 ms). Their rarest trigrams are either unique to the request, wasting prefix slots, or moderately common (for example the signing time's leading digits), so every prefix overlaps nearly every other; the research names data with few rare trigrams as where the prefix filter admits many false candidates. On the script log's ERROR batch it behaves as designed.
+
+**A count bound per candidate (`probe-count-bound.pl`).** For a source r probing p trigrams and a candidate s with h shared trigrams inside the probe, the overlap is at most h + (|r| − p), so Dice ≥ T is impossible unless h ≥ ⌈T·(|r| + |s|)/200⌉ − (|r| − p). Scoring a candidate only once h reaches that value loses nothing and scores no candidate that cannot qualify. Smoke run on the download batch (50 sources, one pass): at T = 85, 90 and 95, 0 candidates scored per search (11.3, 0.9 and 0.3 ms; the time left is counting, 19,545 posting entries per search at 85); at T = 50–75 it is slower than stopping at a partner (31–42 ms), because a candidate must accumulate hits before it is scored. The bound holds only where Dice is scored on the trigrams counted: on the application ERROR batch, whose UUID keys are scored on normalised trigrams, applying it missed 111 of 216 partners at T = 85, so keys with normalised trigrams are exempt from it.
+
+**Combined: score a budget of candidates when first seen, then only candidates that reach the bound** (`hybrid_b<budget>_<want>`). Smoke run, download batch, 50 sources: with a budget of 64 and stopping at one partner, 0 missed at every T; 0.25–0.40 ms per search at T = 50–75, 3.6 ms at 80 (stopping at a partner alone: 13.4 ms), 10.8 ms at 85, 2.3 ms at 90, 0.52 ms at 95. Application ERROR batch (all 238 keys): 0 missed up to T = 90 and the sized probe's 61 at 95, 0.14–0.21 ms per search. With a budget of 16, 2 partners were missed at 85 and 90 on UUID keys before the exemption was added. The full ten-batch run with the exemption is in progress.
+
+**Whole runs, stop-at-a-partner searches (`run-e2e.sh`, one run each, single-group PLM download request cases).** Rows after grouping, shipped → first-seen stopping at 1 / at 5 / hits-first: at `-g 50` 74,305 → 5 / 7 / 8 (55.8 s → 7.6 / 8.7 / 31.4 s); at 70, 74,305 → 6 / 7 / 8 (53.6 s → 11.5 / 12.8 / 22.5 s); at 75, 74,305 → 8 / 8 / 8 (59.0 s → 15.1 / 12.5 / 14.9 s). No run had a non-zero exit or a runtime warning. Every download pattern under every arm still keeps a literal leading digit run in the signing time (`sT=1779*`, `177919*`, `177920*`), stopping at 5 and hits-first split one variant at the `177919`/`177920` boundary, and a two-member `.xas` pattern keeps a literal file id and size: open item 4 is unchanged by candidate search. The first-seen arm at `-g 80` ran for more than 14 minutes before the matrix was stopped, consistent with the per-search cost above where most sources have no partner.
+
+**Benchmark cases under load (`run-benchmark.sh`, 3 interleaved repetitions, arm / shipped ratio of the same repetition, median and range).** The no-grouping case, where every arm runs identical code, spans 0.97–1.30 on total, which is the noise under this load.
+
+| Case | first-seen, stop at 1 | first-seen, stop at 5 | hits-first, stop at 1 |
+|---|---|---|---|
+| Tomcat access log, top 25, `-g` | total 0.95 (0.87–1.05) | 0.98 (0.86–1.05) | 0.94 (0.86–1.00) |
+| Application platform log, top 25, `-g` | total 0.83 (0.80–1.04) | 0.95 (0.91–0.97) | **1.68 (1.46–1.69)**; grouping 12.70×, rss 1.31× |
+| Unique-errors log, top 25, `-g` | total 0.95 (0.88–1.31); parse **1.24 (1.19–1.45)**, grouping 0.53 | 0.67 (0.66–1.01) | 0.52 (0.51–0.97) |
+| PLM download requests, top 25, `-g 75` | total **0.14** (0.12–0.14); 68.5 s → 9.3 s | 0.19 | 0.27 |
+
+Hits-first is ruled out by its application-log regression. Grouped row counts differ between arms on the benchmark cases (for example 136 shipped, 106 first-seen stop-at-1, 96 stop-at-5 on the application log); their content is compared in the whole-run stage.
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
