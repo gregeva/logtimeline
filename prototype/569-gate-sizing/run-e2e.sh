@@ -3,7 +3,7 @@
 # at a time, per search strategy: rows after grouping, patterns, evictions, the
 # patterns formed, parse / final-pass / total time and peak memory.
 #   usage: run-e2e.sh <variant ltl> <logs dir> <output dir> <arm>...
-#   arm: <search>[:<want>[:<budget>]], e.g. shipped incremental:1 hybrid:1:64
+#   arm: <search>[:<want>[:<budget>[:<frac>]]], e.g. shipped incremental:1 hybrid:1:64 cut:1:0:0.5
 set -uo pipefail
 bin="$1"; logs="$2"; out="$3"; shift 3
 arms=("$@")
@@ -20,13 +20,13 @@ summary="$out/summary.tsv"
 
 run() {
     local case_name="$1"; shift
-    local arm search want budget name
+    local arm search want budget frac name
     for arm in "${arms[@]}"; do
-        IFS=: read -r search want budget <<< "$arm"
-        want="${want:-1}"; budget="${budget:-64}"
+        IFS=: read -r search want budget frac <<< "$arm"
+        want="${want:-1}"; budget="${budget:-64}"; frac="${frac:-0}"
         name="$case_name--${arm//:/-}"
         echo "$(date +%H:%M:%S) $name" >> "$out/progress.txt"
-        ( cd "$out" && LTL569_SEARCH="$search" LTL569_WANT="$want" LTL569_BUDGET="$budget" \
+        ( cd "$out" && LTL569_SEARCH="$search" LTL569_WANT="$want" LTL569_BUDGET="$budget" LTL569_FRAC="$frac" \
             "$bin" --disable-progress -ni "$@" -V > "$name.out" 2> "$name.err" )
         local rc=$?
         grep '^  cluster: ' "$out/$name.out" > "$out/$name.clusters"
