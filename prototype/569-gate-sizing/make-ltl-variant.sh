@@ -47,6 +47,20 @@ our $ltl569_want   = $ENV{LTL569_WANT} // 1;
 our $ltl569_budget = $ENV{LTL569_BUDGET} // 64;
 our $ltl569_frac   = $ENV{LTL569_FRAC} // 0;
 our $ltl569_sizeorder = $ENV{LTL569_SIZEORDER} // 0;
+# LTL569_STATS=1: per category and phase, searches, posting entries visited, Dice calls,
+# searches that returned a partner, and seconds spent searching, printed to STDERR at exit
+our $ltl569_stats_on = $ENV{LTL569_STATS} // 0;
+our (%ltl569_stats, $ltl569_visits, $ltl569_dice);
+END {
+    if ($ltl569_stats_on) {
+        for my $k (sort keys %ltl569_stats) {
+            my $s = $ltl569_stats{$k};
+            printf STDERR "LTL569_STATS\t%s\tsearches=%d\tfound=%d\tvisits=%d\tdice=%d\tseconds=%.3f\tms_per_search=%.3f\n",
+                $k, $s->{searches}, $s->{found}, $s->{visits}, $s->{dice}, $s->{seconds},
+                $s->{searches} ? 1000 * $s->{seconds} / $s->{searches} : 0;
+        }
+    }
+}
 our %ltl569_int;
 
 sub find_consolidation_candidates {
@@ -56,7 +70,19 @@ sub find_consolidation_candidates {
     return ltl569_hits_first($cat_gk, $source_key, $threshold_pct, $ltl569_want, $skip)                 if $ltl569_search eq 'hits_first';
     return ltl569_incremental($cat_gk, $source_key, $threshold_pct, $ltl569_want, $skip)                if $ltl569_search eq 'incremental';
     return ltl569_hybrid($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip)     if $ltl569_search eq 'hybrid';
-    return ltl569_cut($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip)        if $ltl569_search eq 'cut';
+    if ($ltl569_search eq 'cut') {
+        return ltl569_cut($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip) unless $ltl569_stats_on;
+        ($ltl569_visits, $ltl569_dice) = (0, 0);
+        my $t0 = [gettimeofday];
+        my @r = ltl569_cut($cat_gk, $source_key, $threshold_pct, $ltl569_want, $ltl569_budget, $skip);
+        my $s = $ltl569_stats{"$cat_gk\t" . ($consolidation_phase // 'streaming')} //= { searches => 0, found => 0, visits => 0, dice => 0, seconds => 0 };
+        $s->{searches}++;
+        $s->{found}++ if @r;
+        $s->{visits} += $ltl569_visits;
+        $s->{dice} += $ltl569_dice;
+        $s->{seconds} += tv_interval($t0);
+        return @r;
+    }
     die "LTL569_SEARCH=$ltl569_search is not a search strategy\n";
 }
 
@@ -294,6 +320,7 @@ sub ltl569_cut {
         my ($cid) = @_;
         my $cs = $size_dice->[$cid];
         return if $cs < $min_dice_size || $cs > $max_dice_size;
+        $ltl569_dice++;
         my $score = dice_coefficient($source_trig_dice, $trig_dice->[$cid]);
         push @results, { key => $ix->{keys}[$cid], score => $score } if $score >= $threshold_pct;
     };
@@ -321,6 +348,7 @@ sub ltl569_cut {
             for my $k ($start .. $#$list) {
                 my $cid = $list->[$k];
                 last if $cid > $id_hi;
+                $ltl569_visits++;
                 my $need = $need[$cid];
                 if (!defined $need) {
                     next if !$source_normalised && !$norm->[$cid] && $i > $cut;
