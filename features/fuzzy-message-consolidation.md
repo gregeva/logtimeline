@@ -1727,6 +1727,17 @@ After firing, the counter resets to 0 and accumulation resumes.
 
 **Status (2026-09-15):** investigation in progress; no fix designed. Cause of the download case confirmed on the production code path; pre-filter misses measured across log families; industry grounding recorded. The final-pass threshold part is resolved by #571 (final pass groups at a fixed 85% instead of the -g sensitivity), merged into this branch (`b94ea08`). After that merge the reproducing invocation is unchanged: 74,305 keys, 0 patterns, 74,305 evicted, 1,000 streaming and 37,305 final-pass candidate searches, all empty, 48 s; the final pass now scores at 50 and the pre-filter still blocks both passes.
 
+### Performance baseline before the pre-filter change
+
+Captured 2026-09-15 on `044b25c` (this branch, `ltl` unchanged apart from `$version_number`), same machine, single run each, `tests/baseline/results/569-before-<case>.tsv`. The pre-filter runs in streaming checkpoints (inside `parse/read_files`) and in the final pass (`finalize/group_similar`), so both are read.
+
+| Case | `total` | `finalize/group_similar` | `rss_peak` |
+|---|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.744 s | 0.000 s | 98.4 MB |
+| `single-day-access-log-top25-consolidate` | 13.582 s | 2.518 s | 130.8 MB |
+| `single-day-application-log-top25-consolidate` | 7.015 s | 0.290 s | 131.7 MB |
+| `humungous-log-uniqueness-top25-consolidate` | 11.662 s | 4.379 s | 264.4 MB |
+
 ### Open items and next steps
 
 | # | Item | State | Next step |
