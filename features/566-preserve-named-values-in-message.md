@@ -13,9 +13,10 @@ An analyst who needs messages distinguished by a part of the line that the tool 
 
 ## Requirements (architect's terms)
 
-- **Scope (2026-09-15).** Preservation applies to thread, user, session, and metric values when the metric name is stated. It does not apply to what is truncated or consolidated: those are a far later stage of message processing.
+- **Existing fields and structures (2026-09-15).** Among what the tool already extracts, preservation applies to thread, user, session, and metric values when the metric name is stated. It does not apply to what is truncated or consolidated: those are a far later stage of message processing.
 - **Metric values (2026-09-16).** A metric value is masked in the message, `durationMs=123` becoming `durationMs=?`. Naming it (for example `-expose durationMs`) keeps the `123` in place: the replacement becomes conditional. The same holds for `count=` and `bytes=`.
 - **Naming (2026-09-16).** The analyst can name either the internal metric name or the key as written in the file. The mask's pattern accepts both spellings of the key, `durationM[sS]`.
+- **Keys determined from the line itself (2026-09-16).** This is where the power of the enhancement lies. Attributes such as `fileName`, `adId` and `sT` in a Windchill download request's query string are not part of the tool's normal extraction; they are determined from the log line itself. The analyst names a piece of data in the line they want exposed without exposing the entire query string: `--expose fileName` tacks `fileName=<value>` onto the end of the message. The key-value pairs of interest are concatenated onto the message key, separated by a space, without everything else the query string carries.
 - **Loss, not presence** (issue body). The named keys and values are found before anything is stripped; only where they were removed does the value go back in.
 
 ## Findings (2026-09-16; release/0.18.2)
