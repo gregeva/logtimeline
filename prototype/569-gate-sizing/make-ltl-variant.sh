@@ -45,6 +45,7 @@ variants = r'''
 our $ltl569_search = $ENV{LTL569_SEARCH} // 'shipped';
 our $ltl569_want   = $ENV{LTL569_WANT} // 1;
 our $ltl569_budget = $ENV{LTL569_BUDGET} // 64;
+our $ltl569_frac   = $ENV{LTL569_FRAC} // 0;
 our %ltl569_int;
 
 sub find_consolidation_candidates {
@@ -273,7 +274,9 @@ sub ltl569_cut {
         }
     }
 
-    my (@hits, @need, @deadline, @dying, @results);
+    # With LTL569_FRAC > 0 a candidate is scored once its hits reach that fraction of its
+    # bound; Dice is exact, so a candidate that fails there cannot qualify and is dropped.
+    my (@hits, @need, @verify_at, @deadline, @dying, @results);
     my $live = 0;
     $need[$sid] = -1;
     my $score_it = sub {
@@ -299,6 +302,7 @@ sub ltl569_cut {
                     if ($source_normalised || $norm->[$cid]) { $need = 1; }
                     else { $need = int(($sum_const + $threshold_pct * $cand_size) / 200) - $outside; $need = 1 if $need < 1; }
                     $need[$cid] = $need;
+                    $verify_at[$cid] = $ltl569_frac > 0 ? max(1, int($need * $ltl569_frac + 0.999)) : $need;
                     if ($need > 1) {
                         # With h hits after position i it can still reach its bound while i <= p - 1 - need + h
                         my $d = $p - $need;
@@ -309,7 +313,7 @@ sub ltl569_cut {
                 next if $need < 0;
                 if ($need > 1 && defined $hits[$cid] && $deadline[$cid] < $i - 1) { $need[$cid] = -1; next; }
                 my $h = ++$hits[$cid];
-                if ($h == $need) {
+                if ($h == $verify_at[$cid]) {
                     if ($need > 1) { $dying[$deadline[$cid]]--; $live--; }
                     $need[$cid] = -1;
                     $score_it->($cid);
@@ -332,6 +336,14 @@ hook_old = '    return $indexed;\n}'
 if out.count(hook_old) != 1:
     raise SystemExit("index build hook: expected one occurrence of the index build's return")
 out = out.replace(hook_old, "    ltl569_build_int_index($cat_gk, $log_keys_ref) if $main::ltl569_search eq 'cut';\n" + hook_old)
+# The cutoff search reads only the integer index: its mode does not fill the hash postings
+hash_post_old = ('        for my $trig (keys %$trigrams) {\n'
+                 '            $consolidation_ngram_index{$cat_gk}{$trig}{$log_key} = 1;\n'
+                 '        }\n')
+if out.count(hash_post_old) != 1:
+    raise SystemExit("hash posting loop: expected one occurrence")
+out = out.replace(hash_post_old,
+                  "        if ($main::ltl569_search ne 'cut') {\n" + hash_post_old + "        }\n")
 calls = [
     ('find_consolidation_candidates($cat_gk, $key, $consolidation_threshold);',
      'find_consolidation_candidates($cat_gk, $key, $consolidation_threshold, undef, \\%consumed);'),
