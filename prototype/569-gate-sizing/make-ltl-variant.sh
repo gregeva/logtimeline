@@ -344,6 +344,15 @@ if out.count(hash_post_old) != 1:
     raise SystemExit("hash posting loop: expected one occurrence")
 out = out.replace(hash_post_old,
                   "        if ($main::ltl569_search ne 'cut') {\n" + hash_post_old + "        }\n")
+# The integer index is freed where the hash index is, and reported beside it under -mem
+free_old = '    delete $consolidation_ngram_index{$cat_gk};\n    delete $consolidation_posting_size{$cat_gk};\n'
+if out.count(free_old) != 2:
+    raise SystemExit("index cleanup: expected two occurrences, found %d" % out.count(free_old))
+out = out.replace(free_old, free_old + '    delete $main::ltl569_int{$cat_gk};\n')
+mem_old = '        consolidation_posting_size => Devel::Size::total_size(\\%consolidation_posting_size),\n'
+if out.count(mem_old) != 1:
+    raise SystemExit("memory structures: expected one posting size entry")
+out = out.replace(mem_old, mem_old + '        ltl569_int_index => Devel::Size::total_size(\\%main::ltl569_int),\n')
 calls = [
     ('find_consolidation_candidates($cat_gk, $key, $consolidation_threshold);',
      'find_consolidation_candidates($cat_gk, $key, $consolidation_threshold, undef, \\%consumed);'),
