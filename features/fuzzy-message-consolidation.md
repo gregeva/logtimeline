@@ -1722,3 +1722,59 @@ After firing, the counter resets to 0 and accumulation resumes.
 | Memory regression with `-g` | Unmatched keys accumulated in consolidation tracking structures indefinitely | Fixed by adaptive per-key eviction (#135): EMA-based survival threshold bounds the working set. XL benchmark: 455→238 MiB (-47.7%). |
 | Time regression in `read_files` with `-g` | Diverse keys accumulated in unmatched set, increasing per-checkpoint cost | Fixed by adaptive per-key eviction (#135): fast-path eviction skips `run_consolidation_pass` when max_survivals=0. XL benchmark: 185s→55s (3.4× faster). |
 | `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |
+
+## Finding: no groupings on keys whose rarest trigrams are per-request values (#569)
+
+**Status:** investigated, cause confirmed on the production code path; no fix designed.
+
+### Input and invocation
+
+An Apache HTTP Server 2.x access log in front of a PLM application server, one full day, read with microsecond durations. 74,305 of its lines are signed direct-download requests carrying fifteen query parameters: the file's identity (folder, file id, file name), per-request values (a signature unique on every line, the signing time in epoch seconds, the response size, a counter) and constants (user id, authentication scheme, site). With the query string exposed, the 350-character message key ends inside the signature value.
+
+Reproducing invocation, run on the 0.18.2 release branch:
+
+```
+-du us -i "/Windchill/servlet/WindchillGW&/doDirectDownload" -i "/Windchill/servlet/WindchillGW&/doIndirectDownload" -xqs -bs 1w -r -n 200 -o -hm bytes -hg bytes -hgh 13 -g 50
+```
+
+### Observed
+
+`-V` `message-grouping`, group `plain|200`: 74,305 keys seen, 15 checkpoints, 0 patterns, 74,305 evicted, 1,000 candidate searches during streaming and 37,305 in the final pass, reduction 74,305 → 74,305 (0.0%). No runtime warnings.
+
+### Mechanism
+
+`find_consolidation_candidates()` Phase 1 sorts the source key's trigrams by posting-list size ascending, keeps the top 50 (`$consolidation_discriminative_topk`), and admits a candidate only when it shares at least 15 of them (`my $loose_min = max(1, int($consolidation_prefilter_ratio * $topk_actual));`). On these keys the rarest trigrams are drawn from the per-request values. Measured on the first 5,000 download keys, 500 source keys, with the sub sliced verbatim from `ltl`:
+
+| Measure | Value |
+|---|---|
+| Trigrams per key | median 286 |
+| Selected top-50 trigrams occurring in the source key only | min 6, median 17, max 28 |
+| Most selected trigrams any other key shares | min 3, median 6, max 9 (15 required) |
+| Sources for which Phase 1 admits a candidate | 0 of 500 |
+| Sources with a partner scoring ≥ 50 by direct Dice comparison | 500 of 500 |
+
+Zero candidates means zero pairs, zero patterns and an absorption rate of 0 at the first two checkpoints; the absorption EMA then drives `get_consolidation_max_survivals()` to 0 and the fast-path eviction in `run_consolidation_checkpoint()` discards every later key without a search. The final pass runs the same pre-filter and finds nothing either. The sensitivity value is never reached, which is why no `-g` setting changes the outcome.
+
+For contrast, on the same day's first 5,000 status-200 keys without the include filters (static resources and application pages mixed with downloads), 196 of 500 sources pass Phase 1.
+
+### Proof of cause
+
+The reproducing invocation on a scratch copy of `ltl` whose only change is `$consolidation_prefilter_ratio = 0.0` (loose minimum 1), single run each on the same machine:
+
+| Build | Patterns | Rows after grouping | Evicted | Wall time |
+|---|---|---|---|---|
+| As shipped | 0 | 74,305 | 74,305 | 47 s |
+| Pre-filter loose minimum 1 | 6 | 7 | 0 | 12 s |
+
+The groups formed are one per download variant (by the file-name template and extension in the path), with ids, sizes and signature wildcarded. Residual over-specificity: one variant splits in two on the leading digits of the signing time, and one row keeps a literal file id and size.
+
+### Related behaviour observed on the way
+
+- **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%. Neither side of the 65/70 boundary is correct grouping.
+- **A small Apache HTTP Server 2.x access log of a PLM application with microsecond durations (677 lines, 6 download requests) does group** with `-xqs -bs 1440 -n 15 -g N -V` at 50, 80 and 95 (54 keys → 15–18 rows); it does not reproduce the defect.
+- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes.
+
+### Constraints on a fix
+
+- The pre-filter exists for a 4.8× `find_candidates` speedup measured on a 200-key sample of a varied application log with zero missed matches (PF-18). Any change to the selection or the 15-of-50 minimum is re-measured there and on this input.
+- The catch-all pattern in the unfiltered case is a separate over-generalisation and is not resolved by a pre-filter change.
