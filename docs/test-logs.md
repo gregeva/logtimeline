@@ -24,6 +24,7 @@ logs/
 | File | Server | Latency Unit | Metrics | Size | Lines | Use Case |
 |---|---|---|---|---|---|---|
 | `ApacheHTTP2Server-access_log-Windchill_Navigate.2026-01-25.log` | Apache HTTP Server 2.x | microseconds (%D) | duration, bytes | 98KB | 677 | Apache HTTP2 with microsecond latency (the `-FULL` sibling is 658KB) |
+| `access.log_2026-05-19_00_00_00` | Apache HTTP Server 2.x (Windchill) | microseconds (%D), read with `-du us` | duration, bytes | 41MB | 84,876 | One full day of Windchill traffic; binds `access_common_duration` on every line, no thread or session field. 76,142 lines carry a query string, 74,305 of them signed direct-download requests (`doDirectDownload`) with fifteen parameters each: the file's identity (`fileName`, `adId`: 22,431 distinct) beside per-request values (`sign` unique on every line, `sT` signing time, `refsize`) and constants (`userid`, `AUTH_CODE`, `site`). The query-string specimen for keeping or discarding named parameters and for consolidation under `-xqs`. 2,130 lines carry a populated remote user |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 277MB | 1,430,678 | Primary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-06.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 220MB | 1,133,132 | Secondary Tomcat 9 access log test |
 | `localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt` | Tomcat 9 | milliseconds (%D) | duration, bytes | 148MB | 761,698 | Smaller Tomcat 9 access log test |
