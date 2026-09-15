@@ -35,6 +35,14 @@ FIXTURE="$REPO_DIR/tests/fixtures/udm-specs.txt"
 # delta 90 over 3 (20..40, the first occurrence seeding the state), and pages is
 # a second extraction target for the same metric name.
 COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
+# The user-defined metric that replaces the "N milliseconds" duration read the
+# Integration Runtime and Connection Server formats no longer make: one
+# synthetic file of each shape, five of eight lines carrying the value
+# (152 48 3017 152 7 -> sum 3376 min 7 max 3017; the Connection Server file
+# has 15000 in place of 7 -> sum 18369 min 48 max 15000).
+MS_IR_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-integration-runtime.txt"
+MS_CS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-connection-server.txt"
+MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -46,7 +54,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -992,6 +1000,44 @@ COLUMNAR
     rm -f "$out" "$out.stderr" "$columnar"
 }
 
+# ---------------------------------------------------------------------------
+# Scenario: milliseconds-replacement — the user-defined metric that replaces
+# the "N milliseconds" duration read the Integration Runtime and Connection
+# Server formats no longer make produces every value on both line shapes.
+# ---------------------------------------------------------------------------
+scenario_milliseconds_replacement() {
+    current_scenario="milliseconds-replacement"
+    echo "[$current_scenario]"
+    local fixture expected out ec
+    for fixture in "$MS_IR_FIXTURE" "$MS_CS_FIXTURE"; do
+        if [[ "$fixture" == "$MS_IR_FIXTURE" ]]; then
+            expected='  produced: occurrences=5 buckets=1 sum=3376 min=7 max=3017'
+        else
+            expected='  produced: occurrences=5 buckets=1 sum=18369 min=48 max=15000'
+        fi
+        out="$TMP_DIR/milliseconds-$(basename "$fixture" .txt).out"
+        set +e
+        "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs -udm "$MS_SPEC" "$fixture" > "$out" 2>"$out.stderr"
+        ec=$?
+        set -e
+        check_capture_warnings "$out"
+        assert_command \
+            command     "[ '$ec' = 0 ]" \
+            label       "ltl exits 0 on $(basename "$fixture")" \
+            asserts     'The replacement metric runs cleanly on the fixture' \
+            produced_by 'parse_udm_configs() and read_and_process_logs() in ltl' \
+            contract    'features/566-preserve-named-values-in-message.md section #576 acceptance criterion 5'
+        assert_section_present "$out"
+        assert_line "$out" \
+            pattern     "$expected" \
+            asserts     "The metric reads every \"N milliseconds\" value on $(basename "$fixture"): five occurrences with the hand-computed sum, min and max" \
+            produced_by 'derive_udm_production() in ltl' \
+            contract    'features/566-preserve-named-values-in-message.md section #576 acceptance criterion 5'
+        rm -f "$out" "$out.stderr"
+    done
+}
+
+want milliseconds-replacement    && scenario_milliseconds_replacement || true
 want undelimited-regex           && scenario_undelimited_regex || true
 want whole-match                 && scenario_whole_match || true
 want absent-field                && scenario_absent_field || true

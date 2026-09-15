@@ -2861,12 +2861,6 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
@@ -2876,7 +2870,7 @@ sub format_registry_specs {
       ],
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
-        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
       expect_outcomes => [ 0, 0 ] },
     # Integration Runtime: byte-identical line shape to Connection Server
@@ -2890,24 +2884,20 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms_ddmm', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted',
         '2025-28-01 07:26:36.635 [vert.x-eventloop-thread-0] INFO  c.t.s.SecurityManagerBootstrapper - initializing KeyStore provider',
+        '2025-28-01 07:26:40.100 [vert.x-eventloop-thread-3] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds',
       ],
       expect => [
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
+        [ '2025-28-01 07:26:40', 'INFO', 'c.t.i.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
-      expect_outcomes => [ 0, 0 ] },
+      expect_outcomes => [ 0, 0, 0 ] },
     # Windchill Workgroup Manager client logs: one line shape shared by the
     # genlwsc / uwgm_client / uwgm files (each file's own header block
     # declares `columns "date time tz msgtype logid tid area message"` and

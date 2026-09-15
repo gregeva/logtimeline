@@ -1,0 +1,8 @@
+2025-08-14 21:00:34.633 [vert.x-eventloop-thread-12] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size
+2025-08-14 21:00:34.700 [vert.x-eventloop-thread-0] INFO  c.t.c.s.SecurityManagerBootstrapper - initializing KeyStore provider
+2025-08-14 21:00:35.100 [vert.x-eventloop-thread-3] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.10:52344 completed processing in 152 milliseconds
+2025-08-14 21:00:36.220 [vert.x-eventloop-thread-1] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.11:52345 completed processing in 48 milliseconds
+2025-08-14 21:00:38.905 [vert.x-eventloop-thread-2] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.10:52346 completed processing in 3017 milliseconds
+2025-08-14 21:00:39.001 [vert.x-worker-thread-1] INFO  c.t.c.ConnectionServerConfiguration - Setting Java SSL javax.net.ssl.keyStore properties
+2025-08-14 21:00:40.310 [vert.x-eventloop-thread-3] INFO  c.t.c.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.12:52347 completed processing in 152 milliseconds
+2025-08-14 21:00:41.777 [vert.x-eventloop-thread-0] WARN  c.t.c.a.AlwaysOnHttpServerVerticle - WebSocket auth request from 192.0.2.13:52348 was not received within 15000 milliseconds; closing connection
