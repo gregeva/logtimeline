@@ -19,7 +19,8 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **UUID.** `--discard uuid` removes UUIDs. Masking, which leaves the shape of the UUID behind, is a different treatment on a different surface, `--mask uuid` (#580).
 - **Keys written in the line.** Found by the same token approach as `-udm` and `-x`: naming the key removes the key, its value and their separator. Regular-expression support for `--expose` and `--discard`, as `-udm` has, is a separate enhancement (#582).
 - **Several names in one option (2026-09-16, surfaced trying `--expose`).** `-d fileName,folderId,sT` operates on the three keys; repeating the option, `-d fileName -d folderId -d sT`, also works.
-- **Metrics.** The omit options that suppress the metrics (`-od`, `-ob`, `-oc`) are duplicated into `--discard`, a better verb that more broadly covers aspects the omit options cannot. The omit options are to be deprecated later, cleanly, under their own issue (#581). Only data-side omit options are duplicated: `-osum` (`--omit-summary`) hides a rendered section and is not part of `--discard`; nor are `-oe`, `-or` and `-ov`.
+- **`--expose` takes the same list (2026-09-16).** `-x` is fixed to handle a comma-separated list as part of the `--discard` work.
+- **Metrics.** The omit options that suppress the metrics (`-od`, `-ob`, `-oc`) are duplicated into `--discard`, a better verb that more broadly covers aspects the omit options cannot. The omit options are to be deprecated later, cleanly, under their own issue (#581). Only data-side omit options are duplicated: `-osum` (`--omit-summary`) hides a rendered section and is not part of `--discard`; nor are `-oe`, `-or`, `-ov` and `-os`.
 
 ## Decisions
 
@@ -33,6 +34,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D8 — LOCKED 2026-09-16 (architect) — A discarded value is gone from the whole run, as if it had never been on the line.** Discard is never partial: every surface that reads the value sees nothing. `--discard thread` leaves no `[pool]` segment in the message, and the thread-pool activity surfaces (`-tpas`, `-tpa`) and `-x thread` get no thread; the same holds for every name `--discard` accepts.
 - **D9 — LOCKED 2026-09-16 (architect) — The parsed fields `--discard` accepts are `session`, `user`, `instance`, `platform`, `object` and `thread`.** Each clears the captured value (D3, D8). The timestamp, the status or level and the message are not among them.
 - **D10 — LOCKED 2026-09-16 (architect) — A comma-separated list names several parts in one option.** `-d fileName,folderId,sT` is the same as `-d fileName -d folderId -d sT`.
+- **D11 — LOCKED 2026-09-16 (architect) — `--expose` accepts the same comma-separated list, delivered in this issue.** `-x fileName,adId` is the same as `-x fileName -x adId`, correcting the finding § `--expose` does not split a comma-separated list.
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
