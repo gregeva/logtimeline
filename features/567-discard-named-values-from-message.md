@@ -50,6 +50,16 @@ An analyst whose messages stay apart because of a part of the line that says not
 
   `-d user` on a line carrying a user field and `user=bob` in its query string discards the user field and leaves `user=bob`.
 - **D15 — LOCKED 2026-09-16 (architect) — `query-string` is a built-in `--discard` name, so `-x` and `-d` accept the same names.** It removes the query string from the message: alone it changes nothing, since the query string is removed unless exposed; with `-xqs` the query string is discarded and the D13 notice prints. A `-udm` metric counting a key inside the query string reads the raw line and keeps counting (D12 switches off only a metric whose own key is discarded).
+- **D16 — LOCKED 2026-09-16 (architect) — A discarded key-value pair takes the separator that follows it, or, at the end, the one before it; every occurrence goes.** The separator is `&`, `?` or a space. With `-d sign`:
+
+  | Message before | After |
+  |---|---|
+  | `…regen?folderId=1&sign=abc&sT=9` | `…regen?folderId=1&sT=9` |
+  | `…regen?sign=abc&sT=9` | `…regen?sT=9` |
+  | `…regen?folderId=1&sign=abc` | `…regen?folderId=1` |
+  | `…regen?sign=abc` | `…regen` |
+  | `Request done sign=abc status=ok` | `Request done status=ok` |
+  | `Request done sign=abc` | `Request done` |
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
