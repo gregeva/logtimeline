@@ -3,7 +3,7 @@
 ## Status
 
 - **Issue:** #580. Blocking #567 (discard named keys and values from the message), which uses the UUID and IP address patterns this issue defines.
-- **Phase:** specification; decisions D1 to D8 locked 2026-09-16; acceptance criteria drafted for agreement.
+- **Phase:** specification; decisions D1 to D8 locked and acceptance criteria agreed 2026-09-16.
 - **Record:** this file. The issue body is its snapshot.
 - **Governing records:** `features/567-discard-named-values-from-message.md` (D4 masking is its own option, D10 a comma-separated list, D14 the patterns are one resolution surface for `--mask` and `--discard`, D17 a value both masked and discarded, D18 `-V runtime-config` reports the effective configuration, D19 the gap a removed UUID or IP address leaves); `features/566-preserve-named-values-in-message.md` (the sister option `--expose`: D3 one option with shorthands, D7 a key is appended only when the formed message no longer yields its value, D9 a repeated name kept once); `features/fuzzy-message-consolidation.md` § DD-11: $mask_uuid Processing Order.
 
@@ -89,7 +89,7 @@ Every `ltl` run `-ni -bs 1440 -oe -n 100000 -o -V`, no ` at <file> line <N>` on 
 
 ## Acceptance criteria
 
-Draft for agreement. Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages CSV is read, `-i` isolating the lines that carry the identifier on a corpus log) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-mask.sh` is new. Its corpus inputs are chosen from `docs/test-logs.md`; its synthetic fixture `tests/fixtures/message-mask-values.txt` is new and carries only what the corpus lacks: IPv6 addresses (documentation range `2001:db8::/32`, full, compressed, IPv4-ending, bracketed with a port, with a zone), invalid IPv4 outlines, and lines differing only by one identifier. #567 extends the same fixture.
+Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages CSV is read, `-i` isolating the lines that carry the identifier on a corpus log) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-mask.sh` is new. Its corpus inputs are chosen from `docs/test-logs.md`; its synthetic fixture `tests/fixtures/message-mask-values.txt` is new and carries only what the corpus lacks: IPv6 addresses (documentation range `2001:db8::/32`, full, compressed, IPv4-ending, bracketed with a port, with a zone), invalid IPv4 outlines, and lines differing only by one identifier. #567 extends the same fixture.
 
 | # | Condition | Observable outcome | Asserted by |
 |---|---|---|---|
