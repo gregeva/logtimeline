@@ -3,7 +3,7 @@
 ## Status
 
 - **Issue:** #567. Blocked by #580 (mask UUIDs and IP addresses in the message, keeping their shape). Blocking #581 (deprecate the omit options that `--discard` duplicates) and #582 (name what to expose or discard by a regular expression).
-- **Phase:** specification.
+- **Phase:** specification; decisions D1 to D19 locked and acceptance criteria agreed 2026-09-16.
 - **Record:** this file. The issue body is its snapshot.
 - **Governing records:** `features/566-preserve-named-values-in-message.md` (the sister option `--expose`: D1 the token rule, D3 one option with shorthands, D6 built-in names resolve first, D7 loss not presence); `features/444-access-log-format-family-and-user-surface.md` § Post-release findings (how the thread segment is derived); `features/user-defined-metrics.md` § Counting Aggregations (the token rule); `features/fuzzy-message-consolidation.md` § DD-11: $mask_uuid Processing Order.
 
@@ -74,7 +74,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 
 ## Acceptance criteria
 
-Draft for agreement. Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages or statistics CSV is read) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-discard.sh` is new; its fixture `tests/fixtures/message-discard-values.txt` is new and synthetic, ThingWorx standard lines whose messages carry space-separated key-value pairs, UUIDs and IP addresses (`192.0.2.0/24`, `2001:db8::/32`) between spaces, between `/`, and in brackets.
+Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages or statistics CSV is read) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-discard.sh` is new; its fixture `tests/fixtures/message-discard-values.txt` is new and synthetic, ThingWorx standard lines whose messages carry space-separated key-value pairs, UUIDs and IP addresses (`192.0.2.0/24`, `2001:db8::/32`) between spaces, between `/`, and in brackets.
 
 | # | Condition | Observable outcome | Asserted by |
 |---|---|---|---|
