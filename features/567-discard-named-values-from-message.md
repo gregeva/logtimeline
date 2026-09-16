@@ -72,6 +72,10 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
 - **D18 — LOCKED 2026-09-16 (architect) — `-V runtime-config` reports the effective configuration.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13; `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric (D5). With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`.
 
+### Performance evidence (architect, 2026-09-16)
+
+`--discard` adds per-line work when it names a key in the line, `uuid` or `ip`. The requirement is a before/after benchmark compared for regression, captured on the base commit before the first line of code and at the completion gate; no prototype.
+
 ## Acceptance criteria
 
 Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages or statistics CSV is read) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-discard.sh` is new; its fixture `tests/fixtures/message-discard-values.txt` is new and synthetic, ThingWorx standard lines whose messages carry space-separated key-value pairs, UUIDs and IP addresses (`192.0.2.0/24`, `2001:db8::/32`) between spaces, between `/`, and in brackets.
