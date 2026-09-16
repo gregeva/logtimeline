@@ -16,7 +16,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **Purpose.** Remove some string, data, metric or key-value pair from being included in any of the processing and display.
 - **Nothing left behind.** The intention is not to indicate that something was there but now is not. The explicit use of the option means something is being removed purposefully.
 - **Fields parsed from the line.** What is parsed from a log line is the guide to what can be named. Discarding a parsed field clears its captured value. The fields in scope are session, user, instance, platform, object and thread.
-- **UUID.** `--discard uuid` removes UUIDs. Masking, which leaves the shape of the UUID behind, is a different treatment on a different surface, `--mask uuid` (#580).
+- **UUID and IP address.** `--discard uuid` removes UUIDs; `--discard ip`, `ipv4` and `ipv6` remove IP addresses, the same names `--mask` takes. Masking, which leaves the shape of the UUID behind, is a different treatment on a different surface, `--mask uuid` (#580).
 - **Keys written in the line.** Found by the same token approach as `-udm` and `-x`: naming the key removes the key, its value and their separator. Regular-expression support for `--expose` and `--discard`, as `-udm` has, is a separate enhancement (#582).
 - **Several names in one option (2026-09-16, surfaced trying `--expose`).** `-d fileName,folderId,sT` operates on the three keys; repeating the option, `-d fileName -d folderId -d sT`, also works.
 - **`--expose` takes the same list (2026-09-16).** `-x` is fixed to handle a comma-separated list as part of the `--discard` work.
@@ -37,6 +37,18 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D11 — LOCKED 2026-09-16 (architect) — `--expose` accepts the same comma-separated list, delivered in this issue.** `-x fileName,adId` is the same as `-x fileName -x adId`, correcting the finding § `--expose` does not split a comma-separated list.
 - **D12 — LOCKED 2026-09-16 (architect) — Nothing of a discarded part survives into any count or capture; filters and highlighting still see the raw line.** Discarding a field or key leaves every count and capture of it empty: the built-in distinct counts (thread-pool activity, the Sessions and Users columns) and a `-udm` metric on the discarded key alike, so the built-in and the user-defined count of the same value never disagree. `-include`, `-exclude` and `-highlight` match the raw line before discard, as selection rather than capture. For a key written in the line no text is removed from the raw line: a `-udm` metric whose key is discarded is switched off when the options are resolved, and the key, value and separator are removed from the message. Counting a value while keeping it from separating messages needs no `--discard`: a counting `-udm` metric already masks its value in the message (`-xqs -udm sign::distinct` writes `sign=?`, measured on two download-request lines).
 - **D13 — LOCKED 2026-09-16 (architect) — A name given to both `--expose` and `--discard` is discarded, with a notice.** The value no longer exists when exposed values are appended (D12), so `-x` adds nothing for it; a behavioural notice naming the value prints on every run, `--disable-progress` included, and the run continues.
+- **D14 — LOCKED 2026-09-16 (architect) — A built-in name resolves before a key found in the line, as for `--expose` (566 D6); IP addresses are built-in names beside `uuid`.**
+
+  | Name | What `--discard` does |
+  |---|---|
+  | `thread`, `session`, `user`, `instance`, `platform`, `object` | clears the captured value (D9, D12) |
+  | `uuid`; `ip`, `ipv4`, `ipv6` (`ip` either version) | removes UUIDs, or IP addresses, from the message; the patterns are the ones `--mask` defines (#580), one resolution surface for both options |
+  | `duration`, `durationMs`, `durationMS` | what `-od` does (D5); the three spellings are one name |
+  | `bytes`, `count` | what `-ob` and `-oc` do (D5) |
+  | the name of a `-udm` metric | switches that metric off (D12) |
+  | any other name | a key found in the line: switches off a `-udm` metric counting that key (D12), and is removed from the message with its value and separator (D1, D2) |
+
+  `-d user` on a line carrying a user field and `user=bob` in its query string discards the user field and leaves `user=bob`.
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
