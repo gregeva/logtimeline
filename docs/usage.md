@@ -145,9 +145,7 @@ Consolidated entries are marked with `~` in the summary table output; that marke
 |--------|-------------|
 | `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. |
 | `-uuid, --mask-uuid` | Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to `-g` for UUID-only variation) |
-| `-xqs, --expose-query-string` | Keep the query string when grouping URLs, so `/api?a=1` and `/api?b=2` are tracked separately |
-| `-xs, --expose-session` | Keep session IDs when grouping messages, so each session is tracked separately |
-| `-xu, --expose-user` | Keep user names when grouping messages, so each user is tracked separately |
+| `-x, --expose <name>` | Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. `<name>` is `thread`, `session`, `user` or `query-string`; a metric (`duration`, `bytes`, `count`, or one of your own), whose number then stays in the message in place of `?`; or any key written in the line, such as `fileName`, whose value is added to the end of the message as `fileName=<value>` when grouping would otherwise have removed it. Shorthands: `-xt` for thread, `-xs` for session, `-xu` for user, `-xqs` for the query string, spelled in full as `--expose-thread`, `--expose-session`, `--expose-user` and `--expose-query-string` |
 | `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
@@ -155,8 +153,10 @@ Consolidated entries are marked with `~` in the summary table output; that marke
 ltl -g access.log
 # Don't consolidate messages with more than 5000 occurrences
 ltl -g -gc 5000 access.log
-# Consolidate but keep query strings and sessions as separate entries
+# Consolidate but keep the query string and the session, in that order
 ltl -g 80 -xqs -xs access.log
+# Consolidate but keep the user and a named value written in the line
+ltl -g 80 -xu -x fileName access.log
 ```
 
 **Performance characteristics:** Time overhead is ~20-30% at all scales. Memory overhead depends on data size — at small scale (< 200 MB) consolidation uses more memory due to trigram structures during checkpoint processing, but at production scale (1+ GB) it saves memory dramatically (up to 88% reduction on 7.9 GB) because matched keys are absorbed inline and never stored.
