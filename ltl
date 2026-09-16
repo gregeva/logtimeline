@@ -13135,8 +13135,8 @@ sub resolve_expose_names {
 # grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
 # with no word character, colon or dot before and no word character or colon
 # after, so a zone and a bracketed port stay as written around the placeholder.
-# A bare :: is a separator in messages and is never matched. --discard reads
-# the same table, so the two options find exactly the same identifiers.
+# A bare :: is a separator in messages and is never matched. Every option that
+# names one of these identifiers resolves it through this table.
 my %mask_patterns;
 {
     my $hex = '[0-9A-Fa-f]';
@@ -15096,7 +15096,7 @@ sub read_and_process_logs {
                     $log_level =~ s/-HL$//;
 
                     # Exposed values (-x), appended in the order their names
-                    # were given, after every mask has run: the thread,
+                    # were given, after the metric masks have run: the thread,
                     # session and user fields as the format captured them,
                     # and a key read from the line whose value the formed
                     # message no longer yields. The index() test rejects a

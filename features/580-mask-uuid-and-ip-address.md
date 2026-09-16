@@ -136,3 +136,16 @@ Every `ltl` run `-ni -bs 1440 -oe -n 100000 -o -V`, no ` at <file> line <N>` on 
 - **IPv4 lookbehind as written in § Pattern definitions.** The implementation uses "no word character immediately before, and not a digit and `.`" (`(?<!\w)(?<!\d\.)`); the specification session's emulation rejected any `.` before the address. On the corpus inputs above the two agree on every count.
 - **Two defects caught by the checks before commit.** A double-quoted `"$h::"` in the IPv6 alternatives was read by Perl as the package variable `$h::`, which made one alternative empty and matched everywhere (runtime warning on stderr; fixture keys prefixed with a placeholder). The IPv4 octet separator lost its escape in the edit and matched any character, so digit runs of seven or more characters were masked (589 method-server keys became 343). Both are fixed; the fixture and the corpus runs, checked against the emulation, agree with the pattern definitions.
 - **Proof the harness asserts.** `tests/validate-message-mask.sh` against the base build (`ab38511:ltl`): 0 passed, 15 failed, every scenario failing at its first assertion (`-m` unknown there; the `-uuid` count on the gateway lines 1,327 against 1,328). Against the new build: 25 passed, 0 failed. `tests/validate-runtime-config.sh` 45 passed with the new `runtime-config-mask` scenario; `tests/validate-help-content.sh` 18 passed with the new `H-mask-option-rows` scenario; `tests/validate-message-grouping.sh` 18 passed, `uuid-pair-85-masked` unchanged.
+
+## Completion gate (2026-09-16, commit 485d4a1, `$version_number` 0.18.2)
+
+- **Harness suite:** every `tests/validate-*.sh` run once in sequence, each captured to its own file (`CI=1 validate-csv-output.sh`, `CI=1 validate-statistics.sh`, then the rest): 38 of 39 exit 0 on the first pass. `validate-statistics.sh` exited 1 once: its refreshed capture of the `thingworx-bin-consolidated` scenario formed different consolidated rows (240 compared cells, 10 unpaired, against 400 and none in every other run), so a registered known failure for the `p999` column of the merged rows no longer reproduced and the self-clearing registry reported it stale. The same scenario passes alone on the base build and twice alone on this build, and the harness passes 22 of 22 when re-run in gate order (`validate-csv-output.sh` then `validate-statistics.sh`) with the same 400 cells; the mask code is not on that scenario's path (no `-m`, no `-uuid`). Not caused by this work; not reproduced; recorded here for the architect.
+- **Benchmark** (`single-day-access-log-standard`, this machine, before on the base commit in a worktree, after on 485d4a1; the first single-run pair is discarded, its `after` having run straight after the four-minute statistics harness and read +14 %):
+
+  | pair | parse/read_files before | after | total before | after | rss_peak |
+  |---|---|---|---|---|---|
+  | 1 | 9.2 s | 9.0 s (-2.2 %) | 9.4 s | 9.1 s | +176 KB (+0.2 %) |
+  | 2 | 9.5 s | 9.4 s (-0.8 %) | 9.6 s | 9.5 s | +112 KB (+0.1 %) |
+  | 3 | 9.2 s | 9.0 s (-3.2 %) | 9.4 s | 9.1 s | +96 KB (+0.1 %) |
+
+  Median parse/read_files 9.2 s before (range 9.2 to 9.5) against 9.0 s after (9.0 to 9.4): no regression; a run that masks nothing pays one scalar test per retained message, and the compiled patterns account for the memory delta.
