@@ -72,6 +72,19 @@ my $no_index = 0;                                                       # -ni: n
 my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_user, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0, 0 );
+# -x / --expose: the names given on the command line, in the order given
+# (@expose_raw), the resolved names in that same order for the
+# runtime-config surface (@expose_names), and what the run does with them:
+# the values appended to the end of the message in command-line order
+# (@expose_appends, each [ kind, key name, token pattern for a line key ]),
+# and the metrics whose number stays in the message in place of its mask
+# (%expose_metric keyed by the metric the format spec's probe declares,
+# $expose_count for the count capture's own mask). $expose_active is the
+# single scalar the per-line path reads: false, and no run without an
+# appended value pays more than that one test.
+use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
+my ( @expose_raw, @expose_names, @expose_appends, %expose_metric );
+my ( $expose_active, $expose_count ) = ( 0, 0 );
 my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
@@ -2343,6 +2356,7 @@ sub _classify_argv_provenance {
                 'summary-bar-absolute|sba', 'summary-bar-log|sbl',
                 'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
+                'expose|x', 'expose-thread|xt',
                 'expose-query-string|xqs', 'expose-session|xs', 'expose-user|xu',
                 'hide-session|hses', 'hide-user|hu', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
@@ -2467,6 +2481,7 @@ sub emit_runtime_config_verbose {
         'include-success'                   => $include_success,
         'exclude-success'                   => $exclude_success,
         'highlight-success'                 => $highlight_success,
+        'expose'                            => join(',', @expose_names),
         'expose-query-string'               => $include_query_string,
         'expose-session'                    => $include_session,
         'expose-user'                       => $include_user,
@@ -2781,8 +2796,6 @@ my %format_transform_code = (
     undef_bytes_dash    => q{ undef $bytes if $bytes eq "-"; },
     chop_http_proto     => q{ $message =~ s/ HTTP\/\d\.\d$//; },
     strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
-    prepend_session     => q{ $message = "[$session] $message" if defined $session && $session ne '' && $session ne '-'; },  # emitted only when sessions are included (CLI-gated at compile); a bare - is an absent session (#444 D12/D14)
-    prepend_user        => q{ $message = "[$user] $message" if defined $user && $user ne '' && $user ne '-'; },  # emitted only when users are included (CLI-gated at compile, #444 D12)
     # The unit written beside the value on the line (#444 D7). The converted
     # value is stored as a string on purpose: the record lexicals are shared
     # by every entry for the whole run, a floating-point result would leave
@@ -2831,12 +2844,15 @@ sub format_registry_specs {
                     samples => [ 'ApplicationLog.log', 'ApplicationLog.2025-05-05.0.log', 'ErrorLog.2025-05-05.1.log', 'ScriptLog.2025-04-09.4.log', 'AkkaCommunicationLog.log', 'ApplicationLog.2025-05-05.0.log.gz' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
-      transforms => [ 'prepend_user' ],
+      transforms => [],
       message_metrics => {
           gate_lit => '=',
-          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B'  },
-                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms' } ],
-          mask => { pattern => ' ((bytes|durationM[sS])\s*=\s*)(\d+)', replace => ' $1?' },
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_key => 'bytes'          },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_key => 'durationM[sS]' } ],
+          # One mask over the probe keys it covers: KEYS is filled at compile
+          # time with the mask_key of every probe whose number the run does
+          # not expose, and the mask is left out entirely when that is none.
+          mask => { pattern => ' ((KEYS)\s*=\s*)(\d+)', replace => ' $1?' },
           marks_metrics_observed => 1,
       },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
@@ -2858,12 +2874,6 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
@@ -2873,7 +2883,7 @@ sub format_registry_specs {
       ],
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
-        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
       expect_outcomes => [ 0, 0 ] },
     # Integration Runtime: byte-identical line shape to Connection Server
@@ -2887,24 +2897,20 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms_ddmm', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted',
         '2025-28-01 07:26:36.635 [vert.x-eventloop-thread-0] INFO  c.t.s.SecurityManagerBootstrapper - initializing KeyStore provider',
+        '2025-28-01 07:26:40.100 [vert.x-eventloop-thread-3] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds',
       ],
       expect => [
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
+        [ '2025-28-01 07:26:40', 'INFO', 'c.t.i.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
-      expect_outcomes => [ 0, 0 ] },
+      expect_outcomes => [ 0, 0, 0 ] },
     # Windchill Workgroup Manager client logs: one line shape shared by the
     # genlwsc / uwgm_client / uwgm files (each file's own header block
     # declares `columns "date time tz msgtype logid tid area message"` and
@@ -3000,7 +3006,7 @@ sub format_registry_specs {
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+) (\S+) (\S+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'thread'],[10,'session'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3027,7 +3033,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) \[(\d+(?:\.\d+)?)(us|ms|s)\] \[(\d+(?:\.\d+)?)(?:us|ms|s)\]$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'duration_unit_token'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3057,7 +3063,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[10,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3082,7 +3088,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)" (\d+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[10,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3107,7 +3113,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)"$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3131,7 +3137,7 @@ sub format_registry_specs {
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3156,7 +3162,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3286,7 +3292,7 @@ sub format_registry_specs {
                                  'MethodServer.log', 'BackgroundMethodServerESI.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d{3}) (\w+) +\[(.*?)\] (\S+) (\S*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'user'],[6,'message'] ],
-      transforms => [ 'prepend_user' ],
+      transforms => [],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],
@@ -4185,7 +4191,7 @@ sub compile_format_classifier {
 # success the non-captured record fields receive the entry's
 # static-order-faithful defaults ($clobbered — see the section header).
 # $opts carries the CLI-gated compile decisions (include_query_string,
-# include_session).
+# expose_metric).
 sub compile_format_extractor {
     my ($spec, $clobbered, $opts) = @_;
 
@@ -4259,7 +4265,19 @@ sub format_entry_block_src {
         my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
         my @mask_block;
         push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
-        push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
+        # The mask covers the probe keys whose number stays out of the
+        # message: a metric named on -x keeps its value in place, so its key
+        # drops out of the alternation, and a mask covering no key at all is
+        # not emitted.
+        if ($mm->{mask}) {
+            my $exposed = $opts->{expose_metric} || {};
+            my @mask_keys = map  { $_->{mask_key} }
+                            grep { defined $_->{mask_key} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
+            if (@mask_keys) {
+                ( my $mask_pattern = $mm->{mask}{pattern} ) =~ s/KEYS/join('|', @mask_keys)/e;
+                push @mask_block, "        \$message =~ s/$mask_pattern/$mm->{mask}{replace}/g;";
+            }
+        }
         push @body,
             "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
           . join("\n", @probe_lines) . "\n"
@@ -4271,8 +4289,6 @@ sub format_entry_block_src {
 
     for my $t (@{ $spec->{transforms} }) {
         if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
-        if ($t eq 'prepend_session')    { next unless $opts->{include_session}; }
-        if ($t eq 'prepend_user')       { next unless $opts->{include_user}; }
         my $code = $format_transform_code{$t}
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
         push @body, $code;
@@ -4637,7 +4653,7 @@ sub build_format_registry {
     # equal to the declared expected record for every sample.
     for my $spec (grep { $_->{_compiled} } @specs) {
         my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
-            { include_query_string => 0, include_session => 0, include_user => 0 });
+            { include_query_string => 0 });
         my $want_o = $spec->{expect_outcomes};
         die "ltl: format registry: entry '$spec->{name}' declares " . (ref $want_o eq 'ARRAY' ? scalar(@$want_o) : 'no')
           . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 4 classification conflict, 2 failure, 1 success, 0 unclassified)\n"
@@ -4787,7 +4803,7 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, include_session => $include_session, include_user => $include_user };
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric };
     @format_registry = ();
     @format_registry_members = ();
     @format_registry_pin_only = ();
@@ -9582,9 +9598,7 @@ sub print_help {
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with -uuid is advisable, as they make the similarity comparison do much more work.");
     $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
-    $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
-    $out .= help_opt("-xs,  --expose-session",       "Keep session IDs when grouping messages, so each session is tracked separately");
-    $out .= help_opt("-xu,  --expose-user",          "Keep user names when grouping messages, so each user is tracked separately");
+    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric (duration, bytes, count, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -9998,6 +10012,20 @@ sub resolve_udm_metric_names {
     return;
 }
 
+# The token capture shared by the counting user-defined metrics and the
+# exposed keys read from the line: the key, then = or :, then a value that
+# runs to the first character which cannot sit inside a field (whitespace,
+# comma, semicolon, quote, closing bracket or brace, & or ?). One
+# resolution surface for the rule — parse_udm_configs() builds a counting
+# config's default pattern with it, and the -x resolution reads a line's
+# named key with it, so the two can never read a line differently.
+# features/user-defined-metrics.md section Counting Aggregations.
+sub counting_token_pattern {
+    my ($key) = @_;
+    my $escaped_key = quotemeta($key);
+    return qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])&?]+)/;
+}
+
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
@@ -10154,7 +10182,7 @@ sub parse_udm_configs {
             my $escaped_key = quotemeta($token_key // $name);
             if ($agg_kind eq 'counting') {
                 # Token capture: any run of characters that cannot end a field
-                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])&?]+)/;
+                push @patterns, counting_token_pattern($token_key // $name);
             } else {
                 push @patterns, qr/\b${escaped_key}\s*[=:]\s*(${number})/;
                 push @patterns, qr/(${number})\s*[=:]?\s*${escaped_key}\b/;
@@ -13049,6 +13077,42 @@ sub available_metric_names {
     return (qw(duration bytes count), map { $_->{name} } @udm_configs);
 }
 
+# Resolve the names given to -x / --expose and its shorthands. A built-in
+# name resolves first: the query string is kept in the message; the thread,
+# session and user are appended to the end of it; a metric name, or the key
+# as the file writes it, keeps its number in the message in place of the
+# mask. Any other name is a key read from the line by the counting token
+# rule and appended. The order the names were given is the order the values
+# are appended in, so the same combination of values gives the same message
+# whatever order the line carries them in; a name given twice keeps its
+# first position. Runs after parse_udm_configs(), whose metric names and
+# token keys it resolves against, and before build_format_registry(), which
+# bakes each format's metric masks into its extraction code.
+sub resolve_expose_names {
+    my %seen;
+    for my $raw (@expose_raw) {
+        my $name = trim($raw);
+        next if $name eq '' || $seen{$name}++;
+        push @expose_names, $name;
+        if    ( $name eq 'query-string' ) { $include_query_string = 1 }
+        elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
+        elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
+        elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
+        elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
+        elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
+        elsif ( $name eq 'count' )        { $expose_count = 1 }
+        else {
+            my ($config) = grep { $_->{name} eq $name
+                                  || $_->{base_name} eq $name
+                                  || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+            if ($config) { $config->{expose} = 1 }
+            else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
+        }
+    }
+    $expose_active = @expose_appends ? 1 : 0;
+    return;
+}
+
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
@@ -13335,9 +13399,11 @@ sub adapt_to_command_line_options {
         'omit-bytes|ob' => \$omit_bytes,
         'omit-count|oc' => \$omit_count,
         'include-count|ic' => \$include_count,
-        'expose-query-string|xqs' => \$include_query_string,
-        'expose-session|xs' => \$include_session,
-        'expose-user|xu' => \$include_user,
+        'expose|x=s' => sub { push @expose_raw, $_[1] },
+        'expose-thread|xt' => sub { push @expose_raw, 'thread' },
+        'expose-query-string|xqs' => sub { push @expose_raw, 'query-string' },
+        'expose-session|xs' => sub { push @expose_raw, 'session' },
+        'expose-user|xu' => sub { push @expose_raw, 'user' },
         'hide-session|hses' => \$hide_session,
         'hide-user|hu' => \$hide_user,
         'hide-classification|hcl' => \$hide_classification,
@@ -13874,6 +13940,10 @@ sub adapt_to_command_line_options {
     apply_parse_time_sort_gate($sort_operand_typed);
 
     parse_udm_configs() if @udm_raw_args;
+
+    # The exposed names resolve against the metrics the run declares, so
+    # this follows the -udm configs and precedes the registry build.
+    resolve_expose_names() if @expose_raw;
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
@@ -14503,7 +14573,7 @@ sub read_and_process_logs {
             if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 if( defined $count ) {
-                    $message =~ s/ count\s*=\s*\d+/ count=?/g;                  # mask out actual count values for grouping purposes
+                    $message =~ s/ count\s*=\s*\d+/ count=?/g unless $expose_count;   # the value is masked for grouping, and kept in place when the run exposes count
                     $metrics_observed = 1;
                 }
             }
@@ -14547,7 +14617,7 @@ sub read_and_process_logs {
                     # numeric coercion, transforms, and unit conversion do not apply
                     if ($config->{agg_kind} eq 'counting') {
                         $udm_values{$name} = $matched_value;
-                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
                         next;
                     }
 
@@ -14572,8 +14642,9 @@ sub read_and_process_logs {
                     my $converted_value = defined $config->{converter} ? $config->{converter}->($raw_value) : $raw_value;
                     $udm_values{$name} = $converted_value if defined $converted_value;
 
-                    # Mask extracted values in message for grouping (skip for CSV)
-                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                    # Mask extracted values in message for grouping (skip for CSV,
+                    # and for a metric the run exposes)
+                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
                 }
             }
             $metrics_observed = 1 if %udm_values;
@@ -14934,6 +15005,33 @@ sub read_and_process_logs {
 
                     # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
                     $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
+
+                    # Exposed values (-x), appended in the order their names
+                    # were given, after every mask has run: the thread,
+                    # session and user fields as the format captured them,
+                    # and a key read from the line whose value the formed
+                    # message no longer yields. The index() test rejects a
+                    # line that cannot carry the key before the pattern runs,
+                    # and $expose_active keeps a run that exposes nothing to
+                    # one scalar test per line.
+                    if( $expose_active ) {
+                        for my $ex (@expose_appends) {
+                            if ($ex->[0] == EXPOSE_LINE_KEY) {
+                                next if index($_, $ex->[1]) < 0;
+                                my ($line_value) = $_ =~ $ex->[2];
+                                next unless defined $line_value;
+                                my ($message_value) = $message =~ $ex->[2];
+                                next if defined $message_value && $message_value eq $line_value;
+                                $message .= " $ex->[1]=$line_value";
+                            } else {
+                                my $field_value = $ex->[0] == EXPOSE_THREAD  ? $thread
+                                                : $ex->[0] == EXPOSE_SESSION ? $session
+                                                :                              $user;
+                                next unless defined $field_value && $field_value ne '' && $field_value ne '-';
+                                $message .= " $ex->[1]=$field_value";
+                            }
+                        }
+                    }
 
                     # Hoist truncated metadata for consolidation grouping key (Issue #96)
                     my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;

@@ -1695,6 +1695,34 @@ scenario_variant_connection_server() {
         contract 'features/log-format-registry.md section Drop 1.5 D52'
 }
 
+# Neither member of the connection_server group reads a duration from, or
+# masks the number in, "N milliseconds" in the message (#576): a file of such
+# lines reports metrics_observed: no, and selection is unchanged. Staged with
+# no name evidence so content alone binds each member.
+scenario_milliseconds_not_read() {
+    current_scenario="milliseconds-not-read"
+    echo "[$current_scenario]"
+    local log out member slug fixture staged
+    for member in mt10ir mt10; do
+        if [[ "$member" == mt10ir ]]; then
+            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt
+        else
+            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt
+        fi
+        log=$(stage_fixture "$fixture" "$staged") || return
+        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        assert_variant_selection "$out" "$slug" "$member" evidence '1\.00'
+        assert_line "$out" pattern '^  matched_lines: 8$' \
+            asserts "Every line of the $slug fixture is recognised" \
+            produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+            contract 'features/log-format-registry.md section -V format-detection section-contract'
+        assert_line "$out" pattern '^  metrics_observed: no$' \
+            asserts "A $slug file whose lines carry \"N milliseconds\" observes no metric: the format reads no duration from the message" \
+            produced_by 'emit_format_detection_verbose() in ltl (per-file metrics_observed), fed by the scan sub compile_format_scan_sub() generates for the entry' \
+            contract 'features/566-preserve-named-values-in-message.md section #576 acceptance criterion 2'
+    done
+}
+
 scenario_variant_integration_runtime_named() {
     current_scenario="variant-integration-runtime-named"
     echo "[$current_scenario]"
@@ -2140,6 +2168,7 @@ scenario_classification_format_interleaved; echo ""
 scenario_classification_summary_rows; echo ""
 scenario_variant_ambiguity_note; echo ""
 scenario_variant_connection_server; echo ""
+scenario_milliseconds_not_read; echo ""
 scenario_variant_integration_runtime_named; echo ""
 scenario_variant_integration_runtime_unnamed; echo ""
 scenario_unit_tomcat_named; echo ""

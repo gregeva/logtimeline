@@ -225,13 +225,18 @@ scenario_users_column() {
     # is proven on the ThingWorx specimen, whose messages repeat across users.
     local tw="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
     local with without
-    with=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '\] \[(SuperUser|Administrator)\] ' || true)
-    without=$("$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -cE '\] \[(SuperUser|Administrator)\] ' || true)
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 -xu "$tw" > "$TMP_DIR/xu-with.out" 2> "$TMP_DIR/xu-with.err"
+    check_stderr_warnings "$TMP_DIR/xu-with.err"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 300 --terminal-width 300 "$tw" > "$TMP_DIR/xu-without.out" 2> "$TMP_DIR/xu-without.err"
+    check_stderr_warnings "$TMP_DIR/xu-without.err"
+    with=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/xu-with.out" | grep -cE ' user=(SuperUser|Administrator)( |$)') || with=0
+    without=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/xu-without.out" | grep -cE ' user=(SuperUser|Administrator)( |$)') || without=0
     assert_command \
         command "[ \"$with\" -gt 0 ] && [ \"$without\" -eq 0 ]" \
-        label "-xu prepends the user to the message key ($with rows carry a user under -xu, $without without)" \
-        asserts '-xu prepends the user to the message key the way -xs prepends the session, so a text logged by several users becomes one row per user (D12)' \
-        produced_by 'the prepend_user transform emitted by compile_format_extractor() under -xu in ltl' contract "$USERS_CONTRACT"
+        label "-xu appends the user to the end of the message key ($with rows carry a user under -xu, $without without)" \
+        asserts '-xu appends user=<value> to the end of the message key, so a text logged by several users becomes one row per user, and no user reaches the key without it' \
+        produced_by 'the exposed-value append in read_and_process_logs() in ltl' \
+        contract "$USERS_CONTRACT; features/566-preserve-named-values-in-message.md D5 (an exposed session and user are appended as key-value pairs at the end of the message, in place of the bracketed value at the front)"
     # A non-access format that captures a user renders the same column: the
     # synthetic Windchill Method Server fixture carries three placeholder
     # users on nine of its twelve lines.

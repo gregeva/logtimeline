@@ -839,7 +839,7 @@ Record: `features/444-access-log-format-family-and-user-surface.md` (requirement
 - **The user is capture 3 of every access entry** (`^([^ ]+) ([^ ]+) ([^ ]+) `, three explicit captures, still backtracking-free); every other ordinal moved by two and the expected records with them (D6).
 - **`family => 'access'`** on the seven entries (D5): read by the `-V format-registry` `family:` line and by `--help formats`, which lists a family under its own heading with the shared classification stated once. The ambiguity note names every other member of the unit *group* with its unit, once per file that fell to a default (D15; the once-per-run latch is per file).
 - **`%match_type_to_slug` is retired** (D17): the per-file slug is the bound entry's `FR_SLUG`. `match_type` integers remain entry identifiers (19, 20, 21, 22 for the four new entries).
-- **New transforms**: `prepend_user` (emitted under `-xu`), `duration_from_unit_token`; `prepend_session` and `prepend_user` both skip an empty value and a bare `-` (D12/D14).
+- **New transforms**: `prepend_user` (emitted under `-xu`), `duration_from_unit_token`; `prepend_session` and `prepend_user` both skip an empty value and a bare `-` (D12/D14). The two prepend transforms no longer exist: under `features/566-preserve-named-values-in-message.md` D5 the session and user are appended to the end of the message by the expose path in `read_and_process_logs()`, not by a registry transform; the empty and `-` guards stand there.
 
 ## #476 — per-format level declarations, and unregistered levels reported at end of run
 

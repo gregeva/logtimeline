@@ -366,6 +366,33 @@ scenario_runtime_config_numeric_highlight() {
         contract    'features/312-numeric-criteria-highlight-selection.md section The defined-highlight_regex gate sweep - the runtime-config merged line stays regex-only'
 }
 
+# Issue #566 criterion 12: the resolved expose names, in command-line order,
+# surface as one runtime-config row beside the per-flag rows of the aliases.
+scenario_runtime_config_expose() {
+    current_scenario="runtime-config-expose"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-expose" -V runtime-config -xqs -x fileName -xu "$TEST_LOG"
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose: query-string,fileName,user$' \
+        asserts     'The expose row reports the names -x and its aliases resolved to, comma-separated, in the order they were given on the command line: -xqs -x fileName -xu resolves to query-string, fileName, user. The order is the contract - it is the order the values are appended to the message key in.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for expose, filled by adapt_to_command_line_options() from the ordered expose list' \
+        contract    'features/566-preserve-named-values-in-message.md section D2 (command-line order) and section D3 (one option names anything to expose; the existing options are its aliases)'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose-query-string: 1$' \
+        asserts     'The alias still reports its own state: -xqs sets expose-query-string, whose row is unchanged by the new expose row.' \
+        produced_by 'emit_runtime_config_verbose() in ltl' \
+        contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose-user: 1$' \
+        asserts     'The alias still reports its own state: -xu sets expose-user, whose row is unchanged by the new expose row.' \
+        produced_by 'emit_runtime_config_verbose() in ltl' \
+        contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
+}
+
 scenario_error_unknown_so() {
     current_scenario="error-unknown-so"
     echo "[$current_scenario]"
@@ -525,6 +552,7 @@ scenario_warning_hm_non_builtin;                       echo ""
 scenario_error_unknown_exact_percentiles;              echo ""
 scenario_runtime_config_data_model_selectors;          echo ""
 scenario_runtime_config_numeric_highlight;             echo ""
+scenario_runtime_config_expose;                        echo ""
 scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""
