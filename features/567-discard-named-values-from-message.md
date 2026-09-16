@@ -60,6 +60,7 @@ An analyst whose messages stay apart because of a part of the line that says not
   | `…regen?sign=abc` | `…regen` |
   | `Request done sign=abc status=ok` | `Request done status=ok` |
   | `Request done sign=abc` | `Request done` |
+- **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
