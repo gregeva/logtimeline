@@ -61,6 +61,7 @@ An analyst whose messages stay apart because of a part of the line that says not
   | `Request done sign=abc status=ok` | `Request done status=ok` |
   | `Request done sign=abc` | `Request done` |
 - **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
+- **D18 — LOCKED 2026-09-16 (architect) — `-V runtime-config` reports the effective configuration.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13; `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric (D5). With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`.
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
