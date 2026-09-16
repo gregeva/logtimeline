@@ -15,7 +15,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 
 - **Purpose.** Remove some string, data, metric or key-value pair from being included in any of the processing and display.
 - **Nothing left behind.** The intention is not to indicate that something was there but now is not. The explicit use of the option means something is being removed purposefully.
-- **Fields parsed from the line.** What is parsed from a log line is the guide to what can be named. Discarding a parsed field clears its captured value. The fields in scope are session, user, instance, platform, object and thread.
+- **Fields parsed from the line.** What is parsed from a log line is the guide to what can be named. Discarding a parsed field clears its captured value. The fields in scope are session, user, object and thread. Instance and platform are left out (2026-09-16): no surface reads them after capture, so discarding them would change nothing.
 - **UUID and IP address.** `--discard uuid` removes UUIDs; `--discard ip`, `ipv4` and `ipv6` remove IP addresses, the same names `--mask` takes. Masking, which leaves the shape of the UUID behind, is a different treatment on a different surface, `--mask uuid` (#580).
 - **Keys written in the line.** Found by the same token approach as `-udm` and `-x`: naming the key removes the key, its value and their separator. Regular-expression support for `--expose` and `--discard`, as `-udm` has, is a separate enhancement (#582).
 - **Several names in one option (2026-09-16, surfaced trying `--expose`).** `-d fileName,folderId,sT` operates on the three keys; repeating the option, `-d fileName -d folderId -d sT`, also works.
@@ -32,7 +32,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D6 — LOCKED 2026-09-16 (architect) — `-xqs -d sign -d sT -x fileName` exposes the query string without `sign` and `sT`.** `-x fileName` adds nothing, because the exposed query string already carries `fileName` (566 D7); `-d sign` and `-d sT` remove those two key-value pairs.
 - **D7 — LOCKED 2026-09-16 (architect) — One option names anything to discard.** `-d <name>` / `--discard <name>`, with one help entry. Neither spelling collides with an existing option.
 - **D8 — LOCKED 2026-09-16 (architect) — A discarded value is gone from the whole run, as if it had never been on the line.** Discard is never partial: every surface that reads the value sees nothing. `--discard thread` leaves no `[pool]` segment in the message, and the thread-pool activity surfaces (`-tpas`, `-tpa`) and `-x thread` get no thread; the same holds for every name `--discard` accepts.
-- **D9 — LOCKED 2026-09-16 (architect) — The parsed fields `--discard` accepts are `session`, `user`, `instance`, `platform`, `object` and `thread`.** Each clears the captured value (D3, D8). The timestamp, the status or level and the message are not among them.
+- **D9 — LOCKED 2026-09-16 (architect), revised the same day — The parsed fields `--discard` accepts are `session`, `user`, `object` and `thread`.** Each clears the captured value (D3, D8). The timestamp, the status or level and the message are not among them. `instance` and `platform` were in scope at first and are left out: the ThingWorx standard format captures both, but nothing after capture reads either, so discarding them would have no observable effect.
 - **D10 — LOCKED 2026-09-16 (architect) — A comma-separated list names several parts in one option.** `-d fileName,folderId,sT` is the same as `-d fileName -d folderId -d sT`.
 - **D11 — LOCKED 2026-09-16 (architect) — `--expose` accepts the same comma-separated list, delivered in this issue.** `-x fileName,adId` is the same as `-x fileName -x adId`, correcting the finding § `--expose` does not split a comma-separated list.
 - **D12 — LOCKED 2026-09-16 (architect) — Nothing of a discarded part survives into any count or capture; filters and highlighting still see the raw line.** Discarding a field or key leaves every count and capture of it empty: the built-in distinct counts (thread-pool activity, the Sessions and Users columns) and a `-udm` metric on the discarded key alike, so the built-in and the user-defined count of the same value never disagree. `-include`, `-exclude` and `-highlight` match the raw line before discard, as selection rather than capture. For a key written in the line no text is removed from the raw line: a `-udm` metric whose key is discarded is switched off when the options are resolved, and the key, value and separator are removed from the message. Counting a value while keeping it from separating messages needs no `--discard`: a counting `-udm` metric already masks its value in the message (`-xqs -udm sign::distinct` writes `sign=?`, measured on two download-request lines).
@@ -41,7 +41,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 
   | Name | What `--discard` does |
   |---|---|
-  | `thread`, `session`, `user`, `instance`, `platform`, `object` | clears the captured value (D9, D12) |
+  | `thread`, `session`, `user`, `object` | clears the captured value (D9, D12) |
   | `uuid`; `ip`, `ipv4`, `ipv6` (`ip` either version) | removes UUIDs, or IP addresses, from the message; the patterns are the ones `--mask` defines (#580), one resolution surface for both options |
   | `duration`, `durationMs`, `durationMS` | what `-od` does (D5); the three spellings are one name |
   | `bytes`, `count` | what `-ob` and `-oc` do (D5) |
@@ -60,6 +60,15 @@ An analyst whose messages stay apart because of a part of the line that says not
   | `…regen?sign=abc` | `…regen` |
   | `Request done sign=abc status=ok` | `Request done status=ok` |
   | `Request done sign=abc` | `Request done` |
+- **D19 — LOCKED 2026-09-16 (architect) — A removed UUID or IP address closes the gap it leaves.** Where the same separator (`/` or a space) sits on both sides, the one after it goes with the value; otherwise only the value goes, and brackets around it stay. IP addresses embedded in brackets are planned for: there may be no separator to remove.
+
+  | Message before | After (`-d uuid` or `-d ip`) |
+  |---|---|
+  | `GET /store/orders/3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3/items/summary` | `GET /store/orders/items/summary` |
+  | `connection from 10.0.0.1 closed` | `connection from closed` |
+  | `ErrorCode(de4882d2-d816-4940-ae83-c2f346e19335), Cause(null)` | `ErrorCode(), Cause(null)` |
+  | `client (127.0.0.1) refused` | `client () refused` |
+  | `id=3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3&x=1` | `id=&x=1` (`-d id` removes the pair instead, D16) |
 - **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
 - **D18 — LOCKED 2026-09-16 (architect) — `-V runtime-config` reports the effective configuration.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13; `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric (D5). With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`.
 
