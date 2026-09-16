@@ -49,6 +49,7 @@ An analyst whose messages stay apart because of a part of the line that says not
   | any other name | a key found in the line: switches off a `-udm` metric counting that key (D12), and is removed from the message with its value and separator (D1, D2) |
 
   `-d user` on a line carrying a user field and `user=bob` in its query string discards the user field and leaves `user=bob`.
+- **D15 — LOCKED 2026-09-16 (architect) — `query-string` is a built-in `--discard` name, so `-x` and `-d` accept the same names.** It removes the query string from the message: alone it changes nothing, since the query string is removed unless exposed; with `-xqs` the query string is discarded and the D13 notice prints. A `-udm` metric counting a key inside the query string reads the raw line and keeps counting (D12 switches off only a metric whose own key is discarded).
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
