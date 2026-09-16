@@ -72,6 +72,30 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
 - **D18 — LOCKED 2026-09-16 (architect) — `-V runtime-config` reports the effective configuration.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13; `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric (D5). With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`.
 
+## Acceptance criteria
+
+Draft for agreement. Every run of `ltl` in a harness is shaped to its assertion (`-ni -bs 1440 -oe`, `-o` in a scratch directory where the messages or statistics CSV is read) and checked for ` at <file> line <N>` on stderr. Each assertion is proven to fail against the base build. `tests/validate-message-discard.sh` is new; its fixture `tests/fixtures/message-discard-values.txt` is new and synthetic, ThingWorx standard lines whose messages carry space-separated key-value pairs, UUIDs and IP addresses (`192.0.2.0/24`, `2001:db8::/32`) between spaces, between `/`, and in brackets.
+
+| # | Condition | Observable outcome | Asserted by |
+|---|---|---|---|
+| 1 | `-xqs -d sign,sT` on download requests whose query string carries `fileName`, `adId`, `sign`, `sT` and `userid` (D1, D2, D10, D16) | No key carries `sign=` or `sT=`; lines differing only in `sign` and `sT` share one message; no key contains `&&`, `?&` or ends in `&` or `?`; the messages CSV is identical to `-xqs -d sign -d sT` | `tests/validate-message-discard.sh`, messages CSV, on `tests/fixtures/message-expose-download-requests.txt` |
+| 2 | `-d sign` on each position of D16's table | Each key ends exactly as the table's *After* column | same, on the download fixture staged per case in the harness and on `message-discard-values.txt` |
+| 3 | `-xqs -d sign -x fileName` (D6) | Messages CSV identical to `-xqs -d sign` | same, download fixture |
+| 4 | `-d thread` with `-tpas` and `-xt` on thread-and-session lines (D8, D9, D12, D13) | No key carries a `[pool]` segment or ` thread=`; `threadpool_population: 0`; one notice on stderr naming `thread` as both exposed and discarded | same, on `tests/fixtures/format-detection/access-thread-session.txt` |
+| 5 | `-d session` and `-d user`, each with its `-x` shorthand, on user-and-session lines (D9, D12, D13) | `-V udm-counting` reports `sessions: 0` / `users: 0` in every bucket where the run without `-d` reports more; no ` session=` / ` user=` in any key; the D13 notice for each | same, on `tests/fixtures/format-detection/access-users-sessions.txt` |
+| 6 | `-d object` on ThingWorx application log lines (D9) | No key carries an `[object]` segment; keys differing only in the object share one message | same, on `tests/fixtures/format-detection/thingworx-application-log.txt`, staged in the harness so one message carries two objects |
+| 7 | `-xqs -d user` on a line carrying user field `alice` and `user=bob` in its query string (D14) | `-V udm-counting` `users: 0`; the key still carries `user=bob` | same, download fixture |
+| 8 | `-d duration`, `-d durationMs`, `-d durationMS`; `-d bytes`; `-d count` on ThingWorx standard lines carrying all three metrics (D5, D14) | Messages and statistics CSVs identical to `-od`, `-ob`, `-oc` respectively; the three duration spellings identical to each other | same, on `tests/fixtures/numeric-highlight-boundary.txt` |
+| 9 | `-xqs -udm sign::distinct -d sign`; `-udm <name>:… -d <name>` (D12) | The metric produces nothing: no column for it in the statistics CSV, and no `-V udm-counting` line for it | same, download fixture and `tests/fixtures/udm-counting-query-string.txt` |
+| 10 | `-d query-string -udm fileName::distinct`; `-xqs -d query-string` (D15, D13) | The first is identical to `-udm fileName::distinct` alone, the metric still counting; the second is identical to the run without `-xqs`, with the D13 notice naming `query-string` | same, download fixture |
+| 11 | `-d uuid` and `-d ip` / `-d ipv4` / `-d ipv6` on each case of D19's table and each IP version (D14, D19) | Each key reads exactly as the table's *After* column; `-d ip` removes both versions, `-d ipv4` leaves the IPv6 addresses and `-d ipv6` the IPv4 ones | same, on `message-discard-values.txt` |
+| 12 | `--mask uuid -d uuid`, `-uuid -d uuid`, `--mask ip -d ip` (D17) | Identical to `-d uuid` / `-d ip` alone, plus one notice naming the value as both masked and discarded | same |
+| 13 | `-include`, `-exclude` and `-highlight` naming the text of a discarded key, `-xqs -d sign` (D12) | The lines selected and highlighted are those the same filters select without `-d sign` | same, download fixture, `-V` classification and occurrence counts |
+| 14 | `-x fileName,adId` (D11) | Messages CSV identical to `-x fileName -x adId`; `-V runtime-config` `expose: fileName,adId` | `tests/validate-message-expose.sh`, download fixture |
+| 15 | `-xqs -x thread -d sign,thread -d duration`; a repeated name `-d sign -d sign` (D18) | `-V runtime-config` reports `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`; the repeated name is listed once | `tests/validate-runtime-config.sh` |
+| 16 | `--help` (D7) | One `-d, --discard <name>` entry; `docs/usage.md` agrees | `tests/validate-help-content.sh` |
+| 17 | No discard option | Output unchanged: the regression goldens, the statistics oracle and every registry self-validation pass without re-blessing | the full harness suite at the completion gate |
+
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
 ### Where each nameable part reaches the message today (code audit)
