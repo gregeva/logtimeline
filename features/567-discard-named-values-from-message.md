@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Issue:** #567. Blocked by #580 (mask UUIDs and IP addresses in the message, keeping their shape). Blocking #581 (deprecate the omit options that `--discard` duplicates).
+- **Issue:** #567. Blocked by #580 (mask UUIDs and IP addresses in the message, keeping their shape). Blocking #581 (deprecate the omit options that `--discard` duplicates) and #582 (name what to expose or discard by a regular expression).
 - **Phase:** specification.
 - **Record:** this file. The issue body is its snapshot.
 - **Governing records:** `features/566-preserve-named-values-in-message.md` (the sister option `--expose`: D1 the token rule, D3 one option with shorthands, D6 built-in names resolve first, D7 loss not presence); `features/444-access-log-format-family-and-user-surface.md` § Post-release findings (how the thread segment is derived); `features/user-defined-metrics.md` § Counting Aggregations (the token rule); `features/fuzzy-message-consolidation.md` § DD-11: $mask_uuid Processing Order.
@@ -17,8 +17,8 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **Nothing left behind.** The intention is not to indicate that something was there but now is not. The explicit use of the option means something is being removed purposefully.
 - **Fields parsed from the line.** What is parsed from a log line is the guide to what can be named. Discarding a parsed field (thread, object) clears its captured value.
 - **UUID.** `--discard uuid` removes UUIDs. Masking, which leaves the shape of the UUID behind, is a different treatment on a different surface, `--mask uuid` (#580).
-- **Keys written in the line.** Found by the same token approach as `-udm` and `-x`: naming the key removes the key, its value and their separator. Regular-expression support for `--expose` and `--discard`, as `-udm` has, would be nice, and is likely a separate enhancement request.
-- **Metrics.** The omit options that suppress the metrics (`-od`, `-ob`, `-oc`) are duplicated into `--discard`, a better verb that more broadly covers aspects the omit options cannot. The omit options are to be deprecated later, cleanly, under their own issue (#581).
+- **Keys written in the line.** Found by the same token approach as `-udm` and `-x`: naming the key removes the key, its value and their separator. Regular-expression support for `--expose` and `--discard`, as `-udm` has, is a separate enhancement (#582).
+- **Metrics.** The omit options that suppress the metrics (`-od`, `-ob`, `-oc`) are duplicated into `--discard`, a better verb that more broadly covers aspects the omit options cannot. The omit options are to be deprecated later, cleanly, under their own issue (#581). Only data-side omit options are duplicated: `-osum` (`--omit-summary`) hides a rendered section and is not part of `--discard`.
 
 ## Decisions
 
@@ -29,6 +29,7 @@ An analyst whose messages stay apart because of a part of the line that says not
 - **D5 — LOCKED 2026-09-16 (architect) — `--discard` duplicates the metric omit options.** `--discard duration`, `--discard bytes` and `--discard count` do what `-od`, `-ob` and `-oc` do; the omit options stay for now, and their deprecation is #581.
 - **D6 — LOCKED 2026-09-16 (architect) — `-xqs -d sign -d sT -x fileName` exposes the query string without `sign` and `sT`.** `-x fileName` adds nothing, because the exposed query string already carries `fileName` (566 D7); `-d sign` and `-d sT` remove those two key-value pairs.
 - **D7 — LOCKED 2026-09-16 (architect) — One option names anything to discard.** `-d <name>` / `--discard <name>`, with one help entry. Neither spelling collides with an existing option.
+- **D8 — LOCKED 2026-09-16 (architect) — A discarded value is gone from the whole run, as if it had never been on the line.** Discard is never partial: every surface that reads the value sees nothing. `--discard thread` leaves no `[pool]` segment in the message, and the thread-pool activity surfaces (`-tpas`, `-tpa`) and `-x thread` get no thread; the same holds for every name `--discard` accepts.
 
 ## Findings (2026-09-16; release/0.18.2 at a2873b2)
 
