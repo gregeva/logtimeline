@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.2-580";
+my $version_number = "0.18.2";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -217,7 +217,17 @@ my %bucket_outcomes;
 # (Issue #302). Keyed by category ('plain'/'highlight').
 my %message_key_order;
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
-my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
+# -m / --mask: the names given on the command line (@mask_raw, a value
+# may be a comma-separated list), the resolved names in that same order for
+# the runtime-config surface (@mask_names), and the substitutions the run
+# applies to every retained message (@mask_subs, each [ pattern, placeholder ]
+# in the fixed order uuid, ipv6, ipv4, so that an IPv6 address ending in an
+# IPv4 address is one IPv6 placeholder). $mask_active is the one scalar test a
+# run that masks nothing pays per retained message; $mask_uuid reports whether
+# UUIDs are masked by either spelling, and $mask_uuid_option records that the
+# deprecated -uuid spelling was used.
+my ( @mask_raw, @mask_names, @mask_subs );
+my ( $mask_active, $mask_uuid, $mask_uuid_option ) = ( 0, 0, 0 );
 my @graph_columns = qw( duration bytes count );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
@@ -2373,7 +2383,7 @@ sub _classify_argv_provenance {
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
-                'udm-csv-separator|ucs', 'mask-uuid|uuid',
+                'udm-csv-separator|ucs', 'mask|m', 'mask-uuid|uuid',
                 'group-similar|g', 'no-final-pass',
                 'consolidation-trigger', 'consolidation-ceiling',
                 'consolidation-max-patterns', 'final-threshold',
@@ -2518,6 +2528,7 @@ sub emit_runtime_config_verbose {
         'sort-on'                           => $sort_type,
         'sort-ascending'                    => $sort_ascending,
         'threadpool-activity-summary'       => $include_threadpool_summary,
+        'mask'                              => join(',', @mask_names),
         'mask-uuid'                         => $mask_uuid,
         'group-similar'                     => $group_similar_sensitivity,
         'group-ceiling'                     => $consolidation_final_ceiling,
@@ -9596,8 +9607,8 @@ sub print_help {
 
     # Message Grouping
     $out .= help_subheading("Message Grouping");
-    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with -uuid is advisable, as they make the similarity comparison do much more work.");
-    $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
+    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
+    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
     $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric (duration, bytes, count, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
@@ -13113,6 +13124,70 @@ sub resolve_expose_names {
     return;
 }
 
+# The identifiers -m / --mask can name, each with the pattern that finds it in
+# the message and the placeholder of its shape that replaces it. Word-boundary
+# tests keep an identifier embedded in a longer token as written: a UUID is
+# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
+# digit either side; an IPv4 address is four decimal octets from 0 to 255
+# without leading zeros, with no word character or digit-and-dot before, and no word
+# character or further dotted digit after, so a port, a leading / and a thread
+# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
+# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
+# with no word character, colon or dot before and no word character or colon
+# after, so a zone and a bracketed port stay as written around the placeholder.
+# A bare :: is a separator in messages and is never matched. --discard reads
+# the same table, so the two options find exactly the same identifiers.
+my %mask_patterns;
+{
+    my $hex = '[0-9A-Fa-f]';
+    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+    my $ipv4 = "(?:$octet\\.){3}$octet";
+    my $h = '[0-9A-Fa-f]{1,4}';
+    my $ls32 = "(?:$h:$h|$ipv4)";
+    my $ipv6 = join '|',
+        "(?:${h}:){6}$ls32",
+        "::(?:${h}:){5}$ls32",
+        "(?:${h})?::(?:${h}:){4}$ls32",
+        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
+        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
+        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
+        "(?:(?:${h}:){0,4}${h})?::$ls32",
+        "(?:(?:${h}:){0,5}${h})?::$h",
+        "(?:${h}:){0,6}${h}::";
+    %mask_patterns = (
+        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
+        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
+        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
+    );
+}
+my @mask_order = qw(uuid ipv6 ipv4);
+
+# Resolve the names given to -m / --mask and -uuid into the substitutions the
+# run applies. A value may be a comma-separated list; a name given twice keeps
+# its first position; ip names both address versions. The substitutions are
+# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the same
+# names give the same message. An unknown name stops the run.
+sub resolve_mask_names {
+    my %seen;
+    my %wanted;
+    for my $raw (@mask_raw) {
+        for my $name ( map { trim($_) } split /,/, $raw ) {
+            next if $name eq '' || $seen{$name}++;
+            push @mask_names, $name;
+            if    ( $name eq 'ip' )                      { $wanted{ipv4} = 1; $wanted{ipv6} = 1 }
+            elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }
+            else {
+                print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");
+                exit 1;
+            }
+        }
+    }
+    @mask_subs = map { $mask_patterns{$_} } grep { $wanted{$_} } @mask_order;
+    $mask_active = @mask_subs ? 1 : 0;
+    $mask_uuid   = $wanted{uuid} ? 1 : 0;
+    return;
+}
+
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
@@ -13330,6 +13405,15 @@ sub adapt_to_command_line_options {
 
     %option_provenance = _classify_argv_provenance(\@cli_argv, \@env_args);
 
+    # The two spellings of masking report as one configuration: whenever
+    # either -m or -uuid was given, runtime-config carries both the mask row
+    # (the resolved names) and the mask-uuid row (whether UUIDs are masked).
+    for my $pair ( [ 'mask', 'mask-uuid' ], [ 'mask-uuid', 'mask' ] ) {
+        my ( $given, $other ) = @$pair;
+        next unless $option_provenance{$given} && !$option_provenance{$other};
+        $option_provenance{$other} = [ @{ $option_provenance{$given} } ];
+    }
+
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
     # Resolve the terminal-width override before dispatching informational
@@ -13444,7 +13528,8 @@ sub adapt_to_command_line_options {
         'user-defined-metrics|udm=s' => \@udm_raw_args,
         'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
-        'mask-uuid|uuid' => \$mask_uuid,
+        'mask|m=s' => sub { push @mask_raw, $_[1] },
+        'mask-uuid|uuid' => sub { push @mask_raw, 'uuid'; $mask_uuid_option = 1 },        # hidden - deprecated spelling of -m uuid; kept working, prints a notice
         'group-similar|g:s' => \$group_similar_sensitivity,
         'no-final-pass' => sub { $consolidation_final_pass = 0; },                  # hidden
         'consolidation-trigger=i' => \$consolidation_trigger,                       # hidden
@@ -13944,6 +14029,7 @@ sub adapt_to_command_line_options {
     # The exposed names resolve against the metrics the run declares, so
     # this follows the -udm configs and precedes the registry build.
     resolve_expose_names() if @expose_raw;
+    resolve_mask_names()   if @mask_raw;
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
@@ -13999,6 +14085,12 @@ sub adapt_to_command_line_options {
     if ($omit_stats) {
         print STDERR "Warning: -os/--omit-stats is deprecated: use -od/--omit-durations to keep durations from being captured, or -hst/--hide-stats to keep the statistics panel from being displayed\n";
         $hide_stats = 1;
+    }
+
+    # -uuid/--mask-uuid is the deprecated spelling of -m uuid: it masks as
+    # before and tells the user where the option went.
+    if ($mask_uuid_option) {
+        print STDERR "Warning: -uuid/--mask-uuid is deprecated: use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6\n";
     }
 
     # With no message retained, the options that only configure the per-message
@@ -15003,9 +15095,6 @@ sub read_and_process_logs {
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     $log_level =~ s/-HL$//;
 
-                    # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
-                    $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
-
                     # Exposed values (-x), appended in the order their names
                     # were given, after every mask has run: the thread,
                     # session and user fields as the format captured them,
@@ -15030,6 +15119,16 @@ sub read_and_process_logs {
                                 next unless defined $field_value && $field_value ne '' && $field_value ne '-';
                                 $message .= " $ex->[1]=$field_value";
                             }
+                        }
+                    }
+
+                    # Masks (-m), applied to the formed message after the
+                    # exposed values have been added, so an exposed value that
+                    # carries an identifier is masked in place. $mask_active
+                    # keeps a run that masks nothing to one scalar test.
+                    if( $mask_active ) {
+                        for my $m (@mask_subs) {
+                            $message =~ s/$m->[0]/$m->[1]/g;
                         }
                     }
 

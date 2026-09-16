@@ -3,7 +3,7 @@
 ## Status
 
 - **Issue:** #580. Blocking #567 (discard named keys and values from the message), which uses the UUID and IP address patterns this issue defines.
-- **Phase:** specification; decisions D1 to D8 locked and acceptance criteria agreed 2026-09-16.
+- **Phase:** implemented on branch `580-mask-uuid-and-ip-address`; decisions D1 to D8 locked and acceptance criteria agreed 2026-09-16, harness `tests/validate-message-mask.sh` green and proven to fail on the base build 2026-09-16 (§ Implementation findings).
 - **Record:** this file. The issue body is its snapshot.
 - **Governing records:** `features/567-discard-named-values-from-message.md` (D4 masking is its own option, D10 a comma-separated list, D14 the patterns are one resolution surface for `--mask` and `--discard`, D17 a value both masked and discarded, D18 `-V runtime-config` reports the effective configuration, D19 the gap a removed UUID or IP address leaves); `features/566-preserve-named-values-in-message.md` (the sister option `--expose`: D3 one option with shorthands, D7 a key is appended only when the formed message no longer yields its value, D9 a repeated name kept once); `features/fuzzy-message-consolidation.md` § DD-11: $mask_uuid Processing Order.
 
@@ -94,7 +94,7 @@ Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its 
 | # | Condition | Observable outcome | Asserted by |
 |---|---|---|---|
 | 1 | `-m uuid` on the reference ThingWorx log of UUID-varying errors (D1) | Every key that carried a UUID shows `########-####-####-####-############` where it sat; the message count is the one measured with `-uuid` on the base build | `tests/validate-message-mask.sh`, messages CSV |
-| 2 | `-m uuid` and `-uuid` on the thirty-day access-log lines requesting gateway file repositories, `-i` on the gateway path segment (D1) | 1,334 messages; every gateway name is as written; no placeholder is preceded by anything but `/` | same |
+| 2 | `-m uuid` and `-uuid` on one day of the thirty-day access-log lines requesting gateway file repositories, `-i` on the path shape (`FileRepositories/.*_GW_`) (D1) | 1,328 messages (1,489 unmasked, 1,327 with the base build's loose pattern); every gateway name is as written; no placeholder is preceded by anything but `/` | same |
 | 3 | `-uuid` in place of `-m uuid` on the runs of criteria 1 and 2 | Identical messages CSV; one notice on stderr stating that `-uuid` is deprecated in favour of `--mask`, also with `--disable-progress` | same |
 | 4 | `-m ipv4` on the method server log, `-i ServletRequestMonitor` (D2, D3) | No valid IPv4 address remains in the message text of any key; each client address reads `###.###.###.###`; the thread segment is unchanged; occurrence totals unchanged | same |
 | 5 | `-m ipv4` on the WGM client log, `-i 'Version :'` (D2) | The four-part version numbers read `###.###.###.###`; the five-part version strings are as written | same |
@@ -112,3 +112,27 @@ Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its 
 ## Performance evidence
 
 Masking adds substitutions per retained message, and only when `--mask` or `-uuid` is given; it is a small change to an existing path, so under `docs/process/workflow.md` § 2 the before/after benchmark at the completion gate is its evidence, with the `before` captured on the base commit before the first line of code.
+
+## `-V runtime-config` contract (D5)
+
+Two rows in the `command-line` (or `environment-variable`) sub-section, both present whenever either `-m`/`--mask` or `-uuid` was given, neither otherwise:
+
+| Key | Value |
+|---|---|
+| `mask` | the names given to `-m` and `-uuid`, comma-separated, in command-line order; a comma-separated value split; a repeated name kept once at its first position; `-uuid` contributes `uuid`; `ip` reported as given, not expanded |
+| `mask-uuid` | `1` when `uuid` is among the resolved names by either spelling, `0` otherwise |
+
+Consumers: `tests/validate-runtime-config.sh` (scenario `runtime-config-mask`). Renaming or removing either key is a breaking change under `tests/HARNESS-DESIGN.md` § Stability contract.
+
+## Implementation findings (2026-09-16; branch `580-mask-uuid-and-ip-address` off release/0.18.2 at ab38511)
+
+Every `ltl` run `-ni -bs 1440 -oe -n 100000 -o -V`, no ` at <file> line <N>` on stderr, captured once to the scratchpad and inspected there.
+
+- **Criterion 2 re-measured with a neutral include pattern.** The specification isolated the gateway lines by a gateway name; the committed harness isolates them by the path shape instead (`-i 'FileRepositories/.*_GW_'`, architect's choice 2026-09-16), on one day of the thirty-day access logs. Base build: 1,489 keys unmasked, 1,327 with `-uuid`; hexadecimal UUIDs only (computed from the unmasked keys, and produced by the new build with both `-m uuid` and `-uuid`): 1,328. The one difference is the same pair of gateway names differing only in a TEST and a PROD part, which the loose pattern merged. Every placeholder in the 1,328 keys is preceded by `/`.
+- **Criterion 1.** The reference log yields 333 keys with `-uuid` on the base build and 333 with `-m uuid` and with `-uuid` on the new build, the three CSVs identical: every match there is a hexadecimal UUID, so D1 changes nothing on it. Three keys carry the placeholder; the rest carry no UUID.
+- **Criterion 4.** Method server request-monitor lines: 589 keys with and without `-m ipv4`, 589 lines both ways; 584 keys carry a client address unmasked and every one of those reads `###.###.###.###` masked, none carries a valid IPv4 address in its message text; the set of bracketed level, thread and object prefixes (the thread segment `[ajp-nio-127.0.0.1-80]` among them) is identical. The specification's estimate (masking changes the number of messages by none) holds.
+- **Criterion 5.** WGM version lines: 4 keys over 61 lines both ways; the three keys carrying four-part version numbers that are valid addresses (`10.1.0.0`, `12.1.2.0`, `12.1.2.2`, `5.0.2.0`) read the placeholder there; the five-part strings (`17.1.0.00.370788`, `12.1.20.02.02`, `12.1.20.07.31`) are as written in the same three keys.
+- **The emulated masking of a truncated key is not the produced key.** Where a message runs past the 350-character cut of the messages CSV, masking before the cut shifts what the cut keeps, so a masked key cannot be predicted by masking the unmasked CSV key. The harness therefore asserts shapes (key and line counts, presence and absence of addresses and placeholders, the prefix set) on corpus inputs, and exact keys only on the synthetic fixture, whose lines are short.
+- **IPv4 lookbehind as written in § Pattern definitions.** The implementation uses "no word character immediately before, and not a digit and `.`" (`(?<!\w)(?<!\d\.)`); the specification session's emulation rejected any `.` before the address. On the corpus inputs above the two agree on every count.
+- **Two defects caught by the checks before commit.** A double-quoted `"$h::"` in the IPv6 alternatives was read by Perl as the package variable `$h::`, which made one alternative empty and matched everywhere (runtime warning on stderr; fixture keys prefixed with a placeholder). The IPv4 octet separator lost its escape in the edit and matched any character, so digit runs of seven or more characters were masked (589 method-server keys became 343). Both are fixed; the fixture and the corpus runs, checked against the emulation, agree with the pattern definitions.
+- **Proof the harness asserts.** `tests/validate-message-mask.sh` against the base build (`ab38511:ltl`): 0 passed, 15 failed, every scenario failing at its first assertion (`-m` unknown there; the `-uuid` count on the gateway lines 1,327 against 1,328). Against the new build: 25 passed, 0 failed. `tests/validate-runtime-config.sh` 45 passed with the new `runtime-config-mask` scenario; `tests/validate-help-content.sh` 18 passed with the new `H-mask-option-rows` scenario; `tests/validate-message-grouping.sh` 18 passed, `uuid-pair-85-masked` unchanged.

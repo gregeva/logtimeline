@@ -109,7 +109,7 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **What happened:** The scorer judged text the analyst never sees. Whether the same UUIDs recur, or change in only a few characters, is information an analyst may need, and a placeholder erases it before grouping decides anything. Candidate selection also read the raw key while scoring read the normalised one, so a candidate search sized on the raw text missed UUID-bearing partners the scorer would have accepted at high thresholds.
 
-**What works:** Scoring the message as written in every stage, and leaving masking to an explicit option the analyst chooses before consolidation (`-uuid`). Where a log carries many UUIDs, masking them is the advice, because they make the similarity check do much more work.
+**What works:** Scoring the message as written in every stage, and leaving masking to an explicit option the analyst chooses before consolidation (`--mask uuid`). Where a log carries many UUIDs, masking them is the advice, because they make the similarity check do much more work.
 
 **Lesson:** A transformation that changes what two messages are judged on belongs where the analyst can see and choose it, not inside the scorer. Every stage that reads a message (candidate selection, scoring, alignment) must read the same text; a normalisation hidden in one stage turns the other stages' guarantees into guesses.
 
