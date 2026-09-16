@@ -6,12 +6,19 @@ A prototype is not a draft of the feature. It is an experiment with a question,
 a method and a recorded result, and its output is a decision in the owning
 feature doc — not code that later becomes the implementation.
 
-## When a prototype is mandatory
+## When a prototype is required
 
-Not a judgment call. A prototype is required when the work introduces:
+Every change to the hot path is taken carefully and proven not to regress: a
+before/after benchmark on this machine is required whenever the work adds cost
+per line or per key (`docs/process/workflow.md` § 3 (b)). For a small change to
+an existing path, such as a test, a cleared value or a substitution, that
+comparison is the evidence, and no prototype is needed.
+
+A prototype is required when the work introduces:
 
 - **(a)** a new or changed data model
-- **(b)** a new per-line hot-path cost
+- **(b)** a new code path, feature or capability in the hot path, where the best
+  and most performant way to build it has to be found
 - **(c)** any feature or fix impactful by its cost profile — execution frequency
   × per-execution cost (a cheap operation run tens of millions of times, or an
   expensive one run per key at high cardinality)

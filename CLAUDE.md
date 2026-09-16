@@ -122,8 +122,10 @@ about anything else, these still hold.
 - [ ] Acceptance criteria are derived from the requirements and agreed in the
       feature doc before code (`docs/test-driven-development.md`). An "unknown"
       verification method is prototyping scope, proposed with its cost.
-- [ ] Prototype triggers (`prototype/README.md`): new or changed data model,
-      new per-line cost, high frequency × cost, unknown verification method.
+- [ ] Hot-path work always gets a before/after benchmark. A prototype
+      (`prototype/README.md`) is for a new or changed data model, a new code
+      path or capability in the hot path, high frequency × cost, or an unknown
+      verification method; not for a small change to an existing path.
 - [ ] A performance fix measures its premise's constants first, mandatory when
       the code has moved since the issue was written.
 - [ ] Ordering between issues is a native `blocked_by` edge, recorded in the

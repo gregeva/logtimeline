@@ -98,10 +98,12 @@ Phase 1 begins only on explicit instruction. Filing a requirement
    mechanism to reuse, the criterion names it too, so it cannot pass against a
    substitute. A criterion that turns out unbuildable mid-implementation is a
    stop-and-raise. Full rule: `docs/test-driven-development.md`.
-2. **Prototyping** in `prototype/` — see `prototype/README.md`. Mandatory, not a
-   judgement call, for (a) a new or changed data model, (b) a new per-line
-   hot-path cost, (c) anything impactful by execution frequency × per-execution
-   cost, (d) a key requirement whose verification method is unknown. Research
+2. **Prototyping** in `prototype/` — see `prototype/README.md`. Required for (a) a
+   new or changed data model, (b) a new code path, feature or capability in the
+   hot path, where the most performant way to build it has to be found, (c) anything impactful by execution frequency × per-execution
+   cost, (d) a key requirement whose verification method is unknown. A smaller
+   hot-path change needs no prototype: the before/after benchmark (§ 3 (b)),
+   always required for hot-path work, is its evidence. Research
    grounds the prototype; the prototype compares candidates at staged scale
    against the current code as baseline; exit requires measured justification
    (medians with ranges) and decisions recorded as Dxx before implementation.
@@ -166,7 +168,9 @@ once, here.
 The only valid comparison is before-vs-after, same machine, same case, same
 session. A released baseline TSV (`vX.Y.Z.tsv`) was captured on another
 machine for the release stage and proves nothing about a change. Any metric
-worse by more than 5% is stop-and-investigate (one run is not a median of 3).
+worse by more than 1% across repeated runs indicates a performance regression
+and is investigated, so the change is as optimized as it can be (one run is not
+a median of 3).
 Delete both TSVs afterwards. The `full`, `xl` and `all` tiers and the XL file
 selections are release instruments and are never run during issue work.
 
