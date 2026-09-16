@@ -62,7 +62,7 @@ Similarity is scored on the message text as written, by every stage that reads i
 - **It hides information the analyst needs.** Whether the same identifiers recur, or change in only a few characters, is visible in a pattern that keeps the constant characters of an identifier and wildcards the ones that vary. A placeholder makes every identifier score alike.
 - **It splits what the stages read.** A candidate search whose bounds are computed on the raw text cannot guarantee anything about a score computed on normalised text; partners the scorer would accept are passed over.
 
-Masking values is an explicit step the analyst chooses, applied before consolidation (`-uuid`). It has a real effect on cost and grouping: a single UUID (36 chars) in a ~180-char message contributes ~34 trigrams no partner shares, holding Dice for otherwise identical messages at 74-76%. Where a log carries many UUIDs, masking them avoids a large amount of fruitless candidate scoring.
+Masking values is an explicit step the analyst chooses, applied before consolidation (`--mask uuid`). It has a real effect on cost and grouping: a single UUID (36 chars) in a ~180-char message contributes ~34 trigrams no partner shares, holding Dice for otherwise identical messages at 74-76%. Where a log carries many UUIDs, masking them avoids a large amount of fruitless candidate scoring.
 
 ### Default Threshold: 85%
 

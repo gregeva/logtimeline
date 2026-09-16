@@ -511,6 +511,57 @@ printf "  getopts:   %d entries (%d visible, %d hidden)\n" \
     "$(wc -l < "$HIDDEN_LONGS_FILE"  | tr -d ' ')"
 echo ""
 
+# Issue #580 criterion 13: one -m, --mask <name> entry, no -uuid row (D8), and
+# the -g entry advising --mask uuid, in --help and docs/usage.md alike.
+scenario_H_mask_option_rows() {
+    current_scenario="H-mask-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-mask.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    assert_line "$help_out" \
+        pattern     '^\s+-m,\s+--mask <name>\s+Replace an identifier' \
+        asserts     '--help carries one -m, --mask <name> row describing the placeholder masking' \
+        produced_by 'print_help() in ltl (the -m row after the -g row)' \
+        contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13 - one -m, --mask <name> entry'
+    assert_equal "$(grep -c -- '--mask <name>' "$help_out")" "1" \
+        label       'exactly one --mask <name> row in --help' \
+        asserts     'The option is documented once, not once per name it accepts' \
+        produced_by 'print_help() in ltl' \
+        contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13'
+    assert_equal "$(grep -c -E -- '(^|\s)-uuid[, ]' "$help_out")" "0" \
+        label       'no -uuid row in --help' \
+        asserts     '-uuid is deprecated: --help carries no row for it; the notice printed on use names its replacement' \
+        produced_by 'print_help() in ltl (the -uuid row is dropped; the GetOptions entry is annotated hidden)' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D8 - --help carries no -uuid row'
+    # The -g description wraps over several lines at any width, so the help text
+    # is collapsed to one line before the phrase is looked for.
+    assert_equal "$(tr -s ' \n' '  ' < "$help_out" | grep -c -- 'masking them with --mask uuid is advisable')" "1" \
+        label       'the -g row advises --mask uuid' \
+        asserts     'The -g entry advises masking UUIDs with --mask uuid, not with the deprecated -uuid' \
+        produced_by 'print_help() in ltl (the -g row)' \
+        contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13 - the -g entry names --mask uuid'
+
+    assert_line "$USAGE_MD" \
+        pattern     '^\| `-m, --mask <name>` \| Replace an identifier' \
+        asserts     'docs/usage.md carries the -m, --mask <name> row' \
+        produced_by 'docs/usage.md option table - manually maintained alongside print_help()' \
+        contract    'CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    assert_equal "$(grep -c -- '`-uuid' "$USAGE_MD")" "0" \
+        label       'no -uuid row or advice in docs/usage.md' \
+        asserts     'docs/usage.md names the deprecated option nowhere; the -g row advises --mask uuid' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D8 and section Acceptance criteria 13 - docs/usage.md agrees'
+    assert_line "$USAGE_MD" \
+        pattern     '`-g, --group-similar <N>`.*masking them with `--mask uuid` is advisable' \
+        asserts     'The docs/usage.md -g row advises --mask uuid' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 13'
+}
+
 scenario_G_udm_function_list_parity() {
     current_scenario="G-udm-function-list-parity"
     echo "[$current_scenario]"
@@ -546,6 +597,7 @@ scenario_C_help_short_forms_match_getopts;         echo ""
 scenario_D_dash_v_matches_version_number;          echo ""
 scenario_E_benchmark_data_section_matches_version_number; echo ""
 scenario_G_udm_function_list_parity;               echo ""
+scenario_H_mask_option_rows;                       echo ""
 scenario_F_description_quality_warnings
 
 echo ""
