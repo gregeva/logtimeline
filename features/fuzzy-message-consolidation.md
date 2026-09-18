@@ -2300,3 +2300,172 @@ Criteria 1 and 2 fail against the fixed 85: that final pass creates 1 pattern at
 ### `-V message-grouping` keys asserted
 
 The header line `Threshold: <T>%  Trigger: <N>  Ceiling: <C>  Final pass: on (threshold=<F>%, ceiling=<M>)` (emitted by `pipeline_finalize()`), where `<T>` is the resolved `-g` sensitivity and `<F>` the threshold the final pass scored at; and, per group, `Keys seen:` and `New patterns created:` in the `--- <category>|<group>: Final Pass (2-pass) ---` block. Renaming or removing any of these is a breaking change for that harness.
+
+## Consolidation stops absorbing UUID-bearing keys at scale (#584)
+
+**Status:** root cause established, 2026-09-19. No fix proposed; the remedy is the
+architect's to direct, and the candidate remedies below each trade against D569-2.
+
+### What was measured
+
+On the release benchmark's 1.5 GB single-server access-log selection
+(`-bs 1440 -n 25 -g`, 28 files, 7,749,167 lines), `finalize/group_similar` takes
+2655.6 s against 55.2 s on v0.18.1, 96% of a 2775.4 s run, and peak resident memory
+rises from 964 MB to 2393 MB. Against § DD-12, which requires a consolidating run
+within 15% of the non-consolidating wall clock and at least 30% below its peak memory,
+0.18.2 reads +2703.3% and +11.0% where v0.18.1 read +87.9% and −55.3%.
+
+The reading that explains both halves is in the same capture:
+`COUNTS log_messages_entries` is **1,313 on v0.18.1 and 1,136,511 on 0.18.2**.
+Consolidation is not slow at absorbing this selection; it has stopped absorbing it.
+
+Across the whole benchmark the correlation is exact. Every consolidating case whose
+surviving row count stayed in the hundreds or low thousands is flat or faster on
+0.18.2; the only cases that regressed are the two whose row count exploded.
+
+### Root cause
+
+Two access-log keys differing only in a trailing UUID score **Dice 63 as written and
+90 with the UUID normalised** (127 characters, 112 distinct trigrams each, measured on
+this corpus). The default sensitivity is 85. Normalised, the pair groups; as written,
+it does not.
+
+`0c7c950` (#569, D569-2) removed the UUID-normalised trigram set that consolidation
+scored Dice against. Every key whose only variation is a UUID therefore stops finding
+a partner, and each distinct UUID becomes a permanent row. The day file used for the
+reproduction holds 36,541 distinct UUIDs and leaves 36,791 surviving rows.
+
+**This is D569-2 operating as decided, not a defect in its implementation.** D569-2
+states that consolidation does not replace UUIDs anywhere, and acceptance criterion 4
+asserts that two keys differing only in a UUID are *not* grouped at `-g 85`. The
+grouping loss is the decision's intended effect. What was not established when it was
+locked is the scale at which that effect is paid: § Prototype Performance Assessment
+and the #569 completion gate both measured selections whose retained populations stay
+small.
+
+### Bisection
+
+One day of the affected corpus, `-bs 1440 -n 25 -g`, `COUNTS log_messages_entries` and
+`finalize/group_similar`:
+
+| commit | rows | `group_similar` |
+|---|---|---|
+| `e153589` (before #571) | 467 | 0.72 s |
+| `3defdcb` (#571, final pass at the `-g` sensitivity) | 467 | 0.70 s |
+| `0c7c950` (#569, UUIDs compared as written) | 36,790 | 23.05 s |
+| `22a7e8f` (#569, the new candidate search) | 36,791 | 6.83 s |
+
+`0c7c950` carries the whole of the change in outcome. `22a7e8f` recovers two thirds of
+the time its predecessor lost and recovers none of the grouping — the new search is
+mitigating this regression, not causing it. #571 is flat on this invocation because it
+already scores at 85; it would contribute at a higher `-g`, and does not here.
+
+This matches the attribution already recorded for the application log in § Finding: no
+groupings on keys whose rarest trigrams are per-request values (#569) → *The cost
+belongs to D569-2, not to the search* (7.0 s → 24.3 s → 8.8 s, 136 → 3,573 → 4,498
+rows). #584 is the same mechanism on a corpus two orders of magnitude larger.
+
+### Where the time goes
+
+Devel::NYTProf 6.15 on the first 100,000 lines of one day of the corpus, same options.
+Full profile, hypothesis and line-level data:
+`tests/profile/results/584-consolidation-regression/`.
+
+| sub | exclusive | share | calls | ms/call |
+|---|---|---|---|---|
+| `find_consolidation_candidates` | 3.4424 s | 36.7% | 12,232 | 0.324 |
+| `build_consolidation_ngram_index` | 0.7686 s | 13.2% | 79 | 17.958 |
+| `match_consolidation_patterns` | 0.7019 s | 8.0% | 65,915 | 0.013 |
+| `get_consolidation_trigrams` | 0.6579 s | 6.1% | 33,688 | 0.020 |
+| `dice_coefficient` | 0.0264 s | 0.2% | 2,721 | 0.010 |
+
+`process_final_pass_window()` holds 46.1% inclusive. The candidate search's NYTProf
+call count reconciles exactly with the `-V` `find_candidates calls` counters:
+12,232 against 12,232.
+
+**2,721 Dice scores against 12,232 searches is the shape of the fault.** The searches
+are not scoring partners; they are walking to exhaustion and returning nothing.
+Per search: about 50 probe positions, 154 candidate visits, 100 candidates
+initialised, 0.22 candidates scored. `last if @results` cannot fire when no partner
+exists, and the exhaustion rule rarely fires because candidates stay live while the
+size range still admits them. Two costs are paid per call whatever the walk does —
+building and sorting a posting-length map over all of the source's trigrams
+(ltl:10824-10825, 844 ms of the 3.44 s).
+
+### Why only the largest selections move
+
+The retained population grows linearly with the input, because each distinct UUID is a
+row; on v0.18.1 it was nearly flat.
+
+| days | v0.18.1 rows | 0.18.2 rows | v0.18.1 `group_similar` | 0.18.2 `group_similar` |
+|---|---|---|---|---|
+| 1 | 467 | 36,791 | 0.73 s | 6.91 s |
+| 2 | 531 | 74,693 | 0.77 s | 13.40 s |
+| 4 | 988 | 147,866 | 1.87 s | 30.18 s |
+| 28 (benchmark) | 1,313 | 1,136,511 | 55.2 s | 2655.6 s |
+
+From 1 to 4 days the cost is close to linear in retained rows, about 190 us per row.
+At 28 days it is about 2,336 us per row, roughly 12x that: the number of searches and
+the work inside each grow together, and neither is visible at small sizes. This is why
+the standard benchmark tiers stayed flat and only the release tiers moved.
+
+The streaming phase contributes by standing aside. At 4 days `-V` reports
+`S1 Inline match: 100`, `S6 Evicted: 150057`, `EMA=0.0%, max_survivals=0`: the adaptive
+eviction guard (#135) sees a zero absorption rate and evicts the entire working set
+from streaming, deferring the whole retained population to the final pass. The guard is
+behaving as designed, on an absorption rate D569-2 drove to zero.
+
+### The memory half
+
+`MEMORY log_messages` is 254 MB on v0.18.1 and 1,568 MB on 0.18.2, and
+`MEMORY_FINAL log_messages` is 1,498 MB — the rows are never absorbed, so they are
+never freed. That single structure accounts for the peak rising from 964 MB to
+2393 MB, and for DD-12's memory target inverting from −55.3% to +11.0%. It is the same
+root cause, not a second one: consolidation's memory saving *is* the rows it absorbs.
+
+This is also the surface #426 (per-message statistics store is one hash per message)
+bears on: at 1,313 rows the per-row overhead is irrelevant and at 1,136,511 rows it is
+the whole of the peak.
+
+### The counterfactual
+
+The same 100,000-line sample and the same code, with `-m uuid` so UUIDs never reach the
+similarity comparison:
+
+| | default | `-m uuid` |
+|---|---|---|
+| `finalize/group_similar` | 10.438 s | 0.690 s |
+| total | 18.059 s | 6.082 s |
+| `rss_peak` | 171.6 MB | 126.3 MB |
+| `COUNTS log_messages_entries` | 21,565 | 235 |
+
+`find_consolidation_candidates` leaves the top six subs entirely under `-m uuid`, where
+it had held 36.7% of exclusive time. On the full day the same substitution gives 286
+rows in 0.42 s at 126 MB, against v0.18.1's 467 rows in 0.71 s at 160 MB — better than
+before #569 on every axis. D569-6 already documents masking as the advice for
+UUID-heavy logs, and `--help` and `docs/usage.md` carry it.
+
+### What this leaves open
+
+The remedy is a decision, not a repair, because every candidate trades against a locked
+decision or a stated target. Recorded here so the architect's choice is made against
+what each one costs:
+
+1. **Accept the regression and rely on D569-6's advice.** Costs nothing to build.
+   Leaves DD-12 breached by default on UUID-heavy logs, and leaves the failure silent:
+   nothing tells the analyst that `-g` did almost nothing and that `-m uuid` would have.
+2. **Notice the condition.** Detect a consolidating run with a near-zero absorption
+   rate and a high retained-row count, and print what it means and what to do. Does not
+   restore the targets; makes the breach visible at the moment it is paid. The
+   absorption EMA and row count already exist, and the notice surface is #412.
+3. **Mask UUIDs by default under `-g`, with an option to keep them as written.**
+   Restores every target and inverts D569-2's default. Needs the architect, since
+   D569-2 and acceptance criterion 4 both assert the current default.
+4. **Make the similarity comparison UUID-aware without replacing UUIDs in output.**
+   This is PF-19's mechanism, which D569-2 removed. The scoring change and the display
+   change were removed together; separating them would restore grouping while keeping
+   UUIDs shown as written. Needs the architect to say whether D569-2 governs what is
+   displayed, what is scored, or both.
+
+Benchmark evidence: `tests/baseline/results/0.18.2-partial-584.tsv` (69 of 77 cases)
+against `tests/baseline/results/v0.18.1.tsv`, same machine.
