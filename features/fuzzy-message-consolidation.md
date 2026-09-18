@@ -2684,9 +2684,10 @@ what each one costs:
    default either, so the mask not being a default is not a reason to leave the case
    measuring a search that finds nothing. On one day of the affected corpus the mask
    takes the same run from 37,597 rows to 286, `finalize/group_similar` from 1.14 s to
-   0.43 s and `rss_peak` from 166 MB to 119 MB. This starts a new series for those two
-   scenarios; `tests/baseline/README.md` § A scenario's options are part of the series
-   records which captures are the unmasked ones.
+   0.43 s and `rss_peak` from 166 MB to 119 MB. Both scenarios have an entry in
+   `compare-results.sh`'s `OPTIONS_TMAP_AWK`, so captures either side of the change still
+   pair and the series continues; `tests/baseline/README.md` § A scenario's options are
+   part of its identity — and of the compat map carries the rule.
 2. **Skip the final pass when streaming absorbed nothing, and say why.** Taken; the
    design is § Design: skip the final pass when streaming absorbed nothing (#584) above.
    Does not restore grouping; it stops the run costing more than not grouping at all,

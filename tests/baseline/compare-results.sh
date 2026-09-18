@@ -205,11 +205,51 @@ TIMING_TMAP_AWK='
     }
 '
 
+# --- Scenario options compat map — THE one definition ---
+# Old options string -> the options in use today, for the same scenario. A row's
+# identity in a comparison is its test name AND its options, so changing a
+# scenario's options splits every one of its rows into a half-empty N/A pair —
+# the same silent drop-out the TIMING map above exists to prevent, for the same
+# reason, and it must be repaired the same way: add the entry IN THE SAME CHANGE
+# that changes the scenario.
+#
+# Pairing an old capture with a new one is only honest when the options changed
+# what the run was ASKED to do without changing what the series MEASURES. Where
+# the change alters the measurement, the right move is a new scenario name, not
+# an entry here.
+#
+# #584 added -m uuid to the consolidating scenarios. Consolidation compares UUIDs
+# as written, so on an access-log selection carrying one, no two keys reached the
+# default similarity and the scenario measured a candidate search that found
+# nothing. Masking restores what the scenario is for; the run is the same code
+# path on the same input, so the series continues rather than restarting. Expect
+# a step change at that boundary on UUID-bearing selections: it is the scenario
+# being fixed, not the tool regressing.
+OPTIONS_TMAP_AWK='
+    BEGIN {
+        omap["-n 25 -g"] = "-n 25 -g -m uuid"
+        omap["-hm -hg -g"] = "-hm -hg -g -m uuid"
+    }
+
+    # Follow the chain so options changed more than once still land on the
+    # current string; the guard stops a mistaken cycle looping.
+    function canon_options(opts,    hops) {
+        hops = 0
+        while (opts in omap && hops++ < 10) opts = omap[opts]
+        return opts
+    }
+'
+
 # --- Comparison output ---
 run_comparison() {
     local filter_mode="$1"
 
-    awk -F'\t' -v filter="$filter_mode" "$TIMING_TMAP_AWK"'
+    awk -F'\t' -v filter="$filter_mode" "$TIMING_TMAP_AWK$OPTIONS_TMAP_AWK"'
+    # Canonicalise the options once, before any key is built from them: a row is
+    # identified by its test name AND its options, so a scenario whose options
+    # changed must be folded onto the current string here or every one of its
+    # rows splits into a half-empty N/A pair.
+    FNR > 1 { $2 = canon_options($2) }
     {
         if ($3 == "TIMING") {
             $4 = canon_timing($4)
@@ -449,7 +489,9 @@ run_comparison() {
 run_rollup() {
     local kind="$1"
 
-    awk -F'\t' -v kind="$kind" "$TIMING_TMAP_AWK"'
+    awk -F'\t' -v kind="$kind" "$TIMING_TMAP_AWK$OPTIONS_TMAP_AWK"'
+    # Same canonicalisation as run_comparison, for the same reason.
+    FNR > 1 { $2 = canon_options($2) }
 
     NR == FNR && FNR == 1 { next }
     NR != FNR && FNR == 1 { next }
