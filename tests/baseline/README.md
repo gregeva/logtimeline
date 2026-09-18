@@ -56,6 +56,31 @@ Development references are working artifacts of a cycle. They are committed so t
 comparisons are reproducible and auditable, and they are never cited as release
 figures.
 
+## A scenario's options are part of the series
+
+A comparison is like-for-like only when both sides ran the same scenario options, and
+the TSV records them in its `options` column. Changing a scenario's options starts a new
+series for the cases it touches: earlier TSVs remain valid for their own options and are
+not comparable across the change.
+
+**The consolidating scenarios gained `-m uuid` on 2026-09-19 (#584).** `top25-consolidate`
+and `heatmap-histogram-consolidate` now run `-g` with UUIDs masked. Consolidation
+compares UUIDs as written (`features/fuzzy-message-consolidation.md` D569-2), so on an
+access-log selection whose request paths carry one, no two message keys reach the default
+similarity: every distinct identifier stays its own row and the scenario measures a
+candidate search that finds nothing rather than the grouping it exists to measure. On one
+day of the affected corpus the mask takes the same run from 37,597 surviving rows to 286,
+`finalize/group_similar` from 1.14 s to 0.43 s and `rss_peak` from 166 MB to 119 MB.
+
+Masking keeps the same internal functions under test and makes the series measure
+consolidation again. `-g` is not a default either, so the mask not being one is no reason
+to leave the case measuring futility.
+
+Consequence for reading the record: for these two scenarios on the access-log selections,
+`v0.18.1.tsv` and earlier — and `0.18.2-partial-584.tsv` — are the unmasked series. Do not
+compare them against a masked capture and read the difference as a code change; it is the
+options.
+
 ## Results naming
 
 | kind | naming | what it is |

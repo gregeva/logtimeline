@@ -2677,11 +2677,16 @@ what each one costs:
    Leaves DD-12 breached by default on UUID-heavy logs, and leaves the failure silent:
    nothing tells the analyst that `-g` did almost nothing and that `-m uuid` would have.
 
-   A variant the architect has directed regardless of which remedy is taken: the
-   benchmark's consolidating cases on this selection carry `--mask uuid`, so the suite
-   continues to exercise the same internal functions and stays comparable across
-   versions. `-g` is not a default either, so the mask not being a default is not a
-   reason to leave the case measuring a search that finds nothing.
+   A variant the architect directed regardless of which remedy is taken, **applied**:
+   `tests/baseline/run-benchmark.sh` runs `top25-consolidate` and
+   `heatmap-histogram-consolidate` with `-m uuid`, so the suite continues to exercise
+   the same internal functions and stays comparable across versions. `-g` is not a
+   default either, so the mask not being a default is not a reason to leave the case
+   measuring a search that finds nothing. On one day of the affected corpus the mask
+   takes the same run from 37,597 rows to 286, `finalize/group_similar` from 1.14 s to
+   0.43 s and `rss_peak` from 166 MB to 119 MB. This starts a new series for those two
+   scenarios; `tests/baseline/README.md` § A scenario's options are part of the series
+   records which captures are the unmasked ones.
 2. **Skip the final pass when streaming absorbed nothing, and say why.** Taken; the
    design is § Design: skip the final pass when streaming absorbed nothing (#584) above.
    Does not restore grouping; it stops the run costing more than not grouping at all,
