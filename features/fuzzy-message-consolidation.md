@@ -2545,11 +2545,14 @@ A notice, printed whenever the skip fires (a behavioural notice, so never suppre
 - that final-pass consolidation was skipped, and **why** — that grouping at the
   requested sensitivity absorbed essentially nothing during the run, so the final pass
   would have cost heavily and grouped little
-- that the rows grouped before the skip **stay grouped**: the output is not
-  unconsolidated, it is consolidated as far as streaming got, which the notice must not
-  overstate
 - the similarity the data clusters at (below), offered as a reference for tuning
 - that masking a per-request identifier is the other remedy
+
+The notice stays on the final pass and the shape of the data. It does **not** report
+what the streaming phase absorbed: that is a different phase, and a count of rows
+grouped before the skip adds a number the reader cannot act on and has to interpret.
+Rows grouped before the skip do remain grouped, which the design guarantees by taking
+the decision at the phase boundary; it is not something the notice needs to say.
 
 The notice names no internal identifiers, per the user-facing prose rule.
 
@@ -2640,7 +2643,7 @@ this feature existed.
 | 4 | A fixture that absorbs nothing but hands a population below the floor forward | the final pass runs — a cheap final pass is not worth skipping |
 | 5 | Criterion 1's run | `-V` reports a similarity cliff edge, and it falls below the requested sensitivity |
 | 6 | Criterion 1's run with `--disable-progress` | the notice is still printed |
-| 7 | Criterion 1's run | rows absorbed during streaming are still consolidated in the output |
+| 7 | Criterion 1's run | rows absorbed during streaming are still consolidated in the output, and the notice says nothing about them |
 
 Harness: `tests/validate-message-grouping.sh`.
 

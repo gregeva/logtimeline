@@ -12108,17 +12108,9 @@ sub report_skipped_final_pass {
     my $skipped_keys = 0;
     $skipped_keys += scalar @{ $forward_keys_ref->{$_} // [] } for @skipped;
 
-    my $grouped = 0;
-    for my $cat_gk (@skipped) {
-        $grouped += $consolidation_cat_stats{$cat_gk}{s1_inline} // 0;
-    }
-
     my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
         . ($skipped_keys == 1 ? "" : "s")
         . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
-    $notice .= $grouped
-        ? " The $grouped message" . ($grouped == 1 ? "" : "s") . " already grouped before it was skipped remain grouped in the output."
-        : " No messages were grouped before it was skipped.";
 
     my @edges = sort { $a <=> $b } grep { defined } map { $consolidation_cliff_edge{$_} } @skipped;
     if (@edges) {

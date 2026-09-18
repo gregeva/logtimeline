@@ -414,11 +414,18 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 1)"
 
     assert_command \
-        command     "grep -qE 'No messages were grouped before it was skipped|already grouped before it was skipped remain grouped' '$out.stderr'" \
-        label       'the notice is truthful about rows grouped before the skip' \
-        asserts     "The notice states what happened to rows grouped before the skip: either that none were, or that those already grouped remain grouped in the output" \
+        command     "! grep -qE 'grouped before it was skipped|already grouped' '$out.stderr'" \
+        label       'the notice stays on the final pass and says nothing about the streaming phase' \
+        asserts     "The notice reports the skipped final pass and the shape of the data, and does not report what the streaming phase absorbed: that is a different phase, and the count is a number the reader cannot act on" \
         produced_by "$NOTICE_PRODUCER" \
-        contract    "$CONTRACT_SKIP (criterion 1, criterion 7)"
+        contract    "$CONTRACT_SKIP (criterion 1) — the notice's subject"
+
+    assert_command \
+        command     "grep -qE 'similarity clusters below [0-9]+%' '$out.stderr' && grep -q 'masking it with --mask' '$out.stderr'" \
+        label       'the notice carries the data shape and the remedy' \
+        asserts     "The notice tells the analyst the similarity the data clusters at and that masking a per-request identifier is the other remedy, which is what makes a next run possible" \
+        produced_by "$NOTICE_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 1, criterion 5)"
 
     assert_command \
         command     "grep -qE '^    Similarity cliff edge: [0-9]+%\$' '$out' && awk '/^    Similarity cliff edge:/ { gsub(/[^0-9]/, \"\", \$4); exit (\$4 < 85 && \$4 >= 50) ? 0 : 1 }' '$out'" \
@@ -426,6 +433,15 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         asserts     "When the skip fires, the run reports the similarity the data clusters at, and it falls below the requested sensitivity (the data does not group at what was asked for)" \
         produced_by "$CLIFF_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 5)"
+
+    # Criterion 7: the skip abandons work, never rows. Every key the group held is
+    # still a row, so nothing was dropped along with the pass that did not run.
+    assert_command \
+        command     "check_rows_equal '$out' 'plain|200' 400 400" \
+        label       'skipping the final pass drops no rows' \
+        asserts     "The skip abandons the pass, not the data: every key the group handed forward is still reported as a row, so no message is lost with the pass that did not run" \
+        produced_by "$SKIP_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 7)"
 fi
 
 current_scenario="skip-final-pass-population-below-floor"
