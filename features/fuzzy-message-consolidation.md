@@ -2499,6 +2499,115 @@ Consequence for any notice or advice: "try a lower sensitivity" is wrong as stat
 because the values immediately below the default cost more and gain nothing. Masking
 the identifier is the first remedy where one is detected.
 
+### Design: skip the final pass when streaming absorbed nothing (#584)
+
+**Decision (architect, 2026-09-19):** when the streaming phase has absorbed almost
+nothing and is about to hand a large population forward, the final pass is skipped.
+`ltl` prints why it was skipped and reports the similarity the data actually clusters
+at, so the analyst can choose a sensitivity or a mask for the next run. Consolidation
+is never silently re-tuned: it runs at the analyst's sensitivity or it stops.
+
+There is no option to force the final pass back on. Keeping the surface small is
+preferred to covering the case.
+
+#### The condition
+
+Evaluated per consolidation category group (`cat_gk`) at the point the run enters the
+final pass, before the streaming working structures are reset — the boundary where
+streaming has finished and the final pass has not started, so no key is half-processed.
+
+Both must hold:
+
+1. **Streaming absorbed almost nothing.** The absorption EMA the adaptive eviction
+   guard already maintains (`%consolidation_absorption_ema`) is at or below a floor,
+   equivalently that the keys absorbed in streaming are a negligible fraction of the
+   keys seen.
+2. **The population handed forward is large enough for the final pass to be
+   expensive.** The count of keys the group would hand to the final pass is at or
+   above a floor.
+
+**The two are ANDed, not ORed.** Size alone is not evidence of futility: a corpus that
+absorbs well in streaming and still hands a large population forward has a final pass
+worth running, and must not be skipped for being big. Absorption alone is not
+sufficient either — skipping a cheap final pass saves nothing and costs grouping.
+
+Observed at both ends of this condition on the affected corpus (`-V`, per group,
+4 days): the failing case reports streaming `S1 Inline match: 100` against
+`S6 Evicted: 150057`, handing 150,057 keys forward; the same input with the identifier
+masked absorbs 13,960 inline with nothing evicted and hands 513 keys forward. The two
+signals agree in both directions.
+
+#### What the analyst is told
+
+A notice, printed whenever the skip fires (a behavioural notice, so never suppressed by
+`--disable-progress`), stating:
+
+- that final-pass consolidation was skipped, and **why** — that grouping at the
+  requested sensitivity absorbed essentially nothing during the run, so the final pass
+  would have cost heavily and grouped little
+- that the rows grouped before the skip **stay grouped**: the output is not
+  unconsolidated, it is consolidated as far as streaming got, which the notice must not
+  overstate
+- the similarity the data clusters at (below), offered as a reference for tuning
+- that masking a per-request identifier is the other remedy
+
+The notice names no internal identifiers, per the user-facing prose rule.
+
+#### The similarity cliff edge
+
+Reported as an observation about the data, not a recommended setting: *the data's
+similarity cliff edge is at N%*, to be used as a reference for tuning
+`--group-similar` to the analysis goal.
+
+Derived from the distribution of best-partner Dice scores over a sample of keys: the
+distribution on an affected log is bimodal, with the reachable population above the
+requested sensitivity and a larger unreachable mode below a gap. The cliff edge is the
+top of that gap. On the affected corpus this yields 71 against a usable band found by
+hand at 72-74; on `tests/fixtures/grouping-signed-downloads.txt`, whose record states
+every key has a partner at Dice 75-79 and none at 85, it yields 79.
+
+Two honest limits, which the wording must respect:
+
+- It locates the **threshold**, not the outcome. It says where partners become
+  reachable, not how many rows would result.
+- It does not know where grouping stops being **meaningful**. On the affected corpus
+  the value below the cliff is already close to where canonical forms over-merge (at
+  `-g 65` the top row is `[200] POST /Thingworx/*s/*/Services/*` at 107,970
+  occurrences, with the status code wildcarded on other rows). This is why it is phrased
+  as where the data bites, not as a setting to adopt.
+
+The sample is bounded and the comparison is over that sample only, so the cost does not
+scale with the input. It is computed only when the skip condition has fired.
+
+#### `-V message-grouping` additions
+
+Three keys, in the consolidation section (not the benchmark-data block), per
+`tests/HARNESS-DESIGN.md` and the profile-ready contract:
+
+| key | meaning |
+|---|---|
+| final pass skipped | boolean, whether the skip fired for the group |
+| streaming absorption | the absorption measure the condition tested, so a skip or a non-skip can be explained from the capture |
+| similarity cliff edge | the reported percentage, or absent when not computed |
+
+The existing header line and per-group `Keys seen:` / `New patterns created:` keys are
+unchanged. Renaming or removing any of them is a breaking change for
+`tests/validate-message-grouping.sh`.
+
+#### Acceptance criteria
+
+| # | Condition | Observable outcome |
+|---|---|---|
+| 1 | A fixture whose keys differ only in a per-request identifier, at a sensitivity none of them reach, with enough keys to pass the population floor | the final pass is skipped; `-V` reports it skipped; the notice states that it was skipped, why, and that rows grouped before the skip stay grouped |
+| 2 | The same fixture at a sensitivity its keys do reach | the final pass runs; `-V` reports it not skipped; no notice |
+| 3 | A fixture that absorbs well in streaming but hands a population above the floor forward | the final pass runs — absorption governs, size alone does not skip |
+| 4 | A fixture that absorbs nothing but hands a population below the floor forward | the final pass runs — a cheap final pass is not worth skipping |
+| 5 | Criterion 1's run | `-V` reports a similarity cliff edge, and it falls below the requested sensitivity |
+| 6 | Criterion 1's run with `--disable-progress` | the notice is still printed |
+| 7 | Criterion 1's run | rows absorbed during streaming are still consolidated in the output |
+
+Harness: `tests/validate-message-grouping.sh`.
+
 ### What this leaves open
 
 The remedy is a decision, not a repair, because every candidate trades against a locked
@@ -2514,14 +2623,10 @@ what each one costs:
    continues to exercise the same internal functions and stays comparable across
    versions. `-g` is not a default either, so the mask not being a default is not a
    reason to leave the case measuring a search that finds nothing.
-2. **Notice the condition, and stop paying for it.** Detect a consolidating run with a
-   near-zero absorption rate, abandon consolidation for the remainder of the run, and
-   print what happened and what to try. Filed as #586 (abandon consolidation when the
-   data is not consolidating, and say so). Does not restore grouping; it stops the run
-   costing more than not grouping at all, and makes the condition visible instead of
-   silent. The absorption EMA and row count already exist; the notice surface is #412.
-   Per the sweep above, its advice must lead with masking rather than a lower
-   sensitivity.
+2. **Skip the final pass when streaming absorbed nothing, and say why.** Taken; the
+   design is § Design: skip the final pass when streaming absorbed nothing (#584) above.
+   Does not restore grouping; it stops the run costing more than not grouping at all,
+   and makes the condition visible instead of silent.
 3. **Mask UUIDs by default under `-g`, with an option to keep them as written.**
    Restores every target and inverts D569-2's default. Needs the architect, since
    D569-2 and acceptance criterion 4 both assert the current default.
