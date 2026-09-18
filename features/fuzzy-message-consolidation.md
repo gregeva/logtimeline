@@ -2445,6 +2445,60 @@ rows in 0.42 s at 126 MB, against v0.18.1's 467 rows in 0.71 s at 160 MB — bet
 before #569 on every axis. D569-6 already documents masking as the advice for
 UUID-heavy logs, and `--help` and `docs/usage.md` carry it.
 
+### Against the same selection without `-g`
+
+The non-consolidating run of the same selection retains 1,212,271 rows. The 0.18.2
+consolidating run retains 1,136,511 — within 6% of it. Consolidation is not absorbing
+nothing, but its reduction has collapsed from 99.9% to 6%.
+
+| | rows retained | total | peak RSS |
+|---|---|---|---|
+| without `-g` | 1,212,271 | 99.0 s | 2156 MB |
+| `-g` on v0.18.1 | 1,313 | 187.1 s | 964 MB |
+| `-g` on 0.18.2 | 1,136,511 | 2775.4 s | 2393 MB |
+
+This is what inverts DD-12's memory target rather than merely missing it: the
+consolidating run now holds nearly the same population as the non-consolidating run,
+so it inherits that run's footprint and adds consolidation's own structures on top
+(`consolidation_clusters` 181 MB, `consolidation_id_index` 81 MB,
+`consolidation_key_trigrams` 41 MB). Both runs build the same store; the 2,655 s
+difference is searching for partners that do not exist, once per key, and absorbing
+6% at the end of it.
+
+### Sensitivity sweep on the affected corpus
+
+One day of the corpus, `-bs 1440 -n 25`, varying `-g`:
+
+| `-g` | rows | `finalize/group_similar` | grouping produced |
+|---|---|---|---|
+| 95 | 37,573 | 5.88 s | nothing |
+| 85 (default) | 36,791 | 7.02 s | nothing |
+| 80 | 36,726 | 7.70 s | nothing, costs more than 85 |
+| 75 | 36,700 | 9.11 s | nothing, costs more than 80 |
+| 74 | 5,027 | 4.47 s | partial |
+| 72 | 300 | 0.30 s | good |
+| 70 | 69 | 0.21 s | over-merged |
+| 65 | 37 | 0.09 s | unusable |
+| 85 with `--mask uuid` | 286 | 0.42 s | best |
+
+**Lowering the sensitivity moderately makes it worse.** 80 and 75 are slower than 85
+and group no more: a lower threshold widens the probe and admits more candidates per
+search while still finding almost no partners. The transition is a cliff between 75
+and 72, where the Dice 63 pair measured above finally falls inside the threshold.
+
+The usable band is narrow, around 72-74. Below it the canonical forms stop carrying
+information: at `-g 65` the top row is `[200] POST /Thingworx/*s/*/Services/*` at
+107,970 occurrences, and on other rows the status code itself is wildcarded to `[*]`.
+
+At `-g 85` with `--mask uuid` the UUID family collapses to the same population as
+`-g 72` while the remaining rows keep their detail
+(`RD.RS.Interface.NiFi.Instance/Services/*` rather than `*s/*/Services/*`), which is
+the best output of the three approaches.
+
+Consequence for any notice or advice: "try a lower sensitivity" is wrong as stated,
+because the values immediately below the default cost more and gain nothing. Masking
+the identifier is the first remedy where one is detected.
+
 ### What this leaves open
 
 The remedy is a decision, not a repair, because every candidate trades against a locked
@@ -2454,10 +2508,20 @@ what each one costs:
 1. **Accept the regression and rely on D569-6's advice.** Costs nothing to build.
    Leaves DD-12 breached by default on UUID-heavy logs, and leaves the failure silent:
    nothing tells the analyst that `-g` did almost nothing and that `-m uuid` would have.
-2. **Notice the condition.** Detect a consolidating run with a near-zero absorption
-   rate and a high retained-row count, and print what it means and what to do. Does not
-   restore the targets; makes the breach visible at the moment it is paid. The
-   absorption EMA and row count already exist, and the notice surface is #412.
+
+   A variant the architect has directed regardless of which remedy is taken: the
+   benchmark's consolidating cases on this selection carry `--mask uuid`, so the suite
+   continues to exercise the same internal functions and stays comparable across
+   versions. `-g` is not a default either, so the mask not being a default is not a
+   reason to leave the case measuring a search that finds nothing.
+2. **Notice the condition, and stop paying for it.** Detect a consolidating run with a
+   near-zero absorption rate, abandon consolidation for the remainder of the run, and
+   print what happened and what to try. Filed as #586 (abandon consolidation when the
+   data is not consolidating, and say so). Does not restore grouping; it stops the run
+   costing more than not grouping at all, and makes the condition visible instead of
+   silent. The absorption EMA and row count already exist; the notice surface is #412.
+   Per the sweep above, its advice must lead with masking rather than a lower
+   sensitivity.
 3. **Mask UUIDs by default under `-g`, with an option to keep them as written.**
    Restores every target and inverts D569-2's default. Needs the architect, since
    D569-2 and acceptance criterion 4 both assert the current default.
