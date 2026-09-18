@@ -2633,6 +2633,26 @@ record states that every key has a partner at Dice 75 to 79 and none reaches 85,
 computation reports 79% — a fixture whose similarity structure was characterised before
 this feature existed.
 
+#### Relationship to final-pass performance (#142)
+
+This skip routes around the final pass's cost on one shape of input; it does not reduce
+that cost, and #142 stays open. Checked against #142's own cases:
+
+- **#142's named regression case is not covered.** `single-day-application-log` at
+  `-g 85` reports `Streaming absorption: 0 of 1709 keys (0.0%)` — the futility condition
+  — but 1,709 keys is far below the population floor, so the final pass runs and still
+  costs 3.2 s. Deliberate: skipping a cheap final pass saves nothing and costs grouping.
+- **The cost #571 deferred to #142 is not covered.** That deferral records the script log
+  at `-g 95` going from 115 s to 246 s. Measured now: one group absorbs 21.2% and another
+  2.7% over 2,679 keys, so nothing is skipped and the pass runs, correctly, at 1.28 s.
+  That case forms fewer patterns and makes more searches — a different shape from a
+  population that absorbs nothing.
+
+What remains with #142 is the structural cost this design routes around: the per-key
+cost paid twice (Pass 1 and the Pass 2 cleanup sweep), the search walking to exhaustion
+per key on a population without partners, and the futile-but-cheap small-population case
+that is simply paid.
+
 #### Acceptance criteria
 
 | # | Condition | Observable outcome |
