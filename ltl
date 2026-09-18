@@ -10541,28 +10541,46 @@ sub group_similar_messages {
         # skipping a cheap pass saves nothing. Decided here, at the boundary where
         # streaming has finished and the final pass has not started, so no key is left
         # half-processed and whatever streaming grouped stays grouped.
-        {
-            my %forward_keys;
+        SKIP_DECISION: {
+            # Nothing can qualify unless the surviving population reaches the floor,
+            # so that cheap total is tested before any per-key work. Past it, the
+            # groups are counted, and only a group that actually skips has its keys
+            # collected: a run that skips nothing never builds a second copy of a key
+            # set that can hold a million strings.
+            my $total_forward = 0;
+            $total_forward += scalar keys %{$log_messages{$_}} for keys %log_messages;
+            last SKIP_DECISION if $total_forward < $consolidation_skip_min_keys;
+
+            my %forward_count;
             for my $category (keys %log_messages) {
                 for my $log_key (keys %{$log_messages{$category}}) {
                     my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                     $grouping_key //= "";
-                    push @{$forward_keys{"$category|$grouping_key"}}, $log_key;
+                    $forward_count{"$category|$grouping_key"}++;
                 }
             }
-            for my $cat_gk (sort keys %forward_keys) {
-                my $forward = scalar @{$forward_keys{$cat_gk}};
-                next if $forward < $consolidation_skip_min_keys;
+            for my $cat_gk (sort keys %forward_count) {
+                next if $forward_count{$cat_gk} < $consolidation_skip_min_keys;
                 my $seen = $consolidation_cat_stats{$cat_gk}{keys_seen} // 0;
                 next unless $seen > 0;
                 my $absorbed = $consolidation_streaming_absorbed{$cat_gk} // 0;
                 next if ($absorbed / $seen) > $consolidation_skip_absorption;
-
                 $consolidation_final_pass_skipped{$cat_gk} = 1;
-                my $edge = consolidation_cliff_edge($forward_keys{$cat_gk}, $consolidation_threshold);
-                $consolidation_cliff_edge{$cat_gk} = $edge if defined $edge;
             }
-            report_skipped_final_pass(\%forward_keys) if keys %consolidation_final_pass_skipped;
+            if (keys %consolidation_final_pass_skipped) {
+                for my $cat_gk (sort keys %consolidation_final_pass_skipped) {
+                    my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
+                    my @keys;
+                    for my $log_key (keys %{$log_messages{$category}}) {
+                        my ($gk) = $log_key =~ /^\[([^\]]+)\]/;
+                        $gk //= "";
+                        push @keys, $log_key if $gk eq $grouping_key;
+                    }
+                    my $edge = consolidation_cliff_edge(\@keys, $consolidation_threshold);
+                    $consolidation_cliff_edge{$cat_gk} = $edge if defined $edge;
+                }
+                report_skipped_final_pass(\%forward_count);
+            }
         }
 
         # Pass 1: sorted iteration with sliding window
@@ -12101,12 +12119,12 @@ sub consolidation_cliff_edge {
 # (#584). Behavioural, so it always prints: --disable-progress suppresses progress
 # indicators only. No internal identifiers reach this text.
 sub report_skipped_final_pass {
-    my ($forward_keys_ref) = @_;
+    my ($forward_count_ref) = @_;
     my @skipped = sort keys %consolidation_final_pass_skipped;
     return unless @skipped;
 
     my $skipped_keys = 0;
-    $skipped_keys += scalar @{ $forward_keys_ref->{$_} // [] } for @skipped;
+    $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
 
     my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
         . ($skipped_keys == 1 ? "" : "s")
