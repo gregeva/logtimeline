@@ -379,6 +379,86 @@ if [[ -s "$out_downloads_75" ]] && capture_section "$out" $SHAPE -du us -xqs -g 
         contract    "$CONTRACT_SEARCH (criterion 5)"
 fi
 
+# --- Final-pass skip when streaming absorbed nothing (#584) -----------------
+#
+# The download fixture's keys have no partner at Dice 85, so streaming absorbs
+# none of them: the condition the skip tests. The population floor is lowered
+# with the hidden --skip-final-min-keys so the decision is exercised on a
+# committed 400-line fixture instead of a corpus-sized input.
+#
+# `-bs 1440 -oe -n 1`: the assertions read the message-grouping section and the
+# notice on stderr, neither of which depends on the time axis or the rendered
+# table.
+
+CONTRACT_SKIP='features/fuzzy-message-consolidation.md § Design: skip the final pass when streaming absorbed nothing (#584) — acceptance criteria'
+SKIP_PRODUCER='group_similar_messages() in ltl (the per-group skip decision at the streaming/final-pass boundary), reported by pipeline_finalize()'
+NOTICE_PRODUCER='report_skipped_final_pass() in ltl'
+CLIFF_PRODUCER='consolidation_cliff_edge() in ltl, called from group_similar_messages() when the skip fires'
+
+current_scenario="skip-final-pass-fires"
+echo "[$current_scenario]"
+out="$TMP_DIR/skip-fires.out"
+if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "grep -q '^    Final pass skipped:    yes\$' '$out'" \
+        label       'the final pass is skipped when streaming absorbed nothing and the population is above the floor' \
+        asserts     "A group whose streaming phase absorbed at or below the absorption floor, and which would hand at least the floor number of keys to the final pass, has that pass skipped" \
+        produced_by "$SKIP_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 1)"
+
+    assert_command \
+        command     "grep -q 'the final consolidation pass was skipped' '$out.stderr'" \
+        label       'the notice states that the final pass was skipped and why' \
+        asserts     "When the skip fires, ltl prints a notice naming what was skipped and the reason: grouping at the requested similarity absorbed almost none of the data as it was read" \
+        produced_by "$NOTICE_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 1)"
+
+    assert_command \
+        command     "grep -qE 'No messages were grouped before it was skipped|already grouped before it was skipped remain grouped' '$out.stderr'" \
+        label       'the notice is truthful about rows grouped before the skip' \
+        asserts     "The notice states what happened to rows grouped before the skip: either that none were, or that those already grouped remain grouped in the output" \
+        produced_by "$NOTICE_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 1, criterion 7)"
+
+    assert_command \
+        command     "grep -qE '^    Similarity cliff edge: [0-9]+%\$' '$out' && awk '/^    Similarity cliff edge:/ { gsub(/[^0-9]/, \"\", \$4); exit (\$4 < 85 && \$4 >= 50) ? 0 : 1 }' '$out'" \
+        label       'a similarity cliff edge is reported, below the requested sensitivity' \
+        asserts     "When the skip fires, the run reports the similarity the data clusters at, and it falls below the requested sensitivity (the data does not group at what was asked for)" \
+        produced_by "$CLIFF_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 5)"
+fi
+
+current_scenario="skip-final-pass-population-below-floor"
+echo "[$current_scenario]"
+out="$TMP_DIR/skip-below-floor.out"
+if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100000 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        label       'a group below the population floor keeps its final pass' \
+        asserts     "Absorbing nothing is not on its own a reason to skip: a group handing fewer keys forward than the floor runs its final pass, because skipping a cheap pass saves nothing and costs grouping" \
+        produced_by "$SKIP_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 4)"
+
+    assert_command \
+        command     "! grep -q 'the final consolidation pass was skipped' '$out.stderr'" \
+        label       'no notice when nothing is skipped' \
+        asserts     "A run that skips no final pass prints no skip notice" \
+        produced_by "$NOTICE_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 2)"
+fi
+
+current_scenario="skip-final-pass-absorbing-data"
+echo "[$current_scenario]"
+out="$TMP_DIR/skip-absorbing.out"
+if capture_section "$out" $SHAPE -du us -xqs -g 75 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
+    assert_command \
+        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        label       'a sensitivity the data does reach keeps its final pass' \
+        asserts     "At a sensitivity whose partners the data does have, streaming absorbs and the final pass runs: the skip is governed by absorption, not by population size alone" \
+        produced_by "$SKIP_PRODUCER" \
+        contract    "$CONTRACT_SKIP (criterion 2, criterion 3)"
+fi
+
 echo
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 ]]; then

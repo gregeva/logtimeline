@@ -2594,6 +2594,42 @@ The existing header line and per-group `Keys seen:` / `New patterns created:` ke
 unchanged. Renaming or removing any of them is a breaking change for
 `tests/validate-message-grouping.sh`.
 
+#### As implemented
+
+Values chosen at implementation, both named as configuration in the globals block:
+
+- **Absorption floor 5%** (`$consolidation_skip_absorption`). Aligned deliberately with
+  the adaptive eviction guard's existing `< 0.05` boundary in
+  `get_consolidation_max_survivals()`, below which it already treats a group as absorbing
+  nothing and evicts immediately. One definition of "absorbing nothing" across both
+  mechanisms rather than two.
+- **Population floor 20,000 keys** (`$consolidation_skip_min_keys`). Above the retained
+  populations of every corpus selection that consolidates normally, and far below the
+  affected selection's per-group population.
+- **Cliff-edge sample 300 keys** (`$consolidation_cliff_sample`), evenly strided over the
+  keys handed forward.
+
+The measure the condition reads is the **cumulative** streaming absorption
+(`%consolidation_streaming_absorbed`, counting both S1 inline matches and checkpoint
+absorptions), not the absorption EMA. The EMA is a recency-weighted signal built for a
+per-checkpoint eviction decision; a single late checkpoint can lift or depress it, and
+the skip is a once-per-run judgement about the whole phase.
+
+`--skip-final-min-keys` is a hidden diagnostic override for the population floor,
+following `--final-threshold`'s precedent, so the decision is exercisable on a committed
+fixture rather than only on a corpus-sized input. It has no `--help` or `docs/usage.md`
+row, as hidden options do not.
+
+Sensitivity of the reported cliff edge to the sample size, on the affected corpus: 70% at
+a 300-key sample, 72% at 500, 71% at 800 — within a couple of points across a near
+threefold range, and all inside the band found by hand. The figure is presented as a
+reference point, and that is the precision it has.
+
+Independent corroboration: on `tests/fixtures/grouping-signed-downloads.txt`, whose
+record states that every key has a partner at Dice 75 to 79 and none reaches 85, the
+computation reports 79% — a fixture whose similarity structure was characterised before
+this feature existed.
+
 #### Acceptance criteria
 
 | # | Condition | Observable outcome |

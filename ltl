@@ -698,6 +698,9 @@ my %consolidation_pattern_generation;  # {cat_gk} => increments on each pattern 
 my %consolidation_key_generation;     # {log_key} => pattern generation at entry time (for S3 skip optimization)
 my %consolidation_key_checkpoint_count; # {log_key} => number of checkpoints this key has participated in
 my %consolidation_absorption_ema;     # {cat_gk} => exponential moving average of absorption rate (0.0-1.0)
+my %consolidation_streaming_absorbed; # {cat_gk} => keys absorbed during the streaming phase
+my %consolidation_final_pass_skipped; # {cat_gk} => 1 when the final pass was skipped for this group
+my %consolidation_cliff_edge;         # {cat_gk} => the similarity the data clusters at, when computed
 
 # Consolidation configuration
 my $consolidation_threshold          = 85;
@@ -709,6 +712,12 @@ my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorptio
 my $consolidation_final_pass         = 1;
 my $consolidation_final_threshold;          # unset: the final pass scores at the -g sensitivity; --final-threshold overrides it
 my $consolidation_final_ceiling      = 1_000_000;
+# Skip the final pass when streaming absorbed almost nothing AND the population it
+# would hand forward is large enough for that pass to be expensive (#584). Both
+# conditions are required: size alone is not evidence that the pass is futile.
+my $consolidation_skip_absorption    = 0.05;   # absorbed share of keys seen, at or below which streaming counts as having absorbed nothing
+my $consolidation_skip_min_keys      = 20_000; # keys handed forward, at or above which the final pass counts as expensive
+my $consolidation_cliff_sample       = 300;    # keys sampled to locate the similarity cliff edge
 my $max_observed_message_length      = 0;
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
 
@@ -2386,7 +2395,7 @@ sub _classify_argv_provenance {
                 'udm-csv-separator|ucs', 'mask|m', 'mask-uuid|uuid',
                 'group-similar|g', 'no-final-pass',
                 'consolidation-trigger', 'consolidation-ceiling',
-                'consolidation-max-patterns', 'final-threshold',
+                'consolidation-max-patterns', 'final-threshold', 'skip-final-min-keys',
                 'group-ceiling|gc', 'heatmap|hm', 'heatmap-width|hmw',
                 'light-background|lbg', 'dark-background|dbg', 'histogram|hg',
                 'histogram-width|hgw', 'histogram-height|hgh',
@@ -10525,6 +10534,37 @@ sub group_similar_messages {
         my $fp_total_new_patterns = 0;
         my $fp_window_capacity = 1000;
 
+        # Decide, per group, whether the final pass is worth running (#584). Streaming
+        # having absorbed almost nothing means the requested similarity does not reach
+        # this data; a large population handed forward means the pass would be
+        # expensive. Both are required: size alone is not evidence of futility, and
+        # skipping a cheap pass saves nothing. Decided here, at the boundary where
+        # streaming has finished and the final pass has not started, so no key is left
+        # half-processed and whatever streaming grouped stays grouped.
+        {
+            my %forward_keys;
+            for my $category (keys %log_messages) {
+                for my $log_key (keys %{$log_messages{$category}}) {
+                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
+                    $grouping_key //= "";
+                    push @{$forward_keys{"$category|$grouping_key"}}, $log_key;
+                }
+            }
+            for my $cat_gk (sort keys %forward_keys) {
+                my $forward = scalar @{$forward_keys{$cat_gk}};
+                next if $forward < $consolidation_skip_min_keys;
+                my $seen = $consolidation_cat_stats{$cat_gk}{keys_seen} // 0;
+                next unless $seen > 0;
+                my $absorbed = $consolidation_streaming_absorbed{$cat_gk} // 0;
+                next if ($absorbed / $seen) > $consolidation_skip_absorption;
+
+                $consolidation_final_pass_skipped{$cat_gk} = 1;
+                my $edge = consolidation_cliff_edge($forward_keys{$cat_gk}, $consolidation_threshold);
+                $consolidation_cliff_edge{$cat_gk} = $edge if defined $edge;
+            }
+            report_skipped_final_pass(\%forward_keys) if keys %consolidation_final_pass_skipped;
+        }
+
         # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
             # Collect and sort keys by message body (strip [$grouping_key] prefix)
@@ -10559,6 +10599,8 @@ sub group_similar_messages {
                 my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                 $grouping_key //= "";
                 my $cat_gk = "$category|$grouping_key";
+
+                next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
                 $consolidation_cat_stats{$cat_gk}{fp_keys_seen} = ($consolidation_cat_stats{$cat_gk}{fp_keys_seen} // 0) + 1;
 
@@ -10608,6 +10650,7 @@ sub group_similar_messages {
                     my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                     $grouping_key //= "";
                     my $cat_gk = "$category|$grouping_key";
+                    next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
                     my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
                     if ($entry) {
@@ -11459,6 +11502,7 @@ sub consolidation_process_key {
         if ($cluster) {
             merge_consolidation_stats($cluster, $stats_source);
             $consolidation_cat_stats{$cat_gk}{"${pfx}s1_inline"}++;
+            $consolidation_streaming_absorbed{$cat_gk}++ if $consolidation_phase eq 'streaming';
             return 1;
         }
     }
@@ -11992,6 +12036,100 @@ sub get_consolidation_max_survivals {
     return 5;                            # >= 99%: five retries (power-law data)
 }
 
+# Locate the similarity the data clusters at, for a group whose final pass is being
+# skipped (#584). Over a bounded sample of the keys handed forward, score each key's
+# best partner by Dice. On a log whose messages carry a per-request value the
+# sensitivity cannot see past, that distribution is bimodal: a reachable population at
+# or above the requested similarity, and a larger unreachable one below a gap. The
+# cliff edge is the top of that gap — where partners become reachable.
+#
+# It locates the threshold, not the outcome: it says where partners exist, not how many
+# rows would result, and it does not know where grouping stops being meaningful. The
+# caller presents it as an observation about the data, never as a setting to adopt.
+#
+# Returns the percentage, or undef when the sample is too small or shows no clear gap.
+sub consolidation_cliff_edge {
+    my ($keys_ref, $threshold_pct) = @_;
+    my @keys = @$keys_ref;
+    return undef if scalar @keys < 50;
+
+    # Bounded, evenly spread sample so the cost does not scale with the input
+    if (scalar @keys > $consolidation_cliff_sample) {
+        my $stride = scalar(@keys) / $consolidation_cliff_sample;
+        @keys = map { $keys[int($_ * $stride)] } 0 .. $consolidation_cliff_sample - 1;
+    }
+    my @trigrams = map { get_consolidation_trigrams(substr($_, 0, $consolidation_message_length_cap)) } @keys;
+    my $n = scalar @keys;
+
+    my @best;
+    for my $i (0 .. $n - 1) {
+        my $best = 0;
+        for my $j (0 .. $n - 1) {
+            next if $i == $j;
+            my $score = dice_coefficient($trigrams[$i], $trigrams[$j]);
+            $best = $score if $score > $best;
+        }
+        push @best, $best;
+    }
+
+    my %histogram;
+    $histogram{$_}++ for @best;
+    my $sparse = $n * 0.005;
+
+    # Widest run of near-empty scores below the requested similarity that still has a
+    # substantial population beneath it — that population is what the run cannot reach
+    my ($widest, $gap_lo) = (0, undef);
+    my $i = 50;
+    while ($i < $threshold_pct) {
+        if (($histogram{$i} // 0) <= $sparse) {
+            my $j = $i;
+            $j++ while $j < $threshold_pct && (($histogram{$j} // 0) <= $sparse);
+            my $below = grep { $_ < $i } @best;
+            if (($j - $i) > $widest && $below > $n * 0.15) {
+                ($widest, $gap_lo) = ($j - $i, $i);
+            }
+            $i = $j;
+        }
+        else { $i++ }
+    }
+    return undef unless $widest >= 3 && defined $gap_lo;
+    my $edge = $gap_lo - 1;
+    return ($edge >= 50 && $edge < $threshold_pct) ? $edge : undef;
+}
+
+# Tell the analyst that final-pass consolidation was skipped, why, and what to try
+# (#584). Behavioural, so it always prints: --disable-progress suppresses progress
+# indicators only. No internal identifiers reach this text.
+sub report_skipped_final_pass {
+    my ($forward_keys_ref) = @_;
+    my @skipped = sort keys %consolidation_final_pass_skipped;
+    return unless @skipped;
+
+    my $skipped_keys = 0;
+    $skipped_keys += scalar @{ $forward_keys_ref->{$_} // [] } for @skipped;
+
+    my $grouped = 0;
+    for my $cat_gk (@skipped) {
+        $grouped += $consolidation_cat_stats{$cat_gk}{s1_inline} // 0;
+    }
+
+    my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
+        . ($skipped_keys == 1 ? "" : "s")
+        . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
+    $notice .= $grouped
+        ? " The $grouped message" . ($grouped == 1 ? "" : "s") . " already grouped before it was skipped remain grouped in the output."
+        : " No messages were grouped before it was skipped.";
+
+    my @edges = sort { $a <=> $b } grep { defined } map { $consolidation_cliff_edge{$_} } @skipped;
+    if (@edges) {
+        $notice .= " This data's similarity clusters below $edges[0]%, which is a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more.";
+    }
+    $notice .= " Where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy.\n";
+
+    print STDERR $notice;
+    return;
+}
+
 # Fire a consolidation checkpoint for one category/grouping_key pair
 sub run_consolidation_checkpoint {
     my ($category, $grouping_key) = @_;
@@ -12081,6 +12219,9 @@ sub run_consolidation_checkpoint {
     # and the working set is bounded (no new keys arrive). Eviction here would
     # permanently lose keys with no subsequent pass to catch them.
     my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;
+    # Cumulative streaming absorption (#584): the skip decision reads the whole
+    # phase, not the EMA, which a single late checkpoint can lift or depress.
+    $consolidation_streaming_absorbed{$cat_gk} += $absorbed unless $is_final_pass;
     if (exists $consolidation_absorption_ema{$cat_gk}) {
         $consolidation_absorption_ema{$cat_gk} = $consolidation_eviction_ema_alpha * $absorption_rate
             + (1 - $consolidation_eviction_ema_alpha) * $consolidation_absorption_ema{$cat_gk};
@@ -13536,6 +13677,7 @@ sub adapt_to_command_line_options {
         'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,            # hidden
         'consolidation-max-patterns=i' => \$consolidation_max_patterns,             # hidden
         'final-threshold=i' => \$consolidation_final_threshold,                     # hidden
+        'skip-final-min-keys=i' => \$consolidation_skip_min_keys,                    # hidden (#584): population floor for the final-pass skip, so the decision is testable on a small fixture
         'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
@@ -21147,6 +21289,10 @@ sub pipeline_finalize {
                 my $ema_pct = ($s->{absorption_ema} // 0) * 100;
                 my $ms = $s->{max_survivals} // 0;
                 push @verbose_output, sprintf("    Eviction:              EMA=%.1f%%, max_survivals=%d", $ema_pct, $ms);
+                # #584: the cumulative measure the final-pass skip decision reads
+                my $absorbed_streaming = $consolidation_streaming_absorbed{$cat_gk} // 0;
+                push @verbose_output, sprintf("    Streaming absorption:  %d of %d keys (%.1f%%)",
+                    $absorbed_streaming, $keys_seen, $keys_seen > 0 ? 100 * $absorbed_streaming / $keys_seen : 0);
                 push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
                 push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
                     $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
@@ -21174,6 +21320,12 @@ sub pipeline_finalize {
                 $grand_patterns += $patterns;
 
                 # --- Final pass phase (2-pass architecture) ---
+                # #584: report the skip and the cliff edge whether or not the pass ran
+                push @verbose_output, sprintf("    Final pass skipped:    %s",
+                    $consolidation_final_pass_skipped{$cat_gk} ? "yes" : "no");
+                if (defined $consolidation_cliff_edge{$cat_gk}) {
+                    push @verbose_output, sprintf("    Similarity cliff edge: %d%%", $consolidation_cliff_edge{$cat_gk});
+                }
                 my $fp_keys = $s->{fp_keys_seen} // 0;
                 if ($fp_keys > 0) {
                     my $fp_p1_s3 = $s->{fp_p1_s3} // 0;
