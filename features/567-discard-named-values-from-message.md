@@ -119,3 +119,30 @@ Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its 
 ### `--expose` does not split a comma-separated list (0.18.2-567, 2026-09-16)
 
 `-x fileName,adId` on two Windchill download-request lines (`-ni -du us -bs 1440 -oe -o -V runtime-config`): exit 0, no notice, no ` at <file> line <N>` on stderr; `-V runtime-config` reports `expose: fileName,adId`, the same line two separate names would give; the messages CSV holds one message ending `….regen` with nothing appended, because the whole string `fileName,adId` is read as one key that no line carries (`resolve_expose_names()` trims each name and does not split it).
+
+## Implementation findings (2026-09-19; branch `567-discard-named-values-from-message` off `release/0.18.3`)
+
+Every `ltl` run `--disable-progress -ni -bs 1440 -oe -n 100 -o`, no ` at <file> line <N>` on stderr, captured once to the scratchpad and inspected there.
+
+- **One resolution surface, four registration points.** `resolve_discard_names()` sits beside `resolve_expose_names()` and `resolve_mask_names()` and is called from the same place, after `parse_udm_configs()` and before `build_format_registry()`. An option also needs an entry in `_resolve_short_to_long()`, whose `@specs` list is a hand-maintained mirror of `GetOptions` and builds `%option_provenance`: `-V runtime-config` emits a row only for an option the user supplied, so a `discard` key in `%resolved_values` without that entry would never print.
+- **D18's omit-row clause was wrong, and is revised (architect, 2026-09-19).** The clause said `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric. That cannot hold while `-V runtime-config` reports the configuration the user provided: `-d duration` is reported by the `discard` row, and an omit row for an option the user never gave misrepresents the input. Each option now surfaces itself and only itself, `-od -d duration` printing both rows. The first implementation derived a provenance for the omit row from the variable `--discard` happens to set; that is removed.
+- **A cleared field goes to `undef`, not `""`.** Clearing to the empty string left an empty `[]` segment in the message key, because the key branch tests `defined($object)` alone. The per-line reset uses `undef` for a field no format wrote, so that is the value a discard restores, and the key drops the segment entirely (D1). Measured on ThingWorx application-log lines: `-d object` gives `[WARN] [metrics-SystemMetric] AlertProcessingSubsystem: …`, with no bracket pair where the object sat.
+- **A discarded field is cleared where nothing has read it yet**, immediately after the control-character normalisation and before the count block, the thread-pool block and the accumulators. One clearing point is what makes the removal reach every surface: `-d thread` on the thread-and-session specimen leaves no `[https-jsse-nio-8443-]` segment *and* renders no thread-pool activity table under `-tpas`; `-d session,user` leaves neither the `sessions` nor the `users` column in the rendered header.
+- **A `-udm` metric whose own key is discarded is dropped from `@udm_configs`**, the way a duplicate `-udm` spec is dropped, rather than left to report zero. Setting a flag on the config and leaving it there was not enough: `-V udm-counting` still reported `counting_udms: 1` with the metric's full line. It now reports `counting_udms: none`. A metric counting a key inside a discarded query string keeps counting (`-d query-string -udm fileName::distinct` reports `counting_udms: 1`): it reads the raw line, and D12 switches off only a metric whose own key is named.
+- **The `--expose` comma-split defect is fixed and measured.** On the download fixture, `-x fileName,adId` now gives a messages CSV byte-identical to `-x fileName -x adId`; before the change it appended nothing, the whole string being read as one key no line carries.
+- **Proof the harness asserts.** `tests/validate-message-discard.sh` against the base build (`release/0.18.3:ltl`): 9 passed, 12 failed. The 9 are the guards that prove each fixture carries the case an absence assertion tests, and hold on both builds by design; every assertion of `--discard` behaviour fails without it. Against the new build: 54 passed, 0 failed, and the same counts under `FORCE_COLOR=3`.
+- **Two harness defects caught before commit.** An assertion that the `sessions` and `users` columns are gone grepped the whole rendered output, which matched the fixture's own filename `access-users-sessions.txt` in the file list; it now reads the column header row. An assertion on `^users:` matched nothing on either build, so it passed vacuously; it now reads the header row too.
+
+## Completion gate (2026-09-19, this machine, `$version_number` restored to `0.18.3`)
+
+- **Harness suite:** every `tests/validate-*.sh` run once in sequence, each captured to its own file (`CI=1 validate-csv-output.sh`, `CI=1 validate-statistics.sh`, then the rest): 39 of 39 exit 0, every one reporting assertions actually run. `validate-statistics.sh` 22 of 22 scenarios, `validate-regression.sh` 74 assertions, `validate-message-discard.sh` 54, `validate-message-expose.sh` 38, `validate-runtime-config.sh` 51, `validate-help-content.sh` 22. No golden re-blessed.
+- **Benchmark** (`single-day-access-log-standard`, this machine, before on the base commit `release/0.18.3` in the main checkout, after on the gate commit in the worktree; 761,698 lines read and included in both, so the comparison is like for like):
+
+  | metric | before | after | change |
+  |---|---|---|---|
+  | parse/read_files | 8.8 s | 8.7 s | -0.2 % |
+  | finalize/calculate_statistics | 101 ms | 97 ms | -4.0 % |
+  | total | 8.9 s | 8.8 s | -0.2 % |
+  | rss_peak | 101.8 MB | 99.2 MB | -2.6 % |
+
+  No regression: every metric is flat or lower. A run that names nothing pays one scalar test per line for the field clearing and one per retained message for the message removal, which does not rise above the noise floor of a single pair.
