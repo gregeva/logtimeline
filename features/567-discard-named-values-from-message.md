@@ -70,7 +70,7 @@ An analyst whose messages stay apart because of a part of the line that says not
   | `client (127.0.0.1) refused` | `client () refused` |
   | `id=3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3&x=1` | `id=&x=1` (`-d id` removes the pair instead, D16) |
 - **D17 — LOCKED 2026-09-16 (architect) — A UUID or IP address given to both `--mask` and `--discard` is discarded, with a notice.** As D13: the value is removed, a behavioural notice naming it prints on every run, and the run continues. It holds for the deprecated `-uuid` as for `--mask uuid`.
-- **D18 — LOCKED 2026-09-16 (architect) — `-V runtime-config` reports the effective configuration.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13; `omit-durations`, `omit-bytes` and `omit-count` report `1` when `--discard` names that metric (D5). With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`.
+- **D18 — LOCKED 2026-09-16 (architect), revised 2026-09-19 — `-V runtime-config` reports the configuration the user provided.** A new `discard` key lists the resolved names in command-line order, a comma-separated list split and a repeated name kept once at its first position (as 566 D9); `expose` lists only the names still exposed after D13. With `-xqs -x thread -d sign,thread -d duration`: `discard: sign,thread,duration`, `expose: query-string`. The section reports the options the user gave, so a metric named on `--discard` is reported by the `discard` key alone: `omit-durations`, `omit-bytes` and `omit-count` report only when the user gave `-od`, `-ob` or `-oc` (architect, 2026-09-19, correcting the original clause that they report `1` when `--discard` names that metric).
 
 ### Performance evidence (architect, 2026-09-16)
 
@@ -96,7 +96,7 @@ Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its 
 | 12 | `--mask uuid -d uuid`, `-uuid -d uuid`, `--mask ip -d ip` (D17) | Identical to `-d uuid` / `-d ip` alone, plus one notice naming the value as both masked and discarded | same |
 | 13 | `-include`, `-exclude` and `-highlight` naming the text of a discarded key, `-xqs -d sign` (D12) | The lines selected and highlighted are those the same filters select without `-d sign` | same, download fixture, `-V` classification and occurrence counts |
 | 14 | `-x fileName,adId` (D11) | Messages CSV identical to `-x fileName -x adId`; `-V runtime-config` `expose: fileName,adId` | `tests/validate-message-expose.sh`, download fixture |
-| 15 | `-xqs -x thread -d sign,thread -d duration`; a repeated name `-d sign -d sign` (D18) | `-V runtime-config` reports `discard: sign,thread,duration`, `expose: query-string`, `omit-durations: 1`; the repeated name is listed once | `tests/validate-runtime-config.sh` |
+| 15 | `-xqs -x thread -d sign,thread -d duration`; a repeated name `-d sign -d sign` (D18) | `-V runtime-config` reports `discard: sign,thread,duration` and `expose: query-string`, and no `omit-durations` row, the user not having given `-od`; the repeated name is listed once | `tests/validate-runtime-config.sh` |
 | 16 | `--help` (D7) | One `-d, --discard <name>` entry; `docs/usage.md` agrees | `tests/validate-help-content.sh` |
 | 17 | No discard option | Output unchanged: the regression goldens, the statistics oracle and every registry self-validation pass without re-blessing | the full harness suite at the completion gate |
 

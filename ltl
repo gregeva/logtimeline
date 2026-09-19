@@ -13432,18 +13432,6 @@ sub discard_identifier_sub {
 sub apply_discard_precedence {
     my %discarded = map { $_ => 1 } @discard_names;
 
-    # A metric named on --discard does what its omit option does (D5), so the
-    # omit row reports it: runtime-config emits a row only for an option the
-    # user supplied, and the user supplied --discard. The same propagation
-    # the two spellings of masking use.
-    my %omit_row = ( duration   => 'omit-durations', durationMs => 'omit-durations',
-                     durationMS => 'omit-durations', bytes      => 'omit-bytes',
-                     count      => 'omit-count' );
-    for my $name (@discard_names) {
-        my $row = $omit_row{$name} or next;
-        $option_provenance{$row} ||= [ @{ $option_provenance{discard} || [] } ];
-    }
-
     # An exposed name that is also discarded: drop the append, and with it
     # the metric whose number would have stayed in the message.
     my @exposed_too = grep { $discarded{$_} } @expose_names;
