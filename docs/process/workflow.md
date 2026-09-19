@@ -176,6 +176,16 @@ selections are release instruments and are never run during issue work.
 
 ## 4. Merge and close
 
+Steps 4 to 10 are one action, run per issue, in order, without pausing for
+direction between them. A merge is not the end of an issue: an issue whose PR
+reports `MERGED` while it is still open, still labelled `status: in review`,
+or still without its completion comment is unfinished work, and the branch it
+came from is a dangling artifact. Finish one issue before starting the next —
+reconstructing which of several merged issues got which step, after the fact,
+costs far more than doing them in sequence, and the evidence needed to write a
+completion comment (what was measured, against what) is in hand at the merge
+and gone a week later.
+
 1. Commit to the feature branch. Commit only when told; "results returned" and
    "commit" are separate instructions.
 2. `git push origin {feature-branch}`
@@ -200,6 +210,40 @@ selections are release instruments and are never run during issue work.
    each: drop the closed `blocked_by` edge, true up the body prose, and
    re-decide its status with a comment. An `on hold` that existed only for this
    blocker becomes `in progress` if any work has started, `backlog` only if none has.
+10. **Delete the merged branch**, local and remote, in the same action as the
+    close. A branch whose issue is closed and whose content is in the base is
+    an artifact, and the longer it survives the more it looks like unfinished
+    work to the next session. Never the release branch.
+
+### Confirming an issue is closed out
+
+Run this for the issue just merged, before moving to the next one. Each line
+answers one question, and any answer but the expected one is the finding:
+
+```
+gh pr view {PR#} --json state -q .state                 # MERGED
+gh issue view {number} --json state -q .state           # CLOSED
+gh issue view {number} --json labels -q '[.labels[].name]'   # no 'status:' label
+gh issue view {number} --json comments -q '[.comments[].body]|length'  # >= 1, the completion comment
+git branch -r --list 'origin/{branch}'                  # gone
+```
+
+### A branch that merged through another branch
+
+`git branch -r --merged origin/main` and `git merge-base --is-ancestor` both
+answer by commit identity, so a branch whose commits were rebased, squashed or
+re-applied under new SHAs reads as unmerged even though every line of it
+shipped. A PR based on another feature branch rather than on the release
+branch produces exactly this: the work reaches the base through its parent,
+under different SHAs, and the original branch is left looking live.
+
+Before concluding a branch is unmerged, ask whether its *content* is in the
+base: `git cherry origin/main origin/{branch}` marks with `-` each commit
+already present by content, and `git log origin/main --grep='#{number}'` finds
+the commits that carried it. An unmerged branch whose issue is closed is that
+shape until proved otherwise, and the proof is the behaviour in the shipped
+tool, not the branch graph. Say which of the two it is before proposing to
+delete or to keep.
 
 ### Direct commits to the release branch
 

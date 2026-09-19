@@ -76,6 +76,10 @@ about anything else, these still hold.
       `git branch -a --no-merged main`, `./build/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
       session's.
+- [ ] Any issue still labelled `status: in review` whose PR reports `MERGED` is
+      a close-out that did not finish: complete § 4 for it before new work.
+      `git branch --no-merged` answers by commit identity, so cross it against
+      the issue's state rather than reading it as work outstanding.
 - [ ] The open release branch is the base: new work, reads and comparisons start
       from `release/X.Y.Z`, never from main, which trails it until the release
       merges. Main behind a *tagged* release branch is the finding: report it
@@ -253,11 +257,26 @@ about anything else, these still hold.
 ### At close-out
 
 - [ ] **Issue:** release-notes decision, completion comment (with any recorded
-      skip), close with label stripped, dependents released
-      (`docs/process/workflow.md` § 4).
+      skip), close with label stripped, dependents released, merged branch
+      deleted (`docs/process/workflow.md` § 4).
 - [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
       without asking, including deleting the issue's own before/after benchmark
       TSVs and removing its merged worktree. Only another issue's artifacts wait.
+- [ ] **A merged PR is not a closed issue.** After any `gh pr merge`, the issue
+      it belongs to is closed, its `status:` label stripped and its completion
+      comment written, in that same action, before another issue is touched.
+      An issue whose PR reports `MERGED` while it is still open or still
+      labelled `status: in review` is unfinished work, and is found by
+      `gh issue view {number} --json state,labels`.
+- [ ] **One issue closed out at a time.** Close out each merge before the next
+      merge, never a batch of them afterwards: which issue received which step
+      is knowable now and forensic later, and the completion comment's evidence
+      is in hand at the merge.
+- [ ] A branch that reads as unmerged while its issue is closed is checked by
+      content before it is called unfinished or deleted: `git cherry`, and the
+      behaviour in the shipped tool. A PR based on another feature branch
+      reaches the base under different SHAs and leaves its branch looking live
+      (`docs/process/workflow.md` § 4).
 - [ ] **Release:** `gh pr view` reports `MERGED` and `git log main..release/X.Y.Z`
       is empty. Otherwise the release is not finished.
 - [ ] **Session:** no open PRs, no unpushed branches, no issue moved but not resolved.

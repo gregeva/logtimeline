@@ -87,5 +87,17 @@ if [ -x ./build/issue-status.sh ]; then
     status=$(./build/issue-status.sh list 2>/dev/null | head -40)
     [ -n "$status" ] && { echo "open issues by status:"; echo "$status"; }
 fi
+
+# An issue left on 'status: in review' whose PR already merged is a close-out
+# that stopped at the merge: the issue is still open, its label still set and
+# its completion comment unwritten, while its code has shipped. Reported here
+# because it looks like work in flight and is the opposite.
+reviewing=$(gh issue list --label "status: in review" --state open \
+    --json number --jq '.[].number' 2>/dev/null | head -10)
+for n in $reviewing; do
+    merged=$(gh pr list --search "$n in:title" --state merged \
+        --json number,title --jq ".[] | select(.title | test(\"#?$n\\\\b\")) | .number" 2>/dev/null | head -1)
+    [ -n "$merged" ] && echo "FINDING: #$n is 'in review' but PR #$merged merged: finish workflow.md 4 (close, strip label, completion comment)"
+done
 echo "== Read CLAUDE.md § At session start before acting on any of this =="
 exit 0
