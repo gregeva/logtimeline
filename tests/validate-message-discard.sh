@@ -385,6 +385,9 @@ write_expected() {
 #               in brackets, and a UUID as a key's value.
 #   lines 12-14 IPv6 addresses between spaces, between slashes, and beside
 #               an IPv4 address, so that -d ipv4 and -d ipv6 are told apart.
+#   lines 15-16 the same key written with a colon, and both spellings on one
+#               line, so that the = and : of the shared token rule are both
+#               asserted rather than only the one the other fixtures use.
 # Addresses are from the documentation ranges (192.0.2.0/24, 2001:db8::/32).
 # Every line shares the level, thread and object, so the key prefix is fixed
 # and the assertions are about the message alone.
@@ -411,7 +414,9 @@ scenario_key_separators() {
         "$DF GET /app/regen?folderId=1" \
         "$DF GET /app/regen" \
         "$DF Request done status=ok" \
+        "$DF Request done status:ok" \
         "$DF Request done" \
+        "$DF mixed and other here" \
         "$DF GET /store/orders/3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3/items/summary" \
         "$DF connection from 192.0.2.10 closed" \
         "$DF ErrorCode(de4882d2-d816-4940-ae83-c2f346e19335), Cause(null)" \
@@ -434,6 +439,25 @@ scenario_key_separators() {
         asserts     'Removing a key-value pair never leaves && or ?& behind, and never leaves a key ending in & or ?.' \
         produced_by "$PRODUCED_MESSAGE" \
         contract    "$CONTRACT_DOC section Decisions D16"
+
+    assert_command \
+        command     "check_no_key_matches '$MSG_CSV' 'sign[=:]'" \
+        label       'the key goes whether it is written with = or with :' \
+        asserts     'The value of a named key is read by the token rule -udm and -x share, which accepts = or : between the key and its value, so a key written either way is removed. A log writing sign:abc is read exactly as one writing sign=abc.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_DOC section Decisions D2 - the token rule -udm and -x use, one resolution surface for all three"
+    assert_command \
+        command     "check_some_key_matches '$MSG_CSV' 'Request done status:ok'" \
+        label       'a colon-separated pair takes its separator and leaves the rest of the message' \
+        asserts     'Request done sign:abc status:ok becomes Request done status:ok: the colon form takes the space after the pair exactly as the equals form does, and the neighbouring colon-separated pair is left as written.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_DOC section Decisions D16"
+    assert_command \
+        command     "check_some_key_matches '$MSG_CSV' 'mixed and other here'" \
+        label       'both spellings go in one pass on the same line' \
+        asserts     'A line carrying the named key written both ways loses both occurrences: the two separators are not alternatives the analyst must choose between.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_DOC section Decisions D16 - every occurrence goes"
 }
 
 # Criterion 11 (D14, D19): the identifier cases, and the versions told apart.
@@ -453,6 +477,8 @@ scenario_identifiers() {
         "$DF GET /app/regen?sign=abc" \
         "$DF Request done sign=abc status=ok" \
         "$DF Request done sign=abc" \
+        "$DF Request done sign:abc status:ok" \
+        "$DF mixed sign=abc and other sign:def here" \
         "$DF connection from 192.0.2.10 closed" \
         "$DF client (192.0.2.11) refused" \
         "$DF peer 2001:db8::8a2e:370:7334 disconnected" \

@@ -12,3 +12,5 @@
 2026-01-26 10:00:12.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] peer 2001:db8::8a2e:370:7334 disconnected
 2026-01-26 10:00:13.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] route /gw/2001:db8::1/inbound ready
 2026-01-26 10:00:14.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] pair 192.0.2.12 and 2001:db8::2 established
+2026-01-26 10:00:15.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] Request done sign:abc status:ok
+2026-01-26 10:00:16.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] mixed sign=abc and other sign:def here
