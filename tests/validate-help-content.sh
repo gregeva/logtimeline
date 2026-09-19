@@ -439,6 +439,40 @@ scenario_E_benchmark_data_section_matches_version_number() {
         contract    'features/232-help-coverage.md section 4 + tests/HARNESS-DESIGN.md section Stability contract - version row format is locked'
 }
 
+# Issue #567 criterion 16 (567 D7): one -d, --discard <name> entry in --help
+# and docs/usage.md alike.
+scenario_I_discard_option_rows() {
+    current_scenario="I-discard-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-discard.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    assert_line "$help_out" \
+        pattern     '^\s+-d,\s+--discard <name>\s+Remove a named part of the line' \
+        asserts     '--help carries one -d, --discard <name> row describing what the option removes' \
+        produced_by 'print_help() in ltl (the -d row after the -x row)' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7 - one option names anything to discard, with one help entry'
+    assert_equal "$(grep -c -- '--discard <name>' "$help_out")" "1" \
+        label       'exactly one --discard <name> row in --help' \
+        asserts     'The option is documented once, not once per name it accepts' \
+        produced_by 'print_help() in ltl' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7'
+
+    assert_line "$USAGE_MD" \
+        pattern     '^\| `-d, --discard <name>` \| Remove a named part of the line' \
+        asserts     'docs/usage.md carries the -d, --discard <name> row' \
+        produced_by 'docs/usage.md option table - manually maintained alongside print_help()' \
+        contract    'CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    assert_equal "$(grep -c -- '`-d, --discard <name>`' "$USAGE_MD")" "1" \
+        label       'exactly one --discard row in docs/usage.md' \
+        asserts     'The option has one row in the user documentation, matching --help' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7'
+}
+
 scenario_F_description_quality_warnings() {
     current_scenario="F-description-quality (soft)"
     echo "[$current_scenario]"
@@ -598,6 +632,7 @@ scenario_D_dash_v_matches_version_number;          echo ""
 scenario_E_benchmark_data_section_matches_version_number; echo ""
 scenario_G_udm_function_list_parity;               echo ""
 scenario_H_mask_option_rows;                       echo ""
+scenario_I_discard_option_rows;                    echo ""
 scenario_F_description_quality_warnings
 
 echo ""

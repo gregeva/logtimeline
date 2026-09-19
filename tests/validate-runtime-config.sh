@@ -437,6 +437,49 @@ scenario_runtime_config_mask() {
         contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 11 - -m ip reports mask: ip, mask-uuid: 0'
 }
 
+# Issue #567 criterion 15 (567 D18): the discard row, and the omit rows that
+# report only what the user gave.
+scenario_runtime_config_discard() {
+    current_scenario="runtime-config-discard"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-discard" -V runtime-config -xqs -x thread -d sign,thread -d duration "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^discard: sign,thread,duration$' \
+        asserts     'The discard row reports the names -d resolved to, comma-separated, in the order they were given: a comma-separated list is split, and the names keep their command-line order across repeated options.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for discard, filled by resolve_discard_names() from the ordered discard list' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D18 - a new discard key lists the resolved names in command-line order'
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose: query-string$' \
+        asserts     'The expose row lists only the names still exposed: a name given to both options is discarded and drops out of the expose row, so the two rows cannot both claim the same value.' \
+        produced_by 'apply_discard_precedence() in ltl - the exposed names a discard removes' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D13 and D18'
+    assert_no_line "$RUN_STDOUT" \
+        pattern     '^omit-durations:' \
+        asserts     'runtime-config reports the configuration the user provided: -d duration is reported by the discard row, and the omit row is not printed for an option the user did not give.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the rows are emitted from %option_provenance, which records what was supplied' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
+
+    run_ltl "rc-discard-repeat" -V runtime-config -d sign -d sign "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^discard: sign$' \
+        asserts     'A name given twice is listed once, at its first position.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for discard' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D18'
+
+    run_ltl "rc-discard-omit" -V runtime-config -od -d duration "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^omit-durations: 1$' \
+        asserts     'An omit option the user did give is reported on its own row, whether or not --discard names the same metric: each option surfaces itself.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the omit-durations row, given command-line provenance because -od was supplied' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
+    assert_line "$RUN_STDOUT" \
+        pattern     '^discard: duration$' \
+        asserts     'The discard row is unaffected by the omit option being given as well.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for discard' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D18'
+}
+
 scenario_error_unknown_so() {
     current_scenario="error-unknown-so"
     echo "[$current_scenario]"
@@ -598,6 +641,7 @@ scenario_runtime_config_data_model_selectors;          echo ""
 scenario_runtime_config_numeric_highlight;             echo ""
 scenario_runtime_config_expose;                        echo ""
 scenario_runtime_config_mask;                          echo ""
+scenario_runtime_config_discard;                       echo ""
 scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""

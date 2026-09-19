@@ -454,6 +454,21 @@ scenario_multi_key_order() {
         asserts     'The order of the option occurrences is the order of the appended pairs: naming adId first puts adId first on every key, and the grouping is unchanged because the same values are appended.' \
         produced_by "$PRODUCED_APPEND" \
         contract    "$CONTRACT_DOC section D2 - command-line order"
+
+    # Issue #567 criterion 14 (567 D11): one option takes the list.
+    run_messages comma-list -x fileName,adId "$DOWNLOAD_FIXTURE" || return 0
+    assert_command \
+        command     "check_messages '$MSG_CSV' '$expected'" \
+        label       '-x fileName,adId names the two keys, in the order given' \
+        asserts     'A comma-separated list names several keys in one option, and gives the same messages as naming them one option each: the list is split on the comma rather than read as a single key no line carries.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D11 - --expose accepts the same comma-separated list, delivered in this issue'
+    assert_command \
+        command     "check_same_csv '$forward_csv' '$MSG_CSV' 'messages'" \
+        label       '-x fileName,adId is identical to -x fileName -x adId' \
+        asserts     'The two spellings of the same request produce the same run.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/567-discard-named-values-from-message.md section Acceptance criteria 14'
 }
 
 # Criterion 4: the exposed value is read by the rule the counting user-defined
