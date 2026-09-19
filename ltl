@@ -13432,6 +13432,16 @@ sub discard_identifier_sub {
 sub apply_discard_precedence {
     my %discarded = map { $_ => 1 } @discard_names;
 
+    # A user-defined metric whose own key is discarded produces nothing: the
+    # value it counts no longer exists, so the metric is dropped rather than
+    # left to report zero, and the built-in and the user-defined count of the
+    # same value can never disagree (D12). A metric counting a key inside the
+    # query string is untouched: it reads the raw line, and D12 switches off
+    # only a metric whose own key is named.
+    if ( grep { $_->{discarded} } @udm_configs ) {
+        @udm_configs = grep { !$_->{discarded} } @udm_configs;
+    }
+
     # An exposed name that is also discarded: drop the append, and with it
     # the metric whose number would have stayed in the message.
     my @exposed_too = grep { $discarded{$_} } @expose_names;
@@ -14941,6 +14951,26 @@ sub read_and_process_logs {
                 $message =~ tr/\x00-\x08\x0a-\x1f\x7f//d;
             }
 
+            # Discarded parsed fields (-d thread|session|user|object), cleared
+            # here, where every ingest path has written them and nothing has
+            # read them: the thread-pool block below derives the pool from
+            # $thread, the message key takes its bracketed segments from
+            # $threadname and $object, and the session, user and thread-pool
+            # accumulators read the fields directly. Clearing once, before any
+            # of them, is what makes a discarded field absent from the whole
+            # run rather than from the message alone (D8, D12). The field
+            # goes back to undef, the per-line reset's value for a field no
+            # format wrote, so the message key drops its bracketed segment
+            # entirely rather than carrying an empty one (D1).
+            # $discard_any_field keeps a run that discards no field to one
+            # scalar test per line.
+            if( $discard_any_field ) {
+                undef $thread  if $discard_field{thread};
+                undef $session if $discard_field{session};
+                undef $user    if $discard_field{user};
+                undef $object  if $discard_field{object};
+            }
+
             ## COUNT METRICS # capture count metrics unless explicitly omitted
             if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
@@ -15399,6 +15429,22 @@ sub read_and_process_logs {
                                 next unless defined $field_value && $field_value ne '' && $field_value ne '-';
                                 $message .= " $ex->[1]=$field_value";
                             }
+                        }
+                    }
+
+                    # Discarded parts of the message (-d), removed after the
+                    # exposed values have been added and before the masks run
+                    # (580 D4): the message is formed, exposed values added,
+                    # discarded parts removed, then masking applies to what is
+                    # left. A key written in the line goes with its value and
+                    # one separator, a UUID or IP address closes the gap it
+                    # leaves, and the query string goes whole.
+                    # $discard_active keeps a run that discards nothing in the
+                    # message to one scalar test.
+                    if( $discard_active ) {
+                        $message =~ s/\?.+$// if $discard_field{'query-string'};
+                        for my $d (@discard_subs) {
+                            $message =~ s/$d->[0]/$d->[1]/g;
                         }
                     }
 
