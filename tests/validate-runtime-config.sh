@@ -366,6 +366,77 @@ scenario_runtime_config_numeric_highlight() {
         contract    'features/312-numeric-criteria-highlight-selection.md section The defined-highlight_regex gate sweep - the runtime-config merged line stays regex-only'
 }
 
+# Issue #566 criterion 12: the resolved expose names, in command-line order,
+# surface as one runtime-config row beside the per-flag rows of the aliases.
+scenario_runtime_config_expose() {
+    current_scenario="runtime-config-expose"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-expose" -V runtime-config -xqs -x fileName -xu "$TEST_LOG"
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose: query-string,fileName,user$' \
+        asserts     'The expose row reports the names -x and its aliases resolved to, comma-separated, in the order they were given on the command line: -xqs -x fileName -xu resolves to query-string, fileName, user. The order is the contract - it is the order the values are appended to the message key in.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for expose, filled by adapt_to_command_line_options() from the ordered expose list' \
+        contract    'features/566-preserve-named-values-in-message.md section D2 (command-line order) and section D3 (one option names anything to expose; the existing options are its aliases)'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose-query-string: 1$' \
+        asserts     'The alias still reports its own state: -xqs sets expose-query-string, whose row is unchanged by the new expose row.' \
+        produced_by 'emit_runtime_config_verbose() in ltl' \
+        contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
+
+    assert_line "$RUN_STDOUT" \
+        pattern     '^expose-user: 1$' \
+        asserts     'The alias still reports its own state: -xu sets expose-user, whose row is unchanged by the new expose row.' \
+        produced_by 'emit_runtime_config_verbose() in ltl' \
+        contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
+}
+
+# Issue #580 criterion 11: the resolved mask names, in command-line order, a
+# comma-separated list split and a repeated name kept once, and the mask-uuid
+# row reporting whether UUIDs are masked by either spelling.
+scenario_runtime_config_mask() {
+    current_scenario="runtime-config-mask"
+    echo "[$current_scenario]"
+
+    run_ltl "rc-mask-list" -V runtime-config -m uuid,ipv4 -m uuid "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask: uuid,ipv4$' \
+        asserts     'The mask row reports the names -m resolved to, comma-separated, in the order they were given: a comma-separated list is split, and a name given twice keeps its first position. -m uuid,ipv4 -m uuid resolves to uuid, ipv4.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for mask, filled by resolve_mask_names() from the ordered mask list' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - a new mask key lists the resolved names in command-line order'
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask-uuid: 1$' \
+        asserts     'mask-uuid reports 1 when UUIDs are masked through -m uuid, not only through the deprecated -uuid spelling.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid reports 1 when UUIDs are masked by either spelling'
+
+    run_ltl "rc-mask-uuid" -V runtime-config -uuid "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask: uuid$' \
+        asserts     'The deprecated -uuid spelling resolves to the mask name uuid and reports it on the mask row, so the two spellings read as one configuration.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask row, given command-line provenance whenever -uuid was supplied' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - -V runtime-config reports the effective configuration'
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask-uuid: 1$' \
+        asserts     '-uuid still reports mask-uuid: 1, as it did before -m existed.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid stays'
+
+    run_ltl "rc-mask-ip" -V runtime-config -m ip "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask: ip$' \
+        asserts     'ip is reported as the name given, not expanded to ipv4,ipv6: the row is the configuration as the user stated it.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask row' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 and section Acceptance criteria 11'
+    assert_line "$RUN_STDOUT" \
+        pattern     '^mask-uuid: 0$' \
+        asserts     'A mask that does not name uuid reports mask-uuid: 0 rather than omitting the row, so a reader of the section sees that UUIDs are not masked.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
+        contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 11 - -m ip reports mask: ip, mask-uuid: 0'
+}
+
 scenario_error_unknown_so() {
     current_scenario="error-unknown-so"
     echo "[$current_scenario]"
@@ -525,6 +596,8 @@ scenario_warning_hm_non_builtin;                       echo ""
 scenario_error_unknown_exact_percentiles;              echo ""
 scenario_runtime_config_data_model_selectors;          echo ""
 scenario_runtime_config_numeric_highlight;             echo ""
+scenario_runtime_config_expose;                        echo ""
+scenario_runtime_config_mask;                          echo ""
 scenario_error_unknown_so;                             echo ""
 scenario_error_unknown_du;                             echo ""
 scenario_error_unknown_ru;                             echo ""

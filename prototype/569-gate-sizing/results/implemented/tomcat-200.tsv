@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+tomcat-200	50	500	500	0	0	0.087
+tomcat-200	60	500	499	0	0	0.096
+tomcat-200	70	500	482	0	0	0.111
+tomcat-200	75	500	451	0	0	0.124
+tomcat-200	80	500	403	0	0	0.123
+tomcat-200	85	500	330	0	0	0.125
+tomcat-200	90	500	203	0	0	0.110
+tomcat-200	95	500	36	0	0	0.070

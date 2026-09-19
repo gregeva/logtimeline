@@ -76,11 +76,13 @@ about anything else, these still hold.
       `git branch -a --no-merged main`, `./build/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
       session's.
-- [ ] Main behind a release branch is the finding: report it first, fix it first,
-      never route around it.
+- [ ] The open release branch is the base: new work, reads and comparisons start
+      from `release/X.Y.Z`, never from main, which trails it until the release
+      merges. Main behind a *tagged* release branch is the finding: report it
+      first, fix it first, never route around it.
 - [ ] A named branch is checked out and synced from origin before any file is
       read (`docs/process/workflow.md` § 1).
-- [ ] Before the first line of code: branch name matches the issue title, status
+- [ ] Before the first line of code: branch name is a short description of the issue, status
       set to `in progress`, `$version_number` stamped, and a `before` benchmark
       captured on the base commit if the hot path is in scope.
 
@@ -97,6 +99,9 @@ about anything else, these still hold.
       against. No retracted framings, no self-orienting context.
 - [ ] One question at a time. A clarification gets a short explanation plus a
       small table, not a discourse.
+- [ ] A decision that needs the architect's lock is asked as a direct question
+      in the same message ("Do you lock D33: <what it means>?"), never written
+      into a record as "awaiting lock" or parked as an open question in a feature doc.
 - [ ] No closing commentary ("worth keeping in mind", "one caveat"). A caveat
       that matters was raised before the decision.
 - [ ] His setup is not restated to him (gitignore, layout, what is generated).
@@ -117,8 +122,10 @@ about anything else, these still hold.
 - [ ] Acceptance criteria are derived from the requirements and agreed in the
       feature doc before code (`docs/test-driven-development.md`). An "unknown"
       verification method is prototyping scope, proposed with its cost.
-- [ ] Prototype triggers (`prototype/README.md`): new or changed data model,
-      new per-line cost, high frequency × cost, unknown verification method.
+- [ ] Hot-path work always gets a before/after benchmark. A prototype
+      (`prototype/README.md`) is for a new or changed data model, a new code
+      path or capability in the hot path, high frequency × cost, or an unknown
+      verification method; not for a small change to an existing path.
 - [ ] A performance fix measures its premise's constants first, mandatory when
       the code has moved since the issue was written.
 - [ ] Ordering between issues is a native `blocked_by` edge, recorded in the
@@ -131,6 +138,9 @@ about anything else, these still hold.
 - [ ] `ltl` always gets `--disable-progress`.
 - [ ] Will I look at this output more than once? Capture once to the scratchpad,
       then grep, sed, diff, python3 against the file.
+- [ ] A prototype, reproduction, profiling or benchmark run of `ltl` passes bare
+      `-V` and is captured, so a later question is answered from the file, not a
+      re-run. Harness assertions stay shaped to what they read.
 - [ ] A failing child process is invoked directly on minimal input, not through
       the parent harness. A harness under iteration uses `--scenario` or a
       single-test selector.
@@ -168,8 +178,15 @@ about anything else, these still hold.
       `docs/explain/`, wiki, error messages): no Perl identifiers, issue numbers,
       decision labels, or other tools' internals.
 - [ ] Issue body at filing: am I describing HOW? Then it does not belong. No
-      line numbers; code is referenced by function name plus snippet.
+      line numbers; code is referenced by function name plus snippet. It does
+      name the log files and the command-line options that produced the behaviour.
       Full rule: `docs/process/issues.md` § Filing a requirement.
+- [ ] A specification, source code or a comment describes a sample log by its
+      family and characteristics ("a web application access log carrying
+      execution time in the duration field"), never by file name: a named file
+      that later leaves the corpus turns the reference into a failure. Test
+      scripts are exempt: a harness runs against a real file, chosen from
+      `docs/test-logs.md` for what its scenarios need.
 - [ ] A finding, contract, constraint or status change goes into the owning
       feature doc in the same action; the comment points at it.
 - [ ] A decision made anywhere else is transcribed onto the open issue now.
@@ -230,6 +247,9 @@ about anything else, these still hold.
 - [ ] **Issue:** release-notes decision, completion comment (with any recorded
       skip), close with label stripped, dependents released
       (`docs/process/workflow.md` § 4).
+- [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
+      without asking, including deleting the issue's own before/after benchmark
+      TSVs and removing its merged worktree. Only another issue's artifacts wait.
 - [ ] **Release:** `gh pr view` reports `MERGED` and `git log main..release/X.Y.Z`
       is empty. Otherwise the release is not finished.
 - [ ] **Session:** no open PRs, no unpushed branches, no issue moved but not resolved.
@@ -244,7 +264,7 @@ about anything else, these still hold.
 | Deriving acceptance criteria | `docs/test-driven-development.md` |
 | Deciding whether and how to prototype | `prototype/README.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
-| Choosing a test log | `docs/test-logs.md` (single source of truth; never cite files elsewhere) |
+| Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
@@ -365,3 +385,7 @@ performed; a rule that can be checked mechanically goes into a hook under
 not go here; the commit message that makes the edit carries the incident.
 After each release, the checkpoints are reviewed against what actually went
 wrong, and anything that never fired is removed.
+
+Claude's auto-memory is never written. Development runs on several machines,
+and a rule held in one machine's memory makes Claude behave differently there;
+every rule lives in this file or another tracked file.

@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.1";
+my $version_number = "0.18.2";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -72,6 +72,19 @@ my $no_index = 0;                                                       # -ni: n
 my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_user, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0, 0 );
+# -x / --expose: the names given on the command line, in the order given
+# (@expose_raw), the resolved names in that same order for the
+# runtime-config surface (@expose_names), and what the run does with them:
+# the values appended to the end of the message in command-line order
+# (@expose_appends, each [ kind, key name, token pattern for a line key ]),
+# and the metrics whose number stays in the message in place of its mask
+# (%expose_metric keyed by the metric the format spec's probe declares,
+# $expose_count for the count capture's own mask). $expose_active is the
+# single scalar the per-line path reads: false, and no run without an
+# appended value pays more than that one test.
+use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
+my ( @expose_raw, @expose_names, @expose_appends, %expose_metric );
+my ( $expose_active, $expose_count ) = ( 0, 0 );
 my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
@@ -204,7 +217,17 @@ my %bucket_outcomes;
 # (Issue #302). Keyed by category ('plain'/'highlight').
 my %message_key_order;
 my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
-my $mask_uuid;									# temporary command line option to mask UUIDs with HASH characters for grouping purposes (to be replaced by more generic group similar feature)
+# -m / --mask: the names given on the command line (@mask_raw, a value
+# may be a comma-separated list), the resolved names in that same order for
+# the runtime-config surface (@mask_names), and the substitutions the run
+# applies to every retained message (@mask_subs, each [ pattern, placeholder ]
+# in the fixed order uuid, ipv6, ipv4, so that an IPv6 address ending in an
+# IPv4 address is one IPv6 placeholder). $mask_active is the one scalar test a
+# run that masks nothing pays per retained message; $mask_uuid reports whether
+# UUIDs are masked by either spelling, and $mask_uuid_option records that the
+# deprecated -uuid spelling was used.
+my ( @mask_raw, @mask_names, @mask_subs );
+my ( $mask_active, $mask_uuid, $mask_uuid_option ) = ( 0, 0, 0 );
 my @graph_columns = qw( duration bytes count );
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
@@ -665,8 +688,8 @@ my %option_overrides;
 
 # Consolidation data structures (Issue #96 - Fuzzy Message Consolidation)
 my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_message );
-my ( %consolidation_unmatched, %consolidation_ngram_index, %consolidation_posting_size );
-my ( %consolidation_key_trigrams, %consolidation_key_trigrams_norm );
+my ( %consolidation_unmatched, %consolidation_id_index );
+my %consolidation_key_trigrams;
 my %consolidation_cat_stats;
 my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
@@ -675,6 +698,9 @@ my %consolidation_pattern_generation;  # {cat_gk} => increments on each pattern 
 my %consolidation_key_generation;     # {log_key} => pattern generation at entry time (for S3 skip optimization)
 my %consolidation_key_checkpoint_count; # {log_key} => number of checkpoints this key has participated in
 my %consolidation_absorption_ema;     # {cat_gk} => exponential moving average of absorption rate (0.0-1.0)
+my %consolidation_streaming_absorbed; # {cat_gk} => keys absorbed during the streaming phase
+my %consolidation_final_pass_skipped; # {cat_gk} => 1 when the final pass was skipped for this group
+my %consolidation_cliff_edge;         # {cat_gk} => the similarity the data clusters at, when computed
 
 # Consolidation configuration
 my $consolidation_threshold          = 85;
@@ -684,13 +710,16 @@ my $consolidation_occurrence_ceiling = 3;
 my $consolidation_max_patterns       = 0;  # 0 = unlimited (adaptive eviction bounds the working set)
 my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorption rate (higher = faster response)
 my $consolidation_final_pass         = 1;
-my $consolidation_final_threshold    = 85;
+my $consolidation_final_threshold;          # unset: the final pass scores at the -g sensitivity; --final-threshold overrides it
 my $consolidation_final_ceiling      = 1_000_000;
-my $consolidation_discriminative_topk = 50;
-my $consolidation_prefilter_ratio    = 0.30;
+# Skip the final pass when streaming absorbed almost nothing AND the population it
+# would hand forward is large enough for that pass to be expensive (#584). Both
+# conditions are required: size alone is not evidence that the pass is futile.
+my $consolidation_skip_absorption    = 0.05;   # absorbed share of keys seen, at or below which streaming counts as having absorbed nothing
+my $consolidation_skip_min_keys      = 20_000; # keys handed forward, at or above which the final pass counts as expensive
+my $consolidation_cliff_sample       = 300;    # keys sampled to locate the similarity cliff edge
 my $max_observed_message_length      = 0;
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
-my $uuid_re = qr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 my ( @in_files, @output_columns );
 my %in_files_matched;
@@ -2346,6 +2375,7 @@ sub _classify_argv_provenance {
                 'summary-bar-absolute|sba', 'summary-bar-log|sbl',
                 'summary-bar-reverse|sbr',
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
+                'expose|x', 'expose-thread|xt',
                 'expose-query-string|xqs', 'expose-session|xs', 'expose-user|xu',
                 'hide-session|hses', 'hide-user|hu', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
@@ -2362,10 +2392,10 @@ sub _classify_argv_provenance {
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
-                'udm-csv-separator|ucs', 'mask-uuid|uuid',
+                'udm-csv-separator|ucs', 'mask|m', 'mask-uuid|uuid',
                 'group-similar|g', 'no-final-pass',
                 'consolidation-trigger', 'consolidation-ceiling',
-                'consolidation-max-patterns', 'final-threshold',
+                'consolidation-max-patterns', 'final-threshold', 'skip-final-min-keys',
                 'group-ceiling|gc', 'heatmap|hm', 'heatmap-width|hmw',
                 'light-background|lbg', 'dark-background|dbg', 'histogram|hg',
                 'histogram-width|hgw', 'histogram-height|hgh',
@@ -2470,6 +2500,7 @@ sub emit_runtime_config_verbose {
         'include-success'                   => $include_success,
         'exclude-success'                   => $exclude_success,
         'highlight-success'                 => $highlight_success,
+        'expose'                            => join(',', @expose_names),
         'expose-query-string'               => $include_query_string,
         'expose-session'                    => $include_session,
         'expose-user'                       => $include_user,
@@ -2506,6 +2537,7 @@ sub emit_runtime_config_verbose {
         'sort-on'                           => $sort_type,
         'sort-ascending'                    => $sort_ascending,
         'threadpool-activity-summary'       => $include_threadpool_summary,
+        'mask'                              => join(',', @mask_names),
         'mask-uuid'                         => $mask_uuid,
         'group-similar'                     => $group_similar_sensitivity,
         'group-ceiling'                     => $consolidation_final_ceiling,
@@ -2784,8 +2816,6 @@ my %format_transform_code = (
     undef_bytes_dash    => q{ undef $bytes if $bytes eq "-"; },
     chop_http_proto     => q{ $message =~ s/ HTTP\/\d\.\d$//; },
     strip_query_string  => q{ $message =~ s/\?.+$//; },                # emitted only when query strings are excluded (CLI-gated at compile)
-    prepend_session     => q{ $message = "[$session] $message" if defined $session && $session ne '' && $session ne '-'; },  # emitted only when sessions are included (CLI-gated at compile); a bare - is an absent session (#444 D12/D14)
-    prepend_user        => q{ $message = "[$user] $message" if defined $user && $user ne '' && $user ne '-'; },  # emitted only when users are included (CLI-gated at compile, #444 D12)
     # The unit written beside the value on the line (#444 D7). The converted
     # value is stored as a string on purpose: the record lexicals are shared
     # by every entry for the whole run, a floating-point result would leave
@@ -2834,12 +2864,15 @@ sub format_registry_specs {
                     samples => [ 'ApplicationLog.log', 'ApplicationLog.2025-05-05.0.log', 'ErrorLog.2025-05-05.1.log', 'ScriptLog.2025-04-09.4.log', 'AkkaCommunicationLog.log', 'ApplicationLog.2025-05-05.0.log.gz' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'instance'],[5,'user'],[6,'session'],[7,'platform'],[8,'thread'],[9,'message'] ],
-      transforms => [ 'prepend_user' ],
+      transforms => [],
       message_metrics => {
           gate_lit => '=',
-          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B'  },
-                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms' } ],
-          mask => { pattern => ' ((bytes|durationM[sS])\s*=\s*)(\d+)', replace => ' $1?' },
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_key => 'bytes'          },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_key => 'durationM[sS]' } ],
+          # One mask over the probe keys it covers: KEYS is filled at compile
+          # time with the mask_key of every probe whose number the run does
+          # not expose, and the mask is left out entirely when that is none.
+          mask => { pattern => ' ((KEYS)\s*=\s*)(\d+)', replace => ' $1?' },
           marks_metrics_observed => 1,
       },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
@@ -2861,12 +2894,6 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
@@ -2876,7 +2903,7 @@ sub format_registry_specs {
       ],
       expect => [
         [ '2025-08-14 21:00:34', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-12', 'Enabled fix for WebSocket compression sometimes causing frames to exceed maximum WebSocket frame size', undef, undef, '0', '0' ],
-        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in ? millseconds', undef, '152', '0', '1' ],
+        [ '2025-08-14 21:00:35', 'INFO', 'c.t.c.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
       expect_outcomes => [ 0, 0 ] },
     # Integration Runtime: byte-identical line shape to Connection Server
@@ -2890,24 +2917,20 @@ sub format_registry_specs {
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[([^\]]*)\] ([^ ]*)\s+([^ ]*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'thread'],[3,'category_bucket'],[4,'object'],[5,'message'] ],
       transforms => [ 'mask_ephemeral_port' ],
-      message_metrics => {
-          gate_lit => ' milliseconds',
-          probes => [ { name => 'duration', field => 'duration', guard_lit => undef, pattern => ' (\d+) milliseconds', unit => 'ms' } ],
-          mask => { pattern => ' (\d+) milliseconds', replace => ' ? millseconds' },
-          marks_metrics_observed => 1,
-      },
       time => { layout => 'iso_ms_ddmm', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => 'ms', stats_eligible => 0,
       expect_ancestors => [],
       samples => [
         '2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted',
         '2025-28-01 07:26:36.635 [vert.x-eventloop-thread-0] INFO  c.t.s.SecurityManagerBootstrapper - initializing KeyStore provider',
+        '2025-28-01 07:26:40.100 [vert.x-eventloop-thread-3] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 10.1.2.3:52344 completed processing in 152 milliseconds',
       ],
       expect => [
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.i.IntegrationRuntimeConfiguration', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'Reading from config file D:\THINGW~1\integration-runtime\integrationRuntime-settings.json.encrypted', undef, undef, '0', '0' ],
         [ '2025-28-01 07:26:36', 'INFO', 'c.t.s.SecurityManagerBootstrapper', undef, undef, undef, undef, 'vert.x-eventloop-thread-0', 'initializing KeyStore provider', undef, undef, '0', '0' ],
+        [ '2025-28-01 07:26:40', 'INFO', 'c.t.i.a.AlwaysOnHttpServerVerticle', undef, undef, undef, undef, 'vert.x-eventloop-thread-3', 'Request from 10.1.2.3:XXXXX completed processing in 152 milliseconds', undef, undef, '0', '0' ],
       ],
-      expect_outcomes => [ 0, 0 ] },
+      expect_outcomes => [ 0, 0, 0 ] },
     # Windchill Workgroup Manager client logs: one line shape shared by the
     # genlwsc / uwgm_client / uwgm files (each file's own header block
     # declares `columns "date time tz msgtype logid tid area message"` and
@@ -3003,7 +3026,7 @@ sub format_registry_specs {
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+) (\S+) (\S+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'thread'],[10,'session'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_session', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3030,7 +3053,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) \[(\d+(?:\.\d+)?)(us|ms|s)\] \[(\d+(?:\.\d+)?)(?:us|ms|s)\]$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'duration_unit_token'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3060,7 +3083,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+) "([^"]+)" "([^"]+)" (\d+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[10,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3085,7 +3108,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)" (\d+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[10,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3110,7 +3133,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) "([^"]*)" "([^"]*)"$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3134,7 +3157,7 @@ sub format_registry_specs {
                     samples => [ 'localhost_access_log.2025-03-21.txt', 'localhost_access_log.txt' ] },
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) ([0-9.]+)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => 'ms', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3159,7 +3182,7 @@ sub format_registry_specs {
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'] ],
-      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'prepend_user' ],
+      transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
       duration_unit => undef, stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
@@ -3289,7 +3312,7 @@ sub format_registry_specs {
                                  'MethodServer.log', 'BackgroundMethodServerESI.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d{3}) (\w+) +\[(.*?)\] (\S+) (\S*) - (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'thread'],[4,'object'],[5,'user'],[6,'message'] ],
-      transforms => [ 'prepend_user' ],
+      transforms => [],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'local', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
       expect_ancestors => [],
@@ -4188,7 +4211,7 @@ sub compile_format_classifier {
 # success the non-captured record fields receive the entry's
 # static-order-faithful defaults ($clobbered — see the section header).
 # $opts carries the CLI-gated compile decisions (include_query_string,
-# include_session).
+# expose_metric).
 sub compile_format_extractor {
     my ($spec, $clobbered, $opts) = @_;
 
@@ -4262,7 +4285,19 @@ sub format_entry_block_src {
         my $any_defined = join(' || ', map { "defined \$$_->{field}" } @{ $mm->{probes} });
         my @mask_block;
         push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
-        push @mask_block, "        \$message =~ s/$mm->{mask}{pattern}/$mm->{mask}{replace}/g;" if $mm->{mask};
+        # The mask covers the probe keys whose number stays out of the
+        # message: a metric named on -x keeps its value in place, so its key
+        # drops out of the alternation, and a mask covering no key at all is
+        # not emitted.
+        if ($mm->{mask}) {
+            my $exposed = $opts->{expose_metric} || {};
+            my @mask_keys = map  { $_->{mask_key} }
+                            grep { defined $_->{mask_key} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
+            if (@mask_keys) {
+                ( my $mask_pattern = $mm->{mask}{pattern} ) =~ s/KEYS/join('|', @mask_keys)/e;
+                push @mask_block, "        \$message =~ s/$mask_pattern/$mm->{mask}{replace}/g;";
+            }
+        }
         push @body,
             "if (index(\$message, '$mm->{gate_lit}') >= 0) {\n"
           . join("\n", @probe_lines) . "\n"
@@ -4274,8 +4309,6 @@ sub format_entry_block_src {
 
     for my $t (@{ $spec->{transforms} }) {
         if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
-        if ($t eq 'prepend_session')    { next unless $opts->{include_session}; }
-        if ($t eq 'prepend_user')       { next unless $opts->{include_user}; }
         my $code = $format_transform_code{$t}
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
         push @body, $code;
@@ -4640,7 +4673,7 @@ sub build_format_registry {
     # equal to the declared expected record for every sample.
     for my $spec (grep { $_->{_compiled} } @specs) {
         my $extract = compile_format_extractor($spec, $clobbered_by{ $spec->{name} },
-            { include_query_string => 0, include_session => 0, include_user => 0 });
+            { include_query_string => 0 });
         my $want_o = $spec->{expect_outcomes};
         die "ltl: format registry: entry '$spec->{name}' declares " . (ref $want_o eq 'ARRAY' ? scalar(@$want_o) : 'no')
           . " expect_outcomes for " . scalar(@{ $spec->{samples} }) . " samples (one integer per sample: 4 classification conflict, 2 failure, 1 success, 0 unclassified)\n"
@@ -4790,7 +4823,7 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, include_session => $include_session, include_user => $include_user };
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric };
     @format_registry = ();
     @format_registry_members = ();
     @format_registry_pin_only = ();
@@ -9583,11 +9616,9 @@ sub print_help {
 
     # Message Grouping
     $out .= help_subheading("Message Grouping");
-    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified.");
-    $out .= help_opt("-uuid, --mask-uuid",            "Replace UUIDs/GUIDs with a placeholder so that requests differing only by ID are grouped together (simpler alternative to -g for UUID-only variation)");
-    $out .= help_opt("-xqs, --expose-query-string",  "Keep the query string when grouping URLs, so /api?a=1 and /api?b=2 are tracked separately");
-    $out .= help_opt("-xs,  --expose-session",       "Keep session IDs when grouping messages, so each session is tracked separately");
-    $out .= help_opt("-xu,  --expose-user",          "Keep user names when grouping messages, so each user is tracked separately");
+    $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
+    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
+    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric (duration, bytes, count, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -9655,7 +9686,7 @@ sub print_help {
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
-    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru).");
+    $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
     $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
 
@@ -10001,6 +10032,20 @@ sub resolve_udm_metric_names {
     return;
 }
 
+# The token capture shared by the counting user-defined metrics and the
+# exposed keys read from the line: the key, then = or :, then a value that
+# runs to the first character which cannot sit inside a field (whitespace,
+# comma, semicolon, quote, closing bracket or brace, & or ?). One
+# resolution surface for the rule — parse_udm_configs() builds a counting
+# config's default pattern with it, and the -x resolution reads a line's
+# named key with it, so the two can never read a line differently.
+# features/user-defined-metrics.md section Counting Aggregations.
+sub counting_token_pattern {
+    my ($key) = @_;
+    my $escaped_key = quotemeta($key);
+    return qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])&?]+)/;
+}
+
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
@@ -10157,7 +10202,7 @@ sub parse_udm_configs {
             my $escaped_key = quotemeta($token_key // $name);
             if ($agg_kind eq 'counting') {
                 # Token capture: any run of characters that cannot end a field
-                push @patterns, qr/\b${escaped_key}\s*[=:]\s*([^\s,;"'\])]+)/;
+                push @patterns, counting_token_pattern($token_key // $name);
             } else {
                 push @patterns, qr/\b${escaped_key}\s*[=:]\s*(${number})/;
                 push @patterns, qr/(${number})\s*[=:]?\s*${escaped_key}\b/;
@@ -10474,21 +10519,69 @@ sub group_similar_messages {
         %consolidation_key_message_cat_gk = ();
         %consolidation_key_generation = ();
         %consolidation_key_checkpoint_count = ();
-        %consolidation_ngram_index = ();
+        %consolidation_id_index = ();
         %consolidation_key_trigrams = ();
-        %consolidation_key_trigrams_norm = ();
-        %consolidation_posting_size = ();
         %consolidation_category_unmatched_count = ();
         %consolidation_absorption_ema = ();
         # Preserved: %consolidation_patterns, %consolidation_clusters, %consolidation_pattern_generation, %consolidation_cat_stats
 
-        # Swap threshold for final pass (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
+        # The final pass scores at the -g sensitivity unless --final-threshold was given
+        # (used by find_consolidation_candidates and try_consolidation_merge_into_existing)
         my $saved_threshold = $consolidation_threshold;
-        $consolidation_threshold = $consolidation_final_threshold;
+        $consolidation_threshold = $consolidation_final_threshold // $consolidation_threshold;
 
         $consolidation_phase = 'final_pass';
         my $fp_total_new_patterns = 0;
         my $fp_window_capacity = 1000;
+
+        # Decide, per group, whether the final pass is worth running (#584). Streaming
+        # having absorbed almost nothing means the requested similarity does not reach
+        # this data; a large population handed forward means the pass would be
+        # expensive. Both are required: size alone is not evidence of futility, and
+        # skipping a cheap pass saves nothing. Decided here, at the boundary where
+        # streaming has finished and the final pass has not started, so no key is left
+        # half-processed and whatever streaming grouped stays grouped.
+        SKIP_DECISION: {
+            # Nothing can qualify unless the surviving population reaches the floor,
+            # so that cheap total is tested before any per-key work. Past it, the
+            # groups are counted, and only a group that actually skips has its keys
+            # collected: a run that skips nothing never builds a second copy of a key
+            # set that can hold a million strings.
+            my $total_forward = 0;
+            $total_forward += scalar keys %{$log_messages{$_}} for keys %log_messages;
+            last SKIP_DECISION if $total_forward < $consolidation_skip_min_keys;
+
+            my %forward_count;
+            for my $category (keys %log_messages) {
+                for my $log_key (keys %{$log_messages{$category}}) {
+                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
+                    $grouping_key //= "";
+                    $forward_count{"$category|$grouping_key"}++;
+                }
+            }
+            for my $cat_gk (sort keys %forward_count) {
+                next if $forward_count{$cat_gk} < $consolidation_skip_min_keys;
+                my $seen = $consolidation_cat_stats{$cat_gk}{keys_seen} // 0;
+                next unless $seen > 0;
+                my $absorbed = $consolidation_streaming_absorbed{$cat_gk} // 0;
+                next if ($absorbed / $seen) > $consolidation_skip_absorption;
+                $consolidation_final_pass_skipped{$cat_gk} = 1;
+            }
+            if (keys %consolidation_final_pass_skipped) {
+                for my $cat_gk (sort keys %consolidation_final_pass_skipped) {
+                    my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
+                    my @keys;
+                    for my $log_key (keys %{$log_messages{$category}}) {
+                        my ($gk) = $log_key =~ /^\[([^\]]+)\]/;
+                        $gk //= "";
+                        push @keys, $log_key if $gk eq $grouping_key;
+                    }
+                    my $edge = consolidation_cliff_edge(\@keys, $consolidation_threshold);
+                    $consolidation_cliff_edge{$cat_gk} = $edge if defined $edge;
+                }
+                report_skipped_final_pass(\%forward_count);
+            }
+        }
 
         # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
@@ -10524,6 +10617,8 @@ sub group_similar_messages {
                 my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                 $grouping_key //= "";
                 my $cat_gk = "$category|$grouping_key";
+
+                next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
                 $consolidation_cat_stats{$cat_gk}{fp_keys_seen} = ($consolidation_cat_stats{$cat_gk}{fp_keys_seen} // 0) + 1;
 
@@ -10573,6 +10668,7 @@ sub group_similar_messages {
                     my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
                     $grouping_key //= "";
                     my $cat_gk = "$category|$grouping_key";
+                    next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
                     my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
                     if ($entry) {
@@ -10738,98 +10834,131 @@ sub dice_coefficient {
     return int((2 * $intersection * 100) / ($size_a + $size_b));
 }
 
-# Build ngram index for a set of keys within a consolidation category
+# Build the candidate index for a set of keys within a consolidation category.
+# Keys get integer ids in order of trigram count, then batch order, so every
+# posting array (trigram -> ids) is ordered by key size and a search can crop it
+# to the sizes its threshold admits.
 sub build_consolidation_ngram_index {
     my ($cat_gk, $log_keys_ref) = @_;
-    my $indexed = 0;
+    my (@batch, %batch_pos, %trigram_count);
     for my $log_key (@$log_keys_ref) {
         my $msg = $consolidation_key_message{$log_key};
         next unless defined $msg;
+        next if exists $batch_pos{$log_key};
         # Reuse existing trigrams for surviving keys (#135: avoid recomputing across checkpoints)
-        my $trigrams = $consolidation_key_trigrams{$log_key};
-        if (!$trigrams) {
-            $trigrams = get_consolidation_trigrams($msg);
-            $consolidation_key_trigrams{$log_key} = $trigrams;
-            # Build UUID-normalized trigrams for Dice scoring
-            if ($msg =~ $uuid_re) {
-                (my $normalized = $msg) =~ s/$uuid_re/<UUID>/g;
-                $consolidation_key_trigrams_norm{$log_key} = get_consolidation_trigrams($normalized);
-            }
-        }
-        for my $trig (keys %$trigrams) {
-            $consolidation_ngram_index{$cat_gk}{$trig}{$log_key} = 1;
-        }
-        $indexed++;
+        my $trigrams = $consolidation_key_trigrams{$log_key} //= get_consolidation_trigrams($msg);
+        $batch_pos{$log_key} = scalar @batch;
+        $trigram_count{$log_key} = scalar keys %$trigrams;
+        push @batch, $log_key;
     }
-    # Cache posting list sizes for discriminative trigram selection
-    delete $consolidation_posting_size{$cat_gk};
-    for my $trig (keys %{$consolidation_ngram_index{$cat_gk}}) {
-        $consolidation_posting_size{$cat_gk}{$trig} = scalar keys %{$consolidation_ngram_index{$cat_gk}{$trig}};
+    my (%ids, @keys, @size, @trig, %post);
+    for my $log_key (sort { $trigram_count{$a} <=> $trigram_count{$b} || $batch_pos{$a} <=> $batch_pos{$b} } @batch) {
+        my $id = scalar @keys;
+        push @keys, $log_key;
+        $ids{$log_key} = $id;
+        $size[$id] = $trigram_count{$log_key};
+        $trig[$id] = $consolidation_key_trigrams{$log_key};
+        push @{$post{$_}}, $id for keys %{$trig[$id]};
     }
-    return $indexed;
+    $consolidation_id_index{$cat_gk} = { ids => \%ids, keys => \@keys, size => \@size, trig => \@trig, post => \%post };
+    return scalar @keys;
 }
 
-# Find candidate keys similar to source_key using discriminative trigram pre-filter + Dice verification
+# Find keys whose Dice score against $source_key reaches $threshold_pct, skipping keys
+# in %$consumed_ref. The probe is the source's rarest trigrams, as many as guarantee a
+# partner at the threshold shares at least one. A candidate needs a number of shared
+# probe trigrams set by its size; it is scored once it holds a quarter of them and
+# dropped once the positions left cannot supply the rest. The walk ends after the probe
+# trigram that yields a partner, or once no candidate seen or still unseen can qualify.
+# Returns { key, score } records, best score first, then by key.
 sub find_consolidation_candidates {
-    my ($cat_gk, $source_key, $threshold_pct, $max_candidates) = @_;
-    $max_candidates //= 50;
-    my $source_trigrams = $consolidation_key_trigrams{$source_key};
-    return () unless defined $source_trigrams;
-
-    my $source_size = scalar keys %$source_trigrams;
+    my ($cat_gk, $source_key, $threshold_pct, $consumed_ref) = @_;
+    my $index = $consolidation_id_index{$cat_gk} or return ();
+    my $sid = $index->{ids}{$source_key};
+    return () unless defined $sid;
+    my ($keys, $size, $trig, $post) = @{$index}{qw(keys size trig post)};
+    my $source_size = $size->[$sid];
     return () if $source_size == 0;
+    my $t = $threshold_pct;
 
-    # Length pre-filter: Dice >= T% requires |B| >= |A|*T/(200-T)
-    my $min_cand_size = int($source_size * $threshold_pct / (200 - $threshold_pct));
-    my $max_cand_size = int($source_size * (200 - $threshold_pct) / $threshold_pct) + 1;
+    # Probe length p = |r| - ceil(T*|r|/(200-T)): a partner at T shares one of these
+    my %posting_length = map { $_ => scalar @{$post->{$_}} } keys %{$trig->[$sid]};
+    my @probe = sort { $posting_length{$a} <=> $posting_length{$b} || $a cmp $b } keys %posting_length;
+    my $p = $source_size - int(($source_size * $t + (200 - $t) - 1) / (200 - $t)) + 1;
+    $p = 1 if $p < 1;
+    $p = @probe if $p > @probe;
+    my $outside = $source_size - $p;
+    # Size filter: Dice >= T% requires |r|*T/(200-T) <= |c| <= |r|*(200-T)/T
+    my $min_cand_size = int($source_size * $t / (200 - $t));
+    my $max_cand_size = int($source_size * (200 - $t) / $t) + 1;
+    # int(($sum_const + T*s) / 200) = ceil(T*(|r|+s)/200)
+    my $sum_const = $t * $source_size + 199;
 
-    # Phase 1: top-K most discriminative trigrams (smallest posting lists)
-    my $ps = $consolidation_posting_size{$cat_gk};
-    my @disc_trigrams = sort { (($ps->{$a} // 0) <=> ($ps->{$b} // 0)) || ($a cmp $b) }
-                        grep { exists $consolidation_ngram_index{$cat_gk}{$_} }
-                        keys %$source_trigrams;
-    my $topk_actual = min($consolidation_discriminative_topk, scalar @disc_trigrams);
-    splice(@disc_trigrams, $topk_actual) if @disc_trigrams > $topk_actual;
+    # Ids are ordered by size, so the size filter is the id range [$id_lo, $id_hi]
+    my ($lo, $hi) = (0, scalar @$size);
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] < $min_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_lo = $lo;
+    $hi = scalar @$size;
+    while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $max_cand_size) { $lo = $mid + 1 } else { $hi = $mid } }
+    my $id_hi = $lo - 1;
 
-    my $loose_min = max(1, int($consolidation_prefilter_ratio * $topk_actual));
-
-    my %candidate_hits;
-    for my $trig (@disc_trigrams) {
-        for my $cand_key (keys %{$consolidation_ngram_index{$cat_gk}{$trig}}) {
-            next if $cand_key eq $source_key;
-            $candidate_hits{$cand_key}++;
+    # $need[id]: shared probe trigrams the candidate requires (-1 once scored or dropped)
+    my (@need, @hits, @score_at, @deadline, @dying, @results);
+    my $live = 0;
+    $need[$sid] = -1;
+    for my $i (0 .. $p - 1) {
+        # A candidate first seen here gathers at most p - i hits, so only sizes s with
+        # ceil(T*(|r|+s)/200) - (|r| - p) <= p - i can still qualify; those end at $new_hi
+        my $s_max = int(200 * ($p - $i + $outside) / $t) - $source_size;
+        ($lo, $hi) = ($id_lo, $id_hi + 1);
+        while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($size->[$mid] <= $s_max) { $lo = $mid + 1 } else { $hi = $mid } }
+        my $new_hi = $lo - 1;
+        # While candidates are live they keep gathering hits across the whole size range
+        my $end_id = $live > 0 ? $id_hi : $new_hi;
+        if ($end_id >= $id_lo) {
+            my $list = $post->{$probe[$i]};
+            ($lo, $hi) = (0, scalar @$list);
+            while ($lo < $hi) { my $mid = ($lo + $hi) >> 1; if ($list->[$mid] < $id_lo) { $lo = $mid + 1 } else { $hi = $mid } }
+            for my $k ($lo .. $#$list) {
+                my $cid = $list->[$k];
+                last if $cid > $end_id;
+                my $need = $need[$cid];
+                if (!defined $need) {
+                    next if $cid > $new_hi;
+                    if ($consumed_ref && $consumed_ref->{$keys->[$cid]}) { $need[$cid] = -1; next; }
+                    $need = int(($sum_const + $t * $size->[$cid]) / 200) - $outside;
+                    $need = 1 if $need < 1;
+                    $need[$cid] = $need;
+                    $score_at[$cid] = int(($need + 3) / 4);
+                    if ($need > 1) {
+                        # With h hits it can still reach its bound while the position is at most p - need + h - 1
+                        my $d = $p - $need;
+                        if ($d < $i) { $need[$cid] = -1; next; }
+                        $deadline[$cid] = $d;
+                        $dying[$d]++;
+                        $live++;
+                    }
+                }
+                next if $need < 0;
+                if ($need > 1 && defined $hits[$cid] && $deadline[$cid] < $i - 1) { $need[$cid] = -1; next; }
+                my $h = ++$hits[$cid];
+                if ($h == $score_at[$cid]) {
+                    if ($need > 1) { $dying[$deadline[$cid]]--; $live--; }
+                    $need[$cid] = -1;
+                    my $score = dice_coefficient($trig->[$sid], $trig->[$cid]);
+                    push @results, { key => $keys->[$cid], score => $score } if $score >= $t;
+                } elsif ($h > 1) {
+                    $dying[$deadline[$cid]]--;
+                    $deadline[$cid]++;
+                    $dying[$deadline[$cid]]++;
+                }
+            }
         }
+        $live -= $dying[$i - 1] // 0 if $i > 0;
+        last if @results;
+        last if $new_hi < $id_lo && $live <= 0;
     }
-
-    # Phase 2: Full Dice verification using UUID-normalized trigrams when available
-    my $source_trig_dice = $consolidation_key_trigrams_norm{$source_key} // $source_trigrams;
-    my $source_size_dice = scalar keys %$source_trig_dice;
-    my $min_dice_size = int($source_size_dice * $threshold_pct / (200 - $threshold_pct));
-    my $max_dice_size = int($source_size_dice * (200 - $threshold_pct) / $threshold_pct) + 1;
-
-    my @results;
-    for my $cand_key (keys %candidate_hits) {
-        next if $candidate_hits{$cand_key} < $loose_min;
-
-        my $cand_trigrams = $consolidation_key_trigrams{$cand_key};
-        next unless defined $cand_trigrams;
-
-        my $cand_size = scalar keys %$cand_trigrams;
-        next if $cand_size < $min_cand_size || $cand_size > $max_cand_size;
-
-        my $cand_trig_dice = $consolidation_key_trigrams_norm{$cand_key} // $cand_trigrams;
-        my $cand_size_dice = scalar keys %$cand_trig_dice;
-        next if $cand_size_dice < $min_dice_size || $cand_size_dice > $max_dice_size;
-
-        my $score = dice_coefficient($source_trig_dice, $cand_trig_dice);
-        if ($score >= $threshold_pct) {
-            push @results, { key => $cand_key, score => $score };
-        }
-    }
-
-    @results = sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
-    splice(@results, $max_candidates) if @results > $max_candidates;
-    return @results;
+    return sort { $b->{score} <=> $a->{score} || $a->{key} cmp $b->{key} } @results;
 }
 
 # Pure Perl banded edit distance with backtrace — returns mask arrayref (1=keep, 0=variable)
@@ -11391,6 +11520,7 @@ sub consolidation_process_key {
         if ($cluster) {
             merge_consolidation_stats($cluster, $stats_source);
             $consolidation_cat_stats{$cat_gk}{"${pfx}s1_inline"}++;
+            $consolidation_streaming_absorbed{$cat_gk}++ if $consolidation_phase eq 'streaming';
             return 1;
         }
     }
@@ -11559,7 +11689,7 @@ sub run_consolidation_pass {
     my $index_limit = min($consolidation_trigger, scalar @gate2_survivors);
     my @index_batch = @gate2_survivors[0 .. $index_limit - 1];
 
-    delete $consolidation_ngram_index{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
     build_consolidation_ngram_index($cat_gk, \@index_batch);
 
     my $patterns_discovered = 0;
@@ -11583,7 +11713,7 @@ sub run_consolidation_pass {
 
         $keys_searched++;
         $fc_calls++;
-        my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_threshold);
+        my @matches = find_consolidation_candidates($cat_gk, $key, $consolidation_threshold, \%consumed);
 
         for my $match (@matches) {
             next if $consumed{$match->{key}};
@@ -11702,7 +11832,7 @@ sub process_final_pass_window {
     }
 
     # Build trigram index for window
-    delete $consolidation_ngram_index{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
     build_consolidation_ngram_index($cat_gk, \@key_list);
 
     # Build window-local partition buckets for re-scan
@@ -11727,7 +11857,7 @@ sub process_final_pass_window {
 
         $keys_searched++;
         $fc_calls++;
-        my @matches = find_consolidation_candidates($cat_gk, $log_key, $consolidation_threshold);
+        my @matches = find_consolidation_candidates($cat_gk, $log_key, $consolidation_threshold, \%consumed);
 
         for my $match (@matches) {
             next if $consumed{$match->{key}};
@@ -11836,10 +11966,8 @@ sub process_final_pass_window {
     for my $log_key (@key_list) {
         delete $consolidation_key_message{$log_key};
         delete $consolidation_key_trigrams{$log_key};
-        delete $consolidation_key_trigrams_norm{$log_key};
     }
-    delete $consolidation_ngram_index{$cat_gk};
-    delete $consolidation_posting_size{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
 
     return ($patterns_discovered, $messages_absorbed - $rescan_absorbed, $rescan_absorbed, $fc_calls, $messages_absorbed, $cross_merges);
 }
@@ -11926,6 +12054,92 @@ sub get_consolidation_max_survivals {
     return 5;                            # >= 99%: five retries (power-law data)
 }
 
+# Locate the similarity the data clusters at, for a group whose final pass is being
+# skipped (#584). Over a bounded sample of the keys handed forward, score each key's
+# best partner by Dice. On a log whose messages carry a per-request value the
+# sensitivity cannot see past, that distribution is bimodal: a reachable population at
+# or above the requested similarity, and a larger unreachable one below a gap. The
+# cliff edge is the top of that gap — where partners become reachable.
+#
+# It locates the threshold, not the outcome: it says where partners exist, not how many
+# rows would result, and it does not know where grouping stops being meaningful. The
+# caller presents it as an observation about the data, never as a setting to adopt.
+#
+# Returns the percentage, or undef when the sample is too small or shows no clear gap.
+sub consolidation_cliff_edge {
+    my ($keys_ref, $threshold_pct) = @_;
+    my @keys = @$keys_ref;
+    return undef if scalar @keys < 50;
+
+    # Bounded, evenly spread sample so the cost does not scale with the input
+    if (scalar @keys > $consolidation_cliff_sample) {
+        my $stride = scalar(@keys) / $consolidation_cliff_sample;
+        @keys = map { $keys[int($_ * $stride)] } 0 .. $consolidation_cliff_sample - 1;
+    }
+    my @trigrams = map { get_consolidation_trigrams(substr($_, 0, $consolidation_message_length_cap)) } @keys;
+    my $n = scalar @keys;
+
+    my @best;
+    for my $i (0 .. $n - 1) {
+        my $best = 0;
+        for my $j (0 .. $n - 1) {
+            next if $i == $j;
+            my $score = dice_coefficient($trigrams[$i], $trigrams[$j]);
+            $best = $score if $score > $best;
+        }
+        push @best, $best;
+    }
+
+    my %histogram;
+    $histogram{$_}++ for @best;
+    my $sparse = $n * 0.005;
+
+    # Widest run of near-empty scores below the requested similarity that still has a
+    # substantial population beneath it — that population is what the run cannot reach
+    my ($widest, $gap_lo) = (0, undef);
+    my $i = 50;
+    while ($i < $threshold_pct) {
+        if (($histogram{$i} // 0) <= $sparse) {
+            my $j = $i;
+            $j++ while $j < $threshold_pct && (($histogram{$j} // 0) <= $sparse);
+            my $below = grep { $_ < $i } @best;
+            if (($j - $i) > $widest && $below > $n * 0.15) {
+                ($widest, $gap_lo) = ($j - $i, $i);
+            }
+            $i = $j;
+        }
+        else { $i++ }
+    }
+    return undef unless $widest >= 3 && defined $gap_lo;
+    my $edge = $gap_lo - 1;
+    return ($edge >= 50 && $edge < $threshold_pct) ? $edge : undef;
+}
+
+# Tell the analyst that final-pass consolidation was skipped, why, and what to try
+# (#584). Behavioural, so it always prints: --disable-progress suppresses progress
+# indicators only. No internal identifiers reach this text.
+sub report_skipped_final_pass {
+    my ($forward_count_ref) = @_;
+    my @skipped = sort keys %consolidation_final_pass_skipped;
+    return unless @skipped;
+
+    my $skipped_keys = 0;
+    $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
+
+    my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
+        . ($skipped_keys == 1 ? "" : "s")
+        . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
+
+    my @edges = sort { $a <=> $b } grep { defined } map { $consolidation_cliff_edge{$_} } @skipped;
+    if (@edges) {
+        $notice .= " This data's similarity clusters below $edges[0]%, which is a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more.";
+    }
+    $notice .= " Where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy.\n";
+
+    print STDERR $notice;
+    return;
+}
+
 # Fire a consolidation checkpoint for one category/grouping_key pair
 sub run_consolidation_checkpoint {
     my ($category, $grouping_key) = @_;
@@ -11957,7 +12171,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 delete $consolidation_unmatched{$cat_gk}{$key};
@@ -11996,14 +12209,12 @@ sub run_consolidation_checkpoint {
         delete $consolidation_key_message{$key};
         delete $consolidation_key_message_cat_gk{$key};
         delete $consolidation_key_trigrams{$key};
-        delete $consolidation_key_trigrams_norm{$key};
         delete $consolidation_key_generation{$key};
         delete $consolidation_key_checkpoint_count{$key};
     }
 
     # Free index structures (per-checkpoint, not per-key)
-    delete $consolidation_ngram_index{$cat_gk};
-    delete $consolidation_posting_size{$cat_gk};
+    delete $consolidation_id_index{$cat_gk};
 
     # Cross-cluster merge and pattern generation bump
     if ($discovered > 0) {
@@ -12018,6 +12229,9 @@ sub run_consolidation_checkpoint {
     # and the working set is bounded (no new keys arrive). Eviction here would
     # permanently lose keys with no subsequent pass to catch them.
     my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;
+    # Cumulative streaming absorption (#584): the skip decision reads the whole
+    # phase, not the EMA, which a single late checkpoint can lift or depress.
+    $consolidation_streaming_absorbed{$cat_gk} += $absorbed unless $is_final_pass;
     if (exists $consolidation_absorption_ema{$cat_gk}) {
         $consolidation_absorption_ema{$cat_gk} = $consolidation_eviction_ema_alpha * $absorption_rate
             + (1 - $consolidation_eviction_ema_alpha) * $consolidation_absorption_ema{$cat_gk};
@@ -12049,7 +12263,6 @@ sub run_consolidation_checkpoint {
                 delete $consolidation_key_message{$key};
                 delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
-                delete $consolidation_key_trigrams_norm{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
                 $evicted++;
@@ -12098,10 +12311,8 @@ sub named_structure_sizes {
         consolidation_patterns => Devel::Size::total_size(\%consolidation_patterns),
         consolidation_key_message => Devel::Size::total_size(\%consolidation_key_message),
         consolidation_unmatched => Devel::Size::total_size(\%consolidation_unmatched),
-        consolidation_ngram_index => Devel::Size::total_size(\%consolidation_ngram_index),
-        consolidation_posting_size => Devel::Size::total_size(\%consolidation_posting_size),
+        consolidation_id_index => Devel::Size::total_size(\%consolidation_id_index),
         consolidation_key_trigrams => Devel::Size::total_size(\%consolidation_key_trigrams),
-        consolidation_key_trigrams_norm => Devel::Size::total_size(\%consolidation_key_trigrams_norm),
     );
 }
 
@@ -13028,6 +13239,106 @@ sub available_metric_names {
     return (qw(duration bytes count), map { $_->{name} } @udm_configs);
 }
 
+# Resolve the names given to -x / --expose and its shorthands. A built-in
+# name resolves first: the query string is kept in the message; the thread,
+# session and user are appended to the end of it; a metric name, or the key
+# as the file writes it, keeps its number in the message in place of the
+# mask. Any other name is a key read from the line by the counting token
+# rule and appended. The order the names were given is the order the values
+# are appended in, so the same combination of values gives the same message
+# whatever order the line carries them in; a name given twice keeps its
+# first position. Runs after parse_udm_configs(), whose metric names and
+# token keys it resolves against, and before build_format_registry(), which
+# bakes each format's metric masks into its extraction code.
+sub resolve_expose_names {
+    my %seen;
+    for my $raw (@expose_raw) {
+        my $name = trim($raw);
+        next if $name eq '' || $seen{$name}++;
+        push @expose_names, $name;
+        if    ( $name eq 'query-string' ) { $include_query_string = 1 }
+        elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
+        elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
+        elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
+        elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
+        elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
+        elsif ( $name eq 'count' )        { $expose_count = 1 }
+        else {
+            my ($config) = grep { $_->{name} eq $name
+                                  || $_->{base_name} eq $name
+                                  || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+            if ($config) { $config->{expose} = 1 }
+            else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
+        }
+    }
+    $expose_active = @expose_appends ? 1 : 0;
+    return;
+}
+
+# The identifiers -m / --mask can name, each with the pattern that finds it in
+# the message and the placeholder of its shape that replaces it. Word-boundary
+# tests keep an identifier embedded in a longer token as written: a UUID is
+# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
+# digit either side; an IPv4 address is four decimal octets from 0 to 255
+# without leading zeros, with no word character or digit-and-dot before, and no word
+# character or further dotted digit after, so a port, a leading / and a thread
+# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
+# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
+# with no word character, colon or dot before and no word character or colon
+# after, so a zone and a bracketed port stay as written around the placeholder.
+# A bare :: is a separator in messages and is never matched. Every option that
+# names one of these identifiers resolves it through this table.
+my %mask_patterns;
+{
+    my $hex = '[0-9A-Fa-f]';
+    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+    my $ipv4 = "(?:$octet\\.){3}$octet";
+    my $h = '[0-9A-Fa-f]{1,4}';
+    my $ls32 = "(?:$h:$h|$ipv4)";
+    my $ipv6 = join '|',
+        "(?:${h}:){6}$ls32",
+        "::(?:${h}:){5}$ls32",
+        "(?:${h})?::(?:${h}:){4}$ls32",
+        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
+        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
+        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
+        "(?:(?:${h}:){0,4}${h})?::$ls32",
+        "(?:(?:${h}:){0,5}${h})?::$h",
+        "(?:${h}:){0,6}${h}::";
+    %mask_patterns = (
+        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
+        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
+        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
+    );
+}
+my @mask_order = qw(uuid ipv6 ipv4);
+
+# Resolve the names given to -m / --mask and -uuid into the substitutions the
+# run applies. A value may be a comma-separated list; a name given twice keeps
+# its first position; ip names both address versions. The substitutions are
+# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the same
+# names give the same message. An unknown name stops the run.
+sub resolve_mask_names {
+    my %seen;
+    my %wanted;
+    for my $raw (@mask_raw) {
+        for my $name ( map { trim($_) } split /,/, $raw ) {
+            next if $name eq '' || $seen{$name}++;
+            push @mask_names, $name;
+            if    ( $name eq 'ip' )                      { $wanted{ipv4} = 1; $wanted{ipv6} = 1 }
+            elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }
+            else {
+                print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");
+                exit 1;
+            }
+        }
+    }
+    @mask_subs = map { $mask_patterns{$_} } grep { $wanted{$_} } @mask_order;
+    $mask_active = @mask_subs ? 1 : 0;
+    $mask_uuid   = $wanted{uuid} ? 1 : 0;
+    return;
+}
+
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
@@ -13245,6 +13556,15 @@ sub adapt_to_command_line_options {
 
     %option_provenance = _classify_argv_provenance(\@cli_argv, \@env_args);
 
+    # The two spellings of masking report as one configuration: whenever
+    # either -m or -uuid was given, runtime-config carries both the mask row
+    # (the resolved names) and the mask-uuid row (whether UUIDs are masked).
+    for my $pair ( [ 'mask', 'mask-uuid' ], [ 'mask-uuid', 'mask' ] ) {
+        my ( $given, $other ) = @$pair;
+        next unless $option_provenance{$given} && !$option_provenance{$other};
+        $option_provenance{$other} = [ @{ $option_provenance{$given} } ];
+    }
+
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
     # Resolve the terminal-width override before dispatching informational
@@ -13314,9 +13634,11 @@ sub adapt_to_command_line_options {
         'omit-bytes|ob' => \$omit_bytes,
         'omit-count|oc' => \$omit_count,
         'include-count|ic' => \$include_count,
-        'expose-query-string|xqs' => \$include_query_string,
-        'expose-session|xs' => \$include_session,
-        'expose-user|xu' => \$include_user,
+        'expose|x=s' => sub { push @expose_raw, $_[1] },
+        'expose-thread|xt' => sub { push @expose_raw, 'thread' },
+        'expose-query-string|xqs' => sub { push @expose_raw, 'query-string' },
+        'expose-session|xs' => sub { push @expose_raw, 'session' },
+        'expose-user|xu' => sub { push @expose_raw, 'user' },
         'hide-session|hses' => \$hide_session,
         'hide-user|hu' => \$hide_user,
         'hide-classification|hcl' => \$hide_classification,
@@ -13357,13 +13679,15 @@ sub adapt_to_command_line_options {
         'user-defined-metrics|udm=s' => \@udm_raw_args,
         'udm-csv-message|ucm=s'    => \@udm_csv_message_col_names,
         'udm-csv-separator|ucs=s'  => \$csv_separator_override,
-        'mask-uuid|uuid' => \$mask_uuid,
+        'mask|m=s' => sub { push @mask_raw, $_[1] },
+        'mask-uuid|uuid' => sub { push @mask_raw, 'uuid'; $mask_uuid_option = 1 },        # hidden - deprecated spelling of -m uuid; kept working, prints a notice
         'group-similar|g:s' => \$group_similar_sensitivity,
         'no-final-pass' => sub { $consolidation_final_pass = 0; },                  # hidden
         'consolidation-trigger=i' => \$consolidation_trigger,                       # hidden
         'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,            # hidden
         'consolidation-max-patterns=i' => \$consolidation_max_patterns,             # hidden
         'final-threshold=i' => \$consolidation_final_threshold,                     # hidden
+        'skip-final-min-keys=i' => \$consolidation_skip_min_keys,                    # hidden (#584): population floor for the final-pass skip, so the decision is testable on a small fixture
         'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
@@ -13854,6 +14178,11 @@ sub adapt_to_command_line_options {
 
     parse_udm_configs() if @udm_raw_args;
 
+    # The exposed names resolve against the metrics the run declares, so
+    # this follows the -udm configs and precedes the registry build.
+    resolve_expose_names() if @expose_raw;
+    resolve_mask_names()   if @mask_raw;
+
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my $resolved = resolve_metric_operand($heatmap_metric);
@@ -13908,6 +14237,12 @@ sub adapt_to_command_line_options {
     if ($omit_stats) {
         print STDERR "Warning: -os/--omit-stats is deprecated: use -od/--omit-durations to keep durations from being captured, or -hst/--hide-stats to keep the statistics panel from being displayed\n";
         $hide_stats = 1;
+    }
+
+    # -uuid/--mask-uuid is the deprecated spelling of -m uuid: it masks as
+    # before and tells the user where the option went.
+    if ($mask_uuid_option) {
+        print STDERR "Warning: -uuid/--mask-uuid is deprecated: use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6\n";
     }
 
     # With no message retained, the options that only configure the per-message
@@ -14482,13 +14817,13 @@ sub read_and_process_logs {
             if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 if( defined $count ) {
-                    $message =~ s/ count\s*=\s*\d+/ count=?/g;                  # mask out actual count values for grouping purposes
+                    $message =~ s/ count\s*=\s*\d+/ count=?/g unless $expose_count;   # the value is masked for grouping, and kept in place when the run exposes count
                     $metrics_observed = 1;
                 }
             }
 
-            ## THREAD POOL # populate if thread name was found
-            if( defined $thread && $thread ne "" ) {
+            ## THREAD POOL # populate if thread name was found; a bare - is an absent thread
+            if( defined $thread && $thread ne "" && $thread ne "-" ) {
                 ( $threadpool ) = $thread =~ /(.*)-\d+$/;
                 $threadname = defined $threadpool ? $threadpool : $thread;
             }
@@ -14526,7 +14861,7 @@ sub read_and_process_logs {
                     # numeric coercion, transforms, and unit conversion do not apply
                     if ($config->{agg_kind} eq 'counting') {
                         $udm_values{$name} = $matched_value;
-                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
                         next;
                     }
 
@@ -14551,8 +14886,9 @@ sub read_and_process_logs {
                     my $converted_value = defined $config->{converter} ? $config->{converter}->($raw_value) : $raw_value;
                     $udm_values{$name} = $converted_value if defined $converted_value;
 
-                    # Mask extracted values in message for grouping (skip for CSV)
-                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13;
+                    # Mask extracted values in message for grouping (skip for CSV,
+                    # and for a metric the run exposes)
+                    $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
                 }
             }
             $metrics_observed = 1 if %udm_values;
@@ -14911,8 +15247,42 @@ sub read_and_process_logs {
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     $log_level =~ s/-HL$//;
 
-                    # Substitute UUID with HASH if command line option to do so is present (temporary feature to be eclipsed by group similar feature)
-                    $message =~ s/\S{8}-\S{4}-\S{4}-\S{4}-\S{12}+/########-####-####-####-############/g if defined $mask_uuid && $mask_uuid;
+                    # Exposed values (-x), appended in the order their names
+                    # were given, after the metric masks have run: the thread,
+                    # session and user fields as the format captured them,
+                    # and a key read from the line whose value the formed
+                    # message no longer yields. The index() test rejects a
+                    # line that cannot carry the key before the pattern runs,
+                    # and $expose_active keeps a run that exposes nothing to
+                    # one scalar test per line.
+                    if( $expose_active ) {
+                        for my $ex (@expose_appends) {
+                            if ($ex->[0] == EXPOSE_LINE_KEY) {
+                                next if index($_, $ex->[1]) < 0;
+                                my ($line_value) = $_ =~ $ex->[2];
+                                next unless defined $line_value;
+                                my ($message_value) = $message =~ $ex->[2];
+                                next if defined $message_value && $message_value eq $line_value;
+                                $message .= " $ex->[1]=$line_value";
+                            } else {
+                                my $field_value = $ex->[0] == EXPOSE_THREAD  ? $thread
+                                                : $ex->[0] == EXPOSE_SESSION ? $session
+                                                :                              $user;
+                                next unless defined $field_value && $field_value ne '' && $field_value ne '-';
+                                $message .= " $ex->[1]=$field_value";
+                            }
+                        }
+                    }
+
+                    # Masks (-m), applied to the formed message after the
+                    # exposed values have been added, so an exposed value that
+                    # carries an identifier is masked in place. $mask_active
+                    # keeps a run that masks nothing to one scalar test.
+                    if( $mask_active ) {
+                        for my $m (@mask_subs) {
+                            $message =~ s/$m->[0]/$m->[1]/g;
+                        }
+                    }
 
                     # Hoist truncated metadata for consolidation grouping key (Issue #96)
                     my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;
@@ -18699,9 +19069,8 @@ sub print_verbose_output {
         printf "MEMORY_FINAL\tconsolidation_patterns\t%d\n", Devel::Size::total_size(\%consolidation_patterns);
         printf "MEMORY_FINAL\tconsolidation_key_message\t%d\n", Devel::Size::total_size(\%consolidation_key_message);
         printf "MEMORY_FINAL\tconsolidation_unmatched\t%d\n", Devel::Size::total_size(\%consolidation_unmatched);
-        printf "MEMORY_FINAL\tconsolidation_ngram_index\t%d\n", Devel::Size::total_size(\%consolidation_ngram_index);
+        printf "MEMORY_FINAL\tconsolidation_id_index\t%d\n", Devel::Size::total_size(\%consolidation_id_index);
         printf "MEMORY_FINAL\tconsolidation_key_trigrams\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams);
-        printf "MEMORY_FINAL\tconsolidation_key_trigrams_norm\t%d\n", Devel::Size::total_size(\%consolidation_key_trigrams_norm);
     }
 
     # Hash entry counts for key structures
@@ -20877,7 +21246,7 @@ sub pipeline_finalize {
             push @verbose_output, "=== message-grouping ===";
             push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
                 $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
-                $consolidation_final_pass ? "on (threshold=${consolidation_final_threshold}%, ceiling=${consolidation_final_ceiling})" : "off");
+                $consolidation_final_pass ? "on (threshold=" . ($consolidation_final_threshold // $consolidation_threshold) . "%, ceiling=${consolidation_final_ceiling})" : "off");
 
             my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
             my $grand_checkpoints = 0;
@@ -20930,6 +21299,10 @@ sub pipeline_finalize {
                 my $ema_pct = ($s->{absorption_ema} // 0) * 100;
                 my $ms = $s->{max_survivals} // 0;
                 push @verbose_output, sprintf("    Eviction:              EMA=%.1f%%, max_survivals=%d", $ema_pct, $ms);
+                # #584: the cumulative measure the final-pass skip decision reads
+                my $absorbed_streaming = $consolidation_streaming_absorbed{$cat_gk} // 0;
+                push @verbose_output, sprintf("    Streaming absorption:  %d of %d keys (%.1f%%)",
+                    $absorbed_streaming, $keys_seen, $keys_seen > 0 ? 100 * $absorbed_streaming / $keys_seen : 0);
                 push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
                 push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
                     $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
@@ -20957,6 +21330,12 @@ sub pipeline_finalize {
                 $grand_patterns += $patterns;
 
                 # --- Final pass phase (2-pass architecture) ---
+                # #584: report the skip and the cliff edge whether or not the pass ran
+                push @verbose_output, sprintf("    Final pass skipped:    %s",
+                    $consolidation_final_pass_skipped{$cat_gk} ? "yes" : "no");
+                if (defined $consolidation_cliff_edge{$cat_gk}) {
+                    push @verbose_output, sprintf("    Similarity cliff edge: %d%%", $consolidation_cliff_edge{$cat_gk});
+                }
                 my $fp_keys = $s->{fp_keys_seen} // 0;
                 if ($fp_keys > 0) {
                     my $fp_p1_s3 = $s->{fp_p1_s3} // 0;

@@ -1,0 +1,2 @@
+192.0.2.10 - - [07/May/2025:00:00:01 +0000] "GET /store/orders/3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3/items/summary HTTP/1.1" 200 512 11
+192.0.2.11 - - [07/May/2025:00:00:02 +0000] "GET /store/orders/3f9c2a71-8be4-4d0a-a7e2-51c9f08b3d6e/items/summary HTTP/1.1" 200 512 12

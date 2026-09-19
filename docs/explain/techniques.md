@@ -267,7 +267,7 @@ ltl -e "sess-4BDC7EE2" access.log  # everything but that session
 ltl -i "10.0.12.44" access.log     # one caller, when the line carries it
 ```
 
-**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-surfacing`, `api-isolation`, `contribution-highlighting`. Options: `-i`, `-e`, `-h`, `-xs`, `-xu`, `-xqs`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-surfacing`, `api-isolation`, `contribution-highlighting`. Options: `-i`, `-e`, `-h`, `-x`, `-xs`, `-xu`, `-xt`, `-xqs`.
 
 ---
 
@@ -359,7 +359,7 @@ ltl -e "/health" -e "/favicon.ico" access.log   # drop the noise before reading 
 
 **How to read it.** Consolidation is what makes a message table readable: near-identical lines are grouped so a call appears once with its totals rather than ten thousand times. That is the right default across a population, and it is what hides the answer once a call has been isolated.
 
-Surfacing reverses it for one attribute — keep the session, the user or the query string in the grouping key, and the single consolidated row separates into a row per value, each with its own count and durations. In the example one endpoint at 785 requests becomes four sessions, and the distribution across them is the answer: one session at 683 requests, three others in the hundreds. A single value carrying most of the volume is a different finding from the volume being spread evenly, and the consolidated row cannot tell you which you have. The same applies to time rather than volume — a per-value breakdown of durations says whether one user is experiencing the slowness or all of them are.
+Surfacing reverses it for one attribute — name the attribute and its value is kept in the grouping key, so the single consolidated row separates into a row per value, each with its own count and durations. The session, the user, the thread and any key written in the line are added to the end of the message as `session=<value>`, `user=<value>`, `thread=<value>` or `fileName=<value>`; a key from the line is only added when the grouping had removed it, so nothing is said twice. The query string is kept where it stands in the URL, and a metric named this way keeps its number in place of the `?` the message would otherwise carry. Name several attributes and they are added in the order you name them, which is the order the rows read in. In the example one endpoint at 785 requests becomes four sessions, and the distribution across them is the answer: one session at 683 requests, three others in the hundreds. A single value carrying most of the volume is a different finding from the volume being spread evenly, and the consolidated row cannot tell you which you have. The same applies to time rather than volume — a per-value breakdown of durations says whether one user is experiencing the slowness or all of them are.
 
 *What falsifies the reading.* Run before a call has been isolated, there is too much in the view to read anything from it, because every call separates by every value at once. Isolate first. And the attribute must be on the line: surfacing a field the log does not record produces the consolidated row unchanged, not an error.
 
@@ -369,10 +369,12 @@ Surfacing reverses it for one attribute — keep the session, the user or the qu
 ltl -i "/api/v2/device" -xs access.log                 # that call, a row per session
 ltl -i "/api/v2/device" -xu access.log                 # a row per user
 ltl -i "/api/v2/search" -xqs access.log                # a row per query string
+ltl -i "/api/v2/device" -x fileName access.log         # a row per value of a key in the line
+ltl -i "/api/v2/device" -xs -xt access.log             # a row per session and thread pair
 ltl -i "/api/v2/device" -xs -so duration access.log    # which session owns the time
 ```
 
-**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-isolation`, `api-isolation`, `rank-then-isolate`. Options: `-xs`, `-xu`, `-xqs`, `-i`, `-so`, `-g`.
+**See also.** [Population](#population-population) (the grouping this belongs to), `attribute-isolation`, `api-isolation`, `rank-then-isolate`. Options: `-x`, `-xs`, `-xu`, `-xt`, `-xqs`, `-i`, `-so`, `-g`.
 
 ---
 

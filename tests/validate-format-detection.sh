@@ -470,6 +470,24 @@ scenario_family_shapes() {
     assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
+    # A bare - thread is absent from the message (R14); a literal null is the
+    # thread's text and stays (D18). The derived copy rewrites the thread to -
+    # on the first three lines, as family-fields-evidence rewrites the user.
+    # -bs 1440 -oe -n 20 -o: the twelve messages are read from the MESSAGES CSV.
+    local tdir="$TMP_DIR/$current_scenario/thread-dash"; mkdir -p "$tdir"
+    perl -pe 's/ \S+ (\S+)$/ - $1/ if $. <= 3' "$log" > "$tdir/localhost_access_log.2025-05-05.txt"
+    ( cd "$tdir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 20 -o localhost_access_log.2025-05-05.txt > run.out 2> run.out.stderr ) || true
+    check_capture_warnings "$tdir/run.out"
+    assert_command \
+        command "m=\$(ls '$tdir'/*-LTL-MESSAGES-*.csv) && grep -qF '\"[503] POST /store/catalog\"' \"\$m\" && ! grep -qF '[-]' \"\$m\"" \
+        label 'a - thread writes no thread segment: [503] POST /store/catalog, and no message carries [-]' \
+        asserts 'a bare - in the thread position is an absent thread, so the message carries no [-] segment (R14)' \
+        produced_by 'the thread-pool block in read_and_process_logs() (a bare - sets no thread name) feeding message-key construction in ltl' contract "$FAMILY_CONTRACT R14, D18"
+    assert_command \
+        command "m=\$(ls '$tdir'/*-LTL-MESSAGES-*.csv) && grep -qF '\"[200] [null] POST /store/account\"' \"\$m\" && grep -qF '\"[200] [https-jsse-nio-8443-] POST /store/checkout\"' \"\$m\"" \
+        label 'a null thread keeps [null] and a worker keeps its pool segment in the same run' \
+        asserts 'only a bare - is absent: the literal null is the thread text and stays in the message, and a worker name still contributes its pool segment (D18)' \
+        produced_by 'the thread-pool block in read_and_process_logs() feeding message-key construction in ltl' contract "$FAMILY_CONTRACT D18"
 }
 
 scenario_family_fields_evidence() {
@@ -1345,9 +1363,15 @@ scenario_classification_consolidation_reconciles() {
 
     # The S3 obligation: the per-message outcome slots ride through
     # consolidation. The same fixture is run twice - plain, and consolidated at
-    # -g 60, which merges the ten message keys into eight - and the successes
-    # and failures columns of the MESSAGES CSV must sum to the same totals in
-    # both runs, and to the run-level counts of their own capture.
+    # -g 60, which merges the ten message keys into seven, one of them mixed
+    # ([201] and [403] POST /store/orders, a success and a failure) - and the
+    # successes and failures columns of the MESSAGES CSV must sum to the same
+    # totals in both runs. The run-level counters are a partition of the
+    # included lines (#456 D4, D5): every line of a mixed row leaves the
+    # counter it was counted in for MIXED, so the consolidated run reconciles
+    # as successes + failures + mixed, and consolidation moves lines into
+    # MIXED and nowhere else. Every fixture line is classified, so the CSV's
+    # classified total equals that sum.
     local log="$REPO_DIR/tests/fixtures/http-status-families.txt"
 
     local plain_out cons_out
@@ -1372,9 +1396,15 @@ scenario_classification_consolidation_reconciles() {
         exit 1
     fi
 
-    local plain_section cons_section
-    plain_section="$(classification_value "$plain_out" successes) $(classification_value "$plain_out" failures)"
-    cons_section="$(classification_value "$cons_out" successes) $(classification_value "$cons_out" failures)"
+    local plain_s plain_f plain_mixed cons_s cons_f cons_mixed
+    plain_s=$(classification_value "$plain_out" successes)
+    plain_f=$(classification_value "$plain_out" failures)
+    plain_mixed=$(classification_value "$plain_out" mixed)
+    cons_s=$(classification_value "$cons_out" successes)
+    cons_f=$(classification_value "$cons_out" failures)
+    cons_mixed=$(classification_value "$cons_out" mixed)
+    local cons_csv_total
+    cons_csv_total=$(( ${cons_sums% *} + ${cons_sums#* } ))
 
     assert_command \
         command     "[[ '$plain_sums' == '6 4' ]]" \
@@ -1391,18 +1421,25 @@ scenario_classification_consolidation_reconciles() {
         contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation - a consolidated run's merged counts equal the unconsolidated totals"
 
     assert_command \
-        command     "[[ '$plain_sums' == '$cons_section' && '$cons_sums' == '$cons_section' ]]" \
-        label       "both CSV sums equal the consolidated run's own sub-section counts (section: $cons_section, plain CSV: $plain_sums, consolidated CSV: $cons_sums)" \
-        asserts     'The per-message store and the run-level counters are two views of one classification, so a consolidated run reconciles with its own sub-section and with the unconsolidated run' \
-        produced_by "the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; merge_consolidation_stats() sums them element-wise; run-level counts from $CLASSIFICATION_PRODUCER" \
-        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation"
+        command     "[[ '$plain_sums' == '$plain_s $plain_f' && '$plain_mixed' == '0' ]]" \
+        label       "the unconsolidated CSV sums equal its own sub-section counts, with nothing mixed (section: $plain_s $plain_f mixed $plain_mixed, CSV: $plain_sums)" \
+        asserts     'Without consolidation every message row is one key and so uniform: the per-message store and the run-level counters are two views of one classification, and no line is mixed' \
+        produced_by "the MESSAGES CSV row writer in print_summary_table() reading the per-message outcomes slots; run-level counts from $CLASSIFICATION_PRODUCER; resolve_message_classification_states() in ltl" \
+        contract    "$CLASSIFICATION_CONTRACT / section 10 S3 obligation; features/456-per-message-success-failure-indicator.md D4, D5"
 
     assert_command \
-        command     "[[ '$plain_section' == '$cons_section' ]]" \
-        label       "the run-level successes/failures are unchanged by consolidation (plain: $plain_section, consolidated: $cons_section)" \
-        asserts     'Consolidation is a presentation of the message store, not a re-classification: the run-level counters are accumulated at the include point and cannot move when -g merges keys' \
-        produced_by "$CLASSIFICATION_PRODUCER" \
-        contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17)"
+        command     "[[ \$(( $cons_s + $cons_f + $cons_mixed )) -eq $cons_csv_total ]]" \
+        label       "the consolidated sub-section reconciles with its CSV as successes + failures + mixed (section: $cons_s + $cons_f + mixed $cons_mixed, CSV classified: $cons_csv_total)" \
+        asserts     'A consolidated run moves the lines of a mixed row out of the success and failure counters into MIXED, so its run-level successes, failures and mixed together account for every classified line its MESSAGES CSV carries' \
+        produced_by "resolve_message_classification_states() in ltl, after group_similar_messages(); run-level counts from $CLASSIFICATION_PRODUCER" \
+        contract    "features/456-per-message-success-failure-indicator.md D4, D5 - the run-level figures are a partition of the included lines"
+
+    assert_command \
+        command     "[[ $cons_s -le $plain_s && $cons_f -le $plain_f && \$(( ($plain_s - $cons_s) + ($plain_f - $cons_f) )) -eq $cons_mixed ]]" \
+        label       "consolidation moves lines only into MIXED (plain: $plain_s $plain_f, consolidated: $cons_s $cons_f mixed $cons_mixed)" \
+        asserts     'Consolidation is a presentation of the message store, not a re-classification: the only run-level movement it causes is lines of a mixed row leaving the counter they were counted in for MIXED' \
+        produced_by "resolve_message_classification_states() in ltl; successes/failures accumulated at the include point in read_and_process_logs()" \
+        contract    "$CLASSIFICATION_CONTRACT - successes/failures are accumulated at the include point (D16, D17); features/456-per-message-success-failure-indicator.md D4, D5"
 }
 
 scenario_variant_ambiguity_note() {
@@ -1656,6 +1693,34 @@ scenario_variant_connection_server() {
         asserts 'The Integration Runtime member is eliminated: day tokens > 12 are impossible under yyyy-dd-MM (D52 probe a)' \
         produced_by 'format_sample_probes() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D52'
+}
+
+# Neither member of the connection_server group reads a duration from, or
+# masks the number in, "N milliseconds" in the message (#576): a file of such
+# lines reports metrics_observed: no, and selection is unchanged. Staged with
+# no name evidence so content alone binds each member.
+scenario_milliseconds_not_read() {
+    current_scenario="milliseconds-not-read"
+    echo "[$current_scenario]"
+    local log out member slug fixture staged
+    for member in mt10ir mt10; do
+        if [[ "$member" == mt10ir ]]; then
+            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt
+        else
+            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt
+        fi
+        log=$(stage_fixture "$fixture" "$staged") || return
+        out=$(run_format_detection "$log"); check_capture_warnings "$out"
+        assert_variant_selection "$out" "$slug" "$member" evidence '1\.00'
+        assert_line "$out" pattern '^  matched_lines: 8$' \
+            asserts "Every line of the $slug fixture is recognised" \
+            produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
+            contract 'features/log-format-registry.md section -V format-detection section-contract'
+        assert_line "$out" pattern '^  metrics_observed: no$' \
+            asserts "A $slug file whose lines carry \"N milliseconds\" observes no metric: the format reads no duration from the message" \
+            produced_by 'emit_format_detection_verbose() in ltl (per-file metrics_observed), fed by the scan sub compile_format_scan_sub() generates for the entry' \
+            contract 'features/566-preserve-named-values-in-message.md section #576 acceptance criterion 2'
+    done
 }
 
 scenario_variant_integration_runtime_named() {
@@ -2103,6 +2168,7 @@ scenario_classification_format_interleaved; echo ""
 scenario_classification_summary_rows; echo ""
 scenario_variant_ambiguity_note; echo ""
 scenario_variant_connection_server; echo ""
+scenario_milliseconds_not_read; echo ""
 scenario_variant_integration_runtime_named; echo ""
 scenario_variant_integration_runtime_unnamed; echo ""
 scenario_unit_tomcat_named; echo ""

@@ -1,0 +1,39 @@
+====================================================================================================
+Profile:  nytprof-100k.out
+Script:   /Users/gregeva/Documents/GitHub/logtimeline/ltl
+Perl:     5.44.0
+CPU time: 10.7800 s (sum of exclusive times)
+Subs:     25 shown of 729 matching (from 2025 total)
+Sort:     excl time | Filter: Perl subs only
+====================================================================================================
+
+Rank  Subroutine                                               Calls   Incl(s)   Excl(s)   ms/call   %Tot
+----------------------------------------------------------------------------------------------------
+   1  find_consolidation_candidates                            12232    3.9607    3.4424     0.324   36.7
+   2  read_and_process_logs                                        1    4.2526    1.7671  4252.634   39.4
+   3  build_consolidation_ngram_index                             79    1.4186    0.7686    17.958   13.2
+   4  match_consolidation_patterns                             65915    0.8605    0.7019     0.013    8.0
+   5  get_consolidation_trigrams                               33688    0.6579    0.6579     0.020    6.1
+   6  __ANON__[(eval 88)[/Users/gregeva/Documents/GitHu...    100053    0.6777    0.4851     0.007    6.3
+   7  process_final_pass_window                                   70    4.9668    0.4118    70.955   46.1
+   8  run_consolidation_checkpoint                                15    1.5765    0.1097   105.101   14.6
+   9  group_similar_messages                                       1    6.3024    0.1093  6302.369   58.5
+  10  consolidation_process_key                                22192    1.6619    0.0658     0.075   15.4
+  11  compute_mask                                               185    0.0581    0.0581     0.314    0.5
+  12  run_consolidation_pass                                      12    1.3904    0.0294   115.867   12.9
+  13  message_classification_state                             21590    0.0270    0.0270     0.001    0.3
+  14  dice_coefficient                                          2721    0.0264    0.0264     0.010    0.2
+  15  extract_consolidation_bucket_key                         32256    0.0246    0.0211  0.000761    0.2
+  16  resolve_message_classification_states                        1    0.0433    0.0163    43.258    0.4
+  17  calculate_all_statistics                                     1    0.0569    0.0144    56.898    0.5
+  18  compile_format_extractor                                    40    0.0079    0.0072     0.197    0.1
+  19  try_consolidation_merge_into_existing                       91    0.0877    0.0064     0.963    0.8
+  20  Text::CSV::BEGIN@1.1                                         1    0.0063    0.0061     6.322    0.1
+  21  __ANON__[/Users/gregeva/Documents/GitHub/logtimel...       117    4.9728    0.0059    42.502   46.1
+  22  calculate_statistics                                        26    0.0221    0.0057     0.852    0.2
+  23  compile_format_scan_sub                                      1    0.0134    0.0057    13.383    0.1
+  24  merge_consolidation_stats                                  718    0.0052    0.0052     0.007    0.0
+  25  derive_regex                                               185    0.0060    0.0051     0.032    0.1
+
+Note: %Tot = incl_time / 10.7800 s (total Perl CPU time)
+      Use --all to include XSubs [xs] and opcodes [op]

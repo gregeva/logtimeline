@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+app-DEBUG	50	500	500	0	0	1.590
+app-DEBUG	60	500	500	0	0	1.574
+app-DEBUG	70	500	500	0	0	1.471
+app-DEBUG	75	500	347	0	0	0.496
+app-DEBUG	80	500	0	0	0	0.339
+app-DEBUG	85	500	0	0	0	0.249
+app-DEBUG	90	500	0	0	0	0.194
+app-DEBUG	95	500	0	0	0	0.156

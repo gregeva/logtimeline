@@ -1,0 +1,8 @@
+2025-28-01 07:26:36.541 [vert.x-eventloop-thread-0] INFO  c.t.i.IntegrationRuntimeConfiguration - Reading from config file D:\runtime\integrationRuntime-settings.json.encrypted
+2025-28-01 07:26:36.635 [vert.x-eventloop-thread-0] INFO  c.t.s.SecurityManagerBootstrapper - initializing KeyStore provider
+2025-28-01 07:26:40.100 [vert.x-eventloop-thread-3] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.10:52344 completed processing in 152 milliseconds
+2025-28-01 07:26:41.220 [vert.x-eventloop-thread-1] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.11:52345 completed processing in 48 milliseconds
+2025-28-01 07:26:43.905 [vert.x-eventloop-thread-2] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.10:52346 completed processing in 3017 milliseconds
+2025-28-01 07:26:44.001 [vert.x-worker-thread-1] INFO  c.t.i.IntegrationRuntimeConfiguration - Setting Java SSL javax.net.ssl.keyStore properties
+2025-28-01 07:26:45.310 [vert.x-eventloop-thread-3] INFO  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.12:52347 completed processing in 152 milliseconds
+2025-28-01 07:26:46.777 [vert.x-eventloop-thread-0] WARN  c.t.i.a.AlwaysOnHttpServerVerticle - Request from 192.0.2.11:52348 completed processing in 7 milliseconds

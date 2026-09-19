@@ -1722,3 +1722,984 @@ After firing, the counter resets to 0 and accumulation resumes.
 | Memory regression with `-g` | Unmatched keys accumulated in consolidation tracking structures indefinitely | Fixed by adaptive per-key eviction (#135): EMA-based survival threshold bounds the working set. XL benchmark: 455→238 MiB (-47.7%). |
 | Time regression in `read_files` with `-g` | Diverse keys accumulated in unmatched set, increasing per-checkpoint cost | Fixed by adaptive per-key eviction (#135): fast-path eviction skips `run_consolidation_pass` when max_survivals=0. XL benchmark: 185s→55s (3.4× faster). |
 | `gk_prefix` errors or missing prefixes | Legacy code from pre-#131 grouping key design | Removed in #131: canonical form is the full `$log_key` |
+
+## Finding: no groupings on keys whose rarest trigrams are per-request values (#569)
+
+**Status (2026-09-16): design settled — § Design: candidate search that finds every partner (#569); ready for implementation.** Earlier status (2026-09-15): investigation of the reported case complete. Five mechanisms are established (§ Open items and next steps), each traced on the production code path with instrumented scratch copies of `ltl`: the fixed pre-filter selecting per-instance identifiers (items 1 and 2, one defect), merge-first generalisation producing the catch-all (item 3), literal residue from near-duplicate pairs and rejected merges (item 4), and the candidate cap exhausted by consumed keys (item 5). The final-pass threshold part is resolved by #571, merged into this branch (`b94ea08`); the reproducing invocation is unchanged after it (74,305 keys, 0 patterns, 48 s). Before benchmarks for the change are captured (§ Performance baseline before the pre-filter change). Next: design, covering items 1, 3, 4 and 5 together, against the constraints and the cost split below.
+
+### Interaction: the pre-filter opened, against the other mechanisms
+
+2026-09-15. The shipped `ltl` against a scratch copy whose only change is `$consolidation_prefilter_ratio = 0.0` (loose minimum 1), both from this branch after the #571 merge. Sequential single runs, `-V message-grouping`; wall time is indicative only, not a benchmark.
+
+| Input and options | Shipped: rows after grouping, wall | Pre-filter opened: rows after grouping, wall |
+|---|---|---|
+| PLM access log, one day, `-du us -xqs -bs 1440 -n 15 -g 80` | 74,416, 61.2 s | 13,880, 101.4 s (35,795 keys evicted) |
+| same, `-g 70` | 74,374, 44.3 s | 75, 11.3 s |
+| Application platform log, ~480,000 lines, `-bs 1440 -n 15 -g 85` | 136, 6.8 s (ERROR 265 → 81) | 92, 14.9 s (ERROR 414 → 37) |
+| Application log of hundreds of thousands of unique errors, `-bs 1440 -n 15 -g 85` | 72, 11.4 s; ERROR: 2 checkpoints, 281,453 matched inline | 71, 121.3 s; ERROR: 54 checkpoints, 18,616 inline, 267,489 evicted and matched in the final pass |
+
+Readings:
+- **Access log, `-g 70`, opened:** the 75 rows are genuine groups, not a catch-all. The largest are the three download variants (7,142, 4,655 and 2,484 member keys); the signing-time split of item 4 remains.
+- **Access log, `-g 80`, opened:** 13,880 rows remain. This is consistent with only 40.6% of download keys having a partner at 80 across the day (§ Similarity distribution between download keys); not verified row by row.
+- **Unique-errors log, opened:** the same final result by a different path. Both runs form the same first three pairs: keys identical but for the UUID, Dice 100, whose sorted neighbours share leading hex digits, so the canonicals keep them (`ErrorCode(000*)`, `001*`, `01*`, merged to `ErrorCode(0*)` absorbing 320 keys; item 4's literal residue again). Shipped, checkpoint 1 then keeps forming pairs and merges to `ErrorCode(*)`; opened, it forms no further `ErrorCode` pair in 500 candidate searches, absorption collapses, eviction takes over. **Mechanism confirmed (open item 5):** instrumented, 495 of the 500 sources searched in that checkpoint received exactly 50 candidates, all scoring 100 and all 50 already consumed by `ErrorCode(0*)`; `find_consolidation_candidates()` caps its result at 50 sorted by score then key, and `run_consolidation_pass()` skips consumed candidates without refilling, so none of those sources formed a pair (the other five: two with no candidates, three with some unconsumed).
+
+### What stays ungrouped at `-g 80` with the pre-filter opened
+
+2026-09-15. The PLM access log, one day, `-du us -xqs -bs 1440 -n 15 -g 80`, on a scratch copy with loose minimum 1 that writes out the keys left after the final pass and, for the `plain|200` group's first three streaming checkpoints, each batch and the evicted keys marked by whether they had been searched as a source. 75,833 keys reduce to 13,858 rows; 13,814 keys remain, of which 13,754 are download requests (60 other).
+
+- **About half have no partner at the threshold.** For 200 randomly sampled leftover download keys, the best partner among all 74,305 download keys of the day scores 78–81 (median 80): 52.0% have one at ≥ 80, all 100% at ≥ 75. The 48% without one are correctly left ungrouped at 80.
+- **The other half are stranded by literal residue (open item 4).** For all 104 sampled keys with a partner at ≥ 80, that partner was already grouped, none left over, so the key could join only by matching the partner's cluster pattern; it cannot pair with the absorbed partner either (open item 5's consumed-candidate skip). Of the 94 whose partner's cluster was located in `message-grouping / cluster-membership`, every one fails that pattern on `sT` alone (one also on the capped `site` tail): the cluster requires `sT=177919*` and the key's signing time begins `177920`, the day's later half.
+- **The 500-source limit did not strand keys here.** Checkpoint 3 held 7,804 keys and evicted 2,804 (2,365 download requests), of which only 165 had been searched as a source. For 200 sampled evicted non-source download keys, the best partner inside that batch scores 75–78: none had a partner at 80 there, so being skipped as a source cost them no pair. Their partners at 80, where they exist, are elsewhere in the day.
+
+### Where the time goes: shipped against the pre-filter opened
+
+2026-09-15. `-V benchmark-data` `TIMING` rows, single sequential runs on one machine, shipped `ltl` against the loose-minimum-1 copy. Streaming checkpoints run inside `parse/read_files`; the final pass is `finalize/group_similar`.
+
+| Input and options | Shipped: parse / final pass / total | Pre-filter opened: parse / final pass / total |
+|---|---|---|
+| PLM access log, one day, `-du us -xqs -bs 1440 -n 15 -g 80` | 5.9 s / 48.8 s / 54.9 s | 94.1 s / 31.3 s / 125.6 s |
+| Application log of hundreds of thousands of unique errors, `-bs 1440 -n 15 -g 85` | 7.2 s / 4.7 s / 12.0 s | 99.2 s / 14.5 s / 113.7 s |
+
+Readings:
+- **Shipped, the access log's time is the final pass doing nothing useful:** 48.8 s for 37,305 candidate searches that all return empty, over the 74,305 keys eviction handed it.
+- **Opened, the cost moves into the streaming checkpoints:** parse rises 16× on the access log and 14× on the unique-errors log. On the unique-errors log that is item 5: 54 checkpoints of fruitless searches before eviction hands the keys to the final pass.
+- The same four runs measured through `-V message-grouping` earlier gave 61.2 / 101.4 s and 11.4 / 121.3 s totals: single runs, so these figures bound an order of magnitude, not a percentage.
+
+### Performance baseline before the pre-filter change
+
+Captured 2026-09-15 on `044b25c` (this branch, `ltl` unchanged apart from `$version_number`), same machine, single run each, `tests/baseline/results/569-before-<case>.tsv`. The pre-filter runs in streaming checkpoints (inside `parse/read_files`) and in the final pass (`finalize/group_similar`), so both are read.
+
+| Case | `total` | `finalize/group_similar` | `rss_peak` |
+|---|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.744 s | 0.000 s | 98.4 MB |
+| `single-day-access-log-top25-consolidate` | 13.582 s | 2.518 s | 130.8 MB |
+| `single-day-application-log-top25-consolidate` | 7.015 s | 0.290 s | 131.7 MB |
+| `humungous-log-uniqueness-top25-consolidate` | 11.662 s | 4.379 s | 264.4 MB |
+
+The completion gate compares against a second capture, taken 2026-09-16 after this branch was rebased onto `release/0.18.2`. It runs on the commit before implementation (the final pass at the `-g` sensitivity from #571 included, `ltl` otherwise unchanged apart from `$version_number`). Same machine, single run each, `tests/baseline/results/569-rebased-before-<case>.tsv`, corpus read through `LTL_LOGS_DIR` from the worktree.
+
+| Case | `total` | `parse/read_files` | `finalize/group_similar` | `rss_peak` |
+|---|---|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.242 s | 9.126 s | 0.000 s | 98.5 MB |
+| `single-day-access-log-top25-consolidate` | 13.321 s | 10.596 s | 2.537 s | 130.9 MB |
+| `single-day-application-log-top25-consolidate` | 6.870 s | 6.569 s | 0.287 s | 131.7 MB |
+| `humungous-log-uniqueness-top25-consolidate` | 12.178 s | 7.307 s | 4.856 s | 264.4 MB |
+
+### Prototype: candidate gate sized from the requested similarity
+
+2026-09-15, `prototype/569-gate-sizing/` (results in `results/`), at the architect's direction (open item 1).
+
+**Question.** Does a pre-filter that probes the |r| − ⌈T·|r|/(200 − T)⌉ + 1 rarest trigrams of a key with |r| trigrams at similarity T, and admits a candidate on one shared trigram (§ Industry grounding), find the partners the shipped rule (50 rarest, 15 shared) misses, and at what cost per candidate search?
+
+**Method.** Both arms are `find_consolidation_candidates()` sliced verbatim from `ltl`; the sized arm changes only Phase 1's probe length and required hits. Inputs are the ten first-checkpoint batches of § Pre-filter misses across log families, the first 500 sources in batch order, T = 50 to 95. Per search: partners missed against a direct Dice scan of the whole batch (UUID-normalised where `ltl` scores normalised), trigrams probed, posting entries visited, Dice verifications, and milliseconds (median of 3 timed passes, arms interleaved, batches sequential on one machine; the widest pass range is 1.7× for the sized arm and 3.5× for one shipped cell). The shipped arm reproduces the earlier record's partner and miss counts on all ten batches.
+
+Partners missed, shipped → sized, of the sources with a partner at T:
+
+| Batch (keys) | T=50 | T=60 | T=70 | T=75 | T=80 | T=85 | T=90 | T=95 |
+|---|---|---|---|---|---|---|---|---|
+| PLM access log, download requests only (5,000) | 500 → 0 / 500 | 500 → 0 / 500 | 500 → 0 / 500 | 500 → 0 / 500 | 446 → 0 / 446 | no partners | no partners | no partners |
+| PLM access log, unfiltered (4,990) | 298 → 0 / 500 | 296 → 0 / 495 | 296 → 0 / 489 | 296 → 0 / 475 | 247 → 0 / 408 | 0 → 0 / 132 | 0 → 0 / 69 | 0 → 0 / 22 |
+| Application platform log, ERROR (238) | 69 → 0 / 232 | 102 → 0 / 229 | 99 → 0 / 224 | 101 → 0 / 220 | 100 → 0 / 218 | 100 → 0 / 216 | 75 → 0 / 183 | 75 → 61 / 175 |
+| Unique-errors log, ERROR (4,990) | 1 → 0 / 499 | 1 → 0 / 499 | 0 → 0 / 498 | 0 → 0 / 498 | 0 → 0 / 496 | 0 → 0 / 496 | 0 → 0 / 496 | 0 → 0 / 496 |
+| Script log, INFO (2,851) | 1 → 0 / 500 | 1 → 0 / 500 | 1 → 0 / 500 | 1 → 0 / 500 | 1 → 0 / 500 | 6 → 2 / 500 | 6 → 7 / 495 | 5 → 6 / 239 |
+| Script log, ERROR (209) | 1 → 0 / 208 | 0 → 0 / 206 | 0 → 0 / 204 | 0 → 0 / 204 | 0 → 0 / 201 | 0 → 0 / 197 | 0 → 0 / 191 | 0 → 0 / 157 |
+
+Application platform WARN (3,048) and DEBUG (1,709), script WARN (1,940) and Tomcat 9 access log (2,870): 0 missed by either arm at every T.
+
+Milliseconds per search, median, shipped → sized:
+
+| Batch (keys) | T=50 | T=60 | T=70 | T=75 | T=80 | T=85 | T=90 | T=95 |
+|---|---|---|---|---|---|---|---|---|
+| PLM access log, download requests only (5,000) | 0.35 → 193 | 0.35 → 174 | 0.35 → 145 | 0.36 → 135 | 0.35 → 116 | 0.37 → 103 | 0.35 → 13 | 0.35 → 0.47 |
+| PLM access log, unfiltered (4,990) | 4.2 → 122 | 4.5 → 110 | 3.8 → 87 | 3.7 → 79 | 3.8 → 68 | 3.4 → 59 | 3.9 → 8.2 | 3.7 → 0.32 |
+| Application platform log, ERROR (238) | 0.24 → 2.8 | 0.24 → 2.2 | 0.24 → 1.8 | 0.24 → 1.7 | 0.24 → 1.5 | 0.24 → 1.1 | 0.23 → 0.56 | 0.23 → 0.17 |
+| Application platform log, WARN (3,048) | 1.7 → 22 | 1.6 → 19 | 1.6 → 17 | 1.6 → 16 | 1.6 → 16 | 1.6 → 14 | 1.5 → 1.9 | 1.5 → 0.59 |
+| Application platform log, DEBUG (1,709) | 9.0 → 21 | 8.8 → 19 | 9.1 → 17 | 8.9 → 16 | 9.3 → 15 | 9.1 → 3.4 | 9.0 → 1.5 | 9.0 → 0.67 |
+| Unique-errors log, ERROR (4,990) | 12 → 144 | 11 → 133 | 11 → 112 | 12 → 107 | 12 → 97 | 11 → 90 | 11 → 77 | 11 → 7.0 |
+| Script log, INFO (2,851) | 18 → 26 | 18 → 23 | 18 → 19 | 17 → 17 | 17 → 15 | 16 → 12 | 13 → 7.5 | 12 → 2.8 |
+| Script log, WARN (1,940) | 12 → 31 | 12 → 30 | 12 → 25 | 12 → 23 | 12 → 21 | 11 → 14 | 12 → 9.4 | 9.7 → 6.7 |
+| Script log, ERROR (209) | 0.50 → 2.0 | 0.49 → 1.4 | 0.49 → 0.96 | 0.49 → 0.78 | 0.48 → 0.66 | 0.47 → 0.50 | 0.47 → 0.42 | 0.42 → 0.31 |
+| Tomcat 9 access log (2,870) | 6.9 → 10 | 5.5 → 3.9 | 4.8 → 2.1 | 6.0 → 1.7 | 4.2 → 1.9 | 5.6 → 0.80 | 4.9 → 0.43 | 4.3 → 0.09 |
+
+Readings:
+- **Recall.** The sized gate finds every partner the shipped rule misses on the download keys and the unfiltered access log at every T, and on the application ERROR batch up to T = 90. It still misses on UUID-bearing keys at the highest thresholds: 61 of 175 on the application ERROR batch at 95, and 2, 7 and 6 on the script INFO batch at 85, 90 and 95 (shipped: 6, 6, 5). The probe is sized and selected on the raw trigram set while Dice is scored on the UUID-normalised set; a pair at 100 normalised scores about 80 raw (open item 2), so a prefix sized for 95 on raw trigrams carries no guarantee for it.
+- **Cost where it rises: nearly every key in the batch is verified.** On the download batch the sized gate runs 4,999 Dice verifications per search from T = 50 to 80 (4,674 at 85, 616 at 90, 11 at 95); the unique-errors batch runs 4,943 from 50 to 90. Every key shares at least one probed trigram and passes the size filter. The shipped rule verifies 0 and 190 there.
+- **Attribution.** A least-squares fit over the download batch's eight sized rows gives 0.021 ms per Dice verification and 0.00016 ms per posting entry visited (fit within 2 ms of every median): at T = 50, 105 ms verification and 88 ms counting; at T = 80, 105 ms and 13 ms. Verification dominates from T = 70 up; counting grows with the longer probe at low T.
+- **Cost where it falls.** The sized probe is shorter than 50 from T ≈ 85 up on most batches and on short keys at every T, and is then faster: Tomcat 9 access log from T = 60 (5.5 → 3.9 ms) to 95 (4.3 → 0.09 ms), application DEBUG from 85, and every batch at 95 except the download batch (0.35 → 0.47 ms).
+- **What a lossless search must verify at minimum.** On the first 5,000 download keys, 25.9% of random pairs score ≥ 75 and 0% score ≥ 80 (§ Similarity distribution between download keys). At 75, any method returning every partner verifies about 1,300 keys per search, a quarter of the 4,999 verified now; at 80 the true partners are few, so the 4,999 are almost all rejected by verification.
+- **What a search is used for.** `run_consolidation_pass()` takes the top 50 candidates by score and forms a pattern with the first unconsumed one that validates; it needs one usable partner per source, not every partner. The prefix bound guarantees every partner.
+- **Scale in production.** A checkpoint searches up to 500 sources: at the medians above that is about 58 s per checkpoint on the download batch at T = 80 (0.18 s shipped) and 45 s on the unique-errors batch at 85 (5.7 s shipped). End-to-end runs are not measured: re-scan absorption reduces the searches made, and open item 5 (consumed candidates filling the cap) interacts.
+
+### Prototype stages: making the sized search cheap
+
+2026-09-15, at the architect's direction to prototype a search that stops once it holds a usable partner, then to continue autonomously through the stages needed. All scripts in `prototype/569-gate-sizing/`. Timings in this section were taken while other prototype work shared a 4-core machine (1-minute load 3.6 to 12, peaking at 59), so they are indicative: partner, verification and visit counts are deterministic; times are compared only within the same run.
+
+**Stop at a partner (`probe-early-stop.pl`, download and application ERROR batches completed).** Walking the sized probe rarest first and scoring each candidate the first time it is seen, stopping once a partner is held, misses no partner the sized gate finds (download batch, every T; application ERROR batch up to 90). Where partners exist it is cheap: on the download batch at T = 50–75 a search scores 1.0–2.7 candidates and takes 0.27–0.31 ms (shipped 0.36–0.39 ms, finding none). Where no partner exists it cannot stop: at T = 85 every search scores 4,674 candidates (108 ms), and at 80 a median 576 (14 ms). Counting hits first and scoring from the highest count down (`hits_first`) pays the full counting cost, 85.7 ms per search at T = 50.
+
+**Prefix filtering on both sides (`probe-prefix-index.pl`, smoke run: 50 sources, one pass).** Indexing each key by its own sized prefix keeps the guarantee (0 missed) but does not cut the work on download keys: at T = 85 the prefix index holds 377,182 of the full index's 1,435,715 entries and a search with no partner still scores 4,543 candidates (113 ms). Their rarest trigrams are either unique to the request, wasting prefix slots, or moderately common (for example the signing time's leading digits), so every prefix overlaps nearly every other; the research names data with few rare trigrams as where the prefix filter admits many false candidates. On the script log's ERROR batch it behaves as designed.
+
+**A count bound per candidate (`probe-count-bound.pl`).** For a source r probing p trigrams and a candidate s with h shared trigrams inside the probe, the overlap is at most h + (|r| − p), so Dice ≥ T is impossible unless h ≥ ⌈T·(|r| + |s|)/200⌉ − (|r| − p). Scoring a candidate only once h reaches that value loses nothing and scores no candidate that cannot qualify. Smoke run on the download batch (50 sources, one pass): at T = 85, 90 and 95, 0 candidates scored per search (11.3, 0.9 and 0.3 ms; the time left is counting, 19,545 posting entries per search at 85); at T = 50–75 it is slower than stopping at a partner (31–42 ms), because a candidate must accumulate hits before it is scored. The bound holds only where Dice is scored on the trigrams counted: on the application ERROR batch, whose UUID keys are scored on normalised trigrams, applying it missed 111 of 216 partners at T = 85, so keys with normalised trigrams are exempt from it.
+
+**Combined: score a budget of candidates when first seen, then only candidates that reach the bound** (`hybrid_b<budget>_<want>`). Smoke run, download batch, 50 sources: with a budget of 64 and stopping at one partner, 0 missed at every T; 0.25–0.40 ms per search at T = 50–75, 3.6 ms at 80 (stopping at a partner alone: 13.4 ms), 10.8 ms at 85, 2.3 ms at 90, 0.52 ms at 95. Application ERROR batch (all 238 keys): 0 missed up to T = 90 and the sized probe's 61 at 95, 0.14–0.21 ms per search. With a budget of 16, 2 partners were missed at 85 and 90 on UUID keys before the exemption was added. The full ten-batch run with the exemption is in progress.
+
+**Whole runs, stop-at-a-partner searches (`run-e2e.sh`, one run each, single-group PLM download request cases).** Rows after grouping, shipped → first-seen stopping at 1 / at 5 / hits-first: at `-g 50` 74,305 → 5 / 7 / 8 (55.8 s → 7.6 / 8.7 / 31.4 s); at 70, 74,305 → 6 / 7 / 8 (53.6 s → 11.5 / 12.8 / 22.5 s); at 75, 74,305 → 8 / 8 / 8 (59.0 s → 15.1 / 12.5 / 14.9 s). No run had a non-zero exit or a runtime warning. Every download pattern under every arm still keeps a literal leading digit run in the signing time (`sT=1779*`, `177919*`, `177920*`), stopping at 5 and hits-first split one variant at the `177919`/`177920` boundary, and a two-member `.xas` pattern keeps a literal file id and size: open item 4 is unchanged by candidate search. The first-seen arm at `-g 80` ran for more than 14 minutes before the matrix was stopped, consistent with the per-search cost above where most sources have no partner.
+
+**Benchmark cases under load (`run-benchmark.sh`, 3 interleaved repetitions, arm / shipped ratio of the same repetition, median and range).** The no-grouping case, where every arm runs identical code, spans 0.97–1.30 on total, which is the noise under this load.
+
+| Case | first-seen, stop at 1 | first-seen, stop at 5 | hits-first, stop at 1 |
+|---|---|---|---|
+| Tomcat access log, top 25, `-g` | total 0.95 (0.87–1.05) | 0.98 (0.86–1.05) | 0.94 (0.86–1.00) |
+| Application platform log, top 25, `-g` | total 0.83 (0.80–1.04) | 0.95 (0.91–0.97) | **1.68 (1.46–1.69)**; grouping 12.70×, rss 1.31× |
+| Unique-errors log, top 25, `-g` | total 0.95 (0.88–1.31); parse **1.24 (1.19–1.45)**, grouping 0.53 | 0.67 (0.66–1.01) | 0.52 (0.51–0.97) |
+| PLM download requests, top 25, `-g 75` | total **0.14** (0.12–0.14); 68.5 s → 9.3 s | 0.19 | 0.27 |
+
+Hits-first is ruled out by its application-log regression. Grouped row counts differ between arms on the benchmark cases (for example 136 shipped, 106 first-seen stop-at-1, 96 stop-at-5 on the application log); their content is compared in the whole-run stage.
+
+**Whole runs, combined search (budget 64, count bound, UUID exemption; `run-e2e.sh`, one run each, `-V message-grouping,benchmark-data`).** Every run rc 0 with no runtime warning. Total seconds and rows after grouping, shipped → stop at 1 → stop at 5:
+
+| Case | Shipped | Stop at 1 | Stop at 5 |
+|---|---|---|---|
+| PLM download requests `-g 50` | 47.7 s, 74,305 | 7.6 s, 5 | 8.7 s, 7 |
+| same `-g 70` | 49.2 s, 74,305 | 7.2 s, 6 | 8.0 s, 7 |
+| same `-g 75` | 45.2 s, 74,305 | 7.9 s, 8 | 11.5 s, 8 |
+| same `-g 80` | 46.8 s, 74,305 | **270.9 s**, 13,770 | **270.9 s**, 13,770 |
+| same `-g 85` (no partners exist) | 47.4 s, 74,305 | **218.3 s**, 74,305 | **217.4 s**, 74,305 |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 7.3 s, 50 | 3.3 s, 28 |
+| same `-g 80` | 49.5 s, 74,416 | **275.4 s**, 13,881 | **273.4 s**, 13,880 |
+| Application platform log `-g 70` | 6.7 s, 81 | 5.9 s, 93 | 6.4 s, 83 |
+| same `-g 85` | 7.2 s, 136 | 6.1 s, 106 | 7.4 s, 96 |
+| same `-g 95` | 9.4 s, 528 | 6.8 s, 550 | 6.9 s, 477 |
+| Unique-errors log `-g 85` | 13.0 s, 72 | 11.6 s, 77 | 8.5 s, 72 |
+| Script log `-g 70` | 15.0 s, 106 | 12.0 s, 100 | 10.2 s, 95 |
+| same `-g 85` | 13.2 s, 417 | 10.8 s, 157 | 10.6 s, 170 |
+| Tomcat 9 access log `-g 70` | 12.5 s, 72 | 11.3 s, 75 | 10.2 s, 72 |
+| same `-g 85` | 12.4 s, 615 | 11.3 s, 643 | 11.6 s, 615 |
+
+Readings: the combined search is as fast as shipped or faster everywhere except where most download keys have no partner (`-g 80` and 85), where it is 4.6–5.8× slower. On the unfiltered day at `-g 65`, shipped and stop-at-5 both form the catch-all `[200] GET /Windchill/*` (9 patterns); stop-at-1 does not, forming `/Windchill/com/ptc/*`, `/Windchill/netmarkets/*` and `/Windchill/ptc1/*?*` among 24 (open item 3's merge mechanism, reached through a different first pair).
+
+**Where the slow case's time goes (NYTProf, combined search, `-g 80`, the day's first 25,000 lines filtered to download requests).** The profile's `find_consolidation_candidates` count (4,686) equals the `-V` count (1,225 streaming + 3,461 final pass). Of 160 s CPU: the search's own walk 120 s (75%), Dice 18 s (11%, 295,675 calls, about 63 per search: the budget), `compute_mask` 8 s, index build 5 s. A streaming search costs about 2.6× a final-pass search, as streaming batches hold up to 5,000 keys against final-pass windows of 1,000.
+
+**Integer-id index (`probe-int-index.pl`).** The same combined search over posting arrays of integer key ids, with per-key sizes and per-search counters in arrays, returns identical candidates; on the download batch (50 sources) it is 1.3–1.4× faster per search (11.2 → 7.8 ms at 85) and builds the batch index 3.6× faster (983 → 271 ms for 5,000 keys). The hash index's per-search result can depend on Perl's per-process hash order: the budget is spent on candidates in `keys %$posting` order, and one of 50 searches at T = 80 returned a different candidate from the two indexes. The array index walks in batch order.
+
+**Discovery cutoff.** With s_min the smallest raw size among the batch's non-UUID keys inside the size filter, a candidate first seen at probe position i can gather at most p − i hits against a bound of at least ⌈T·(|r| + s_min)/200⌉ − (|r| − p), so past that position no new non-UUID candidate is tracked; once no seen candidate can still reach its bound the non-UUID posting lists are not walked. Download batch key sizes are 277–293 trigrams (median 286). Premise measured on 50 sources at T = 85: the walk can stop at probe position 48 of 75 for every source, visiting a median 334 posting entries instead of 20,332. Measured with a zero budget, where only the bound admits candidates, the cutoff misses no partner on the download batch at any T and returns the same candidates as the search without it on the download, application ERROR and script INFO batches. Per search on the download batch (50 sources), budget 64, without → with the cutoff: 3.3 → 1.4 ms at 80, 9.6 → 1.8 ms at 85, 1.9 → 0.66 ms at 90 (shipped 0.37–0.43 ms). The budget pulls the two regimes apart: at 85, budget 0 takes 0.37 ms and budget 64 takes 1.8 ms; at 80, budget 64 takes 1.4 ms and budget 16 takes 9.0 ms; at 50–75, budget 0 takes 18–31 ms against 0.23–0.27 ms with a budget. Spending the budget only on candidates met in posting lists of at most 16, 64 or 256 keys does not change that at 85 (1.46–1.70 ms): the candidates it scores there are the same file downloaded again, similar (about 80) but below the threshold.
+
+**Integer index and cutoff over the ten batches (`probe-int-index.pl`, 500 sources, 3 timed passes, `results/int-index/`).** Against a direct Dice scan of each batch:
+- **The cutoff loses nothing.** With a zero budget, where only the count bound admits candidates, the cutoff search misses no partner on any batch at any T, apart from the UUID-bearing keys the sized raw-trigram probe already misses (application platform ERROR 61 of 175 at 95; script INFO 2, 7 and 6 at 85, 90 and 95).
+- **The cutoff changes no result.** With a budget of 64 it returns exactly the candidates of the same search without it, for every source on every batch at every T.
+- **The hash index's results depend on hash order.** With a budget of 64 the hash and integer indexes returned different candidates for 120 of 500 sources on the script INFO batch (T = 50), 71 on script WARN, 20 on the download batch at 80 and 1–7 on the Tomcat and unfiltered access batches; the budget is spent in `keys %$posting` order, which Perl randomises per process.
+- **Per search, budget 64 with the cutoff:** download batch 0.27–0.31 ms at T = 50–75, 1.42 at 80, 1.72 at 85, 0.64 at 90 (shipped 0.40–0.42); unique-errors 0.36–0.40 (shipped 12.9–13.8); script INFO 0.22–0.51 (shipped 14.0–24.1); application DEBUG 0.10–0.11 (shipped 9.3–9.9); Tomcat 0.07–0.17 (shipped 3.0–5.3).
+
+**Whole runs, cutoff search over the integer index (budget 64, hash index still built beside it; `run-e2e.sh`, bare `-V`, one run each).** Every run rc 0, no runtime warning. Total seconds, rows after grouping and peak memory, shipped → stop at 1 → stop at 5:
+
+| Case | Shipped | Stop at 1 | Stop at 5 |
+|---|---|---|---|
+| PLM download requests `-g 50` | 48.5 s, 74,305, 363 MB | 8.9 s, 5, 676 MB | 10.0 s, 7, 676 MB |
+| same `-g 75` | 45.4 s, 74,305 | 10.3 s, 8 | 12.5 s, 8 |
+| same `-g 80` | 48.6 s, 74,305 | **91.6 s**, 13,770, 713 MB | **92.0 s**, 13,770 |
+| same `-g 85` (no partners) | 47.4 s, 74,305 | **107.6 s**, 74,305, 705 MB | **110.0 s**, 74,305 |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 9.8 s, 50 | 3.8 s, 28 |
+| same `-g 80` | 49.4 s, 74,416 | **151.3 s**, 13,881 | **160.4 s**, 13,880 |
+| Application platform log `-g 85` | 8.1 s, 136, 132 MB | 7.2 s, 106, 201 MB | 7.4 s, 96 |
+| same `-g 95` | 10.1 s, 528 | 7.4 s, 550 | 7.1 s, 477 |
+| Unique-errors log `-g 85` | 15.4 s, 72, 262 MB | 12.9 s, 77, 356 MB | 9.4 s, 72 |
+| Script log `-g 85` | 15.6 s, 417 | 12.4 s, 157 | 12.7 s, 168 |
+| Tomcat 9 access log `-g 85` | 15.8 s, 615 | 12.5 s, 643 | 11.5 s, 615 |
+
+Readings: the cutoff cuts the download cases at 80 and 85 from 270.9 and 218.3 s to 91.6 and 107.6 s, and leaves their grouping identical (the patterns at 80 and 85, and on the application log at 85, match the run without the cutoff exactly; the script log at 85 has the same 157 rows but a different pattern set, consistent with the hash-order dependence of the run without it). They remain 1.9–3.1× shipped. Peak memory rises because this copy builds both indexes. At `-g 80` on the download requests: 4,725 streaming searches in 55.4 s parse and 7,361 final-pass searches in 36.1 s. NYTProf on the day's first 25,000 download lines at `-g 80` (search count 4,686, equal to `-V`): 54 s CPU against 160 s without the cutoff; Dice 17.6 s (32%, 291,840 calls, the budget), the search's own walk 11.2 s (21%), both index builds 9.9 s (18%), `compute_mask` 7.7 s (14%). The hash index is read only by the candidate search, so the next variant does not fill it in cutoff mode, and tests replacing the budget with scoring a candidate once its hits reach a fraction of its bound.
+
+**Trigger by a fraction of the bound (`run-e2e-focus.sh`, bare `-V`, one run each, other prototype work sharing the machine).** With a fraction f, a candidate is scored once its hits reach ⌈f × bound⌉; Dice is exact, so one that fails cannot qualify and is dropped, which loses nothing. The hash index is not built. Total seconds and rows after grouping, same load within each case:
+
+| Case | Shipped | Budget 64 | Budget 0, f = ½ | Budget 0, f = ¼ | Budget 8, f = ½ |
+|---|---|---|---|---|---|
+| PLM download requests `-g 50` | 50.2 s, 74,305 | 5.5 s, 5 | 11.2 s, 8 | 7.9 s, 7 | 5.5 s, 5 |
+| same `-g 75` | 49.4 s, 74,305 | 6.2 s, 8 | 9.0 s, 8 | 7.7 s, 8 | 6.7 s, 8 |
+| same `-g 80` | 49.7 s, 74,305 | 82.7 s, 13,770 | **53.7 s**, 13,701 | 59.7 s, 13,770 | 62.9 s, 13,701 |
+| same `-g 85` (no partners) | 53.3 s, 74,305 | 64.7 s, 74,305 | **38.6 s**, 74,305 | 38.2 s, 74,305 | 54.8 s, 74,305 |
+| Application platform log `-g 85` | 7.0 s, 136 | 5.6 s, 106 | 6.0 s, 98 | 6.2 s, 106 | 5.8 s, 106 |
+| Unique-errors log `-g 85` | 13.4 s, 72 | 9.4 s, 77 | **5.7 s**, 75 | 6.2 s, 75 | 10.2 s, 77 |
+| Script log `-g 85` | 12.6 s, 417 | 11.2 s, 157 | 10.0 s, 179 | 9.7 s, 168 | 9.9 s, 162 |
+
+Candidate searches made: at `-g 50` on the download requests, 72 with budget 64 against shipped's 38,305 (early patterns absorb the rest); at 85, 38,305 for every arm.
+
+**Memory.** Under `-mem` on the day's first 25,000 download lines at `-g 80`, shipped's candidate index peaks at 135.1 MB of postings plus 13.9 MB of posting sizes; the integer index reports 222.3 MB, a figure that includes the per-key trigram sets it only references (118.1 MB, also counted under `consolidation_key_trigrams`). Peak RSS: shipped 335.7 MB, cutoff search 359.5 MB (f = ½) and 359.8 MB (budget 64); total time 17.4, 18.0 and 25.2 s. The full-day runs above peaked at 563–571 MB because that copy kept each batch's integer index until the next was built; with it freed where the hash index is freed, the full day at f = ½ peaks at 388 MB at `-g 80` (45.2 s, 13,701 rows) and 352 MB at 85 (37.8 s, 74,305 rows), against shipped's 354–363 MB.
+
+**Whole runs, v5 (cutoff search over the integer index only, index freed with each batch; budget 0; `run-e2e.sh`, bare `-V`, one run each).** Every run rc 0, no runtime warning. Total seconds, rows after grouping, peak memory; shipped → f = ½ → f = ¼:
+
+| Case | Shipped | f = ½ | f = ¼ |
+|---|---|---|---|
+| PLM download requests `-g 50` | 49.3 s, 74,305, 363 MB | 11.3 s, 8, 320 MB | 7.7 s, 7, 320 MB |
+| same `-g 70` | 47.5 s, 74,305 | 12.4 s, 8 | 7.9 s, 8 |
+| same `-g 75` | 46.9 s, 74,305 | 8.9 s, 8 | 7.9 s, 8 |
+| same `-g 80` | 44.7 s, 74,305, 363 MB | 43.8 s, 13,701, 388 MB | 45.5 s, 13,770, 388 MB |
+| same `-g 85` (no partners) | 47.0 s, 74,305, 363 MB | 37.1 s, 74,305, 352 MB | 35.9 s, 74,305, 352 MB |
+| PLM access day, unfiltered, `-g 65` | 3.4 s, 28 | 2.9 s, 30 | 2.8 s, 30 |
+| same `-g 80` | 47.6 s, 74,416, 363 MB | **91.8 s**, 13,818, 385 MB | **93.5 s**, 13,887 |
+| Application platform log `-g 70` | 6.7 s, 81 | 6.0 s, 85 | 5.9 s, 85 |
+| same `-g 85` | 7.1 s, 136 | 6.3 s, 98 | 6.1 s, 106 |
+| same `-g 95` | 8.8 s, 528 | 5.5 s, 540 | 5.5 s, 549 |
+| Unique-errors log `-g 85` | 12.7 s, 72, 262 MB | 5.4 s, 75, 289 MB | 5.7 s, 75 |
+| Script log `-g 70` | 12.0 s, 106, 148 MB | 8.9 s, 88, 109 MB | 9.7 s, 89 |
+| same `-g 85` | 13.0 s, 417 | 9.8 s, 179 | 9.4 s, 168 |
+| Tomcat 9 access log `-g 70` | 10.8 s, 72 | 10.8 s, 79 | 10.6 s, 79 |
+| same `-g 85` | 12.2 s, 615 | 11.2 s, 666 | 11.5 s, 656 |
+
+Readings:
+- **Every case is as fast as shipped or faster except the unfiltered access day at `-g 80`**, and peak memory stays within 10% of shipped (lower on the download requests at 50–85 and the script log at 70).
+- **The unfiltered day's extra time is in the search's own walk during streaming; its cause is not yet established.** Against the download requests alone at `-g 80` it makes about the same number of searches (4,827 streaming and 7,395 final-pass, against 4,725 and 7,292), yet parse rises from 31.1 to 79.2 s. NYTProf on the day's first 25,000 lines, unfiltered, f = ½ (search count 4,119, equal to `-V`): of 60 s CPU, the search's own walk 43.8 s (73%), `compute_mask` 8.0 s (13%), integer index build 3.0 s, Dice 0.05 s (2,293 calls); about 30 ms per streaming search and 2 ms per final-pass search under the profiler. It is not the first batch: that batch's 4,990 keys are 95% download keys of 282–291 trigrams (minimum 19), all inside the size filter at 80 and 85, and a search there costs 2.7 ms at T = 80 with f = ½ against 3.8 ms on the download batch. Ordering integer ids by key size and cropping each posting array to the size filter therefore has nothing to crop: the whole run at `-g 80` took about 102 s with it against 91.8 s without. Search counters (`LTL569_STATS`, f = ½, `-g 80`) locate the cost in streaming: unfiltered, 4,827 streaming searches visit 193.4 million posting entries (16.5 ms per search, 494 Dice, 161 searches finding a partner); the download requests alone, 4,725 searches visit 20.6 million (3.7 ms per search, 263 Dice); the final pass is alike on both (7,395 and 7,292 searches, 5.1 million visits, 0.84 and 0.88 ms per search). The whole matrix with size-ordered ids (`LTL569_SIZEORDER=1`, `results/e2e/`) forms byte-identical patterns to the run without them on the download requests at 80 and 85, the unfiltered day at 80 and the application, script and unique-errors logs at 85, with timings within run-to-run variation and no runtime warning. The probable mechanism, to be tested: later streaming searches are mostly download keys without a partner, which cannot stop early, so the discovery cutoff decides their cost; it is set by the smallest admissible key size in the batch, 277 trigrams among download keys alone, while in the unfiltered population a few mid-length keys near the size filter's lower bound place it near the end of the probe. A discovery bound per candidate size (`LTL569_SIZEORDER=2`: a candidate first seen at probe position i can gather at most p − i hits, so only sizes whose bound fits are admitted, found by binary search over size-ordered ids) cuts the unfiltered day's streaming visits from 193.4 to 121.1 million (9.3 ms per search), its parse from 97.6 to 61.5 s and total from 112.2 to 75.8 s, with byte-identical patterns; the download requests alone are unchanged (20.6 million visits, 44.7 s, identical patterns). The visits that remain come from candidates already seen that can still reach their bound, which keep whole posting arrays walked to the end of the probe. Following those candidates past the size band by looking the probe trigram up in each one's own trigram set, instead of walking the arrays (`LTL569_SIZEORDER=3`), was measured on a reduced input that reproduces the cost in seconds: the day's first 10,000 lines, unfiltered, `-g 80 --consolidation-trigger 2000` (a 5,000-line slice at trigger 500 did not reproduce it: under 1,000 visits per search). Streaming visits 8.31 million (mode 0) → 6.41 million (mode 2) → 2.08 million (mode 3); streaming ms per search 2.33 → 2.17 → 1.57; parse 5.33 → 5.19 → 4.56 s; 86 rows and byte-identical patterns in all three; shipped on the same input 3.76 s total and 5,339 rows. Confirmed once on the full unfiltered day at `-g 80`: mode 3 cuts streaming visits from 121.1 to 44.5 million with byte-identical patterns, but total time is unchanged (76.2 s against 75.8 s for mode 2; streaming 8.2 ms per search against 9.3; final pass 1.55 ms against 0.86), because a lookup in a candidate's trigram set costs about what the array visits it replaces did. Mode 3 is not carried forward.
+- **Where partners are common, f = ½ scores late.** Per search on the download batch at T = 50–75: budget 64 0.29–0.32 ms, f = ½ 8.6–11.5 ms, f = ¼ 2.4–3.4 ms; at 80: 1.47, 3.80 and 1.90 ms; at 85 (no partners): 1.76, 0.45 and 0.47 ms. The unfiltered batch follows the same pattern. Neither fraction misses a partner on either batch.
+- **The catch-all `[200] GET /Windchill/*` forms at `-g 65` under shipped and both fractions** (open item 3 is untouched by candidate search).
+- **Repeatable.** A second run of f = ½ on the download requests at `-g 75`, the unique-errors log at 85 and the script log at 85 produced byte-identical patterns and `message-grouping` counters (timing and memory lines excluded); the integer index walks in batch order, where the hash index's budget depended on Perl's per-process hash order.
+
+**Documentation requirement (architect, 2026-09-15).** The user documentation that accompanies this fix states that excluding UUIDs from the message (today `-uuid`; `--discard uuid` under #567) is advisable when a log carries many of them, because every UUID-bearing key is scored on UUID-normalised trigrams without the count bound, which makes the similarity check do much more work.
+
+### Open items and next steps
+
+| # | Item | State | Next step |
+|---|---|---|---|
+| 1 | **Candidate pre-filter**: the fixed 50 rarest trigrams and 15 required hits in `find_consolidation_candidates()` miss 100% of download partners at T ≤ 80 on the PLM access log, and 30–46% of partners at every T on the application platform log's ERROR group (item 2) | Cause proven (§ Mechanism, § Proof of cause). Direction from research (§ Industry grounding): probe length set by the threshold and the key's size with one shared token required. **Architect's direction (2026-09-15):** prototype a probe length adapted to the requested similarity (and the key's trigram count) before any design; masking values before comparison is not pursued, as it sidesteps the gate rather than fixing it. **Prototyped (2026-09-15, § Prototype: candidate gate sized from the requested similarity):** the sized gate misses no partner on the download keys at any T, but verifies nearly every key in the batch per search there (116–193 ms against 0.35 ms at T 50–80); UUID-bearing keys are still missed at T ≥ 85, where the probe is sized on raw trigrams and scored on normalised ones **Decision (architect, 2026-09-15): the candidate search reads the key as written; UUIDs are not replaced for candidate selection.** Whether the same or similar UUIDs recur is information an analyst may need, and grouping is meant to keep the parts of a UUID that stay the same while wildcarding the characters that change; replacing UUIDs to make candidate search faster would defeat that. Masking UUIDs remains the analyst's choice through the existing `-uuid` option, to be offered as `--discard uuid` under #567 (discard named keys and values from the message). Consequence for the search: keys whose Dice is scored on UUID-normalised trigrams keep no count bound, and the sized raw-trigram probe keeps its misses on them at high thresholds (application platform ERROR 61 of 175 at 95; script INFO 2–7 of about 500 at 85–95) **Decision (architect, 2026-09-16): carry the prototyped search into design.** The search carried forward: an integer-id candidate index in place of the hash index, the probe sized from the similarity and the key's trigram count, the per-candidate count bound (not applied to keys scored on UUID-normalised trigrams), scoring at a fraction of that bound, the discovery bound per candidate size, and the walk ending once no seen or new candidate can qualify (§ Prototype stages: making the sized search cheap). **Accepted:** the unfiltered PLM access day at `-g 80` runs at about 76 s against shipped's 47.6 s. **Decision (architect, 2026-09-16): consolidation does not replace, mask or hide UUIDs anywhere, including before Dice scoring.** Whether the same UUIDs recur, or change too little, is information the analyst must be able to see; masking UUIDs belongs to the separate option that applies before consolidation (`-uuid`, `--discard uuid` under #567). This reverses PF-19 (UUID normalisation for Dice scoring): the design removes the UUID-normalised trigram sets, and with them the search's exemption for keys that carry UUIDs. | Design with items 3, 4 and 5; quiet before/after benchmark at the completion gate |
+| 2 | **UUID-bearing error keys** (application platform log, ~480,000 lines, not the access log): 30–46% of partners missed at every T, including 95, in the ERROR group's 238-key first checkpoint batch (§ Pre-filter misses across log families) | **Mechanism established (2026-09-15), the same as item 1.** These ThingWorx errors carry a `PersistentSession<uuid>` entity name twice per line, and a few keys share each session, so the UUID's trigrams are rare but not unique (hence the 0.6 singleton reading). Of the 50 trigrams the pre-filter selects from the raw key, a median 39 (max 40) overlap the UUID; the best partner, identical apart from its UUID, shares a median 11 at T=95 and 12 at T=50 (max 14; 15 required). Dice on the UUID-normalised trigrams `ltl` scores with: median 100; on raw trigrams: median 81 and 80. The size filter rejects none. The pre-filter selects on raw trigrams while scoring is UUID-normalised, so normalisation never reaches candidate selection | Resolved into item 1 |
+| 3 | **Catch-all pattern**: without the include filters, `[200] GET /Windchill/*` absorbs every GET at T ≤ 65 (§ Related behaviour observed on the way) | **Mechanism established (2026-09-15)** on the day's first 25,000 lines at `-g 65`, with `try_consolidation_merge_into_existing()` instrumented in a scratch copy. The pair itself was sound: `netmarkets/images/accept_task.gif` with `export.gif` (Dice 78) gave `[200] GET /Windchill/netmarkets/images/*`. Merge-first then compared that canonical with the existing `[200] GET /Windchill/com/ptc/windchill/cadx/images/*` at Dice 65, exactly the threshold, most of the shared trigrams coming from the common `[200] GET /Windchill/` start. `compute_mask()` kept that 21-character start, one stray character and the `images/*` tail; `coalesce_mask()` pass 2 treated everything from position 21 as a variable-dominated span, because the tail's keep run is shorter than the 10-character span boundary, and wildcarded the tail too, giving `[200] GET /Windchill/*`. Validation only checks that the two merged canonicals match the merged regex, which they trivially do, so nothing bounds how general a merged pattern may be; the re-scan absorbed 4,850 keys in one step. Three contributors: Dice between short canonicals dominated by a shared prefix, pass 2 discarding a short distinguishing tail, and no generality check on a merge. Not resolved by a pre-filter change. **Closed (architect, 2026-09-16): a broad merge at low similarity is the intended grouping** (§ Design, D569-4) | None |
+| 4 | **Literal values kept in patterns**: with the pre-filter opened, one download variant splits on the signing time's leading digits and one row keeps a literal file id and size (§ Proof of cause) | **Mechanism established (2026-09-15)** on the download-filtered day at `-g 50`, pre-filter loose minimum 1, merge-first instrumented: 60 pair patterns, 365 merge comparisons, 37 merges, 328 rejected by validation. (a) The best-scoring candidate for a download key is usually the same file downloaded again, differing only in the counter `c`, the signing time and the signature, so the pair canonical keeps that file's `adId`, `fileName` and `refsize` as literals. (b) Merge-first widens those one step at a time (`adId=15909708` → `159097*` → `15909*`), but `compute_mask()` aligns coincidental characters inside numeric fields: `15909*` against `15910001` keeps a stray `0` and yields `adId=1590*`, which does not match `15910001`; `sT=177919*` against `sT=17792001*` yields `sT=17791*`, which does not match `17792001*`. Validation rejects the merged regex and the new pattern stands on its own, so the day's signing times, which cross from `177919…` to `177920…`, never join, and the `.xas` row, formed from one file downloaded twice, keeps every field literal. (c) The same comparisons also attempted merges across different path templates (`%7D.xas` with `%7D` and `.xpr`, Dice 80–88), rejected by the same validation rather than by any template check. **Closed (architect, 2026-09-16): keeping the leading digits two patterns share is the intended grouping** (§ Design, D569-4) | None |
+| 5 | **Candidate cap exhausted by consumed keys**: `find_consolidation_candidates()` returns at most 50 candidates sorted by score then key; `run_consolidation_pass()` skips those already consumed and does not look further | **Mechanism established (2026-09-15)**, masked by the shipped pre-filter and exposed when it is opened (§ Interaction): where many keys tie at the top score, the 50 returned are the lowest-sorting, which a just-formed pattern has already absorbed. On the unique-errors log with the pre-filter opened, 495 of 500 sources in checkpoint 1 got 50 consumed candidates and no pair; absorption collapsed, 267,489 keys were evicted, and the run took 121.3 s against 11.4 s. **Designed:** the search does not discover consumed candidates (§ Design, step 6) | Implementation |
+
+
+### Input and invocation
+
+An Apache HTTP Server 2.x access log in front of a PLM application server, one full day, read with microsecond durations. 74,305 of its lines are signed direct-download requests carrying fifteen query parameters: the file's identity (folder, file id, file name), per-request values (a signature unique on every line, the signing time in epoch seconds, the response size, a counter) and constants (user id, authentication scheme, site). With the query string exposed, the 350-character message key ends inside the signature value.
+
+Reproducing invocation, run on the 0.18.2 release branch:
+
+```
+-du us -i "/Windchill/servlet/WindchillGW&/doDirectDownload" -i "/Windchill/servlet/WindchillGW&/doIndirectDownload" -xqs -bs 1w -r -n 200 -o -hm bytes -hg bytes -hgh 13 -g 50
+```
+
+### Observed
+
+`-V` `message-grouping`, group `plain|200`: 74,305 keys seen, 15 checkpoints, 0 patterns, 74,305 evicted, 1,000 candidate searches during streaming and 37,305 in the final pass, reduction 74,305 → 74,305 (0.0%). No runtime warnings.
+
+### Mechanism
+
+`find_consolidation_candidates()` Phase 1 sorts the source key's trigrams by posting-list size ascending, keeps the top 50 (`$consolidation_discriminative_topk`), and admits a candidate only when it shares at least 15 of them (`my $loose_min = max(1, int($consolidation_prefilter_ratio * $topk_actual));`). On these keys the rarest trigrams are drawn from the per-request values. Measured on the first 5,000 download keys, 500 source keys, with the sub sliced verbatim from `ltl`:
+
+| Measure | Value |
+|---|---|
+| Trigrams per key | median 286 |
+| Selected top-50 trigrams occurring in the source key only | min 6, median 17, max 28 |
+| Most selected trigrams any other key shares | min 3, median 6, max 9 (15 required) |
+| Sources for which Phase 1 admits a candidate | 0 of 500 |
+| Sources with a partner scoring ≥ 50 by direct Dice comparison | 500 of 500 |
+
+Zero candidates means zero pairs, zero patterns and an absorption rate of 0 at the first two checkpoints; the absorption EMA then drives `get_consolidation_max_survivals()` to 0 and the fast-path eviction in `run_consolidation_checkpoint()` discards every later key without a search. The final pass runs the same pre-filter and finds nothing either. The sensitivity value is never reached, which is why no `-g` setting changes the outcome.
+
+For contrast, on the same day's first 5,000 status-200 keys without the include filters (static resources and application pages mixed with downloads), 196 of 500 sources pass Phase 1.
+
+### Proof of cause
+
+The reproducing invocation on a scratch copy of `ltl` whose only change is `$consolidation_prefilter_ratio = 0.0` (loose minimum 1), single run each on the same machine:
+
+| Build | Patterns | Rows after grouping | Evicted | Wall time |
+|---|---|---|---|---|
+| As shipped | 0 | 74,305 | 74,305 | 47 s |
+| Pre-filter loose minimum 1 | 6 | 7 | 0 | 12 s |
+
+The groups formed are one per download variant (by the file-name template and extension in the path), with ids, sizes and signature wildcarded. Residual over-specificity: one variant splits in two on the leading digits of the signing time, and one row keeps a literal file id and size.
+
+### Similarity distribution between download keys
+
+Which sensitivities should group these keys at all. Scored with `get_consolidation_trigrams()` and `dice_coefficient()` sliced verbatim from `ltl`, on message keys built as `ltl` builds them (`[200] ` plus the request, query string kept, capped at 350 characters). Two samples of 5,000 download keys: the first 5,000 of the day (what the first checkpoint sees) and 5,000 spread evenly across the day. For each, the best-partner score of 500 source keys against the other 4,999, and the scores of 200,000 random pairs.
+
+Best partner per source (500 sources):
+
+| Sample | Min | Median | Max | ≥ 75 | ≥ 80 | ≥ 85 |
+|---|---|---|---|---|---|---|
+| First 5,000 | 78 | 80 | 81 | 100% | 87.2% | 0% |
+| Across the day | 74 | 79 | 81 | 99.8% | 40.6% | 0% |
+
+Random pairs (200,000):
+
+| Sample | Min | Median | Max | ≥ 65 | ≥ 70 | ≥ 75 | ≥ 80 |
+|---|---|---|---|---|---|---|---|
+| First 5,000 | 65 | 70 | 82 | 100% | 51.4% | 25.9% | 0% |
+| Across the day | 60 | 68 | 80 | 86.1% | 42.1% | 5.4% | 0% |
+
+Reading:
+- **85 to 95:** no pair of download keys reaches the threshold, so forming no groups is the correct outcome.
+- **75 and below:** every key has a partner above the threshold; forming no groups is the defect.
+- **80:** a boundary; 87.2% of keys have a partner at 80 in the first checkpoint's batch, 40.6% across the day.
+- The day-wide sample is more varied than one checkpoint batch (random pairs 60–80 against 65–82).
+
+### Related behaviour observed on the way
+
+- **Without the include filters the result depends on a catch-all.** `-du us -xqs -bs 1440 -n 15 -g N -V` on the same log, group `plain|200`: at 50, 60 and 65 the 79,845 keys reduce to 17–20 rows, but only because an early pair of short static-resource URLs derives `[200] GET /Windchill/*`, one row absorbing 82,626 requests including every download; at 70, 75, 80, 90 and 95 that pair does not form, the first checkpoint absorbs 2.9% (at 70) and grouping falls to 1.6–2.3%, with no pattern formed for the download requests. Neither side of the 65/70 boundary is correct grouping. The include filters are therefore not what makes the download keys ungroupable: at 70 and above they are ungrouped in the unfiltered population too, and at 50–65 the filters only remove the catch-all that absorbed them.
+- **A small Apache HTTP Server 2.x access log of a PLM application with microsecond durations (677 lines, 6 download requests) does group** with `-xqs -bs 1440 -n 15 -g N -V` at 50, 80 and 95 (54 keys → 15–18 rows); it does not reproduce the defect.
+- **The final pass always scores at 85** (`$consolidation_final_threshold`, hidden `--final-threshold`), whatever `-g` is set to. Not the cause here: the pre-filter blocks both passes. Measured against `-g` in § Final pass threshold against `-g` below; open with final-pass performance in #142.
+
+### Pre-filter misses across log families
+
+How often the pre-filter rejects every partner that scores above the threshold, beyond the download case. Method:
+
+- A scratch copy of `ltl` whose only change writes out each group's first streaming checkpoint batch (the sorted unmatched keys `run_consolidation_checkpoint()` passes to discovery), run with `-bs 1440 -n 1 -g 80` (the first batch of a group is the same at any `-g`: no pattern exists for it before its first checkpoint).
+- Per batch with at least 200 keys: the first 500 source keys in that sorted order (`run_consolidation_pass()`'s own search order and 500-source limit); for each, the best partner by direct `dice_coefficient()` over the whole batch, on UUID-normalised trigrams where `ltl` scores on them, and `find_consolidation_candidates()` sliced verbatim.
+- *Partner at T*: the best partner scores ≥ T. *Missed at T*: a partner at T exists and the pre-filter returns no candidate.
+
+Cells are missed / sources with a partner at T:
+
+| Log family (group, batch keys) | T=50 | T=70 | T=80 | T=85 | T=95 |
+|---|---|---|---|---|---|
+| Application platform log, ~480,000 lines, the size the prototype record gives for its diverse data (DEBUG, 1,709) | 0/500 | 0/500 | 0/500 | 0/500 | 0/500 |
+| same (WARN, 3,048) | 0/500 | 0/500 | 0/500 | 0/500 | 0/493 |
+| same (ERROR, 238) | 69/232 | 99/224 | 100/218 | 100/216 | 75/175 |
+| Application log of hundreds of thousands of unique errors, power-law (ERROR, 4,990) | 1/499 | 0/498 | 0/496 | 0/496 | 0/496 |
+| Application script log with thread names and full metrics (ERROR, 209) | 1/208 | 0/204 | 0/201 | 0/197 | 0/157 |
+| same (INFO, 2,851) | 1/500 | 1/500 | 1/500 | 6/500 | 5/239 |
+| same (WARN, 1,940) | 0/500 | 0/500 | 0/500 | 0/500 | 0/495 |
+| Tomcat 9 access log, one day, query string stripped (200, 2,870) | 0/500 | 0/482 | 0/403 | 0/330 | 0/36 |
+| The PLM access log above, query string exposed, unfiltered (200, 4,990) | 298/500 | 296/489 | 247/408 | 0/132 | 0/22 |
+| same, download requests only (200, 5,000) | 500/500 | 500/500 | 446/446 | no partners | no partners |
+
+Keys containing a UUID, which `ltl` scores on UUID-normalised trigrams but pre-filters on raw trigrams:
+
+| Batch, T | Missed | Missed containing a UUID | Found containing a UUID | Selected top-50 trigrams unique to the source, mean (found / missed) |
+|---|---|---|---|---|
+| Application platform ERROR, 95 | 75 | 75 | 50 of 100 | 0.7 / 0.6 |
+| Application platform ERROR, 50 | 69 | 63 | 89 of 163 | 2.4 / 3.9 |
+| Script INFO, 95 | 5 | 5 | 1 of 234 | 0.1 / 27.0 |
+
+Reading:
+- The pre-filter is effectively lossless on the power-law error log, the thread-rich script log's WARN and ERROR groups, the Tomcat access log and the large application groups.
+- It loses badly in two places: the PLM access log with the query string exposed (about 60% of sources with a partner at T ≤ 80 unfiltered, 100% on downloads alone, none at T ≥ 85), and a small application ERROR batch (30–46% at every T, including 95).
+- **On the unfiltered PLM batch every miss is a download request.** Of its first 500 sources, 296 are download requests: all 296 are missed at T = 50 and 70, and 247 of 247 at 80. Of the 204 other keys, 2 are missed at 50 and none at 70 or 80. The failure follows the download keys, not the population around them.
+- Every miss in the application ERROR batch at 95, and in the script INFO batch, is a key containing a UUID. The script INFO misses carry a mean 27 of 50 selected trigrams unique to the source, the download mechanism. The application ERROR misses do not (0.6), so their mechanism is a different one and is not yet established.
+- Wall times from these probes are not reported: ten ran concurrently.
+
+### Research record behind the pre-filter
+
+What the repository records about how candidates are found, reviewed against the finding above:
+
+- **DD-01** (N-gram Indexing with Dice Coefficient) describes candidate search as "candidates sharing the most chunks are scored for actual similarity": ranking by overlap, with no rarest-K selection and no fixed minimum.
+- **Alternatives were listed and not pursued.** The first prototype performance assessment on issue #96 (fuzzy message consolidation) listed MinHash, Drain-style token grouping and locality-sensitive hashing as next steps. `docs/fuzzy-consolidation-lessons-learned.md` § Don't Optimize What You Haven't Scoped records "None of this research was necessary" once the checkpoint architecture fixed performance. Candidate search was not researched after that, and no record references prefix filtering or any set-similarity-join method.
+- **The pre-filter is an empirical speed fix.** PF-18 added it after profiling showed candidate search at 88.1% of runtime. Its basis is one experiment on a 200-key sample of a varied application log, varying only the number of rarest trigrams kept, at a single required share of 30%: 50 kept gave 4.8× and 0 missed matches, 30 gave 6.2× and 2 missed, 20 gave 8.1× and 5 missed. The record does not state the sensitivity it ran at or how a missed match was established, and the commit that introduced it (`4479cf6`) contains no benchmark script.
+- **The experiment became guidance.** `docs/similarity-engine-best-practices.md` § Discriminative Trigram Pre-filter restates K=50 and ratio 0.30 as a best practice with "zero missed matches".
+- **Neither value adapts.** Nothing in the record or the code ties the 50 kept trigrams or the 15 required hits to the `-g` sensitivity, to the key's trigram count, or to the composition of the population being consolidated.
+
+### Final pass threshold against `-g`
+
+`group_similar_messages()` swaps `$consolidation_threshold` for `$consolidation_final_threshold` (85) for the whole final pass, whatever `-g` is. `features/137-final-pass-redesign.md` § 6 (Threshold During Final Pass) records only that both default to 85 and that the hidden `--final-threshold` gives control. The fixed value was kept to bound final-pass effort so the feature could ship; the final pass's performance is open in #142 (final pass regression on XL consolidation benchmarks).
+
+Each log run twice with `-bs 1440 -n 1 -g N -V`: final pass at its default 85, and with `--final-threshold N`. Single sequential runs on one machine, counters summed over every group of the `message-grouping` section. Query string exposed (`-du us -xqs`) on the PLM access log only.
+
+| Log family | `-g` | Final pass at | Wall s | Final-pass keys | Final-pass candidate searches | Final-pass patterns | Rows after grouping |
+|---|---|---|---|---|---|---|---|
+| Application platform log, ~480,000 lines | 70 | 85 | 7.0 | 73 | 53 | 11 | 82 |
+| | 70 | 70 | 6.5 | 73 | 52 | 12 | 81 |
+| | 95 | 85 | 10.4 | 514 | 195 | 59 | 143 |
+| | 95 | 95 | 8.7 | 514 | 476 | 22 | 528 |
+| Application log of hundreds of thousands of unique errors | 70 | 85 | 12.0 | 106 | 57 | 7 | 68 |
+| | 70 | 70 | 9.6 | 106 | 49 | 7 | 59 |
+| | 95 | 85 | 12.5 | 198 | 81 | 20 | 81 |
+| | 95 | 95 | 9.2 | 198 | 167 | 15 | 178 |
+| Application script log with thread names | 70 | 85 | 11.5 | 432 | 315 | 13 | 351 |
+| | 70 | 70 | 11.6 | 432 | 313 | 13 | 106 |
+| | 95 | 85 | 114.9 | 39,412 | 607 | 216 | 457 |
+| | 95 | 95 | 246.4 | 39,412 | 9,553 | 2,594 | 8,142 |
+| Tomcat 9 access log, one day | 70 | 85 | 10.7 | 342 | 215 | 49 | 221 |
+| | 70 | 70 | 10.5 | 342 | 92 | 25 | 72 |
+| | 95 | 85 | 12.0 | 3,123 | 866 | 266 | 674 |
+| | 95 | 95 | 13.6 | 3,123 | 2,724 | 271 | 2,707 |
+| PLM access log, query string exposed | 70 | 85 | 42.3 | 75,450 | 37,425 | 42 | 74,399 |
+| | 70 | 70 | 42.2 | 75,450 | 37,381 | 28 | 74,374 |
+| | 95 | 85 | 43.9 | 75,647 | 37,519 | 65 | 74,473 |
+| | 95 | 95 | 44.0 | 75,647 | 37,897 | 61 | 74,869 |
+
+**Decision (architect, 2026-09-15):** the final pass scores at the streaming threshold, the `-g` value given or the default when none is given, and never at a separate fixed value. The current behaviour silently loosens or tightens the requested grouping for every key the final pass handles, which corrupts results. The slower final pass at high sensitivity measured below is accepted until final-pass performance is improved (#142). Carried by #571 (final pass groups at a fixed 85% instead of the -g sensitivity): § Final pass follows the sensitivity (#571).
+
+Reading:
+- **Above 85 the fixed value loosens the user's setting.** At `-g 95` the final pass at 85 leaves 143 rows where 95 leaves 528 (application), 81 against 178 (errors), 457 against 8,142 (script), 674 against 2,707 (Tomcat).
+- **Below 85 it tightens it.** At `-g 70`: 351 rows against 106 (script), 221 against 72 (Tomcat), 68 against 59 (errors), 82 against 81 (application).
+- **Cost of matching.** At `-g 70` matching cost at most 0.1 s (script 11.5 → 11.6 s), and errors ran faster (12.0 → 9.6 s). At `-g 95` the script log slows from 114.9 to 246.4 s: the stricter pass absorbs less per pattern and makes 9,553 candidate searches instead of 607 over the same 39,412 keys; the other three logs move within 3.3 s either way.
+- **On the PLM access log both settings cost the same 42–44 s** and about 37,400 final-pass candidate searches over ~75,500 keys: the pre-filter misses above leave every key for the final pass, which then misses them again.
+- Single runs, not medians.
+
+### Industry grounding
+
+Primary-source research on candidate generation for set-similarity joins and on log template mining: `features/569-candidate-search-industry-grounding.md`. What it establishes for this pre-filter:
+
+- **Prefix filtering** (AllPairs 2007, PPJoin 2008, Mann et al. 2016) guarantees no missed pair when each key probes its |r| − ⌈lb_r⌉ + 1 rarest tokens and one shared token suffices, with lb_r = T·|r|/(2 − T) for Dice. The probe length depends on the threshold and the key's size. For a 286-trigram key: 191, 164, 133, 115, 96, 75, 53 and 28 tokens at T = 50, 60, 70, 75, 80, 85, 90 and 95.
+- **The fixed rule is outside that bound below about 90.** Requiring 15 hits needs 14 more tokens than the one-hit prefix (205 at 50 … 42 at 95); only at 95 does that fit inside 50. By the counting argument behind the bound, 15 of 50 is lossless for a 286-trigram key only from about T = 90 (equal-size partner) or 93 (smallest admissible partner). At T ≤ 80 even one hit in 50 is not lossless.
+- **Tokens unique to one key do not break the exact bound**, which always reaches past them; they break the fixed 50. At T = 75 a true download partner needs one shared trigram among the source's 115 rarest.
+- **What pays off, empirically** (Mann et al. 2016, 7 algorithms, 12 datasets): the plain prefix filter with a length filter; AllPairs wins most data points; verification costs a small constant; heavier filters (suffix, adaptive prefix) rarely pay back, except that adaptive prefix extension wins on data with few infrequent tokens.
+- **MinHash/LSH** is approximate, with a false-negative rate set by the band/row choice, and treats per-line random tokens like any other shingle.
+- **Log template miners** (Drain, Spell, LogMine, and the Zhu et al. 2019 benchmark) compare token sequences, not q-gram sets, after masking variable values (IPs, numbers, IDs, paths) with simple regexes or type detection, because unmasked values make same-pattern lines look dissimilar.
+
+### Constraints on a fix
+
+Each constraint is stated with the measurement it rests on; the sections cited hold the input and method.
+
+- **The pre-filter's speed is load-bearing.** It exists for a 4.8× `find_candidates` speedup (PF-18). Opened to a loose minimum of 1, the streaming checkpoints inside `parse/read_files` rose from 5.9 s to 94.1 s on the PLM access log at `-g 80` and from 7.2 s to 99.2 s on the unique-errors log at `-g 85` (§ Where the time goes). Any change to the selection or the minimum is measured on `parse/read_files` as well as `finalize/group_similar`, against the before benchmarks (§ Performance baseline before the pre-filter change), including the two heaviest grouping cases.
+- **Loosening the pre-filter exposes the candidate cap (open item 5).** With more candidates admitted, the 50 returned for a source can all be keys a pattern already absorbed; on the unique-errors log 495 of 500 sources found no usable partner, checkpoints rose from 2 to 54, 267,489 keys were evicted and the run took 113.7 s against 12.0 s. A pre-filter change that does not also address how consumed candidates are handled regresses power-law logs.
+- **Selection and scoring must read the same text (open item 2).** The pre-filter selects from raw trigrams while Dice is scored on UUID-normalised ones, so a UUID fills 39 of the 50 selected trigrams on the application log's ERROR group while the partner scores 100 normalised.
+- **Opening candidate search alone does not reach the requirement (open item 4).** At `-g 80` with the pre-filter opened, 13,754 download keys stay ungrouped; about half of them have a partner at 80 that was already grouped under a pattern keeping `sT=177919*`, so they fail it on the signing time alone (§ What stays ungrouped at `-g 80`). Pair patterns built from near-duplicate keys keep per-file literals, and 328 of 365 merges on the download run were rejected by validation after coincidental digit alignment, so patterns do not generalise over per-request fields.
+- **A looser pre-filter must not widen over-generalisation (open item 3).** The catch-all `[200] GET /Windchill/*` forms in merge-first, not in candidate search: short canonicals meet the threshold on a shared prefix, `coalesce_mask()` pass 2 discards the distinguishing tail, and validation places no bound on how general a merged pattern may be. More candidates mean more merges.
+- **The usable range is bounded by the data.** About half the download keys have no partner at 80 anywhere in the day and none at 85 (§ Similarity distribution between download keys, § What stays ungrouped at `-g 80`), so grouping every download key at 80 or above is not a correct outcome; at 75 and below every key has a partner.
+- **The final pass follows `-g` (#571).** Its cost at high sensitivity is accepted and tracked with #142; a change to candidate search or merging changes the final pass's cost too, since it runs the same `find_consolidation_candidates()` and merge-first in sliding windows.
+
+## Design: candidate search that finds every partner (#569)
+
+Settled 2026-09-16. Findings, measurements and the architect's decisions behind every item here: § Finding: no groupings on keys whose rarest trigrams are per-request values (#569). Prototype: `prototype/569-gate-sizing/` (`make-ltl-variant.sh` `ltl569_build_int_index()` and `ltl569_cut()` with `LTL569_SIZEORDER=2`, `LTL569_BUDGET=0`, `LTL569_WANT=1`).
+
+### Requirement
+
+An analyst running `-g` on a log whose lines carry per-request values (signatures, signing times, counters, UUIDs) gets those lines grouped wherever a partner at the requested similarity exists; no line is left ungrouped because the candidate search passed over a partner that scores at or above the similarity. Consolidation shows values as they are: it never replaces, masks or hides UUIDs. Masking stays the analyst's choice through `-uuid` (to become `--discard uuid`, #567).
+
+### Decisions
+
+| # | Decision | Source |
+|---|---|---|
+| D569-1 | The candidate search is the prototyped search below; the fixed rule (50 rarest trigrams, 15 shared) and its constants `$consolidation_discriminative_topk` and `$consolidation_prefilter_ratio` are removed | Architect, 2026-09-16 |
+| D569-2 | Consolidation does not replace UUIDs anywhere: `%consolidation_key_trigrams_norm`, the UUID-normalised Dice scoring (PF-19) and every branch that reads it are removed | Architect, 2026-09-16 |
+| D569-3 | The unfiltered PLM access day at `-g 80` running at about 76 s against shipped's 47.6 s is accepted | Architect, 2026-09-16 |
+| D569-4 | Pattern alignment and merging are unchanged: shared leading digits kept in a pattern (`sT=177919*`) and broad merges at low similarity (`[200] GET /Windchill/*` at `-g 65`) are the intended grouping, not defects (open items 3 and 4 closed) | Architect, 2026-09-16 |
+| D569-5 | The final pass scores at the `-g` similarity (#571) | Architect, 2026-09-15 |
+| D569-6 | User documentation advises excluding UUIDs (`-uuid`) where a log carries many of them, as they make the similarity check do much more work | Architect, 2026-09-15 |
+
+### The search
+
+For source key r with |r| distinct trigrams (capped message, as today) and similarity T:
+
+1. **Index of key ids.** Each checkpoint batch and final-pass window is indexed where `build_consolidation_ngram_index()` runs today, replacing `%consolidation_ngram_index` and `%consolidation_posting_size`: keys get integer ids in order of raw trigram count, then batch order; each trigram maps to an array of ids (ascending, therefore size-ordered); per id the key, its trigram count and its trigram set. Freed where the hash index is freed today (after each checkpoint and final-pass window).
+2. **Probe sized from T.** Sort r's trigrams by posting length, then trigram; keep the first p = |r| − ⌈T·|r|/(200 − T)⌉ + 1 (integer arithmetic).
+3. **Size filter by id range.** Candidates must have between ⌊|r|·T/(200 − T)⌋ and ⌊|r|·(200 − T)/T⌋ + 1 trigrams; that is one id range, found by binary search, and each posting array is walked from its first id in range.
+4. **Discovery bound by size.** At probe position i a candidate not yet seen can gather at most p − i hits, so only sizes s with ⌈T·(|r| + s)/200⌉ − (|r| − p) ≤ p − i are admitted (upper id found by binary search; integer arithmetic).
+5. **Count bound.** A candidate s is scored only once its hits inside the probe reach ⌈¼ × bound⌉, where bound = ⌈T·(|r| + s)/200⌉ − (|r| − p) (at least 1). Dice is exact: a candidate that fails is dropped. A candidate whose remaining positions cannot reach its bound is dropped (per-candidate deadline).
+6. **Skip consumed keys.** Candidates the calling pass has already consumed are not discovered (open item 5).
+7. **Stop.** Stop after the posting array that yields a partner (the pass forms its pattern from the best-scoring candidate returned), or once no seen candidate can still reach its bound and no new size is admissible.
+
+The fraction ¼ is chosen from the prototype: on the download batch ½ costs 8.6–11.5 ms per search where partners are common against 2.4–3.4 ms for ¼, and both fractions miss exactly the partners the bound alone misses on all ten batches.
+
+### Surfaces
+
+- **Subs:** `find_consolidation_candidates()` (replaced), `build_consolidation_ngram_index()` (builds the id index; UUID normalisation removed), `run_consolidation_pass()` and `process_final_pass_window()` (pass the consumed set), the cleanup points that free the index, `measure_memory_structures()` and the `MEMORY_FINAL` rows (report the id index in place of `consolidation_ngram_index` and `consolidation_posting_size`), `$uuid_re` where it serves only scoring.
+- **`-V message-grouping`:** keys unchanged; `find_candidates calls` counts searches as today. **`-mem` / `benchmark-data`:** structure names change with the index; every consumer is found with `grep -r` and updated in the same commit (`tests/HARNESS-DESIGN.md`).
+- **Harnesses and saved outputs:** `tests/validate-message-grouping.sh`, `tests/validate-message-grouping-notices.sh`, and the consolidated grouping baselines under `tests/statistics-drift/` change where grouping changes; each re-capture states whether the change comes from the search finding partners or from UUIDs no longer being replaced.
+- **Docs:** `docs/usage.md` and `print_help()` (`-g`: the UUID advice, D569-6); `docs/similarity-engine-best-practices.md` (§ UUID Normalization Before Scoring and § Discriminative Trigram Pre-filter replaced by this search); `docs/fuzzy-consolidation-lessons-learned.md`.
+
+### Acceptance criteria
+
+| # | Condition | Observable outcome | Triage |
+|---|---|---|---|
+| 1 | A committed fixture of signed download requests (scrubbed, `.txt`), `-du us -xqs -g 75` | the `plain\|200` group reduces to at most 10 rows; shipped leaves every key ungrouped | assertable (`validate-message-grouping.sh`) |
+| 2 | Same fixture at `-g 85`, where no two keys score 85 | no pattern is formed | assertable |
+| 3 | The ten first-checkpoint batches of § Pre-filter misses across log families, T = 50 to 95 | for every source with a partner at T by direct Dice, the search (sliced from `ltl`) returns a candidate | assertable by the prototype probe method (`probe-int-index.pl` pattern) against the implemented subs; not a harness |
+| 4 | Two keys differing only in a UUID, `-g 85`, without `-uuid` | they are not grouped by a UUID placeholder: no `<UUID>` appears and grouping follows raw Dice; with `-uuid` they group | assertable |
+| 5 | The same invocation run twice | byte-identical `message-grouping` cluster output | assertable |
+| 6 | Completion gate, the four `569-before` cases | no metric worse by more than 5% (`compare-results.sh summary`) | assertable |
+| 7 | `--help` and `docs/usage.md` for `-g` | both advise excluding UUIDs with `-uuid` where a log carries many | assertable (`validate-help-content.sh` parity; text reviewed) |
+
+### Implementation progress
+
+**Acceptance tests, shown failing before the change (2026-09-16).** `tests/validate-message-grouping.sh` gains scenarios for criteria 1, 2, 4 and 5 over two committed fixtures:
+- `tests/fixtures/grouping-signed-downloads.txt`: 400 scrubbed signed direct-download requests from the PLM access day, rebuilt by `tests/fixtures/regenerate-grouping-signed-downloads.sh`. Under `-xqs` each key's best partner scores Dice 75 to 79 (median 77) and no pair reaches 85.
+- `tests/fixtures/grouping-uuid-pair.txt`: two requests whose keys differ only in a UUID sharing its first 18 characters. They score Dice 73 as written and 100 with the UUIDs replaced by a placeholder.
+
+Run on the rebased base commit (`ltl` unchanged apart from `$version_number`): 15 passed, 3 failed. Every failure is expected:
+
+| Criterion | Assertion | Base result |
+|---|---|---|
+| 1 | `plain\|200` reduces 400 keys to at most 10 rows at `-g 75` | fails: `Reduction 400 -> 400` |
+| 4 | the two UUID-differing keys remain two rows at `-g 85` | fails: `Reduction 2 -> 1`; the base scores Dice with the UUIDs replaced and groups them as `3f9c2a71-8be4-4d0a-*` |
+| 5 | cluster membership byte-identical across two runs at `-g 75` | fails: the base forms no cluster, so there is no membership to compare |
+| 2 | no pattern in any `plain\|200` block at `-g 85` | passes, as it must before and after |
+| 4 | no `<UUID>` anywhere in the output; with `-uuid` the two lines are one row | passes: the base's placeholder never reaches output |
+| #571's final-pass threshold scenarios | all 12 assertions | pass |
+
+Each new check was also shown to fail on a doctored or violating capture (at most 10 rows against 400 → 400, 400 → 11 and a missing group; no patterns against streaming and final-pass pattern counts and a missing count line; membership against a changed member line, a missing section and an empty section).
+
+A variant of `ltl` built with the prototype's search settings reduces the download fixture 400 → 3 at `-g 75` and forms nothing at `-g 85`.
+
+**UUIDs compared as written (D569-2).** `build_consolidation_ngram_index()` no longer builds a second trigram set with each UUID rewritten as `<UUID>`, and `find_consolidation_candidates()` scores Dice on the key's own trigrams. The placeholder sets, the pattern that matched UUIDs for them, every per-key and per-pass free of them, and their `-mem` rows (`consolidation_key_trigrams_norm` in the checkpoint measurement and `MEMORY_FINAL`) are gone; no harness or build script reads that row. `-uuid` is unchanged. The fixed pre-filter is still in place at this step. `tests/validate-message-grouping.sh`: 16 passed, 2 failed. Criterion 4 now passes (the UUID pair stays `Reduction 2 -> 2` at `-g 85`, one row with `-uuid`); criteria 1 and 5 still fail with the base's diagnostics, as they must until the search changes; #571's scenarios pass. `tests/validate-statistics.sh`, each of the seven `-g 90` consolidated scenarios run alone: all pass, every cell of `messages` and `stats` identical to its stored baseline (T1) with no row key changed, and the bin-model scenarios' registered known failures still reproduce, none stale. Comparing UUIDs as written changes none of those references, so none is re-captured at this step.
+
+**The search (D569-1), and what it does to grouping elsewhere (2026-09-16).** `build_consolidation_ngram_index()` builds the integer-id index (ids in trigram-count order then batch order; per id the key, its trigram count and its trigram set; each trigram an ascending id array) and `find_consolidation_candidates()` is the seven-step search, with both passes handing it their consumed set. The fixed rule's two constants are gone, as is the 50-candidate cap; `-mem` and `benchmark-data` report `consolidation_id_index` in place of the hash index and posting sizes. `tests/validate-message-grouping.sh`: 18 passed, 0 failed, so criteria 1, 2, 4 and 5 hold and #571's scenarios still pass.
+
+*Recall (criterion 3).* `prototype/569-gate-sizing/probe-implemented.pl`, which slices the implemented subs and the message cap out of `ltl`, over the ten first-checkpoint batches at T = 50, 60, 70, 75, 80, 85, 90 and 95: **25,449 partners by direct Dice, 0 missed, 0 returned candidate below T or above the best score**. Per search on the download batch: 3.2 ms at 50, 2.4 ms at 75, 1.9 ms at 80, 0.5 ms at 85 where no partner exists. Results in `prototype/569-gate-sizing/results/implemented/`.
+
+*Determinism.* Three runs of the same invocation on the one-day Tomcat access log (148 MB, `-cp full -bs 240 -g 90 -n 25`) produce identical consolidated message keys.
+
+*Grouping changes on two corpus logs, measured old search against new, same invocation, `-V message-grouping` `Reduction` per group.* The statistics-drift scenarios `tomcat-consolidated`, `thingworx-consolidated` and `thingworx-bin-consolidated` fail on row keys alone (24, 20 and 20 mismatches), every compared value still identical; the other four scenarios are unchanged.
+
+| Log, group | Old rows | New rows |
+|---|---|---|
+| Tomcat access, `plain\|200` (2,870 keys) | 1,023 | 986 |
+| Tomcat access, third group (135 keys) | 66 | 98 |
+| Tomcat access, all groups | 1,142 | 1,137 |
+| ScriptLog, `plain\|WARN` (3,388 keys) | 39 | 44 |
+| ScriptLog, all groups | 49 | 53 |
+
+The direction is mixed, not uniform: the largest group on each log moves one way and a smaller one the other. The mechanism is the stop rule (step 7). The search returns the partners found at the probe position that first yields one, so the pair a pattern is formed from is the best of those, not the best in the batch, and a different first pair generalises differently. Seen directly on the `MSAI-AnalyticsServer_*` family of the Tomcat log: the old search formed `MSAI-AnalyticsServer_*Thing/Properties/isConnected`, absorbing nine keys; the new one forms `MSAI-AnalyticsServer_*ingThing/Properties/isConnected` from the three keys ending in `ingThing`, and the other six stay as rows of their own. Recall is not the cause: criterion 3 shows no partner at or above T is passed over.
+
+**The reported case, swept (2026-09-16).** The issue's own invocation on the PLM access day (`-du us`, both download include filters, `-xqs -bs 1w -r -n 200 -o -hm bytes -hg bytes -hgh 13`), `plain|200`, no runtime warnings at any setting:
+
+| `-g` | Reduction |
+|---|---|
+| 50 | 74,305 → 7 |
+| 65 | 74,305 → 7 |
+| 75 | 74,305 → 8 |
+| 80 | 74,305 → 13,770 (81.5%) |
+| 85 | 74,305 → 74,305 |
+| 95 | 74,305 → 74,305 |
+
+Shipped left 74,305 → 74,305 at every setting from 50 to 95. The range where grouping happens is the range the data supports: about half the download keys have no partner at 80 and none at 85 (§ Similarity distribution between download keys), so 85 and 95 forming nothing is the correct outcome, not a miss.
+
+*The accepted case (D569-3).* The unfiltered day at `-du us -xqs -bs 1440 -n 15 -g 80`, `-V benchmark-data` `TIMING`: total 54.2 s (parse/read_files 41.4 s, finalize/group_similar 12.7 s), against the accepted about 76 s and shipped's 47.6 s.
+
+**Completion gate, before/after on this machine (2026-09-16).** Commit `22a7e8f`, `$version_number` restored, against the four `569-rebased-before` cases. Single run each; the benchmark ran with nothing else on the machine.
+
+| Case | `total` before → after | `rss_peak` before → after |
+|---|---|---|
+| `single-day-access-log-standard` (no `-g`) | 9.2 s → 9.5 s (+2.6%) | 98.5 → 98.3 MB |
+| `single-day-access-log-top25-consolidate` | 13.3 s → 12.0 s (−9.7%) | 130.9 → 130.3 MB |
+| `single-day-application-log-top25-consolidate` | 6.9 s → 9.0 s (**+31.4%**) | 131.7 → 172.7 MB (**+31.2%**) |
+| `humungous-log-uniqueness-top25-consolidate` | 12.2 s → 6.3 s (−48.7%) | 264.4 → 225.0 MB (−14.9%) |
+
+The application-log case breaches the 5% bound (criterion 6). Its cost sits in `finalize/group_similar` (0.287 s → 3.609 s) while `parse/read_files` falls (6.569 s → 5.401 s), and its surviving message rows rise from 136 to 4,498 (`COUNTS log_messages_entries`). That log carries a hex UUID on 13,996 of its 479,904 lines, 10,954 of them a `PersistentSession` entity name, which is the family § Pre-filter misses across log families measured at raw Dice 81 against normalised 100.
+
+*Attribution, three runs per arm on this machine, same case and options, medians with ranges.* Each arm is a worktree at that commit; `rows` is `COUNTS log_messages_entries`.
+
+| Arm | `total` | `finalize/group_similar` | `rss_peak` | rows |
+|---|---|---|---|---|
+| `8e6dd17` fixed pre-filter, Dice scored with UUIDs replaced | 7.011 s (6.804–7.468) | 0.283 s (0.264–0.302) | 131.7 MB | 136 |
+| `0c7c950` UUIDs compared as written, fixed pre-filter | 24.317 s (23.563–24.734) | 12.932 s (12.698–13.664) | 163.1 MB | 3,573 |
+| `22a7e8f` UUIDs as written **and** the new search | 8.786 s (8.759–8.909) | 3.524 s (3.509–3.539) | 172.9 MB | 4,498 |
+| `22a7e8f` with `-uuid` (two runs) | 5.492, 5.539 s | 0.320, 0.340 s | 112.7 MB | 103 |
+
+**The cost belongs to D569-2, not to the search.** Comparing UUIDs as written alone takes the case from 7.0 s to 24.3 s: keys that scored 100 against a placeholder score about 81 as written and stop grouping at the default 85, so surviving rows rise from 136 to 3,573 and the final pass carries them. The new search then recovers most of that, 24.3 s back to 8.8 s, leaving the case 25% slower and 31% heavier than before this issue. On this log it groups slightly less than the fixed pre-filter does with the same scoring (4,498 rows against 3,573), the pairing effect measured above.
+
+**The remedy D569-6 documents is measured.** With `-uuid`, the same run takes 5.5 s at 112.7 MB and 103 rows: faster, lighter and more grouped than before this issue, because masking applies before the key is built and the analyst chooses it.
+
+**Decision (architect, 2026-09-16): the mixed grouping change is accepted; the three references are re-captured.** `tests/statistics-drift/baselines/{tomcat,thingworx,thingworx-bin}-consolidated/messages.csv` are re-captured from the new search, and each scenario then passes: the change comes from the search, not from UUIDs being compared as written, which left every reference identical at the step before. The bin scenario's registered known failures still reproduce, none stale.
+
+## Final pass follows the sensitivity (#571)
+
+**Requirement:** the final pass groups at the sensitivity given with `-g`, or at the default when `-g` is given without a value; the slower final pass this causes at high sensitivity is accepted until final-pass performance is improved (#142). Measurements and the architect's decision: § Finding: no groupings on keys whose rarest trigrams are per-request values (#569) → Final pass threshold against `-g`.
+
+**Design:** `group_similar_messages()` scores the final pass at `$consolidation_threshold`, the resolved `-g` value. The hidden `--final-threshold` remains as an explicit diagnostic override: when given it replaces the threshold for the final pass only; when absent there is no separate final-pass value. The `message-grouping` header reports the threshold the final pass actually used.
+
+### Acceptance criteria
+
+Fixture: `tests/fixtures/grouping-final-pass-threshold.txt`, a Tomcat-shaped access log of four request paths, each requested three times. Every key reaches the occurrence ceiling, so streaming discovery skips it, its first checkpoint absorbs nothing and eviction removes it from the streaming working set; all four are left to the final pass. The paths form two pairs: catalog televisions/headphones at Dice 77 and warehouse north/south levels at Dice 89 (`dice_coefficient()` on the `[200] GET <path>` keys). Both pairs pass the candidate pre-filter (each key has at most 10 trigrams unique to it, of 45–46).
+
+| # | Condition | Observable outcome | Triage |
+|---|---|---|---|
+| 1 | `-g 70` | `message-grouping` header reports `Threshold: 70%` and `Final pass: on (threshold=70%`; the `plain\|200` final pass creates 2 patterns (both pairs grouped) | assertable |
+| 2 | `-g 95` | header reports `Final pass: on (threshold=95%`; the final pass creates 0 patterns (neither pair grouped) | assertable |
+| 3 | `-g` without a value | header reports `Threshold: 85%` and `Final pass: on (threshold=85%`; the final pass creates 1 pattern (only the Dice 89 pair) | assertable |
+| 4 | `-g 95 --final-threshold 70` | header reports `Threshold: 95%` and `Final pass: on (threshold=70%`; the final pass creates 2 patterns | assertable |
+| 5 | Every scenario above | the final pass receives all 4 keys (`Keys seen: 4` in its block): streaming grouped none of them, so the pattern counts are the final pass's own | assertable |
+
+Criteria 1 and 2 fail against the fixed 85: that final pass creates 1 pattern at any `-g`. Harness: `tests/validate-message-grouping.sh`.
+
+### `-V message-grouping` keys asserted
+
+The header line `Threshold: <T>%  Trigger: <N>  Ceiling: <C>  Final pass: on (threshold=<F>%, ceiling=<M>)` (emitted by `pipeline_finalize()`), where `<T>` is the resolved `-g` sensitivity and `<F>` the threshold the final pass scored at; and, per group, `Keys seen:` and `New patterns created:` in the `--- <category>|<group>: Final Pass (2-pass) ---` block. Renaming or removing any of these is a breaking change for that harness.
+
+## Consolidation stops absorbing UUID-bearing keys at scale (#584)
+
+**Status:** root cause established, 2026-09-19. No fix proposed; the remedy is the
+architect's to direct, and the candidate remedies below each trade against D569-2.
+
+### What was measured
+
+On the release benchmark's 1.5 GB single-server access-log selection
+(`-bs 1440 -n 25 -g`, 28 files, 7,749,167 lines), `finalize/group_similar` takes
+2655.6 s against 55.2 s on v0.18.1, 96% of a 2775.4 s run, and peak resident memory
+rises from 964 MB to 2393 MB. Against § DD-12, which requires a consolidating run
+within 15% of the non-consolidating wall clock and at least 30% below its peak memory,
+0.18.2 reads +2703.3% and +11.0% where v0.18.1 read +87.9% and −55.3%.
+
+The reading that explains both halves is in the same capture:
+`COUNTS log_messages_entries` is **1,313 on v0.18.1 and 1,136,511 on 0.18.2**.
+Consolidation is not slow at absorbing this selection; it has stopped absorbing it.
+
+Across the whole benchmark the correlation is exact. Every consolidating case whose
+surviving row count stayed in the hundreds or low thousands is flat or faster on
+0.18.2; the only cases that regressed are the two whose row count exploded.
+
+### Root cause
+
+Two access-log keys differing only in a trailing UUID score **Dice 63 as written and
+90 with the UUID normalised** (127 characters, 112 distinct trigrams each, measured on
+this corpus). The default sensitivity is 85. Normalised, the pair groups; as written,
+it does not.
+
+`0c7c950` (#569, D569-2) removed the UUID-normalised trigram set that consolidation
+scored Dice against. Every key whose only variation is a UUID therefore stops finding
+a partner, and each distinct UUID becomes a permanent row. The day file used for the
+reproduction holds 36,541 distinct UUIDs and leaves 36,791 surviving rows.
+
+**This is D569-2 operating as decided, not a defect in its implementation.** D569-2
+states that consolidation does not replace UUIDs anywhere, and acceptance criterion 4
+asserts that two keys differing only in a UUID are *not* grouped at `-g 85`. The
+grouping loss is the decision's intended effect. What was not established when it was
+locked is the scale at which that effect is paid: § Prototype Performance Assessment
+and the #569 completion gate both measured selections whose retained populations stay
+small.
+
+### Bisection
+
+One day of the affected corpus, `-bs 1440 -n 25 -g`, `COUNTS log_messages_entries` and
+`finalize/group_similar`:
+
+| commit | rows | `group_similar` |
+|---|---|---|
+| `e153589` (before #571) | 467 | 0.72 s |
+| `3defdcb` (#571, final pass at the `-g` sensitivity) | 467 | 0.70 s |
+| `0c7c950` (#569, UUIDs compared as written) | 36,790 | 23.05 s |
+| `22a7e8f` (#569, the new candidate search) | 36,791 | 6.83 s |
+
+`0c7c950` carries the whole of the change in outcome. `22a7e8f` recovers two thirds of
+the time its predecessor lost and recovers none of the grouping — the new search is
+mitigating this regression, not causing it. #571 is flat on this invocation because it
+already scores at 85; it would contribute at a higher `-g`, and does not here.
+
+This matches the attribution already recorded for the application log in § Finding: no
+groupings on keys whose rarest trigrams are per-request values (#569) → *The cost
+belongs to D569-2, not to the search* (7.0 s → 24.3 s → 8.8 s, 136 → 3,573 → 4,498
+rows). #584 is the same mechanism on a corpus two orders of magnitude larger.
+
+### Where the time goes
+
+Devel::NYTProf 6.15 on the first 100,000 lines of one day of the corpus, same options.
+Full profile, hypothesis and line-level data:
+`tests/profile/results/584-consolidation-regression/`.
+
+| sub | exclusive | share | calls | ms/call |
+|---|---|---|---|---|
+| `find_consolidation_candidates` | 3.4424 s | 36.7% | 12,232 | 0.324 |
+| `build_consolidation_ngram_index` | 0.7686 s | 13.2% | 79 | 17.958 |
+| `match_consolidation_patterns` | 0.7019 s | 8.0% | 65,915 | 0.013 |
+| `get_consolidation_trigrams` | 0.6579 s | 6.1% | 33,688 | 0.020 |
+| `dice_coefficient` | 0.0264 s | 0.2% | 2,721 | 0.010 |
+
+`process_final_pass_window()` holds 46.1% inclusive. The candidate search's NYTProf
+call count reconciles exactly with the `-V` `find_candidates calls` counters:
+12,232 against 12,232.
+
+**2,721 Dice scores against 12,232 searches is the shape of the fault.** The searches
+are not scoring partners; they are walking to exhaustion and returning nothing.
+Per search: about 50 probe positions, 154 candidate visits, 100 candidates
+initialised, 0.22 candidates scored. `last if @results` cannot fire when no partner
+exists, and the exhaustion rule rarely fires because candidates stay live while the
+size range still admits them. Two costs are paid per call whatever the walk does —
+building and sorting a posting-length map over all of the source's trigrams
+(ltl:10824-10825, 844 ms of the 3.44 s).
+
+### Why only the largest selections move
+
+The retained population grows linearly with the input, because each distinct UUID is a
+row; on v0.18.1 it was nearly flat.
+
+| days | v0.18.1 rows | 0.18.2 rows | v0.18.1 `group_similar` | 0.18.2 `group_similar` |
+|---|---|---|---|---|
+| 1 | 467 | 36,791 | 0.73 s | 6.91 s |
+| 2 | 531 | 74,693 | 0.77 s | 13.40 s |
+| 4 | 988 | 147,866 | 1.87 s | 30.18 s |
+| 28 (benchmark) | 1,313 | 1,136,511 | 55.2 s | 2655.6 s |
+
+From 1 to 4 days the cost is close to linear in retained rows, about 190 us per row.
+At 28 days it is about 2,336 us per row, roughly 12x that: the number of searches and
+the work inside each grow together, and neither is visible at small sizes. This is why
+the standard benchmark tiers stayed flat and only the release tiers moved.
+
+The streaming phase contributes by standing aside. At 4 days `-V` reports
+`S1 Inline match: 100`, `S6 Evicted: 150057`, `EMA=0.0%, max_survivals=0`: the adaptive
+eviction guard (#135) sees a zero absorption rate and evicts the entire working set
+from streaming, deferring the whole retained population to the final pass. The guard is
+behaving as designed, on an absorption rate D569-2 drove to zero.
+
+### The memory half
+
+`MEMORY log_messages` is 254 MB on v0.18.1 and 1,568 MB on 0.18.2, and
+`MEMORY_FINAL log_messages` is 1,498 MB — the rows are never absorbed, so they are
+never freed. That single structure accounts for the peak rising from 964 MB to
+2393 MB, and for DD-12's memory target inverting from −55.3% to +11.0%. It is the same
+root cause, not a second one: consolidation's memory saving *is* the rows it absorbs.
+
+This is also the surface #426 (per-message statistics store is one hash per message)
+bears on: at 1,313 rows the per-row overhead is irrelevant and at 1,136,511 rows it is
+the whole of the peak.
+
+### The counterfactual
+
+The same 100,000-line sample and the same code, with `-m uuid` so UUIDs never reach the
+similarity comparison:
+
+| | default | `-m uuid` |
+|---|---|---|
+| `finalize/group_similar` | 10.438 s | 0.690 s |
+| total | 18.059 s | 6.082 s |
+| `rss_peak` | 171.6 MB | 126.3 MB |
+| `COUNTS log_messages_entries` | 21,565 | 235 |
+
+`find_consolidation_candidates` leaves the top six subs entirely under `-m uuid`, where
+it had held 36.7% of exclusive time. On the full day the same substitution gives 286
+rows in 0.42 s at 126 MB, against v0.18.1's 467 rows in 0.71 s at 160 MB — better than
+before #569 on every axis. D569-6 already documents masking as the advice for
+UUID-heavy logs, and `--help` and `docs/usage.md` carry it.
+
+### Against the same selection without `-g`
+
+The non-consolidating run of the same selection retains 1,212,271 rows. The 0.18.2
+consolidating run retains 1,136,511 — within 6% of it. Consolidation is not absorbing
+nothing, but its reduction has collapsed from 99.9% to 6%.
+
+| | rows retained | total | peak RSS |
+|---|---|---|---|
+| without `-g` | 1,212,271 | 99.0 s | 2156 MB |
+| `-g` on v0.18.1 | 1,313 | 187.1 s | 964 MB |
+| `-g` on 0.18.2 | 1,136,511 | 2775.4 s | 2393 MB |
+
+This is what inverts DD-12's memory target rather than merely missing it: the
+consolidating run now holds nearly the same population as the non-consolidating run,
+so it inherits that run's footprint and adds consolidation's own structures on top
+(`consolidation_clusters` 181 MB, `consolidation_id_index` 81 MB,
+`consolidation_key_trigrams` 41 MB). Both runs build the same store; the 2,655 s
+difference is searching for partners that do not exist, once per key, and absorbing
+6% at the end of it.
+
+### Sensitivity sweep on the affected corpus
+
+One day of the corpus, `-bs 1440 -n 25`, varying `-g`:
+
+| `-g` | rows | `finalize/group_similar` | grouping produced |
+|---|---|---|---|
+| 95 | 37,573 | 5.88 s | nothing |
+| 85 (default) | 36,791 | 7.02 s | nothing |
+| 80 | 36,726 | 7.70 s | nothing, costs more than 85 |
+| 75 | 36,700 | 9.11 s | nothing, costs more than 80 |
+| 74 | 5,027 | 4.47 s | partial |
+| 72 | 300 | 0.30 s | good |
+| 70 | 69 | 0.21 s | over-merged |
+| 65 | 37 | 0.09 s | unusable |
+| 85 with `--mask uuid` | 286 | 0.42 s | best |
+
+**Lowering the sensitivity moderately makes it worse.** 80 and 75 are slower than 85
+and group no more: a lower threshold widens the probe and admits more candidates per
+search while still finding almost no partners. The transition is a cliff between 75
+and 72, where the Dice 63 pair measured above finally falls inside the threshold.
+
+The usable band is narrow, around 72-74. Below it the canonical forms stop carrying
+information: at `-g 65` the top row is `[200] POST /Thingworx/*s/*/Services/*` at
+107,970 occurrences, and on other rows the status code itself is wildcarded to `[*]`.
+
+At `-g 85` with `--mask uuid` the UUID family collapses to the same population as
+`-g 72` while the remaining rows keep their detail
+(`RD.RS.Interface.NiFi.Instance/Services/*` rather than `*s/*/Services/*`), which is
+the best output of the three approaches.
+
+Consequence for any notice or advice: "try a lower sensitivity" is wrong as stated,
+because the values immediately below the default cost more and gain nothing. Masking
+the identifier is the first remedy where one is detected.
+
+### Design: skip the final pass when streaming absorbed nothing (#584)
+
+**Decision (architect, 2026-09-19):** when the streaming phase has absorbed almost
+nothing and is about to hand a large population forward, the final pass is skipped.
+`ltl` prints why it was skipped and reports the similarity the data actually clusters
+at, so the analyst can choose a sensitivity or a mask for the next run. Consolidation
+is never silently re-tuned: it runs at the analyst's sensitivity or it stops.
+
+There is no option to force the final pass back on. Keeping the surface small is
+preferred to covering the case.
+
+#### The condition
+
+Evaluated per consolidation category group (`cat_gk`) at the point the run enters the
+final pass, before the streaming working structures are reset — the boundary where
+streaming has finished and the final pass has not started, so no key is half-processed.
+
+Both must hold:
+
+1. **Streaming absorbed almost nothing.** The absorption EMA the adaptive eviction
+   guard already maintains (`%consolidation_absorption_ema`) is at or below a floor,
+   equivalently that the keys absorbed in streaming are a negligible fraction of the
+   keys seen.
+2. **The population handed forward is large enough for the final pass to be
+   expensive.** The count of keys the group would hand to the final pass is at or
+   above a floor.
+
+**The two are ANDed, not ORed.** Size alone is not evidence of futility: a corpus that
+absorbs well in streaming and still hands a large population forward has a final pass
+worth running, and must not be skipped for being big. Absorption alone is not
+sufficient either — skipping a cheap final pass saves nothing and costs grouping.
+
+Observed at both ends of this condition on the affected corpus (`-V`, per group,
+4 days): the failing case reports streaming `S1 Inline match: 100` against
+`S6 Evicted: 150057`, handing 150,057 keys forward; the same input with the identifier
+masked absorbs 13,960 inline with nothing evicted and hands 513 keys forward. The two
+signals agree in both directions.
+
+#### What the analyst is told
+
+A notice, printed whenever the skip fires (a behavioural notice, so never suppressed by
+`--disable-progress`), stating:
+
+- that final-pass consolidation was skipped, and **why** — that grouping at the
+  requested sensitivity absorbed essentially nothing during the run, so the final pass
+  would have cost heavily and grouped little
+- the similarity the data clusters at (below), offered as a reference for tuning
+- that masking a per-request identifier is the other remedy
+
+The notice stays on the final pass and the shape of the data. It does **not** report
+what the streaming phase absorbed: that is a different phase, and a count of rows
+grouped before the skip adds a number the reader cannot act on and has to interpret.
+Rows grouped before the skip do remain grouped, which the design guarantees by taking
+the decision at the phase boundary; it is not something the notice needs to say.
+
+The notice names no internal identifiers, per the user-facing prose rule.
+
+#### The similarity cliff edge
+
+Reported as an observation about the data, not a recommended setting: *the data's
+similarity cliff edge is at N%*, to be used as a reference for tuning
+`--group-similar` to the analysis goal.
+
+Derived from the distribution of best-partner Dice scores over a sample of keys: the
+distribution on an affected log is bimodal, with the reachable population above the
+requested sensitivity and a larger unreachable mode below a gap. The cliff edge is the
+top of that gap. On the affected corpus this yields 71 against a usable band found by
+hand at 72-74; on `tests/fixtures/grouping-signed-downloads.txt`, whose record states
+every key has a partner at Dice 75-79 and none at 85, it yields 79.
+
+Two honest limits, which the wording must respect:
+
+- It locates the **threshold**, not the outcome. It says where partners become
+  reachable, not how many rows would result.
+- It does not know where grouping stops being **meaningful**. On the affected corpus
+  the value below the cliff is already close to where canonical forms over-merge (at
+  `-g 65` the top row is `[200] POST /Thingworx/*s/*/Services/*` at 107,970
+  occurrences, with the status code wildcarded on other rows). This is why it is phrased
+  as where the data bites, not as a setting to adopt.
+
+The sample is bounded and the comparison is over that sample only, so the cost does not
+scale with the input. It is computed only when the skip condition has fired.
+
+#### `-V message-grouping` additions
+
+Three keys, in the consolidation section (not the benchmark-data block), per
+`tests/HARNESS-DESIGN.md` and the profile-ready contract:
+
+| key | meaning |
+|---|---|
+| final pass skipped | boolean, whether the skip fired for the group |
+| streaming absorption | the absorption measure the condition tested, so a skip or a non-skip can be explained from the capture |
+| similarity cliff edge | the reported percentage, or absent when not computed |
+
+The existing header line and per-group `Keys seen:` / `New patterns created:` keys are
+unchanged. Renaming or removing any of them is a breaking change for
+`tests/validate-message-grouping.sh`.
+
+#### As implemented
+
+Values chosen at implementation, both named as configuration in the globals block:
+
+- **Absorption floor 5%** (`$consolidation_skip_absorption`). Aligned deliberately with
+  the adaptive eviction guard's existing `< 0.05` boundary in
+  `get_consolidation_max_survivals()`, below which it already treats a group as absorbing
+  nothing and evicts immediately. One definition of "absorbing nothing" across both
+  mechanisms rather than two.
+- **Population floor 20,000 keys** (`$consolidation_skip_min_keys`). Above the retained
+  populations of every corpus selection that consolidates normally, and far below the
+  affected selection's per-group population.
+- **Cliff-edge sample 300 keys** (`$consolidation_cliff_sample`), evenly strided over the
+  keys handed forward.
+
+The measure the condition reads is the **cumulative** streaming absorption
+(`%consolidation_streaming_absorbed`, counting both S1 inline matches and checkpoint
+absorptions), not the absorption EMA. The EMA is a recency-weighted signal built for a
+per-checkpoint eviction decision; a single late checkpoint can lift or depress it, and
+the skip is a once-per-run judgement about the whole phase.
+
+`--skip-final-min-keys` is a hidden diagnostic override for the population floor,
+following `--final-threshold`'s precedent, so the decision is exercisable on a committed
+fixture rather than only on a corpus-sized input. It has no `--help` or `docs/usage.md`
+row, as hidden options do not.
+
+Sensitivity of the reported cliff edge to the sample size, on the affected corpus: 70% at
+a 300-key sample, 72% at 500, 71% at 800 — within a couple of points across a near
+threefold range, and all inside the band found by hand. The figure is presented as a
+reference point, and that is the precision it has.
+
+Independent corroboration: on `tests/fixtures/grouping-signed-downloads.txt`, whose
+record states that every key has a partner at Dice 75 to 79 and none reaches 85, the
+computation reports 79% — a fixture whose similarity structure was characterised before
+this feature existed.
+
+#### Relationship to final-pass performance (#142)
+
+This skip routes around the final pass's cost on one shape of input; it does not reduce
+that cost, and #142 stays open. Checked against #142's own cases:
+
+- **#142's named regression case is not covered.** `single-day-application-log` at
+  `-g 85` reports `Streaming absorption: 0 of 1709 keys (0.0%)` — the futility condition
+  — but 1,709 keys is far below the population floor, so the final pass runs and still
+  costs 3.2 s. Deliberate: skipping a cheap final pass saves nothing and costs grouping.
+- **The cost #571 deferred to #142 is not covered.** That deferral records the script log
+  at `-g 95` going from 115 s to 246 s. Measured now: one group absorbs 21.2% and another
+  2.7% over 2,679 keys, so nothing is skipped and the pass runs, correctly, at 1.28 s.
+  That case forms fewer patterns and makes more searches — a different shape from a
+  population that absorbs nothing.
+
+What remains with #142 is the structural cost this design routes around: the per-key
+cost paid twice (Pass 1 and the Pass 2 cleanup sweep), the search walking to exhaustion
+per key on a population without partners, and the futile-but-cheap small-population case
+that is simply paid.
+
+#### Acceptance criteria
+
+| # | Condition | Observable outcome |
+|---|---|---|
+| 1 | A fixture whose keys differ only in a per-request identifier, at a sensitivity none of them reach, with enough keys to pass the population floor | the final pass is skipped; `-V` reports it skipped; the notice states that it was skipped, why, and that rows grouped before the skip stay grouped |
+| 2 | The same fixture at a sensitivity its keys do reach | the final pass runs; `-V` reports it not skipped; no notice |
+| 3 | A fixture that absorbs well in streaming but hands a population above the floor forward | the final pass runs — absorption governs, size alone does not skip |
+| 4 | A fixture that absorbs nothing but hands a population below the floor forward | the final pass runs — a cheap final pass is not worth skipping |
+| 5 | Criterion 1's run | `-V` reports a similarity cliff edge, and it falls below the requested sensitivity |
+| 6 | Criterion 1's run with `--disable-progress` | the notice is still printed |
+| 7 | Criterion 1's run | rows absorbed during streaming are still consolidated in the output, and the notice says nothing about them |
+
+Harness: `tests/validate-message-grouping.sh`.
+
+### What this leaves open
+
+The remedy is a decision, not a repair, because every candidate trades against a locked
+decision or a stated target. Recorded here so the architect's choice is made against
+what each one costs:
+
+1. **Accept the regression and rely on D569-6's advice.** Costs nothing to build.
+   Leaves DD-12 breached by default on UUID-heavy logs, and leaves the failure silent:
+   nothing tells the analyst that `-g` did almost nothing and that `-m uuid` would have.
+
+   A variant the architect directed regardless of which remedy is taken, **applied**:
+   `tests/baseline/run-benchmark.sh` runs `top25-consolidate` and
+   `heatmap-histogram-consolidate` with `-m uuid`, so the suite continues to exercise
+   the same internal functions and stays comparable across versions. `-g` is not a
+   default either, so the mask not being a default is not a reason to leave the case
+   measuring a search that finds nothing. On one day of the affected corpus the mask
+   takes the same run from 37,597 rows to 286, `finalize/group_similar` from 1.14 s to
+   0.43 s and `rss_peak` from 166 MB to 119 MB. Both scenarios have an entry in
+   `compare-results.sh`'s `OPTIONS_TMAP_AWK`, so captures either side of the change still
+   pair and the series continues; `tests/baseline/README.md` § A scenario's options are
+   part of its identity — and of the compat map carries the rule.
+2. **Skip the final pass when streaming absorbed nothing, and say why.** Taken; the
+   design is § Design: skip the final pass when streaming absorbed nothing (#584) above.
+   Does not restore grouping; it stops the run costing more than not grouping at all,
+   and makes the condition visible instead of silent.
+3. **Mask UUIDs by default under `-g`, with an option to keep them as written.**
+   Restores every target and inverts D569-2's default. Needs the architect, since
+   D569-2 and acceptance criterion 4 both assert the current default.
+4. **Make the similarity comparison UUID-aware without replacing UUIDs in output.**
+   This is PF-19's mechanism, which D569-2 removed. The scoring change and the display
+   change were removed together; separating them would restore grouping while keeping
+   UUIDs shown as written. Needs the architect to say whether D569-2 governs what is
+   displayed, what is scored, or both.
+
+Benchmark evidence: `tests/baseline/results/0.18.2-partial-584.tsv` (69 of 77 cases)
+against `tests/baseline/results/v0.18.1.tsv`, same machine.

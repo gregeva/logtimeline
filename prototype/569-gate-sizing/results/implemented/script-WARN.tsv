@@ -1,0 +1,9 @@
+label	T	sources	partners	missed	false	ms_per_search
+script-WARN	50	500	500	0	0	0.665
+script-WARN	60	500	500	0	0	0.662
+script-WARN	70	500	500	0	0	0.548
+script-WARN	75	500	500	0	0	0.513
+script-WARN	80	500	500	0	0	0.534
+script-WARN	85	500	500	0	0	0.490
+script-WARN	90	500	498	0	0	0.490
+script-WARN	95	500	495	0	0	0.353

@@ -93,7 +93,14 @@ SCENARIOS+=("standard|")
 # `standard` on the same file selection.
 SCENARIOS+=("no-messages|-n 0")
 SCENARIOS+=("top25|-n 25")
-SCENARIOS+=("top25-consolidate|-n 25 -g")
+# The consolidating scenarios mask UUIDs (#584). Consolidation compares UUIDs as
+# written (D569-2), so on an access-log selection whose request paths carry one, no
+# two keys reach the default similarity and the scenario measures a candidate search
+# that finds nothing rather than the grouping it exists to measure. Masking keeps the
+# same internal functions under test and the series comparable across versions; -g is
+# not a default either, so the mask not being one is no reason to leave the case
+# measuring futility.
+SCENARIOS+=("top25-consolidate|-n 25 -g -m uuid")
 SCENARIOS+=("heatmap|-hm")
 SCENARIOS+=("histogram|-hg")
 SCENARIOS+=("heatmap-histogram|-hm -hg")
@@ -102,7 +109,7 @@ SCENARIOS+=("heatmap-histogram|-hm -hg")
 # carries the export and the message store switched off together; no-messages
 # against standard on the same selection isolates the second.
 SCENARIOS+=("heatmap-histogram-export|-hm -hg -n 0 -o")
-SCENARIOS+=("heatmap-histogram-consolidate|-hm -hg -g")
+SCENARIOS+=("heatmap-histogram-consolidate|-hm -hg -g -m uuid")
 SCENARIOS+=("sort-p99|-so p99")
 SCENARIOS+=("sort-skewness|-so skewness")
 

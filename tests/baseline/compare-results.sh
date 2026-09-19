@@ -205,11 +205,51 @@ TIMING_TMAP_AWK='
     }
 '
 
+# --- Scenario options compat map — THE one definition ---
+# Old options string -> the options in use today, for the same scenario. A row's
+# identity in a comparison is its test name AND its options, so changing a
+# scenario's options splits every one of its rows into a half-empty N/A pair —
+# the same silent drop-out the TIMING map above exists to prevent, for the same
+# reason, and it must be repaired the same way: add the entry IN THE SAME CHANGE
+# that changes the scenario.
+#
+# Pairing an old capture with a new one is only honest when the options changed
+# what the run was ASKED to do without changing what the series MEASURES. Where
+# the change alters the measurement, the right move is a new scenario name, not
+# an entry here.
+#
+# #584 added -m uuid to the consolidating scenarios. Consolidation compares UUIDs
+# as written, so on an access-log selection carrying one, no two keys reached the
+# default similarity and the scenario measured a candidate search that found
+# nothing. Masking restores what the scenario is for; the run is the same code
+# path on the same input, so the series continues rather than restarting. Expect
+# a step change at that boundary on UUID-bearing selections: it is the scenario
+# being fixed, not the tool regressing.
+OPTIONS_TMAP_AWK='
+    BEGIN {
+        omap["-n 25 -g"] = "-n 25 -g -m uuid"
+        omap["-hm -hg -g"] = "-hm -hg -g -m uuid"
+    }
+
+    # Follow the chain so options changed more than once still land on the
+    # current string; the guard stops a mistaken cycle looping.
+    function canon_options(opts,    hops) {
+        hops = 0
+        while (opts in omap && hops++ < 10) opts = omap[opts]
+        return opts
+    }
+'
+
 # --- Comparison output ---
 run_comparison() {
     local filter_mode="$1"
 
-    awk -F'\t' -v filter="$filter_mode" "$TIMING_TMAP_AWK"'
+    awk -F'\t' -v filter="$filter_mode" "$TIMING_TMAP_AWK$OPTIONS_TMAP_AWK"'
+    # Canonicalise the options once, before any key is built from them: a row is
+    # identified by its test name AND its options, so a scenario whose options
+    # changed must be folded onto the current string here or every one of its
+    # rows splits into a half-empty N/A pair.
+    FNR > 1 { $2 = canon_options($2) }
     {
         if ($3 == "TIMING") {
             $4 = canon_timing($4)
@@ -449,7 +489,15 @@ run_comparison() {
 run_rollup() {
     local kind="$1"
 
-    awk -F'\t' -v kind="$kind" "$TIMING_TMAP_AWK"'
+    awk -F'\t' -v kind="$kind" "$TIMING_TMAP_AWK$OPTIONS_TMAP_AWK"'
+    # Rows are buffered as $0 and split back apart on a tab in END, so the
+    # output separator has to be a tab before the canonicalisation below
+    # rebuilds $0 — awk joins the fields with OFS, and the default single
+    # space would strip every tab the rows are later parsed on.
+    BEGIN { OFS = "\t" }
+
+    # Same canonicalisation as run_comparison, for the same reason.
+    FNR > 1 { $2 = canon_options($2) }
 
     NR == FNR && FNR == 1 { next }
     NR != FNR && FNR == 1 { next }
@@ -559,12 +607,30 @@ run_rollup() {
             if (!(key in base_sum)) continue
 
             b = base_sum[key]
+            # A metric the current capture does not carry was removed or
+            # renamed between the two versions. Coercing it to zero reports
+            # the whole baseline figure as a saving that never happened, so
+            # the row is flagged and rendered as missing instead, the same
+            # way run_comparison keeps a one-sided metric as N/A.
+            gone[key] = !(key in cur_sum)
             c = (key in cur_sum) ? cur_sum[key] : 0
             if (b == 0 && c == 0) continue
 
             if (want_type == "TIMING" && name != "total" && !is_contained(type, name)) {
                 stage_b += b
                 stage_c += c
+            }
+
+            # A removed metric ranks by its baseline size and skips the
+            # noise floor: it is a structural change to report, not a
+            # movement to de-rank.
+            if (gone[key]) {
+                rank_key[++nrank] = key
+                rank_name[nrank] = name
+                rank_b[nrank] = b
+                rank_c[nrank] = "GONE"
+                rank_mag[nrank] = b
+                continue
             }
 
             # Noise floor. A category that moved by a few hundred bytes, or
@@ -602,6 +668,20 @@ run_rollup() {
         # (parse -> accumulate -> finalize -> render), which is itself the
         # diagnostic: where in the run the cost moved.
         if (want_type == "MEMORY") sort_by_magnitude(nrank)
+
+        # A rollup with no rows at all is a defect in this script, not a
+        # property of the data: two captures that share test cases always
+        # share TIMING and MEMORY metrics. It printed as a bare header for
+        # every comparison once already (#587), which reads as "nothing
+        # moved" rather than "nothing was measured", so it fails loudly.
+        if (nrank == 0 && quiet_n == 0 && qc_n == 0) {
+            printf "\n" > "/dev/stderr"
+            printf "WARNING: the %s rollup produced no rows (%d metrics accumulated).\n",
+                   want_type, n_order > "/dev/stderr"
+            printf "         Two captures sharing test cases always share metrics, so an\n" > "/dev/stderr"
+            printf "         empty rollup is a defect in compare-results.sh, not a quiet\n" > "/dev/stderr"
+            printf "         release. Do not read it as nothing having moved.\n" > "/dev/stderr"
+        }
 
         for (i = 1; i <= nrank; i++)
             print_row(want_type, rank_name[i], rank_b[i], rank_c[i],
@@ -644,6 +724,14 @@ run_rollup() {
 
     function print_row(type, name, b, c, note, key,
                        delta, pct, ind, bd, cd, dd, up, dn, split_col) {
+        # The metric is absent from the current capture: there is no current
+        # value, so there is no delta and no percentage to state.
+        if (c == "GONE") {
+            bd = (type == "MEMORY") ? format_bytes(b) : format_time(b)
+            printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name note, bd, "-", "-", "-", "-", "REMOVED"
+            return
+        }
+
         delta = c - b
         if (b != 0)       pct = sprintf("%.1f%%", (delta / b) * 100)
         else if (c == 0)  pct = "0.0%"

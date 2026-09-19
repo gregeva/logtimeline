@@ -56,6 +56,40 @@ Development references are working artifacts of a cycle. They are committed so t
 comparisons are reproducible and auditable, and they are never cited as release
 figures.
 
+## A scenario's options are part of its identity — and of the compat map
+
+A row is paired across two TSVs by its test name **and** its options, which the TSV
+records in its `options` column. So changing a scenario's options splits every one of its
+rows into a half-empty `N/A` pair, and the metric silently drops out of every comparison
+spanning the change — the same failure the TIMING label map exists to prevent, for the
+same reason.
+
+**Every scenario options change adds an entry to `OPTIONS_TMAP_AWK` in
+`compare-results.sh`, in the same change**, next to the TIMING map and maintained under
+the same rule. With the entry in place the series continues across the boundary and the
+history stays readable.
+
+The judgement that decides whether an entry is right: pairing old against new is honest
+when the options changed what the run was *asked to do* without changing what the series
+*measures*. Where the change alters the measurement, the right move is a new scenario
+name, not a map entry.
+
+**The consolidating scenarios gained `-m uuid` on 2026-09-19 (#584).** `top25-consolidate`
+and `heatmap-histogram-consolidate` run `-g` with UUIDs masked. Consolidation compares
+UUIDs as written (`features/fuzzy-message-consolidation.md` D569-2), so on an access-log
+selection whose request paths carry one, no two message keys reach the default similarity:
+every distinct identifier stays its own row and the scenario measured a candidate search
+that found nothing rather than the grouping it exists to measure. Masking keeps the same
+internal functions under test and makes the series measure consolidation again; `-g` is
+not a default either, so the mask not being one is no reason to leave the case measuring
+futility.
+
+Both entries are in the map, so captures either side of the change pair normally. **Expect
+a step change at that boundary on UUID-bearing selections**: on one day of the affected
+corpus the mask takes the same run from 37,597 surviving rows to 286,
+`finalize/group_similar` from 1.14 s to 0.43 s and `rss_peak` from 166 MB to 119 MB. That
+is the scenario being fixed, not the tool improving.
+
 ## Results naming
 
 | kind | naming | what it is |

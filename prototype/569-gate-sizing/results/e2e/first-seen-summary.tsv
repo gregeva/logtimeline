@@ -1,0 +1,14 @@
+case	arm	rc	warnings	total_s	parse_s	group_similar_s	rss_peak_mb	rows_after	patterns	evicted
+download-g50	shipped	0	0	55.789	5.476	48.963	326.5	74305	0	0
+download-g50	incremental:1	0	0	7.647	7.576	0.009	319.3	5	0	0
+download-g50	incremental:5	0	0	8.677	8.608	0.009	306.5	7	0	0
+download-g50	hits_first:1	0	0	31.434	31.352	0.011	277.7	8	0	0
+download-g70	shipped	0	0	53.609	5.310	46.800	317.1	74305	0	0
+download-g70	incremental:1	0	0	11.469	11.364	0.016	250.3	6	0	0
+download-g70	incremental:5	0	0	12.776	12.677	0.018	262.5	7	0	0
+download-g70	hits_first:1	0	0	22.471	22.388	0.008	319.4	8	0	0
+download-g75	shipped	0	0	59.049	5.392	51.671	324.8	74305	0	0
+download-g75	incremental:1	0	0	15.102	15.020	0.011	277.5	8	0	0
+download-g75	incremental:5	0	0	12.465	12.382	0.009	285.2	8	0	0
+download-g75	hits_first:1	0	0	14.945	14.868	0.010	278.9	8	0	0
+download-g80	shipped	0	0	76.569	9.566	65.282	268.5	74305	0	0

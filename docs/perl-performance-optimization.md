@@ -132,19 +132,21 @@ The optimization journey for #96:
 | Change | Type | Impact |
 |--------|------|--------|
 | Checkpoint architecture (PF-20) | Architecture | 6× speedup on diverse data |
-| UUID normalization (PF-19) | Algorithm/correctness | 3.3× speedup on diverse data |
-| Discriminative trigram pre-filter (PF-18) | Algorithm | 4.8× on candidate search |
+| UUID normalization inside Dice scoring (PF-19) | Algorithm | 3.3× speedup on diverse data (not used in ltl, see below) |
+| Fixed trigram pre-filter (PF-18) | Algorithm | 4.8× on candidate search (not used in ltl, see below) |
 | Prefix/suffix stripping (PF-14) | Algorithm | 3.1× on alignment |
 | Inline::C alignment (PF-15) | Micro-optimization | 100× per-call, 1.6× end-to-end |
 | Key partitioning (PF-17) | Algorithm | 1.2× on re-scan |
 
 The architectural change delivered more than all algorithmic and micro-optimizations combined. And after the architectural change, the micro-optimization (Inline::C) became unnecessary.
 
+The two rows marked "not used in ltl" are speed-ups that cost correct results. The fixed pre-filter was fast because it skipped candidates without regard to the similarity threshold, including every true partner of keys whose rarest trigrams are per-request values; ltl sizes its candidate search from the threshold instead, so no partner at or above it is passed over. UUID normalization was fast because the scorer stopped seeing UUIDs; ltl scores messages as written, and masking UUIDs is the analyst's choice (`--mask uuid`).
+
 ### Correctness Gaps Masquerade as Performance Problems
 
-The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance (3.3× faster) and correctness (0 patterns → 1 pattern consolidating 1,709 keys) simultaneously.
+On a varied application log, 414K Dice calls over 1,709 DEBUG keys found no pattern. The keys differed only in a trailing UUID, whose ~34 unshared trigrams held Dice at 74-76%, below the threshold: the work was the symptom, the input was the cause. Scoring with the UUIDs masked gave one pattern consolidating all 1,709 keys, 42× fewer Dice calls and a 3.3× faster run. In ltl that masking is an option the analyst chooses before consolidation (`--mask uuid`), not a step hidden inside the scorer, because whether identifiers recur is itself information.
 
-When profiling reveals a function doing enormous work with no useful output, ask whether it's a performance problem or a correctness problem in the input.
+When profiling reveals a function doing enormous work with no useful output, ask whether it's a performance problem or a correctness problem in the input. The converse also holds: when a change makes work disappear, check that it did not make correct results disappear with it, by comparing against the unoptimised path on real data.
 
 ### Inline Functions on Hot Paths
 
@@ -152,9 +154,9 @@ Function call overhead in Perl is measurable on hot paths. `build_grouping_key()
 
 ### Bound the Expensive Work, Don't Optimize It
 
-Instead of making S4 pairwise discovery faster, the checkpoint architecture made it run on fewer keys. Instead of making `find_candidates` iterate posting lists faster, discriminative trigram pre-filtering made it iterate fewer lists. Instead of making `compute_mask` faster with Inline::C, the architecture reduced how many times it's called.
+Instead of making S4 pairwise discovery faster, the checkpoint architecture made it run on fewer keys. Instead of making candidate search walk posting lists faster, sizing its probe from the similarity threshold makes it walk fewer lists and stop at the first partner, without passing over any partner. Instead of making `compute_mask` faster with Inline::C, the architecture reduced how many times it's called.
 
-Reducing the amount of work is almost always more effective than making each unit of work faster.
+Reducing the amount of work is almost always more effective than making each unit of work faster. The bound on the work must come from the problem (here, the threshold and the key sizes), not from a constant, or the work removed includes correct results.
 
 ## Memory Optimization
 
@@ -166,7 +168,7 @@ Design assumptions about memory must be validated with instrumentation. Use `Dev
 
 ### Trigram Structures Are the Dominant Memory Cost
 
-For a 5000-key batch: `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB. This is the price of similarity search. It's bounded per checkpoint (build and free per batch), not cumulative.
+For a 5000-key batch, the per-key trigram sets and the candidate index (each trigram mapped to the integer ids of the keys holding it) are the peak: ~206 MB in the prototype's measurement. This is the price of similarity search. It's bounded per checkpoint (build and free per batch), not cumulative.
 
 The `$trigger` parameter directly controls the peak: lower trigger = smaller batches = less trigram memory but more frequent checkpoints.
 
