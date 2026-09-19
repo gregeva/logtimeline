@@ -162,6 +162,14 @@ about anything else, these still hold.
       that looks missing is a finding to report, never a state to repair.
 - [ ] Subagents and workflow agents run Opus 5 at medium effort, set explicitly
       on every call.
+- [ ] A step that publishes (a tag push, a release, a PR) is its own command,
+      never chained onto a local one: a permission layer judges the whole string
+      and refuses the pair for its second half, so the local part never runs.
+- [ ] A refused command is decomposed and its parts retried before it is called
+      impossible. The refusal names an operation, not a sequence, and an allow
+      rule that covers the operation is already in place more often than not.
+      Declaring a step blocked, or handing it back to the architect, comes after
+      that, and says which single command was refused and on what grounds.
 - [ ] Read `docs/toolchain-guidance.md` before ad-hoc shell one-liners against this repo.
 
 ### Before writing a file, an issue body, or a comment

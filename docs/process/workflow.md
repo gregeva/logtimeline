@@ -222,6 +222,14 @@ any feature branch is cut from it.
 Every issue has already been closed under § 4 and `releases/v{version}.md`
 already carries every bullet. Never `git merge` anywhere in this sequence.
 
+Each step of this sequence is one command. A permission layer judges a whole
+command string, so chaining a local step onto a publishing one with `&&` gets
+the pair refused on account of the second half and the first never runs. A
+refusal names the operation it objected to, not the sequence: run the parts
+separately and see which one it was before concluding the step cannot be done
+here. Reporting a release as blocked, or handing the commands back to the
+architect, is a last resort after the steps have been tried singly.
+
 1. `git checkout release/X.Y.Z && git pull origin release/X.Y.Z`
 2. Verify `$version_number` reads `X.Y.Z` (no branch left its `-{issue}` marker). If wrong, fix it here and note which branch.
 3. Run every `tests/validate-*.sh`, `CI=1 ./tests/validate-csv-output.sh` first, then `CI=1 ./tests/validate-statistics.sh`, then the rest; capture once, inspect the files. The gate is the complete suite.
@@ -231,7 +239,7 @@ already carries every bullet. Never `git merge` anywhere in this sequence.
 7. Finalize `releases/v{version}.md`: every user-observable issue has its bullet, benchmark comparison table appended. No usage examples, file lists, "Breaking Changes: None", "Known Issues" or root-cause analysis. Template: `releases/TEMPLATE.md`.
 8. `git commit -am "Release vX.Y.Z"`
 9. `git push -u origin release/X.Y.Z`
-10. `git tag vX.Y.Z && git push origin vX.Y.Z`
+10. `git tag vX.Y.Z`, then `git push origin vX.Y.Z` as a **separate command**.
 11. `gh release create vX.Y.Z --notes-file releases/vX.Y.Z.md`
 
 ### Post-release
