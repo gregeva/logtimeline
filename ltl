@@ -85,6 +85,18 @@ my ( $include_query_string, $include_session, $include_user, $include_threadpool
 use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
 my ( @expose_raw, @expose_names, @expose_appends, %expose_metric );
 my ( $expose_active, $expose_count ) = ( 0, 0 );
+# -d / --discard: the names given on the command line (@discard_raw, a value
+# may be a comma-separated list), the resolved names in that same order for
+# the runtime-config surface (@discard_names), and what the run removes:
+# the parsed fields whose captured value is cleared before anything reads it
+# (%discard_field, keyed session, user, object, thread), the substitutions
+# applied to the formed message (@discard_subs, each [ pattern, replacement ]
+# for a key written in the line, a UUID or an IP address) and whether the
+# query string goes (%discard_field{'query-string'}). $discard_active is the
+# single scalar the per-line message path reads, and $discard_any_field the
+# one the field path reads: false, and neither pays more than that one test.
+my ( @discard_raw, @discard_names, @discard_subs, %discard_field );
+my ( $discard_active, $discard_any_field ) = ( 0, 0 );
 my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
@@ -2377,6 +2389,7 @@ sub _classify_argv_provenance {
                 'omit-bytes|ob', 'omit-count|oc', 'include-count|ic',
                 'expose|x', 'expose-thread|xt',
                 'expose-query-string|xqs', 'expose-session|xs', 'expose-user|xu',
+                'discard|d',
                 'hide-session|hses', 'hide-user|hu', 'hide-occurrences|ho', 'hide-legend|hl',
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
                 'hide-classification|hcl', 'show-classification|scl',
@@ -2504,6 +2517,7 @@ sub emit_runtime_config_verbose {
         'expose-query-string'               => $include_query_string,
         'expose-session'                    => $include_session,
         'expose-user'                       => $include_user,
+        'discard'                           => join(',', @discard_names),
         'hide-session'                      => $hide_session,
         'hide-user'                         => $hide_user,
         'hide-classification'               => $hide_classification,
@@ -9619,6 +9633,7 @@ sub print_help {
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
     $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
     $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric (duration, bytes, count, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
+    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is thread, session, user or object, whose captured value is cleared; uuid, ipv4, ipv6 or ip, removed wherever it sits in the message; query-string; a metric (duration, bytes, count, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message. A name given to both -x and -d, or to both -m and -d, is discarded");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -13246,29 +13261,30 @@ sub available_metric_names {
 # mask. Any other name is a key read from the line by the counting token
 # rule and appended. The order the names were given is the order the values
 # are appended in, so the same combination of values gives the same message
-# whatever order the line carries them in; a name given twice keeps its
-# first position. Runs after parse_udm_configs(), whose metric names and
+# whatever order the line carries them in; a value may be a comma-separated
+# list, and a name given twice keeps its first position. Runs after parse_udm_configs(), whose metric names and
 # token keys it resolves against, and before build_format_registry(), which
 # bakes each format's metric masks into its extraction code.
 sub resolve_expose_names {
     my %seen;
     for my $raw (@expose_raw) {
-        my $name = trim($raw);
-        next if $name eq '' || $seen{$name}++;
-        push @expose_names, $name;
-        if    ( $name eq 'query-string' ) { $include_query_string = 1 }
-        elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
-        elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
-        elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
-        elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
-        elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
-        elsif ( $name eq 'count' )        { $expose_count = 1 }
-        else {
-            my ($config) = grep { $_->{name} eq $name
-                                  || $_->{base_name} eq $name
-                                  || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
-            if ($config) { $config->{expose} = 1 }
-            else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
+        for my $name ( map { trim($_) } split /,/, $raw ) {
+            next if $name eq '' || $seen{$name}++;
+            push @expose_names, $name;
+            if    ( $name eq 'query-string' ) { $include_query_string = 1 }
+            elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
+            elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
+            elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
+            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
+            elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
+            elsif ( $name eq 'count' )        { $expose_count = 1 }
+            else {
+                my ($config) = grep { $_->{name} eq $name
+                                      || $_->{base_name} eq $name
+                                      || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+                if ($config) { $config->{expose} = 1 }
+                else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
+            }
         }
     }
     $expose_active = @expose_appends ? 1 : 0;
@@ -13336,6 +13352,127 @@ sub resolve_mask_names {
     @mask_subs = map { $mask_patterns{$_} } grep { $wanted{$_} } @mask_order;
     $mask_active = @mask_subs ? 1 : 0;
     $mask_uuid   = $wanted{uuid} ? 1 : 0;
+    return;
+}
+
+# Resolve the names given to -d / --discard into what the run removes. A
+# value may be a comma-separated list; a name given twice keeps its first
+# position. A built-in name resolves before a key written in the line, as
+# for --expose: the four parsed fields clear their captured value, uuid and
+# the IP versions remove the identifier the --mask patterns find, the metric
+# names do what the omit options do, a -udm metric name switches that metric
+# off, and query-string takes the query string out of the message. Any other
+# name is a key read from the line, removed with its value and the separator
+# beside it. An unknown name is such a key, not an error: a key no line
+# carries removes nothing, and nothing declares the keys a log may write.
+# Runs after parse_udm_configs(), whose metric names and token keys it
+# resolves against, and before build_format_registry(), which bakes each
+# format's metric masks into its extraction code.
+sub resolve_discard_names {
+    my %seen;
+    for my $raw (@discard_raw) {
+        for my $name ( map { trim($_) } split /,/, $raw ) {
+            next if $name eq '' || $seen{$name}++;
+            push @discard_names, $name;
+            if    ( $name eq 'thread' || $name eq 'session' || $name eq 'user' || $name eq 'object' ) {
+                $discard_field{$name} = 1;
+            }
+            elsif ( $name eq 'query-string' ) { $discard_field{'query-string'} = 1 }
+            elsif ( $name eq 'ip' ) { push @discard_subs, discard_identifier_sub('ipv6'), discard_identifier_sub('ipv4') }
+            elsif ( $name eq 'uuid' || $name eq 'ipv4' || $name eq 'ipv6' ) { push @discard_subs, discard_identifier_sub($name) }
+            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $omit_durations = 1 }
+            elsif ( $name eq 'bytes' ) { $omit_bytes = 1 }
+            elsif ( $name eq 'count' ) { $omit_count = 1 }
+            else {
+                my ($config) = grep { $_->{name} eq $name
+                                      || $_->{base_name} eq $name
+                                      || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+                $config->{discarded} = 1 if $config;
+                push @discard_subs, discard_key_sub($name);
+            }
+        }
+    }
+    $discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;
+    $discard_any_field = ( grep { $discard_field{$_} } qw( thread session user object ) ) ? 1 : 0;
+    return;
+}
+
+# A key written in the line, removed from the message with its value and one
+# separator (D16): the pair takes the & ? or space that follows it, or, at
+# the end of the message, the one before it. Every occurrence goes. The value
+# runs to the first character that cannot sit inside a field, the same rule
+# counting_token_pattern() gives -udm and -x, so the three read a line alike.
+sub discard_key_sub {
+    my ($key) = @_;
+    my $escaped_key = quotemeta($key);
+    my $value = q{[^\s,;"'\])&?]*};
+    # Two alternatives, the trailing separator first: a pair followed by one
+    # takes it, and a pair at the end of the message takes the one before it
+    # instead. Both collapse to nothing, leaving the separators either side
+    # of the removed pair as one.
+    return [ qr/\b${escaped_key}\s*[=:]\s*${value}[&?\s]|[&?\s]?\b${escaped_key}\s*[=:]\s*${value}$/, '' ];
+}
+
+# A UUID or an IP address, removed from the message (D19): where the same
+# separator - / or a space - sits on both sides of it, the one after it goes
+# with the value; otherwise only the value goes, so brackets around it stay.
+sub discard_identifier_sub {
+    my ($name) = @_;
+    my $pattern = $mask_patterns{$name}[0];
+    return [ qr/(?<=\/)(?:$pattern)\/|(?<= )(?:$pattern) |(?:$pattern)/, '' ];
+}
+
+# Discard wins over expose and over mask, and says so (D13, D17). A value
+# that no longer exists cannot be appended to the message, and one that is
+# gone cannot be masked, so a name given to both options is discarded and
+# the other option drops it. The notice names the value and always prints:
+# it goes to stderr, which --disable-progress does not touch, and the run
+# continues. Runs after all three resolutions, so it reads what each one
+# actually resolved rather than what was typed.
+sub apply_discard_precedence {
+    my %discarded = map { $_ => 1 } @discard_names;
+
+    # A metric named on --discard does what its omit option does (D5), so the
+    # omit row reports it: runtime-config emits a row only for an option the
+    # user supplied, and the user supplied --discard. The same propagation
+    # the two spellings of masking use.
+    my %omit_row = ( duration   => 'omit-durations', durationMs => 'omit-durations',
+                     durationMS => 'omit-durations', bytes      => 'omit-bytes',
+                     count      => 'omit-count' );
+    for my $name (@discard_names) {
+        my $row = $omit_row{$name} or next;
+        $option_provenance{$row} ||= [ @{ $option_provenance{discard} || [] } ];
+    }
+
+    # An exposed name that is also discarded: drop the append, and with it
+    # the metric whose number would have stayed in the message.
+    my @exposed_too = grep { $discarded{$_} } @expose_names;
+    if (@exposed_too) {
+        @expose_names   = grep { !$discarded{$_} } @expose_names;
+        @expose_appends = grep { !$discarded{ $_->[1] } } @expose_appends;
+        $expose_active  = @expose_appends ? 1 : 0;
+        for my $name (@exposed_too) {
+            $include_query_string = 0 if $name eq 'query-string';
+            delete $expose_metric{duration} if $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS';
+            delete $expose_metric{bytes}    if $name eq 'bytes';
+            $expose_count = 0 if $name eq 'count';
+        }
+        print STDERR "Note: " . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed\n";
+    }
+
+    # A masked identifier that is also discarded: it is removed before the
+    # masks run, so the mask would find nothing; drop it from the mask list
+    # so the two options cannot disagree about the same identifier.
+    my %mask_discarded = map { $_ => 1 } grep { $discarded{$_} || ( $discarded{ip} && ( $_ eq 'ipv4' || $_ eq 'ipv6' ) ) } @mask_names;
+    if (%mask_discarded) {
+        my @masked_too = grep { $mask_discarded{$_} } @mask_names;
+        @mask_names = grep { !$mask_discarded{$_} } @mask_names;
+        my %still = map { $_ => 1 } map { $_ eq 'ip' ? ( 'ipv4', 'ipv6' ) : $_ } @mask_names;
+        @mask_subs   = map { $mask_patterns{$_} } grep { $still{$_} } @mask_order;
+        $mask_active = @mask_subs ? 1 : 0;
+        $mask_uuid   = $still{uuid} ? 1 : 0;
+        print STDERR "Note: " . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked\n";
+    }
     return;
 }
 
@@ -13639,6 +13776,7 @@ sub adapt_to_command_line_options {
         'expose-query-string|xqs' => sub { push @expose_raw, 'query-string' },
         'expose-session|xs' => sub { push @expose_raw, 'session' },
         'expose-user|xu' => sub { push @expose_raw, 'user' },
+        'discard|d=s' => sub { push @discard_raw, $_[1] },
         'hide-session|hses' => \$hide_session,
         'hide-user|hu' => \$hide_user,
         'hide-classification|hcl' => \$hide_classification,
@@ -14182,6 +14320,8 @@ sub adapt_to_command_line_options {
     # this follows the -udm configs and precedes the registry build.
     resolve_expose_names() if @expose_raw;
     resolve_mask_names()   if @mask_raw;
+    resolve_discard_names() if @discard_raw;
+    apply_discard_precedence() if @discard_names;
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
