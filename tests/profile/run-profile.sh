@@ -179,12 +179,28 @@ option_arity() {
 }
 
 # Whether the token following option $1 is its value (next token is $2).
+#
+# Getopt::Long hands an optional-value option the next token whatever it
+# holds, so '-g <file>' binds the file to -g and leaves no input argument.
+# ltl does not stop there: a -g value that is not numeric is warned about and
+# unshifted back onto @ARGV as a positional argument (#231), which is how that
+# command still profiles the file the analyst named. Mirroring Getopt::Long
+# alone therefore diverges from ltl exactly where ltl compensates, so an
+# optional value is claimed only when the token could be one.
 option_consumes_next() {
     local arity
     arity=$(option_arity "$1")
     [[ "$arity" == required ]] && return 0
-    [[ "$arity" == optional && -n "$2" && "$2" != -* ]] && return 0
+    [[ "$arity" == optional && -n "$2" && "$2" != -* ]] && ! is_pushed_back_value "$2" && return 0
     return 1
+}
+
+# Whether ltl would push $1 back as a positional argument rather than keep it
+# as an optional option's value. A token that names something on disk is an
+# input file; ltl's own guard is numeric, and a bare number is never a path.
+is_pushed_back_value() {
+    [[ "$1" =~ ^[0-9]+$ ]] && return 1
+    [[ -e "$1" ]] || compgen -G "$1" > /dev/null 2>&1
 }
 
 build_value_option_sets
@@ -217,7 +233,10 @@ detect_file_args() {
             ((i+=1)) || true
         fi
     done
-    echo "${file_args[@]}"
+    # bash 3.2 (macOS) raises 'unbound variable' for ${arr[@]} on an empty
+    # array under `set -u`, which aborted this function before its caller
+    # could report that no file was found.
+    echo "${file_args[@]:-}"
 }
 
 # Create sample file for a given original file and line count
