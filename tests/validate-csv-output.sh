@@ -49,6 +49,9 @@ PROFILE_GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
 
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
+
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
 
@@ -62,18 +65,6 @@ neutralize_colour_env
 # both clean exit and error paths.
 trap csv_cache_maybe_cleanup EXIT
 
-ONLY_SCENARIO=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --scenario) ONLY_SCENARIO="$2"; shift 2 ;;
-        -h|--help)
-            sed -n '2,24p' "$0"
-            exit 0
-            ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
-    esac
-done
-
 # Sanity: required files exist. A missing file would silently skip work and
 # falsely pass, so fail loudly here.
 for f in "$LTL" "$SCENARIOS_TSV" "$RULES_MESSAGES" "$RULES_STATS" "$VALIDATOR" "$PROFILE_GENERATOR"; do
@@ -82,6 +73,16 @@ for f in "$LTL" "$SCENARIOS_TSV" "$RULES_MESSAGES" "$RULES_STATS" "$VALIDATOR" "
         exit 1
     fi
 done
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# The registry is the first column of the scenarios TSV, so the names an
+# operator may select and the rows the loop runs cannot drift apart.
+SCENARIO_USAGE_NOTE="  (rows of $SCENARIOS_TSV)"
+while IFS=$'\t' read -r scenario _rest; do
+    [[ -z "$scenario" || "$scenario" =~ ^# || "$scenario" == "scenario" ]] && continue
+    scenario_register "$scenario"
+done < "$SCENARIOS_TSV"
+scenario_parse_args "$@"
 
 # Profile scenarios reference @PROFILE_LOG@ in scenarios.tsv. Generate the
 # synthetic month-long log (the same fixture the dedicated --profile harnesses
@@ -125,9 +126,7 @@ scenarios_run=0
 while IFS=$'\t' read -r scenario logfile options families expected_categories; do
     [[ -z "$scenario" ]] && continue
     [[ "$scenario" =~ ^# ]] && continue
-    if [[ -n "$ONLY_SCENARIO" && "$scenario" != "$ONLY_SCENARIO" ]]; then
-        continue
-    fi
+    scenario_wanted "$scenario" || continue
 
     # Resolve the generated-fixture marker to its absolute path.
     [[ "$logfile" == "@PROFILE_LOG@" ]] && logfile="$PROFILE_LOG"

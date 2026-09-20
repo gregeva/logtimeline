@@ -41,6 +41,8 @@ SHAPE="-bs 1440 -oe -n 1 -osum"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -157,6 +159,7 @@ assert_header_present() {
 # Scenario: no heatmap mode (sanity — section emits with n/a fields)
 # ---------------------------------------------------------------------------
 scenario_no_heatmap() {
+    scenario_wanted no-heatmap || return 0
     current_scenario="no-heatmap"
     echo "[$current_scenario]"
     local out
@@ -194,6 +197,7 @@ scenario_no_heatmap() {
 #       expected_light_bg ("0"|"1"), expected_source, expected_active ("dark"|"light"),
 #       expected_gradient_dark, expected_gradient_light
 scenario_palette() {
+    scenario_wanted "$1" || return 0
     local name="$1"; shift
     local ltl_args="$1"; shift
     local exp_metric="$1"; shift
@@ -268,6 +272,21 @@ scenario_palette() {
 
 echo "Validating heatmap-palette -V section (Issue #250)"
 echo ""
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per palette case; the name is the first argument each
+# scenario_palette call already carries.
+SCENARIO_USAGE_NOTE="  (one scenario per heatmap palette case)"
+scenario_register no-heatmap \
+                  dbg-duration \
+                  dbg-bytes \
+                  dbg-count \
+                  lbg-duration \
+                  lbg-bytes \
+                  lbg-count \
+                  precedence-lbg-then-dbg \
+                  precedence-dbg-then-lbg
+scenario_parse_args "$@"
 
 scenario_no_heatmap
 echo ""

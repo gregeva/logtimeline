@@ -30,6 +30,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -138,6 +140,15 @@ SHAPE="-bs 1440 -oe -n 1"
 
 MISSING_METRIC_CONTRACT='docs/usage.md § Filtering & Highlighting — numeric filters only keep entries that carry the filtered metric; the count of entries excluded this way is reported (Issue #321)'
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register missing-metric-notes \
+                  silent-when-metric-present \
+                  inverted-range-warnings \
+                  satisfiable-range-silent \
+                  silent-without-numeric-filters
+scenario_parse_args "$@"
+
+if scenario_wanted missing-metric-notes; then
 # --- Scenario: one missing-metric note per filtered metric, with exact count ---
 current_scenario="missing-metric-notes"
 echo "[$current_scenario]"
@@ -159,6 +170,9 @@ if capture_stderr "$errfile" $SHAPE -dmin 1 -bmin 1 -cmin 1 "$BOUNDARY_FIXTURE";
         contract    "$MISSING_METRIC_CONTRACT"
 fi
 
+fi
+
+if scenario_wanted silent-when-metric-present; then
 # --- Scenario: silent when every line carries the filtered metric ---
 current_scenario="silent-when-metric-present"
 echo "[$current_scenario]"
@@ -171,9 +185,11 @@ if capture_stderr "$errfile" $SHAPE -dmin 1 "$ACCESS_LOG"; then
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission)' \
         contract    "$MISSING_METRIC_CONTRACT"
 fi
+fi
 
 INVERTED_RANGE_CONTRACT='docs/usage.md § Filtering & Highlighting — an inverted numeric range (minimum above maximum) is unsatisfiable and ltl warns up front instead of producing a silently empty selection (Issue #322)'
 
+if scenario_wanted inverted-range-warnings; then
 # --- Scenario: inverted ranges warn, one warning per inverted pair ---
 current_scenario="inverted-range-warnings"
 echo "[$current_scenario]"
@@ -199,6 +215,9 @@ if capture_stderr "$errfile" $SHAPE -dmin 500 -dmax 100 -hbmin 6000 -hbmax 5000 
         contract    "$INVERTED_RANGE_CONTRACT"
 fi
 
+fi
+
+if scenario_wanted satisfiable-range-silent; then
 # --- Scenario: satisfiable ranges (including min == max) stay silent ---
 current_scenario="satisfiable-range-silent"
 echo "[$current_scenario]"
@@ -212,6 +231,9 @@ if capture_stderr "$errfile" $SHAPE -dmin 100 -dmax 100 -hbmin 5000 -hbmax 6000 
         contract    "$INVERTED_RANGE_CONTRACT"
 fi
 
+fi
+
+if scenario_wanted silent-without-numeric-filters; then
 # --- Scenario: silent when no numeric filter is active ---
 current_scenario="silent-without-numeric-filters"
 echo "[$current_scenario]"
@@ -224,6 +246,8 @@ if capture_stderr "$errfile" $SHAPE "$BOUNDARY_FIXTURE"; then
         produced_by 'read_and_process_logs() in ltl (numeric threshold guards)' \
         contract    "$MISSING_METRIC_CONTRACT"
 fi
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

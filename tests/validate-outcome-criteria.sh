@@ -42,6 +42,8 @@ ACCESS_FORMAT="access_common_duration"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -151,6 +153,16 @@ GB="$TMP_DIR/gc-base.out";    capture "$GB"   "$GC_FIXTURE"
 GEFES="$TMP_DIR/gc-both.out"; capture "$GEFES" -ef -es "$GC_FIXTURE"
 
 # ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register outcome-filters \
+                  outcome-highlights \
+                  inert-outcomes \
+                  index-signature \
+                  option-surface \
+                  runtime-warnings
+scenario_parse_args "$@"
+
+if scenario_wanted outcome-filters; then
 current_scenario="outcome-filters"
 
 assert_command \
@@ -182,6 +194,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D10 as amended under #455 (declaration-based suppression)" \
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted outcome-highlights; then
 current_scenario="outcome-highlights"
 
 assert_command \
@@ -206,6 +221,9 @@ assert_command \
     contract "features/455-success-failure-filter-highlight-criteria.md AC5; print_help() filtering note (all-families AND)" \
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted inert-outcomes; then
 current_scenario="inert-outcomes"
 
 assert_command \
@@ -223,6 +241,9 @@ assert_command \
     contract "features/455-success-failure-filter-highlight-criteria.md D6, AC9" \
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted index-signature; then
 current_scenario="index-signature"
 
 assert_command \
@@ -233,6 +254,9 @@ assert_command \
     contract "features/455-success-failure-filter-highlight-criteria.md D7, AC6" \
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted option-surface; then
 current_scenario="option-surface"
 
 assert_command \
@@ -250,6 +274,9 @@ assert_command \
     contract "features/455-success-failure-filter-highlight-criteria.md D2/D3/D4, AC7/AC8; tests/validate-help-content.sh enforces the two-surface parity" \
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted runtime-warnings; then
 current_scenario="runtime-warnings"
 for cap in "$B" "$IF" "$IS" "$EF" "$EFES" "$HF" "$HFH" "$HS" "$DB" "$DEFES" "$DES" "$DIS" "$GB" "$GEFES"; do
     label_name=$(basename "$cap")
@@ -261,6 +288,8 @@ for cap in "$B" "$IF" "$IS" "$EF" "$EFES" "$HF" "$HFH" "$HS" "$DB" "$DEFES" "$DE
         contract "tests/HARNESS-DESIGN.md § Runtime-warning cleanliness" \
 
 done
+fi
+
 
 # ---------------------------------------------------------------------------
 echo

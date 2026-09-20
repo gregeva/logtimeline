@@ -35,6 +35,8 @@ EXTRACTOR="$SCRIPT_DIR/extract-doc-examples.pl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -316,6 +318,15 @@ for i in "${!FIXTURE_KEYS[@]}"; do
     SUBSTITUTION_VALS+=( "$dst" )
 done
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per documentation file: the examples this harness runs are
+# extracted from the docs, so the doc is the unit an operator selects.
+SCENARIO_USAGE_NOTE="  (one scenario per documentation file)"
+for _doc in "${DOCS[@]}"; do
+    scenario_register "$(basename "$_doc" .md)"
+done
+scenario_parse_args "$@"
+
 echo "Validating documentation examples (issue #234)"
 echo "  ltl:       $LTL"
 echo "  inject:    $LTL_INJECT"
@@ -324,7 +335,11 @@ echo "  fixtures:  one bounded time window per corpus file, under \$TMP_DIR"
 echo ""
 
 EXAMPLES_TSV="$TMP_DIR/examples.tsv"
-( cd "$REPO_DIR" && "$EXTRACTOR" "${DOCS[@]}" ) > "$EXAMPLES_TSV"
+_selected_docs=()
+for _doc in "${DOCS[@]}"; do
+    scenario_wanted "$(basename "$_doc" .md)" && _selected_docs+=("$_doc")
+done
+( cd "$REPO_DIR" && "$EXTRACTOR" "${_selected_docs[@]}" ) > "$EXAMPLES_TSV"
 
 total=$(wc -l < "$EXAMPLES_TSV" | tr -d ' ')
 echo "Extracted $total candidate example(s)."

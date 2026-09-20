@@ -38,6 +38,8 @@ TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -625,15 +627,31 @@ scenario_G_udm_function_list_parity() {
         contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)'
 }
 
-scenario_A_help_contains_all_visible_longs;        echo ""
-scenario_B_usage_contains_all_visible_longs;       echo ""
-scenario_C_help_short_forms_match_getopts;         echo ""
-scenario_D_dash_v_matches_version_number;          echo ""
-scenario_E_benchmark_data_section_matches_version_number; echo ""
-scenario_G_udm_function_list_parity;               echo ""
-scenario_H_mask_option_rows;                       echo ""
-scenario_I_discard_option_rows;                    echo ""
-scenario_F_description_quality_warnings
+scenario_register A-help-contains-visible-longs \
+                  B-usage-contains-visible-longs \
+                  C-help-short-forms-match-getopts \
+                  D-dash-v-matches-version-number \
+                  E-benchmark-data-version-matches \
+                  G-udm-function-list-parity \
+                  H-mask-option-rows \
+                  I-discard-option-rows \
+                  F-description-quality-soft
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        A-help-contains-visible-longs   ) scenario_A_help_contains_all_visible_longs ;;
+        B-usage-contains-visible-longs  ) scenario_B_usage_contains_all_visible_longs ;;
+        C-help-short-forms-match-getopts) scenario_C_help_short_forms_match_getopts ;;
+        D-dash-v-matches-version-number ) scenario_D_dash_v_matches_version_number ;;
+        E-benchmark-data-version-matches) scenario_E_benchmark_data_section_matches_version_number ;;
+        G-udm-function-list-parity      ) scenario_G_udm_function_list_parity ;;
+        H-mask-option-rows              ) scenario_H_mask_option_rows ;;
+        I-discard-option-rows           ) scenario_I_discard_option_rows ;;
+        F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 if [[ "$warn" -gt 0 ]]; then

@@ -42,6 +42,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -278,6 +280,22 @@ check_scenario() {
 # buckets and a single reported row keep the rest of the run trivial.
 SHAPE="-bs 1440 -oe -n 1 -V message-grouping"
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register sensitivity-70 \
+                  sensitivity-95 \
+                  default-sensitivity \
+                  explicit-final-threshold \
+                  signed-downloads-75 \
+                  signed-downloads-85 \
+                  uuid-pair-85 \
+                  uuid-pair-85-masked \
+                  signed-downloads-75-repeat \
+                  skip-final-pass-fires \
+                  skip-final-pass-population-below-floor \
+                  skip-final-pass-absorbing-data
+scenario_parse_args "$@"
+
+if scenario_wanted sensitivity-70; then
 current_scenario="sensitivity-70"
 echo "[$current_scenario]"
 out="$TMP_DIR/g70.out"
@@ -285,6 +303,9 @@ if capture_section "$out" $SHAPE -g 70 "$FIXTURE"; then
     check_scenario "$out" 70 70 2 'the final pass follows -g 70, so both the Dice 77 and Dice 89 pairs group'
 fi
 
+fi
+
+if scenario_wanted sensitivity-95; then
 current_scenario="sensitivity-95"
 echo "[$current_scenario]"
 out="$TMP_DIR/g95.out"
@@ -292,6 +313,9 @@ if capture_section "$out" $SHAPE -g 95 "$FIXTURE"; then
     check_scenario "$out" 95 95 0 'the final pass follows -g 95, so neither pair groups'
 fi
 
+fi
+
+if scenario_wanted default-sensitivity; then
 current_scenario="default-sensitivity"
 echo "[$current_scenario]"
 out="$TMP_DIR/gdefault.out"
@@ -301,6 +325,9 @@ if capture_section "$out" -bs 1440 -oe -n 1 -g -V message-grouping "$FIXTURE"; t
     check_scenario "$out" 85 85 1 'the final pass follows the default 85, so only the Dice 89 pair groups'
 fi
 
+fi
+
+if scenario_wanted explicit-final-threshold; then
 current_scenario="explicit-final-threshold"
 echo "[$current_scenario]"
 out="$TMP_DIR/g95-final70.out"
@@ -313,6 +340,9 @@ fi
 # per-request values the search must look past. Same SHAPE otherwise.
 DOWNLOAD_KEYS=$(wc -l < "$FIXTURE_DOWNLOADS" | tr -d ' ')
 
+fi
+
+if scenario_wanted signed-downloads-75; then
 current_scenario="signed-downloads-75"
 echo "[$current_scenario]"
 out_downloads_75="$TMP_DIR/downloads-g75.out"
@@ -325,6 +355,9 @@ if capture_section "$out_downloads_75" $SHAPE -du us -xqs -g 75 "$FIXTURE_DOWNLO
         contract    "$CONTRACT_SEARCH (criterion 1)"
 fi
 
+fi
+
+if scenario_wanted signed-downloads-85; then
 current_scenario="signed-downloads-85"
 echo "[$current_scenario]"
 out="$TMP_DIR/downloads-g85.out"
@@ -337,6 +370,9 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 "$FIXTURE_DOWNLOADS"; then
         contract    "$CONTRACT_SEARCH (criterion 2)"
 fi
 
+fi
+
+if scenario_wanted uuid-pair-85; then
 current_scenario="uuid-pair-85"
 echo "[$current_scenario]"
 out="$TMP_DIR/uuid-g85.out"
@@ -355,6 +391,9 @@ if capture_section "$out" $SHAPE -g 85 "$FIXTURE_UUID"; then
         contract    "$CONTRACT_SEARCH (criterion 4)"
 fi
 
+fi
+
+if scenario_wanted uuid-pair-85-masked; then
 current_scenario="uuid-pair-85-masked"
 echo "[$current_scenario]"
 out="$TMP_DIR/uuid-g85-masked.out"
@@ -367,6 +406,9 @@ if capture_section "$out" $SHAPE -g 85 -uuid "$FIXTURE_UUID"; then
         contract    "$CONTRACT_SEARCH (criterion 4)"
 fi
 
+fi
+
+if scenario_wanted signed-downloads-75-repeat; then
 current_scenario="signed-downloads-75-repeat"
 echo "[$current_scenario]"
 out="$TMP_DIR/downloads-g75-repeat.out"
@@ -395,6 +437,9 @@ SKIP_PRODUCER='group_similar_messages() in ltl (the per-group skip decision at t
 NOTICE_PRODUCER='report_skipped_final_pass() in ltl'
 CLIFF_PRODUCER='consolidation_cliff_edge() in ltl, called from group_similar_messages() when the skip fires'
 
+fi
+
+if scenario_wanted skip-final-pass-fires; then
 current_scenario="skip-final-pass-fires"
 echo "[$current_scenario]"
 out="$TMP_DIR/skip-fires.out"
@@ -444,6 +489,9 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 7)"
 fi
 
+fi
+
+if scenario_wanted skip-final-pass-population-below-floor; then
 current_scenario="skip-final-pass-population-below-floor"
 echo "[$current_scenario]"
 out="$TMP_DIR/skip-below-floor.out"
@@ -463,6 +511,9 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100000 
         contract    "$CONTRACT_SKIP (criterion 2)"
 fi
 
+fi
+
+if scenario_wanted skip-final-pass-absorbing-data; then
 current_scenario="skip-final-pass-absorbing-data"
 echo "[$current_scenario]"
 out="$TMP_DIR/skip-absorbing.out"
@@ -474,6 +525,8 @@ if capture_section "$out" $SHAPE -du us -xqs -g 75 --skip-final-min-keys 100 "$F
         produced_by "$SKIP_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 2, criterion 3)"
 fi
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

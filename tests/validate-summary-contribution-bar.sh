@@ -85,6 +85,8 @@ ROW_WIDTH=41
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -501,6 +503,20 @@ BAR_PRODUCED='summary_category_row() and summary_bar_extent() in ltl, called fro
 # largest, over a 41-character row, that is 41, 8, 4 and 1 characters.
 # ---------------------------------------------------------------------------
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register default-bar-normalised-to-the-largest-category \
+                  every-category-colour-resolves-to-a-bar-fill \
+                  summary-bar-off \
+                  summary-mono \
+                  summary-bar-reverse \
+                  summary-bar-absolute \
+                  summary-bar-log \
+                  bar-renders-under-both-colour-modes \
+                  a-share-below-one-character-draws-no-bar \
+                  highlighted-and-plain-twins-differ-in-shade
+scenario_parse_args "$@"
+
+if scenario_wanted default-bar-normalised-to-the-largest-category; then
 current_scenario="default-bar-normalised-to-the-largest-category"
 echo "[$current_scenario]"
 
@@ -553,6 +569,9 @@ assert_command \
 # (CREATE) and any 256-colour category had no highlighted background at all.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted every-category-colour-resolves-to-a-bar-fill; then
 current_scenario="every-category-colour-resolves-to-a-bar-fill"
 echo "[$current_scenario]"
 
@@ -567,6 +586,9 @@ assert_command \
 # Scenario: -sbo removes the bar and leaves the numbers.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted summary-bar-off; then
 current_scenario="summary-bar-off"
 echo "[$current_scenario]"
 
@@ -605,6 +627,9 @@ assert_command \
 # delivered option got wrong and the main fixture cannot reach.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted summary-mono; then
 current_scenario="summary-mono"
 echo "[$current_scenario]"
 
@@ -677,6 +702,9 @@ assert_command \
 # Scenario: -sbr draws from the right edge.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted summary-bar-reverse; then
 current_scenario="summary-bar-reverse"
 echo "[$current_scenario]"
 
@@ -704,6 +732,9 @@ assert_command \
 # 40, 8, 4 and 1 of 53 lines over a 41-character row: 31, 6, 3 and 1.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted summary-bar-absolute; then
 current_scenario="summary-bar-absolute"
 echo "[$current_scenario]"
 
@@ -734,12 +765,23 @@ ROWS
 # ordering is preserved, and the largest still fills the row.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted summary-bar-log; then
 current_scenario="summary-bar-log"
 echo "[$current_scenario]"
 
 LOG_RENDER="$TMP_DIR/log.txt"
 # shellcheck disable=SC2046
 capture_render "$LOG_RENDER" ansi $(run_ltl_args -sbl)
+
+# The comparison is against the linear render of the same data. This scenario
+# captures its own rather than reading the one the default-bar scenario
+# produced: a scenario that depends on a neighbour having run cannot be
+# selected on its own (tests/HARNESS-DESIGN.md section The scenario selector).
+LOG_LINEAR_RENDER="$TMP_DIR/log-linear.txt"
+# shellcheck disable=SC2046
+capture_render "$LOG_LINEAR_RENDER" ansi $(run_ltl_args)
 
 check_log_scale_spreads_the_tail() {
     local linear="$1" logscale="$2"
@@ -843,7 +885,7 @@ check_log_scale_spreads_the_tail() {
 }
 
 assert_command \
-    command     "check_log_scale_spreads_the_tail '$DEFAULT_RENDER' '$LOG_RENDER'" \
+    command     "check_log_scale_spreads_the_tail '$LOG_LINEAR_RENDER' '$LOG_RENDER'" \
     label       'the log scale lengthens the tail without reordering the categories' \
     asserts     'Logarithmic scaling exists for the case where one category holds almost everything and the rest are stubs: it gives the smallest category a length that can actually be seen. It must do that without lying about the ordering — a longer bar still means a larger category — and the reference still fills the row, so the two scales can be read against each other.' \
     produced_by 'summary_bar_extent() in ltl' \
@@ -857,6 +899,9 @@ assert_command \
 # pins the other side of the colour switch and proves the row is unchanged.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted bar-renders-under-both-colour-modes; then
 current_scenario="bar-renders-under-both-colour-modes"
 echo "[$current_scenario]"
 
@@ -887,6 +932,9 @@ assert_command \
 # claim about five times its true size.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted a-share-below-one-character-draws-no-bar; then
 current_scenario="a-share-below-one-character-draws-no-bar"
 echo "[$current_scenario]"
 
@@ -930,6 +978,9 @@ assert_command \
 # the two paths in the dominant category splits it into exactly that pair.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted highlighted-and-plain-twins-differ-in-shade; then
 current_scenario="highlighted-and-plain-twins-differ-in-shade"
 echo "[$current_scenario]"
 
@@ -962,3 +1013,5 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
+fi
+

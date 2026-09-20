@@ -30,6 +30,8 @@ FIXTURES="$REPO_DIR/tests/fixtures"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 neutralize_colour_env
 
 TMP_DIR=$(mktemp -d)
@@ -352,6 +354,12 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
     'A matched line whose level is not in the log-level vocabulary is dropped at the category gate and counted as other'
 
 # --- other: an unparseable CSV timestamp row; the CSV metadata line is unmatched (D22) ---
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register csv-unparseable-row \
+                  summary-table-unchanged
+scenario_parse_args "$@"
+
+if scenario_wanted csv-unparseable-row; then
 current_scenario="csv-unparseable-row"
 if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
     printf 'timestamp,latency\n2026-06-01 10:00:05,12\nnot-a-timestamp,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/bad-row.csv"
@@ -388,6 +396,9 @@ cause_scenario combined-causes "$FIXTURES/http-status-families.txt" \
     -e catalog -ef
 
 # --- the run summary table is unchanged: no accounting row is added ---
+fi
+
+if scenario_wanted summary-table-unchanged; then
 current_scenario="summary-table-unchanged"
 if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
     out="$TMP_DIR/summary.out"
@@ -412,6 +423,8 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         produced_by 'print_summary_table() in ltl' \
         contract 'features/503-yaml-aggregate-export.md D12 - the summary stays exactly as it is'
 fi
+fi
+
 
 echo ""
 echo "Results: $pass passed, $fail failed"

@@ -30,6 +30,8 @@ EXPLAIN_MD="$REPO_DIR/docs/explain/statistics.md"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -1863,59 +1865,67 @@ scenario_group_see_also_names_a_neighbour() {
 echo "Validating --help statistics and --explain framework (Issue #261)"
 echo ""
 
-scenario_all_topics_render
-echo ""
-scenario_aliases
-echo ""
-scenario_registry
-echo ""
-scenario_unknown_topic
-echo ""
-scenario_help_statistics
-echo ""
-scenario_help_unknown
-echo ""
-scenario_help_bare
-echo ""
-scenario_reflow
-echo ""
-scenario_box_drawing
-echo ""
-scenario_table_border_alignment
-echo ""
-scenario_visualization_charts
-echo ""
-scenario_short_alias
-echo ""
-scenario_pager_ansi
-echo ""
-scenario_data_model_aware_prose
-echo ""
-scenario_ascii_and_ansi_modes
-echo ""
-scenario_technique_registry
-echo ""
-scenario_technique_topics_render
-echo ""
-scenario_technique_page_anatomy
-echo ""
-scenario_technique_group_anatomy
-echo ""
-scenario_technique_signals
-echo ""
-scenario_topic_intro_matches_category
-echo ""
-scenario_technique_documented_capabilities
-echo ""
-scenario_technique_no_internals
-echo ""
-scenario_technique_mirror
-echo ""
-scenario_wiki_sync_map
-echo ""
-scenario_wiki_link_form
-echo ""
-scenario_group_see_also_names_a_neighbour
+scenario_register all-topics-render \
+                  aliases \
+                  registry:no-arg \
+                  error:unknown-explain-topic \
+                  help-statistics \
+                  error:unknown-help-topic \
+                  help-bare \
+                  reflow \
+                  box-drawing \
+                  table-border-alignment \
+                  visualization-charts \
+                  short-alias:-ex \
+                  pager-ansi \
+                  data-model-aware-prose \
+                  ascii-and-ansi-modes \
+                  technique-registry \
+                  technique-topics-render \
+                  technique-page-anatomy \
+                  technique-group-anatomy \
+                  technique-signals \
+                  topic-intro-matches-category \
+                  documented:cross-log-marker-states \
+                  technique-no-internals \
+                  mirror:techniques \
+                  wiki-sync-map \
+                  wiki-link-form \
+                  group-see-also-names-a-neighbour
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        all-topics-render                 ) scenario_all_topics_render ;;
+        aliases                           ) scenario_aliases ;;
+        registry:no-arg                   ) scenario_registry ;;
+        error:unknown-explain-topic       ) scenario_unknown_topic ;;
+        help-statistics                   ) scenario_help_statistics ;;
+        error:unknown-help-topic          ) scenario_help_unknown ;;
+        help-bare                         ) scenario_help_bare ;;
+        reflow                            ) scenario_reflow ;;
+        box-drawing                       ) scenario_box_drawing ;;
+        table-border-alignment            ) scenario_table_border_alignment ;;
+        visualization-charts              ) scenario_visualization_charts ;;
+        short-alias:-ex                   ) scenario_short_alias ;;
+        pager-ansi                        ) scenario_pager_ansi ;;
+        data-model-aware-prose            ) scenario_data_model_aware_prose ;;
+        ascii-and-ansi-modes              ) scenario_ascii_and_ansi_modes ;;
+        technique-registry                ) scenario_technique_registry ;;
+        technique-topics-render           ) scenario_technique_topics_render ;;
+        technique-page-anatomy            ) scenario_technique_page_anatomy ;;
+        technique-group-anatomy           ) scenario_technique_group_anatomy ;;
+        technique-signals                 ) scenario_technique_signals ;;
+        topic-intro-matches-category      ) scenario_topic_intro_matches_category ;;
+        documented:cross-log-marker-states) scenario_technique_documented_capabilities ;;
+        technique-no-internals            ) scenario_technique_no_internals ;;
+        mirror:techniques                 ) scenario_technique_mirror ;;
+        wiki-sync-map                     ) scenario_wiki_sync_map ;;
+        wiki-link-form                    ) scenario_wiki_link_form ;;
+        group-see-also-names-a-neighbour  ) scenario_group_see_also_names_a_neighbour ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

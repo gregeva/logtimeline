@@ -41,6 +41,8 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -849,42 +851,25 @@ scenario_classification_unchanged() {
 # Run
 # ---------------------------------------------------------------------------
 
-SCENARIOS=(download-filename query-string-loss multi-key-order counted-keys
-           builtin-user-precedence thread session-user metric-names
-           query-string-alias classification-unchanged)
-
-usage() {
-    echo "Usage: $0 [--scenario NAME] [--list]"
-    echo "Scenarios (acceptance criteria 1-10 of $CONTRACT_DOC):"
-    printf '  %s\n' "${SCENARIOS[@]}"
-}
-
-selected=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --scenario) selected="${2:-}"; shift 2 ;;
-        --list)     usage; exit 0 ;;
-        -h|--help)  usage; exit 0 ;;
-        *) echo "ERROR: unknown argument '$1'"; usage; exit 2 ;;
-    esac
-done
-
-if [[ -n "$selected" ]]; then
-    found=0
-    for s in "${SCENARIOS[@]}"; do [[ "$s" == "$selected" ]] && found=1; done
-    if [[ "$found" -ne 1 ]]; then
-        echo "ERROR: unknown scenario '$selected'"
-        usage
-        exit 2
-    fi
-    SCENARIOS=("$selected")
-fi
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+SCENARIO_USAGE_NOTE="  (acceptance criteria 1-10 of $CONTRACT_DOC):)"
+scenario_register download-filename \
+                  query-string-loss \
+                  multi-key-order \
+                  counted-keys \
+                  builtin-user-precedence \
+                  thread \
+                  session-user \
+                  metric-names \
+                  query-string-alias \
+                  classification-unchanged
+scenario_parse_args "$@"
 
 echo "Validating message expose (-x/--expose), issue #566 acceptance criteria 1-10"
 echo "  ltl:       $LTL"
 echo ""
 
-for s in "${SCENARIOS[@]}"; do
+while read -r s; do
     case "$s" in
         download-filename)        scenario_download_filename ;;
         query-string-loss)        scenario_query_string_loss ;;
@@ -898,10 +883,10 @@ for s in "${SCENARIOS[@]}"; do
         classification-unchanged) scenario_classification_unchanged ;;
     esac
     echo ""
-done
+done < <(scenario_selected)
 
 echo "─────────────────────────────────────────"
-echo "  Results: $pass passed, $fail failed  (scenarios: ${SCENARIOS[*]})"
+echo "  Results: $pass passed, $fail failed  (scenarios: $(scenario_selected | paste -sd" " -))"
 if [[ "$fail" -gt 0 ]]; then
     echo ""
     echo "  Failed assertions:"

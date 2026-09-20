@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # validate-regression.sh — Validate ltl output against regression reference files
-# Usage: ./tests/validate-regression.sh [reference_dir]
+# Usage: ./tests/validate-regression.sh [--scenario NAME] [--list] [reference_dir]
 #
 # Re-runs the same ltl commands as capture-regression.sh and diffs against
 # the stored reference output. Any difference is a regression.
@@ -15,7 +15,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LTL="$REPO_DIR/ltl"
-REF_DIR="${1:-$SCRIPT_DIR/reference-output}"
+REF_DIR="$SCRIPT_DIR/reference-output"
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per regression case; the case name is the one run_test already
+# carries, and the registry is the set of reference files on disk, so a case
+# and the reference it is diffed against cannot drift apart. The optional
+# reference-directory positional is this harness's own argument.
+regression_extra_args() {
+    if [[ "$1" != -* && -z "${_REF_DIR_SET:-}" ]]; then
+        REF_DIR="$1"; _REF_DIR_SET=1; SCENARIO_ARGS_CONSUMED=1
+    else
+        SCENARIO_ARGS_CONSUMED=0
+    fi
+}
+SCENARIO_EXTRA_ARG_HANDLER=regression_extra_args
 
 # Run from the directory containing the log corpus so the log paths handed
 # to ltl below stay relative; must match capture-regression.sh, which
@@ -53,6 +67,8 @@ neutralize_colour_env
 source "$SCRIPT_DIR/lib/fixtures.sh"
 # shellcheck source=lib/rendered-output.sh
 source "$SCRIPT_DIR/lib/rendered-output.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 TMP_DIR=$(mktemp -d)
 # Cleanup is unconditional — if the script aborts mid-run (under set -e),
 # the explicit `rm -rf` at the end never runs. Per tests/HARNESS-DESIGN.md,
@@ -156,6 +172,7 @@ emit_regression_fail() {
 run_test() {
     local name="$1"
     shift
+    scenario_wanted "$name" || return 0
     local reffile="$REF_DIR/$name.txt"
     # The width this scenario renders at, read from its own command line, so the
     # soft-wrap check below judges the render against the terminal it was told
@@ -251,6 +268,13 @@ run_test() {
         emit_regression_fail "$name" "rendered output differs from reference (unified diff below, truncated to 30 lines)" "$difffile"
     fi
 }
+
+SCENARIO_USAGE_NOTE="  (one scenario per regression reference file)\n  A positional argument names an alternative reference directory."
+for _ref in "$REF_DIR"/*.txt; do
+    [[ -e "$_ref" ]] || continue
+    scenario_register "$(basename "$_ref" .txt)"
+done
+scenario_parse_args "$@"
 
 echo "Validating regression output against: $REF_DIR"
 echo ""

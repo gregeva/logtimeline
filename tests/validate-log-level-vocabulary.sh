@@ -77,6 +77,8 @@ WIDTH=140
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -571,6 +573,15 @@ check_help_states_no_levels() {
 # Scenario: one line per level the Windchill Method Server format emits.
 # ---------------------------------------------------------------------------
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register method-server-levels \
+                  extended-severity-vocabulary \
+                  unregistered-level-report \
+                  edge-c-sdk-unregistered-levels \
+                  declared-levels-in-help
+scenario_parse_args "$@"
+
+if scenario_wanted method-server-levels; then
 current_scenario="method-server-levels"
 echo "[$current_scenario]"
 
@@ -628,6 +639,9 @@ assert_command \
 # emit, plus the ThingWorx Edge C SDK's AUDIT.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted extended-severity-vocabulary; then
 current_scenario="extended-severity-vocabulary"
 echo "[$current_scenario]"
 
@@ -717,6 +731,9 @@ assert_command \
 # run, and nothing about the counts changes.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted unregistered-level-report; then
 current_scenario="unregistered-level-report"
 echo "[$current_scenario]"
 
@@ -771,6 +788,9 @@ assert_command \
 # Scenario: the Edge C SDK tokens, the real-data case the report exists for.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted edge-c-sdk-unregistered-levels; then
 current_scenario="edge-c-sdk-unregistered-levels"
 echo "[$current_scenario]"
 
@@ -820,6 +840,9 @@ assert_command \
 # Scenario: the levels a format declares are stated by the format listing.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted declared-levels-in-help; then
 current_scenario="declared-levels-in-help"
 echo "[$current_scenario]"
 
@@ -880,3 +903,5 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
+fi
+

@@ -34,6 +34,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/rendered-output.sh
 source "$SCRIPT_DIR/lib/rendered-output.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -148,6 +150,22 @@ echo "Validating the classification states and the per-message indicator (Issue 
 echo
 
 # ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register producer/fixture-tracked \
+                  producer/contained \
+                  line-states/no-rows \
+                  line-states/rows-retained \
+                  line-states/consolidated \
+                  line-states/mixed-alone-suppresses \
+                  summary-rows \
+                  eligibility/per-bucket \
+                  indicator/rows \
+                  indicator/consolidated \
+                  export \
+                  regression-guard/short-circuit
+scenario_parse_args "$@"
+
+if scenario_wanted producer/fixture-tracked; then
 current_scenario="producer/fixture-tracked"
 if ( cd "$REPO_DIR" && git ls-files --error-unmatch tests/fixtures/classification-states.txt > /dev/null 2>&1 ) \
    && grep -q 'classification-states.txt' "$REPO_DIR/docs/test-logs.md"; then
@@ -156,6 +174,9 @@ else
     fail_with "fixture tracked and recorded" 'the synthetic fixture is committed as .txt and described in docs/test-logs.md' 'repository' "$SPEC acceptance criterion 1"
 fi
 
+fi
+
+if scenario_wanted producer/contained; then
 current_scenario="producer/contained"
 run_ltl unpinned "${COMMON[@]}" -n 0 -osum -V format-detection "$FIXTURE"
 if grep -qE '^  format: -$' "$TMP_DIR/unpinned.out" && grep -qE '^  unmatched_lines: 16$' "$TMP_DIR/unpinned.out"; then
@@ -186,6 +207,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted line-states/no-rows; then
 current_scenario="line-states/no-rows"
 # -n 0 retains no message, so nothing can be MIXED (F5): the four line
 # states as the fixture was designed: 7 success, 4 failure, 2 conflict,
@@ -198,6 +222,9 @@ expect_key "$TMP_DIR/pinned.out" mixed 0 'no retained rows, no MIXED (F5)'
 expect_key "$TMP_DIR/pinned.out" unclassified_qualifying 3 'every unclassified line came from the qualifying verification format'
 partition "$TMP_DIR/pinned.out" 'five-way partition under -n 0'
 
+fi
+
+if scenario_wanted line-states/rows-retained; then
 current_scenario="line-states/rows-retained"
 run_ltl rows "${COMMON[@]}" -n 25 -osum -V format-detection "${PIN[@]}" "$FIXTURE"
 # checkout (1 success + 1 failure) and search (1 success + 1 unclassified) are
@@ -210,6 +237,9 @@ expect_key "$TMP_DIR/rows.out" conflicts 2 'the all-conflict row stays uniform a
 expect_key "$TMP_DIR/rows.out" pct_eligible 0 'a non-zero mixed count withholds the run-level shares (D9)'
 partition "$TMP_DIR/rows.out" 'five-way partition with rows retained'
 
+fi
+
+if scenario_wanted line-states/consolidated; then
 current_scenario="line-states/consolidated"
 run_ltl grouped "${COMMON[@]}" -n 25 -osum -g 85 -V format-detection "${PIN[@]}" "${FIXTURE}"
 # The architect's worked case (D5): "order 1001 placed" (success) and
@@ -220,6 +250,9 @@ expect_key "$TMP_DIR/grouped.out" successes 4 'successes decrement by one for th
 expect_key "$TMP_DIR/grouped.out" failures 2 'failures decrement by one for the consolidated pair'
 partition "$TMP_DIR/grouped.out" 'five-way partition after the final consolidation pass'
 
+fi
+
+if scenario_wanted line-states/mixed-alone-suppresses; then
 current_scenario="line-states/mixed-alone-suppresses"
 # Day 1 only: three successes and three failures, no conflict, no
 # unclassified line, one non-uniform row (checkout). With rows retained the
@@ -240,6 +273,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted summary-rows; then
 current_scenario="summary-rows"
 run_ltl summary "${COMMON[@]}" -n 25 --terminal-width 200 -sm "${PIN[@]}" "$FIXTURE"
 summary_plain=$(sed -E 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/summary.out")
@@ -264,6 +300,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted eligibility/per-bucket; then
 current_scenario="eligibility/per-bucket"
 # Rendered with --debug-layout so the success and failure columns are read
 # at the layout engine's own offsets (tests/lib/rendered-output.sh).
@@ -293,6 +332,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted indicator/rows; then
 current_scenario="indicator/rows"
 set +e
 with_ansi_colour "$LTL" "${COMMON[@]}" -n 25 --terminal-width 200 "${PIN[@]}" "$FIXTURE" > "$TMP_DIR/ind.out" 2> "$TMP_DIR/ind.err"
@@ -305,6 +347,9 @@ expect_indicator "$TMP_DIR/ind.out" 'cache warm'     'space' 'default' 'an all-u
 expect_indicator "$TMP_DIR/ind.out" 'checkout'       '•'     '256:178' 'a success/failure row renders the bullet in gold (MIXED)'
 expect_indicator "$TMP_DIR/ind.out" 'search'         '•'     '256:178' 'a success/unclassified row is MIXED too (D10)'
 
+fi
+
+if scenario_wanted indicator/consolidated; then
 current_scenario="indicator/consolidated"
 set +e
 with_ansi_colour "$LTL" "${COMMON[@]}" -n 25 --terminal-width 200 -g 85 "${PIN[@]}" "$FIXTURE" > "$TMP_DIR/indg.out" 2> "$TMP_DIR/indg.err"
@@ -314,6 +359,9 @@ expect_indicator "$TMP_DIR/indg.out" 'placed' '~' '256:178' 'the consolidated su
 expect_indicator "$TMP_DIR/indg.out" 'catalog fetch' '•' '256:34' 'an unconsolidated row keeps the bullet under -g'
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted export; then
 current_scenario="export"
 mkdir -p "$TMP_DIR/export"
 set +e
@@ -358,12 +406,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted regression-guard/short-circuit; then
 current_scenario="regression-guard/short-circuit"
 if ! grep -qF '"($f) ? 2 : ($s) ? 1 : 0"' "$LTL"; then
     pass_with "the failure-first short-circuit is retired from the compiled classifier"
 else
     fail_with "short-circuit retired" 'a line satisfying both criteria is evaluated on both and filed as a conflict' 'format_classification_src() in ltl' "$CLS_CONTRACT; $SPEC D3"
 fi
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

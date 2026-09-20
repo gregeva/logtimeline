@@ -59,6 +59,8 @@ WIDTH=140
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -274,6 +276,16 @@ check_csv_header_raw_names() {
 # its highlighted twin.
 # ---------------------------------------------------------------------------
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+FAMILY_PRODUCED='category_display_name() in ltl, rendered by print_summary_table()'
+
+scenario_register http-status-families \
+                  longest-name-fills-the-column \
+                  csv-keeps-raw-category-names \
+                  unmapped-categories-keep-their-own-name
+scenario_parse_args "$@"
+
+if scenario_wanted http-status-families; then
 current_scenario="http-status-families"
 echo "[$current_scenario]"
 
@@ -282,7 +294,6 @@ capture_render "$RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
     -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h orders "$FAMILIES_FIXTURE"
 
 FAMILY_CONTRACT='features/463-friendly-log-level-category-names.md § D1 — the shipped descriptive names for the HTTP status families'
-FAMILY_PRODUCED='category_display_name() in ltl, rendered by print_summary_table()'
 
 while read -r raw total descriptive; do
     assert_command \
@@ -336,6 +347,9 @@ assert_command \
 # by any test - and it is the boundary the fixed-width cell turns on.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted longest-name-fills-the-column; then
 current_scenario="longest-name-fills-the-column"
 echo "[$current_scenario]"
 
@@ -359,6 +373,9 @@ ROWS
 # Scenario: the CSV contract is unchanged by the descriptive names.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted csv-keeps-raw-category-names; then
 current_scenario="csv-keeps-raw-category-names"
 echo "[$current_scenario]"
 
@@ -391,6 +408,9 @@ assert_command \
 # The Windchill Method Server levels are self-explanatory and have no entries.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted unmapped-categories-keep-their-own-name; then
 current_scenario="unmapped-categories-keep-their-own-name"
 echo "[$current_scenario]"
 
@@ -418,3 +438,5 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
+fi
+

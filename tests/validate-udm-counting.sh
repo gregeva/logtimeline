@@ -32,6 +32,8 @@ FIXTURE="$REPO_DIR/tests/fixtures/udm-counting-tokens.txt"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -658,16 +660,33 @@ scenario_query_string_values() {
     rm -f "$out" "$out.stderr"
 }
 
-scenario_fixture_values
-scenario_token_key
-scenario_rate_unit
-scenario_validation_warnings
-scenario_alias_canonical
-scenario_csv_columns
-scenario_consolidation
-scenario_mem
-scenario_users_column
-scenario_query_string_values
+scenario_register fixture-values \
+                  token-key-equivalence \
+                  rate-unit-scaling \
+                  validation-warnings \
+                  alias-canonical \
+                  csv-columns \
+                  consolidation-conservation \
+                  mem-tracking \
+                  users-column \
+                  query-string-values
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        fixture-values            ) scenario_fixture_values ;;
+        token-key-equivalence     ) scenario_token_key ;;
+        rate-unit-scaling         ) scenario_rate_unit ;;
+        validation-warnings       ) scenario_validation_warnings ;;
+        alias-canonical           ) scenario_alias_canonical ;;
+        csv-columns               ) scenario_csv_columns ;;
+        consolidation-conservation) scenario_consolidation ;;
+        mem-tracking              ) scenario_mem ;;
+        users-column              ) scenario_users_column ;;
+        query-string-values       ) scenario_query_string_values ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo
 echo "Results: $pass passed, $fail failed"

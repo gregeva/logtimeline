@@ -35,6 +35,8 @@ FIXTURES="$REPO_DIR/tests/fixtures/format-detection"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -504,14 +506,29 @@ scenario_unarmed_run() {
 echo "=== validate-format-registry.sh ==="
 echo ""
 
-scenario_inventory;                 echo ""
-scenario_structure;                 echo ""
-scenario_election_single_format;    echo ""
-scenario_election_mixed_format;     echo ""
-scenario_election_pinned;           echo ""
-scenario_invalid_pin_no_codegen;    echo ""
-scenario_benchmark_data_reemission; echo ""
-scenario_unarmed_run
+scenario_register inventory \
+                  structure \
+                  election-single-format \
+                  election-mixed-format \
+                  election-pinned \
+                  invalid-pin-no-codegen \
+                  benchmark-data-reemission \
+                  unarmed-measurement
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        inventory                ) scenario_inventory ;;
+        structure                ) scenario_structure ;;
+        election-single-format   ) scenario_election_single_format ;;
+        election-mixed-format    ) scenario_election_mixed_format ;;
+        election-pinned          ) scenario_election_pinned ;;
+        invalid-pin-no-codegen   ) scenario_invalid_pin_no_codegen ;;
+        benchmark-data-reemission) scenario_benchmark_data_reemission ;;
+        unarmed-measurement      ) scenario_unarmed_run ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

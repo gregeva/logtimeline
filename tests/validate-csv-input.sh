@@ -21,6 +21,8 @@ LTL="$(cd "$SCRIPT_DIR/.." && pwd)/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -79,6 +81,12 @@ printf '%s\n' \
 printf 'timestamp,occurrences,bytes\n"2026-06-01 10:00",10,100\n"2026-06-01 12:00",20,200\n"2026-06-01 14:00",30,300\n' > "$TMP_DIR/mix/stats.csv"
 
 # --- Assertions -----------------------------------------------------------
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# This harness asserts one surface, so it declares the single scenario it runs.
+SCENARIO_USAGE_NOTE="  (this harness runs a single scenario)"
+scenario_register csv-input
+scenario_parse_args "$@"
 
 echo "[csv-input]"
 

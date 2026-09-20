@@ -25,6 +25,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -183,6 +185,18 @@ done
 # ---------------------------------------------------------------------------
 # Criterion 7 — a unit never changes the timestamp precision
 # ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register precision/90s-on-minute-run \
+                  rejection/bare-number-control \
+                  one-mechanism/spellings \
+                  one-mechanism/udm-day-matches-bs-day \
+                  one-mechanism/ru-week-matches-bs-week \
+                  one-mechanism/structure \
+                  display-ladder/above-a-day \
+                  display-ladder/below-a-microsecond
+scenario_parse_args "$@"
+
+if scenario_wanted precision/90s-on-minute-run; then
 current_scenario="precision/90s-on-minute-run"
 run_ltl p "${COMMON[@]}" -bs 90s "$SPAN_FIXTURE"
 run_ltl pv "${COMMON[@]}" -bs 90s -V benchmark-data "$SPAN_FIXTURE"
@@ -253,6 +267,9 @@ for bad in "5x" "d" "1.2.3h" "-1h" "0h"; do
     fi
 done
 
+fi
+
+if scenario_wanted rejection/bare-number-control; then
 current_scenario="rejection/bare-number-control"
 run_ltl c "${COMMON[@]}" -bs 5 "$SPAN_FIXTURE"
 if [[ "$(cat "$TMP_DIR/c.rc")" == 0 ]]; then
@@ -269,6 +286,9 @@ fi
 LADDER_SPELLINGS=(ns nsec us usec ms msec s sec second seconds m min minute minutes
                   h hr hour hours d day days w wk week weeks month mo mon months
                   year y yr years D H MIN Sec)
+fi
+
+if scenario_wanted one-mechanism/spellings; then
 current_scenario="one-mechanism/spellings"
 spelling_failures=0
 for u in "${LADDER_SPELLINGS[@]}"; do
@@ -307,6 +327,9 @@ else
         "$CONTRACT_D1; $CONTRACT_D2" "spellings failing: $spelling_failures"
 fi
 
+fi
+
+if scenario_wanted one-mechanism/udm-day-matches-bs-day; then
 current_scenario="one-mechanism/udm-day-matches-bs-day"
 run_ltl m "${COMMON[@]}" -bs 1d -udm 'days:d:max:/ ([0-9]+)$/' -V udm-specs,benchmark-data "$SPAN_FIXTURE"
 sec_day=$(benchmark_row "$TMP_DIR/m.out" bucket_size_seconds)
@@ -325,6 +348,9 @@ else
         "$CONTRACT_D1" "read_as: $(grep -E '^  read_as:' "$TMP_DIR/m.out" || echo none)" "udm max: ${udm_max:-none}" "expected: $expected_max (bucket_size_seconds $sec_day)"
 fi
 
+fi
+
+if scenario_wanted one-mechanism/ru-week-matches-bs-week; then
 current_scenario="one-mechanism/ru-week-matches-bs-week"
 mkdir -p "$TMP_DIR/csv" && cp "$SPAN_FIXTURE" "$TMP_DIR/csv/span.txt"
 ( cd "$TMP_DIR/csv" && "$LTL" "${COMMON[@]}" -bs 1w -ru w -o span.txt > run.out 2> run.err; echo $? > run.rc )
@@ -357,6 +383,9 @@ else
         'print_bar_graph() in ltl (rate legend)' "$CONTRACT_D1"
 fi
 
+fi
+
+if scenario_wanted one-mechanism/structure; then
 current_scenario="one-mechanism/structure"
 ladder_defs=$(grep -cE '^my @time_unit_ladder\b' "$LTL" || true)
 # The ladder's own rows are the one place a spelling list belongs.
@@ -376,6 +405,9 @@ fi
 # ---------------------------------------------------------------------------
 # Criterion 5b — the display ladder is complete
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted display-ladder/above-a-day; then
 current_scenario="display-ladder/above-a-day"
 run_ltl d "${COMMON[@]}" -bs 1440 "$DISPLAY_FIXTURE"
 for pair in "2025-06-01|1\.4w" "2025-06-02|1\.5mo" "2025-06-03|1\.1y"; do
@@ -389,6 +421,9 @@ for pair in "2025-06-01|1\.4w" "2025-06-02|1\.5mo" "2025-06-03|1\.1y"; do
             "$CONTRACT_D1; $CONTRACT_D2" "row: $(grep -E "^ $day " "$TMP_DIR/d.out" | cut -c1-160)"
     fi
 done
+fi
+
+if scenario_wanted display-ladder/below-a-microsecond; then
 current_scenario="display-ladder/below-a-microsecond"
 run_ltl dn "${COMMON[@]}" -bs 1440 -du ns "$DISPLAY_FIXTURE"
 if grep -E '^ 2025-06-04 ' "$TMP_DIR/dn.out" | grep -qE 'P50:500ns\b'; then
@@ -399,6 +434,8 @@ else
         'format_time() in ltl, via format_duration()' "$CONTRACT_D1; $CONTRACT_D2" \
         "row: $(grep -E '^ 2025-06-04 ' "$TMP_DIR/dn.out" | cut -c1-160)"
 fi
+fi
+
 
 # ---------------------------------------------------------------------------
 echo

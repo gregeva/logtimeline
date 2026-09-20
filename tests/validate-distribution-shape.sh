@@ -57,20 +57,19 @@ GENERATOR="$SCRIPT_DIR/distribution-shape/generate-anchor.py"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
 # never inherited; issue #438).
 neutralize_colour_env
 
-ONLY_ANCHOR=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --anchor) ONLY_ANCHOR="$2"; shift 2 ;;
-        -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
-    esac
-done
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per distribution shape; the shape names are unchanged.
+SCENARIO_USAGE_NOTE="  (one scenario per generated distribution shape)"
+scenario_register normal exponential bimodal
+scenario_parse_args "$@"
 
 for f in "$LTL" "$GENERATOR"; do
     if [[ ! -e "$f" ]]; then
@@ -103,7 +102,7 @@ TMP_ROOT=$(mktemp -d); trap 'rm -rf "$TMP_ROOT"' EXIT
 pass=0
 fail=0
 failures=()
-current_anchor=""
+current_scenario=""
 
 # Generate one anchor log, run ltl -o on it in its own dir (the CSV filename
 # carries a wall-clock timestamp to the second, so anchors run in the same
@@ -214,23 +213,23 @@ except (TypeError, ValueError):
 print(repr(v))
 PY
     ); then
-        echo "  FAIL  $current_anchor :: $column"
+        echo "  FAIL  $current_scenario :: $column"
         echo "        extraction:  $value"
         echo "        asserts:     $asserts"
         echo "        produced_by: $produced_by"
         echo "        contract:    $contract"
         echo "        (CSV: $csv)"
         fail=$((fail + 1))
-        failures+=("$current_anchor :: $column (extraction failed)")
+        failures+=("$current_scenario :: $column (extraction failed)")
         return
     fi
 
     # In-band comparison in python (float-safe inclusive bounds).
     if python3 -c "import sys; v=$value; sys.exit(0 if $lo <= v <= $hi else 1)"; then
-        echo "  PASS  $current_anchor :: $column = $value in [$lo, $hi]"
+        echo "  PASS  $current_scenario :: $column = $value in [$lo, $hi]"
         pass=$((pass + 1))
     else
-        echo "  FAIL  $current_anchor :: $column"
+        echo "  FAIL  $current_scenario :: $column"
         echo "        value:       $value"
         echo "        band:        [$lo, $hi]"
         echo "        asserts:     $asserts"
@@ -238,7 +237,7 @@ PY
         echo "        contract:    $contract"
         echo "        (CSV: $csv)"
         fail=$((fail + 1))
-        failures+=("$current_anchor :: $column=$value not in [$lo, $hi]")
+        failures+=("$current_scenario :: $column=$value not in [$lo, $hi]")
     fi
 }
 
@@ -249,9 +248,9 @@ CONTRACT='Issue #254 anchor table + features/222-* (shape moments). Bands fixed 
 # ---------------------------------------------------------------------------
 # normal — N(100, 10), n=10000 : symmetric, mesokurtic, unimodal
 # ---------------------------------------------------------------------------
-anchor_normal() {
-    current_anchor="normal"
-    echo "[$current_anchor]"
+scenario_normal() {
+    current_scenario="normal"
+    echo "[$current_scenario]"
     local csv; csv=$(generate_and_run normal)
     check_capture_warnings normal
 
@@ -273,9 +272,9 @@ anchor_normal() {
 # n is large so the 3rd/4th sample moments tighten onto the analytic values.
 # BC is intentionally not asserted (sits on the 0.555 cutoff — see header).
 # ---------------------------------------------------------------------------
-anchor_exponential() {
-    current_anchor="exponential"
-    echo "[$current_anchor]"
+scenario_exponential() {
+    current_scenario="exponential"
+    echo "[$current_scenario]"
     local csv; csv=$(generate_and_run exponential)
     check_capture_warnings exponential
 
@@ -293,9 +292,9 @@ anchor_exponential() {
 # skew/kurtosis bands are pinned from the seeded sample (stable across seeds
 # to ~0.01); the operationally meaningful assertion is BC above 0.555.
 # ---------------------------------------------------------------------------
-anchor_bimodal() {
-    current_anchor="bimodal"
-    echo "[$current_anchor]"
+scenario_bimodal() {
+    current_scenario="bimodal"
+    echo "[$current_scenario]"
     local csv; csv=$(generate_and_run bimodal)
     check_capture_warnings bimodal
 
@@ -313,22 +312,15 @@ anchor_bimodal() {
 }
 
 # ---------------------------------------------------------------------------
-run_anchor() {
-    case "$1" in
-        normal)      anchor_normal ;;
-        exponential) anchor_exponential ;;
-        bimodal)     anchor_bimodal ;;
-        *) echo "unknown anchor: $1" >&2; exit 2 ;;
-    esac
-}
 
-if [[ -n "$ONLY_ANCHOR" ]]; then
-    run_anchor "$ONLY_ANCHOR"
-else
-    anchor_normal; echo ""
-    anchor_exponential; echo ""
-    anchor_bimodal
-fi
+while read -r _scenario; do
+    case "$_scenario" in
+        normal)      scenario_normal ;;
+        exponential) scenario_exponential ;;
+        bimodal)     scenario_bimodal ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"
