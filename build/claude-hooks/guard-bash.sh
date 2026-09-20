@@ -58,6 +58,11 @@ deny "--delete-branch is never used - feature branches are deleted explicitly af
 deny "commit message names a model version - the trailer is 'Co-Authored-By: Claude <noreply\@anthropic.com>'"
     if $cmd =~ /\bgit\s+commit\b/ && $c =~ /Claude\s+(Opus|Sonnet|Haiku|Fable|Mythos)\b|claude-(opus|sonnet|haiku|fable|mythos)-/i;
 
+# --- a multi-hour benchmark holds the machine awake or it is worthless
+deny "run-benchmark.sh full/xl/all without 'caffeinate -s' - the host sleeps mid-run and the overnight capture is lost (docs/process/workflow.md release cut step 5)"
+    if $cmd =~ /run-benchmark\.sh\s+(full|xl|all)\b/
+    && $cmd !~ /\bcaffeinate\b[^;&|]*run-benchmark\.sh/;
+
 # --- release-only instruments and guard overrides need the architect's yes
 ask "run-benchmark.sh full/xl/all is a release-gate instrument (about 2.5 h), never a development tool - confirm this is the release cut"
     if $cmd =~ /run-benchmark\.sh\s+(full|xl|all)\b/;
