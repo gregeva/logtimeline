@@ -45,6 +45,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -2136,54 +2138,109 @@ echo "Validating format-detection -V section (issue #228)"
 echo "  ltl:       $LTL"
 echo ""
 
-scenario_tomcat9_ms;            echo ""
-scenario_tomcat_common;         echo ""
-scenario_jboss_enhanced;        echo ""
-scenario_apache_httpd_us;       echo ""
-scenario_codebeamer;            echo ""
-scenario_family_shapes;         echo ""
-scenario_family_fields_evidence; echo ""
-scenario_family_pin_names;      echo ""
-scenario_family_bracketed_unit; echo ""
-scenario_family_ambiguity_note_per_file; echo ""
-scenario_thingworx_standard;    echo ""
-scenario_thingworx_with_metrics; echo ""
-scenario_tw_edge_c_sdk;         echo ""
-scenario_csv_with_udm;          echo ""
-scenario_thingworx_rac_client;  echo ""
-scenario_connection_server_json; echo ""
-scenario_java_gc_g1;            echo ""
-scenario_tw_analytics_v2;       echo ""
-scenario_tw_analytics_worker;   echo ""
-scenario_connection_server_standard; echo ""
-scenario_windchill_method_server; echo ""
-scenario_scan_telemetry;        echo ""
-scenario_scan_telemetry_nomatch; echo ""
-scenario_classification_access; echo ""
-scenario_classification_declining; echo ""
-scenario_classification_default; echo ""
-scenario_classification_consolidation_reconciles; echo ""
-scenario_classification_format_switch; echo ""
-scenario_classification_format_interleaved; echo ""
-scenario_classification_summary_rows; echo ""
-scenario_variant_ambiguity_note; echo ""
-scenario_variant_connection_server; echo ""
-scenario_milliseconds_not_read; echo ""
-scenario_variant_integration_runtime_named; echo ""
-scenario_variant_integration_runtime_unnamed; echo ""
-scenario_unit_tomcat_named; echo ""
-scenario_unit_httpd_named; echo ""
-scenario_variant_thingworx_rolled; echo ""
-scenario_windchill_method_server_named; echo ""
-scenario_windchill_method_server_rolled; echo ""
-scenario_windchill_method_server_bare; echo ""
-scenario_windchill_method_server_renamed; echo ""
-scenario_variant_mixed_legend; echo ""
-scenario_windchill_workgroup_manager; echo ""
-scenario_wgm_filename_family;   echo ""
-scenario_wgm_client_localtime;  echo ""
-scenario_unregistered_levels_per_file; echo ""
-scenario_format_pin
+scenario_register tomcat9-ms \
+                  tomcat-common \
+                  jboss-enhanced \
+                  apache-httpd-us \
+                  codebeamer \
+                  family-shapes \
+                  family-fields-evidence \
+                  family-pin-names \
+                  family-bracketed-unit \
+                  ambiguity-note-per-file \
+                  thingworx-standard \
+                  thingworx-with-metrics \
+                  tw-edge-c-sdk \
+                  csv-with-udm \
+                  thingworx-rac-client \
+                  connection-server-json \
+                  java-gc-g1 \
+                  tw-analytics-v2 \
+                  tw-analytics-worker \
+                  connection-server-standard \
+                  windchill-method-server \
+                  scan-telemetry \
+                  scan-telemetry-nomatch \
+                  classification-access \
+                  classification-declining \
+                  classification-default \
+                  classification-consolidation-reconciles \
+                  classification-format-switch \
+                  classification-format-interleaved \
+                  classification-summary-rows \
+                  variant-ambiguity-note \
+                  variant-connection-server \
+                  milliseconds-not-read \
+                  variant-integration-runtime-named \
+                  variant-integration-runtime-unnamed \
+                  unit-tomcat-named \
+                  unit-httpd-named \
+                  variant-thingworx-rolled \
+                  windchill-method-server-named \
+                  windchill-method-server-rolled \
+                  windchill-method-server-bare \
+                  windchill-method-server-renamed \
+                  variant-mixed-legend \
+                  wgm-client \
+                  wgm-filename-family \
+                  wgm-client-localtime \
+                  unregistered-levels-per-file \
+                  format-pin
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        tomcat9-ms                             ) scenario_tomcat9_ms ;;
+        tomcat-common                          ) scenario_tomcat_common ;;
+        jboss-enhanced                         ) scenario_jboss_enhanced ;;
+        apache-httpd-us                        ) scenario_apache_httpd_us ;;
+        codebeamer                             ) scenario_codebeamer ;;
+        family-shapes                          ) scenario_family_shapes ;;
+        family-fields-evidence                 ) scenario_family_fields_evidence ;;
+        family-pin-names                       ) scenario_family_pin_names ;;
+        family-bracketed-unit                  ) scenario_family_bracketed_unit ;;
+        ambiguity-note-per-file                ) scenario_family_ambiguity_note_per_file ;;
+        thingworx-standard                     ) scenario_thingworx_standard ;;
+        thingworx-with-metrics                 ) scenario_thingworx_with_metrics ;;
+        tw-edge-c-sdk                          ) scenario_tw_edge_c_sdk ;;
+        csv-with-udm                           ) scenario_csv_with_udm ;;
+        thingworx-rac-client                   ) scenario_thingworx_rac_client ;;
+        connection-server-json                 ) scenario_connection_server_json ;;
+        java-gc-g1                             ) scenario_java_gc_g1 ;;
+        tw-analytics-v2                        ) scenario_tw_analytics_v2 ;;
+        tw-analytics-worker                    ) scenario_tw_analytics_worker ;;
+        connection-server-standard             ) scenario_connection_server_standard ;;
+        windchill-method-server                ) scenario_windchill_method_server ;;
+        scan-telemetry                         ) scenario_scan_telemetry ;;
+        scan-telemetry-nomatch                 ) scenario_scan_telemetry_nomatch ;;
+        classification-access                  ) scenario_classification_access ;;
+        classification-declining               ) scenario_classification_declining ;;
+        classification-default                 ) scenario_classification_default ;;
+        classification-consolidation-reconciles) scenario_classification_consolidation_reconciles ;;
+        classification-format-switch           ) scenario_classification_format_switch ;;
+        classification-format-interleaved      ) scenario_classification_format_interleaved ;;
+        classification-summary-rows            ) scenario_classification_summary_rows ;;
+        variant-ambiguity-note                 ) scenario_variant_ambiguity_note ;;
+        variant-connection-server              ) scenario_variant_connection_server ;;
+        milliseconds-not-read                  ) scenario_milliseconds_not_read ;;
+        variant-integration-runtime-named      ) scenario_variant_integration_runtime_named ;;
+        variant-integration-runtime-unnamed    ) scenario_variant_integration_runtime_unnamed ;;
+        unit-tomcat-named                      ) scenario_unit_tomcat_named ;;
+        unit-httpd-named                       ) scenario_unit_httpd_named ;;
+        variant-thingworx-rolled               ) scenario_variant_thingworx_rolled ;;
+        windchill-method-server-named          ) scenario_windchill_method_server_named ;;
+        windchill-method-server-rolled         ) scenario_windchill_method_server_rolled ;;
+        windchill-method-server-bare           ) scenario_windchill_method_server_bare ;;
+        windchill-method-server-renamed        ) scenario_windchill_method_server_renamed ;;
+        variant-mixed-legend                   ) scenario_variant_mixed_legend ;;
+        wgm-client                             ) scenario_windchill_workgroup_manager ;;
+        wgm-filename-family                    ) scenario_wgm_filename_family ;;
+        wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
+        unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
+        format-pin                             ) scenario_format_pin ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

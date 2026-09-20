@@ -46,6 +46,8 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -162,8 +164,29 @@ echo ""
 # day, everything else keeps a subset.
 mode_drops_days() { [[ "$1" != "day" && "$1" != "week" && "$1" != "week-alt" ]]; }
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# Each profile mode is a scenario; the mode name is the selector token.
+SCENARIO_USAGE_NOTE="  (one scenario per --profile mode)"
+scenario_register day \
+                  workday \
+                  workday-alt \
+                  weekday \
+                  weekday-alt \
+                  weekend \
+                  weekend-alt \
+                  week \
+                  week-alt \
+                  workweek \
+                  workweek-alt \
+                  weekdays \
+                  weekdays-alt \
+                  weekends \
+                  weekends-alt
+scenario_parse_args "$@"
+
 # --- singular modes: time-only labels, no weekday token ----------------------
 for mode in day workday workday-alt weekday weekday-alt weekend weekend-alt; do
+    scenario_wanted "$mode" || continue
     current_scenario="$mode"
     echo "[$current_scenario]"
     render="$TMP_ROOT/$mode.txt"
@@ -190,6 +213,7 @@ done
 
 # --- plural modes: weekday once, correct start, excluded suppressed ----------
 for mode in week week-alt workweek workweek-alt weekdays weekdays-alt weekends weekends-alt; do
+    scenario_wanted "$mode" || continue
     current_scenario="$mode"
     echo "[$current_scenario]"
     render="$TMP_ROOT/$mode.txt"

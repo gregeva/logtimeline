@@ -252,3 +252,88 @@ and a named scenario runs alone — `CI=1 ./tests/validate-csv-output.sh
 `CI=1 ./tests/validate-statistics.sh --scenario apache-default --skip-l3`
 reports `1 scenarios, 1 pass, 0 fail` over 985 checked cells. An unknown flag
 exits 2 in both.
+
+
+### Stage 2 — Groups 1, 2 and 4
+
+The remaining thirty-eight harnesses. Every one declares its scenarios,
+honours `--scenario`, rejects an unknown name and an unknown flag with exit 2,
+and runs no assertion in either case. Verified mechanically across the whole
+suite: forty harnesses checked, zero non-compliant.
+
+**Group 1 (16) — a registry replaces the dispatch list.** The flat call list at
+the foot of each file becomes `scenario_register` plus a loop over
+`scenario_selected`. The selector token is the scenario's own literal
+`current_scenario` where it has exactly one that does not interpolate, and the
+function name otherwise: in `validate-explain.sh`, `current_scenario` is a
+per-assertion label (`topic:$topic`, `reflow:width-$w`), not a stable name, so
+tokens there derive from the function names.
+
+**Group 2 (16) — each top-level block is gated.** The blocks stay where they
+are, wrapped in `if scenario_wanted <name>; then`, with the banner comment
+pulled inside the block it labels. They are not lifted into functions: several
+carry heredocs and shared locals that a wrapper would change.
+`validate-aggregate-export.sh` is the exception — it already gated every block
+on its own `want "$current_scenario"`, so `want` became a thin alias for
+`scenario_wanted` and the harness keeps one selection surface instead of two.
+
+**Group 4 (6) — the vocabulary is standardised (D3).**
+`validate-distribution-shape.sh` had a parallel `--anchor` selector over
+`current_anchor`; `validate-profile.sh` had `--mode` over `current_mode`. Both
+now use `--scenario` and `current_scenario`, and the names they select (normal,
+exponential, bimodal; the profile modes) are unchanged. Three harnesses gained
+a vocabulary they did not have: `validate-regression.sh` registers one scenario
+per reference file on disk (so a case and the reference it is diffed against
+cannot drift), `validate-help-layout.sh` one per layout section,
+`validate-histogram-ticks.sh` one per rendered width plus the multi-histogram
+case, and `validate-csv-input.sh` declares the single scenario it runs.
+
+`validate-regression.sh` takes a documented positional argument naming an
+alternative reference directory; it claims that through
+`SCENARIO_EXTRA_ARG_HANDLER`, so the positional still works and an unknown flag
+is still refused.
+
+**One latent gap closed on the way.** `validate-profile.sh` ran its
+profile-off case only when no mode was selected, so selecting any mode silently
+skipped it. It is now a registered scenario (`profile-off`) and selectable like
+any other.
+
+**Two ordering defects found and fixed.** `validate-index-read-back.sh` ran six
+helper self-test assertions before reaching its argument parsing, so a rejected
+argument had already run assertions — against the contract's "runs no
+assertions in either case". Parsing moved ahead of the self-tests.
+`validate-doc-examples.sh` printed its banner before rejecting. Both now refuse
+before any output.
+
+### Verification
+
+Every converted harness was run against a worktree of the pre-conversion commit
+(`LTL_LOGS_DIR` pointing at the real corpus) and compared on exit code and
+assertion count:
+
+| | before | after |
+|---|---|---|
+| `validate-explain.sh` | 689 | 689 |
+| `validate-format-detection.sh` | 272 | 272 |
+| `validate-histogram-bin-counters.sh` | 147 | 147 |
+| `validate-aggregate-export.sh` | 146 | 146 |
+| `validate-udm-specs.sh` | 126 | 126 |
+| `validate-profile.sh` | 106 | 106 |
+| `validate-statistics-demand.sh` | 102 | 102 |
+| `validate-filter-summary.sh` | 87 | 87 |
+| `validate-index-read-back.sh` | 59 | 59 |
+| `validate-message-discard.sh` | 57 | 57 |
+| `validate-classification-states.sh` | 56 | 56 |
+| `validate-runtime-config.sh` | 51 | 51 |
+| `validate-profile-render.sh` | 50 | 50 |
+
+and the rest likewise, all sixteen of Group 1 and all sixteen of Group 2
+matching. For the six largest, the full output was diffed line by line and is
+identical apart from the harness path and blank-line spacing.
+
+One run of `validate-aggregate-export.sh` reported `csv_cache_produce rc=1` on
+the `oracle-chain` rows, one assertion short. It did not reproduce: the
+scenario alone passes 44 assertions and the full harness 146. The baseline
+worktree and the converted checkout share one cache directory, and the
+comparison ran them back to back — cache contention between two checkouts, not
+a defect in either. Worth knowing for the next comparison run of this shape.

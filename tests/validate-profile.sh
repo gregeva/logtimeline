@@ -30,7 +30,7 @@
 #
 # Usage:
 #   ./tests/validate-profile.sh                # all modes
-#   ./tests/validate-profile.sh --mode workweek
+#   ./tests/validate-profile.sh --scenario workweek
 #
 # Exit codes:
 #   0  all assertions passed
@@ -50,6 +50,8 @@ GENERATOR="$SCRIPT_DIR/profile/generate-profile-log.py"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -63,14 +65,12 @@ ALL_MODES=(day week week-alt workweek workweek-alt workday workday-alt
            weekday weekday-alt weekdays weekdays-alt
            weekend weekend-alt weekends weekends-alt)
 
-ONLY_MODE=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --mode) ONLY_MODE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
-    esac
-done
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per --profile mode, plus the profile-off case; the mode names
+# are unchanged.
+SCENARIO_USAGE_NOTE="  (one scenario per --profile mode, plus profile-off)"
+scenario_register "${ALL_MODES[@]}" profile-off
+scenario_parse_args "$@"
 
 for f in "$LTL" "$GENERATOR"; do
     if [[ ! -e "$f" ]]; then
@@ -98,7 +98,7 @@ MANIFEST="$TMP_ROOT/profile.manifest.json"
 pass=0
 fail=0
 failures=()
-current_mode=""
+current_scenario=""
 
 strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 
@@ -107,9 +107,9 @@ strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
 # HARNESS-DESIGN.md section Runtime-warning cleanliness.
 check_stderr_warnings() {
     local stderr_file="$1"
-    if ! assert_no_runtime_warnings "$stderr_file" "$current_mode"; then
+    if ! assert_no_runtime_warnings "$stderr_file" "$current_scenario"; then
         fail=$((fail + 1))
-        failures+=("$current_mode :: perl-runtime-warnings-on-stderr")
+        failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
 }
 
@@ -157,15 +157,15 @@ capture_section() {
     # assertions never look at.
     if ! "$LTL" --disable-progress -ni -bs 1440 -oe -V profile -pr "$mode" "$LOGFILE" \
          > "$raw" 2>"$TMP_ROOT/$mode.err"; then
-        echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
+        echo "  FAIL  $current_scenario :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/$mode.err" >&2
-        fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return 1
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl failed"); return 1
     fi
     check_stderr_warnings "$TMP_ROOT/$mode.err"
     strip_ansi < "$raw" | sed -n '/^=== profile ===$/,/^=== END profile ===$/p' > "$outfile"
     if [[ ! -s "$outfile" ]]; then
-        echo "  FAIL  $current_mode :: '=== profile ===' section not found in -V output" >&2
-        fail=$((fail + 1)); failures+=("$current_mode :: profile section missing"); return 1
+        echo "  FAIL  $current_scenario :: '=== profile ===' section not found in -V output" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: profile section missing"); return 1
     fi
 }
 
@@ -188,27 +188,27 @@ assert_field() {
     local line actual
     line=$(grep -aE "^${key}: " "$section" || true)
     if [[ -z "$line" ]]; then
-        echo "  FAIL  $current_mode :: key '$key' not found in profile section"
+        echo "  FAIL  $current_scenario :: key '$key' not found in profile section"
         echo "        asserts:     $asserts"
         echo "        produced_by: $PRODUCED_BY"
         echo "        contract:    $CONTRACT"
         echo "        (section: $section)"
-        fail=$((fail + 1)); failures+=("$current_mode :: $key missing")
+        fail=$((fail + 1)); failures+=("$current_scenario :: $key missing")
         return
     fi
     actual="${line#"$key": }"
     if [[ "$actual" == "$expected" ]]; then
-        echo "  PASS  $current_mode :: $key = $actual"
+        echo "  PASS  $current_scenario :: $key = $actual"
         pass=$((pass + 1))
     else
-        echo "  FAIL  $current_mode :: $key"
+        echo "  FAIL  $current_scenario :: $key"
         echo "        expected:    $expected"
         echo "        actual:      $actual"
         echo "        asserts:     $asserts"
         echo "        produced_by: $PRODUCED_BY"
         echo "        contract:    $CONTRACT"
         echo "        (section: $section)"
-        fail=$((fail + 1)); failures+=("$current_mode :: $key=$actual expected $expected")
+        fail=$((fail + 1)); failures+=("$current_scenario :: $key=$actual expected $expected")
     fi
 }
 
@@ -246,16 +246,16 @@ expected_window() {
 
 run_mode() {
     local mode="$1"
-    current_mode="$mode"
-    echo "[$current_mode]"
+    current_scenario="$mode"
+    echo "[$current_scenario]"
 
     local section="$TMP_ROOT/$mode.section"
     capture_section "$mode" "$section" || return 0
 
     local exp_incl exp_drop total
-    exp_incl=$(manifest_get "expected.$mode.included") || { echo "  FAIL  $current_mode :: manifest missing expected.$mode.included"; fail=$((fail+1)); failures+=("$current_mode :: manifest"); return 0; }
-    exp_drop=$(manifest_get "expected.$mode.dropped")  || { echo "  FAIL  $current_mode :: manifest missing expected.$mode.dropped";  fail=$((fail+1)); failures+=("$current_mode :: manifest"); return 0; }
-    total=$(manifest_get "total_lines")                || { echo "  FAIL  $current_mode :: manifest missing total_lines";            fail=$((fail+1)); failures+=("$current_mode :: manifest"); return 0; }
+    exp_incl=$(manifest_get "expected.$mode.included") || { echo "  FAIL  $current_scenario :: manifest missing expected.$mode.included"; fail=$((fail+1)); failures+=("$current_scenario :: manifest"); return 0; }
+    exp_drop=$(manifest_get "expected.$mode.dropped")  || { echo "  FAIL  $current_scenario :: manifest missing expected.$mode.dropped";  fail=$((fail+1)); failures+=("$current_scenario :: manifest"); return 0; }
+    total=$(manifest_get "total_lines")                || { echo "  FAIL  $current_scenario :: manifest missing total_lines";            fail=$((fail+1)); failures+=("$current_scenario :: manifest"); return 0; }
 
     assert_field section "$section" key profile_active expected yes \
         asserts 'When --profile is set the section reports profile_active: yes (the fold is engaged).'
@@ -282,37 +282,37 @@ run_mode() {
     incl=$(grep -aE '^samples_included: ' "$section" | sed 's/^samples_included: //')
     drop=$(grep -aE '^samples_dropped: '  "$section" | sed 's/^samples_dropped: //')
     if [[ "$incl" =~ ^[0-9]+$ && "$drop" =~ ^[0-9]+$ ]] && (( incl + drop == total )); then
-        echo "  PASS  $current_mode :: samples_included + samples_dropped = $total (total)"
+        echo "  PASS  $current_scenario :: samples_included + samples_dropped = $total (total)"
         pass=$((pass + 1))
     else
-        echo "  FAIL  $current_mode :: included + dropped invariant"
+        echo "  FAIL  $current_scenario :: included + dropped invariant"
         echo "        expected:    samples_included + samples_dropped = $total"
         echo "        actual:      $incl + $drop"
         echo "        asserts:     Every matched line is either folded-and-included or dropped on an excluded day; the two counts must reconcile to the fixture total (no filters applied)."
         echo "        produced_by: $PRODUCED_BY"
         echo "        contract:    $CONTRACT"
-        fail=$((fail + 1)); failures+=("$current_mode :: included+dropped != total")
+        fail=$((fail + 1)); failures+=("$current_scenario :: included+dropped != total")
     fi
 }
 
 # Off case: without --profile the section reports profile_active: no.
 run_off_case() {
-    current_mode="no-profile"
-    echo "[$current_mode]"
+    current_scenario="no-profile"
+    echo "[$current_scenario]"
     local raw="$TMP_ROOT/off.raw" section="$TMP_ROOT/off.section"
     # No -pr, so nothing folds the month-long fixture: collapse the axis to
     # day buckets with no empty ones - only `profile_active: no` is read
     # (HARNESS-DESIGN.md section Invocation coherence).
     if ! "$LTL" --disable-progress -ni -bs 1440 -oe -V profile "$LOGFILE" > "$raw" 2>"$TMP_ROOT/off.err"; then
-        echo "  FAIL  $current_mode :: ltl exited non-zero emitting -V profile" >&2
+        echo "  FAIL  $current_scenario :: ltl exited non-zero emitting -V profile" >&2
         sed 's/^/        /' "$TMP_ROOT/off.err" >&2
-        fail=$((fail + 1)); failures+=("$current_mode :: ltl failed"); return
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl failed"); return
     fi
     check_stderr_warnings "$TMP_ROOT/off.err"
     strip_ansi < "$raw" | sed -n '/^=== profile ===$/,/^=== END profile ===$/p' > "$section"
     if [[ ! -s "$section" ]]; then
-        echo "  FAIL  $current_mode :: '=== profile ===' section not found in -V output"
-        fail=$((fail + 1)); failures+=("$current_mode :: profile section missing"); return
+        echo "  FAIL  $current_scenario :: '=== profile ===' section not found in -V output"
+        fail=$((fail + 1)); failures+=("$current_scenario :: profile section missing"); return
     fi
     assert_field section "$section" key profile_active expected no \
         asserts 'When --profile is not set the section reports profile_active: no (folding is off, no fold geometry emitted).'
@@ -322,12 +322,14 @@ echo "Validating --profile folding observability (Issue #256)"
 echo "Surface: -V profile section; expectations from the generator manifest"
 echo ""
 
-if [[ -n "$ONLY_MODE" ]]; then
-    run_mode "$ONLY_MODE"
-else
-    for m in "${ALL_MODES[@]}"; do run_mode "$m"; echo ""; done
-    run_off_case
-fi
+while read -r _scenario; do
+    if [[ "$_scenario" == "profile-off" ]]; then
+        run_off_case
+    else
+        run_mode "$_scenario"
+    fi
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

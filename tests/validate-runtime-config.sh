@@ -30,6 +30,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -631,25 +633,51 @@ echo "Validating runtime-config -V section + CLI validation paths (issue #231)"
 echo "  ltl:       $LTL"
 echo ""
 
-scenario_runtime_config_command_line;                  echo ""
-scenario_runtime_config_env_only;                      echo ""
-scenario_runtime_config_env_overridden;                echo ""
-scenario_warning_g_non_numeric;                        echo ""
-scenario_warning_hm_non_builtin;                       echo ""
-scenario_error_unknown_exact_percentiles;              echo ""
-scenario_runtime_config_data_model_selectors;          echo ""
-scenario_runtime_config_numeric_highlight;             echo ""
-scenario_runtime_config_expose;                        echo ""
-scenario_runtime_config_mask;                          echo ""
-scenario_runtime_config_discard;                       echo ""
-scenario_error_unknown_so;                             echo ""
-scenario_error_unknown_du;                             echo ""
-scenario_error_unknown_ru;                             echo ""
-scenario_error_no_files;                               echo ""
-scenario_info_version_wins_over_parse_error;           echo ""
-scenario_info_help_beats_version;                      echo ""
-scenario_error_unknown_short_b;                        echo ""
-scenario_no_warning_on_clean_run
+scenario_register runtime-config-command-line \
+                  runtime-config-env-only \
+                  runtime-config-env-overridden \
+                  warning-g-non-numeric \
+                  warning-hm-non-builtin \
+                  error-unknown-exact-percentiles \
+                  runtime-config-data-model-selectors \
+                  runtime-config-numeric-highlight \
+                  runtime-config-expose \
+                  runtime-config-mask \
+                  runtime-config-discard \
+                  error-unknown-so \
+                  error-unknown-du \
+                  error-unknown-ru \
+                  error-no-files \
+                  info-version-wins-over-parse-error \
+                  info-help-beats-version \
+                  error-unknown-short-b \
+                  no-warning-on-clean-run
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        runtime-config-command-line        ) scenario_runtime_config_command_line ;;
+        runtime-config-env-only            ) scenario_runtime_config_env_only ;;
+        runtime-config-env-overridden      ) scenario_runtime_config_env_overridden ;;
+        warning-g-non-numeric              ) scenario_warning_g_non_numeric ;;
+        warning-hm-non-builtin             ) scenario_warning_hm_non_builtin ;;
+        error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
+        runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
+        runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
+        runtime-config-expose              ) scenario_runtime_config_expose ;;
+        runtime-config-mask                ) scenario_runtime_config_mask ;;
+        runtime-config-discard             ) scenario_runtime_config_discard ;;
+        error-unknown-so                   ) scenario_error_unknown_so ;;
+        error-unknown-du                   ) scenario_error_unknown_du ;;
+        error-unknown-ru                   ) scenario_error_unknown_ru ;;
+        error-no-files                     ) scenario_error_no_files ;;
+        info-version-wins-over-parse-error ) scenario_info_version_wins_over_parse_error ;;
+        info-help-beats-version            ) scenario_info_help_beats_version ;;
+        error-unknown-short-b              ) scenario_error_unknown_short_b ;;
+        no-warning-on-clean-run            ) scenario_no_warning_on_clean_run ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

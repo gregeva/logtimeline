@@ -37,6 +37,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -152,6 +154,18 @@ assert_command() {
 # --- Scenario: without -r, selection is exactly what ships today (D3) ---
 # The same pattern that recurses below matches only the root level here. This
 # is the baseline the depth-widening assertion is measured against.
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register non-recursive-unchanged \
+                  recursive-depth-widening \
+                  empty-directory-part \
+                  dedup-across-nesting-patterns \
+                  bare-directory-matches-nothing \
+                  unreadable-directory-note \
+                  silent-when-all-readable \
+                  no-match-quoting-guidance
+scenario_parse_args "$@"
+
+if scenario_wanted non-recursive-unchanged; then
 current_scenario="non-recursive-unchanged"
 echo "[$current_scenario]"
 plain="$TMP_DIR/plain.sel"
@@ -170,6 +184,9 @@ if capture_selection "$plain" $SHAPE "$FIXTURE_ROOT/*.888"; then
         contract    'features/420-recursive-file-selection.md § D3 — without -r, behavior is exactly what ships today'
 fi
 
+fi
+
+if scenario_wanted recursive-depth-widening; then
 # --- Scenario: -r widens the same pattern to every depth (D1, D4, D5) ---
 current_scenario="recursive-depth-widening"
 echo "[$current_scenario]"
@@ -222,6 +239,9 @@ EOF
         contract    'features/420-recursive-file-selection.md § D5 — breadth-first traversal, alphanumeric within each level; log trees put current files at the top and archives nested below, so breadth-first leads with the most relevant files'
 fi
 
+fi
+
+if scenario_wanted empty-directory-part; then
 # --- Scenario: an empty directory part makes the root the current directory (D1) ---
 current_scenario="empty-directory-part"
 echo "[$current_scenario]"
@@ -253,6 +273,9 @@ else
         contract    'features/420-recursive-file-selection.md § D1 — an empty directory part makes the root the current directory'
 fi
 
+fi
+
+if scenario_wanted dedup-across-nesting-patterns; then
 # --- Scenario: results are deduplicated when patterns nest (D6) ---
 current_scenario="dedup-across-nesting-patterns"
 echo "[$current_scenario]"
@@ -275,6 +298,9 @@ fi
 # --- Scenario: a bare directory argument matches nothing, with or without -r (D2) ---
 # A directory name carries no filename component, so there is nothing to match.
 # ltl exits 2 with "unable to open any files" — the same outcome as today.
+fi
+
+if scenario_wanted bare-directory-matches-nothing; then
 current_scenario="bare-directory-matches-nothing"
 echo "[$current_scenario]"
 for variant in "with-r" "without-r"; do
@@ -296,6 +322,9 @@ done
 # --- Scenario: unreadable directories are skipped, the sweep continues, one note (D8) ---
 # Constructed at run time via chmod: an unreadable directory cannot be
 # committed, and the case does not apply on Windows.
+fi
+
+if scenario_wanted unreadable-directory-note; then
 current_scenario="unreadable-directory-note"
 echo "[$current_scenario]"
 if [[ "$(id -u)" -eq 0 ]]; then
@@ -329,6 +358,9 @@ else
     chmod 755 "$SWEEP/locked"
 fi
 
+fi
+
+if scenario_wanted silent-when-all-readable; then
 # --- Scenario: a readable sweep emits no unreadable-directory note ---
 current_scenario="silent-when-all-readable"
 echo "[$current_scenario]"
@@ -346,6 +378,9 @@ fi
 # assertion reads a stderr diagnostic emitted while the file arguments are
 # still being expanded, before a bucket, a table or a -V section exists, so the
 # run carries no analysis options at all — the pattern is the whole input.
+fi
+
+if scenario_wanted no-match-quoting-guidance; then
 current_scenario="no-match-quoting-guidance"
 echo "[$current_scenario]"
 GUIDANCE_ANCHOR='Hint: with -r, put the file pattern in double quotes'
@@ -399,6 +434,8 @@ assert_command \
     asserts     'The guidance is tied to selecting nothing, never to the use of -r: a sweep that found its files says nothing about quoting, so a correct invocation is never warned about a problem it does not have' \
     produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is reached only on the failure path)' \
     contract    "$CONTRACT_GUIDANCE"
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

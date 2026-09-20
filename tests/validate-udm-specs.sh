@@ -48,6 +48,8 @@ MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 neutralize_colour_env
 
 if [[ ! -x "$LTL" ]]; then
@@ -64,9 +66,6 @@ done
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-ONLY_SCENARIO=""
-[[ "${1:-}" == "--scenario" ]] && ONLY_SCENARIO="${2:?--scenario needs a name}"
-want() { [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$1" ]]; }
 
 pass=0
 fail=0
@@ -1037,30 +1036,51 @@ scenario_milliseconds_replacement() {
     done
 }
 
-want milliseconds-replacement    && scenario_milliseconds_replacement || true
-want undelimited-regex           && scenario_undelimited_regex || true
-want whole-match                 && scenario_whole_match || true
-want absent-field                && scenario_absent_field || true
-want parse-time-rejections       && scenario_parse_time_rejections || true
-want delta-single-match          && scenario_delta_single_match || true
-want no-udm                      && scenario_no_udm || true
-want collision-transform         && scenario_collision_transform || true
-want collision-unit              && scenario_collision_unit || true
-want collision-three-way         && scenario_collision_three_way || true
-want collision-two-transforms    && scenario_collision_two_transforms || true
-want collision-refused           && scenario_collision_refused || true
-want collision-identical         && scenario_collision_identical || true
-want collision-safe-boundary     && scenario_collision_safe_boundary || true
-want no-collision-names-as-typed && scenario_no_collision_names_as_typed || true
-want delta-shorthand-canonical   && scenario_delta_shorthand_canonical || true
-want collision-csv-and-export    && scenario_collision_csv_and_export || true
-want collision-operands          && scenario_collision_operands || true
-want collision-columnar          && scenario_collision_columnar || true
+scenario_register milliseconds-replacement \
+                  undelimited-regex \
+                  whole-match \
+                  absent-field \
+                  parse-time-rejections \
+                  delta-single-match \
+                  no-udm \
+                  collision-transform \
+                  collision-unit \
+                  collision-three-way \
+                  collision-two-transforms \
+                  collision-refused \
+                  collision-identical \
+                  collision-safe-boundary \
+                  no-collision-names-as-typed \
+                  delta-shorthand-canonical \
+                  collision-csv-and-export \
+                  collision-operands \
+                  collision-columnar
+scenario_parse_args "$@"
 
-if [[ $pass -eq 0 && $fail -eq 0 ]]; then
-    echo "ERROR: no scenarios ran (check --scenario '$ONLY_SCENARIO')"
-    exit 2
-fi
+while read -r _scenario; do
+    case "$_scenario" in
+        milliseconds-replacement   ) scenario_milliseconds_replacement ;;
+        undelimited-regex          ) scenario_undelimited_regex ;;
+        whole-match                ) scenario_whole_match ;;
+        absent-field               ) scenario_absent_field ;;
+        parse-time-rejections      ) scenario_parse_time_rejections ;;
+        delta-single-match         ) scenario_delta_single_match ;;
+        no-udm                     ) scenario_no_udm ;;
+        collision-transform        ) scenario_collision_transform ;;
+        collision-unit             ) scenario_collision_unit ;;
+        collision-three-way        ) scenario_collision_three_way ;;
+        collision-two-transforms   ) scenario_collision_two_transforms ;;
+        collision-refused          ) scenario_collision_refused ;;
+        collision-identical        ) scenario_collision_identical ;;
+        collision-safe-boundary    ) scenario_collision_safe_boundary ;;
+        no-collision-names-as-typed) scenario_no_collision_names_as_typed ;;
+        delta-shorthand-canonical  ) scenario_delta_shorthand_canonical ;;
+        collision-csv-and-export   ) scenario_collision_csv_and_export ;;
+        collision-operands         ) scenario_collision_operands ;;
+        collision-columnar         ) scenario_collision_columnar ;;
+    esac
+done < <(scenario_selected)
+
 
 echo
 echo "Results: $pass passed, $fail failed"

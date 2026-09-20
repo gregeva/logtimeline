@@ -50,6 +50,8 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -304,6 +306,14 @@ run_jboss_duration_scenario() {
         contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #365'
 }
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# The data-model/width matrix names one scenario per combination; the two
+# format-specific cases carry the names they already print.
+SCENARIO_USAGE_NOTE="  (data-model x width matrix, plus the absence and enhanced-format cases)"
+scenario_register dm-bin-w200 dm-bin-w120 dm-raw-w200 dm-raw-w120 \
+                  du-us-bin-w200 no-duration-w200 jboss-duration-w200
+scenario_parse_args "$@"
+
 echo "Validating duration-statistic display invariants (Issue #292)"
 echo "Surfaces: timeline rows (P50/P95/P99/P999) + summary table (Min/P50/P99.9)"
 echo ""
@@ -315,6 +325,7 @@ echo ""
 # source (default unit) is the case Bug 1/Bug 2 surfaced on.
 for model in bin raw; do
     for width in 200 120; do
+        scenario_wanted "dm-$model-w$width" || continue
         run_scenario "dm-$model-w$width" "$ACCESS_LOG" "$width" -dm "$model"
         echo ""
     done
@@ -325,16 +336,22 @@ done
 # resolved unit and exercises the precision invariant's other side — values that
 # auto-scale to a coarser display unit (ms) carry no synthesized precision and
 # must NOT be flagged, even though the source unit permits 6 decimals.
-run_scenario "du-us-bin-w200" "$APACHE_LOG" 200 -dm bin -du us
-echo ""
+if scenario_wanted du-us-bin-w200; then
+    run_scenario "du-us-bin-w200" "$APACHE_LOG" 200 -dm bin -du us
+    echo ""
+fi
 
 # Absence invariants for a source with no duration values at all (issue #345).
-run_no_duration_scenario
-echo ""
+if scenario_wanted no-duration-w200; then
+    run_no_duration_scenario
+    echo ""
+fi
 
 # Presence invariants for the enhanced/JBoss format's trailing duration (issue #365).
-run_jboss_duration_scenario
-echo ""
+if scenario_wanted jboss-duration-w200; then
+    run_jboss_duration_scenario
+    echo ""
+fi
 
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 ]]; then

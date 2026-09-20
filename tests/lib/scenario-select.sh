@@ -86,7 +86,7 @@ scenario_usage() {
     fi
     echo "Scenarios:"
     printf '  %s\n' "${SCENARIO_REGISTRY[@]}"
-    [[ -n "$SCENARIO_USAGE_NOTE" ]] && echo "$SCENARIO_USAGE_NOTE"
+    [[ -n "$SCENARIO_USAGE_NOTE" ]] && printf '%b\n' "$SCENARIO_USAGE_NOTE"
     return 0
 }
 
