@@ -27,3 +27,21 @@ already failed.
   root-cause analysis. Shape: `releases/TEMPLATE.md`; register: `releases/v0.14.0.md`.
 - The `bug` / `enhancement` label on the issue decides the section.
 - Edited directly on the release branch, committed and pushed without a PR.
+
+## The Performance section
+
+The benchmark always runs and its TSV and comparison report are always
+committed under `tests/baseline/results/` — that record is what the next
+release is judged against, and it is never abridged. The **section in the
+release notes** is a pointer to it, not a reproduction of it.
+
+- **Nothing moved: one or two sentences, and the comparison file's path.** Say
+  the benchmark ran, say no improvement or regression was observed, cite the
+  file. No tables, no percentages, no per-case figures. Register:
+  `releases/v0.15.1.md`.
+- **The hot path was untouched:** say that, and that no comparison is included.
+  Register: `releases/v0.15.2.md`.
+- **Performance was the point of the release:** tables earn their place, for the
+  cases the work targeted. Only then.
+- A number in this section is a claim about a measurement, so it is read from
+  `compare-results.sh` output, never derived from the input TSVs.
