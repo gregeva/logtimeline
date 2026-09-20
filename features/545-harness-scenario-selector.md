@@ -456,3 +456,37 @@ exited 1 having printed only passes and no summary line. The guards are now
 SIGPIPE read, this one — were all a status read from something other than what
 the author meant to test, which is the rule HARNESS-DESIGN.md Trap 1 already
 states.
+
+
+## Completion gate
+
+Run on 40c65ad, the commit being merged, with `$version_number` at `0.18.3`,
+serially and with nothing else touching the repository.
+
+- **The complete harness suite: 41 of 41 exit 0**, 2,807 assertions, no harness
+  reporting zero. `CI=1 ./tests/validate-csv-output.sh` then
+  `CI=1 ./tests/validate-statistics.sh` first, per the shared cache, then the
+  rest. `validate-statistics.sh` reports 22 scenarios, 22 pass, 0 fail, with no
+  T4 or T3 on any layer.
+- **No Perl runtime warning** on any capture (` at <file> line <N>` absent from
+  all 41).
+- **Benchmark: skipped, recorded here.** The branch changes no executable line
+  of `ltl`. Its only diff against the release branch was the `-545` version
+  stamp, restored before the gate. `docs/process/workflow.md` § 3 makes the
+  benchmark required for `ltl` changes and for harness changes it does not
+  reach; the scope row that applies here is `tests/validate-*.sh` and
+  `tests/lib/`, which requires the suite, not the benchmark.
+
+An earlier run of the same gate reported `validate-statistics.sh` at 20 pass,
+2 fail and `validate-aggregate-export.sh` one assertion short, both on
+`csv_cache_produce rc=1` and a `mv: No such file or directory` into
+`tests/.artifacts/`. A concurrent sweep of scenario selectors was running in
+the same checkout and its harnesses cleaned up the shared cache mid-run. Both
+harnesses pass in the clean gate. The gate is a serial instrument: nothing else
+may touch the repository while it runs, and that includes another harness.
+
+## Release notes
+
+No bullet. `CLAUDE.md` § Before writing a file limits release-notes bullets to
+user-observable change; this issue changes how harnesses accept arguments and
+is invisible to anyone running `ltl`.
