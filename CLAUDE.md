@@ -146,8 +146,10 @@ about anything else, these still hold.
       `-V` and is captured, so a later question is answered from the file, not a
       re-run. Harness assertions stay shaped to what they read.
 - [ ] A failing child process is invoked directly on minimal input, not through
-      the parent harness. A harness under iteration uses `--scenario` or a
-      single-test selector.
+      the parent harness. A harness under iteration uses `--scenario`; every
+      harness honours it and lists its scenario names under `--list`. An
+      unknown name or flag exits non-zero having run nothing, so a run that
+      reports assertions is a run of what was named.
 - [ ] Only the harness under discussion runs while working it. The full suite
       runs once, as the completion gate. Before launching any gate: name the
       behaviour this change could have altered; if none, there is nothing to prove.

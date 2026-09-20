@@ -337,3 +337,48 @@ scenario alone passes 44 assertions and the full harness 146. The baseline
 worktree and the converted checkout share one cache directory, and the
 comparison ran them back to back — cache contention between two checkouts, not
 a defect in either. Worth knowing for the next comparison run of this shape.
+
+
+### Stage 3 — the selector is itself under test
+
+`tests/validate-scenario-selector.sh`, seven scenarios, 23 assertions. Two
+subjects, because the contract has two halves:
+
+- **The library**, through probe harnesses written to a temporary directory.
+  A probe registers three scenarios and prints one line per scenario that runs,
+  so "ran nothing" and "ran everything" are distinguishable — which is exactly
+  what the defect behind this issue could not be.
+- **The suite**, swept for the two refusals and the `--list` listing. This is
+  the half that regresses: a harness added or rewritten later loses the
+  selector silently, and the suite's own green run says nothing about it. Same
+  reasoning as the runtime-warning (#341) and colour-environment (#438) sweeps.
+
+**Each assertion was proved able to fail** (HARNESS-DESIGN.md § Proving a new
+assertion can fail), by sabotaging the library and running the harness against
+it:
+
+| Sabotage | What failed |
+|---|---|
+| Accept an unknown scenario name (the #545 defect itself) | all four `unknown-name-refused` assertions; the sweep reported 35 of 40 harnesses accepting it |
+| Ignore an unknown flag | both `unknown-flag-refused` assertions |
+| Selection returns every scenario regardless of the selector | three `selects-one` assertions |
+| Run the extra-argument handler under command substitution | two `harness-keeps-its-own-flags` assertions — the stage 1 bug, which this harness would have caught |
+
+The library was restored byte-identical after each (`git diff` empty).
+
+**One defect in the harness's own first draft**, found by running it: the
+suite sweep piped `--list` into `grep -q`, which closes the pipe on its first
+match and kills the still-writing harness with SIGPIPE, so the pipeline's
+status reported the harness's death rather than whether the listing was found.
+Thirty harnesses were reported non-compliant when all forty were fine. The
+sweep now captures the listing first and matches against the captured text —
+HARNESS-DESIGN.md Trap 1 in a new guise: a harness never reads a status that is
+not the one it means.
+
+### Records updated
+
+`CLAUDE.md` § Before running a command no longer says "`--scenario` or a
+single-test selector" — the selector exists everywhere, so the checkpoint
+states what it now guarantees. `.claude/rules/harnesses.md` names the library a
+new harness must use. `tests/HARNESS-DESIGN.md` § The scenario selector points
+at the harness that enforces it.

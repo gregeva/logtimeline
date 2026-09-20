@@ -297,8 +297,12 @@ reported success:
   happen.
 
 `CLAUDE.md` § Before running a command directs that a harness under iteration
-uses `--scenario` or a single-test selector. That checkpoint depends on this
-contract holding in every harness, not most of them.
+uses `--scenario`. That checkpoint depends on this contract holding in every
+harness, not most of them, which is why `tests/validate-scenario-selector.sh`
+asserts both halves: the library's own behaviour, through probe harnesses that
+report which scenarios ran; and a sweep of every `tests/validate-*.sh` for the
+two refusals and the listing. A harness added later without the selector fails
+that sweep rather than waiting to be found by an investigation.
 
 ## Harnesses must fail on missing anchors
 
