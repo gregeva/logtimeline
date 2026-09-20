@@ -382,3 +382,77 @@ single-test selector" — the selector exists everywhere, so the checkpoint
 states what it now guarantees. `.claude/rules/harnesses.md` names the library a
 new harness must use. `tests/HARNESS-DESIGN.md` § The scenario selector points
 at the harness that enforces it.
+
+
+## The defect the conversion introduced, and what it changed
+
+Gating a block where it stood, rather than lifting it into a function, has a
+failure mode the full pass cannot see. A statement written *between* two
+scenarios — a contract string, a fixture path, a shared `produced_by` — ends up
+inside whichever block the gate happened to close after. Every scenario still
+runs in a bare invocation, so the harness stays green; but selecting the later
+scenario alone dies on an unbound variable, which is precisely the run this
+issue exists to make trustworthy.
+
+Two shapes, both found by running every registered scenario of every harness
+alone:
+
+**A statement swallowed into the preceding block.**
+`validate-numeric-criteria-notices.sh` defined `INVERTED_RANGE_CONTRACT`
+between two scenarios; the gate closed after it, so
+`--scenario inverted-range-warnings` reported
+`INVERTED_RANGE_CONTRACT: unbound variable` and asserted nothing. Fixed by
+hoisting such statements out of the block. Same for `FAMILY_PRODUCED`
+(`validate-category-names.sh`), `NARROW_WIDTH` (`validate-progress-line.sh`)
+and `DURATION_SPREAD_FIXTURE` (`validate-statistics-demand.sh`).
+
+**A scenario reading an artifact its neighbour produced.** Not a scoping
+accident but a real dependency the selector exposes:
+`validate-summary-contribution-bar.sh` § summary-bar-log compared its
+logarithmic render against the linear render captured by the default-bar
+scenario, and `validate-progress-line.sh` § disable-progress compared its
+suppressed run against the multi-file scenario's painting run. Both now capture
+what they compare against. A scenario that only passes when a neighbour ran
+first is not selectable, and the harness contract now says a named scenario
+runs.
+
+**The harness gained the assertion that would have caught it.**
+`tests/validate-scenario-selector.sh` § named-scenario-runs. The sweep as first
+written asserted only the two refusals — that a harness says no to what it does
+not know — and never that it says yes to what it does. Half a contract, and the
+half that was missing is where the conversion broke.
+
+Its first draft ran *one* scenario per harness, the first registered, and
+passed against a deliberately reintroduced defect: the swallowed statement
+belongs to one particular block, and `validate-category-names.sh` breaks in its
+second scenario, not its first. Running every scenario instead does catch it —
+and takes about ten minutes, because the suite registers **504** scenarios and
+each is a live `ltl` run. That is a completion gate of its own, not an
+assertion inside one.
+
+The check is therefore split by instrument:
+
+- **Statically**, a Perl pass over the gating reports any variable assigned
+  inside one scenario block and read inside another — the defect's actual
+  shape, found in milliseconds and named precisely
+  (`validate-category-names.sh:$FAMILY_PRODUCED`).
+- **Dynamically**, the first scenario of each harness is run, which proves the
+  gating executes at all. One run per harness, not one per scenario.
+
+Together, 62 seconds. Verified against the reintroduced defect: the static
+check fails and names the harness and the variable; with the defect removed,
+all three assertions pass. The dynamic half skips `validate-statistics.sh` and
+`validate-csv-output.sh`, which drive the shared capture cache and would race
+the gate's own runs of them.
+
+
+**A third trap of the same family, in the new harness itself.** Each sweep
+ended with `[[ -n "$list" ]] && echo "..."` to print the offending harnesses.
+Where that was a function's last statement it became the function's return
+value, which is 1 when the list is empty — the passing case. Under `set -e` the
+dispatch loop then ended silently after `named-scenario-runs`, and the harness
+exited 1 having printed only passes and no summary line. The guards are now
+`if`/`fi`. Three defects in this issue's own work — the subshell handler, the
+SIGPIPE read, this one — were all a status read from something other than what
+the author meant to test, which is the rule HARNESS-DESIGN.md Trap 1 already
+states.

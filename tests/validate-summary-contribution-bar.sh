@@ -775,6 +775,14 @@ LOG_RENDER="$TMP_DIR/log.txt"
 # shellcheck disable=SC2046
 capture_render "$LOG_RENDER" ansi $(run_ltl_args -sbl)
 
+# The comparison is against the linear render of the same data. This scenario
+# captures its own rather than reading the one the default-bar scenario
+# produced: a scenario that depends on a neighbour having run cannot be
+# selected on its own (tests/HARNESS-DESIGN.md section The scenario selector).
+LOG_LINEAR_RENDER="$TMP_DIR/log-linear.txt"
+# shellcheck disable=SC2046
+capture_render "$LOG_LINEAR_RENDER" ansi $(run_ltl_args)
+
 check_log_scale_spreads_the_tail() {
     local linear="$1" logscale="$2"
     "$PERL" -e '
@@ -877,7 +885,7 @@ check_log_scale_spreads_the_tail() {
 }
 
 assert_command \
-    command     "check_log_scale_spreads_the_tail '$DEFAULT_RENDER' '$LOG_RENDER'" \
+    command     "check_log_scale_spreads_the_tail '$LOG_LINEAR_RENDER' '$LOG_RENDER'" \
     label       'the log scale lengthens the tail without reordering the categories' \
     asserts     'Logarithmic scaling exists for the case where one category holds almost everything and the rest are stubs: it gives the smallest category a length that can actually be seen. It must do that without lying about the ordering — a longer bar still means a larger category — and the reference still fills the row, so the two scales can be read against each other.' \
     produced_by 'summary_bar_extent() in ltl' \

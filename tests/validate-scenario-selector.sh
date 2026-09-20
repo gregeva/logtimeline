@@ -29,6 +29,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB="$SCRIPT_DIR/lib/scenario-select.sh"
+PERL="${PERL:-/opt/homebrew/bin/perl}"
+command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
@@ -261,6 +263,126 @@ scenario_duplicate_registration_refused() {
         contract    "$CONTRACT"
 }
 
+scenario_named_scenario_runs() {
+    current_scenario="named-scenario-runs"
+    echo "[$current_scenario]"
+
+    # Refusing what it does not know is half the contract; the other half is
+    # that a name it does know runs. A selector bolted onto a harness can gate
+    # a block so that a statement the block needs — a contract string, a
+    # fixture path — is left inside the scenario before it, and selecting that
+    # scenario alone then dies on an unbound variable while the full pass stays
+    # green. Nothing else in the suite looks at a harness under selection, so
+    # this is where that shows up.
+    #
+    # Two checks, because running all 504 registered scenarios as live ltl
+    # invocations is a completion gate of its own, not an assertion inside one.
+    #
+    # First, statically: a harness that gates its blocks where they stand can
+    # swallow a statement written between two scenarios — a contract string, a
+    # fixture path — into whichever block the gate closed after. Every scenario
+    # still runs in a bare invocation, so the full pass stays green, and only
+    # the later scenario selected alone dies on an unbound variable. That is
+    # the run this contract exists to make trustworthy. The check reads the
+    # gating and reports any variable assigned inside one block and read inside
+    # another.
+    #
+    # Then, dynamically: the first scenario each harness registers is actually
+    # run, which proves the gating executes and the harness survives being
+    # restricted. One run per harness, not one per scenario.
+    local broken=0 checked=0 crossblock=0 broken_list="" crossblock_list=""
+    local h name first out
+
+    crossblock_list=$("$PERL" -e '
+        use strict; use warnings;
+        my @reports;
+        for my $file (@ARGV) {
+            open my $fh, "<", $file or next;
+            my @lines = <$fh>; close $fh;
+            my (@blocks, $start);
+            for my $i (0 .. $#lines) {
+                if ($lines[$i] =~ /^if scenario_wanted /) { $start = $i }
+                elsif (defined $start && $lines[$i] =~ /^fi\s*$/) {
+                    push @blocks, [$start, $i]; undef $start;
+                }
+            }
+            next unless @blocks;
+            my $block_of = sub {
+                my $i = shift;
+                for my $k (0 .. $#blocks) {
+                    return $k if $blocks[$k][0] < $i && $i < $blocks[$k][1];
+                }
+                return undef;
+            };
+            my %home;
+            for my $i (0 .. $#lines) {
+                next unless $lines[$i] =~ /^([A-Z][A-Z0-9_]*)=/;
+                my $b = $block_of->($i);
+                $home{$1} //= $b if defined $b;
+            }
+            for my $name (sort keys %home) {
+                for my $i (0 .. $#lines) {
+                    my $b = $block_of->($i);
+                    next unless defined $b && $b != $home{$name};
+                    next unless $lines[$i] =~ /\$\{?\Q$name\E\b/;
+                    my $base = $file; $base =~ s{.*/}{};
+                    push @reports, "$base:\$$name";
+                    last;
+                }
+            }
+        }
+        print join(" ", @reports);
+    ' "$SCRIPT_DIR"/validate-*.sh)
+    [[ -n "$crossblock_list" ]] && crossblock=$(printf '%s' "$crossblock_list" | wc -w | tr -d ' ')
+
+    assert_equal "no scenario depends on a variable another scenario sets" "$crossblock" 0 \
+        asserts     'A variable assigned inside one scenario block and read inside another makes the second unselectable: it dies on an unbound variable while the full pass, which runs both, stays green.' \
+        produced_by 'the block gating in each harness, against scenario_wanted() in tests/lib/scenario-select.sh' \
+        contract    "$CONTRACT"
+    if [[ -n "$crossblock_list" ]]; then
+        echo "        found:      $crossblock_list"
+    fi
+
+    for h in "$SCRIPT_DIR"/validate-*.sh; do
+        name=$(basename "$h")
+        [[ "$name" == "$(basename "$0")" ]] && continue
+        # The statistics and csv-output harnesses drive the shared capture
+        # cache; running a scenario of each here would race the gate's own runs
+        # of them (tests/HARNESS-DESIGN.md section Cached capture artifacts
+        # expire).
+        case "$name" in validate-statistics.sh|validate-csv-output.sh) continue ;; esac
+
+        first=$("$h" --list 2>/dev/null | sed -n '/^Scenarios:$/,$p' \
+                | sed -n 's/^  \([A-Za-z0-9][A-Za-z0-9:+._-]*\)$/\1/p' | head -1)
+        [[ -n "$first" ]] || continue
+        checked=$((checked + 1))
+
+        set +e
+        out=$("$h" --scenario "$first" 2>&1)
+        set -e
+        if printf '%s' "$out" | grep -qE 'unbound variable|syntax error near|: command not found'; then
+            broken=$((broken + 1))
+            broken_list="$broken_list $name:$first"
+        fi
+    done
+
+    if [[ "$checked" -lt 2 ]]; then
+        fail_with "the sweep found harnesses to check" \
+            'The sweep reads the suite from disk; finding none means it is looking in the wrong place' \
+            'this harness (the validate-*.sh glob)' "$CONTRACT" "checked=$checked"
+        return 0
+    fi
+    pass_with "ran one named scenario in each of $checked harnesses"
+
+    assert_equal "a named scenario runs without shell breakage" "$broken" 0 \
+        asserts     'Selecting a scenario a harness declares runs it, rather than dying in the gating that was added around it' \
+        produced_by 'the gating in each harness, against scenario_wanted() in tests/lib/scenario-select.sh' \
+        contract    "$CONTRACT"
+    if [[ -n "$broken_list" ]]; then
+        echo "        harnesses:  $broken_list"
+    fi
+}
+
 scenario_every_harness_refuses() {
     current_scenario="every-harness-refuses"
     echo "[$current_scenario]"
@@ -311,19 +433,25 @@ scenario_every_harness_refuses() {
         asserts     'Every harness in the suite refuses a scenario name it does not know. A harness added or rewritten without the selector is found here rather than by an investigation that misread a full run as one scenario.' \
         produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh, called by each harness' \
         contract    "$CONTRACT"
-    [[ -n "$bad_name_list" ]] && echo "        harnesses:  $bad_name_list"
+    if [[ -n "$bad_name_list" ]]; then
+        echo "        harnesses:  $bad_name_list"
+    fi
 
     assert_equal "none accepts an unknown flag" "$bad_flag" 0 \
         asserts     'Every harness in the suite refuses an argument it does not parse' \
         produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh, called by each harness' \
         contract    "$CONTRACT"
-    [[ -n "$bad_flag_list" ]] && echo "        harnesses:  $bad_flag_list"
+    if [[ -n "$bad_flag_list" ]]; then
+        echo "        harnesses:  $bad_flag_list"
+    fi
 
     assert_equal "every harness lists its scenarios" "$no_listing" 0 \
         asserts     'Every harness declares its scenarios under --list, so the names an operator may select are discoverable without reading the harness source' \
         produced_by 'scenario_usage() in tests/lib/scenario-select.sh, called by each harness' \
         contract    "$CONTRACT"
-    [[ -n "$no_listing_list" ]] && echo "        harnesses:  $no_listing_list"
+    if [[ -n "$no_listing_list" ]]; then
+        echo "        harnesses:  $no_listing_list"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -337,6 +465,7 @@ scenario_register selects-one \
                   unknown-flag-refused \
                   harness-keeps-its-own-flags \
                   duplicate-registration-refused \
+                  named-scenario-runs \
                   every-harness-refuses
 scenario_parse_args "$@"
 
@@ -352,6 +481,7 @@ while read -r _scenario; do
         unknown-flag-refused)          scenario_unknown_flag_refused ;;
         harness-keeps-its-own-flags)   scenario_harness_keeps_its_own_flags ;;
         duplicate-registration-refused) scenario_duplicate_registration_refused ;;
+        named-scenario-runs)           scenario_named_scenario_runs ;;
         every-harness-refuses)         scenario_every_harness_refuses ;;
     esac
     echo ""

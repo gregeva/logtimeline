@@ -242,6 +242,8 @@ capture_frames() {
 # Scenario: multi-file — the full line, and the overall percentage's arithmetic
 # ---------------------------------------------------------------------------
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+NARROW_WIDTH=60
+
 scenario_register multi-file \
                   single-file \
                   disable-progress \
@@ -397,6 +399,15 @@ capture_frames "$QUIET" \
     -ni --disable-progress --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
     "$PART1" "$PART2" "$PART3"
 
+# The painting run this is compared against, captured here rather than read
+# from the multi-file scenario: a scenario that depends on a neighbour having
+# run cannot be selected on its own (tests/HARNESS-DESIGN.md section The
+# scenario selector).
+PAINTING="$TMP_DIR/painting.frames"
+capture_frames "$PAINTING" \
+    -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
+    "$PART1" "$PART2" "$PART3"
+
 assert_command \
     command     "! grep -q '^Processing' '$QUIET'" \
     label       'no progress frame and no completion line under --disable-progress' \
@@ -409,7 +420,7 @@ assert_command \
 # count is the check — it is the run's own count of what it analysed, and the
 # suppressed run must reach the same number as the painting one.
 assert_command \
-    command     "test \"\$(grep -E '^ +LINES INCLUDED ' '$MULTI' | tr -s ' ')\" = \"\$(grep -E '^ +LINES INCLUDED ' '$QUIET' | tr -s ' ')\" && grep -qE '^ +LINES INCLUDED ' '$MULTI'" \
+    command     "test \"\$(grep -E '^ +LINES INCLUDED ' '$PAINTING' | tr -s ' ')\" = \"\$(grep -E '^ +LINES INCLUDED ' '$QUIET' | tr -s ' ')\" && grep -qE '^ +LINES INCLUDED ' '$PAINTING'" \
     label       'both modes analyse the same lines' \
     asserts     'Whether the progress line is painted or suppressed, the run reads and includes the same lines: the indicator observes the read pass without participating in it' \
     produced_by 'read_and_process_logs() in ltl — the progress block reads $total_lines_read and the handle position, and writes neither' \
@@ -423,7 +434,6 @@ fi
 if scenario_wanted narrow-terminal; then
 current_scenario="narrow-terminal"
 
-NARROW_WIDTH=60
 NARROW="$TMP_DIR/narrow.frames"
 capture_frames "$NARROW" \
     -ni --terminal-width "$NARROW_WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \

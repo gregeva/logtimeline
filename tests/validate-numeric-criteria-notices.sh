@@ -185,10 +185,9 @@ if capture_stderr "$errfile" $SHAPE -dmin 1 "$ACCESS_LOG"; then
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission)' \
         contract    "$MISSING_METRIC_CONTRACT"
 fi
+fi
 
 INVERTED_RANGE_CONTRACT='docs/usage.md § Filtering & Highlighting — an inverted numeric range (minimum above maximum) is unsatisfiable and ltl warns up front instead of producing a silently empty selection (Issue #322)'
-
-fi
 
 if scenario_wanted inverted-range-warnings; then
 # --- Scenario: inverted ranges warn, one warning per inverted pair ---

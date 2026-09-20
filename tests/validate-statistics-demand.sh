@@ -216,6 +216,8 @@ echo
 
 ############################################################
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
+
 scenario_register scenario-1-terminal-only-default \
                   scenario-2-csv-full-demand \
                   scenario-3-sort-on-skewness \
@@ -849,7 +851,6 @@ fi
 if scenario_wanted scenario-13-retained-duration-representation; then
 current_scenario="scenario-13-retained-duration-representation"
 echo "--- $current_scenario ---"
-DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
 DURATION_SPREAD_LINES=434
 LOG_ANALYSIS_CEILING=33000
 REPRESENTATION_ASSERTS='The retained per-bucket durations carry no floating-point slot: a transform that assigns a double into a shared record lexical enlarges every duration retained afterwards, and the per-bucket statistics store grows by 8 bytes per retained duration when one does'

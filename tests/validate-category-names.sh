@@ -277,6 +277,8 @@ check_csv_header_raw_names() {
 # ---------------------------------------------------------------------------
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+FAMILY_PRODUCED='category_display_name() in ltl, rendered by print_summary_table()'
+
 scenario_register http-status-families \
                   longest-name-fills-the-column \
                   csv-keeps-raw-category-names \
@@ -292,7 +294,6 @@ capture_render "$RENDER" --disable-progress -ni -lf "$ACCESS_FORMAT" \
     -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -h orders "$FAMILIES_FIXTURE"
 
 FAMILY_CONTRACT='features/463-friendly-log-level-category-names.md § D1 — the shipped descriptive names for the HTTP status families'
-FAMILY_PRODUCED='category_display_name() in ltl, rendered by print_summary_table()'
 
 while read -r raw total descriptive; do
     assert_command \
