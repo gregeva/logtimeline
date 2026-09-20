@@ -195,10 +195,12 @@ and gone a week later.
 5. `git log origin/release/X.Y.Z --oneline -3` to confirm the merge landed.
 6. **Release notes.** `releases/v{version}.md` gets one bullet with a `(#NNN)`
    reference if the issue changed what a user of `ltl` observes: the tool, its
-   CLI, its output, its user-facing docs. Concise, reflects the change not every
-   detail, never describes pre-existing behaviour. Work confined to `build/`,
-   `tests/`, `features/`, CLAUDE.md or process gets no bullet. Commit and push
-   directly to the release branch.
+   CLI, its output, its user-facing docs. One line, 25 words at the outside,
+   verb first, naming the change once and pointing at `docs/usage.md` rather
+   than reproducing it; never pre-existing behaviour, never the cause of a bug.
+   Full rule and register: `.claude/rules/release-notes.md`. Work confined to
+   `build/`, `tests/`, `features/`, CLAUDE.md or process gets no bullet. Commit
+   and push directly to the release branch.
 7. **Completion comment** on the issue: commit hash, branch, PR number, merge
    commit, what shipped. Record a skipped gate (and why) and a withheld
    release-notes bullet, so each omission is a decision, not a gap.
