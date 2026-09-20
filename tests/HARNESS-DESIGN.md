@@ -251,6 +251,55 @@ Exit code 0 on a healthy input is not evidence that an assertion works — an as
 
 This is the same discipline the stability contract requires after renames ("confirm it still asserts"), applied at authoring time. The sabotage probe for Issue #320's `level_partition` invariant is the reference example: probing with a deliberately broken CSV is what exposed that the rules TSV could not even represent the columns the invariant needed.
 
+## The scenario selector
+
+Every harness names its units of work **scenarios**, declares them, and honours
+a selector that restricts a run to one of them. The vocabulary is uniform: the
+running scenario is held in `current_scenario`, and a selector token means the
+same thing in every harness. A harness that called its units anchors, modes or
+cases names them scenarios.
+
+The contract, in full:
+
+- `--scenario NAME` runs that scenario and no other.
+- `--list` (and `-h`/`--help`) prints the registered scenario names.
+- A scenario name the harness does not know is an **error**: a diagnostic
+  naming the unknown name, the scenario list, a non-zero exit, and **no
+  assertion run**.
+- An argument the harness does not parse is an error on the same terms.
+- A bare invocation runs every scenario. This is how the suite runs, so strict
+  parsing never changes the gate.
+
+Harnesses do not implement this themselves. `tests/lib/scenario-select.sh`
+owns the argument loop, the membership check, the listing and the exit codes;
+a harness sources it, calls `scenario_register` with its scenario names in run
+order, and calls `scenario_parse_args "$@"`. A harness with options of its own
+supplies `SCENARIO_EXTRA_ARG_HANDLER` rather than parsing around the library,
+so unknown-argument rejection stays in one place.
+
+The scenario names and the dispatch that runs them come from **one** registry.
+Where the two were written separately — a `SCENARIOS=(...)` array beside a
+dispatch `case` repeating the same names — they drift, and a scenario silently
+stops being reachable by name while still running in the full pass.
+
+This is the selector-shaped form of *Harnesses must fail on missing anchors*
+below: a selector that matches nothing is an unasserted run. Two failure modes
+were observed across the suite before the library existed (#545), and both
+reported success:
+
+- **The argument is discarded.** A harness that parses nothing runs its full
+  assertion set and exits 0, while the operator reads the result as the single
+  scenario they named. Two investigations iterated against a harness on that
+  belief.
+- **The name is accepted and matches nothing.** Every gate evaluates false, and
+  the summary reports `0 passed, 0 failed` followed by `ALL … TESTS PASSED`.
+  A zero assertion count is never a pass; the count is evidence the run did not
+  happen.
+
+`CLAUDE.md` § Before running a command directs that a harness under iteration
+uses `--scenario` or a single-test selector. That checkpoint depends on this
+contract holding in every harness, not most of them.
+
 ## Harnesses must fail on missing anchors
 
 A harness that greps for a section header, key name, or other anchor and finds zero matches MUST exit non-zero. A grep that matches nothing is not a passing test — it is an unasserted test, which is worse than no test at all because it produces false confidence.

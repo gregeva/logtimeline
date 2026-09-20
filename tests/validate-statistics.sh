@@ -59,6 +59,8 @@ source "$SCRIPT_DIR/lib/csv-cache.sh"
 
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -68,28 +70,46 @@ neutralize_colour_env
 # End-of-run cleanup runs only when standalone (CI unset).
 trap csv_cache_maybe_cleanup EXIT
 
-ONLY_SCENARIO=""
 SHOW_ALL=0
 CAPTURE_BASELINES=0
 SKIP_L3=0
-while [[ $# -gt 0 ]]; do
+
+# This harness's own flags. The scenario selector library owns the argument
+# loop and the unknown-argument rejection (tests/HARNESS-DESIGN.md section The
+# scenario selector); this handler claims the flags that belong to the harness
+# and reports how many arguments it consumed.
+statistics_extra_args() {
     case "$1" in
-        --scenario)                ONLY_SCENARIO="$2"; shift 2 ;;
-        --show-all)                SHOW_ALL=1; shift ;;
-        --capture-baselines)       CAPTURE_BASELINES=1; shift ;;
-        --skip-l3)                 SKIP_L3=1; shift ;;
-        -h|--help)
-            sed -n '2,48p' "$0"
-            exit 0
-            ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
+        --show-all)          SHOW_ALL=1;          SCENARIO_ARGS_CONSUMED=1 ;;
+        --capture-baselines) CAPTURE_BASELINES=1; SCENARIO_ARGS_CONSUMED=1 ;;
+        --skip-l3)           SKIP_L3=1;           SCENARIO_ARGS_CONSUMED=1 ;;
+        *)                                        SCENARIO_ARGS_CONSUMED=0 ;;
     esac
+}
+SCENARIO_EXTRA_ARG_HANDLER=statistics_extra_args
+
+for f in "$LTL" "$SCENARIOS_TSV" "$ENGINE"; do
+    if [[ ! -f "$f" ]]; then
+        echo "ERROR: required file missing: $f" >&2
+        exit 1
+    fi
 done
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# The registry is the first column of the scenarios TSV, so the names an
+# operator may select and the rows the loop runs cannot drift apart. The
+# required-file check above runs first because the TSV is the registry.
+SCENARIO_USAGE_NOTE="  (rows of $SCENARIOS_TSV)"
+while IFS=$'\t' read -r scenario _rest; do
+    [[ -z "$scenario" || "$scenario" =~ ^# || "$scenario" == "scenario" ]] && continue
+    scenario_register "$scenario"
+done < "$SCENARIOS_TSV"
+scenario_parse_args "$@"
 
 # Baseline-capture confirmation prompt. Refuses without explicit yes.
 if [[ $CAPTURE_BASELINES -eq 1 ]]; then
-    if [[ -n "$ONLY_SCENARIO" ]]; then
-        scope="scenario '$ONLY_SCENARIO' only"
+    if [[ -n "$SCENARIO_ONLY" ]]; then
+        scope="scenario '$SCENARIO_ONLY' only"
     else
         scope="ALL scenarios in scenarios.tsv"
     fi
@@ -105,13 +125,6 @@ if [[ $CAPTURE_BASELINES -eq 1 ]]; then
     fi
     mkdir -p "$BASELINES_DIR"
 fi
-
-for f in "$LTL" "$SCENARIOS_TSV" "$ENGINE"; do
-    if [[ ! -f "$f" ]]; then
-        echo "ERROR: required file missing: $f" >&2
-        exit 1
-    fi
-done
 
 # Layer 3 dependency preflight. Per acceptance criterion: fail fast with
 # install hint if any of python3 / numpy / scipy is missing — DO NOT
@@ -412,9 +425,7 @@ scenarios_run=0
 while IFS=$'\t' read -r scenario logfile options; do
     [[ -z "$scenario" ]] && continue
     [[ "$scenario" =~ ^# ]] && continue
-    if [[ -n "$ONLY_SCENARIO" && "$scenario" != "$ONLY_SCENARIO" ]]; then
-        continue
-    fi
+    scenario_wanted "$scenario" || continue
 
     log_shorthand="$(csv_cache_logfile_shorthand "$logfile")"
 
