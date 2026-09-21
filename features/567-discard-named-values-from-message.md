@@ -147,3 +147,54 @@ Every `ltl` run `--disable-progress -ni -bs 1440 -oe -n 100 -o`, no ` at <file> 
   | rss_peak | 101.8 MB | 99.2 MB | -2.6 % |
 
   No regression: every metric is flat or lower. A run that names nothing pays one scalar test per line for the field clearing and one per retained message for the message removal, which does not rise above the noise floor of a single pair.
+
+  **This gate reading was wrong, and the sentence above says why.** A single
+  before/after pair cannot resolve an effect of about 1.5 %, and the pair drawn
+  here happened to land the wrong side of it. See § Post-release finding.
+
+## Post-release finding (2026-09-21): a ~1.6 % access-log regression this gate did not resolve
+
+The v0.18.3 release-tier capture (77 cases, this host) reported the movement split
+by log-format family: access logs +6.40 % (n=33), ScriptLog +6.11 % (n=11),
+Thingworx application logs +0.75 % (n=33), with `rss_peak` flat everywhere and
+every line count identical. Most of that headline figure is host drift between two
+captures taken days apart; the code effect inside it was isolated by running both
+binaries on the same host within the same hour.
+
+**Measured, code as the only variable.** 10 interleaved rounds (each binary once per
+round, so drift is shared), `single-day-access-log-standard`, 50 runs:
+
+| commit | what it added | median | vs base |
+|---|---|---|---|
+| `v0.18.2` base | — | 8.985 s | — |
+| `fb36c5c` | requirements and decisions, no code | 9.025 s | +0.45 % |
+| `e39c23b` | option surface, resolution, reporting | 9.075 s | +1.00 % |
+| `7deb7a4` | runtime-config reports provided options | 9.095 s | +1.22 % |
+| `62db306` | discard applied across the run | 9.130 s | +1.61 % |
+
+The cost accumulates across commits; it does not step at one. A Thingworx
+application log measured 0 % over the same pair of binaries.
+
+**Profiled** (NYTProf, 100k-line samples, both binaries, application log as control):
+the whole regression is `read_and_process_logs` exclusive time — 1.659 s to 1.694 s
+(+2.1 %) on the access log against 1.106 s to 1.109 s (+0.3 %) on the application
+log. Every other sub is flat and no new sub appears. Both binaries execute the same
+114 statements 100,000 times each: **nothing this issue added executes on these runs**,
+which is what the `$discard_active`, `$expose_active` and `$discard_any_field` gates
+are for.
+
+So the cost is not an added statement running. It is diffuse, inside a per-line loop
+that is now about 870 lines, and it lands hardest on the family that spends the
+largest share of its time inside that loop body: the access-log path spends 1.66 s of
+its 2.63 s total exclusive time there, the application-log path 1.11 s of 1.70 s.
+
+**Disposition.** The architect accepts the regression (2026-09-21). The remedies are
+design changes larger than this issue — hoisting per-line option handling out of the
+loop body, or generating the per-line path per run as the format scan sub already is.
+Directional guidance for examining the loop is carried on #342 (the audit of
+redundant logic surfaces).
+
+**What the gate should have done.** Hot-path work is decided by what the change
+affects per line, not by where its new subs are called. A single before/after pair is
+not enough to clear a change that adds branches to the per-line loop; an interleaved
+repeated measurement is. Full record: `tests/profile/results/567-access-log-regression/`.
