@@ -146,8 +146,10 @@ about anything else, these still hold.
       `-V` and is captured, so a later question is answered from the file, not a
       re-run. Harness assertions stay shaped to what they read.
 - [ ] A failing child process is invoked directly on minimal input, not through
-      the parent harness. A harness under iteration uses `--scenario` or a
-      single-test selector.
+      the parent harness. A harness under iteration uses `--scenario`; every
+      harness honours it and lists its scenario names under `--list`. An
+      unknown name or flag exits non-zero having run nothing, so a run that
+      reports assertions is a run of what was named.
 - [ ] Only the harness under discussion runs while working it. The full suite
       runs once, as the completion gate. Before launching any gate: name the
       behaviour this change could have altered; if none, there is nothing to prove.
@@ -205,8 +207,10 @@ about anything else, these still hold.
 - [ ] A deferral pointer names a committed artifact, verified to contain the thing.
 - [ ] A cross-issue note passes the dependency-first test
       (`docs/process/issues.md` § Blocking relationships).
-- [ ] A release-notes bullet reflects the change concisely, never pre-existing
-      behaviour, and only for user-observable change.
+- [ ] A release-notes bullet is one line of 25 words at the outside, verb
+      first, naming the change once: an index entry pointing at `docs/usage.md`,
+      never a substitute for it. Only for user-observable change, never
+      pre-existing behaviour, never the cause of a bug.
 - [ ] Committed fixtures are named `.txt` (`*.log` and `*.csv` are gitignored);
       `git ls-files` confirms tracking before a fixture is planned around.
 

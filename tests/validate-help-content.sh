@@ -38,6 +38,8 @@ TEST_LOG="$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -439,6 +441,40 @@ scenario_E_benchmark_data_section_matches_version_number() {
         contract    'features/232-help-coverage.md section 4 + tests/HARNESS-DESIGN.md section Stability contract - version row format is locked'
 }
 
+# Issue #567 criterion 16 (567 D7): one -d, --discard <name> entry in --help
+# and docs/usage.md alike.
+scenario_I_discard_option_rows() {
+    current_scenario="I-discard-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-discard.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    assert_line "$help_out" \
+        pattern     '^\s+-d,\s+--discard <name>\s+Remove a named part of the line' \
+        asserts     '--help carries one -d, --discard <name> row describing what the option removes' \
+        produced_by 'print_help() in ltl (the -d row after the -x row)' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7 - one option names anything to discard, with one help entry'
+    assert_equal "$(grep -c -- '--discard <name>' "$help_out")" "1" \
+        label       'exactly one --discard <name> row in --help' \
+        asserts     'The option is documented once, not once per name it accepts' \
+        produced_by 'print_help() in ltl' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7'
+
+    assert_line "$USAGE_MD" \
+        pattern     '^\| `-d, --discard <name>` \| Remove a named part of the line' \
+        asserts     'docs/usage.md carries the -d, --discard <name> row' \
+        produced_by 'docs/usage.md option table - manually maintained alongside print_help()' \
+        contract    'CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    assert_equal "$(grep -c -- '`-d, --discard <name>`' "$USAGE_MD")" "1" \
+        label       'exactly one --discard row in docs/usage.md' \
+        asserts     'The option has one row in the user documentation, matching --help' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D7'
+}
+
 scenario_F_description_quality_warnings() {
     current_scenario="F-description-quality (soft)"
     echo "[$current_scenario]"
@@ -591,14 +627,31 @@ scenario_G_udm_function_list_parity() {
         contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)'
 }
 
-scenario_A_help_contains_all_visible_longs;        echo ""
-scenario_B_usage_contains_all_visible_longs;       echo ""
-scenario_C_help_short_forms_match_getopts;         echo ""
-scenario_D_dash_v_matches_version_number;          echo ""
-scenario_E_benchmark_data_section_matches_version_number; echo ""
-scenario_G_udm_function_list_parity;               echo ""
-scenario_H_mask_option_rows;                       echo ""
-scenario_F_description_quality_warnings
+scenario_register A-help-contains-visible-longs \
+                  B-usage-contains-visible-longs \
+                  C-help-short-forms-match-getopts \
+                  D-dash-v-matches-version-number \
+                  E-benchmark-data-version-matches \
+                  G-udm-function-list-parity \
+                  H-mask-option-rows \
+                  I-discard-option-rows \
+                  F-description-quality-soft
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        A-help-contains-visible-longs   ) scenario_A_help_contains_all_visible_longs ;;
+        B-usage-contains-visible-longs  ) scenario_B_usage_contains_all_visible_longs ;;
+        C-help-short-forms-match-getopts) scenario_C_help_short_forms_match_getopts ;;
+        D-dash-v-matches-version-number ) scenario_D_dash_v_matches_version_number ;;
+        E-benchmark-data-version-matches) scenario_E_benchmark_data_section_matches_version_number ;;
+        G-udm-function-list-parity      ) scenario_G_udm_function_list_parity ;;
+        H-mask-option-rows              ) scenario_H_mask_option_rows ;;
+        I-discard-option-rows           ) scenario_I_discard_option_rows ;;
+        F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 if [[ "$warn" -gt 0 ]]; then

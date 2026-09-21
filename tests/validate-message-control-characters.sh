@@ -55,6 +55,8 @@ WIDTH=140
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -251,6 +253,13 @@ check_csv_one_line_per_record() {
 # Scenario: one fixture, three surfaces.
 # ---------------------------------------------------------------------------
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register control-character-normalisation \
+                  ungrouped-tab-expansion \
+                  unmatched-line-not-normalised
+scenario_parse_args "$@"
+
+if scenario_wanted control-character-normalisation; then
 current_scenario="control-character-normalisation"
 echo "[$current_scenario]"
 
@@ -345,6 +354,9 @@ assert_command \
 # into one wildcard row and no individual message text survives to assert on.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted ungrouped-tab-expansion; then
 current_scenario="ungrouped-tab-expansion"
 echo
 echo "[$current_scenario]"
@@ -404,6 +416,9 @@ assert_command \
 # that exclusion — it is what makes it safe for #447 to normalise ahead of it.
 # ---------------------------------------------------------------------------
 
+fi
+
+if scenario_wanted unmatched-line-not-normalised; then
 current_scenario="unmatched-line-not-normalised"
 echo
 echo "[$current_scenario]"
@@ -460,3 +475,5 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
+fi
+

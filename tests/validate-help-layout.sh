@@ -37,6 +37,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -131,6 +133,16 @@ if ! assert_no_runtime_warnings "$HELP_OUT.stderr" "ltl --help capture"; then
     failures+=("ltl --help capture :: perl-runtime-warnings-on-stderr")
 fi
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per layout section; the section labels are unchanged.
+SCENARIO_USAGE_NOTE="  (one scenario per help-layout section)"
+scenario_register sanity \
+                  option-row-alignment \
+                  long-form-column-alignment \
+                  short-and-long-form-presence
+scenario_parse_args "$@"
+
+if scenario_wanted sanity; then
 # ---------------------------------------------------------------------------
 # Sanity: $desc_col found and looks reasonable
 # ---------------------------------------------------------------------------
@@ -189,6 +201,9 @@ fi
 # We detect the EXAMPLES section heading and stop scanning after it.
 # ---------------------------------------------------------------------------
 echo ""
+fi
+
+if scenario_wanted option-row-alignment; then
 echo "[option-row alignment]"
 perl -e '
     use strict; use warnings;
@@ -336,6 +351,9 @@ fi
 # the SAME column (the one determined by $opt_col + $short_col).
 # ---------------------------------------------------------------------------
 echo ""
+fi
+
+if scenario_wanted long-form-column-alignment; then
 echo "[long-form column alignment]"
 perl -e '
     use strict; use warnings;
@@ -395,6 +413,9 @@ fi
 # the original bug) are present in the help output with both forms.
 # ---------------------------------------------------------------------------
 echo ""
+fi
+
+if scenario_wanted short-and-long-form-presence; then
 echo "[short+long form presence]"
 assert_pair() {
     local short="$1" long="$2"
@@ -413,6 +434,8 @@ assert_pair() {
 }
 assert_pair "-dmp"   "--data-model-precision"
 assert_pair "-hgb"   "--histogram-buckets"
+
+fi
 
 # ---------------------------------------------------------------------------
 # Wrap-up

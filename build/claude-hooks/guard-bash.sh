@@ -40,7 +40,10 @@ deny "redirect would truncate a file under logs/"
     if $cmd =~ /(^|[^>])>\s*logs\//;
 
 # --- every direct ltl run carries --disable-progress
-if ($cmd =~ /(^|[;&|(]\s*|\b(?:time|caffeinate\s+-s)\s+)(?:\.\/|\S*\/)?ltl(\s|$)/
+# A '(' is a real command position, but a bare 'ltl' after one is far more
+# often prose inside a quoted string, so there it takes a path prefix.
+if ($cmd =~ /(?:(?:^|[;&|]\s*|\b(?:time|caffeinate\s+-s)\s+)(?:\.\/|\S*\/)?ltl(?:\s|$)
+             |[(]\s*(?:\.\/|\S*\/)ltl(?:\s|$))/x
     && $cmd !~ /--disable-progress/
     && $cmd !~ /(^|[;&|(]\s*|\s)(?:\.\/|\S*\/)?ltl\s+(-v|--version|-h|--help|--explain)\b/) {
     deny "ltl invoked without --disable-progress (progress output wastes tokens; CLAUDE.md § Before running a command)";
@@ -58,9 +61,14 @@ deny "--delete-branch is never used - feature branches are deleted explicitly af
 deny "commit message names a model version - the trailer is 'Co-Authored-By: Claude <noreply\@anthropic.com>'"
     if $cmd =~ /\bgit\s+commit\b/ && $c =~ /Claude\s+(Opus|Sonnet|Haiku|Fable|Mythos)\b|claude-(opus|sonnet|haiku|fable|mythos)-/i;
 
+# --- a multi-hour benchmark holds the machine awake or it is worthless
+deny "run-benchmark.sh full/xl/all without 'caffeinate -s' - the host sleeps mid-run and the overnight capture is lost (docs/process/workflow.md release cut step 5)"
+    if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/
+    && $cmd !~ /\bcaffeinate\b[^;&|]*run-benchmark\.sh/;
+
 # --- release-only instruments and guard overrides need the architect's yes
 ask "run-benchmark.sh full/xl/all is a release-gate instrument (about 2.5 h), never a development tool - confirm this is the release cut"
-    if $cmd =~ /run-benchmark\.sh\s+(full|xl|all)\b/;
+    if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/;
 ask "commit with --no-verify bypasses the pre-commit guard - confirm"
     if $cmd =~ /\bgit\s+commit\b[^;&|]*--no-verify\b/;
 

@@ -37,6 +37,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 neutralize_colour_env
 # shellcheck source=lib/fixtures.sh
 source "$SCRIPT_DIR/lib/fixtures.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Transient files (derived fixture) live in a temp directory cleaned on EXIT
 # per HARNESS-DESIGN.md Trap 10.
@@ -500,14 +502,23 @@ test_multi_histogram() {
     rm -f "$out"
 }
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# One scenario per rendered width, plus the multi-histogram case.
+SCENARIO_USAGE_NOTE="  (one scenario per histogram width, plus multi-histogram)"
+scenario_register single-w30 single-w50 single-w75 single-w95 multi-histogram
+scenario_parse_args "$@"
+
 echo "=== Single-histogram across widths ==="
 for w in 30 50 75 95; do
+    scenario_wanted "single-w$w" || continue
     test_single_width "$w"
 done
 
 echo ""
-echo "=== Multi-histogram ==="
-test_multi_histogram
+if scenario_wanted multi-histogram; then
+    echo "=== Multi-histogram ==="
+    test_multi_histogram
+fi
 
 echo ""
 echo "=========================================="

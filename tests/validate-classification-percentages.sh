@@ -65,6 +65,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/rendered-output.sh
 source "$SCRIPT_DIR/lib/rendered-output.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -191,6 +193,23 @@ SM="$TMP_DIR/diag-mono.out"
 capture_run "$SM" 160 -sm "$DIAG_FIXTURE"
 
 # ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register column-placement \
+                  bucket-values \
+                  value-only-rendering \
+                  following-columns-unchanged \
+                  auto-hide-ordering \
+                  options \
+                  overview-parity \
+                  non-qualifying-run \
+                  mixed-run \
+                  summary-row-colour \
+                  share-omission-notice \
+                  clean-run-hygiene \
+                  soft-wrap
+scenario_parse_args "$@"
+
+if scenario_wanted column-placement; then
 current_scenario="column-placement"
 
 assert_command \
@@ -201,6 +220,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md R1 placement, D4 default-on ladder"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted bucket-values; then
 current_scenario="bucket-values"
 
 bucket_expect() {  # ROW SUCCESS_TEXT FAILURE_TEXT LABEL
@@ -226,6 +248,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D11, F9; CLAUDE.md § Before writing or changing code (derived output is gated on an observation count, never on defined-ness)"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted value-only-rendering; then
 current_scenario="value-only-rendering"
 
 assert_command \
@@ -243,6 +268,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md AC5 (method: centred_report(), prototype/452-timeline-cell-selector/FINDINGS.md)"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted following-columns-unchanged; then
 current_scenario="following-columns-unchanged"
 
 assert_command \
@@ -253,6 +281,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md AC6, F4; features/column-layout-refactor.md § Colour Scheme Requirements"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted auto-hide-ordering; then
 current_scenario="auto-hide-ordering"
 
 assert_command \
@@ -270,6 +301,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md AC7 (width point re-checked at tuning lock)"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted options; then
 current_scenario="options"
 
 assert_command \
@@ -280,6 +314,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D8, D15, AC9"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted overview-parity; then
 current_scenario="overview-parity"
 
 assert_command \
@@ -297,6 +334,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D5"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted non-qualifying-run; then
 current_scenario="non-qualifying-run"
 
 assert_command \
@@ -342,6 +382,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md F8, D2, R9 notice 3"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted mixed-run; then
 current_scenario="mixed-run"
 
 assert_command \
@@ -373,6 +416,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D2 as amended (architect, 2026-09-01), D11, AC18"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted summary-row-colour; then
 current_scenario="summary-row-colour"
 
 assert_command \
@@ -397,6 +443,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md D14; ltl summary_colour()"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted share-omission-notice; then
 current_scenario="share-omission-notice"
 
 assert_command \
@@ -407,6 +456,9 @@ assert_command \
     contract "features/452-success-failure-percentage-columns.md R9 notice 4, D10"
 
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted clean-run-hygiene; then
 current_scenario="clean-run-hygiene"
 
 assert_command \
@@ -426,6 +478,9 @@ for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2" "$SM"; do
         contract "tests/HARNESS-DESIGN.md § Runtime-warning cleanliness"
 done
 
+fi
+
+if scenario_wanted soft-wrap; then
 current_scenario="soft-wrap"
 for spec in "$A:160" "$A2:120" "$M:160"; do
     cap="${spec%%:*}"; w="${spec##*:}"
@@ -450,6 +505,8 @@ for spec in "$A:160" "$A2:120" "$M:160"; do
         failures+=("soft-wrap :: $wrap_scenario")
     fi
 done
+fi
+
 
 # ---------------------------------------------------------------------------
 echo

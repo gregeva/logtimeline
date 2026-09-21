@@ -73,6 +73,8 @@ WIDTH=140
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 neutralize_colour_env
 
@@ -239,6 +241,19 @@ capture_frames() {
 # ---------------------------------------------------------------------------
 # Scenario: multi-file — the full line, and the overall percentage's arithmetic
 # ---------------------------------------------------------------------------
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+NARROW_WIDTH=60
+
+scenario_register multi-file \
+                  single-file \
+                  disable-progress \
+                  narrow-terminal \
+                  path-in-frame \
+                  empty-file-keeps-both-percentages \
+                  notice-not-in-progress-row
+scenario_parse_args "$@"
+
+if scenario_wanted multi-file; then
 current_scenario="multi-file"
 
 MULTI="$TMP_DIR/multi.frames"
@@ -340,6 +355,9 @@ assert_command \
 # ---------------------------------------------------------------------------
 # Scenario: single file — one percentage, no counter
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted single-file; then
 current_scenario="single-file"
 
 SINGLE="$TMP_DIR/single.frames"
@@ -371,11 +389,23 @@ assert_command \
 # ---------------------------------------------------------------------------
 # Scenario: suppression — --disable-progress emits nothing
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted disable-progress; then
 current_scenario="disable-progress"
 
 QUIET="$TMP_DIR/quiet.frames"
 capture_frames "$QUIET" \
     -ni --disable-progress --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
+    "$PART1" "$PART2" "$PART3"
+
+# The painting run this is compared against, captured here rather than read
+# from the multi-file scenario: a scenario that depends on a neighbour having
+# run cannot be selected on its own (tests/HARNESS-DESIGN.md section The
+# scenario selector).
+PAINTING="$TMP_DIR/painting.frames"
+capture_frames "$PAINTING" \
+    -ni --terminal-width "$WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
     "$PART1" "$PART2" "$PART3"
 
 assert_command \
@@ -390,7 +420,7 @@ assert_command \
 # count is the check — it is the run's own count of what it analysed, and the
 # suppressed run must reach the same number as the painting one.
 assert_command \
-    command     "test \"\$(grep -E '^ +LINES INCLUDED ' '$MULTI' | tr -s ' ')\" = \"\$(grep -E '^ +LINES INCLUDED ' '$QUIET' | tr -s ' ')\" && grep -qE '^ +LINES INCLUDED ' '$MULTI'" \
+    command     "test \"\$(grep -E '^ +LINES INCLUDED ' '$PAINTING' | tr -s ' ')\" = \"\$(grep -E '^ +LINES INCLUDED ' '$QUIET' | tr -s ' ')\" && grep -qE '^ +LINES INCLUDED ' '$PAINTING'" \
     label       'both modes analyse the same lines' \
     asserts     'Whether the progress line is painted or suppressed, the run reads and includes the same lines: the indicator observes the read pass without participating in it' \
     produced_by 'read_and_process_logs() in ltl — the progress block reads $total_lines_read and the handle position, and writes neither' \
@@ -399,9 +429,11 @@ assert_command \
 # ---------------------------------------------------------------------------
 # Scenario: narrow terminal — the filename absorbs the fit
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted narrow-terminal; then
 current_scenario="narrow-terminal"
 
-NARROW_WIDTH=60
 NARROW="$TMP_DIR/narrow.frames"
 capture_frames "$NARROW" \
     -ni --terminal-width "$NARROW_WIDTH" -bs 1440 -oe -n 1 -lf "$ACCESS_FORMAT" \
@@ -437,6 +469,9 @@ assert_command \
 # $TMP_DIR (where capture_frames runs) and passed by relative path, so the
 # expected text is exact and independent of where the repo is checked out.
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted path-in-frame; then
 current_scenario="path-in-frame"
 
 SHORT_DIR="alpha"
@@ -488,6 +523,9 @@ assert_command \
 # still advances, so the run reads as though that file were most of the way
 # through. A file with nothing in it has been read in full: it reports 0%.
 # ---------------------------------------------------------------------------
+fi
+
+if scenario_wanted empty-file-keeps-both-percentages; then
 current_scenario="empty-file-keeps-both-percentages"
 
 EMPTY_PART="$TMP_DIR/part-empty.txt"
@@ -522,6 +560,9 @@ assert_command \
 # INTERLEAVED, which is the only arrangement in which the collision exists: the
 # progress line holds a terminal row open on stdout while the notice is written
 # to stderr, and a notice emitted where it is discovered appends to that row.
+fi
+
+if scenario_wanted notice-not-in-progress-row; then
 current_scenario="notice-not-in-progress-row"
 
 COLLIDE="$TMP_DIR/collide.frames"
@@ -589,6 +630,8 @@ assert_command \
     contract    'CLAUDE.md section Before writing or changing code — user-facing behavioural messages are never gated behind --disable-progress'
 
 # ---------------------------------------------------------------------------
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

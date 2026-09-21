@@ -24,6 +24,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -1309,41 +1311,49 @@ scenario_display_dimensions() {
 echo "Validating histogram-bin-counters -V section (Issues #189, #187, #226)"
 echo ""
 
-scenario_default
-echo ""
-scenario_precision_tier
-echo ""
-scenario_precision_out_of_range
-echo ""
-scenario_tier_table
-echo ""
-scenario_message_stats_bin
-echo ""
-scenario_message_stats_csv_shared
-echo ""
-scenario_message_stats_raw
-echo ""
-scenario_bucket_stats_bin
-echo ""
-scenario_bucket_stats_raw
-echo ""
-scenario_heatmap_cells_bin
-echo ""
-scenario_histogram_view_bin
-echo ""
-scenario_highlight_blocks_active
-echo ""
-scenario_highlight_blocks_inactive
-echo ""
-scenario_no_bucket_stats_highlight_store
-echo ""
-scenario_always_present
-echo ""
-scenario_no_values_observed
-echo ""
-scenario_shared_partition_direction
-echo ""
-scenario_display_dimensions
+scenario_register default \
+                  precision-tier \
+                  precision-out-of-range \
+                  tier-table \
+                  message-stats-bin \
+                  message-stats-csv-shared \
+                  message-stats-raw \
+                  bucket-stats-bin \
+                  bucket-stats-raw \
+                  heatmap-cells-bin \
+                  histogram-view-bin \
+                  highlight-blocks-active \
+                  highlight-blocks-inactive \
+                  no-bucket-stats-highlight-store \
+                  always-present \
+                  no-values-observed \
+                  shared-partition-direction \
+                  display-dimensions
+scenario_parse_args "$@"
+
+while read -r _scenario; do
+    case "$_scenario" in
+        default                        ) scenario_default ;;
+        precision-tier                 ) scenario_precision_tier ;;
+        precision-out-of-range         ) scenario_precision_out_of_range ;;
+        tier-table                     ) scenario_tier_table ;;
+        message-stats-bin              ) scenario_message_stats_bin ;;
+        message-stats-csv-shared       ) scenario_message_stats_csv_shared ;;
+        message-stats-raw              ) scenario_message_stats_raw ;;
+        bucket-stats-bin               ) scenario_bucket_stats_bin ;;
+        bucket-stats-raw               ) scenario_bucket_stats_raw ;;
+        heatmap-cells-bin              ) scenario_heatmap_cells_bin ;;
+        histogram-view-bin             ) scenario_histogram_view_bin ;;
+        highlight-blocks-active        ) scenario_highlight_blocks_active ;;
+        highlight-blocks-inactive      ) scenario_highlight_blocks_inactive ;;
+        no-bucket-stats-highlight-store) scenario_no_bucket_stats_highlight_store ;;
+        always-present                 ) scenario_always_present ;;
+        no-values-observed             ) scenario_no_values_observed ;;
+        shared-partition-direction     ) scenario_shared_partition_direction ;;
+        display-dimensions             ) scenario_display_dimensions ;;
+    esac
+    echo ""
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

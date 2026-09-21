@@ -1,0 +1,16 @@
+2026-01-26 10:00:01.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] GET /app/regen?folderId=1&sign=abc&sT=9
+2026-01-26 10:00:02.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] GET /app/regen?sign=abc&sT=9
+2026-01-26 10:00:03.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] GET /app/regen?folderId=1&sign=abc
+2026-01-26 10:00:04.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] GET /app/regen?sign=abc
+2026-01-26 10:00:05.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] Request done sign=abc status=ok
+2026-01-26 10:00:06.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] Request done sign=abc
+2026-01-26 10:00:07.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] GET /store/orders/3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3/items/summary
+2026-01-26 10:00:08.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] connection from 192.0.2.10 closed
+2026-01-26 10:00:09.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] ErrorCode(de4882d2-d816-4940-ae83-c2f346e19335), Cause(null)
+2026-01-26 10:00:10.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] client (192.0.2.11) refused
+2026-01-26 10:00:11.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] id=3f9c2a71-8be4-4d0a-9c15-6e2b7d40a8f3&x=1
+2026-01-26 10:00:12.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] peer 2001:db8::8a2e:370:7334 disconnected
+2026-01-26 10:00:13.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] route /gw/2001:db8::1/inbound ready
+2026-01-26 10:00:14.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] pair 192.0.2.12 and 2001:db8::2 established
+2026-01-26 10:00:15.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] Request done sign:abc status:ok
+2026-01-26 10:00:16.000+0000 [L: INFO] [O: DiscardFixture] [I: ] [U: ] [S: ] [P: ] [T: pool-a-1] mixed sign=abc and other sign:def here

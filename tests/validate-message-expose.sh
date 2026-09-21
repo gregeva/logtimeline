@@ -41,6 +41,8 @@ command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -454,6 +456,21 @@ scenario_multi_key_order() {
         asserts     'The order of the option occurrences is the order of the appended pairs: naming adId first puts adId first on every key, and the grouping is unchanged because the same values are appended.' \
         produced_by "$PRODUCED_APPEND" \
         contract    "$CONTRACT_DOC section D2 - command-line order"
+
+    # Issue #567 criterion 14 (567 D11): one option takes the list.
+    run_messages comma-list -x fileName,adId "$DOWNLOAD_FIXTURE" || return 0
+    assert_command \
+        command     "check_messages '$MSG_CSV' '$expected'" \
+        label       '-x fileName,adId names the two keys, in the order given' \
+        asserts     'A comma-separated list names several keys in one option, and gives the same messages as naming them one option each: the list is split on the comma rather than read as a single key no line carries.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/567-discard-named-values-from-message.md section Decisions D11 - --expose accepts the same comma-separated list, delivered in this issue'
+    assert_command \
+        command     "check_same_csv '$forward_csv' '$MSG_CSV' 'messages'" \
+        label       '-x fileName,adId is identical to -x fileName -x adId' \
+        asserts     'The two spellings of the same request produce the same run.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/567-discard-named-values-from-message.md section Acceptance criteria 14'
 }
 
 # Criterion 4: the exposed value is read by the rule the counting user-defined
@@ -834,42 +851,25 @@ scenario_classification_unchanged() {
 # Run
 # ---------------------------------------------------------------------------
 
-SCENARIOS=(download-filename query-string-loss multi-key-order counted-keys
-           builtin-user-precedence thread session-user metric-names
-           query-string-alias classification-unchanged)
-
-usage() {
-    echo "Usage: $0 [--scenario NAME] [--list]"
-    echo "Scenarios (acceptance criteria 1-10 of $CONTRACT_DOC):"
-    printf '  %s\n' "${SCENARIOS[@]}"
-}
-
-selected=""
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --scenario) selected="${2:-}"; shift 2 ;;
-        --list)     usage; exit 0 ;;
-        -h|--help)  usage; exit 0 ;;
-        *) echo "ERROR: unknown argument '$1'"; usage; exit 2 ;;
-    esac
-done
-
-if [[ -n "$selected" ]]; then
-    found=0
-    for s in "${SCENARIOS[@]}"; do [[ "$s" == "$selected" ]] && found=1; done
-    if [[ "$found" -ne 1 ]]; then
-        echo "ERROR: unknown scenario '$selected'"
-        usage
-        exit 2
-    fi
-    SCENARIOS=("$selected")
-fi
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+SCENARIO_USAGE_NOTE="  (acceptance criteria 1-10 of $CONTRACT_DOC):)"
+scenario_register download-filename \
+                  query-string-loss \
+                  multi-key-order \
+                  counted-keys \
+                  builtin-user-precedence \
+                  thread \
+                  session-user \
+                  metric-names \
+                  query-string-alias \
+                  classification-unchanged
+scenario_parse_args "$@"
 
 echo "Validating message expose (-x/--expose), issue #566 acceptance criteria 1-10"
 echo "  ltl:       $LTL"
 echo ""
 
-for s in "${SCENARIOS[@]}"; do
+while read -r s; do
     case "$s" in
         download-filename)        scenario_download_filename ;;
         query-string-loss)        scenario_query_string_loss ;;
@@ -883,10 +883,10 @@ for s in "${SCENARIOS[@]}"; do
         classification-unchanged) scenario_classification_unchanged ;;
     esac
     echo ""
-done
+done < <(scenario_selected)
 
 echo "─────────────────────────────────────────"
-echo "  Results: $pass passed, $fail failed  (scenarios: ${SCENARIOS[*]})"
+echo "  Results: $pass passed, $fail failed  (scenarios: $(scenario_selected | paste -sd" " -))"
 if [[ "$fail" -gt 0 ]]; then
     echo ""
     echo "  Failed assertions:"

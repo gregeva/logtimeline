@@ -31,6 +31,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -132,6 +134,13 @@ SHAPE="-bs 1440 -oe -n 1"
 
 NOTICE_CONTRACT='docs/usage.md § Options — Stderr warnings: message grouping under the bin message-stats data model answers consolidated rows from histograms combined onto a shared bucket geometry, so their percentiles are approximate and the run says so, pointing at -mdm raw'
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register grouped-bin-model-notice \
+                  grouped-raw-model-silent \
+                  ungrouped-bin-model-silent
+scenario_parse_args "$@"
+
+if scenario_wanted grouped-bin-model-notice; then
 # --- Scenario: grouping on the bin data model announces the trade ---
 current_scenario="grouped-bin-model-notice"
 echo "[$current_scenario]"
@@ -151,6 +160,9 @@ if capture_stderr "$errfile" $SHAPE -g 85 -mdm bin "$FIXTURE"; then
         contract    "$NOTICE_CONTRACT"
 fi
 
+fi
+
+if scenario_wanted grouped-raw-model-silent; then
 # --- Scenario: the exact data model is silent ---
 current_scenario="grouped-raw-model-silent"
 echo "[$current_scenario]"
@@ -164,6 +176,9 @@ if capture_stderr "$errfile" $SHAPE -g 85 -mdm raw "$FIXTURE"; then
         contract    "$NOTICE_CONTRACT"
 fi
 
+fi
+
+if scenario_wanted ungrouped-bin-model-silent; then
 # --- Scenario: the bin model without grouping is silent ---
 current_scenario="ungrouped-bin-model-silent"
 echo "[$current_scenario]"
@@ -176,6 +191,8 @@ if capture_stderr "$errfile" $SHAPE -mdm bin "$FIXTURE"; then
         produced_by 'bin_consolidation_notice() in ltl (grouping guard)' \
         contract    "$NOTICE_CONTRACT"
 fi
+fi
+
 
 echo
 echo "Results: $pass passed, $fail failed"

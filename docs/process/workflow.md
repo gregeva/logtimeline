@@ -195,10 +195,12 @@ and gone a week later.
 5. `git log origin/release/X.Y.Z --oneline -3` to confirm the merge landed.
 6. **Release notes.** `releases/v{version}.md` gets one bullet with a `(#NNN)`
    reference if the issue changed what a user of `ltl` observes: the tool, its
-   CLI, its output, its user-facing docs. Concise, reflects the change not every
-   detail, never describes pre-existing behaviour. Work confined to `build/`,
-   `tests/`, `features/`, CLAUDE.md or process gets no bullet. Commit and push
-   directly to the release branch.
+   CLI, its output, its user-facing docs. One line, 25 words at the outside,
+   verb first, naming the change once and pointing at `docs/usage.md` rather
+   than reproducing it; never pre-existing behaviour, never the cause of a bug.
+   Full rule and register: `.claude/rules/release-notes.md`. Work confined to
+   `build/`, `tests/`, `features/`, CLAUDE.md or process gets no bullet. Commit
+   and push directly to the release branch.
 7. **Completion comment** on the issue: commit hash, branch, PR number, merge
    commit, what shipped. Record a skipped gate (and why) and a withheld
    release-notes bullet, so each omission is a decision, not a gap.
@@ -280,7 +282,15 @@ architect, is a last resort after the steps have been tried singly.
 4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift. Then `./tests/cleanup-test-artifacts.sh`.
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`
-7. Finalize `releases/v{version}.md`: every user-observable issue has its bullet, benchmark comparison table appended. No usage examples, file lists, "Breaking Changes: None", "Known Issues" or root-cause analysis. Template: `releases/TEMPLATE.md`.
+7. Finalize `releases/v{version}.md`: every user-observable issue has its bullet. The
+   TSV and the comparison report from steps 5 and 6 are committed either way; the
+   Performance **section** reproduces neither. Where nothing moved, it is one or two
+   sentences saying the benchmark ran, that no improvement or regression was observed,
+   and the comparison file's path (register: `releases/v0.15.1.md`); where the hot path
+   was untouched, that it was (register: `releases/v0.15.2.md`). Tables only where
+   performance was the point of the release. No usage examples, file lists, "Breaking
+   Changes: None", "Known Issues" or root-cause analysis. Full rule:
+   `.claude/rules/release-notes.md`. Template: `releases/TEMPLATE.md`.
 8. `git commit -am "Release vX.Y.Z"`
 9. `git push -u origin release/X.Y.Z`
 10. `git tag vX.Y.Z`, then `git push origin vX.Y.Z` as a **separate command**.

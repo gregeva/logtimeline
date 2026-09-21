@@ -36,6 +36,8 @@ neutralize_colour_env
 # match the files under test — both read $LOGS_DIR from lib/logs-dir.sh.
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # 5k-line samples of real production logs, sliced from the middle of the
 # corresponding logs/<source>/ files. See docs/test-logs.md and
@@ -1191,6 +1193,28 @@ scenario_filtered_tier2_no_leak() {
 # Runner
 # ---------------------------------------------------------------------------
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# Parsed before the helper self-tests, so a rejected argument runs no assertion.
+scenario_register cold-no-index \
+                  warm-unfiltered \
+                  cold-filtered-tier2-fallback \
+                  warm-tier1-filtered \
+                  warm-tier2-different-filters \
+                  stale-mtime \
+                  stale-size \
+                  drift-refresh-tier1 \
+                  drift-refresh-tier2 \
+                  multi-file-all-fresh-tier2-unfiltered \
+                  multi-file-all-fresh-tier1 \
+                  multi-file-mixed-tiers \
+                  multi-file-one-stale \
+                  malformed-index \
+                  missing-bound-column \
+                  expired-selection-entry \
+                  signature-canonicalization \
+                  filtered-tier2-no-leak
+scenario_parse_args "$@"
+
 echo "Validating index read-back against ltl at $LTL"
 echo ""
 
@@ -1200,29 +1224,30 @@ in_scenario_dir helper_self_test
 echo ""
 echo "--- Scenarios ---"
 
-for s in \
-    scenario_cold_no_index \
-    scenario_warm_unfiltered \
-    scenario_cold_filtered_tier2_fallback \
-    scenario_warm_tier1_filtered \
-    scenario_warm_tier2_different_filters \
-    scenario_stale_mtime \
-    scenario_stale_size \
-    scenario_drift_refresh_tier1 \
-    scenario_drift_refresh_tier2 \
-    scenario_multi_file_all_fresh_tier2_unfiltered \
-    scenario_multi_file_all_fresh_tier1 \
-    scenario_multi_file_mixed_tiers \
-    scenario_multi_file_one_stale \
-    scenario_malformed_index \
-    scenario_missing_bound_column \
-    scenario_expired_selection_entry \
-    scenario_signature_canonicalization \
-    scenario_filtered_tier2_no_leak \
-    ; do
+while read -r _scenario; do
+    case "$_scenario" in
+        cold-no-index                        ) _fn=scenario_cold_no_index ;;
+        warm-unfiltered                      ) _fn=scenario_warm_unfiltered ;;
+        cold-filtered-tier2-fallback         ) _fn=scenario_cold_filtered_tier2_fallback ;;
+        warm-tier1-filtered                  ) _fn=scenario_warm_tier1_filtered ;;
+        warm-tier2-different-filters         ) _fn=scenario_warm_tier2_different_filters ;;
+        stale-mtime                          ) _fn=scenario_stale_mtime ;;
+        stale-size                           ) _fn=scenario_stale_size ;;
+        drift-refresh-tier1                  ) _fn=scenario_drift_refresh_tier1 ;;
+        drift-refresh-tier2                  ) _fn=scenario_drift_refresh_tier2 ;;
+        multi-file-all-fresh-tier2-unfiltered) _fn=scenario_multi_file_all_fresh_tier2_unfiltered ;;
+        multi-file-all-fresh-tier1           ) _fn=scenario_multi_file_all_fresh_tier1 ;;
+        multi-file-mixed-tiers               ) _fn=scenario_multi_file_mixed_tiers ;;
+        multi-file-one-stale                 ) _fn=scenario_multi_file_one_stale ;;
+        malformed-index                      ) _fn=scenario_malformed_index ;;
+        missing-bound-column                 ) _fn=scenario_missing_bound_column ;;
+        expired-selection-entry              ) _fn=scenario_expired_selection_entry ;;
+        signature-canonicalization           ) _fn=scenario_signature_canonicalization ;;
+        filtered-tier2-no-leak               ) _fn=scenario_filtered_tier2_no_leak ;;
+    esac
     echo ""
-    in_scenario_dir "$s"
-done
+    in_scenario_dir "$_fn"
+done < <(scenario_selected)
 
 echo ""
 echo "Results: $pass passed, $fail failed"

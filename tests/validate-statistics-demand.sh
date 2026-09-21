@@ -34,6 +34,8 @@ LTL="$REPO_DIR/ltl"
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 # shellcheck source=lib/colour-env.sh
 source "$SCRIPT_DIR/lib/colour-env.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -213,6 +215,28 @@ echo "fixture: $ACCESS_LOG"
 echo
 
 ############################################################
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
+
+scenario_register scenario-1-terminal-only-default \
+                  scenario-2-csv-full-demand \
+                  scenario-3-sort-on-skewness \
+                  scenario-3b-sort-on-p99 \
+                  scenario-6-sort-unsatisfiable-at-parse \
+                  scenario-7-sort-unsatisfiable-before-walk \
+                  scenario-8-sort-unsatisfiable-after-walk \
+                  scenario-4-heatmap-no-bucket-demand \
+                  scenario-5-runtime-config-crosscheck \
+                  scenario-9-no-message-retention \
+                  scenario-10-no-message-retention-inert-options \
+                  scenario-11-negative-top-messages-retains-nothing \
+                  scenario-12-no-message-retention-csv-request \
+                  scenario-13-retained-duration-representation \
+                  scenario-14-retained-durations-are-numbers \
+                  scenario-15-exported-spelling-on-fractional-durations
+scenario_parse_args "$@"
+
+if scenario_wanted scenario-1-terminal-only-default; then
 current_scenario="scenario-1-terminal-only-default"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand)
@@ -274,6 +298,9 @@ fi
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-2-csv-full-demand; then
 current_scenario="scenario-2-csv-full-demand"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -o)
@@ -316,6 +343,9 @@ fi
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-3-sort-on-skewness; then
 current_scenario="scenario-3-sort-on-skewness"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -so skewness)
@@ -392,6 +422,9 @@ fi
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-3b-sort-on-p99; then
 current_scenario="scenario-3b-sort-on-p99"
 # The sort_selection/sort_calc assertions below grep the same emitted lines
 # already sabotage-proven under scenario-3 (see the record there); the group
@@ -447,6 +480,9 @@ echo
 #      call site      => scenario-3 no-note control failed.
 GATE_CONTRACT='features/418-unsatisfiable-sort-selection-cost.md § D3 (three detection points), D5 (parse-time fallback is literal), D12 (gate state on -V) — stability-contracted via features/duration-statistics.md § sort_gate'
 
+fi
+
+if scenario_wanted scenario-6-sort-unsatisfiable-at-parse; then
 current_scenario="scenario-6-sort-unsatisfiable-at-parse"
 echo "--- $current_scenario ---"
 # -so <family operand> together with that family's --omit flag, all three
@@ -479,6 +515,9 @@ done
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-7-sort-unsatisfiable-before-walk; then
 current_scenario="scenario-7-sort-unsatisfiable-before-walk"
 echo "--- $current_scenario ---"
 # A log carrying no duration, bytes or count field at all: the family is
@@ -510,6 +549,9 @@ done
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-8-sort-unsatisfiable-after-walk; then
 current_scenario="scenario-8-sort-unsatisfiable-after-walk"
 echo "--- $current_scenario ---"
 # Durations observed, but every key carries one sample: below the n>=4 shape
@@ -553,6 +595,9 @@ fi
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-4-heatmap-no-bucket-demand; then
 current_scenario="scenario-4-heatmap-no-bucket-demand"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -hm duration)
@@ -581,6 +626,9 @@ fi
 echo
 
 ############################################################
+fi
+
+if scenario_wanted scenario-5-runtime-config-crosscheck; then
 current_scenario="scenario-5-runtime-config-crosscheck"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand,runtime-config)
@@ -611,6 +659,9 @@ echo
 # internal-state equivalent (tests/HARNESS-DESIGN.md section Render-invariant
 # harnesses). The layout is pinned by run_section's --terminal-width 200 and
 # ANSI is stripped before matching.
+fi
+
+if scenario_wanted scenario-9-no-message-retention; then
 current_scenario="scenario-9-no-message-retention"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand,benchmark-data -n 0)
@@ -679,6 +730,9 @@ echo
 # The options that configure only the per-message store are ignored rather than
 # rejected, and the tool says so on stderr. The notice is a behavioural notice,
 # not progress output, so it is emitted whatever --disable-progress is set to.
+fi
+
+if scenario_wanted scenario-10-no-message-retention-inert-options; then
 current_scenario="scenario-10-no-message-retention-inert-options"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -n 0 -g 85 -mdm bin -so p50)
@@ -701,6 +755,9 @@ echo
 # A negative top-message count takes the same path as zero: it cannot rank a
 # row either, so nothing is retained. Read from the demand section alone —
 # nothing here depends on the render or on the bucket axis.
+fi
+
+if scenario_wanted scenario-11-negative-top-messages-retains-nothing; then
 current_scenario="scenario-11-negative-top-messages-retains-nothing"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -n -5)
@@ -726,6 +783,9 @@ echo
 # own scratch directory so the two file assertions see only its own artifacts
 # (scenario 2 also writes CSVs into the shared workdir). `-bs 1440 -oe`: this
 # scenario reads a stderr notice and which files exist, never a bucket row.
+fi
+
+if scenario_wanted scenario-12-no-message-retention-csv-request; then
 current_scenario="scenario-12-no-message-retention-csv-request"
 echo "--- $current_scenario ---"
 CSV_ONLY_DIR="$WORKDIR/csv-no-message-retention"
@@ -786,9 +846,11 @@ echo
 # byte counts are read rather than the `-mem` summary's whole-KiB rows, whose
 # rounding boundary sits close enough to the signal to move between runs of
 # the same build.
+fi
+
+if scenario_wanted scenario-13-retained-duration-representation; then
 current_scenario="scenario-13-retained-duration-representation"
 echo "--- $current_scenario ---"
-DURATION_SPREAD_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
 DURATION_SPREAD_LINES=434
 LOG_ANALYSIS_CEILING=33000
 REPRESENTATION_ASSERTS='The retained per-bucket durations carry no floating-point slot: a transform that assigns a double into a shared record lexical enlarges every duration retained afterwards, and the per-bucket statistics store grows by 8 bytes per retained duration when one does'
@@ -866,6 +928,9 @@ echo
 #
 # Invocation shape: identical to scenario 13's, and for the same reasons, so
 # that the two ceilings are read from the same measurement.
+fi
+
+if scenario_wanted scenario-14-retained-durations-are-numbers; then
 current_scenario="scenario-14-retained-durations-are-numbers"
 echo "--- $current_scenario ---"
 NUMERIC_RETENTION_CEILING=20000
@@ -921,6 +986,9 @@ echo
 # 11-second span into one bucket and switches off the empty-bucket fill, so
 # the STATS CSV carries a single row to read; `-n 1` because no rendered row
 # is read. The run gets a directory it owns, since -o writes into the CWD.
+fi
+
+if scenario_wanted scenario-15-exported-spelling-on-fractional-durations; then
 current_scenario="scenario-15-exported-spelling-on-fractional-durations"
 echo "--- $current_scenario ---"
 FRACTIONAL_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-thread-session.txt"
@@ -1010,3 +1078,5 @@ if [[ $fail -gt 0 ]]; then
     exit 1
 fi
 exit 0
+fi
+

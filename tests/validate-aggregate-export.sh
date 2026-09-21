@@ -39,6 +39,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 source "$SCRIPT_DIR/lib/logs-dir.sh"
 # shellcheck source=lib/csv-cache.sh
 source "$SCRIPT_DIR/lib/csv-cache.sh"
+# shellcheck source=lib/scenario-select.sh
+source "$SCRIPT_DIR/lib/scenario-select.sh"
 neutralize_colour_env
 
 TMP_DIR=$(mktemp -d)
@@ -47,14 +49,32 @@ trap 'rm -rf "$TMP_DIR"; csv_cache_maybe_cleanup' EXIT
 [[ -x "$LTL" ]] || { echo "ERROR: ltl not found or not executable at $LTL"; exit 1; }
 [[ -f "$RULES" ]] || { echo "ERROR: rules file missing: $RULES"; exit 1; }
 
-ONLY_SCENARIO=""
-[[ "${1:-}" == "--scenario" ]] && ONLY_SCENARIO="${2:?--scenario needs a name}"
 
 pass=0; fail=0; failures=(); current_scenario=""
 CONTRACT='features/503-yaml-aggregate-export.md section Acceptance criteria - the export exposes what the run computed, in ltl names, exact values, absent means not produced or not supported (D1, D3, D4, D12, D15, D16)'
 PRODUCER='write_aggregate_export() in ltl'
 
-want() { [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$1" ]]; }
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+# Every block is already gated on `want "$current_scenario"`; the library owns
+# the selector so there is one selection surface rather than two. The
+# oracle-chain block renames current_scenario per row (oracle-chain/<row>), so
+# the gate matches on the scenario's own registered name.
+SCENARIO_USAGE_NOTE="  (one scenario per aggregate-export case)"
+scenario_register histogram-n0 \
+                  gating-small-bucket \
+                  no-surfaces \
+                  profile-week-heading \
+                  seconds-heading \
+                  precision-not-csv \
+                  users-and-highlight-twins \
+                  directories-relative \
+                  directories-absolute \
+                  environment-options \
+                  heatmap-vs-bucket-store-pinned \
+                  oracle-chain
+scenario_parse_args "$@"
+
+want() { scenario_wanted "${1%%/*}"; }
 
 fail_with() {   # label, asserts, produced_by, contract, detail
     echo "  FAIL  $current_scenario :: $1"
