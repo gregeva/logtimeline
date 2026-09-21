@@ -40,7 +40,10 @@ deny "redirect would truncate a file under logs/"
     if $cmd =~ /(^|[^>])>\s*logs\//;
 
 # --- every direct ltl run carries --disable-progress
-if ($cmd =~ /(^|[;&|(]\s*|\b(?:time|caffeinate\s+-s)\s+)(?:\.\/|\S*\/)?ltl(\s|$)/
+# A '(' is a real command position, but a bare 'ltl' after one is far more
+# often prose inside a quoted string, so there it takes a path prefix.
+if ($cmd =~ /(?:(?:^|[;&|]\s*|\b(?:time|caffeinate\s+-s)\s+)(?:\.\/|\S*\/)?ltl(?:\s|$)
+             |[(]\s*(?:\.\/|\S*\/)ltl(?:\s|$))/x
     && $cmd !~ /--disable-progress/
     && $cmd !~ /(^|[;&|(]\s*|\s)(?:\.\/|\S*\/)?ltl\s+(-v|--version|-h|--help|--explain)\b/) {
     deny "ltl invoked without --disable-progress (progress output wastes tokens; CLAUDE.md § Before running a command)";
