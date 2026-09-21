@@ -43,5 +43,13 @@ release notes** is a pointer to it, not a reproduction of it.
   Register: `releases/v0.15.2.md`.
 - **Performance was the point of the release:** tables earn their place, for the
   cases the work targeted. Only then.
+- **A regression that ships is explained, not just disclosed.** Say what was
+  measured and how, what a user can expect to feel and where, and what the cause
+  turned out to be — including the counter-intuitive part, which is usually the
+  whole reason the investigation was worth doing. "Some cases are slower" with no
+  mechanism is a disclosure, not an explanation.
+- The no-internals rule bans a vocabulary, not an explanation: no Perl
+  identifiers, issue numbers or decision labels, and no sub names. The mechanism
+  behind them is said in plain words.
 - A number in this section is a claim about a measurement, so it is read from
   `compare-results.sh` output, never derived from the input TSVs.
