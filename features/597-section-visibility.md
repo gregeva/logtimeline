@@ -91,7 +91,7 @@ Row 1 is the top of the title block. Positions are those of the same run without
 | Section | Parts, hideable separately through hidden values | Contents |
 |---|---|---|
 | `title` | | the banner block |
-| `progress` | | the progress indicators; hiding it is consistent with, and replaces the need for, a separate progress switch (`--disable-progress` today) |
+| `progress` | | the progress indicators, hidden consistently with the other sections; how this relates to `--disable-progress` is open |
 | `timeline` | | rule, header, bucket rows, closing rule; the statistics or heatmap column is part of it |
 | `histogram` | | every histogram, rendered side by side on the same rows |
 | `options` | | the command-line options row, and the environment options row when present |
