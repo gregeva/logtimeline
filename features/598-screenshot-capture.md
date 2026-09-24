@@ -23,8 +23,7 @@ As filed on the issue, in three parts, plus a fourth added in specification:
 1. **Capture tool.** Perl (D4, superseding PowerShell as filed), one implementation;
    `ltl` run on macOS and on Windows.
    Takes a full `ltl` command line and produces one or more images from a single
-   execution. Terminal width and height default (width around 200 columns) and are
-   overridable. Crops are in terminal cells, never pixels: a target section plus
+   execution. Terminal width and height default to 211 x 53 and are overridable (D11). Crops are in terminal cells, never pixels: a target section plus
    lines before and after it, positioned relative to the section start lines `ltl`
    reports on `-V`. Two runs: a `-V` probe run for the start lines, then a clean
    render run. Output taller than the terminal is handled by hiding or bounding
@@ -131,6 +130,14 @@ documentation exposes nothing sensitive.
 | the manifest | `build/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
 | the images | `docs/screenshots/*.svg`, generated output only |
 | input paths in the manifest | relative to the repository root (`logs/...`), so one recipe resolves on every development machine |
+
+**D11: default terminal size 211 x 53, overridable twice** (architect, 2026-09-24),
+superseding the filed default width of about 200 columns. 211 x 53 is the size a
+full timeline is read at (see *Terminal sizes in real use*); at 53 rows `ltl`
+defaults to 60-minute buckets and a 7-row histogram. A screenshot in the manifest
+may set its own size, and the tool's command line may set one for a run; the
+command line takes precedence over the manifest, the manifest over the default.
+237 x 62 is the override for a picture that needs more detail.
 
 ## Finding: terminal sizes in real use
 
