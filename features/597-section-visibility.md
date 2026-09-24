@@ -132,6 +132,14 @@ following the named-alias convention metric values already use (`size` for
 `hg`, `messages` `msg`, `summary` `sum`, `options` `opt`, `progress` `prog`.
 `title` and the hidden parts have no alias.
 
+**D12: rows are counted on standard output only** (architect, 2026-09-24). The
+one notice printed to standard output today ("Warning: unhandled date/time format -
+option not taken into account", printed while options are read, so it lands between
+the title and the timeline) moves to standard error with every other notice. The
+"no lines matched" message printed in place of the timeline stays on standard output
+as part of the timeline section. Test fixtures capture standard error separately
+from standard output.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -174,8 +182,6 @@ What this shows:
 
 ## Open questions
 
-- **Standard error.** Notices printed to standard error during render are not part
-  of standard output; confirm they are excluded from the count.
 - **The pause option.** Whether `-p` prompts count as lines, or the report is
   defined for runs without it.
 - **The `-V` section name** and its keys.
