@@ -356,6 +356,7 @@ my $progress_file_index  = 0;   # 1-based position of the file being read
 my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
 my @deferred_notices;           # notices raised mid-read, emitted once it ends
+my $sections_opened = 0;        # rendered sections so far; open_section() separates them
 
 # Repaint cadence for the read-pass progress line. The gate is time, not work:
 # repainting on a line count makes the refresh rate follow file size and I/O
@@ -2627,7 +2628,6 @@ sub emit_runtime_config_verbose {
     push @verbose_output, "=== END runtime-config / environment-variable ===";
 
     push @verbose_output, "=== END runtime-config ===";
-    push @verbose_output, "";
 }
 
 # Issue #179: Emit the dedicated `=== index-read-back ===` section
@@ -6865,8 +6865,21 @@ sub get_title_string {
 END
 }
 
+# Start a rendered section on standard output. No section owns the spacing
+# around it: exactly one blank row separates two rendered sections, printed
+# here, before every section but the first.
+sub open_section {
+    print "\n" if $sections_opened++;
+    return;
+}
+
 sub print_title {
-    print get_title_string();
+    open_section();
+    # The colour reset closes the last rule's row instead of opening a blank
+    # row of its own, so the title ends on its rule.
+    my $title = get_title_string();
+    $title =~ s/\n(\033\[0m)\n\z/$1\n/;
+    print $title;
     return;
 }
 
@@ -10813,8 +10826,8 @@ sub group_similar_messages {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Consolidating similar messages completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Consolidating similar messages completed." ) );
+        print "\n";
     }
-    print "\n";
 }
 
 # Returns hashref of all 3-character substrings from capped message
@@ -14529,7 +14542,7 @@ sub calculate_start_end_filter_timestamps {
             $epoch_value = $log_date + $tod;
             $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
         } else {
-            print "Warning: unhandled date/time format - option not taken into account\n";
+            defer_notice("Warning: unhandled date/time format - option not taken into account\n");
         }
 
         # Add fractional milliseconds for precision filtering
@@ -16709,7 +16722,6 @@ sub calculate_histogram_buckets_exact {
         }
         push @verbose_output, "=== END histogram-array / dimensions ===";
         push @verbose_output, "=== END histogram-array ===";
-        push @verbose_output, "";
     }
 
     return;
@@ -17673,8 +17685,8 @@ sub calculate_all_statistics {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
+        print "\n";
     }
-    print "\n";
 
     return;
 }
@@ -18844,6 +18856,7 @@ sub normalize_data_for_output {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
+        print "\n";    # the last progress row: the progress section ends here
     }
 
     return;
@@ -19283,8 +19296,9 @@ sub print_bar_graph {
     my $lines_printed = 0;
     my @csv_data;
 
+    open_section();
     if( $total_lines_included ) {
-        print "\n$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
+        print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
 
         print $colors{'bright-black'};
 
@@ -19713,7 +19727,7 @@ sub print_histograms {
     # Get box drawing characters for current weight setting
     my %box = %{$histogram_box_sets{$histogram_box_weight}};
 
-    print "\n";  # Separator from bar graph
+    open_section();
 
     # Build all histogram output line by line for side-by-side rendering
     my @all_lines = ();
@@ -20460,14 +20474,13 @@ sub build_run_options_string {
 
 sub print_run_options {
     ## PRINT COMMAND AND ARGUMENTS ##
-    if ($ltl_config_raw ne '') {
-        print "\n$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}";
-    }
+    my @rows;
+    push @rows, "$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}" if $ltl_config_raw ne '';
     my $cli_options = build_run_options_string();
-    if ($cli_options ne '') {
-        print "\n$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}";
-    }
-    print "\n";
+    push @rows, "$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}" if $cli_options ne '';
+    return unless @rows;
+    open_section();
+    print "$_\n" for @rows;
 }
 
 # Geometry of the run summary table. The label cell, the total cell and the
@@ -20678,7 +20691,7 @@ sub print_summary_table {
     my $max_timestamp_str = format_observation_timestamp($output_timestamp_max);
 
     ## START SUMMARY STATISTIC TABLE ##
-    push @summary_table, sprintf( "\n  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
+    push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
     push @summary_table, sprintf( "  " . "%-${category_column_width}s %${occurrences_column_width}s$padding\n", "Category", "Total" ); 
     push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
 
@@ -20861,6 +20874,7 @@ sub print_summary_table {
         push @file_details, "$column_padding$padding" . join('  ', map { "$colors{'periwinkle'}$format_legend{$_}$colors{'white'} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
+    open_section();
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
         if( $i >= scalar @summary_table ) {
             print " " x $summary_table_width . $column_padding;
@@ -20888,8 +20902,7 @@ sub print_message_summary {
 
     # Define the relative size of each column as a percentage
     my %col_relative_size;
-
-    print "\n";
+    my $tables_printed = 0;    # the first table opens the section; a blank row separates the next
 
     if( $statistics_variant ) {
         %col_relative_size = (
@@ -21003,6 +21016,7 @@ sub print_message_summary {
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
+            $tables_printed++ ? print "\n" : open_section();
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
@@ -21194,8 +21208,6 @@ sub print_message_summary {
                     print "$row\n";
                 }
             }
-
-            print "\n";
         }
     }
 
@@ -21205,8 +21217,7 @@ sub print_message_summary {
 sub print_threadpool_summary {
     # Define the relative size of each column as a percentage
     my %col_relative_size;
-
-    print "\n";
+    my $tables_printed = 0;    # the first table opens the section; a blank row separates the next
 
     %col_relative_size = (
        1 => 94,
@@ -21285,6 +21296,7 @@ sub print_threadpool_summary {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
 
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
+            $tables_printed++ ? print "\n" : open_section();
 
             my $header_title = " ";
 
@@ -21317,8 +21329,6 @@ sub print_threadpool_summary {
                     print "$row\n";
                 }
             }
-
-            print "\n";
         }
     }
 
@@ -21416,7 +21426,6 @@ sub pipeline_finalize {
 
         # message-grouping verbose diagnostics (Issue #96).
         if (section_requested('message-grouping')) {
-            push @verbose_output, "";
             push @verbose_output, "=== message-grouping ===";
             push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
                 $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
@@ -21591,7 +21600,6 @@ sub pipeline_finalize {
             }
 
             push @verbose_output, "=== END message-grouping ===";
-            push @verbose_output, "";
         }
     }
 
@@ -21916,6 +21924,7 @@ my $_help_or_explain_invoked = grep {
 print_title() unless $_help_or_explain_invoked;
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
+open_section() unless $disable_progress;    # the progress rows follow as their own section
 
 pipeline_detect();
 pipeline_parse();

@@ -305,6 +305,29 @@ What this shows:
 with a carriage return and spaces when a key is pressed, so a run under `-p` prints
 the same rows as one without it. The report needs no rule for `-p`.
 
+## Implementation progress
+
+**Step 1, spacing (D5, D12, D14).** Every printer starts with `open_section()`,
+which prints the one blank row before every rendered section but the first; no
+printer prints a leading or trailing blank row. What this settles for the row
+counts of step 2:
+
+- The title is four rows: the colour reset that used to open a fifth blank-looking
+  row now closes the last rule. The help views keep the title as they had it.
+- When shown, progress is its own section, opened after the title and ending its
+  own last row after the normalisation step. Under `--disable-progress` it prints
+  nothing at all.
+- The options section is absent when there is neither an environment nor a
+  command-line options row.
+- The messages and thread-pool sections each keep one blank row between their two
+  tables, inside the section, and none after the last.
+- `-V` prints no blank row outside its delimiters. Checked on four option sets over
+  a synthetic access log: with every `-V` range removed, each run prints exactly
+  the rows of the same run without `-V`.
+- The date/time warning goes through the deferred-notice path to standard error.
+- The 74 regression goldens were re-captured. Against the committed ones, `diff -B`
+  reports no difference in any file: 148 blank rows removed, two per file.
+
 ## Open questions
 
 None.
