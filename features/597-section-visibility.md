@@ -111,12 +111,6 @@ targeted on its own.
 list, and is additive when repeated, the way `-m` is. The per-column options
 (`--hide-legend`, `--hide-stats`, and the rest) are unchanged.
 
-**D10: short forms `-hi` and `-sh`** (architect, 2026-09-24):
-`-hi, --hide <section>` and `-sh, --show <section>`. The option takes the section
-as its value, so its short form names the verb only. Both are free, and the
-parser's case-insensitive matching rules out `-H` and `-S`, which would resolve to
-`-h` (highlight) and `-s` (seconds).
-
 **D9: `--hide progress` is exactly `--disable-progress`** (architect, 2026-09-24),
 so that `--disable-progress` can one day be deprecated. Audit of what
 `--disable-progress` does today: it suppresses every progress print, and it skips
@@ -125,6 +119,12 @@ the up-front size sweep of the selected files (`size_selected_files_for_progress
 `--hide progress` does both. Differences that remain:
 `--disable-progress` is a hidden option while `progress` becomes a public section
 name; the stray blank row it leaves today is removed by D5.
+
+**D10: short forms `-hi` and `-sh`** (architect, 2026-09-24):
+`-hi, --hide <section>` and `-sh, --show <section>`. The option takes the section
+as its value, so its short form names the verb only. Both are free, and the
+parser's case-insensitive matching rules out `-H` and `-S`, which would resolve to
+`-h` (highlight) and `-s` (seconds).
 
 ## Finding: where each section starts and ends today
 
