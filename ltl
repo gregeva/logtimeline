@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.4-598";
+my $version_number = "0.18.4";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -20683,13 +20683,32 @@ sub category_display_name {
 # including one whose run summary is suppressed.
 # The command-line options as the terminal echoes them under the timeline
 # and the aggregate export records them: the arguments minus the file
-# operands, pattern-file indicators appended, one trailing space.
+# operands and the options that stand in for the terminal, pattern-file
+# indicators appended, one trailing space.
+# The options that stand in for the terminal a view is read in (its size, its
+# background, whether it shows progress) and the diagnostic sections, which
+# print outside the view. A view captured with them echoes the command a
+# reader would type (features/598-screenshot-capture.md D17).
+my %options_standing_in_for_terminal = map { $_ => 1 }
+    qw( disable-progress terminal-width terminal-height light-background dark-background verbose );
 sub build_run_options_string {
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $cli_options = '';
     for (my $i = 0; $i < @ORIGINAL_ARGV; $i++) {
         my $arg = $ORIGINAL_ARGV[$i];
         next if exists $argv_hash{$arg};  # Skip log files
+
+        if ($arg =~ /^--?([a-zA-Z][a-zA-Z0-9-]*)(=.*)?$/) {
+            my $long = _resolve_short_to_long($1);
+            if (defined $long && $options_standing_in_for_terminal{$long}) {
+                # The size options take a value, given as the next argument unless attached with '='
+                $i++ if !defined $2 && $long =~ /^terminal-(width|height)$/ && $i + 1 < @ORIGINAL_ARGV;
+                # -V takes an optional section name: the next argument when it is neither an option nor a file operand
+                $i++ if !defined $2 && $long eq 'verbose' && $i + 1 < @ORIGINAL_ARGV
+                    && $ORIGINAL_ARGV[$i + 1] !~ /^-/ && !exists $argv_hash{ $ORIGINAL_ARGV[$i + 1] };
+                next;
+            }
+        }
 
         # Handle pattern file options with indicators
         if ($arg =~ /^(-epf|--exclude-pattern-file)$/ && $i + 1 < @ORIGINAL_ARGV) {
