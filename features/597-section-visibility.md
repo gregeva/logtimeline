@@ -211,7 +211,9 @@ following `messages` (D7, D11).
 structure whose peak size is 1 KiB or more. A measurement runs when the counts are
 computed (D3), and the list of structures shown is fixed then. The measurement just
 before the summary prints still updates their values. A structure that first
-crosses 1 KiB during rendering is not listed; its bytes stay in the unattributed row.
+crosses 1 KiB during rendering is not listed, as a structure under 1 KiB is not. The
+unattributed row subtracts every measured structure, listed or not, so it does not
+absorb that structure's bytes either.
 
 **D19: when `--hide` and `--show` name the same section, the later one wins**
 (architect, 2026-09-24). Both options apply in the order given, `LTL_CONFIG` first,
@@ -328,6 +330,44 @@ counts of step 2:
 - The 74 regression goldens were re-captured. Against the committed ones, `diff -B`
   reports no difference in any file: 148 blank rows removed, two per file.
 
+**Step 2, section model and row counts (D3, D6, D7, D13, D17, D18).**
+`@output_sections` lists the sections and parts in print order.
+`compute_section_layout()` runs after `normalize_data_for_output()`, before
+`print_verbose_output()`, and `emit_section_layout_verbose()` reports it. How each
+height is known before its first row prints:
+
+| Section | Rows |
+|---|---|
+| title | the newlines of `title_text()`, which `print_title()` prints |
+| progress | counted by `end_progress_row()` where each progress row ends; the section has ended by the time the layout is computed |
+| timeline | one per time bucket plus four (rule, header, rule, closing rule or heatmap scale); one when no line matched |
+| histogram | the rows `build_histogram_rows()` returns, built once and printed by `print_histograms()` |
+| options | the rows `run_options_rows()` returns |
+| messages, threadpools | from `top_table_plan()`, which the printers also iterate: per table a header, a rule and one row per key shown, with one blank row between the two tables |
+| summary | the longer column of `build_summary_table()`; the values and files parts start on the same row |
+
+The memory rows are fixed by `memory_rows_shown()` after a measurement taken in
+`compute_section_layout()` (D18). The summary is built again when it prints, with
+the same list and the later values.
+
+The layout is computed on every run, not only under `-V section-layout`, so a
+plain run lists the same memory rows as the `-V` probe of it (D6).
+
+`tests/validate-section-layout.sh` holds the report against the rows printed,
+through `tests/section-layout/check-section-layout.pl`. It checks the accounting
+(every row placed, D14), static-text anchors at offsets from reported starts (D4),
+states, the `-V`-stripped run against the plain run, progress shown, and the
+date/time warning on standard error. Its 11 scenarios over three committed
+access-log fixtures pass 54 assertions. The accounting check was shown to fail on
+five doctored captures: a timeline row removed, an extra blank row, the closing
+blank row removed, a report claiming one row too many, and a stray trailing row.
+The anchor check was shown to fail on a wrong offset. A capture missing its
+closing blank row first passed; the checker now requires that row.
+
+The shared soft-wrap check (`assert_no_soft_wrap`) measures a row by all its
+bytes, so a progress row painted over in place with carriage returns reads as
+hundreds of columns wide. The progress scenario skips that check.
+
 ## Open questions
 
 None.
@@ -349,11 +389,11 @@ separately from standard output (D12).
       in the histogram legend. Checked under each section's variability: many
       files, a highlight splitting the messages table, a non-default histogram
       height, the memory option.
-- [ ] Every two rendered sections are separated by exactly one blank row, owned by
+- [x] Every two rendered sections are separated by exactly one blank row, owned by
       neither (D5).
-- [ ] A `-V` run with every `-V` range removed prints exactly the rows of the same
+- [x] A `-V` run with every `-V` range removed prints exactly the rows of the same
       run without `-V` (D6, D14).
-- [ ] A date/time option the tool cannot handle prints its warning on standard
+- [x] A date/time option the tool cannot handle prints its warning on standard
       error, and standard output passes the accounting check below (D12).
 - [ ] On every run above, total rows minus `-V` rows minus reported section rows,
       separators and declared fixed spacing equals zero (D14).
@@ -365,7 +405,7 @@ separately from standard output (D12).
       byte-identical to the same run without `-hi` (D16).
 - [ ] With `-tpas`, `threadpools` and its two parts are reported and hideable, and
       `tp` resolves to `threadpools` (D17).
-- [ ] Under the memory option, the summary's rendered rows equal the count
+- [x] Under the memory option, the summary's rendered rows equal the count
       `section-layout` reports (D18).
 - [ ] `-hi summary -sh summary-files` renders only the file list, and
       `-sh summary -hi summary` hides the summary; a `--hide` in `LTL_CONFIG` is
