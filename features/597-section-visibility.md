@@ -99,7 +99,7 @@ Row 1 is the top of the title block. Positions are those of the same run without
 | `histogram` | | every histogram, rendered side by side on the same rows |
 | `options` | | the command-line options row, and the environment options row when present |
 | `messages` | `messages-highlighted`, `messages-overall` | the highlighted-messages table (present only under a highlight) and the overall table |
-| thread-pool summary | | present only with the thread-pool summary option |
+| `threadpools` (D17) | `threadpools-highlighted`, `threadpools-overall` | the highlighted and overall thread-pool tables; present only with the thread-pool summary option |
 | `summary` | `summary-values`, `summary-files` | the left column (categories, counters, timing, memory) and the right column (file list and log-formats legend) |
 
 `messages` and `summary` are the public names. The messages part names follow the
@@ -188,11 +188,76 @@ identical to the same run without `-V` (D6).
 mirroring the hidden `-tw, --terminal-width`. With output redirected, `ltl` cannot
 detect the terminal size, yet the height sets two defaults: the bucket size when
 `-bs` is not given (120, 90, 60, 30 or 10 minutes for up to 30, 45, 65, 85 and
-over 85 rows) and the histogram height when `-hgh` is not given (5, 7, 9, 11 or 14
-rows for under 50, 65, 80, 100 and 120 rows; the configured default when the height
-is not detected). The override makes both follow the given height, as a detected
+over 85 rows) and the histogram height when `-hgh` is not given (5, 7, 9, 11, 14
+or 16 rows for under 50, 65, 80, 100, 120 and 120 or more rows; the configured
+default when the height is not detected). The override makes both follow the given height, as a detected
 terminal of that height would. It is here because this issue owns what the #598
 capture needs from `ltl`.
+
+**D16: a hidden section that writes a file still makes one pass over its data**
+(architect, 2026-09-24). The timeline loop writes the STATS CSV rows and the
+messages loop writes the MESSAGES CSV rows while they render. Each stays a single
+loop that iterates once. Inside it, building and printing the terminal row is gated
+on the section being visible, and the CSV write is gated on `-o`, as today. Hidden
+without `-o`: the loop does not run. Hidden with `-o`: it runs and writes only the
+CSV. Visible: unchanged. This is how D2 holds.
+
+**D17: the thread-pool summary is `threadpools`** (architect, 2026-09-24), alias
+`tp`, with the hidden parts `threadpools-highlighted` and `threadpools-overall`,
+following `messages` (D7, D11).
+
+**D18: the memory rows of the summary are fixed when the row counts are taken**
+(architect, 2026-09-24). Under the memory option the summary lists each data
+structure whose peak size is 1 KiB or more. A measurement runs when the counts are
+computed (D3), and the list of structures shown is fixed then. The measurement just
+before the summary prints still updates their values. A structure that first
+crosses 1 KiB during rendering is not listed; its bytes stay in the unattributed row.
+
+**D19: when `--hide` and `--show` name the same section, the later one wins**
+(architect, 2026-09-24). Both options apply in the order given, `LTL_CONFIG` first,
+then the command line, so a command-line `--show` undoes a `--hide` from the
+environment. A section name covers its parts: `--hide summary --show summary-files`
+renders only the file list.
+
+**D20: `-osum, --omit-summary` is exactly `--hide summary`** (architect,
+2026-09-24), as D9 makes `--hide progress` exactly `--disable-progress`. Both set
+one flag; `section-layout` reports the summary as `hidden` under either.
+
+## Finding: the render code the decisions act on
+
+Read on `release/0.18.4` on 2026-09-24, before implementation.
+
+- **Two printers also write the CSV files.** `print_bar_graph()` writes each STATS
+  CSV row inside its bucket loop, and `print_message_summary()` writes each
+  MESSAGES CSV row inside its message loop. Skipping a hidden printer would have
+  dropped those rows (D16).
+- **Only the timeline counts its rows today**, and only under `-p`: the counter in
+  `print_bar_graph()` advances only when the pause option is on.
+- **Every other height is settled before rendering, with two exceptions.** The
+  histogram layout (`calculate_histogram_layout()`) is computed inside
+  `print_histograms()` from settled data, so it can run earlier. Under the memory
+  option, the summary's memory rows depend on `measure_memory_structures()`, which
+  runs right before `print_summary_table()` (D18).
+- **The title prints before the options are read.** `print_title()` runs in
+  `## MAIN ##` before `adapt_to_command_line_options()`. `--hide title` therefore
+  needs the section options read before the title prints. They are pre-read the way
+  `--terminal-width` already is, so the banner still comes before `-V list` output
+  and option errors.
+- **Blank rows beyond those in the section-position table above.**
+  `group_similar_messages()` prints an unconditional newline under
+  `--disable-progress`, as `calculate_all_statistics()` does. The thread-pool
+  tables end with the same trailing blank row as the messages tables. The `-V`
+  output pushes blank rows around the `message-grouping` block outside its
+  delimiters, against D14. The summary's leading blank row is embedded in its
+  first cell.
+- **Two rows are never wrapped by `ltl`:** the command-line options row and the
+  log-formats legend. Where they are wider than the terminal they soft-wrap, and
+  the physical rows exceed the reported count. That is #497 (output lines exceed
+  the terminal width and soft-wrap); harness runs pin a width at which they fit.
+- **Every regression golden changes with D5.** All 74 captures in
+  `tests/reference-output/` carry three blank rows between the title and the
+  timeline. They are re-captured with the spacing change, and the proof that
+  nothing else moved is that old and new differ only in blank rows.
 
 ## Finding: where each section starts and ends today
 
@@ -273,5 +338,15 @@ separately from standard output (D12).
       resolves to its section (D8, D11).
 - [ ] With output redirected, `-th 30` gives the bucket size and histogram height
       that a detected 30-row terminal gives, and `-th 90` those of a 90-row one (D15).
+- [ ] `-hi timeline -o` and `-hi messages -o` write STATS and MESSAGES CSV files
+      byte-identical to the same run without `-hi` (D16).
+- [ ] With `-tpas`, `threadpools` and its two parts are reported and hideable, and
+      `tp` resolves to `threadpools` (D17).
+- [ ] Under the memory option, the summary's rendered rows equal the count
+      `section-layout` reports (D18).
+- [ ] `-hi summary -sh summary-files` renders only the file list, and
+      `-sh summary -hi summary` hides the summary; a `--hide` in `LTL_CONFIG` is
+      undone by `--show` on the command line (D19).
+- [ ] `-osum` and `-hi summary` produce byte-identical output (D20).
 - [ ] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
       (`tests/validate-help-content.sh`).
