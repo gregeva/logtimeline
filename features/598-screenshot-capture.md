@@ -43,10 +43,18 @@ As filed on the issue, in three parts:
   `-V` (#597 D6), so positions read from the probe run apply to the capture run.
 - One blank row separates sections and belongs to neither (#597 D5).
 
+## Decisions
+
+**D1: images are rendered from the captured ANSI output** (architect, 2026-09-24),
+not captured from a terminal window. The render run's standard output is parsed into
+a grid of cells (character, foreground, background, attributes) and the cropped cell
+range is drawn to an image. The same input yields the same image on macOS and
+Windows, needs no visible window, and a crop in cells is a slice of the grid. The
+renderer's font and colour table set the look; the font must carry the block and
+box-drawing characters `ltl` prints.
+
 ## Open questions
 
-- How a cell region becomes an image: capturing the terminal window, or rendering
-  the captured ANSI output for that cell range to an image.
 - Whether crops need a column range (a region on the right of the screen, such as
   the heatmap), or whether terminal width plus section control is enough.
 
