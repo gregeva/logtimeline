@@ -15,6 +15,12 @@
 #               row, under each section's variability (D4)
 #   state       a section or part is reported rendered, hidden or absent (D13)
 #
+# The harness owns --hide and --show, so it also asserts the timeline columns
+# they name (D21 to D25): a column's heading is in the header row without the
+# option and absent with it, and each per-column option prints what its value
+# prints. No -V section reports column visibility; the heading check is the one
+# tests/validate-udm-counting.sh makes for the Users column.
+#
 # Every run pins --terminal-width so column positions are deterministic, and
 # captures standard error apart from standard output (D12).
 #
@@ -40,6 +46,11 @@ WIDTH=160
 # a handful of rows.
 THREAD_LOG="$REPO_DIR/tests/fixtures/format-detection/access-thread-session.txt"   # 12 lines, one day, thread and session
 SPREAD_LOG="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"             # 434 lines over 14.5 h, durations and 4xx/5xx
+NUMERIC_LOG="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"            # 19 lines, duration, bytes, count (with -ic), users
+USERS_LOG="$REPO_DIR/tests/fixtures/format-detection/access-users-sessions.txt"    # 12 lines, sessions, users, event ledger
+LEDGER_LOG="$REPO_DIR/tests/fixtures/access-classification-buckets.txt"            # access log: an event ledger
+DIAG_LOG="$REPO_DIR/tests/fixtures/diagnostics-classification-overlap.txt"         # diagnostics log: not an event ledger
+UDM_LOG="$REPO_DIR/tests/fixtures/udm-collision.txt"                               # 4 lines, rows= 10 30 60 100
 MULTI_LOGS=(
     "$REPO_DIR/tests/fixtures/progress-multi-file/part-1.txt"
     "$REPO_DIR/tests/fixtures/progress-multi-file/part-2.txt"
@@ -59,7 +70,7 @@ source "$SCRIPT_DIR/lib/nondeterministic.sh"
 
 neutralize_colour_env
 
-for f in "$PERL" "$LTL" "$CHECKER" "$THREAD_LOG" "$SPREAD_LOG" "${MULTI_LOGS[@]}"; do
+for f in "$PERL" "$LTL" "$CHECKER" "$THREAD_LOG" "$SPREAD_LOG" "$NUMERIC_LOG" "$USERS_LOG" "$LEDGER_LOG" "$DIAG_LOG" "$UDM_LOG" "${MULTI_LOGS[@]}"; do
     [[ -e "$f" ]] || { echo "ERROR: required file not found: $f"; exit 1; }
 done
 
@@ -127,6 +138,30 @@ text_absent() {
 # Standard output of a capture, -V ranges removed, holds TEXT.
 text_present() {
     "$PERL" "$CHECKER" strip "$1" | grep -qF -- "$2" || { echo "'$2' is not printed"; return 1; }
+}
+
+# The timeline's header row of a capture: the first row naming the timestamp
+# column, escape sequences removed. Usage: header_row <capture>
+header_row() {
+    "$PERL" "$CHECKER" strip "$1" | sed 's/\x1b\[[0-9;]*m//g' | grep -m1 -w timestamp
+}
+
+# The header row of a capture holds HEADING as a whole word, or does not.
+# Usage: heading_present <capture> <heading>; heading_absent <capture> <heading>
+heading_present() {
+    local row
+    row=$(header_row "$1") || { echo "no header row in $1"; return 1; }
+    grep -qw -- "$2" <<< "$row" || { echo "'$2' is not in the header row: $row"; return 1; }
+}
+heading_absent() {
+    local row
+    row=$(header_row "$1") || { echo "no header row in $1"; return 1; }
+    if grep -qw -- "$2" <<< "$row"; then echo "'$2' is in the header row: $row"; return 1; fi
+}
+
+# Two captures print the same bytes on both streams. Usage: same_streams <tag-a> <tag-b>
+same_streams() {
+    cmp -s "$TMP_DIR/$1/out" "$TMP_DIR/$2/out" && cmp -s "$TMP_DIR/$1/err" "$TMP_DIR/$2/err"
 }
 
 # A CONFIG value from -V benchmark-data. Usage: config_value <tag> <key>
@@ -243,8 +278,12 @@ scenario_register \
     hide-summary-is-omit-summary \
     hide-list-repeat-and-aliases \
     show-after-hide \
-    unknown-section-refused \
-    terminal-height
+    unknown-name-refused \
+    terminal-height \
+    hide-each-column \
+    show-column-after-hide \
+    hide-sections-and-columns-list \
+    hide-metric-column
 scenario_parse_args "$@"
 
 echo "Section layout (-V section-layout) against standard output, width $WIDTH"
@@ -508,7 +547,7 @@ if scenario_wanted hide-progress-is-disable-progress; then
             command     "same_rows hideprog disprog && cmp -s $(printf '%q' "$TMP_DIR/hideprog/err") $(printf '%q' "$TMP_DIR/disprog/err")" \
             label       '--hide progress prints what --disable-progress prints, on both streams' \
             asserts     '--hide progress and --disable-progress produce the same standard output, the time and memory rows aside, and the same standard error' \
-            produced_by 'apply_section_visibility() sets $disable_progress from the progress section, in ltl' \
+            produced_by 'apply_output_visibility() sets $disable_progress from the progress section, in ltl' \
             contract    'features/597-section-visibility.md § D9'
     fi
     echo ""
@@ -523,7 +562,7 @@ if scenario_wanted hide-summary-is-omit-summary; then
             command     "cmp -s $(printf '%q' "$(capture hidesum)") $(printf '%q' "$(capture osum)")" \
             label       '--hide summary and -osum print the same bytes, report included' \
             asserts     '--hide summary and -osum produce byte-identical standard output, the section-layout report included' \
-            produced_by 'apply_section_visibility(): -osum hides the summary section, in ltl' \
+            produced_by 'apply_output_visibility(): -osum hides the summary section, in ltl' \
             contract    'features/597-section-visibility.md § D20'
         assert_state osum summary hidden
     fi
@@ -541,7 +580,7 @@ if scenario_wanted hide-list-repeat-and-aliases; then
             command     "same_rows list repeat && diff <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture list)")) <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture repeat)"))" \
             label       '-hi tl,hg and -hi tl -hi hg hide the same sections' \
             asserts     'A comma-separated list and the option repeated hide the same sections: the same rows and the same section-layout report' \
-            produced_by 'apply_section_visibility() in ltl' \
+            produced_by 'apply_output_visibility() in ltl' \
             contract    'features/597-section-visibility.md § D8'
         assert_state list timeline hidden
         assert_state list histogram hidden
@@ -575,20 +614,32 @@ if scenario_wanted show-after-hide; then
     echo ""
 fi
 
-# A name that is no section is refused before anything prints.
-if scenario_wanted unknown-section-refused; then
-    current_scenario=unknown-section-refused
+# A name that is no section or column is refused. Without -udm no name can be a
+# metric, so it is refused before anything prints; with -udm, once the metrics
+# are parsed, and the error names them too (D24).
+if scenario_wanted unknown-name-refused; then
+    current_scenario=unknown-name-refused
     mkdir -p "$TMP_DIR/unknown"
     set +e
     ( cd "$TMP_DIR/unknown" && "$LTL" --disable-progress -ni -hi nosuch "$THREAD_LOG" > out 2> err )
     rc=$?
     set -e
     assert_command \
-        command     "[[ $rc -eq 1 ]] && [[ ! -s $(printf '%q' "$TMP_DIR/unknown/out") ]] && grep -q \"Unknown section 'nosuch' for --hide\" $(printf '%q' "$TMP_DIR/unknown/err")" \
-        label       '-hi nosuch exits 1, names the value on standard error, prints nothing' \
-        asserts     'An unknown --hide value is an error that names it, exits 1, and prints nothing on standard output' \
-        produced_by 'apply_section_visibility() through print_usage() in ltl' \
-        contract    'features/597-section-visibility.md § D8, D11'
+        command     "[[ $rc -eq 1 ]] && [[ ! -s $(printf '%q' "$TMP_DIR/unknown/out") ]] && grep -q \"Unknown section or column 'nosuch' for --hide. Sections: .*; columns: legend (leg), \" $(printf '%q' "$TMP_DIR/unknown/err")" \
+        label       '-hi nosuch exits 1, names the value, the sections and the columns on standard error, prints nothing' \
+        asserts     'An unknown --hide value is an error that names it and the valid sections and columns, exits 1, and prints nothing on standard output' \
+        produced_by 'apply_output_visibility() through print_usage() in ltl, from the pass before the title' \
+        contract    'features/597-section-visibility.md § D8, D11, D21'
+    set +e
+    ( cd "$TMP_DIR/unknown" && "$LTL" --disable-progress -ni -udm rows -udm rows::delta -hi nosuch "$UDM_LOG" > out-udm 2> err-udm )
+    rc=$?
+    set -e
+    assert_command \
+        command     "[[ $rc -eq 1 ]] && grep -q \"Unknown section or column 'nosuch' for --hide.*; metrics: rows:sum, rows:delta\" $(printf '%q' "$TMP_DIR/unknown/err-udm") && text_absent $(printf '%q' "$TMP_DIR/unknown/out-udm") timestamp" \
+        label       '-udm rows -udm rows::delta -hi nosuch exits 1 naming the metrics by their headings, no timeline' \
+        asserts     'With -udm an unknown --hide value is refused once the metrics are parsed, naming each metric by its column heading, before any log is read' \
+        produced_by 'apply_output_visibility() through print_usage() in ltl, from the pass after parse_udm_configs()' \
+        contract    'features/597-section-visibility.md § D24'
     echo ""
 fi
 
@@ -617,6 +668,163 @@ if scenario_wanted terminal-height; then
                 produced_by 'set_terminal_height() and calculate_histogram_layout() in ltl' \
                 contract    'features/597-section-visibility.md § D15'
         done
+    fi
+    echo ""
+fi
+
+# Each column value and its alias hides the column whose heading it names, and
+# each per-column option prints what its value prints (D21, D22, D25). -bs 1440
+# -oe -n 1: only the header row is read. The options row echoes the options as
+# given, and the summary's time and memory rows differ between any two runs, so
+# both are hidden throughout. values and rate have no heading: the
+# regression goldens for -ov and -or hold their render, through the same path.
+if scenario_wanted hide-each-column; then
+    current_scenario=hide-each-column
+    col_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,summary)
+    # value:alias:old option:heading:log
+    column_cases=(
+        legend:leg:-hl:legend:NUMERIC
+        occurrences:occ:-ho:occurrences:NUMERIC
+        duration:dur:-hd:duration:NUMERIC
+        bytes:byt:-hb:bytes:NUMERIC
+        count:cnt:-hc:count:NUMERIC
+        user:usr:-hu:users:NUMERIC
+        stats:stat:-hst:statistics:NUMERIC
+        session:ses:-hses:sessions:USERS
+        classification:cls:-hcl:success:USERS
+        values:val:-ov::NUMERIC
+        rate:rt:-or::NUMERIC
+    )
+    # -ic: count is tracked only when asked. -hi stats on the users log: the
+    # sessions and users headings print in full at this width without it.
+    numeric_args=(-ic "$NUMERIC_LOG"); users_args=(-hi stats "$USERS_LOG")
+    run_ltl col-NUMERIC "${col_args[@]}" "${numeric_args[@]}" || true
+    run_ltl col-USERS "${col_args[@]}" "${users_args[@]}" || true
+    for case in "${column_cases[@]}"; do
+        IFS=: read -r value alias old heading log <<< "$case"
+        if [[ "$log" == NUMERIC ]]; then log_args=("${numeric_args[@]}"); else log_args=("${users_args[@]}"); fi
+        run_ltl "col-$value" "${col_args[@]}" -hi "$value" "${log_args[@]}" || continue
+        run_ltl "col-$alias" "${col_args[@]}" -hi "$alias" "${log_args[@]}" || continue
+        run_ltl "col-old-$value" "${col_args[@]}" "$old" "${log_args[@]}" || continue
+        if [[ -n "$heading" ]]; then
+            assert_command \
+                command     "heading_present $(printf '%q' "$(capture "col-$log")") $heading && heading_absent $(printf '%q' "$(capture "col-$value")") $heading" \
+                label       "-hi $value removes the '$heading' heading from the header row" \
+                asserts     "The $value column prints its '$heading' heading without --hide and not with --hide $value" \
+                produced_by 'apply_output_visibility() sets the column flag the column layout reads, in ltl' \
+                contract    'features/597-section-visibility.md § D21'
+        else
+            assert_command \
+                command     "! cmp -s $(printf '%q' "$(capture "col-$log")") $(printf '%q' "$(capture "col-$value")")" \
+                label       "-hi $value changes the render" \
+                asserts     "--hide $value changes the timeline it hides a part of" \
+                produced_by 'apply_output_visibility() sets $omit_values and $omit_rate, in ltl' \
+                contract    'features/597-section-visibility.md § D21'
+        fi
+        assert_command \
+            command     "same_streams col-$alias col-$value" \
+            label       "-hi $alias prints what -hi $value prints" \
+            asserts     "The alias $alias names the $value column: both streams byte-identical" \
+            produced_by 'resolve_visibility_name() through %column_aliases, in ltl' \
+            contract    'features/597-section-visibility.md § D25'
+        assert_command \
+            command     "same_streams col-old-$value col-$value" \
+            label       "$old prints what -hi $value prints" \
+            asserts     "The option $old is exactly --hide $value: both streams byte-identical" \
+            produced_by "the $old entry in adapt_to_command_line_options() pushes hide $value, in ltl" \
+            contract    'features/597-section-visibility.md § D22'
+    done
+    echo ""
+fi
+
+# The later of --hide and --show wins for a column, LTL_CONFIG first (D19).
+# The options row and the summary are hidden as in hide-each-column.
+# --show classification is -scl: it shows the percentage columns on a run mixing
+# an event ledger with a diagnostics log, where they are otherwise not shown,
+# and the later of hide and show decides (D23).
+if scenario_wanted show-column-after-hide; then
+    current_scenario=show-column-after-hide
+    show_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,summary)
+    if LTL_CONFIG='-hi legend' run_ltl env-hide-legend "${show_args[@]}" -sh leg "$NUMERIC_LOG" \
+       && run_ltl hide-show-legend "${show_args[@]}" -hi leg -sh legend "$NUMERIC_LOG" \
+       && run_ltl show-hide-legend "${show_args[@]}" -sh legend -hi leg "$NUMERIC_LOG"; then
+        assert_command \
+            command     "heading_present $(printf '%q' "$(capture env-hide-legend)") legend && heading_present $(printf '%q' "$(capture hide-show-legend)") legend && heading_absent $(printf '%q' "$(capture show-hide-legend)") legend" \
+            label       'the later of --hide and --show decides the legend column, LTL_CONFIG first' \
+            asserts     'A column hidden in LTL_CONFIG or earlier on the command line is shown by a later --show, and hidden by a later --hide' \
+            produced_by 'apply_output_visibility(): the later mention of a column sets %column_visibility, in ltl' \
+            contract    'features/597-section-visibility.md § D19, D21'
+    fi
+    mixed_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,messages,summary)
+    if run_ltl mixed-default "${mixed_args[@]}" "$LEDGER_LOG" "$DIAG_LOG" \
+       && run_ltl mixed-show "${mixed_args[@]}" -sh classification "$LEDGER_LOG" "$DIAG_LOG" \
+       && run_ltl mixed-scl "${mixed_args[@]}" -scl "$LEDGER_LOG" "$DIAG_LOG" \
+       && run_ltl mixed-hcl "${mixed_args[@]}" -hcl "$LEDGER_LOG" "$DIAG_LOG" \
+       && run_ltl mixed-hide-show "${mixed_args[@]}" -hi cls -sh cls "$LEDGER_LOG" "$DIAG_LOG" \
+       && run_ltl mixed-show-hide "${mixed_args[@]}" -sh cls -hi cls "$LEDGER_LOG" "$DIAG_LOG"; then
+        assert_command \
+            command     "heading_absent $(printf '%q' "$(capture mixed-default)") success && heading_present $(printf '%q' "$(capture mixed-show)") success && same_streams mixed-scl mixed-show" \
+            label       '--show classification shows the percentage columns on a mixed run, as -scl does' \
+            asserts     'On a run mixing an event ledger with a diagnostics log the percentage columns are not shown by default, and --show classification shows them, byte-identical to -scl' \
+            produced_by 'apply_output_visibility() sets $show_classification from the classification column, in ltl' \
+            contract    'features/597-section-visibility.md § D23'
+        assert_command \
+            command     "same_streams mixed-hide-show mixed-scl && same_streams mixed-show-hide mixed-hcl" \
+            label       '-hi cls -sh cls is -scl, and -sh cls -hi cls is -hcl' \
+            asserts     'Between --hide classification and --show classification the later wins' \
+            produced_by 'apply_output_visibility() in ltl' \
+            contract    'features/597-section-visibility.md § D19, D23'
+    fi
+    echo ""
+fi
+
+# Sections and columns mix in one list, and the list and the option repeated
+# hide the same things (D8, D21).
+if scenario_wanted hide-sections-and-columns-list; then
+    current_scenario=hide-sections-and-columns-list
+    mix_args=(--disable-progress -bs 1440 -oe -n 1 -hg duration -V section-layout "$NUMERIC_LOG")
+    if run_ltl mix-list -hi legend,hg,opt,sum "${mix_args[@]}" && run_ltl mix-repeat -hi legend -hi hg -hi opt -hi sum "${mix_args[@]}"; then
+        assert_command \
+            command     "same_streams mix-list mix-repeat && heading_absent $(printf '%q' "$(capture mix-list)") legend" \
+            label       '-hi legend,hg,opt,sum and the option repeated hide the same column and sections' \
+            asserts     'One list may name columns and sections, and prints what the option repeated prints' \
+            produced_by 'apply_output_visibility() in ltl' \
+            contract    'features/597-section-visibility.md § D8, D21'
+        assert_state mix-list histogram hidden
+    fi
+    echo ""
+fi
+
+# A user-defined metric's column is named by its heading; the name as written
+# reaches what -hg reaches, the first metric carrying it (D24). A hidden
+# metric's column is still written to the STATS CSV (display only, as D2).
+if scenario_wanted hide-metric-column; then
+    current_scenario=hide-metric-column
+    # -hi legend,stats: both metric headings print in full at this width.
+    udm_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,legend,stats -udm rows -udm rows::delta)
+    if run_ltl udm-shown "${udm_args[@]}" "$UDM_LOG" \
+       && run_ltl udm-hide-delta "${udm_args[@]}" -hi rows:delta "$UDM_LOG" \
+       && run_ltl udm-hide-written "${udm_args[@]}" -hi rows "$UDM_LOG"; then
+        assert_command \
+            command     "heading_present $(printf '%q' "$(capture udm-shown)") rows:sum && heading_present $(printf '%q' "$(capture udm-shown)") rows:delta && heading_absent $(printf '%q' "$(capture udm-hide-delta)") rows:delta && heading_present $(printf '%q' "$(capture udm-hide-delta)") rows:sum" \
+            label       '-hi rows:delta removes that column and keeps rows:sum' \
+            asserts     'A user-defined metric is hidden by its column heading, and only that metric' \
+            produced_by 'udm_config_by_name() and the hidden flag add_dynamic_column() reads, in ltl' \
+            contract    'features/597-section-visibility.md § D24'
+        assert_command \
+            command     "heading_absent $(printf '%q' "$(capture udm-hide-written)") rows:sum && heading_present $(printf '%q' "$(capture udm-hide-written)") rows:delta" \
+            label       '-hi rows reaches rows:sum, as -hg rows does' \
+            asserts     'The name as written, without its suffix, reaches the first metric carrying it, through the lookup -hm and -hg use' \
+            produced_by 'udm_config_by_name() in ltl' \
+            contract    'features/597-section-visibility.md § D24'
+    fi
+    if run_ltl udm-csv-shown "${udm_args[@]}" -o "$UDM_LOG" && run_ltl udm-csv-hidden "${udm_args[@]}" -hi rows:delta -o "$UDM_LOG"; then
+        assert_command \
+            command     "cmp -s $(printf '%q' "$TMP_DIR/udm-csv-shown")/*-LTL-STATS-*.csv $(printf '%q' "$TMP_DIR/udm-csv-hidden")/*-LTL-STATS-*.csv" \
+            label       'the STATS CSV is byte-identical with rows:delta hidden' \
+            asserts     'Hiding a user-defined metric column is a display control: -o writes the same STATS CSV' \
+            produced_by 'the STATS CSV columns in normalize_data_for_output(), in ltl' \
+            contract    'features/597-section-visibility.md § D24, D2'
     fi
     echo ""
 fi
