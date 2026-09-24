@@ -98,6 +98,10 @@ dark terminal background and chooses its colours from it (`-lbg, --light-backgro
 the tool forces that choice on `ltl` rather than letting it detect, and draws the
 image on the matching background.
 
+**D8: the manifest is YAML** (architect, 2026-09-24), read with `YAML::PP`, which
+`ltl` already depends on. It is edited by hand, and YAML carries a comment beside
+each screenshot saying what it is for.
+
 ## Open questions
 
 None.
