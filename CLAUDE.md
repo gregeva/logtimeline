@@ -297,6 +297,7 @@ about anything else, these still hold.
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
+| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `build/screenshots.yaml`, generated, never captured or edited by hand) |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
 | Heatmap and histogram | `features/heatmap.md`, `features/histogram-charts.md`, `docs/explain/` |

@@ -1,0 +1,1204 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1548" height="450" viewBox="0 0 1548 450">
+<desc>crop 'sections=timeline' of: ltl --terminal-width 211 --terminal-height 53 -dbg --disable-progress -hm duration -bs 5 -st 09:00 -et 11:00 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt</desc>
+<rect width="100%" height="100%" fill="#191d27"/>
+<g font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12">
+<rect x="921.6" y="60" width="50.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="60" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="75" width="50.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="75" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="90" width="43.2" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="90" width="14.4" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="105" width="50.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="105" width="14.4" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="120" width="57.6" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="120" width="50.4" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="135" width="64.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="135" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="150" width="43.2" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="150" width="7.2" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="165" width="50.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="165" width="21.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="180" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="180" width="43.2" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="195" width="64.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="195" width="14.4" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="210" width="50.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="210" width="7.2" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="225" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="225" width="21.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="240" width="86.4" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="240" width="57.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="255" width="79.2" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="255" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="270" width="64.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="270" width="21.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="285" width="79.2" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="285" width="43.2" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="300" width="64.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="300" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="315" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="315" width="64.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="330" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="330" width="21.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="345" width="64.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="345" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="360" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="360" width="28.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="375" width="93.6" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="375" width="57.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="390" width="100.8" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="390" width="100.8" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<rect x="921.6" y="405" width="72" height="15" fill="#d7d700" shape-rendering="crispEdges"/>
+<rect x="1036.8" y="405" width="21.6" height="15" fill="#00af00" shape-rendering="crispEdges"/>
+<text x="14.4" y="26.4" fill="#465c6d" textLength="1519.2" lengthAdjust="spacing">───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="50.4" y="41.4" fill="#465c6d" textLength="64.8" lengthAdjust="spacing">timestamp</text>
+<text x="288" y="41.4" fill="#465c6d" textLength="43.2" lengthAdjust="spacing">legend</text>
+<text x="482.4" y="41.4" fill="#465c6d" textLength="50.4" lengthAdjust="spacing">success</text>
+<text x="540" y="41.4" fill="#465c6d" textLength="50.4" lengthAdjust="spacing">failure</text>
+<text x="720" y="41.4" fill="#465c6d" textLength="79.2" lengthAdjust="spacing">occurrences</text>
+<text x="943.2" y="41.4" fill="#465c6d" textLength="57.6" lengthAdjust="spacing">duration</text>
+<text x="1072.8" y="41.4" fill="#465c6d" textLength="36" lengthAdjust="spacing">bytes</text>
+<text x="1159.2" y="41.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">1ms</text>
+<text x="1274.4" y="41.4" fill="#465c6d" textLength="50.4" lengthAdjust="spacing">heatmap</text>
+<text x="1332" y="41.4" fill="#465c6d" textLength="72" lengthAdjust="spacing">[duration]</text>
+<text x="1504.8" y="41.4" fill="#465c6d" textLength="28.8" lengthAdjust="spacing">6.2s</text>
+<text x="14.4" y="56.4" fill="#465c6d" textLength="1519.2" lengthAdjust="spacing">───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="21.6" y="71.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="71.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:00</text>
+<text x="144" y="71.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="71.4" fill="#b45648">2</text>
+<text x="194.4" y="71.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="71.4" fill="#c4ac62">8</text>
+<text x="244.8" y="71.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="71.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">98</text>
+<text x="302.4" y="71.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="71.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.9k</text>
+<text x="403.2" y="71.4" fill="#df6c5a">2</text>
+<text x="410.4" y="71.4" fill="#465c6d">:</text>
+<text x="417.6" y="71.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">807.6</text>
+<text x="453.6" y="71.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="71.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="71.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.248%</text>
+<text x="597.6" y="71.4" fill="#465c6d">│</text>
+<text x="928.8" y="71.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
+<text x="957.6" y="71.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="972" y="71.4" fill="#e5c872">n</text>
+<text x="1044" y="71.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
+<text x="1072.8" y="71.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="71.4" fill="#465c6d">│</text>
+<text x="1188" y="71.4" fill="#465c6d">|</text>
+<text x="1396.8" y="71.4" fill="#465c6d">|</text>
+<text x="1454.4" y="71.4" fill="#465c6d">|</text>
+<text x="21.6" y="86.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="86.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:05</text>
+<text x="144" y="86.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="86.4" fill="#b45648">1</text>
+<text x="194.4" y="86.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="86.4" fill="#c4ac62">5</text>
+<text x="244.8" y="86.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="86.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">48</text>
+<text x="302.4" y="86.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="86.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.5k</text>
+<text x="396" y="86.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
+<text x="417.6" y="86.4" fill="#465c6d">:</text>
+<text x="424.8" y="86.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
+<text x="453.6" y="86.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="86.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="86.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.108%</text>
+<text x="597.6" y="86.4" fill="#465c6d">│</text>
+<text x="928.8" y="86.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
+<text x="957.6" y="86.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="972" y="86.4" fill="#e5c872">n</text>
+<text x="1044" y="86.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
+<text x="1072.8" y="86.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="86.4" fill="#465c6d">│</text>
+<text x="1159.2" y="86.4" fill="#465c6d">|</text>
+<text x="1389.6" y="86.4" fill="#465c6d">|</text>
+<text x="1454.4" y="86.4" fill="#465c6d">|</text>
+<text x="21.6" y="101.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="101.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:10</text>
+<text x="144" y="101.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="101.4" fill="#c4ac62">4</text>
+<text x="194.4" y="101.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="101.4" fill="#bd7bcd">7</text>
+<text x="244.8" y="101.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="101.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.8k</text>
+<text x="388.8" y="101.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
+<text x="410.4" y="101.4" fill="#465c6d">:</text>
+<text x="417.6" y="101.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">767.4</text>
+<text x="453.6" y="101.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="101.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="101.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.104%</text>
+<text x="597.6" y="101.4" fill="#465c6d">│</text>
+<text x="928.8" y="101.4" fill="#35424c">3</text>
+<text x="943.2" y="101.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="101.4" fill="#35424c">2</text>
+<text x="1051.2" y="101.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.3</text>
+<text x="1072.8" y="101.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="101.4" fill="#465c6d">│</text>
+<text x="1159.2" y="101.4" fill="#465c6d">|</text>
+<text x="1396.8" y="101.4" fill="#465c6d">|</text>
+<text x="1454.4" y="101.4" fill="#465c6d">|</text>
+<text x="21.6" y="116.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="116.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:15</text>
+<text x="144" y="116.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="116.4" fill="#b45648">4</text>
+<text x="194.4" y="116.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="116.4" fill="#c4ac62">4</text>
+<text x="244.8" y="116.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="116.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">47</text>
+<text x="302.4" y="116.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="116.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.4k</text>
+<text x="388.8" y="116.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.6</text>
+<text x="410.4" y="116.4" fill="#465c6d">:</text>
+<text x="417.6" y="116.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">689.4</text>
+<text x="453.6" y="116.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="116.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="116.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.232%</text>
+<text x="597.6" y="116.4" fill="#465c6d">│</text>
+<text x="928.8" y="116.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
+<text x="957.6" y="116.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="972" y="116.4" fill="#e5c872">n</text>
+<text x="1044" y="116.4" fill="#35424c">2</text>
+<text x="1051.2" y="116.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.5</text>
+<text x="1072.8" y="116.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="116.4" fill="#465c6d">│</text>
+<text x="1188" y="116.4" fill="#465c6d">|</text>
+<text x="1404" y="116.4" fill="#465c6d">|</text>
+<text x="1454.4" y="116.4" fill="#465c6d">|</text>
+<text x="21.6" y="131.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="131.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:20</text>
+<text x="144" y="131.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="131.4" fill="#c4ac62">5</text>
+<text x="194.4" y="131.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="131.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">61</text>
+<text x="252" y="131.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="288" y="131.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.6k</text>
+<text x="403.2" y="131.4" fill="#df6c5a">1</text>
+<text x="410.4" y="131.4" fill="#465c6d">:</text>
+<text x="417.6" y="131.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">926.4</text>
+<text x="453.6" y="131.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="131.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="131.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.108%</text>
+<text x="597.6" y="131.4" fill="#465c6d">│</text>
+<text x="928.8" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
+<text x="957.6" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.6</text>
+<text x="1072.8" y="131.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">Mi</text>
+<text x="1087.2" y="131.4" fill="#6caa71">B</text>
+<text x="1144.8" y="131.4" fill="#465c6d">│</text>
+<text x="1159.2" y="131.4" fill="#465c6d">|</text>
+<text x="1396.8" y="131.4" fill="#465c6d">|</text>
+<text x="1454.4" y="131.4" fill="#465c6d">|</text>
+<text x="21.6" y="146.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="146.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:25</text>
+<text x="144" y="146.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="146.4" fill="#c4ac62">8</text>
+<text x="194.4" y="146.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="146.4" fill="#bd7bcd" textLength="21.6" lengthAdjust="spacing">103</text>
+<text x="259.2" y="146.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="295.2" y="146.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">4k</text>
+<text x="388.8" y="146.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.6</text>
+<text x="410.4" y="146.4" fill="#465c6d">:</text>
+<text x="417.6" y="146.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">814.2</text>
+<text x="453.6" y="146.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="146.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="146.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.197%</text>
+<text x="597.6" y="146.4" fill="#465c6d">│</text>
+<text x="928.8" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
+<text x="957.6" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
+<text x="1072.8" y="146.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="146.4" fill="#465c6d">│</text>
+<text x="1231.2" y="146.4" fill="#465c6d">|</text>
+<text x="1404" y="146.4" fill="#465c6d">|</text>
+<text x="1454.4" y="146.4" fill="#465c6d">|</text>
+<text x="21.6" y="161.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="161.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:30</text>
+<text x="144" y="161.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="161.4" fill="#c4ac62">4</text>
+<text x="194.4" y="161.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="161.4" fill="#bd7bcd">2</text>
+<text x="244.8" y="161.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="161.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2.5k</text>
+<text x="388.8" y="161.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
+<text x="410.4" y="161.4" fill="#465c6d">:</text>
+<text x="417.6" y="161.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">496.6</text>
+<text x="453.6" y="161.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="161.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="161.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.161%</text>
+<text x="597.6" y="161.4" fill="#465c6d">│</text>
+<text x="928.8" y="161.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">2.8</text>
+<text x="957.6" y="161.4" fill="#35424c">m</text>
+<text x="964.8" y="161.4" fill="#e5c872" textLength="14.4" lengthAdjust="spacing">in</text>
+<text x="1044" y="161.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">1.5</text>
+<text x="1072.8" y="161.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="161.4" fill="#465c6d">│</text>
+<text x="1202.4" y="161.4" fill="#465c6d">|</text>
+<text x="1454.4" y="161.4" fill="#465c6d">|</text>
+<text x="21.6" y="176.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="176.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:35</text>
+<text x="144" y="176.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="176.4" fill="#c4ac62">6</text>
+<text x="194.4" y="176.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="176.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">48</text>
+<text x="252" y="176.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="288" y="176.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.9k</text>
+<text x="403.2" y="176.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
+<text x="424.8" y="176.4" fill="#465c6d">:</text>
+<text x="432" y="176.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">981</text>
+<text x="453.6" y="176.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="176.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="176.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.122%</text>
+<text x="597.6" y="176.4" fill="#465c6d">│</text>
+<text x="928.8" y="176.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.3</text>
+<text x="957.6" y="176.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="972" y="176.4" fill="#e5c872">n</text>
+<text x="1044" y="176.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">2.</text>
+<text x="1058.4" y="176.4" fill="#6caa71">7</text>
+<text x="1072.8" y="176.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="176.4" fill="#465c6d">│</text>
+<text x="1159.2" y="176.4" fill="#465c6d">|</text>
+<text x="1389.6" y="176.4" fill="#465c6d">|</text>
+<text x="1454.4" y="176.4" fill="#465c6d">|</text>
+<text x="21.6" y="191.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="191.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:40</text>
+<text x="144" y="191.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="191.4" fill="#c4ac62">4</text>
+<text x="194.4" y="191.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="191.4" fill="#bd7bcd">4</text>
+<text x="244.8" y="191.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="191.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">6k</text>
+<text x="396" y="191.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
+<text x="417.6" y="191.4" fill="#465c6d">:</text>
+<text x="424.8" y="191.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.2k</text>
+<text x="453.6" y="191.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="191.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="191.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
+<text x="597.6" y="191.4" fill="#465c6d">│</text>
+<text x="928.8" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
+<text x="957.6" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.2</text>
+<text x="1072.8" y="191.4" fill="#35424c">M</text>
+<text x="1080" y="191.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">iB</text>
+<text x="1144.8" y="191.4" fill="#465c6d">│</text>
+<text x="1159.2" y="191.4" fill="#465c6d">|</text>
+<text x="1396.8" y="191.4" fill="#465c6d">|</text>
+<text x="1454.4" y="191.4" fill="#465c6d">|</text>
+<text x="21.6" y="206.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="206.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:45</text>
+<text x="144" y="206.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="206.4" fill="#c4ac62">5</text>
+<text x="194.4" y="206.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="206.4" fill="#bd7bcd">7</text>
+<text x="244.8" y="206.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="206.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.4k</text>
+<text x="403.2" y="206.4" fill="#df6c5a">1</text>
+<text x="410.4" y="206.4" fill="#465c6d">:</text>
+<text x="417.6" y="206.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">686.6</text>
+<text x="453.6" y="206.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="206.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="206.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.146%</text>
+<text x="597.6" y="206.4" fill="#465c6d">│</text>
+<text x="928.8" y="206.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
+<text x="957.6" y="206.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="206.4" fill="#35424c">2</text>
+<text x="1051.2" y="206.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.2</text>
+<text x="1072.8" y="206.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="206.4" fill="#465c6d">│</text>
+<text x="1245.6" y="206.4" fill="#465c6d">|</text>
+<text x="1454.4" y="206.4" fill="#465c6d">|</text>
+<text x="21.6" y="221.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="221.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:50</text>
+<text x="144" y="221.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="221.4" fill="#c4ac62">2</text>
+<text x="194.4" y="221.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="221.4" fill="#bd7bcd">1</text>
+<text x="244.8" y="221.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="221.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">3k</text>
+<text x="403.2" y="221.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.4</text>
+<text x="424.8" y="221.4" fill="#465c6d">:</text>
+<text x="432" y="221.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">608</text>
+<text x="453.6" y="221.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="221.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="221.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
+<text x="597.6" y="221.4" fill="#465c6d">│</text>
+<text x="928.8" y="221.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.5</text>
+<text x="957.6" y="221.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="972" y="221.4" fill="#e5c872">n</text>
+<text x="1044" y="221.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">1.3</text>
+<text x="1072.8" y="221.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="221.4" fill="#465c6d">│</text>
+<text x="1159.2" y="221.4" fill="#465c6d">|</text>
+<text x="1454.4" y="221.4" fill="#465c6d">|</text>
+<text x="21.6" y="236.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="236.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">09:55</text>
+<text x="144" y="236.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="236.4" fill="#c4ac62">5</text>
+<text x="194.4" y="236.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="236.4" fill="#bd7bcd">3</text>
+<text x="244.8" y="236.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="236.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.5k</text>
+<text x="403.2" y="236.4" fill="#df6c5a">1</text>
+<text x="410.4" y="236.4" fill="#465c6d">:</text>
+<text x="417.6" y="236.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">892.6</text>
+<text x="453.6" y="236.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="236.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="236.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.112%</text>
+<text x="597.6" y="236.4" fill="#465c6d">│</text>
+<text x="928.8" y="236.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
+<text x="957.6" y="236.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="236.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
+<text x="1058.4" y="236.4" fill="#6caa71">3</text>
+<text x="1072.8" y="236.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="236.4" fill="#465c6d">│</text>
+<text x="1188" y="236.4" fill="#465c6d">|</text>
+<text x="1411.2" y="236.4" fill="#465c6d">|</text>
+<text x="1454.4" y="236.4" fill="#465c6d">|</text>
+<text x="21.6" y="251.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="251.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:00</text>
+<text x="144" y="251.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="251.4" fill="#c4ac62">5</text>
+<text x="194.4" y="251.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="251.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">26</text>
+<text x="252" y="251.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="288" y="251.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.2k</text>
+<text x="424.8" y="251.4" fill="#df6c5a">1</text>
+<text x="432" y="251.4" fill="#465c6d">:</text>
+<text x="439.2" y="251.4" fill="#e0e0e0" textLength="14.4" lengthAdjust="spacing">1k</text>
+<text x="453.6" y="251.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="251.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="251.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.095%</text>
+<text x="597.6" y="251.4" fill="#465c6d">│</text>
+<text x="928.8" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.3</text>
+<text x="957.6" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">7.8</text>
+<text x="1072.8" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="251.4" fill="#465c6d">│</text>
+<text x="1231.2" y="251.4" fill="#465c6d">|</text>
+<text x="1411.2" y="251.4" fill="#465c6d">|</text>
+<text x="1454.4" y="251.4" fill="#465c6d">|</text>
+<text x="21.6" y="266.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="266.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:05</text>
+<text x="144" y="266.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="266.4" fill="#c4ac62" textLength="14.4" lengthAdjust="spacing">10</text>
+<text x="201.6" y="266.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="237.6" y="266.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">60</text>
+<text x="259.2" y="266.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="295.2" y="266.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.2k</text>
+<text x="410.4" y="266.4" fill="#df6c5a">2</text>
+<text x="417.6" y="266.4" fill="#465c6d">:</text>
+<text x="424.8" y="266.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
+<text x="453.6" y="266.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="266.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="266.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.188%</text>
+<text x="597.6" y="266.4" fill="#465c6d">│</text>
+<text x="928.8" y="266.4" fill="#35424c">5</text>
+<text x="943.2" y="266.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="266.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.3</text>
+<text x="1072.8" y="266.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="266.4" fill="#465c6d">│</text>
+<text x="1202.4" y="266.4" fill="#465c6d">|</text>
+<text x="1404" y="266.4" fill="#465c6d">|</text>
+<text x="1454.4" y="266.4" fill="#465c6d">|</text>
+<text x="21.6" y="281.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="281.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:10</text>
+<text x="144" y="281.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="281.4" fill="#c4ac62">4</text>
+<text x="194.4" y="281.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="281.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">50</text>
+<text x="252" y="281.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="288" y="281.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.4k</text>
+<text x="388.8" y="281.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
+<text x="410.4" y="281.4" fill="#465c6d">:</text>
+<text x="417.6" y="281.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">892.6</text>
+<text x="453.6" y="281.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="281.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="281.4" fill="#d70000" textLength="36" lengthAdjust="spacing">0.09%</text>
+<text x="597.6" y="281.4" fill="#465c6d">│</text>
+<text x="928.8" y="281.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.3</text>
+<text x="957.6" y="281.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="281.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
+<text x="1058.4" y="281.4" fill="#6caa71">2</text>
+<text x="1072.8" y="281.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="281.4" fill="#465c6d">│</text>
+<text x="1159.2" y="281.4" fill="#465c6d">|</text>
+<text x="1411.2" y="281.4" fill="#465c6d">|</text>
+<text x="1454.4" y="281.4" fill="#465c6d">|</text>
+<text x="21.6" y="296.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="296.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:15</text>
+<text x="144" y="296.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="296.4" fill="#b45648">2</text>
+<text x="194.4" y="296.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="296.4" fill="#c4ac62">5</text>
+<text x="244.8" y="296.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="296.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">12</text>
+<text x="302.4" y="296.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="296.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.3k</text>
+<text x="396" y="296.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.4</text>
+<text x="417.6" y="296.4" fill="#465c6d">:</text>
+<text x="424.8" y="296.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
+<text x="453.6" y="296.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="296.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="296.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.132%</text>
+<text x="597.6" y="296.4" fill="#465c6d">│</text>
+<text x="928.8" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.1</text>
+<text x="957.6" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.8</text>
+<text x="1072.8" y="296.4" fill="#35424c">M</text>
+<text x="1080" y="296.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">iB</text>
+<text x="1144.8" y="296.4" fill="#465c6d">│</text>
+<text x="1231.2" y="296.4" fill="#465c6d">|</text>
+<text x="1396.8" y="296.4" fill="#465c6d">|</text>
+<text x="1454.4" y="296.4" fill="#465c6d">|</text>
+<text x="21.6" y="311.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="311.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:20</text>
+<text x="144" y="311.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="311.4" fill="#c4ac62">6</text>
+<text x="194.4" y="311.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="311.4" fill="#bd7bcd">9</text>
+<text x="244.8" y="311.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="311.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.4k</text>
+<text x="388.8" y="311.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
+<text x="410.4" y="311.4" fill="#465c6d">:</text>
+<text x="417.6" y="311.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">889.2</text>
+<text x="453.6" y="311.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="311.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="311.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.135%</text>
+<text x="597.6" y="311.4" fill="#465c6d">│</text>
+<text x="928.8" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.2</text>
+<text x="957.6" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
+<text x="1072.8" y="311.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="311.4" fill="#465c6d">│</text>
+<text x="1202.4" y="311.4" fill="#465c6d">|</text>
+<text x="1396.8" y="311.4" fill="#465c6d">|</text>
+<text x="1454.4" y="311.4" fill="#465c6d">|</text>
+<text x="21.6" y="326.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="326.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:25</text>
+<text x="144" y="326.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="326.4" fill="#b45648">4</text>
+<text x="194.4" y="326.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="326.4" fill="#c4ac62">8</text>
+<text x="244.8" y="326.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="326.4" fill="#bd7bcd" textLength="21.6" lengthAdjust="spacing">100</text>
+<text x="309.6" y="326.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="345.6" y="326.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">6.1k</text>
+<text x="396" y="326.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">2.4</text>
+<text x="417.6" y="326.4" fill="#465c6d">:</text>
+<text x="424.8" y="326.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.3k</text>
+<text x="453.6" y="326.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="326.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="326.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.192%</text>
+<text x="597.6" y="326.4" fill="#465c6d">│</text>
+<text x="928.8" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.6</text>
+<text x="957.6" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">8.3</text>
+<text x="1072.8" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="326.4" fill="#465c6d">│</text>
+<text x="1159.2" y="326.4" fill="#465c6d">|</text>
+<text x="1396.8" y="326.4" fill="#465c6d">|</text>
+<text x="1454.4" y="326.4" fill="#465c6d">|</text>
+<text x="21.6" y="341.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="341.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:30</text>
+<text x="144" y="341.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="341.4" fill="#c4ac62">5</text>
+<text x="194.4" y="341.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="341.4" fill="#bd7bcd">2</text>
+<text x="244.8" y="341.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="280.8" y="341.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.1k</text>
+<text x="424.8" y="341.4" fill="#df6c5a">1</text>
+<text x="432" y="341.4" fill="#465c6d">:</text>
+<text x="439.2" y="341.4" fill="#e0e0e0" textLength="14.4" lengthAdjust="spacing">1k</text>
+<text x="453.6" y="341.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="341.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="341.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.098%</text>
+<text x="597.6" y="341.4" fill="#465c6d">│</text>
+<text x="928.8" y="341.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.8</text>
+<text x="957.6" y="341.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="341.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
+<text x="1058.4" y="341.4" fill="#6caa71">5</text>
+<text x="1072.8" y="341.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="341.4" fill="#465c6d">│</text>
+<text x="1159.2" y="341.4" fill="#465c6d">|</text>
+<text x="1396.8" y="341.4" fill="#465c6d">|</text>
+<text x="1454.4" y="341.4" fill="#465c6d">|</text>
+<text x="21.6" y="356.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="356.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:35</text>
+<text x="144" y="356.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="356.4" fill="#c4ac62">6</text>
+<text x="194.4" y="356.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="230.4" y="356.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">96</text>
+<text x="252" y="356.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="288" y="356.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">5k</text>
+<text x="410.4" y="356.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
+<text x="432" y="356.4" fill="#465c6d">:</text>
+<text x="439.2" y="356.4" fill="#e0e0e0" textLength="14.4" lengthAdjust="spacing">1k</text>
+<text x="453.6" y="356.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="356.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="356.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.116%</text>
+<text x="597.6" y="356.4" fill="#465c6d">│</text>
+<text x="928.8" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
+<text x="957.6" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
+<text x="1072.8" y="356.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="356.4" fill="#465c6d">│</text>
+<text x="1159.2" y="356.4" fill="#465c6d">|</text>
+<text x="1396.8" y="356.4" fill="#465c6d">|</text>
+<text x="1454.4" y="356.4" fill="#465c6d">|</text>
+<text x="21.6" y="371.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="371.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:40</text>
+<text x="144" y="371.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="371.4" fill="#b45648">1</text>
+<text x="194.4" y="371.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="371.4" fill="#c4ac62">3</text>
+<text x="244.8" y="371.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="371.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">51</text>
+<text x="302.4" y="371.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="371.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">6k</text>
+<text x="396" y="371.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
+<text x="417.6" y="371.4" fill="#465c6d">:</text>
+<text x="424.8" y="371.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.2k</text>
+<text x="453.6" y="371.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="371.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
+<text x="547.2" y="371.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
+<text x="597.6" y="371.4" fill="#465c6d">│</text>
+<text x="928.8" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
+<text x="957.6" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.7</text>
+<text x="1072.8" y="371.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="371.4" fill="#465c6d">│</text>
+<text x="1159.2" y="371.4" fill="#465c6d">|</text>
+<text x="1396.8" y="371.4" fill="#465c6d">|</text>
+<text x="1454.4" y="371.4" fill="#465c6d">|</text>
+<text x="21.6" y="386.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="386.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:45</text>
+<text x="144" y="386.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="386.4" fill="#b45648">8</text>
+<text x="194.4" y="386.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="386.4" fill="#c4ac62" textLength="14.4" lengthAdjust="spacing">45</text>
+<text x="252" y="386.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="288" y="386.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">64</text>
+<text x="309.6" y="386.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="345.6" y="386.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8.7k</text>
+<text x="388.8" y="386.4" fill="#df6c5a" textLength="28.8" lengthAdjust="spacing">10.6</text>
+<text x="417.6" y="386.4" fill="#465c6d">:</text>
+<text x="424.8" y="386.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.8k</text>
+<text x="453.6" y="386.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="386.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.4%</text>
+<text x="547.2" y="386.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.599%</text>
+<text x="597.6" y="386.4" fill="#465c6d">│</text>
+<text x="928.8" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.9</text>
+<text x="957.6" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">7.7</text>
+<text x="1072.8" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="386.4" fill="#465c6d">│</text>
+<text x="1159.2" y="386.4" fill="#465c6d">|</text>
+<text x="1389.6" y="386.4" fill="#465c6d">|</text>
+<text x="1454.4" y="386.4" fill="#465c6d">|</text>
+<text x="21.6" y="401.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="401.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:50</text>
+<text x="144" y="401.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="180" y="401.4" fill="#c4ac62" textLength="21.6" lengthAdjust="spacing">232</text>
+<text x="208.8" y="401.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="244.8" y="401.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">67</text>
+<text x="266.4" y="401.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="302.4" y="401.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8.6k</text>
+<text x="388.8" y="401.4" fill="#df6c5a" textLength="28.8" lengthAdjust="spacing">46.4</text>
+<text x="417.6" y="401.4" fill="#465c6d">:</text>
+<text x="424.8" y="401.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.8k</text>
+<text x="453.6" y="401.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="401.4" fill="#00af00" textLength="36" lengthAdjust="spacing">97.4%</text>
+<text x="547.2" y="401.4" fill="#d70000" textLength="36" lengthAdjust="spacing">2.62%</text>
+<text x="597.6" y="401.4" fill="#465c6d">│</text>
+<text x="928.8" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.2</text>
+<text x="957.6" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="401.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">12.8</text>
+<text x="1080" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="401.4" fill="#465c6d">│</text>
+<text x="1188" y="401.4" fill="#465c6d">|</text>
+<text x="1389.6" y="401.4" fill="#465c6d">|</text>
+<text x="1454.4" y="401.4" fill="#465c6d">|</text>
+<text x="21.6" y="416.4" fill="#e0e0e0" textLength="72" lengthAdjust="spacing">2025-05-07</text>
+<text x="100.8" y="416.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">10:55</text>
+<text x="144" y="416.4" fill="#b45648" textLength="28.8" lengthAdjust="spacing">5xx:</text>
+<text x="180" y="416.4" fill="#b45648">2</text>
+<text x="194.4" y="416.4" fill="#c4ac62" textLength="28.8" lengthAdjust="spacing">4xx:</text>
+<text x="230.4" y="416.4" fill="#c4ac62">5</text>
+<text x="244.8" y="416.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
+<text x="280.8" y="416.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">52</text>
+<text x="302.4" y="416.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
+<text x="338.4" y="416.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">4k</text>
+<text x="403.2" y="416.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.4</text>
+<text x="424.8" y="416.4" fill="#465c6d">:</text>
+<text x="432" y="416.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">805</text>
+<text x="453.6" y="416.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
+<text x="489.6" y="416.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
+<text x="547.2" y="416.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.174%</text>
+<text x="597.6" y="416.4" fill="#465c6d">│</text>
+<text x="928.8" y="416.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.6</text>
+<text x="957.6" y="416.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="1044" y="416.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
+<text x="1058.4" y="416.4" fill="#6caa71">3</text>
+<text x="1072.8" y="416.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1144.8" y="416.4" fill="#465c6d">│</text>
+<text x="1231.2" y="416.4" fill="#465c6d">|</text>
+<text x="1454.4" y="416.4" fill="#465c6d">|</text>
+<text x="14.4" y="431.4" fill="#465c6d" textLength="1519.2" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────7.5ms───────66.7ms───────592.9ms──────6.2s</text>
+<text x="612" y="71.4" fill="#6caa71" textLength="129.6" lengthAdjust="spacing">██████████████████</text>
+<text x="1159.2" y="71.4" fill="#ffd700">█</text>
+<text x="1202.4" y="71.4" fill="#afaf00">█</text>
+<text x="1216.8" y="71.4" fill="#af8700">█</text>
+<text x="1224" y="71.4" fill="#875f00">█</text>
+<text x="1231.2" y="71.4" fill="#afaf00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1260" y="71.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1274.4" y="71.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="71.4" fill="#af8700">█</text>
+<text x="1296" y="71.4" fill="#afaf00">█</text>
+<text x="1303.2" y="71.4" fill="#af8700">█</text>
+<text x="1310.4" y="71.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1324.8" y="71.4" fill="#d7af00">█</text>
+<text x="1332" y="71.4" fill="#d7d700">█</text>
+<text x="1339.2" y="71.4" fill="#afaf00">█</text>
+<text x="1346.4" y="71.4" fill="#875f00">█</text>
+<text x="1353.6" y="71.4" fill="#afaf00">█</text>
+<text x="1360.8" y="71.4" fill="#af8700">█</text>
+<text x="1368" y="71.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="71.4" fill="#875f00">█</text>
+<text x="1389.6" y="71.4" fill="#af8700">█</text>
+<text x="1404" y="71.4" fill="#875f00">█</text>
+<text x="1411.2" y="71.4" fill="#af8700">█</text>
+<text x="1418.4" y="71.4" fill="#5f5f00">█</text>
+<text x="1461.6" y="71.4" fill="#5f5f00">█</text>
+<text x="612" y="86.4" fill="#6caa71" textLength="180" lengthAdjust="spacing">█████████████████████████</text>
+<text x="1188" y="86.4" fill="#d7af00">█</text>
+<text x="1202.4" y="86.4" fill="#afaf00">█</text>
+<text x="1216.8" y="86.4" fill="#af8700">█</text>
+<text x="1224" y="86.4" fill="#875f00">█</text>
+<text x="1231.2" y="86.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1245.6" y="86.4" fill="#af8700">█</text>
+<text x="1252.8" y="86.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1267.2" y="86.4" fill="#af8700">█</text>
+<text x="1274.4" y="86.4" fill="#875f00">█</text>
+<text x="1281.6" y="86.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1296" y="86.4" fill="#afaf00">█</text>
+<text x="1303.2" y="86.4" fill="#af8700">█</text>
+<text x="1310.4" y="86.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1324.8" y="86.4" fill="#d7af00">█</text>
+<text x="1332" y="86.4" fill="#d7d700">█</text>
+<text x="1339.2" y="86.4" fill="#afaf00">█</text>
+<text x="1346.4" y="86.4" fill="#875f00">█</text>
+<text x="1353.6" y="86.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="86.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1382.4" y="86.4" fill="#875f00">█</text>
+<text x="1396.8" y="86.4" fill="#afaf00">█</text>
+<text x="1404" y="86.4" fill="#875f00">█</text>
+<text x="1411.2" y="86.4" fill="#af8700">█</text>
+<text x="1418.4" y="86.4" fill="#875f00">█</text>
+<text x="612" y="101.4" fill="#6caa71" textLength="129.6" lengthAdjust="spacing">██████████████████</text>
+<text x="1188" y="101.4" fill="#afaf00">█</text>
+<text x="1202.4" y="101.4" fill="#af8700">█</text>
+<text x="1216.8" y="101.4" fill="#875f00">█</text>
+<text x="1224" y="101.4" fill="#5f5f00">█</text>
+<text x="1231.2" y="101.4" fill="#af8700" textLength="43.2" lengthAdjust="spacing">██████</text>
+<text x="1274.4" y="101.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="101.4" fill="#875f00">█</text>
+<text x="1296" y="101.4" fill="#af8700" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1324.8" y="101.4" fill="#d7af00">█</text>
+<text x="1332" y="101.4" fill="#d7d700">█</text>
+<text x="1339.2" y="101.4" fill="#af8700">█</text>
+<text x="1353.6" y="101.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="101.4" fill="#5f5f00">█</text>
+<text x="1389.6" y="101.4" fill="#af8700">█</text>
+<text x="1404" y="101.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1418.4" y="101.4" fill="#5f5f00">█</text>
+<text x="612" y="116.4" fill="#6caa71" textLength="115.2" lengthAdjust="spacing">████████████████</text>
+<text x="1159.2" y="116.4" fill="#ffd700">█</text>
+<text x="1202.4" y="116.4" fill="#afaf00">█</text>
+<text x="1216.8" y="116.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1231.2" y="116.4" fill="#af8700">█</text>
+<text x="1238.4" y="116.4" fill="#afaf00">█</text>
+<text x="1245.6" y="116.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1260" y="116.4" fill="#afaf00">█</text>
+<text x="1267.2" y="116.4" fill="#af8700">█</text>
+<text x="1274.4" y="116.4" fill="#5f5f00">█</text>
+<text x="1281.6" y="116.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1296" y="116.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1310.4" y="116.4" fill="#afaf00">█</text>
+<text x="1317.6" y="116.4" fill="#af8700">█</text>
+<text x="1324.8" y="116.4" fill="#d7af00">█</text>
+<text x="1332" y="116.4" fill="#d7d700">█</text>
+<text x="1339.2" y="116.4" fill="#afaf00">█</text>
+<text x="1346.4" y="116.4" fill="#875f00">█</text>
+<text x="1353.6" y="116.4" fill="#af8700">█</text>
+<text x="1360.8" y="116.4" fill="#afaf00">█</text>
+<text x="1368" y="116.4" fill="#5f5f00">█</text>
+<text x="1389.6" y="116.4" fill="#af8700">█</text>
+<text x="1396.8" y="116.4" fill="#afaf00">█</text>
+<text x="1411.2" y="116.4" fill="#af8700">█</text>
+<text x="1418.4" y="116.4" fill="#5f5f00">█</text>
+<text x="612" y="131.4" fill="#6caa71" textLength="151.2" lengthAdjust="spacing">█████████████████████</text>
+<text x="1188" y="131.4" fill="#d7af00">█</text>
+<text x="1202.4" y="131.4" fill="#afaf00">█</text>
+<text x="1216.8" y="131.4" fill="#afaf00">█</text>
+<text x="1224" y="131.4" fill="#af8700">█</text>
+<text x="1231.2" y="131.4" fill="#afaf00" textLength="36" lengthAdjust="spacing">█████</text>
+<text x="1267.2" y="131.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1281.6" y="131.4" fill="#875f00">█</text>
+<text x="1288.8" y="131.4" fill="#af8700">█</text>
+<text x="1296" y="131.4" fill="#afaf00">█</text>
+<text x="1303.2" y="131.4" fill="#af8700">█</text>
+<text x="1310.4" y="131.4" fill="#afaf00">█</text>
+<text x="1317.6" y="131.4" fill="#af8700">█</text>
+<text x="1324.8" y="131.4" fill="#d7af00">█</text>
+<text x="1332" y="131.4" fill="#d7d700">█</text>
+<text x="1339.2" y="131.4" fill="#afaf00">█</text>
+<text x="1346.4" y="131.4" fill="#af8700">█</text>
+<text x="1353.6" y="131.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="131.4" fill="#5f5f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1389.6" y="131.4" fill="#af8700">█</text>
+<text x="1404" y="131.4" fill="#875f00">█</text>
+<text x="1411.2" y="131.4" fill="#af8700">█</text>
+<text x="1418.4" y="131.4" fill="#875f00">█</text>
+<text x="1447.2" y="131.4" fill="#875f00">█</text>
+<text x="612" y="146.4" fill="#6caa71" textLength="129.6" lengthAdjust="spacing">██████████████████</text>
+<text x="1159.2" y="146.4" fill="#ffd700">█</text>
+<text x="1188" y="146.4" fill="#d7af00">█</text>
+<text x="1202.4" y="146.4" fill="#af8700">█</text>
+<text x="1216.8" y="146.4" fill="#af8700">█</text>
+<text x="1224" y="146.4" fill="#875f00">█</text>
+<text x="1238.4" y="146.4" fill="#afaf00">█</text>
+<text x="1245.6" y="146.4" fill="#af8700">█</text>
+<text x="1252.8" y="146.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1274.4" y="146.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1296" y="146.4" fill="#afaf00">█</text>
+<text x="1303.2" y="146.4" fill="#af8700">█</text>
+<text x="1310.4" y="146.4" fill="#afaf00">█</text>
+<text x="1317.6" y="146.4" fill="#af8700">█</text>
+<text x="1324.8" y="146.4" fill="#d7af00">█</text>
+<text x="1332" y="146.4" fill="#d7d700">█</text>
+<text x="1339.2" y="146.4" fill="#afaf00">█</text>
+<text x="1346.4" y="146.4" fill="#af8700">█</text>
+<text x="1353.6" y="146.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="146.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="146.4" fill="#875f00">█</text>
+<text x="1389.6" y="146.4" fill="#af8700">█</text>
+<text x="1396.8" y="146.4" fill="#afaf00">█</text>
+<text x="1411.2" y="146.4" fill="#af8700">█</text>
+<text x="1418.4" y="146.4" fill="#875f00">█</text>
+<text x="1425.6" y="146.4" fill="#5f5f00">█</text>
+<text x="612" y="161.4" fill="#6caa71" textLength="79.2" lengthAdjust="spacing">███████████</text>
+<text x="1159.2" y="161.4" fill="#d7d700">█</text>
+<text x="1188" y="161.4" fill="#af8700">█</text>
+<text x="1216.8" y="161.4" fill="#875f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1238.4" y="161.4" fill="#af8700">█</text>
+<text x="1245.6" y="161.4" fill="#875f00">█</text>
+<text x="1252.8" y="161.4" fill="#af8700">█</text>
+<text x="1260" y="161.4" fill="#875f00">█</text>
+<text x="1267.2" y="161.4" fill="#5f5f00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1296" y="161.4" fill="#875f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1317.6" y="161.4" fill="#af8700">█</text>
+<text x="1324.8" y="161.4" fill="#d7af00">█</text>
+<text x="1332" y="161.4" fill="#d7d700">█</text>
+<text x="1339.2" y="161.4" fill="#af8700">█</text>
+<text x="1346.4" y="161.4" fill="#5f5f00">█</text>
+<text x="1353.6" y="161.4" fill="#af8700">█</text>
+<text x="1360.8" y="161.4" fill="#875f00">█</text>
+<text x="1368" y="161.4" fill="#5f5f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1389.6" y="161.4" fill="#875f00">█</text>
+<text x="1396.8" y="161.4" fill="#af8700">█</text>
+<text x="1411.2" y="161.4" fill="#875f00">█</text>
+<text x="1418.4" y="161.4" fill="#5f5f00">█</text>
+<text x="612" y="176.4" fill="#6caa71" textLength="158.4" lengthAdjust="spacing">██████████████████████</text>
+<text x="1188" y="176.4" fill="#afaf00">█</text>
+<text x="1202.4" y="176.4" fill="#af8700">█</text>
+<text x="1216.8" y="176.4" fill="#af8700">█</text>
+<text x="1224" y="176.4" fill="#875f00">█</text>
+<text x="1231.2" y="176.4" fill="#af8700" textLength="36" lengthAdjust="spacing">█████</text>
+<text x="1267.2" y="176.4" fill="#875f00">█</text>
+<text x="1274.4" y="176.4" fill="#af8700">█</text>
+<text x="1281.6" y="176.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1296" y="176.4" fill="#af8700">█</text>
+<text x="1303.2" y="176.4" fill="#875f00">█</text>
+<text x="1310.4" y="176.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1324.8" y="176.4" fill="#d7af00">█</text>
+<text x="1332" y="176.4" fill="#d7d700">█</text>
+<text x="1339.2" y="176.4" fill="#af8700">█</text>
+<text x="1346.4" y="176.4" fill="#5f5f00">█</text>
+<text x="1353.6" y="176.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="176.4" fill="#5f5f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1396.8" y="176.4" fill="#afaf00">█</text>
+<text x="1404" y="176.4" fill="#875f00">█</text>
+<text x="1411.2" y="176.4" fill="#af8700">█</text>
+<text x="1418.4" y="176.4" fill="#5f5f00">█</text>
+<text x="612" y="191.4" fill="#6caa71" textLength="201.6" lengthAdjust="spacing">████████████████████████████</text>
+<text x="1188" y="191.4" fill="#afaf00">█</text>
+<text x="1202.4" y="191.4" fill="#afaf00">█</text>
+<text x="1216.8" y="191.4" fill="#af8700" textLength="36" lengthAdjust="spacing">█████</text>
+<text x="1252.8" y="191.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1267.2" y="191.4" fill="#af8700">█</text>
+<text x="1274.4" y="191.4" fill="#875f00">█</text>
+<text x="1281.6" y="191.4" fill="#af8700">█</text>
+<text x="1288.8" y="191.4" fill="#875f00">█</text>
+<text x="1296" y="191.4" fill="#afaf00">█</text>
+<text x="1303.2" y="191.4" fill="#af8700">█</text>
+<text x="1310.4" y="191.4" fill="#afaf00">█</text>
+<text x="1317.6" y="191.4" fill="#af8700">█</text>
+<text x="1324.8" y="191.4" fill="#d7af00">█</text>
+<text x="1332" y="191.4" fill="#d7d700">█</text>
+<text x="1339.2" y="191.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1353.6" y="191.4" fill="#afaf00">█</text>
+<text x="1360.8" y="191.4" fill="#af8700">█</text>
+<text x="1368" y="191.4" fill="#875f00">█</text>
+<text x="1375.2" y="191.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1389.6" y="191.4" fill="#af8700">█</text>
+<text x="1404" y="191.4" fill="#5f5f00">█</text>
+<text x="1411.2" y="191.4" fill="#af8700">█</text>
+<text x="1418.4" y="191.4" fill="#875f00">█</text>
+<text x="1432.8" y="191.4" fill="#5f5f00">█</text>
+<text x="612" y="206.4" fill="#6caa71" textLength="115.2" lengthAdjust="spacing">████████████████</text>
+<text x="1159.2" y="206.4" fill="#ffd700">█</text>
+<text x="1188" y="206.4" fill="#afaf00">█</text>
+<text x="1202.4" y="206.4" fill="#af8700">█</text>
+<text x="1216.8" y="206.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1231.2" y="206.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1252.8" y="206.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1274.4" y="206.4" fill="#875f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1296" y="206.4" fill="#af8700" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1324.8" y="206.4" fill="#d7af00">█</text>
+<text x="1332" y="206.4" fill="#d7d700">█</text>
+<text x="1339.2" y="206.4" fill="#af8700">█</text>
+<text x="1346.4" y="206.4" fill="#875f00">█</text>
+<text x="1353.6" y="206.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="206.4" fill="#5f5f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1389.6" y="206.4" fill="#af8700">█</text>
+<text x="1396.8" y="206.4" fill="#afaf00">█</text>
+<text x="1404" y="206.4" fill="#875f00">█</text>
+<text x="1411.2" y="206.4" fill="#af8700">█</text>
+<text x="1418.4" y="206.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="612" y="221.4" fill="#6caa71" textLength="100.8" lengthAdjust="spacing">██████████████</text>
+<text x="1188" y="221.4" fill="#af8700">█</text>
+<text x="1202.4" y="221.4" fill="#875f00">█</text>
+<text x="1224" y="221.4" fill="#875f00">█</text>
+<text x="1231.2" y="221.4" fill="#5f5f00">█</text>
+<text x="1238.4" y="221.4" fill="#875f00">█</text>
+<text x="1245.6" y="221.4" fill="#5f5f00">█</text>
+<text x="1252.8" y="221.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1267.2" y="221.4" fill="#5f5f00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1296" y="221.4" fill="#875f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1317.6" y="221.4" fill="#af8700">█</text>
+<text x="1324.8" y="221.4" fill="#d7af00">█</text>
+<text x="1332" y="221.4" fill="#d7d700">█</text>
+<text x="1339.2" y="221.4" fill="#af8700">█</text>
+<text x="1353.6" y="221.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1375.2" y="221.4" fill="#5f5f00">█</text>
+<text x="1389.6" y="221.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1404" y="221.4" fill="#5f5f00">█</text>
+<text x="1411.2" y="221.4" fill="#875f00">█</text>
+<text x="1418.4" y="221.4" fill="#5f5f00">█</text>
+<text x="612" y="236.4" fill="#6caa71" textLength="151.2" lengthAdjust="spacing">█████████████████████</text>
+<text x="1159.2" y="236.4" fill="#ffd700">█</text>
+<text x="1202.4" y="236.4" fill="#af8700">█</text>
+<text x="1216.8" y="236.4" fill="#af8700" textLength="43.2" lengthAdjust="spacing">██████</text>
+<text x="1260" y="236.4" fill="#afaf00">█</text>
+<text x="1267.2" y="236.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1281.6" y="236.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1296" y="236.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1317.6" y="236.4" fill="#af8700">█</text>
+<text x="1324.8" y="236.4" fill="#d7af00">█</text>
+<text x="1332" y="236.4" fill="#d7d700">█</text>
+<text x="1339.2" y="236.4" fill="#afaf00">█</text>
+<text x="1346.4" y="236.4" fill="#af8700">█</text>
+<text x="1353.6" y="236.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="236.4" fill="#875f00">█</text>
+<text x="1382.4" y="236.4" fill="#5f5f00">█</text>
+<text x="1389.6" y="236.4" fill="#af8700">█</text>
+<text x="1396.8" y="236.4" fill="#afaf00">█</text>
+<text x="1404" y="236.4" fill="#875f00">█</text>
+<text x="1418.4" y="236.4" fill="#875f00">█</text>
+<text x="1447.2" y="236.4" fill="#5f5f00">█</text>
+<text x="1526.4" y="236.4" fill="#5f5f00">█</text>
+<text x="612" y="251.4" fill="#6caa71" textLength="172.8" lengthAdjust="spacing">████████████████████████</text>
+<text x="1159.2" y="251.4" fill="#ffd700">█</text>
+<text x="1188" y="251.4" fill="#d7af00">█</text>
+<text x="1202.4" y="251.4" fill="#afaf00">█</text>
+<text x="1216.8" y="251.4" fill="#afaf00">█</text>
+<text x="1224" y="251.4" fill="#af8700">█</text>
+<text x="1238.4" y="251.4" fill="#afaf00">█</text>
+<text x="1245.6" y="251.4" fill="#af8700">█</text>
+<text x="1252.8" y="251.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1274.4" y="251.4" fill="#af8700">█</text>
+<text x="1281.6" y="251.4" fill="#875f00">█</text>
+<text x="1288.8" y="251.4" fill="#af8700">█</text>
+<text x="1296" y="251.4" fill="#afaf00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1324.8" y="251.4" fill="#d7af00">█</text>
+<text x="1332" y="251.4" fill="#d7d700">█</text>
+<text x="1339.2" y="251.4" fill="#afaf00">█</text>
+<text x="1346.4" y="251.4" fill="#af8700">█</text>
+<text x="1353.6" y="251.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="251.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1382.4" y="251.4" fill="#af8700">█</text>
+<text x="1389.6" y="251.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1404" y="251.4" fill="#af8700">█</text>
+<text x="1418.4" y="251.4" fill="#af8700">█</text>
+<text x="1432.8" y="251.4" fill="#5f5f00">█</text>
+<text x="612" y="266.4" fill="#6caa71" textLength="172.8" lengthAdjust="spacing">████████████████████████</text>
+<text x="1159.2" y="266.4" fill="#ffd700">█</text>
+<text x="1188" y="266.4" fill="#d7af00">█</text>
+<text x="1216.8" y="266.4" fill="#afaf00">█</text>
+<text x="1224" y="266.4" fill="#875f00">█</text>
+<text x="1231.2" y="266.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1245.6" y="266.4" fill="#af8700">█</text>
+<text x="1252.8" y="266.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1274.4" y="266.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="266.4" fill="#af8700">█</text>
+<text x="1296" y="266.4" fill="#afaf00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1324.8" y="266.4" fill="#d7af00">█</text>
+<text x="1332" y="266.4" fill="#d7d700">█</text>
+<text x="1339.2" y="266.4" fill="#afaf00">█</text>
+<text x="1346.4" y="266.4" fill="#875f00">█</text>
+<text x="1353.6" y="266.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1375.2" y="266.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="266.4" fill="#875f00">█</text>
+<text x="1389.6" y="266.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1411.2" y="266.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1447.2" y="266.4" fill="#5f5f00">█</text>
+<text x="612" y="281.4" fill="#6caa71" textLength="144" lengthAdjust="spacing">████████████████████</text>
+<text x="1188" y="281.4" fill="#afaf00">█</text>
+<text x="1202.4" y="281.4" fill="#afaf00">█</text>
+<text x="1216.8" y="281.4" fill="#af8700">█</text>
+<text x="1224" y="281.4" fill="#875f00">█</text>
+<text x="1231.2" y="281.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1245.6" y="281.4" fill="#af8700" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1274.4" y="281.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="281.4" fill="#af8700">█</text>
+<text x="1296" y="281.4" fill="#afaf00">█</text>
+<text x="1303.2" y="281.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1324.8" y="281.4" fill="#d7af00">█</text>
+<text x="1332" y="281.4" fill="#d7d700">█</text>
+<text x="1339.2" y="281.4" fill="#afaf00">█</text>
+<text x="1346.4" y="281.4" fill="#875f00">█</text>
+<text x="1353.6" y="281.4" fill="#afaf00">█</text>
+<text x="1360.8" y="281.4" fill="#af8700">█</text>
+<text x="1368" y="281.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="281.4" fill="#875f00">█</text>
+<text x="1389.6" y="281.4" fill="#af8700">█</text>
+<text x="1396.8" y="281.4" fill="#afaf00">█</text>
+<text x="1404" y="281.4" fill="#875f00">█</text>
+<text x="1418.4" y="281.4" fill="#875f00">█</text>
+<text x="612" y="296.4" fill="#6caa71" textLength="172.8" lengthAdjust="spacing">████████████████████████</text>
+<text x="1159.2" y="296.4" fill="#ffd700">█</text>
+<text x="1188" y="296.4" fill="#d7af00">█</text>
+<text x="1202.4" y="296.4" fill="#afaf00">█</text>
+<text x="1216.8" y="296.4" fill="#afaf00">█</text>
+<text x="1224" y="296.4" fill="#af8700">█</text>
+<text x="1238.4" y="296.4" fill="#afaf00" textLength="36" lengthAdjust="spacing">█████</text>
+<text x="1274.4" y="296.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="296.4" fill="#afaf00" textLength="36" lengthAdjust="spacing">█████</text>
+<text x="1324.8" y="296.4" fill="#d7af00">█</text>
+<text x="1332" y="296.4" fill="#d7d700">█</text>
+<text x="1339.2" y="296.4" fill="#afaf00">█</text>
+<text x="1346.4" y="296.4" fill="#af8700">█</text>
+<text x="1353.6" y="296.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="296.4" fill="#875f00">█</text>
+<text x="1382.4" y="296.4" fill="#875f00">█</text>
+<text x="1389.6" y="296.4" fill="#afaf00">█</text>
+<text x="1404" y="296.4" fill="#875f00">█</text>
+<text x="1411.2" y="296.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="612" y="311.4" fill="#6caa71" textLength="144" lengthAdjust="spacing">████████████████████</text>
+<text x="1159.2" y="311.4" fill="#ffd700">█</text>
+<text x="1188" y="311.4" fill="#d7af00">█</text>
+<text x="1216.8" y="311.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1231.2" y="311.4" fill="#afaf00" textLength="43.2" lengthAdjust="spacing">██████</text>
+<text x="1274.4" y="311.4" fill="#af8700">█</text>
+<text x="1281.6" y="311.4" fill="#875f00">█</text>
+<text x="1288.8" y="311.4" fill="#af8700">█</text>
+<text x="1296" y="311.4" fill="#afaf00">█</text>
+<text x="1303.2" y="311.4" fill="#af8700">█</text>
+<text x="1310.4" y="311.4" fill="#afaf00">█</text>
+<text x="1317.6" y="311.4" fill="#af8700">█</text>
+<text x="1324.8" y="311.4" fill="#d7af00">█</text>
+<text x="1332" y="311.4" fill="#d7d700">█</text>
+<text x="1339.2" y="311.4" fill="#afaf00">█</text>
+<text x="1346.4" y="311.4" fill="#875f00">█</text>
+<text x="1353.6" y="311.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="311.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1382.4" y="311.4" fill="#875f00">█</text>
+<text x="1389.6" y="311.4" fill="#af8700">█</text>
+<text x="1404" y="311.4" fill="#5f5f00">█</text>
+<text x="1411.2" y="311.4" fill="#af8700">█</text>
+<text x="1418.4" y="311.4" fill="#875f00">█</text>
+<text x="1425.6" y="311.4" fill="#5f5f00">█</text>
+<text x="612" y="326.4" fill="#6caa71" textLength="201.6" lengthAdjust="spacing">████████████████████████████</text>
+<text x="1188" y="326.4" fill="#d7af00">█</text>
+<text x="1202.4" y="326.4" fill="#afaf00">█</text>
+<text x="1216.8" y="326.4" fill="#afaf00">█</text>
+<text x="1224" y="326.4" fill="#af8700">█</text>
+<text x="1231.2" y="326.4" fill="#afaf00" textLength="43.2" lengthAdjust="spacing">██████</text>
+<text x="1274.4" y="326.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1296" y="326.4" fill="#afaf00">█</text>
+<text x="1303.2" y="326.4" fill="#af8700">█</text>
+<text x="1310.4" y="326.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1324.8" y="326.4" fill="#d7af00">█</text>
+<text x="1332" y="326.4" fill="#d7d700">█</text>
+<text x="1339.2" y="326.4" fill="#afaf00">█</text>
+<text x="1346.4" y="326.4" fill="#875f00">█</text>
+<text x="1353.6" y="326.4" fill="#afaf00">█</text>
+<text x="1360.8" y="326.4" fill="#af8700">█</text>
+<text x="1368" y="326.4" fill="#5f5f00">█</text>
+<text x="1375.2" y="326.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1389.6" y="326.4" fill="#af8700">█</text>
+<text x="1404" y="326.4" fill="#875f00">█</text>
+<text x="1411.2" y="326.4" fill="#af8700">█</text>
+<text x="1418.4" y="326.4" fill="#875f00">█</text>
+<text x="612" y="341.4" fill="#6caa71" textLength="172.8" lengthAdjust="spacing">████████████████████████</text>
+<text x="1188" y="341.4" fill="#afaf00">█</text>
+<text x="1202.4" y="341.4" fill="#af8700">█</text>
+<text x="1216.8" y="341.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1231.2" y="341.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1245.6" y="341.4" fill="#af8700">█</text>
+<text x="1252.8" y="341.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1274.4" y="341.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="341.4" fill="#af8700">█</text>
+<text x="1296" y="341.4" fill="#afaf00">█</text>
+<text x="1303.2" y="341.4" fill="#af8700">█</text>
+<text x="1310.4" y="341.4" fill="#afaf00">█</text>
+<text x="1317.6" y="341.4" fill="#af8700">█</text>
+<text x="1324.8" y="341.4" fill="#d7af00">█</text>
+<text x="1332" y="341.4" fill="#d7d700">█</text>
+<text x="1339.2" y="341.4" fill="#afaf00">█</text>
+<text x="1346.4" y="341.4" fill="#af8700">█</text>
+<text x="1353.6" y="341.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="341.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="341.4" fill="#875f00">█</text>
+<text x="1389.6" y="341.4" fill="#af8700">█</text>
+<text x="1404" y="341.4" fill="#5f5f00">█</text>
+<text x="1411.2" y="341.4" fill="#af8700">█</text>
+<text x="1418.4" y="341.4" fill="#875f00">█</text>
+<text x="612" y="356.4" fill="#6caa71" textLength="165.6" lengthAdjust="spacing">███████████████████████</text>
+<text x="1188" y="356.4" fill="#afaf00">█</text>
+<text x="1202.4" y="356.4" fill="#af8700">█</text>
+<text x="1216.8" y="356.4" fill="#af8700">█</text>
+<text x="1224" y="356.4" fill="#875f00">█</text>
+<text x="1231.2" y="356.4" fill="#af8700">█</text>
+<text x="1238.4" y="356.4" fill="#afaf00">█</text>
+<text x="1245.6" y="356.4" fill="#af8700">█</text>
+<text x="1252.8" y="356.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1267.2" y="356.4" fill="#af8700">█</text>
+<text x="1274.4" y="356.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="356.4" fill="#af8700">█</text>
+<text x="1296" y="356.4" fill="#afaf00">█</text>
+<text x="1303.2" y="356.4" fill="#af8700">█</text>
+<text x="1310.4" y="356.4" fill="#afaf00">█</text>
+<text x="1317.6" y="356.4" fill="#af8700">█</text>
+<text x="1324.8" y="356.4" fill="#d7af00">█</text>
+<text x="1332" y="356.4" fill="#d7d700">█</text>
+<text x="1339.2" y="356.4" fill="#afaf00">█</text>
+<text x="1346.4" y="356.4" fill="#af8700">█</text>
+<text x="1353.6" y="356.4" fill="#afaf00">█</text>
+<text x="1360.8" y="356.4" fill="#af8700">█</text>
+<text x="1368" y="356.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1382.4" y="356.4" fill="#875f00">█</text>
+<text x="1389.6" y="356.4" fill="#af8700">█</text>
+<text x="1404" y="356.4" fill="#875f00">█</text>
+<text x="1411.2" y="356.4" fill="#af8700">█</text>
+<text x="1418.4" y="356.4" fill="#875f00">█</text>
+<text x="1425.6" y="356.4" fill="#5f5f00">█</text>
+<text x="612" y="371.4" fill="#6caa71" textLength="201.6" lengthAdjust="spacing">████████████████████████████</text>
+<text x="1188" y="371.4" fill="#afaf00">█</text>
+<text x="1202.4" y="371.4" fill="#af8700">█</text>
+<text x="1216.8" y="371.4" fill="#af8700">█</text>
+<text x="1224" y="371.4" fill="#875f00">█</text>
+<text x="1231.2" y="371.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1245.6" y="371.4" fill="#af8700" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1274.4" y="371.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="371.4" fill="#af8700">█</text>
+<text x="1296" y="371.4" fill="#afaf00">█</text>
+<text x="1303.2" y="371.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1324.8" y="371.4" fill="#d7af00">█</text>
+<text x="1332" y="371.4" fill="#d7d700">█</text>
+<text x="1339.2" y="371.4" fill="#afaf00">█</text>
+<text x="1346.4" y="371.4" fill="#875f00">█</text>
+<text x="1353.6" y="371.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="371.4" fill="#875f00">█</text>
+<text x="1382.4" y="371.4" fill="#875f00">█</text>
+<text x="1389.6" y="371.4" fill="#af8700">█</text>
+<text x="1404" y="371.4" fill="#5f5f00">█</text>
+<text x="1411.2" y="371.4" fill="#af8700">█</text>
+<text x="1418.4" y="371.4" fill="#875f00">█</text>
+<text x="612" y="386.4" fill="#6caa71" textLength="288" lengthAdjust="spacing">████████████████████████████████████████</text>
+<text x="1188" y="386.4" fill="#d7af00">█</text>
+<text x="1202.4" y="386.4" fill="#d7af00">█</text>
+<text x="1216.8" y="386.4" fill="#d7af00">█</text>
+<text x="1224" y="386.4" fill="#af8700">█</text>
+<text x="1231.2" y="386.4" fill="#d7af00">█</text>
+<text x="1238.4" y="386.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1260" y="386.4" fill="#d7af00">█</text>
+<text x="1267.2" y="386.4" fill="#afaf00">█</text>
+<text x="1274.4" y="386.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="386.4" fill="#afaf00">█</text>
+<text x="1296" y="386.4" fill="#d7af00">█</text>
+<text x="1303.2" y="386.4" fill="#afaf00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1324.8" y="386.4" fill="#d7d700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1339.2" y="386.4" fill="#afaf00">█</text>
+<text x="1346.4" y="386.4" fill="#af8700">█</text>
+<text x="1353.6" y="386.4" fill="#d7af00">█</text>
+<text x="1360.8" y="386.4" fill="#afaf00">█</text>
+<text x="1368" y="386.4" fill="#875f00">█</text>
+<text x="1375.2" y="386.4" fill="#5f5f00">█</text>
+<text x="1382.4" y="386.4" fill="#875f00">█</text>
+<text x="1396.8" y="386.4" fill="#afaf00">█</text>
+<text x="1404" y="386.4" fill="#af8700">█</text>
+<text x="1411.2" y="386.4" fill="#afaf00">█</text>
+<text x="1418.4" y="386.4" fill="#af8700">█</text>
+<text x="1425.6" y="386.4" fill="#5f5f00">█</text>
+<text x="1440" y="386.4" fill="#5f5f00">█</text>
+<text x="612" y="401.4" fill="#c4ac62">█</text>
+<text x="619.2" y="401.4" fill="#6caa71" textLength="288" lengthAdjust="spacing">████████████████████████████████████████</text>
+<text x="1159.2" y="401.4" fill="#ffd700">█</text>
+<text x="1202.4" y="401.4" fill="#d7d700">█</text>
+<text x="1216.8" y="401.4" fill="#d7d700">█</text>
+<text x="1224" y="401.4" fill="#afaf00" textLength="50.4" lengthAdjust="spacing">███████</text>
+<text x="1274.4" y="401.4" fill="#af8700" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1296" y="401.4" fill="#afaf00" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1324.8" y="401.4" fill="#d7af00">█</text>
+<text x="1332" y="401.4" fill="#d7d700">█</text>
+<text x="1339.2" y="401.4" fill="#afaf00">█</text>
+<text x="1346.4" y="401.4" fill="#af8700">█</text>
+<text x="1353.6" y="401.4" fill="#afaf00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="401.4" fill="#5f5f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1382.4" y="401.4" fill="#875f00">█</text>
+<text x="1396.8" y="401.4" fill="#afaf00">█</text>
+<text x="1404" y="401.4" fill="#af8700">█</text>
+<text x="1411.2" y="401.4" fill="#afaf00">█</text>
+<text x="1418.4" y="401.4" fill="#af8700">█</text>
+<text x="1425.6" y="401.4" fill="#5f5f00">█</text>
+<text x="1440" y="401.4" fill="#5f5f00">█</text>
+<text x="1461.6" y="401.4" fill="#5f5f00">█</text>
+<text x="1490.4" y="401.4" fill="#5f5f00">█</text>
+<text x="612" y="416.4" fill="#6caa71" textLength="129.6" lengthAdjust="spacing">██████████████████</text>
+<text x="1159.2" y="416.4" fill="#ffd700">█</text>
+<text x="1188" y="416.4" fill="#afaf00">█</text>
+<text x="1202.4" y="416.4" fill="#afaf00">█</text>
+<text x="1216.8" y="416.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1238.4" y="416.4" fill="#afaf00">█</text>
+<text x="1245.6" y="416.4" fill="#af8700" textLength="28.8" lengthAdjust="spacing">████</text>
+<text x="1274.4" y="416.4" fill="#875f00" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1288.8" y="416.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1303.2" y="416.4" fill="#875f00">█</text>
+<text x="1310.4" y="416.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1324.8" y="416.4" fill="#d7af00">█</text>
+<text x="1332" y="416.4" fill="#d7d700">█</text>
+<text x="1339.2" y="416.4" fill="#af8700">█</text>
+<text x="1346.4" y="416.4" fill="#875f00">█</text>
+<text x="1353.6" y="416.4" fill="#af8700" textLength="14.4" lengthAdjust="spacing">██</text>
+<text x="1368" y="416.4" fill="#875f00" textLength="21.6" lengthAdjust="spacing">███</text>
+<text x="1389.6" y="416.4" fill="#af8700">█</text>
+<text x="1396.8" y="416.4" fill="#afaf00">█</text>
+<text x="1404" y="416.4" fill="#875f00">█</text>
+<text x="1411.2" y="416.4" fill="#af8700">█</text>
+<text x="1418.4" y="416.4" fill="#875f00">█</text>
+<text x="1461.6" y="416.4" fill="#5f5f00">█</text>
+<text x="1497.6" y="416.4" fill="#5f5f00">█</text>
+</g>
+</svg>
