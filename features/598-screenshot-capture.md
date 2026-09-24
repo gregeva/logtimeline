@@ -147,6 +147,11 @@ command line takes precedence over the manifest, the manifest over the default.
 | a row in the `CLAUDE.md` *Where to look* table | creating or changing a documentation screenshot points at `docs/process/screenshots.md` |
 | a path-scoped rule in `.claude/rules/` on `docs/screenshots/**` and `build/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
 
+**D13: run-varying figures are accepted** (architect, 2026-09-24). The summary's
+`TOTAL TIME` and `MAXIMUM MEMORY USED` differ on every run, so an image showing them
+changes at every release even when nothing else has. That is accepted; the noise is
+confined to the images that show the summary's values.
+
 ## Finding: terminal sizes in real use
 
 Measured by the architect with `tput lines` / `tput cols` in macOS Terminal,
@@ -178,4 +183,29 @@ crop anchored on its section start line, captured on macOS and on Windows.
 
 ## Acceptance criteria
 
-To be derived once the open questions above are settled.
+Criteria 1 to 10 are assertable; 11 and 12 are unknown and are the prototype's
+scope (D6).
+
+- [ ] 1. A crop's cells equal the corresponding rows of `ltl`'s standard output,
+      sliced by the reported section positions, the start and end offsets and the
+      column positions (for example `+15` / `-2`, and `100, -25` at width 200) (D2, D3).
+- [ ] 2. Every cell's foreground and background colour is the one `ltl` printed,
+      mapped through the tool's colour table; heatmap cells are checked against the
+      gradient `-V heatmap-palette` reports.
+- [ ] 3. Histogram tick glyphs sit at the columns `tests/validate-histogram-ticks.sh`
+      asserts.
+- [ ] 4. `light` runs `ltl` with `-lbg` and draws a light background; `dark` with
+      `-dbg` and a dark one (D7).
+- [ ] 5. A crop naming a `hidden` or `absent` section fails with an error naming it,
+      and writes no image (D2).
+- [ ] 6. Size precedence is command line over manifest over the 211 x 53 default,
+      observed in the `--terminal-width` and `--terminal-height` passed to `ltl` (D11).
+- [ ] 7. One execution yields several crops, with `ltl` run exactly twice per recipe.
+- [ ] 8. A batch run regenerates every manifest entry into `docs/screenshots/` (D10).
+- [ ] 9. The same recipe on macOS and on Windows yields the same crop cells.
+- [ ] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
+      the path rule covers `docs/screenshots/**` and `build/screenshots.yaml` (D12).
+- [ ] 11. *(unknown: prototype)* Block and box-drawing characters align cell to cell
+      in the SVG as displayed where the documentation is read.
+- [ ] 12. *(unknown: prototype)* The rendered image matches the terminal's look,
+      verified by viewing it on real data.
