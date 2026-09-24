@@ -5,6 +5,7 @@ requires 'Getopt::Long';
 requires 'JSON::PP';
 requires 'List::Util';
 requires 'POSIX';
+requires 'PerlIO::via';
 requires 'Term::ANSIColor';
 requires 'Term::ReadKey';
 requires 'Text::CSV';
