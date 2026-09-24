@@ -369,6 +369,19 @@ sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpa
 
 GitHub Actions builds all platforms on `v*` tags (`.github/workflows/release-build.yml`).
 
+### Test and benchmark
+
+```bash
+export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnesses need bash 4+ and Homebrew Perl
+perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
+./tests/validate-<name>.sh --list                   # its scenario names
+./tests/validate-<name>.sh --scenario <name>        # one scenario while iterating
+# Full suite (completion gate only): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
+./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after
+./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
+./tests/cleanup-test-artifacts.sh                   # the only sanctioned cleanup
+```
+
 ## Architecture
 
 `ltl` has three section markers; search for them rather than relying on line
