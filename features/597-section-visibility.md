@@ -193,6 +193,15 @@ on the section being visible, and the CSV write is gated on `-o`, as today. Hidd
 without `-o`: the loop does not run. Hidden with `-o`: it runs and writes only the
 CSV. Visible: unchanged. This is how D2 holds.
 
+The timeline takes the other form of the same pass (architect, 2026-09-24): its
+printer prints each row piece by piece across some forty `print` statements,
+interleaved with collecting the row's CSV values, so gating each print would touch
+the whole loop. A hidden timeline under `-o` runs its printer once with its
+standard output sent to a null handle, and the pause option is off for that run.
+The loop, the STATS CSV and the rest of the printer are unchanged. The messages
+tables keep the gate inside the loop: each row is built into one string and
+printed once.
+
 **D17: the thread-pool summary is `threadpools`** (architect, 2026-09-24), alias
 `tp`, with the hidden parts `threadpools-highlighted` and `threadpools-overall`,
 following `messages` (D7, D11).
@@ -351,6 +360,40 @@ so a progress row painted over in place reads as hundreds of columns wide; the
 progress scenario skips it. The options row echoes every option given, so a long
 `-V` list wraps it (#497); the on/off scenario uses `-V all`.
 
+**Step 3, `--hide` / `--show` (D1, D2, D8-D11, D16, D17, D19, D20).** The options
+push `[hide|show, value]` in the order given into `@section_visibility_ops`, and so
+do `--disable-progress` and `-osum`, as hiding progress and the summary.
+`apply_section_visibility()` resolves each name through `resolve_section_name()`
+(sections, parts, and the aliases in `%section_aliases`; an unknown name exits 1
+naming the public sections and their aliases). A name covers its parts, and the
+later mention wins. `$disable_progress` and `$omit_summary` are then read from the
+result. The options are also read early, with `pass_through` beside
+`--terminal-width`, so a hidden title is known before the title prints. The title
+now prints from `adapt_to_command_line_options()`, still before any informational
+output or option error.
+
+`open_section()` and `open_part()` do nothing for a hidden name. The call sites in
+`pipeline_render()` skip a hidden histogram, options row, thread-pool summary or
+summary. A hidden timeline under `-o` runs through `run_with_output_discarded()`
+(D16, timeline form). The messages printer skips a hidden table unless `-o` needs
+its CSV rows, and then prints nothing of it. A hidden summary column leaves the
+other where it stands.
+
+The harness grows to 19 scenarios and 129 assertions. The equivalence of
+`--hide progress` and `--disable-progress` is checked on standard output with the
+options row hidden in both and the time and memory figures masked, and on standard
+error byte for byte. The options row echoes the options as given, and the figures
+vary run to run. Shown to fail, one change to `ltl` at a time:
+- the STATS CSV check, with the discarded-output run removed;
+- the no-rows check, with a hidden table's header printed;
+- the progress equivalence, with `$disable_progress` not set from the section;
+- the `--show` checks, with `--show` hiding.
+
+Found while building the harness: under macOS's `/bin/bash` 3.2, a script that dies
+on an unbound variable exits 0 when an `EXIT` trap is set, and the trap sees a
+status of 0. Every harness that cleans up through `trap ... EXIT` can report a
+crash as a pass.
+
 ## Open questions
 
 None.
@@ -360,13 +403,13 @@ None.
 All assertable. Every run pins `--terminal-width`; standard error is captured
 separately from standard output (D12).
 
-- [ ] `-hi timeline` prints no timeline rows and `section-layout` reports `timeline`
+- [x] `-hi timeline` prints no timeline rows and `section-layout` reports `timeline`
       `hidden`; likewise for each section and each hidden part (D7), one at a time.
-- [ ] `-hi messages` prints no messages table and the MESSAGES CSV is still written
+- [x] `-hi messages` prints no messages table and the MESSAGES CSV is still written
       (D2, the difference from `-n 0`).
-- [ ] `-hi progress` produces byte-identical output to `--disable-progress` on the
+- [x] `-hi progress` produces byte-identical output to `--disable-progress` on the
       same input (D9).
-- [ ] For every rendered section, known static text is found at a fixed row and
+- [x] For every rendered section, known static text is found at a fixed row and
       column offset from the start row `section-layout` reports (D4): for example
       the log-formats legend title in the file list, the fiftieth-percentile marker
       in the histogram legend. Checked under each section's variability: many
@@ -378,24 +421,24 @@ separately from standard output (D12).
       run without `-V` (D6, D14).
 - [x] A date/time option the tool cannot handle prints its warning on standard
       error, and standard output passes the accounting check below (D12).
-- [ ] On every run above, total rows minus `-V` rows minus reported section rows,
+- [x] On every run above, total rows minus `-V` rows minus reported section rows,
       separators and declared fixed spacing equals zero (D14).
-- [ ] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias
+- [x] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias
       resolves to its section (D8, D11).
 - [ ] With output redirected, `-th 30` gives the bucket size and histogram height
       that a detected 30-row terminal gives, and `-th 90` those of a 90-row one (D15).
-- [ ] `-hi timeline -o` and `-hi messages -o` write STATS and MESSAGES CSV files
+- [x] `-hi timeline -o` and `-hi messages -o` write STATS and MESSAGES CSV files
       byte-identical to the same run without `-hi` (D16).
-- [ ] With `-tpas`, `threadpools` and its two parts are reported and hideable, and
+- [x] With `-tpas`, `threadpools` and its two parts are reported and hideable, and
       `tp` resolves to `threadpools` (D17).
 - [x] Under the memory option, the summary's rendered rows equal the count
       `section-layout` reports (D3).
 - [x] With a histogram shown, the messages and summary sections start on the same
       rows with the histogram's `-V` sections requested and not requested, and on
       the rows the same run prints without `-V` (D3, D6, D14).
-- [ ] `-hi summary -sh summary-files` renders only the file list, and
+- [x] `-hi summary -sh summary-files` renders only the file list, and
       `-sh summary -hi summary` hides the summary; a `--hide` in `LTL_CONFIG` is
       undone by `--show` on the command line (D19).
-- [ ] `-osum` and `-hi summary` produce byte-identical output (D20).
-- [ ] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
+- [x] `-osum` and `-hi summary` produce byte-identical output (D20).
+- [x] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
       (`tests/validate-help-content.sh`).

@@ -13,6 +13,8 @@
 #       count from the start, `last`, or `last-N`.
 #   check-section-layout.pl state CAPTURE NAME STATE [ROWS]
 #       NAME is reported in STATE, and with ROWS rows when given.
+#   check-section-layout.pl strip CAPTURE
+#       Standard output as the terminal shows it, -V ranges removed.
 #   check-section-layout.pl compare CAPTURE_WITH_V CAPTURE_WITHOUT_V
 #       With its -V ranges removed, the first capture prints the rows of the
 #       second: the same count, the same text, except the options row, which
@@ -186,6 +188,12 @@ if ( $mode eq 'state' ) {
         exit 1;
     }
     print "$name $got\n";
+    exit 0;
+}
+
+if ( $mode eq 'strip' ) {
+    my ($rows) = read_capture( $args[0] );
+    print "$_\n" for @$rows;
     exit 0;
 }
 

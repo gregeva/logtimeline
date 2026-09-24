@@ -104,6 +104,19 @@ run_ltl() {
 
 capture() { echo "$TMP_DIR/$1/out"; }
 
+# Standard output of a capture, -V ranges removed, does not hold TEXT.
+# Usage: text_absent <capture> <text>
+text_absent() {
+    if "$PERL" "$CHECKER" strip "$1" | grep -qF -- "$2"; then
+        echo "'$2' is printed"; return 1
+    fi
+}
+
+# Standard output of a capture, -V ranges removed, holds TEXT.
+text_present() {
+    "$PERL" "$CHECKER" strip "$1" | grep -qF -- "$2" || { echo "'$2' is not printed"; return 1; }
+}
+
 # The section-layout row for NAME is present in both captures and identical.
 # Usage: same_layout_row <name> <capture-a> <capture-b>
 same_layout_row() {
@@ -201,7 +214,14 @@ scenario_register \
     states-absent-and-hidden \
     verbose-removed-matches-plain \
     progress-rendered \
-    datetime-warning-stderr
+    datetime-warning-stderr \
+    hide-each-section \
+    hide-keeps-csv \
+    hide-progress-is-disable-progress \
+    hide-summary-is-omit-summary \
+    hide-list-repeat-and-aliases \
+    show-after-hide \
+    unknown-section-refused
 scenario_parse_args "$@"
 
 echo "Section layout (-V section-layout) against standard output, width $WIDTH"
@@ -395,6 +415,155 @@ if scenario_wanted datetime-warning-stderr; then
             produced_by 'calculate_start_end_filter_timestamps() through defer_notice() in ltl' \
             contract    'features/597-section-visibility.md § D12'
     fi
+    echo ""
+fi
+
+# Each section and part hidden alone: reported hidden, its text gone, every
+# other row still placed (D1, D7, D8, D17). A highlight on "api" splits the
+# messages and thread-pool tables in two.
+if scenario_wanted hide-each-section; then
+    current_scenario=hide-each-section
+    for entry in 'title:log timeline' 'timeline:timestamp' 'histogram:Distribution' \
+                 'options:command-line options:' 'messages:MESSAGES' \
+                 'messages-highlighted:TOP HIGHLIGHTED MESSAGES' 'messages-overall:TOP OVERALL MESSAGES' \
+                 'threadpools:THREAD POOLS' 'threadpools-highlighted:TOP HIGHLIGHTED THREAD POOLS' \
+                 'threadpools-overall:TOP OVERALL THREAD POOLS' \
+                 'summary:Category' 'summary-values:Category' 'summary-files:Log Formats'; do
+        name=${entry%%:*}; text=${entry#*:}
+        if run_ltl "hide-$name" --disable-progress -bs 1440 -hg duration -h api -n 4 -tpas -hi "$name" -V section-layout "$THREAD_LOG"; then
+            assert_accounting "hide-$name"
+            assert_state "hide-$name" "$name" hidden
+            assert_command \
+                command     "text_absent $(printf '%q' "$(capture "hide-$name")") $(printf '%q' "$text")" \
+                label       "-hi $name prints no '$text'" \
+                asserts     "With --hide $name, the static text of $name is not on standard output" \
+                produced_by "section_hidden() gating the printer of $name, in ltl" \
+                contract    'features/597-section-visibility.md § D1, D7, D8, D17'
+        fi
+    done
+    # A hidden part leaves its sibling in place.
+    assert_state hide-summary-values summary-files rendered
+    assert_anchor hide-summary-values summary-files last-2 'Log Formats' 'print_summary_table()'
+    assert_state hide-messages-highlighted messages-overall rendered
+    assert_anchor hide-messages-highlighted messages-overall 0 'TOP OVERALL MESSAGES' 'print_message_summary()'
+    echo ""
+fi
+
+# Hiding the timeline or the messages is a display control: -o writes the same
+# STATS and MESSAGES CSV files as the same run with nothing hidden (D2, D16).
+if scenario_wanted hide-keeps-csv; then
+    current_scenario=hide-keeps-csv
+    if run_ltl csv-shown --disable-progress -bs 1440 -h api -n 4 -o "$THREAD_LOG" \
+       && run_ltl csv-hidden --disable-progress -bs 1440 -h api -n 4 -o -hi timeline,messages "$THREAD_LOG"; then
+        for kind in STATS MESSAGES; do
+            assert_command \
+                command     "cmp -s $(printf '%q' "$TMP_DIR/csv-shown")/*-LTL-$kind-*.csv $(printf '%q' "$TMP_DIR/csv-hidden")/*-LTL-$kind-*.csv" \
+                label       "the $kind CSV is byte-identical with the timeline and messages hidden" \
+                asserts     "-o with --hide timeline,messages writes the same $kind CSV as the same run with nothing hidden" \
+                produced_by 'run_with_output_discarded() for print_bar_graph(); the shown gate in print_message_summary(), in ltl' \
+                contract    'features/597-section-visibility.md § D2, D16'
+        done
+        assert_command \
+            command     "text_absent $(printf '%q' "$(capture csv-hidden)") timestamp && text_absent $(printf '%q' "$(capture csv-hidden)") 'TOP OVERALL MESSAGES'" \
+            label       'the hidden timeline and messages print nothing while their CSV files are written' \
+            asserts     'A hidden section that writes a CSV prints none of its rows' \
+            produced_by 'run_with_output_discarded() and print_message_summary() in ltl' \
+            contract    'features/597-section-visibility.md § D16'
+    fi
+    echo ""
+fi
+
+# --hide progress is --disable-progress (D9). The options row, which echoes the
+# options given, is hidden in both; time and memory figures vary run to run.
+if scenario_wanted hide-progress-is-disable-progress; then
+    current_scenario=hide-progress-is-disable-progress
+    if run_ltl hideprog -bs 120 -n 2 -hi progress,options "$SPREAD_LOG" \
+       && run_ltl disprog --disable-progress -bs 120 -n 2 -hi options "$SPREAD_LOG"; then
+        assert_command \
+            command     "$(checker_cmd compare "$(capture hideprog)" "$(capture disprog)") && cmp -s $(printf '%q' "$TMP_DIR/hideprog/err") $(printf '%q' "$TMP_DIR/disprog/err")" \
+            label       '--hide progress prints what --disable-progress prints, on both streams' \
+            asserts     '--hide progress and --disable-progress produce the same standard output, time and memory figures aside, and the same standard error' \
+            produced_by 'apply_section_visibility() sets $disable_progress from the progress section, in ltl' \
+            contract    'features/597-section-visibility.md § D9'
+    fi
+    echo ""
+fi
+
+# -osum is --hide summary (D20).
+if scenario_wanted hide-summary-is-omit-summary; then
+    current_scenario=hide-summary-is-omit-summary
+    if run_ltl hidesum --disable-progress -bs 120 -n 2 -hi summary,options -V section-layout "$SPREAD_LOG" \
+       && run_ltl osum --disable-progress -bs 120 -n 2 -osum -hi options -V section-layout "$SPREAD_LOG"; then
+        assert_command \
+            command     "cmp -s $(printf '%q' "$(capture hidesum)") $(printf '%q' "$(capture osum)")" \
+            label       '--hide summary and -osum print the same bytes, report included' \
+            asserts     '--hide summary and -osum produce byte-identical standard output, the section-layout report included' \
+            produced_by 'apply_section_visibility(): -osum hides the summary section, in ltl' \
+            contract    'features/597-section-visibility.md § D20'
+        assert_state osum summary hidden
+    fi
+    echo ""
+fi
+
+# A list and a repeated option hide the same sections, and every alias names its
+# section (D8, D11, D17).
+if scenario_wanted hide-list-repeat-and-aliases; then
+    current_scenario=hide-list-repeat-and-aliases
+    # The options row echoes the options as given, so it is hidden in both.
+    if run_ltl list --disable-progress -bs 1440 -hg duration -n 2 -tpas -hi tl,hg,opt -V section-layout "$THREAD_LOG" \
+       && run_ltl repeat --disable-progress -bs 1440 -hg duration -n 2 -tpas -hi tl -hi hg -hi opt -V section-layout "$THREAD_LOG"; then
+        assert_command \
+            command     "$(checker_cmd compare "$(capture list)" "$(capture repeat)") && diff <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture list)")) <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture repeat)"))" \
+            label       '-hi tl,hg and -hi tl -hi hg hide the same sections' \
+            asserts     'A comma-separated list and the option repeated hide the same sections: the same rows and the same section-layout report' \
+            produced_by 'apply_section_visibility() in ltl' \
+            contract    'features/597-section-visibility.md § D8'
+        assert_state list timeline hidden
+        assert_state list histogram hidden
+    fi
+    for pair in tl:timeline hg:histogram opt:options msg:messages tp:threadpools sum:summary prog:progress; do
+        alias=${pair%%:*}; name=${pair#*:}
+        progress_off=--disable-progress; [[ "$alias" == prog ]] && progress_off=--hide=progress
+        if run_ltl "alias-$alias" "$progress_off" -bs 1440 -hg duration -n 2 -tpas -hi "$alias" -V section-layout "$THREAD_LOG"; then
+            assert_state "alias-$alias" "$name" hidden
+        fi
+    done
+    echo ""
+fi
+
+# The later of --hide and --show wins, LTL_CONFIG first, and a name covers its
+# parts (D19).
+if scenario_wanted show-after-hide; then
+    current_scenario=show-after-hide
+    if run_ltl onlyfiles --disable-progress -bs 1440 -n 2 -hi summary -sh summary-files -V section-layout "$THREAD_LOG"; then
+        assert_accounting onlyfiles
+        assert_state onlyfiles summary-values hidden
+        assert_state onlyfiles summary-files rendered
+        assert_anchor onlyfiles summary-files last-2 'Log Formats' 'print_summary_table()'
+    fi
+    if run_ltl hidelast --disable-progress -bs 1440 -n 2 -sh summary -hi summary -V section-layout "$THREAD_LOG"; then
+        assert_state hidelast summary hidden
+    fi
+    if LTL_CONFIG='-hi summary' run_ltl envshow --disable-progress -bs 1440 -n 2 -sh summary -V section-layout "$THREAD_LOG"; then
+        assert_state envshow summary rendered
+    fi
+    echo ""
+fi
+
+# A name that is no section is refused before anything prints.
+if scenario_wanted unknown-section-refused; then
+    current_scenario=unknown-section-refused
+    mkdir -p "$TMP_DIR/unknown"
+    set +e
+    ( cd "$TMP_DIR/unknown" && "$LTL" --disable-progress -ni -hi nosuch "$THREAD_LOG" > out 2> err )
+    rc=$?
+    set -e
+    assert_command \
+        command     "[[ $rc -eq 1 ]] && [[ ! -s $(printf '%q' "$TMP_DIR/unknown/out") ]] && grep -q \"Unknown section 'nosuch' for --hide\" $(printf '%q' "$TMP_DIR/unknown/err")" \
+        label       '-hi nosuch exits 1, names the value on standard error, prints nothing' \
+        asserts     'An unknown --hide value is an error that names it, exits 1, and prints nothing on standard output' \
+        produced_by 'apply_section_visibility() through print_usage() in ltl' \
+        contract    'features/597-section-visibility.md § D8, D11'
     echo ""
 fi
 

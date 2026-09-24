@@ -371,6 +371,11 @@ my @output_sections = qw(
     summary summary-values summary-files
 );
 my %section_rows;               # section or part => { start, rows } as printed, while rows are counted
+# The fixed alias of each public section (#597 D11, D17). Titles and parts have none.
+my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', msg => 'messages',
+                        tp => 'threadpools', sum => 'summary', prog => 'progress' );
+my @section_visibility_ops;     # [ hide|show, value ] in the order given, LTL_CONFIG first
+my %section_hidden_flag;        # section or part => 1 when turned off
 my ( $open_section_name, $open_part_name );
 my $title_rows = 0;             # rows the title printed, before the options were read
 
@@ -2418,7 +2423,7 @@ sub _classify_argv_provenance {
                 'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',
                 'highlight-bytes-min|hbmin', 'highlight-bytes-max|hbmax',
                 'highlight-count-min|hcmin', 'highlight-count-max|hcmax',
-                'memory-usage|mem', 'timing|t', 'disable-progress',
+                'memory-usage|mem', 'timing|t', 'disable-progress', 'hide|hi', 'show|sh',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
@@ -2514,6 +2519,8 @@ sub emit_runtime_config_verbose {
         'no-index'                          => $no_index,
         'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
+        'hide'                              => join( ',', grep { section_hidden($_) } @output_sections ),
+        'show'                              => join( ',', grep { !section_hidden($_) } map { resolve_section_name( $_->[1] ) // () } grep { $_->[0] eq 'show' } @section_visibility_ops ),
         'summary-mono'                      => $summary_mono,
         'summary-bar-off'                   => $summary_bar_off,
         'summary-bar-absolute'              => $summary_bar_absolute,
@@ -6887,6 +6894,7 @@ END
 # section's start row is recorded; closing it records how many rows it printed.
 sub open_section {
     my ($name) = @_;
+    return if defined $name && section_hidden($name);
     close_section();
     print "\n" if $sections_opened++;
     $open_section_name = $name;
@@ -6907,6 +6915,7 @@ sub close_section {
 # overall tables).
 sub open_part {
     my ($name) = @_;
+    return if section_hidden($name);
     close_part();
     $open_part_name = $name;
     $section_rows{$name} = { start => rows_printed() + 1 } if counting_rows();
@@ -6982,20 +6991,75 @@ sub start_row_counting {
 }
 
 # rendered: the section printed; hidden: it was turned off; absent: the run
-# produced nothing for it. A part not printed takes its section's state.
+# produced nothing for it.
 sub section_state {
     my ($name) = @_;
     return 'rendered' if $section_rows{$name} && defined $section_rows{$name}{rows};
-    my ($section) = $name =~ /^([^-]+)/;
-    return 'hidden' if section_hidden($section);
+    return 'hidden' if section_hidden($name);
     return 'absent';
 }
 
+# The parts of a section: every name that is the section's, a hyphen, and more.
+sub section_parts {
+    my ($name) = @_;
+    return grep { index( $_, "$name-" ) == 0 } @output_sections;
+}
+
+# A section with parts is hidden when every part is; any other name when it
+# was turned off.
 sub section_hidden {
     my ($name) = @_;
-    return 1 if $name eq 'progress' && $disable_progress;
-    return 1 if $name eq 'summary'  && $omit_summary;
-    return 0;
+    my @parts = section_parts($name);
+    return ( grep { !$section_hidden_flag{$_} } @parts ) ? 0 : 1 if @parts;
+    return $section_hidden_flag{$name} ? 1 : 0;
+}
+
+# A --hide or --show value: a section, a part, or a section's alias, in any
+# case. Undef when it names none of them.
+sub resolve_section_name {
+    my ($value) = @_;
+    my $name = lc $value;
+    $name =~ s/^\s+|\s+$//g;
+    $name = $section_aliases{$name} // $name;
+    return ( grep { $_ eq $name } @output_sections ) ? $name : undef;
+}
+
+# Apply --hide and --show in the order given. A name covers its parts, and the
+# later mention of a name decides (#597 D8, D19). --disable-progress and -osum
+# arrive here as hiding progress and the summary (D9, D20).
+sub apply_section_visibility {
+    %section_hidden_flag = ();
+    for my $op (@section_visibility_ops) {
+        my ( $verb, $value ) = @$op;
+        for my $given ( split /,/, $value ) {
+            my $name = resolve_section_name($given);
+            unless ( defined $name ) {
+                my %alias_of = reverse %section_aliases;
+                my $valid = join ', ', map { $alias_of{$_} ? "$_ ($alias_of{$_})" : $_ } grep { !/-/ } @output_sections;
+                print_usage("Unknown section '$given' for --$verb. Valid values: $valid");
+                exit 1;
+            }
+            $section_hidden_flag{$_} = ( $verb eq 'hide' ) ? 1 : 0 for $name, section_parts($name);
+        }
+    }
+    $disable_progress = section_hidden('progress');
+    $omit_summary     = section_hidden('summary');
+    return;
+}
+
+# Run a hidden section's printer for the file it writes, its standard output
+# discarded and the pause option off (#597 D16).
+sub run_with_output_discarded {
+    my ($printer) = @_;
+    open my $discard, '>', File::Spec->devnull or die "Cannot open the null device: $!\n";
+    my $selected = select $discard;
+    my $pause = $pause_output;
+    $pause_output = 0;
+    $printer->();
+    $pause_output = $pause;
+    select $selected;
+    close $discard;
+    return;
 }
 
 # -V section-layout, printed after the run's last row (#597 D3, D13).
@@ -9795,6 +9859,8 @@ sub print_help {
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
+    $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); a comma-separated list, or the option repeated");
+    $out .= help_opt("-sh,  --show <section>",        "Show a section a --hide turned off, such as one hidden in LTL_CONFIG; the later of the two wins");
     $out .= help_opt("-sm,  --summary-mono",          "Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours");
     $out .= help_opt("-sbo, --summary-bar-off",       "Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays)");
     $out .= help_opt("-sba, --summary-bar-absolute",  "Scale the contribution bar so the full row width is every included line, instead of the largest category filling the row");
@@ -13827,6 +13893,7 @@ sub classify_option_error {
 }
 
 sub adapt_to_command_line_options {
+    my (%arg) = @_;
     @ORIGINAL_ARGV = @ARGV;
 
     # Issue #231: record which flag tokens appear in @ARGV vs the env-var
@@ -13871,6 +13938,25 @@ sub adapt_to_command_line_options {
         $terminal_width = $tw_pre if defined $tw_pre;
     }
 
+    # The section options are read here too, the same way, so a hidden title is
+    # known before the title prints, ahead of any informational output or
+    # option error (#597 D7).
+    {
+        my @argv_copy = @ARGV;
+        local $SIG{__WARN__} = sub {};
+        @section_visibility_ops = ();
+        Getopt::Long::Configure('pass_through');
+        Getopt::Long::GetOptionsFromArray(\@argv_copy,
+            'hide|hi=s'         => sub { push @section_visibility_ops, [ 'hide', $_[1] ] },
+            'show|sh=s'         => sub { push @section_visibility_ops, [ 'show', $_[1] ] },
+            'disable-progress'  => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },
+            'omit-summary|osum' => sub { push @section_visibility_ops, [ 'hide', 'summary' ] },
+        );
+        Getopt::Long::Configure('no_pass_through');
+        apply_section_visibility();
+    }
+    print_title() if $arg{title} && !section_hidden('title');
+
     # Informational options (--help, --explain, --version) print their output
     # and exit immediately, taking precedence over option parsing and over any
     # other validation. Dispatching here — before GetOptions — means a
@@ -13884,6 +13970,7 @@ sub adapt_to_command_line_options {
     # named error rather than the misleading generic "required options not
     # provided". See classify_option_error().
     my @getopt_warnings;
+    @section_visibility_ops = ();
     my $getopt_ok = do {
         local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
         GetOptions(
@@ -13911,7 +13998,9 @@ sub adapt_to_command_line_options {
         'omit-empty|oe' => \$omit_empty,
         'no-index|ni' => \$no_index,
         'recursive|r' => \$recursive_files,
-        'omit-summary|osum' => \$omit_summary,
+        'omit-summary|osum' => sub { push @section_visibility_ops, [ 'hide', 'summary' ] },
+        'hide|hi=s' => sub { push @section_visibility_ops, [ 'hide', $_[1] ] },
+        'show|sh=s' => sub { push @section_visibility_ops, [ 'show', $_[1] ] },
         'summary-mono|sm' => \$summary_mono,
         'summary-bar-off|sbo' => \$summary_bar_off,
         'summary-bar-absolute|sba' => \$summary_bar_absolute,
@@ -13958,7 +14047,7 @@ sub adapt_to_command_line_options {
         'highlight-count-max|hcmax=i' => \$highlight_count_max,
 	    'memory-usage|mem:s' => \$memory_usage_operand,
         'timing|t' => \$show_timing,
-        'disable-progress' => \$disable_progress,                                   # hidden
+        'disable-progress' => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },   # hidden
         'output-csv|o' => \$write_messages_to_csv,
         'csv-precision|cp=s' => sub { $csv_precision = $_[1]; $csv_precision_source = "-cp $_[1]"; },
         'sort-on|so=s' => \$sort_type,
@@ -14009,6 +14098,7 @@ sub adapt_to_command_line_options {
         print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
         exit 1;
     }
+    apply_section_visibility();
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -21014,9 +21104,13 @@ sub print_summary_table {
         push @file_details, "$column_padding$padding" . join('  ', map { "$colors{'periwinkle'}$format_legend{$_}$colors{'white'} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
+    # A hidden column leaves the other where it stands.
+    @summary_table = () if section_hidden('summary-values');
+    @file_details  = () if section_hidden('summary-files');
+
     open_section('summary');
-    record_side_part( 'summary-values', scalar @summary_table );
-    record_side_part( 'summary-files',  scalar @file_details );
+    record_side_part( 'summary-values', scalar @summary_table ) if @summary_table;
+    record_side_part( 'summary-files',  scalar @file_details )  if @file_details;
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
         if( $i >= scalar @summary_table ) {
             print " " x $summary_table_width . $column_padding;
@@ -21158,8 +21252,15 @@ sub print_message_summary {
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
-            $tables_printed++ ? print "\n" : open_section('messages');
-            open_part( $grouping eq 'highlight' ? 'messages-highlighted' : 'messages-overall' );
+            # A hidden table still makes its pass when -o writes its MESSAGES CSV
+            # rows; it prints nothing (#597 D16).
+            my $part = $grouping eq 'highlight' ? 'messages-highlighted' : 'messages-overall';
+            my $shown = !section_hidden($part);
+            next unless $shown || $write_messages_to_csv;
+            if( $shown ) {
+                $tables_printed++ ? print "\n" : open_section('messages');
+                open_part($part);
+            }
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
@@ -21190,8 +21291,8 @@ sub print_message_summary {
                 $header_title .= "$colors{'NC'}$colors{'bright-cyan'}";
             }
 
-            print "$header_title\n";
-            print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n";
+            print "$header_title\n" if $shown;
+            print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n" if $shown;
 
             # Print the top messages
             foreach my $key (@top_keys) {
@@ -21348,7 +21449,7 @@ sub print_message_summary {
                         ]);
                     }
 
-                    print "$row\n";
+                    print "$row\n" if $shown;
                 }
             }
             close_part();
@@ -21440,8 +21541,10 @@ sub print_threadpool_summary {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
 
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
+            my $part = $grouping eq 'highlight' ? 'threadpools-highlighted' : 'threadpools-overall';
+            next if section_hidden($part);
             $tables_printed++ ? print "\n" : open_section('threadpools');
-            open_part( $grouping eq 'highlight' ? 'threadpools-highlighted' : 'threadpools-overall' );
+            open_part($part);
 
             my $header_title = " ";
 
@@ -21852,12 +21955,16 @@ sub pipeline_render {
         $csv->print($csv_fh, [ @csv_columns ] );
     }
 
-    print_bar_graph();
+    if( !section_hidden('timeline') ) {
+        print_bar_graph();
+    } elsif( $write_messages_to_csv ) {
+        run_with_output_discarded( \&print_bar_graph );    # the STATS CSV rows are written in its loop
+    }
     memory_debug_decomposition("after_bar_graph");
-    print_histograms() if $histogram_enabled;  # Issue #25: Histograms appear after bar graph
+    print_histograms() if $histogram_enabled && !section_hidden('histogram');  # Issue #25: Histograms appear after bar graph
     close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && defined $csv_fh );	# Close the file handle
 
-    print_run_options();
+    print_run_options() unless section_hidden('options');
 
     # The MESSAGES CSV is the per-message store written out. With no message
     # retained there are no rows and no file: a header-only CSV would look like
@@ -21874,13 +21981,13 @@ sub pipeline_render {
         $csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
-    print_message_summary() if $capture_messages;									                    # Print and write message summaries
+    print_message_summary() if $capture_messages && ( !section_hidden('messages') || $write_messages_to_csv );									                    # Print and write message summaries
     memory_debug_decomposition("after_message_summary");
     close $csv_fh or die "Could not close file: $!" if( $write_messages_to_csv && $capture_messages && defined $csv_fh );	# Close the file handle
 
     # The thread-pool summary is ranked by the same top-N operand as the
     # messages table, so a top-N of zero leaves it no rows to show.
-    print_threadpool_summary() if $include_threadpool_summary && $capture_messages;					    # Print threadpool summaries
+    print_threadpool_summary() if $include_threadpool_summary && $capture_messages && !section_hidden('threadpools');					    # Print threadpool summaries
     memory_debug_decomposition("after_threadpool_summary") if $include_threadpool_summary;
 
     # Issue #356 (S1): capture the peak across every rendered analysis section so
@@ -22062,13 +22169,13 @@ sub expand_recursive_pattern {
 # so the two always agree on what counts as an informational invocation. Version
 # is not suppressed: --version keeps the normal title banner. This runs before
 # the -?/help alias remap in adapt_to_command_line_options(), so it relies on the
-# classifier recognizing the raw -?, /help, /? aliases directly.
+# classifier recognizing the raw -?, /help, /? aliases directly. The title itself
+# prints inside adapt_to_command_line_options(), once --hide is known.
 my $_help_or_explain_invoked = grep {
     my $info = classify_informational_arg($_);
     $info && ($info->{kind} eq 'help' || $info->{kind} eq 'explain');
 } @ARGV;
-print_title() unless $_help_or_explain_invoked;
-adapt_to_command_line_options();
+adapt_to_command_line_options( title => !$_help_or_explain_invoked );
 adapt_to_terminal_settings();
 start_row_counting();
 open_section('progress') unless $disable_progress;    # the progress rows follow as their own section
