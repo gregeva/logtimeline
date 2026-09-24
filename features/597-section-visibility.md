@@ -27,6 +27,8 @@ output above it.
 3. **Report section start lines on `-V`.** A new `-V` section, following the
    `=== name ===` / `=== END name ===` convention, giving the output line at which
    each rendered section starts and ends. A hidden section is reported as absent.
+   For each section the report gives where it starts, how long it is, and the blank
+   rows padding its beginning and its end (architect, 2026-09-24).
 
 ## Decisions
 
@@ -68,6 +70,46 @@ histogram legend. Fixtures exercise each section's variability: many files for a
 long file list, a highlight to split the top-messages table, a non-default histogram
 height, the memory option. Every run pins `--terminal-width` so column offsets are
 deterministic.
+
+## Finding: where each section starts and ends today
+
+Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
+(a combined access log carrying a duration field, and a common access log carrying
+duration, thread and session) at `--terminal-width 160` with
+`-ni -hg duration -h ' 500 ' -n 3`, escape sequences stripped, and tracing which
+sub printed each blank line. Sections carry no title of their own except where
+noted, so a section's first row is whatever its first content happens to be.
+
+| Rows | Content | Printed by |
+|---|---|---|
+| 1-5 | title block: a coloured space row, rule, banner, rule, a reset row that reads blank | `print_title()` |
+| 6 | blank: the newline ending the statistics progress line, printed even under `--disable-progress` | `calculate_all_statistics()` |
+| | *the `-V` block, when requested, is inserted here* | `print_verbose_output()` |
+| 7 | blank, leading | `print_bar_graph()` |
+| 8-12 | timeline: rule, column header, rule, one row per bucket, rule | `print_bar_graph()` |
+| 13 | blank, leading | `print_histograms()` |
+| 14-28 | histogram: chart title, axis label, bars, axis, tick labels, a blank row, one percentile row per population (two when a highlight splits it) | `print_histograms()` |
+| 29 | blank, leading | `print_run_options()` |
+| 30 | the command-line options row (an environment options row above it when a configuration is set) | `print_run_options()` |
+| 31 | blank, leading | `print_message_summary()` |
+| 32-36 | highlighted messages table: header, rule, rows, blank, trailing | `print_message_summary()` |
+| 37-40 | overall messages table: header, rule, rows, blank, trailing | `print_message_summary()` |
+| 41 | blank, leading | `print_summary_table()` |
+| 42-56 | summary: rule, header, rule, category and counter rows beside the file list and the log-formats legend, rule | `print_summary_table()` |
+| 57 | blank | end of `## MAIN ##` |
+
+What this shows:
+
+- **Every section brings its own leading blank row**; the messages tables also end
+  with a trailing one, so two blank rows sit between the messages and the summary.
+- **Blank rows also occur inside sections**: the histogram's row between tick labels
+  and percentiles; the blank row between the two messages tables.
+- **Row 6 belongs to no section**: it is the end of a progress line that is not
+  printed.
+- **The `-V` block sits between rows 6 and 7**, so every rendered row after it moves
+  by the block's length. The same run with `-V -n 2 -osum` printed 362 rows.
+- With `-hm duration` in place of statistics, the timeline's row count is unchanged;
+  two histograms (`-hg duration -hg bytes`) render side by side on the same rows.
 
 ## Open questions
 
