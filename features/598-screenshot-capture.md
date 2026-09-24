@@ -139,6 +139,14 @@ may set its own size, and the tool's command line may set one for a run; the
 command line takes precedence over the manifest, the manifest over the default.
 237 x 62 is the override for a picture that needs more detail.
 
+**D12: where the agent guidance lives** (architect, 2026-09-24), for requirement 4:
+
+| Layer | Content |
+|---|---|
+| `docs/process/screenshots.md` | the guidance: when to use the tool, writing a manifest entry, choosing sections and offsets, the sensitivity warning, the refresh pipeline |
+| a row in the `CLAUDE.md` *Where to look* table | creating or changing a documentation screenshot points at `docs/process/screenshots.md` |
+| a path-scoped rule in `.claude/rules/` on `docs/screenshots/**` and `build/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
+
 ## Finding: terminal sizes in real use
 
 Measured by the architect with `tput lines` / `tput cols` in macOS Terminal,
