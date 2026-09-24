@@ -46,24 +46,15 @@ The table is not printed, the same visible outcome as `-n 0`. Unlike `-n 0`, mes
 are still retained, so the MESSAGES CSV, grouping (`-g`) and ranking (`-so`) keep
 working. The two are parallel paths to the same screen.
 
-**D3: every section's row count is determined before rendering** (architect,
-2026-09-24). Counts are computed after read, parse and statistics (where
-classification, category fill and the memory structures are settled) and before
-the first rendered line, so the report is emitted with the other `-V` sections at
-their usual point, before the rendered output. Every section's height is known by
-then:
-
-| Section | What sets its height |
-|---|---|
-| Timeline | the number of time buckets, fixed once the read is complete |
-| Histogram | its calculated height, including any height given on the command line |
-| Top messages | message count, header, underline, spacing; a second table when a highlight splits it |
-| Thread-pool summary | the ranked pool count |
-| Summary table, left column | categories (including highlighted rows), the success / failure / unclassified / unknown rows, memory structures when the memory option is on |
-| Summary table, right column | the fixed rows plus the file list |
-
-Today only the timeline counts its rows (for the pause option, `-p`); the counting
-for every other section is new.
+**D3: each section's start and row count are measured as it prints, and reported
+after the last section** (architect, 2026-09-24, replacing the earlier D3, under
+which every count was determined before rendering). The screenshot capture runs
+`ltl` twice, a `-V` probe run and then the capture run (#598), so no count is needed
+ahead of the output. Each section marks its start as it opens. A count of the rows
+printed to standard output, leaving out `-V` output wherever it prints, gives each
+section's start and length. `-V section-layout` prints after the run's last row. The
+printers are not restructured for it: knowing every height in advance would have
+meant splitting five printers into a build and a print, which was done and reverted.
 
 **D4: the acceptance tests anchor on static text** (architect, 2026-09-24). A test
 reads a section's reported start line from `-V`, then finds known static text at a
@@ -206,12 +197,9 @@ CSV. Visible: unchanged. This is how D2 holds.
 `tp`, with the hidden parts `threadpools-highlighted` and `threadpools-overall`,
 following `messages` (D7, D11).
 
-**D18: the memory rows of the summary are fixed when the row counts are taken**
-(architect, 2026-09-24). Under the memory option the summary lists each data
-structure whose peak size is 1 KiB or more. A measurement runs when the counts are
-computed (D3), and the list of structures shown is fixed then. The measurement just
-before the summary prints still updates their values. A structure that first
-crosses 1 KiB during rendering is not listed; its bytes stay in the unattributed row.
+**D18: withdrawn** (architect, 2026-09-24). It fixed the summary's memory rows when
+the counts were taken in advance. With counts measured as the summary prints (D3),
+the rows reported are the rows printed.
 
 **D19: when `--hide` and `--show` name the same section, the later one wins**
 (architect, 2026-09-24). Both options apply in the order given, `LTL_CONFIG` first,
@@ -233,11 +221,13 @@ Read on `release/0.18.4` on 2026-09-24, before implementation.
   dropped those rows (D16).
 - **Only the timeline counts its rows today**, and only under `-p`: the counter in
   `print_bar_graph()` advances only when the pause option is on.
-- **Every other height is settled before rendering, with two exceptions.** The
-  histogram layout (`calculate_histogram_layout()`) is computed inside
-  `print_histograms()` from settled data, so it can run earlier. Under the memory
-  option, the summary's memory rows depend on `measure_memory_structures()`, which
-  runs right before `print_summary_table()` (D18).
+- **`-V` output prints in three places.** `print_verbose_output()` prints most
+  sections between progress and the timeline. `print_histograms()` prints
+  `histogram-percentile-ticks` directly after the histogram, and
+  `write_aggregate_export()` prints `aggregate-export` after the summary. The row
+  count leaves out every `-V` range wherever it prints, so a section below the
+  histogram starts on the same row with the histogram's `-V` output on or off (D3,
+  D6).
 - **The title prints before the options are read.** `print_title()` runs in
   `## MAIN ##` before `adapt_to_command_line_options()`. `--hide title` therefore
   needs the section options read before the title prints. They are pre-read the way
@@ -328,6 +318,39 @@ counts of step 2:
 - The 74 regression goldens were re-captured. Against the committed ones, `diff -B`
   reports no difference in any file: 148 blank rows removed, two per file.
 
+**Step 2, rows measured as they print (D3, D6, D13, D14).** Under
+`-V section-layout`, `start_row_counting()` pushes `LTL::RowCounter`, a layer on
+standard output that counts rows and leaves out every `=== name ===` ...
+`=== END name ===` range wherever it prints. The title's rows, printed before the
+options were read, start the count. `open_section()` records where each section
+starts and closes the one before it. `open_part()` / `close_part()` mark the
+highlighted and overall tables inside the messages and thread-pool printers, and
+`record_side_part()` gives the summary's two columns their row counts from the
+arrays the printer prints. `print_section_layout()` prints the report after the
+run's closing row. Without `-V section-layout` nothing is counted, and standard
+output has no layer.
+
+The printers are not restructured. The earlier version of this step computed every
+height before rendering by splitting five printers into a build and a print; it
+was reverted when D3 was replaced.
+
+`tests/validate-section-layout.sh` (12 scenarios, 63 assertions, through
+`tests/section-layout/check-section-layout.pl`) checks the accounting (every row
+placed, D14), static text at offsets from reported starts (D4), states, the
+`-V`-stripped run against the plain run, progress shown, the date/time warning on
+standard error, and that the histogram, options, messages and summary report the
+same rows with the histogram's `-V` sections on and off. Shown to fail:
+- the accounting check, on five doctored captures (a row removed, an extra blank
+  row, the closing row removed, a report one row too long, a stray row) and on a
+  copy of `ltl` whose counter also counts `-V` rows;
+- the on/off comparison, on that same copy;
+- the anchor check, on a wrong offset.
+
+The shared soft-wrap check (`assert_no_soft_wrap`) measures a row by all its bytes,
+so a progress row painted over in place reads as hundreds of columns wide; the
+progress scenario skips it. The options row echoes every option given, so a long
+`-V` list wraps it (#497); the on/off scenario uses `-V all`.
+
 ## Open questions
 
 None.
@@ -349,11 +372,11 @@ separately from standard output (D12).
       in the histogram legend. Checked under each section's variability: many
       files, a highlight splitting the messages table, a non-default histogram
       height, the memory option.
-- [ ] Every two rendered sections are separated by exactly one blank row, owned by
+- [x] Every two rendered sections are separated by exactly one blank row, owned by
       neither (D5).
-- [ ] A `-V` run with every `-V` range removed prints exactly the rows of the same
+- [x] A `-V` run with every `-V` range removed prints exactly the rows of the same
       run without `-V` (D6, D14).
-- [ ] A date/time option the tool cannot handle prints its warning on standard
+- [x] A date/time option the tool cannot handle prints its warning on standard
       error, and standard output passes the accounting check below (D12).
 - [ ] On every run above, total rows minus `-V` rows minus reported section rows,
       separators and declared fixed spacing equals zero (D14).
@@ -365,8 +388,11 @@ separately from standard output (D12).
       byte-identical to the same run without `-hi` (D16).
 - [ ] With `-tpas`, `threadpools` and its two parts are reported and hideable, and
       `tp` resolves to `threadpools` (D17).
-- [ ] Under the memory option, the summary's rendered rows equal the count
-      `section-layout` reports (D18).
+- [x] Under the memory option, the summary's rendered rows equal the count
+      `section-layout` reports (D3).
+- [x] With a histogram shown, the messages and summary sections start on the same
+      rows with the histogram's `-V` sections requested and not requested, and on
+      the rows the same run prints without `-V` (D3, D6, D14).
 - [ ] `-hi summary -sh summary-files` renders only the file list, and
       `-sh summary -hi summary` hides the summary; a `--hide` in `LTL_CONFIG` is
       undone by `--show` on the command line (D19).

@@ -183,6 +183,9 @@ my %verbose_section_registry = (
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
+    'section-layout' => {
+        description => 'Where each output section and part started on standard output and how many rows it printed, tab-separated: name, state (rendered, hidden, absent), start row, row count. Printed after the last row (Issue #597).',
+    },
 );
 my @verbose_section_order = qw(
     runtime-config
@@ -202,6 +205,7 @@ my @verbose_section_order = qw(
     udm-counting
     udm-specs
     aggregate-export
+    section-layout
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -357,6 +361,18 @@ my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
 my @deferred_notices;           # notices raised mid-read, emitted once it ends
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
+
+# Output sections and their parts in print order, as -V section-layout reports
+# them (#597 D7, D13, D17). A part is named for its section: section-part.
+my @output_sections = qw(
+    title progress timeline histogram options
+    messages messages-highlighted messages-overall
+    threadpools threadpools-highlighted threadpools-overall
+    summary summary-values summary-files
+);
+my %section_rows;               # section or part => { start, rows } as printed, while rows are counted
+my ( $open_section_name, $open_part_name );
+my $title_rows = 0;             # rows the title printed, before the options were read
 
 # Repaint cadence for the read-pass progress line. The gate is time, not work:
 # repainting on a line count makes the refresh rate follow file size and I/O
@@ -6867,9 +6883,132 @@ END
 
 # Start a rendered section on standard output. No section owns the spacing
 # around it: exactly one blank row separates two rendered sections, printed
-# here, before every section but the first.
+# here, before every section but the first. While rows are counted, the
+# section's start row is recorded; closing it records how many rows it printed.
 sub open_section {
+    my ($name) = @_;
+    close_section();
     print "\n" if $sections_opened++;
+    $open_section_name = $name;
+    $section_rows{$name} = { start => rows_printed() + 1 } if defined $name && counting_rows();
+    return;
+}
+
+sub close_section {
+    close_part();
+    my $name = $open_section_name;
+    undef $open_section_name;
+    return unless defined $name && counting_rows();
+    $section_rows{$name}{rows} = rows_printed() - $section_rows{$name}{start} + 1;
+    return;
+}
+
+# A part printed below the one before it in its section (the highlighted and
+# overall tables).
+sub open_part {
+    my ($name) = @_;
+    close_part();
+    $open_part_name = $name;
+    $section_rows{$name} = { start => rows_printed() + 1 } if counting_rows();
+    return;
+}
+
+sub close_part {
+    my $name = $open_part_name;
+    undef $open_part_name;
+    return unless defined $name && counting_rows();
+    $section_rows{$name}{rows} = rows_printed() - $section_rows{$name}{start} + 1;
+    return;
+}
+
+# A part printed beside the others from the section's first row (the summary's
+# two columns), with the rows it takes.
+sub record_side_part {
+    my ( $name, $rows ) = @_;
+    return unless counting_rows();
+    $section_rows{$name} = { start => $section_rows{$open_section_name}{start}, rows => $rows };
+    return;
+}
+
+sub rows_printed  { return $LTL::RowCounter::rows // 0 }
+sub counting_rows { return defined $LTL::RowCounter::rows }
+
+# Count the rows reaching standard output from here on, for -V section-layout
+# (#597 D3). The title printed before the options were read; its rows start
+# the count.
+sub start_row_counting {
+    return unless section_requested('section-layout');
+    require PerlIO::via;
+    $LTL::RowCounter::rows = $title_rows;
+    $section_rows{title} = { start => 1, rows => $title_rows } if $title_rows;
+    binmode( STDOUT, ':via(LTL::RowCounter)' ) or die "Cannot count output rows: $!\n";
+    return;
+}
+
+{
+    # A layer on standard output that counts the rows written, leaving out -V
+    # output: every === name === ... === END name === range, wherever it
+    # prints, so each position is the one the same run without -V prints
+    # (#597 D6, D14). A row too long to be a delimiter is only counted.
+    package LTL::RowCounter;
+    our $rows;
+    my ( $depth, $partial, $partial_long ) = ( 0, '', 0 );
+
+    sub PUSHED {
+        my ($class) = @_;
+        my $self = '';
+        return bless \$self, $class;
+    }
+
+    sub WRITE {
+        my ( $self, $buffer, $fh ) = @_;
+        my @lines = split /\n/, $partial . $buffer, -1;
+        $partial = pop @lines;
+        for my $line (@lines) {
+            if ( !$partial_long && $line =~ /^=== (END )?.+ ===$/ ) {
+                $depth += $1 ? -1 : 1;
+            } elsif ( !$depth ) {
+                $rows++;
+            }
+            $partial_long = 0;
+        }
+        if ( length $partial > 256 ) {
+            $partial = substr( $partial, 0, 256 );
+            $partial_long = 1;
+        }
+        print {$fh} $buffer or return -1;
+        return length $buffer;
+    }
+}
+
+# rendered: the section printed; hidden: it was turned off; absent: the run
+# produced nothing for it. A part not printed takes its section's state.
+sub section_state {
+    my ($name) = @_;
+    return 'rendered' if $section_rows{$name} && defined $section_rows{$name}{rows};
+    my ($section) = $name =~ /^([^-]+)/;
+    return 'hidden' if section_hidden($section);
+    return 'absent';
+}
+
+sub section_hidden {
+    my ($name) = @_;
+    return 1 if $name eq 'progress' && $disable_progress;
+    return 1 if $name eq 'summary'  && $omit_summary;
+    return 0;
+}
+
+# -V section-layout, printed after the run's last row (#597 D3, D13).
+sub print_section_layout {
+    return unless counting_rows();
+    print "=== section-layout ===\n";
+    print join( "\t", qw( name state start rows ) ) . "\n";
+    for my $name (@output_sections) {
+        my $state = section_state($name);
+        my @position = $state eq 'rendered' ? @{ $section_rows{$name} }{qw( start rows )} : ( '', '' );
+        print join( "\t", $name, $state, @position ) . "\n";
+    }
+    print "=== END section-layout ===\n";
     return;
 }
 
@@ -6880,6 +7019,7 @@ sub print_title {
     my $title = get_title_string();
     $title =~ s/\n(\033\[0m)\n\z/$1\n/;
     print $title;
+    $title_rows = () = $title =~ /\n/g;
     return;
 }
 
@@ -19296,7 +19436,7 @@ sub print_bar_graph {
     my $lines_printed = 0;
     my @csv_data;
 
-    open_section();
+    open_section('timeline');
     if( $total_lines_included ) {
         print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";
 
@@ -19727,7 +19867,7 @@ sub print_histograms {
     # Get box drawing characters for current weight setting
     my %box = %{$histogram_box_sets{$histogram_box_weight}};
 
-    open_section();
+    open_section('histogram');
 
     # Build all histogram output line by line for side-by-side rendering
     my @all_lines = ();
@@ -20479,7 +20619,7 @@ sub print_run_options {
     my $cli_options = build_run_options_string();
     push @rows, "$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}" if $cli_options ne '';
     return unless @rows;
-    open_section();
+    open_section('options');
     print "$_\n" for @rows;
 }
 
@@ -20874,7 +21014,9 @@ sub print_summary_table {
         push @file_details, "$column_padding$padding" . join('  ', map { "$colors{'periwinkle'}$format_legend{$_}$colors{'white'} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
-    open_section();
+    open_section('summary');
+    record_side_part( 'summary-values', scalar @summary_table );
+    record_side_part( 'summary-files',  scalar @file_details );
     for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
         if( $i >= scalar @summary_table ) {
             print " " x $summary_table_width . $column_padding;
@@ -21016,7 +21158,8 @@ sub print_message_summary {
         if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
-            $tables_printed++ ? print "\n" : open_section();
+            $tables_printed++ ? print "\n" : open_section('messages');
+            open_part( $grouping eq 'highlight' ? 'messages-highlighted' : 'messages-overall' );
             my $header_title = " ";
 
             if( $grouping eq "highlight" ) {
@@ -21208,6 +21351,7 @@ sub print_message_summary {
                     print "$row\n";
                 }
             }
+            close_part();
         }
     }
 
@@ -21296,7 +21440,8 @@ sub print_threadpool_summary {
             my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
 
             next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
-            $tables_printed++ ? print "\n" : open_section();
+            $tables_printed++ ? print "\n" : open_section('threadpools');
+            open_part( $grouping eq 'highlight' ? 'threadpools-highlighted' : 'threadpools-overall' );
 
             my $header_title = " ";
 
@@ -21329,6 +21474,7 @@ sub print_threadpool_summary {
                     print "$row\n";
                 }
             }
+            close_part();
         }
     }
 
@@ -21924,7 +22070,8 @@ my $_help_or_explain_invoked = grep {
 print_title() unless $_help_or_explain_invoked;
 adapt_to_command_line_options();
 adapt_to_terminal_settings();
-open_section() unless $disable_progress;    # the progress rows follow as their own section
+start_row_counting();
+open_section('progress') unless $disable_progress;    # the progress rows follow as their own section
 
 pipeline_detect();
 pipeline_parse();
@@ -21933,5 +22080,7 @@ pipeline_finalize();
 resolve_message_classification_states();
 pipeline_render();
 
+close_section();
 print "\n";
+print_section_layout();
 exit;
