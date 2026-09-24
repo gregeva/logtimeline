@@ -111,6 +111,12 @@ targeted on its own.
 list, and is additive when repeated, the way `-m` is. The per-column options
 (`--hide-legend`, `--hide-stats`, and the rest) are unchanged.
 
+**D10: short forms `-hi` and `-sh`** (architect, 2026-09-24):
+`-hi, --hide <section>` and `-sh, --show <section>`. The option takes the section
+as its value, so its short form names the verb only. Both are free, and the
+parser's case-insensitive matching rules out `-H` and `-S`, which would resolve to
+`-h` (highlight) and `-s` (seconds).
+
 **D9: `--hide progress` is exactly `--disable-progress`** (architect, 2026-09-24),
 so that `--disable-progress` can one day be deprecated. Audit of what
 `--disable-progress` does today: it suppresses every progress print, and it skips
@@ -162,8 +168,6 @@ What this shows:
 
 ## Open questions
 
-- **Short forms** for `--hide` and `--show`. `-h` is highlight, and most `-h…` and
-  `-s…` short forms are taken; candidates must be checked against every existing one.
 - **Standard error.** Notices printed to standard error during render are not part
   of standard output; confirm they are excluded from the count.
 - **The pause option.** Whether `-p` prompts count as lines, or the report is
