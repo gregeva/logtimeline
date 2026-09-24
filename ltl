@@ -2441,7 +2441,7 @@ sub _classify_argv_provenance {
                 'hmdm|heatmap-data-model',
                 'mdm|message-stats-data-model',
                 'bdm|bucket-stats-data-model',
-                'terminal-width|tw', 'no-auto-hide|nah',
+                'terminal-width|tw', 'terminal-height|th', 'no-auto-hide|nah',
                 'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
             );
             for my $s (@specs) {
@@ -13892,6 +13892,16 @@ sub classify_option_error {
     return "required options not provided";
 }
 
+# --terminal-height: the run behaves as under a detected terminal of that many
+# rows, so the defaults read from the height (the bucket size, the histogram
+# height) follow it with output redirected (#597 D15).
+sub set_terminal_height {
+    my ($rows) = @_;
+    $terminal_height = $rows;
+    $terminal_height_detected = 1;
+    return;
+}
+
 sub adapt_to_command_line_options {
     my (%arg) = @_;
     @ORIGINAL_ARGV = @ARGV;
@@ -13922,20 +13932,21 @@ sub adapt_to_command_line_options {
 
     @ARGV = map { ($_ eq '-?' || $_ eq '/help' || $_ eq '/?') ? '--help' : $_ } @ARGV;
 
-    # Resolve the terminal-width override before dispatching informational
+    # Resolve the terminal-size overrides before dispatching informational
     # options so --help/--explain/--version output reflows to the requested
-    # width. This is a deliberately narrow, non-fatal pre-parse: pass_through
+    # width and pages at the requested height. This is a deliberately narrow, non-fatal pre-parse: pass_through
     # leaves every other token (including malformed companion options) untouched
     # and runs no other option's parsing or validation, so informational options
     # still short-circuit before full option parsing.
     {
         my @argv_copy = @ARGV;
-        my $tw_pre;
+        my ( $tw_pre, $th_pre );
         local $SIG{__WARN__} = sub {};
         Getopt::Long::Configure('pass_through');
-        Getopt::Long::GetOptionsFromArray(\@argv_copy, 'terminal-width|tw=i' => \$tw_pre);
+        Getopt::Long::GetOptionsFromArray(\@argv_copy, 'terminal-width|tw=i' => \$tw_pre, 'terminal-height|th=i' => \$th_pre);
         Getopt::Long::Configure('no_pass_through');
         $terminal_width = $tw_pre if defined $tw_pre;
+        set_terminal_height($th_pre) if defined $th_pre;
     }
 
     # The section options are read here too, the same way, so a hidden title is
@@ -14086,6 +14097,7 @@ sub adapt_to_command_line_options {
         'bdm|bucket-stats-data-model=s'    => sub { _validate_dm('bucket-stats-data-model',    $_[1]); $data_model_bucket    = $_[1]; },
         'profile|pr=s'                     => sub { _validate_profile($_[1]); $profile_mode = $_[1]; },
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
+        'terminal-height|th=i' => sub { set_terminal_height($_[1]) },               # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
         'debug-layout' => \$debug_layout,                                           # hidden
         'detection-window=i' => \$format_detection_window,                          # hidden — D30 two-phase-store window size (default 0 until #17 sizes it)

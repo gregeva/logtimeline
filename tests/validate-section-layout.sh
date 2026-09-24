@@ -129,6 +129,16 @@ text_present() {
     "$PERL" "$CHECKER" strip "$1" | grep -qF -- "$2" || { echo "'$2' is not printed"; return 1; }
 }
 
+# A CONFIG value from -V benchmark-data. Usage: config_value <tag> <key>
+config_value() {
+    awk -F'\t' -v key="$2" '$1 == "CONFIG" && $2 == key { print $3; found = 1 } END { exit !found }' "$(capture "$1")"
+}
+
+# The row count section-layout reports for NAME. Usage: layout_rows <tag> <name>
+layout_rows() {
+    awk -F'\t' -v name="$2" '$1 == name && $2 == "rendered" { print $4; found = 1 } END { exit !found }' "$(capture "$1")"
+}
+
 # The section-layout row for NAME is present in both captures and identical.
 # Usage: same_layout_row <name> <capture-a> <capture-b>
 same_layout_row() {
@@ -233,7 +243,8 @@ scenario_register \
     hide-summary-is-omit-summary \
     hide-list-repeat-and-aliases \
     show-after-hide \
-    unknown-section-refused
+    unknown-section-refused \
+    terminal-height
 scenario_parse_args "$@"
 
 echo "Section layout (-V section-layout) against standard output, width $WIDTH"
@@ -578,6 +589,35 @@ if scenario_wanted unknown-section-refused; then
         asserts     'An unknown --hide value is an error that names it, exits 1, and prints nothing on standard output' \
         produced_by 'apply_section_visibility() through print_usage() in ltl' \
         contract    'features/597-section-visibility.md § D8, D11'
+    echo ""
+fi
+
+# With output redirected no terminal height is detected. --terminal-height makes
+# the run take the defaults a detected terminal of that height gives: the bucket
+# size (120 minutes up to 30 rows, 10 minutes over 85) and the histogram height
+# (5 rows under 50, 11 under 100), the latter compared with the same run given
+# that histogram height explicitly (D15).
+if scenario_wanted terminal-height; then
+    current_scenario=terminal-height
+    th_args=(--disable-progress -hg duration -n 1 -V section-layout,benchmark-data "$SPREAD_LOG")
+    if run_ltl th30 -th 30 "${th_args[@]}" && run_ltl hgh5 -hgh 5 "${th_args[@]}" \
+       && run_ltl th90 -th 90 "${th_args[@]}" && run_ltl hgh11 -hgh 11 "${th_args[@]}"; then
+        for check in th30:120:hgh5 th90:10:hgh11; do
+            IFS=: read -r tag minutes explicit <<< "$check"
+            assert_command \
+                command     "[[ \"\$(config_value $tag time_bucket_size)\" == $minutes ]]" \
+                label       "-${tag/th/th } gives a $minutes-minute bucket" \
+                asserts     "With output redirected and no -bs, --terminal-height ${tag#th} sets the default bucket size a detected ${tag#th}-row terminal sets: $minutes minutes" \
+                produced_by 'set_terminal_height() and adapt_to_terminal_settings() in ltl' \
+                contract    'features/597-section-visibility.md § D15'
+            assert_command \
+                command     "[[ \"\$(layout_rows $tag histogram)\" == \"\$(layout_rows $explicit histogram)\" ]]" \
+                label       "-${tag/th/th } draws the histogram at the height -${explicit/hgh/hgh } gives" \
+                asserts     "With output redirected and no -hgh, --terminal-height ${tag#th} sets the histogram height a detected ${tag#th}-row terminal sets, so the histogram takes the rows it takes at that explicit height" \
+                produced_by 'set_terminal_height() and calculate_histogram_layout() in ltl' \
+                contract    'features/597-section-visibility.md § D15'
+        done
+    fi
     echo ""
 fi
 

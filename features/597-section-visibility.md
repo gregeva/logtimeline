@@ -397,6 +397,23 @@ on an unbound variable exits 0 when an `EXIT` trap is set, and the trap sees a
 status of 0. Every harness that cleans up through `trap ... EXIT` can report a
 crash as a pass.
 
+**Step 4, `-th, --terminal-height` (D15).** A hidden option, read early beside
+`--terminal-width`, since `--help` pages at the height too, and again in the main
+option list. `set_terminal_height()` sets the height and marks it detected, so the
+default bucket size (`adapt_to_terminal_settings()`) and histogram height
+(`calculate_histogram_layout()`) follow it as under a detected terminal. Measured
+on the synthetic access log with output redirected, and matching the tiers in D15:
+
+| Run | Bucket | Histogram rows |
+|---|---|---|
+| no override (height falls back to 24, not detected) | 120 min | 14 (configured height 8) |
+| `-th 30` | 120 min | 11, as `-hgh 5` |
+| `-th 90` | 10 min | 17, as `-hgh 11` |
+| `-th 130` | 10 min | 22 (height 16) |
+
+The harness's `terminal-height` scenario asserts the `-th 30` and `-th 90` rows;
+removing the detected mark or the height from `set_terminal_height()` fails it.
+
 ## Open questions
 
 None.
@@ -428,7 +445,7 @@ separately from standard output (D12).
       separators and declared fixed spacing equals zero (D14).
 - [x] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias
       resolves to its section (D8, D11).
-- [ ] With output redirected, `-th 30` gives the bucket size and histogram height
+- [x] With output redirected, `-th 30` gives the bucket size and histogram height
       that a detected 30-row terminal gives, and `-th 90` those of a 90-row one (D15).
 - [x] `-hi timeline -o` and `-hi messages -o` write STATS and MESSAGES CSV files
       byte-identical to the same run without `-hi` (D16).
