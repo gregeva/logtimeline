@@ -108,13 +108,11 @@ committed fixtures. The architect selects the files and the narrative so the
 documentation exposes nothing sensitive.
 
 > **Warning: sensitive data in screenshots.** The repository and its documentation
-> are public. Everything `ltl` renders is metrics and counters except: the
+> are public. Everything `ltl` renders is metrics and counters except the
 > **messages** section (message text, which can carry host names, user names, paths
-> and identifiers), the **file names** in the summary's file list, and the
-> **options** row, which echoes the command line, including any include, exclude or
-> highlight pattern. A screenshot showing any of these is checked for sensitive
-> content before it is committed; hiding the section (`--hide`) or cropping it out
-> removes it.
+> and identifiers) and possibly the **file names** in the summary's file list. A
+> screenshot showing either is checked for sensitive content before it is
+> committed; hiding the section (`--hide`) or cropping it out removes it.
 
 ## Open questions
 
