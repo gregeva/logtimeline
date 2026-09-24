@@ -71,6 +71,16 @@ long file list, a highlight to split the top-messages table, a non-default histo
 height, the memory option. Every run pins `--terminal-width` so column offsets are
 deterministic.
 
+**D5: no section owns the spacing around it** (architect, 2026-09-24). The blank
+rows between sections are printed between sections, not by them: exactly one blank
+row separates two rendered sections. The trailing blank row the messages tables
+print and the blank row left by the statistics progress line under
+`--disable-progress` are removed. Blank rows inside a section (the histogram's row
+before its percentiles, the row between the two messages tables) are part of that
+section and count in its length. The report gives each section's first content row
+and its length. Visible consequence: the double blank row after the messages and the
+extra blank row above the timeline disappear.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
