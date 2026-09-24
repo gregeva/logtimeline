@@ -5,8 +5,8 @@
 [#598](https://github.com/gregeva/logtimeline/issues/598): Enhancement: programmatic
 console screenshot capture for documentation (development tooling).
 
-Blocked by [#597](https://github.com/gregeva/logtimeline/issues/597) (section
-visibility and the `-V` section start-line report), specified in
+Builds on [#597](https://github.com/gregeva/logtimeline/issues/597) (section
+visibility and the `-V section-layout` report), shipped in 0.18.4 and specified in
 `features/597-section-visibility.md`.
 
 ## Motivating consumer
@@ -42,8 +42,9 @@ As filed on the issue, in three parts, plus a fourth added in specification:
 
 ## What this issue takes from #597
 
-- Line positions come from the `-V` report, computed before render (#597 D3), so
-  the probe run and the capture run agree when the rendered output is identical.
+- Line positions come from the `-V section-layout` report, measured as each section
+  prints and printed after the run's last row (#597 D3), so the probe run and the
+  capture run agree when the rendered output is identical.
 - Sections are removed with the `hide` options (#597 D1).
 - The recipe's terminal width and height reach `ltl` through `--terminal-width` and
   `--terminal-height` (#597 D15), so defaults `ltl` derives from the terminal size
