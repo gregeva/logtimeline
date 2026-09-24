@@ -53,6 +53,19 @@ Windows, needs no visible window, and a crop in cells is a slice of the grid. Th
 renderer's font and colour table set the look; the font must carry the block and
 box-drawing characters `ltl` prints.
 
+**D2: a crop is sections plus a start and an end offset** (architect, 2026-09-24).
+
+| Part | Meaning | Example |
+|---|---|---|
+| sections | one section, or several in print order; the crop spans from the first one's start row to the last one's last row, including the blank rows between | `timeline,histogram` |
+| start offset | rows relative to the first section's start row; negative reaches above it, positive skips into it | `+15` skips the first 15 timeline rows; `-5` starts 5 rows above the timeline |
+| end offset | rows relative to the last section's last row, same sign convention; default `0` | `-2` stops 2 rows before the histogram ends |
+
+Start rows and row counts are read from `-V section-layout` (#597 D13). Anything
+printed between the named sections is part of the crop; leaving it out means hiding
+it with `--hide`. A crop naming a section the report gives as `hidden` or `absent`
+is an error, not an empty image.
+
 ## Open questions
 
 - Whether crops need a column range (a region on the right of the screen, such as
