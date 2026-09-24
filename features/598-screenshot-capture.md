@@ -20,7 +20,8 @@ This is development and release tooling, not shipped with `ltl`.
 
 As filed on the issue, in three parts:
 
-1. **Capture tool.** PowerShell (`pwsh`) on macOS and Windows, one implementation.
+1. **Capture tool.** Perl (D4, superseding PowerShell as filed), one implementation;
+   `ltl` run on macOS and on Windows.
    Takes a full `ltl` command line and produces one or more images from a single
    execution. Terminal width and height default (width around 200 columns) and are
    overridable. Crops are in terminal cells, never pixels: a target section plus
@@ -74,6 +75,28 @@ value reaches inward. Anything not given means the full width. At
 (cells 100 to 175). Column positions hold only while the terminal width is fixed,
 which every screenshot definition sets. Columns anchored to positions `ltl` reports,
 as rows are, are [#599](https://github.com/gregeva/logtimeline/issues/599), filed as not planned.
+
+**D4: the tool is written in Perl, not PowerShell** (architect, 2026-09-24),
+superseding the platform line as filed. PowerShell was chosen to capture the
+console window; with D1 nothing is captured from a window, and .NET's bundled
+imaging (`System.Drawing`) is supported only on Windows. Perl is `ltl`'s own
+language and toolchain; one implementation runs wherever `ltl` is developed. The
+macOS and Windows requirement stands as: `ltl` is run, and its output captured, on
+both.
+
+**D5: screenshots are SVG** (architect, 2026-09-24). Written as text, so no imaging
+module is needed, and a release's screenshot changes are readable in its diff.
+
+**D6: prototype the rendering first** (architect, 2026-09-24). Before anything is
+built on it, a prototype under `prototype/` proves that `ltl`'s ANSI output renders
+faithfully to SVG: the block and box-drawing characters align cell to cell, the
+colours match, and the result displays correctly where the documentation is read.
+
+**D7: the background is an input** (architect, 2026-09-24). `ltl` detects a light or
+dark terminal background and chooses its colours from it (`-lbg, --light-background`,
+`-dbg, --dark-background` force either). Each screenshot states `dark` or `light`;
+the tool forces that choice on `ltl` rather than letting it detect, and draws the
+image on the matching background.
 
 ## Open questions
 
