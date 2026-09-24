@@ -66,10 +66,18 @@ printed between the named sections is part of the crop; leaving it out means hid
 it with `--hide`. A crop naming a section the report gives as `hidden` or `absent`
 is an error, not an empty image.
 
+**D3: columns are absolute, measured from the edges** (architect, 2026-09-24). A
+crop may give a left and a right position. Left counts from the left edge, which is
+0; right counts from the right edge, which is the terminal width, so a negative
+value reaches inward. Anything not given means the full width. At
+`--terminal-width 200`, `100, -25` captures 75 cells starting at the middle
+(cells 100 to 175). Column positions hold only while the terminal width is fixed,
+which every screenshot definition sets. Columns anchored to positions `ltl` reports,
+as rows are, are [#599](https://github.com/gregeva/logtimeline/issues/599), filed as not planned.
+
 ## Open questions
 
-- Whether crops need a column range (a region on the right of the screen, such as
-  the heatmap), or whether terminal width plus section control is enough.
+None.
 
 ## Definition of done (as filed)
 
