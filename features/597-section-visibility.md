@@ -126,6 +126,12 @@ as its value, so its short form names the verb only. Both are free, and the
 parser's case-insensitive matching rules out `-H` and `-S`, which would resolve to
 `-h` (highlight) and `-s` (seconds).
 
+**D11: fixed aliases for the public section names** (architect, 2026-09-24),
+following the named-alias convention metric values already use (`size` for
+`bytes`, `avg` for `mean`), never prefix matching: `timeline` `tl`, `histogram`
+`hg`, `messages` `msg`, `summary` `sum`, `options` `opt`, `progress` `prog`.
+`title` and the hidden parts have no alias.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
