@@ -91,19 +91,34 @@ Row 1 is the top of the title block. Positions are those of the same run without
 | Section | Parts, hideable separately through hidden values | Contents |
 |---|---|---|
 | `title` | | the banner block |
-| `progress` | | the progress indicators, hidden consistently with the other sections; how this relates to `--disable-progress` is open |
+| `progress` | | the progress indicators (D9) |
 | `timeline` | | rule, header, bucket rows, closing rule; the statistics or heatmap column is part of it |
 | `histogram` | | every histogram, rendered side by side on the same rows |
 | `options` | | the command-line options row, and the environment options row when present |
-| `messages` | `messages-highlighted`, `messages-plain` | the highlighted-messages table (present only under a highlight) and the overall table |
+| `messages` | `messages-highlighted`, `messages-overall` | the highlighted-messages table (present only under a highlight) and the overall table |
 | thread-pool summary | | present only with the thread-pool summary option |
 | `summary` | `summary-values`, `summary-files` | the left column (categories, counters, timing, memory) and the right column (file list and log-formats legend) |
 
-`messages` and `summary` are the public names. The part names are hidden values:
+`messages` and `summary` are the public names. The messages part names follow the
+table titles the tool prints (`TOP HIGHLIGHTED MESSAGES`, `TOP OVERALL MESSAGES`). The part names are hidden values:
 they exist so that output can be cut to a strict minimum, for example
 `--hide summary-files` so a long file list does not push the values table out of a
 screenshot. The `-V` report lists the parts as separate entries so each can be
 targeted on its own.
+
+**D8: one `--hide <section>` and one `--show <section>` option** (architect,
+2026-09-24). Each takes a section or part name from D7, accepts a comma-separated
+list, and is additive when repeated, the way `-m` is. The per-column options
+(`--hide-legend`, `--hide-stats`, and the rest) are unchanged.
+
+**D9: `--hide progress` is exactly `--disable-progress`** (architect, 2026-09-24),
+so that `--disable-progress` can one day be deprecated. Audit of what
+`--disable-progress` does today: it suppresses every progress print, and it skips
+the up-front size sweep of the selected files (`size_selected_files_for_progress()`,
+`return if $disable_progress`), whose only consumer is the overall progress figure.
+`--hide progress` does both. Differences that remain:
+`--disable-progress` is a hidden option while `progress` becomes a public section
+name; the stray blank row it leaves today is removed by D5.
 
 ## Finding: where each section starts and ends today
 
@@ -147,9 +162,8 @@ What this shows:
 
 ## Open questions
 
-- **Short forms.** `-h` and most `-h…` short forms are taken by highlight (`-h`,
-  `-hpf`, `-hf`, `-hs`), heatmap (`-hm`) and the column hides. The new options need
-  short forms checked against every existing one.
+- **Short forms** for `--hide` and `--show`. `-h` is highlight, and most `-h…` and
+  `-s…` short forms are taken; candidates must be checked against every existing one.
 - **Standard error.** Notices printed to standard error during render are not part
   of standard output; confirm they are excluded from the count.
 - **The pause option.** Whether `-p` prompts count as lines, or the report is
