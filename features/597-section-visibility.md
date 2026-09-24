@@ -29,6 +29,9 @@ output above it.
    each rendered section starts and ends. A hidden section is reported as absent.
    For each section the report gives where it starts, how long it is, and the blank
    rows padding its beginning and its end (architect, 2026-09-24).
+4. **Override the terminal height** (architect, 2026-09-24), as `--terminal-width`
+   overrides the width, so a run whose output is redirected (the #598 capture)
+   behaves as it would at a given terminal height (D15).
 
 ## Decisions
 
@@ -181,6 +184,16 @@ a failure that names the rows it could not place. `-V` output prints no rows out
 its delimiters, blank padding included, so a `-V` run with its ranges removed is
 identical to the same run without `-V` (D6).
 
+**D15: a hidden `-th, --terminal-height <N>` option** (architect, 2026-09-24),
+mirroring the hidden `-tw, --terminal-width`. With output redirected, `ltl` cannot
+detect the terminal size, yet the height sets two defaults: the bucket size when
+`-bs` is not given (120, 90, 60, 30 or 10 minutes for up to 30, 45, 65, 85 and
+over 85 rows) and the histogram height when `-hgh` is not given (5, 7, 9, 11 or 14
+rows for under 50, 65, 80, 100 and 120 rows; the configured default when the height
+is not detected). The override makes both follow the given height, as a detected
+terminal of that height would. It is here because this issue owns what the #598
+capture needs from `ltl`.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -258,5 +271,7 @@ separately from standard output (D12).
       separators and declared fixed spacing equals zero (D14).
 - [ ] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias
       resolves to its section (D8, D11).
+- [ ] With output redirected, `-th 30` gives the bucket size and histogram height
+      that a detected 30-row terminal gives, and `-th 90` those of a 90-row one (D15).
 - [ ] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
       (`tests/validate-help-content.sh`).
