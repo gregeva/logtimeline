@@ -153,6 +153,13 @@ command line takes precedence over the manifest, the manifest over the default.
 changes at every release even when nothing else has. That is accepted; the noise is
 confined to the images that show the summary's values.
 
+**D14: every character is drawn as font text** (architect, 2026-09-24). Block and
+box-drawing characters included, in the viewer's monospace font, each run of
+characters held to its cells' width. Terminal.app does not draw a full block over the
+whole line height, so rows keep the gap between them that Terminal.app shows; drawing
+blocks as rectangles filling the cell, compared in the rendering prototype, does not
+match it. The look on Windows depends on the viewer's font (Consolas).
+
 ## Finding: terminal sizes in real use
 
 Measured by the architect with `tput lines` / `tput cols` in macOS Terminal,
@@ -186,7 +193,14 @@ the timeline bars, the heatmap and the histogram (2,449 of 7,276 edge samples fa
 on the dark fixture render). Drawn as rectangles at cell coordinates with crisp
 edges, none fail, on dark or light. A pixel check through Quick Look and `sips`
 (macOS only, nothing to install) tells the two apart. Pending: the side-by-side
-comparison with Terminal.app (criterion 12) and display on GitHub.
+comparison with Terminal.app (criterion 12).
+
+Viewed on GitHub by the architect (2026-09-24): text renders well in both modes; the
+timeline bars and the heatmap are poor in geometry mode, while the text-glyph render
+is acceptable. The cause (architect, 2026-09-24): Terminal.app does not
+draw a full block over the whole line height, so a gap between rows is its expected
+rendering; geometry mode fills the line and so does not match it. The pixel check
+measured blocks against a full cell, which is the wrong reference for Terminal.app.
 
 ## Open questions
 
@@ -202,8 +216,8 @@ crop anchored on its section start line, captured on macOS and on Windows.
 
 ## Acceptance criteria
 
-Criteria 1 to 10 are assertable; 11 and 12 are unknown and are the prototype's
-scope (D6).
+Criteria 1 to 11 are assertable; 12 is verified by eye. The rendering prototype
+(D6) settled 11 and 12, which it held as unknown (`prototype/598-ansi-svg/findings.md`).
 
 - [ ] 1. A crop's cells equal the corresponding rows of `ltl`'s standard output,
       sliced by the reported section positions, the start and end offsets and the
@@ -224,7 +238,9 @@ scope (D6).
 - [ ] 9. The same recipe on macOS and on Windows yields the same crop cells.
 - [ ] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
       the path rule covers `images/screenshots/**` and `build/screenshots.yaml` (D12).
-- [ ] 11. *(unknown: prototype)* Block and box-drawing characters align cell to cell
-      in the SVG as displayed where the documentation is read.
-- [ ] 12. *(unknown: prototype)* The rendered image matches the terminal's look,
-      verified by viewing it on real data.
+- [ ] 11. Every character sits within its cell's columns as displayed: the pixel
+      check (`prototype/598-ansi-svg/check-alignment.pl`, Quick Look on macOS)
+      samples each full block's left and right edges (D14).
+- [ ] 12. *(by eye)* The rendered image matches Terminal.app's look on real data,
+      block heights and the gap between rows included, which follow the viewer's
+      font (D14).

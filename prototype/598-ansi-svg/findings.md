@@ -82,3 +82,14 @@ background it cannot, and says so).
 3. **Font**: the text uses the viewer's monospace font (SF Mono on macOS, Consolas
    on Windows, DejaVu Sans Mono on Linux). Letter spacing is adjusted to the cell
    grid, so text stays in its cells whichever font is used; the glyph shapes differ.
+
+## Outcome
+
+Viewed on GitHub in Safari by the architect: text renders well in both renderers;
+the timeline bars and the heatmap are wrong in the geometry renderer and acceptable
+as text glyphs. Terminal.app does not draw a full block over the whole line height,
+so the gap between rows that the alignment check counted as a failure is the
+terminal's own look. The check measured against a full cell, the wrong reference.
+
+Decision: `features/598-screenshot-capture.md` D14, every character is drawn as
+font text.
