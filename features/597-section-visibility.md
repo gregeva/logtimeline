@@ -81,6 +81,10 @@ section and count in its length. The report gives each section's first content r
 and its length. Visible consequence: the double blank row after the messages and the
 extra blank row above the timeline disappear.
 
+**D6: rows are counted from the first row the run prints** (architect, 2026-09-24).
+Row 1 is the top of the title block. Positions are those of the same run without
+`-V`, so a position read from a `-V` probe run applies unchanged to the capture run.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -126,9 +130,6 @@ What this shows:
 - **Short forms.** `-h` and most `-h…` short forms are taken by highlight (`-h`,
   `-hpf`, `-hf`, `-hs`), heatmap (`-hm`) and the column hides. The new options need
   short forms checked against every existing one.
-- **Line numbering origin.** The title prints first, then the `-V` block, then the
-  rendered sections. Does the report count lines as the run prints them without
-  `-V` (the capture run), and does line 1 start at the title?
 - **The section set.** Which units are reported: the run-options line, the
   thread-pool summary, the summary table as one section or its two columns
   separately, the two top-messages tables when a highlight splits them.

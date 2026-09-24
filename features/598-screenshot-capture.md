@@ -39,9 +39,9 @@ As filed on the issue, in three parts:
 - Line positions come from the `-V` report, computed before render (#597 D3), so
   the probe run and the capture run agree when the rendered output is identical.
 - Sections are removed with the `hide` options (#597 D1).
-- #597's open question on the line-numbering origin is decided by this tool's
-  two-run design: the positions it needs are those of the capture run, which has
-  no `-V` block.
+- Rows are counted from the first row the run prints, as the run prints without
+  `-V` (#597 D6), so positions read from the probe run apply to the capture run.
+- One blank row separates sections and belongs to neither (#597 D5).
 
 ## Open questions
 
