@@ -18,7 +18,7 @@ This is development and release tooling, not shipped with `ltl`.
 
 ## Requirements
 
-As filed on the issue, in three parts:
+As filed on the issue, in three parts, plus a fourth added in specification:
 
 1. **Capture tool.** Perl (D4, superseding PowerShell as filed), one implementation;
    `ltl` run on macOS and on Windows.
@@ -34,6 +34,12 @@ As filed on the issue, in three parts:
    geometry overrides, crops, output image names.
 3. **Release step.** Beside `build/sync-wiki.sh`; runs the batch processor, and the
    images are committed before any documentation update that references them.
+4. **Guidance for agents** (architect, 2026-09-24). Documentation written for
+   machine and AI use, not for end users, explaining the intended and appropriate
+   use of the tooling to create screenshots across scenarios and use cases, and
+   setting the expectation that any screenshot requested for documentation is
+   generated this way and added to the manifest and the automated refresh and
+   rebuild pipeline.
 
 ## What this issue takes from #597
 
@@ -125,6 +131,23 @@ documentation exposes nothing sensitive.
 | the manifest | `build/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
 | the images | `docs/screenshots/*.svg`, generated output only |
 | input paths in the manifest | relative to the repository root (`logs/...`), so one recipe resolves on every development machine |
+
+## Finding: terminal sizes in real use
+
+Measured by the architect with `tput lines` / `tput cols` in macOS Terminal,
+2026-09-24:
+
+| Setting | Columns x rows |
+|---|---|
+| windowed | 44 rows |
+| full screen | 50 to 56 rows |
+| zoomed far in | 158 x 40, too small to see a full timeline's detail |
+| typical viewing of a full timeline | about 211 x 53 |
+| higher resolution and fidelity | about 237 x 62 |
+
+The filed default width of about 200 columns is therefore a starting point only:
+the size must be settable per screenshot in the manifest and on the tool's command
+line.
 
 ## Open questions
 
