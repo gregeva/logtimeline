@@ -193,6 +193,7 @@ This list prevents collisions across parallel work. Update it when adding a new 
 
 **Reserved by sub-issues, not yet implemented:**
 - `option-resolution` (Issue #231)
+- `section-layout` (Issue #597): per rendered section and part, its state and the row it starts on and its row count, as a tab-separated table; contract in features/597-section-visibility.md § D13
 
 ## Stability contract
 

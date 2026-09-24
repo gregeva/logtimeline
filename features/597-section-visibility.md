@@ -140,6 +140,31 @@ the title and the timeline) moves to standard error with every other notice. The
 as part of the timeline section. Test fixtures capture standard error separately
 from standard output.
 
+**D13: the `-V section-layout` section, tab-separated** (architect, 2026-09-24).
+A header row, then one row per section and per part (D7) in print order, each with
+the same four tab-separated fields:
+
+| Field | Value |
+|---|---|
+| `name` | the section or part name from D7 |
+| `state` | `rendered`; `hidden` (turned off by `--hide`); `absent` (the run produced nothing for it, such as highlighted messages without a highlight) |
+| `start` | the first content row (D5, D6); empty unless `rendered` |
+| `rows` | the row count, blank rows inside the section included; empty unless `rendered` |
+
+A part's row follows its section's row. Side-by-side parts (`summary-values`,
+`summary-files`) share a start row. Example (fields separated by tabs, which do not
+align visually):
+
+```
+=== section-layout ===
+name	state	start	rows
+title	rendered	1	4
+timeline	rendered	6	5
+messages-highlighted	absent		
+progress	hidden		
+=== END section-layout ===
+```
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -188,7 +213,7 @@ the same rows as one without it. The report needs no rule for `-p`.
 
 ## Open questions
 
-- **The `-V` section name** and its keys.
+None.
 
 ## Acceptance criteria
 
