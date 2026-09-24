@@ -85,6 +85,26 @@ extra blank row above the timeline disappear.
 Row 1 is the top of the title block. Positions are those of the same run without
 `-V`, so a position read from a `-V` probe run applies unchanged to the capture run.
 
+**D7: the sections, and the parts that can be hidden separately** (architect,
+2026-09-24). In print order:
+
+| Section | Parts, hideable separately through hidden values | Contents |
+|---|---|---|
+| `title` | | the banner block |
+| `progress` | | the progress indicators; hiding it is consistent with, and replaces the need for, a separate progress switch (`--disable-progress` today) |
+| `timeline` | | rule, header, bucket rows, closing rule; the statistics or heatmap column is part of it |
+| `histogram` | | every histogram, rendered side by side on the same rows |
+| `options` | | the command-line options row, and the environment options row when present |
+| `messages` | `messages-highlighted`, `messages-plain` | the highlighted-messages table (present only under a highlight) and the overall table |
+| thread-pool summary | | present only with the thread-pool summary option |
+| `summary` | `summary-values`, `summary-files` | the left column (categories, counters, timing, memory) and the right column (file list and log-formats legend) |
+
+`messages` and `summary` are the public names. The part names are hidden values:
+they exist so that output can be cut to a strict minimum, for example
+`--hide summary-files` so a long file list does not push the values table out of a
+screenshot. The `-V` report lists the parts as separate entries so each can be
+targeted on its own.
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -130,9 +150,6 @@ What this shows:
 - **Short forms.** `-h` and most `-h…` short forms are taken by highlight (`-h`,
   `-hpf`, `-hf`, `-hs`), heatmap (`-hm`) and the column hides. The new options need
   short forms checked against every existing one.
-- **The section set.** Which units are reported: the run-options line, the
-  thread-pool summary, the summary table as one section or its two columns
-  separately, the two top-messages tables when a highlight splits them.
 - **Standard error.** Notices printed to standard error during render are not part
   of standard output; confirm they are excluded from the count.
 - **The pause option.** Whether `-p` prompts count as lines, or the report is
