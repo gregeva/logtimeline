@@ -32,6 +32,10 @@ output above it.
 4. **Override the terminal height** (architect, 2026-09-24), as `--terminal-width`
    overrides the width, so a run whose output is redirected (the #598 capture)
    behaves as it would at a given terminal height (D15).
+5. **Hide and show the timeline's columns through the same two options**
+   (architect, 2026-09-24). `--hide` and `--show` are the single set through which
+   every visibility control of the output operates, sections and columns alike, so
+   that the individual options can eventually go (D21 to D24).
 
 ## Decisions
 
@@ -102,8 +106,8 @@ targeted on its own.
 
 **D8: one `--hide <section>` and one `--show <section>` option** (architect,
 2026-09-24). Each takes a section or part name from D7, accepts a comma-separated
-list, and is additive when repeated, the way `-m` is. The per-column options
-(`--hide-legend`, `--hide-stats`, and the rest) are unchanged.
+list, and is additive when repeated, the way `-m` is. They take the timeline's
+column names too (D21).
 
 **D9: `--hide progress` is exactly `--disable-progress`** (architect, 2026-09-24),
 so that `--disable-progress` can one day be deprecated. Audit of what
@@ -219,6 +223,69 @@ renders only the file list.
 **D20: `-osum, --omit-summary` is exactly `--hide summary`** (architect,
 2026-09-24), as D9 makes `--hide progress` exactly `--disable-progress`. Both set
 one flag; `section-layout` reports the summary as `hidden` under either.
+
+**D21: `--hide` and `--show` take the timeline's column names** (architect,
+2026-09-24). Each value is the suffix of the option it duplicates, so `--hide-X`
+becomes `--hide X`:
+
+| Value | Column or element | Option it duplicates |
+|---|---|---|
+| `legend` | the legend column | `-hl, --hide-legend` |
+| `occurrences` | the occurrences bar | `-ho, --hide-occurrences` |
+| `duration` | the duration bar | `-hd, --hide-duration` |
+| `bytes` | the bytes bar | `-hb, --hide-bytes` |
+| `count` | the count bar | `-hc, --hide-count` |
+| `session` | the Sessions column | `-hses, --hide-session` |
+| `user` | the Users column | `-hu, --hide-user` |
+| `classification` | the success and failure percentage columns | `-hcl, --hide-classification`, `-scl, --show-classification` |
+| `stats` | the latency statistics column, or the heatmap under `-hm` | `-hst, --hide-stats` |
+| `values` | the numbers on the bars | `-ov, --omit-values` |
+| `rate` | the rate in the legend | `-or, --omit-rate` |
+
+`-sbo, --summary-bar-off` is not duplicated. In `--help` and `docs/usage.md` each
+option has two rows: the column use, then the section use.
+
+**D22: the individual options stay, not marked deprecated** (architect,
+2026-09-24). Each does exactly what its `--hide` or `--show` value does, as
+`-osum` does `--hide summary` (D20). Their deprecation is #601 (deprecate the
+options that `--hide` and `--show` duplicate).
+
+**D23: `--show classification` is `-scl`** (architect, 2026-09-24). It shows the
+percentage columns for a format that declares both classifications without being
+an event ledger; for every other column `--show` only undoes a `--hide`. When
+`--hide classification` and `--show classification` are both given, the later
+wins (D19), where today `-hcl` wins over `-scl` in either order.
+
+**D24: a user-defined metric's column is hidden by the name its column shows**
+(architect, 2026-09-24). A metric's name is its column heading in the timeline:
+the name as written, with the function and then the unit added only where
+another metric would otherwise carry the same name (`rows:sum`, `rows:delta`), as
+`resolve_udm_metric_names()` sets it. That name alone targets the metric,
+uniquely, for `--hide`, `--show`, `--expose` and `--discard` alike, resolved
+through the one lookup `-hm` and `-hg` already use, `resolve_metric_operand()`.
+`--expose` and `--discard` each carry an inline copy of that lookup today and
+converge on the shared one. The lookup stays as it is, consistent with the rest of
+the code (architect, 2026-09-25): after the heading name it accepts the name as
+written without its suffix, as `-hm` and `-hg` do (#104, disambiguated metric
+names). `--discard` also keeps matching a key as written in the line
+(`features/567-discard-named-values-from-message.md` D12).
+
+**D25: fixed aliases for the column values** (architect, 2026-09-25), abbreviations
+as the section aliases are (D11):
+
+| Value | Alias |
+|---|---|
+| `legend` | `leg` |
+| `occurrences` | `occ` |
+| `duration` | `dur` |
+| `bytes` | `byt` |
+| `count` | `cnt` |
+| `session` | `ses` |
+| `user` | `usr` |
+| `classification` | `cls` |
+| `stats` | `stat` |
+| `values` | `val` |
+| `rate` | `rt` |
 
 ## Finding: the render code the decisions act on
 
@@ -414,6 +481,54 @@ on the synthetic access log with output redirected, and matching the tiers in D1
 The harness's `terminal-height` scenario asserts the `-th 30` and `-th 90` rows;
 removing the detected mark or the height from `set_terminal_height()` fails it.
 
+**Step 5, columns (D21 to D25).** `--hide` and `--show` values resolve through
+`resolve_visibility_name()`: a section or part, then a column from
+`@visibility_columns` or its alias in `%column_aliases`, then a user-defined
+metric through `udm_config_by_name()`, the lookup `resolve_metric_operand()` now
+calls and `--expose` and `--discard` share. The per-column options, `-ov` and
+`-or` push their value onto `@section_visibility_ops` as `--disable-progress` and
+`-osum` do, so every spelling applies in the order given. `apply_output_visibility()`
+runs twice before the `-udm` configs are parsed, leaving a name it cannot place
+for later, and once after, when a name that is no section, column or metric stops
+the run naming all three. It sets the per-column flags the layout already reads;
+a hidden metric's column is added to the layout not visible, as the Sessions and
+Users columns are.
+
+Measured against the base commit's tool (the released `-hl` ... `-scl` and `-ov`,
+`-or`), with title, options row and summary hidden in both runs so the version
+and the echoed command line drop out: each of the eleven hide values and each
+alias gives standard output and standard error byte-identical to the old option,
+and each changes the render against the run without it. Inputs: an access log
+carrying sessions and users (the `-hc` case on a ScriptLog slice carrying count,
+with `-ic`). No format declares both classifications without being an event
+ledger, so `-scl` shows its columns only on a run mixing an access log with a
+diagnostics log. There, `--show classification` and `--show cls` are
+byte-identical to the base tool's `-scl`, and differ from the default;
+`--hide cls --show cls` renders as `-scl` and `--show cls --hide cls` as `-hcl`
+(D23).
+
+An unknown name: without `-udm` no name can be a metric, so the pass before the
+title refuses it and nothing prints on standard output, as before. With `-udm`
+the name is refused once the metrics are parsed, after the title, as any other
+option error is.
+
+`tests/validate-section-layout.sh` grows to 24 scenarios and 175 assertions:
+`hide-each-column`, `show-column-after-hide`, `hide-sections-and-columns-list`,
+`hide-metric-column`, and `unknown-section-refused` renamed `unknown-name-refused`
+with a `-udm` case. The byte comparisons hide the options row and the summary,
+whose time and memory rows differ between any two runs. Shown to fail, one change
+to `ltl` at a time:
+- the heading check, with the legend flag not set from its column;
+- the alias check, with `leg` removed from the aliases;
+- the old-option check, with `-hl` pushing another column;
+- the `--show classification` check, with `$show_classification` never set;
+- both later-wins checks, with the first mention of a column deciding;
+- the list check, with only the first name of a list applied;
+- both metric checks, with a hidden metric's column added visible;
+- the written-name check, with the lookup's fallback removed;
+- the STATS CSV check, with a hidden metric left out of the CSV columns;
+- the refusal before the title, with the early pass deferring every name.
+
 ## Open questions
 
 None.
@@ -462,3 +577,39 @@ separately from standard output (D12).
 - [x] `-osum` and `-hi summary` produce byte-identical output (D20).
 - [x] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
       (`tests/validate-help-content.sh`).
+
+Columns (D21 to D25), asserted in `tests/validate-section-layout.sh`, the harness
+that owns `--hide` and `--show`:
+
+- [x] For each value in D21 and its alias, `--hide <value>` gives standard output
+      and standard error byte-identical to the base commit's tool given the option
+      it duplicates (D22, D25). Measured once at development, recorded under
+      *Implementation progress* step 5; in a harness both spellings share one
+      path, so there the check is the next two.
+- [x] For each column value and its alias, the column's heading is in the header
+      row without it and absent with it, as `tests/validate-udm-counting.sh`
+      checks the Users column; `values` and `rate` have no heading and rest on the
+      regression goldens for `-ov` and `-or`, which run the same path (D21, D25).
+- [x] Each old option is byte-identical to its `--hide` or `--show` value (D22).
+- [x] `--show classification` shows the percentage columns on a run mixing an
+      access log with a diagnostics log, as `-scl` does (D23).
+- [x] `--hide classification --show classification` shows the percentage columns
+      and `--show classification --hide classification` hides them (D19, D23).
+- [x] A column hidden in `LTL_CONFIG` is shown by `--show` on the command line
+      (D19).
+- [x] `-hi legend,tl` and `-hi legend -hi tl` hide the legend column and the
+      timeline section alike (D8, D21).
+- [x] Every column alias resolves to its value: `--hide <alias>` is byte-identical
+      to `--hide <value>` (D25).
+- [x] With `-udm rows -udm rows::delta`, `--hide rows:delta` removes that column
+      and keeps `rows:sum`; `--hide rows` does what `-hg rows` resolves to (D24).
+- [x] A hidden user-defined metric's column is still written to the STATS CSV,
+      byte-identical to the run without `--hide` (D24, display only as D2).
+- [x] An unknown name exits 1 naming the sections and the columns; without `-udm`
+      nothing prints on standard output, and with `-udm` the error also names the
+      run's metrics (D8, D21, D24).
+- [x] `--expose` and `--discard` harnesses pass unchanged on the shared lookup
+      (D24; `tests/validate-message-expose.sh`, `tests/validate-message-discard.sh`).
+- [x] `--help` and `docs/usage.md` give each of `-hi` and `-sh` two rows, the
+      column use then the section use, and agree (D21;
+      `tests/validate-help-content.sh`).

@@ -374,8 +374,15 @@ my %section_rows;               # section or part => { start, rows } as printed,
 # The fixed alias of each public section (#597 D11, D17). Titles and parts have none.
 my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', msg => 'messages',
                         tp => 'threadpools', sum => 'summary', prog => 'progress' );
+# The timeline's columns --hide and --show also name, each the suffix of the
+# option it duplicates, with its fixed alias (#597 D21, D25). A user-defined
+# metric's column is named by its heading (D24).
+my @visibility_columns = qw( legend occurrences duration bytes count session user classification stats values rate );
+my %column_aliases = ( leg => 'legend', occ => 'occurrences', dur => 'duration', byt => 'bytes', cnt => 'count',
+                       ses => 'session', usr => 'user', cls => 'classification', stat => 'stats', val => 'values', rt => 'rate' );
 my @section_visibility_ops;     # [ hide|show, value ] in the order given, LTL_CONFIG first
 my %section_hidden_flag;        # section or part => 1 when turned off
+my %column_visibility;          # column => 'hide' or 'show', the later mention of it
 my ( $open_section_name, $open_part_name );
 my $title_rows = 0;             # rows the title printed, before the options were read
 
@@ -2519,8 +2526,10 @@ sub emit_runtime_config_verbose {
         'no-index'                          => $no_index,
         'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
-        'hide'                              => join( ',', grep { section_hidden($_) } @output_sections ),
-        'show'                              => join( ',', grep { !section_hidden($_) } map { resolve_section_name( $_->[1] ) // () } grep { $_->[0] eq 'show' } @section_visibility_ops ),
+        'hide'                              => join( ',', ( grep { section_hidden($_) } @output_sections ),
+                                                              ( grep { column_hidden($_) } @visibility_columns ),
+                                                              ( map { $_->{name} } grep { $_->{hidden} } @udm_configs ) ),
+        'show'                              => join( ',', visibility_shown_names() ),
         'summary-mono'                      => $summary_mono,
         'summary-bar-off'                   => $summary_bar_off,
         'summary-bar-absolute'              => $summary_bar_absolute,
@@ -7014,37 +7023,90 @@ sub section_hidden {
     return $section_hidden_flag{$name} ? 1 : 0;
 }
 
-# A --hide or --show value: a section, a part, or a section's alias, in any
-# case. Undef when it names none of them.
-sub resolve_section_name {
+# A --hide or --show value: a section, a part, a column, or the alias of a
+# section or column, in any case; or, once the -udm configs are parsed, a
+# user-defined metric's column by its heading (#597 D24). Returns
+# [ section|column, name ] or [ metric, config ]; undef when it names none.
+sub resolve_visibility_name {
     my ($value) = @_;
-    my $name = lc $value;
-    $name =~ s/^\s+|\s+$//g;
-    $name = $section_aliases{$name} // $name;
-    return ( grep { $_ eq $name } @output_sections ) ? $name : undef;
+    my $given = trim($value);
+    my $name  = lc $given;
+    my $section = $section_aliases{$name} // $name;
+    return [ 'section', $section ] if grep { $_ eq $section } @output_sections;
+    my $column = $column_aliases{$name} // $name;
+    return [ 'column', $column ] if grep { $_ eq $column } @visibility_columns;
+    my $config = udm_config_by_name($given);
+    return [ 'metric', $config ] if $config;
+    return undef;
+}
+
+sub column_hidden {
+    my ($column) = @_;
+    return ( $column_visibility{$column} // '' ) eq 'hide' ? 1 : 0;
 }
 
 # Apply --hide and --show in the order given. A name covers its parts, and the
-# later mention of a name decides (#597 D8, D19). --disable-progress and -osum
-# arrive here as hiding progress and the summary (D9, D20).
-sub apply_section_visibility {
+# later mention of a name decides (#597 D8, D19). --disable-progress, -osum and
+# the per-column options arrive here as the section or column they hide or
+# show (D9, D20, D22). A name that is not a section or column may be a
+# user-defined metric, known only once the -udm configs are parsed: until
+# $metrics_known, such a name is left for the final pass, which stops the run
+# on a name that is none of them.
+sub apply_output_visibility {
+    my ($metrics_known) = @_;
     %section_hidden_flag = ();
+    %column_visibility   = ();
+    if ($metrics_known) { $_->{hidden} = 0 for @udm_configs }
     for my $op (@section_visibility_ops) {
         my ( $verb, $value ) = @$op;
         for my $given ( split /,/, $value ) {
-            my $name = resolve_section_name($given);
-            unless ( defined $name ) {
-                my %alias_of = reverse %section_aliases;
-                my $valid = join ', ', map { $alias_of{$_} ? "$_ ($alias_of{$_})" : $_ } grep { !/-/ } @output_sections;
-                print_usage("Unknown section '$given' for --$verb. Valid values: $valid");
+            my $resolved = resolve_visibility_name($given);
+            unless ( defined $resolved ) {
+                next unless $metrics_known;
+                my %section_alias_of = reverse %section_aliases;
+                my %column_alias_of  = reverse %column_aliases;
+                my $sections = join ', ', map { $section_alias_of{$_} ? "$_ ($section_alias_of{$_})" : $_ } grep { !/-/ } @output_sections;
+                my $columns  = join ', ', map { "$_ ($column_alias_of{$_})" } @visibility_columns;
+                my $metrics  = @udm_configs ? '; metrics: ' . join( ', ', map { $_->{name} } @udm_configs ) : '';
+                print_usage("Unknown section or column '" . trim($given) . "' for --$verb. Sections: $sections; columns: $columns$metrics");
                 exit 1;
             }
-            $section_hidden_flag{$_} = ( $verb eq 'hide' ) ? 1 : 0 for $name, section_parts($name);
+            my ( $kind, $target ) = @$resolved;
+            if    ( $kind eq 'section' ) { $section_hidden_flag{$_} = ( $verb eq 'hide' ) ? 1 : 0 for $target, section_parts($target) }
+            elsif ( $kind eq 'column' )  { $column_visibility{$target} = $verb }
+            else                         { $target->{hidden} = ( $verb eq 'hide' ) ? 1 : 0 }
         }
     }
-    $disable_progress = section_hidden('progress');
-    $omit_summary     = section_hidden('summary');
+    $disable_progress    = section_hidden('progress');
+    $omit_summary        = section_hidden('summary');
+    $hide_legend         = column_hidden('legend');
+    $hide_occurrences    = column_hidden('occurrences');
+    $hide_duration       = column_hidden('duration');
+    $hide_bytes          = column_hidden('bytes');
+    $hide_count          = column_hidden('count');
+    $hide_session        = column_hidden('session');
+    $hide_user           = column_hidden('user');
+    $hide_classification = column_hidden('classification');
+    $show_classification = ( $column_visibility{classification} // '' ) eq 'show' ? 1 : 0;   # -scl (D23)
+    $hide_stats          = column_hidden('stats');
+    $omit_values         = column_hidden('values');
+    $omit_rate           = column_hidden('rate');
     return;
+}
+
+# The names --show turned on and that stay shown, for -V runtime-config.
+sub visibility_shown_names {
+    my @shown;
+    for my $op ( grep { $_->[0] eq 'show' } @section_visibility_ops ) {
+        for my $given ( split /,/, $op->[1] ) {
+            my $resolved = resolve_visibility_name($given) or next;
+            my ( $kind, $target ) = @$resolved;
+            push @shown, $kind eq 'metric'  ? ( $target->{hidden} ? () : $target->{name} )
+                       : $kind eq 'column'  ? ( column_hidden($target) ? () : $target )
+                       :                      ( section_hidden($target) ? () : $target );
+        }
+    }
+    return @shown;
 }
 
 # Run a hidden section's printer for the file it writes, its standard output
@@ -9859,7 +9921,9 @@ sub print_help {
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from -du), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
-    $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); a comma-separated list, or the option repeated");
+    $out .= help_opt("-hi,  --hide <column>",         "Hide a timeline column: legend (leg), occurrences (occ), duration (dur), bytes (byt), count (cnt), session (ses), user (usr), classification (cls), stats (stat), values (val) on the bars, rate (rt) in the legend, or a -udm metric by its column heading; a comma-separated list, or the option repeated");
+    $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); sections and columns mix in one list");
+    $out .= help_opt("-sh,  --show <column>",         "Show a column a --hide turned off; classification also shows the success and failure percentages for a format that is not an event ledger");
     $out .= help_opt("-sh,  --show <section>",        "Show a section a --hide turned off, such as one hidden in LTL_CONFIG; the later of the two wins");
     $out .= help_opt("-sm,  --summary-mono",          "Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours");
     $out .= help_opt("-sbo, --summary-bar-off",       "Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays)");
@@ -13462,10 +13526,19 @@ sub resolve_metric_operand {
     $token = trim($token);
     my $builtin = builtin_metric_name($token);
     return { kind => 'builtin', name => $builtin } if defined $builtin;
-    my ($match) = grep { $_->{name} eq $token } @udm_configs;
-    ($match) = grep { $_->{base_name} eq $token } @udm_configs if !$match;
+    my $match = udm_config_by_name($token);
     return { kind => 'udm', config => $match } if $match;
     return undef;
+}
+
+# A user-defined metric by its name, the heading of its column, then by its
+# base_name for disambiguated metrics (#104). The one lookup of a metric's name
+# for -hm, -hg, --hide, --show, --expose and --discard (#597 D24).
+sub udm_config_by_name {
+    my ($token) = @_;
+    my ($match) = grep { $_->{name} eq $token } @udm_configs;
+    ($match) = grep { $_->{base_name} eq $token } @udm_configs if !$match;
+    return $match;
 }
 
 # The metric vocabulary named in every unknown-metric diagnostic.
@@ -13498,9 +13571,8 @@ sub resolve_expose_names {
             elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
             elsif ( $name eq 'count' )        { $expose_count = 1 }
             else {
-                my ($config) = grep { $_->{name} eq $name
-                                      || $_->{base_name} eq $name
-                                      || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+                my $config = udm_config_by_name($name)
+                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
                 if ($config) { $config->{expose} = 1 }
                 else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
             }
@@ -13603,9 +13675,8 @@ sub resolve_discard_names {
             elsif ( $name eq 'bytes' ) { $omit_bytes = 1 }
             elsif ( $name eq 'count' ) { $omit_count = 1 }
             else {
-                my ($config) = grep { $_->{name} eq $name
-                                      || $_->{base_name} eq $name
-                                      || ( defined $_->{token_key} && $_->{token_key} eq $name ) } @udm_configs;
+                my $config = udm_config_by_name($name)
+                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
                 $config->{discarded} = 1 if $config;
                 push @discard_subs, discard_key_sub($name);
             }
@@ -13953,7 +14024,10 @@ sub adapt_to_command_line_options {
     # known before the title prints, ahead of any informational output or
     # option error (#597 D7).
     {
+        # Without -udm no name can be a metric, so an unknown name is refused
+        # here, before the title.
         my @argv_copy = @ARGV;
+        my $metrics_declared = 0;
         local $SIG{__WARN__} = sub {};
         @section_visibility_ops = ();
         Getopt::Long::Configure('pass_through');
@@ -13962,9 +14036,10 @@ sub adapt_to_command_line_options {
             'show|sh=s'         => sub { push @section_visibility_ops, [ 'show', $_[1] ] },
             'disable-progress'  => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },
             'omit-summary|osum' => sub { push @section_visibility_ops, [ 'hide', 'summary' ] },
+            'user-defined-metrics|udm=s' => sub { $metrics_declared = 1 },
         );
         Getopt::Long::Configure('no_pass_through');
-        apply_section_visibility();
+        apply_output_visibility( !$metrics_declared );
     }
     print_title() if $arg{title} && !section_hidden('title');
 
@@ -14003,7 +14078,7 @@ sub adapt_to_command_line_options {
         'highlight-success|hs' => \$highlight_success,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'top-messages|n=i' => \$top_n_messages,
-        'omit-values|ov' => \$omit_values,
+        'omit-values|ov' => sub { push @section_visibility_ops, [ 'hide', 'values' ] },
         'precise-values|pv' => \$precise_values,
         'omit-stats|os' => \$omit_stats,
         'omit-empty|oe' => \$omit_empty,
@@ -14017,7 +14092,7 @@ sub adapt_to_command_line_options {
         'summary-bar-absolute|sba' => \$summary_bar_absolute,
         'summary-bar-log|sbl' => \$summary_bar_log,
         'summary-bar-reverse|sbr' => \$summary_bar_reverse,
-        'omit-rate|or' => \$omit_rate,
+        'omit-rate|or' => sub { push @section_visibility_ops, [ 'hide', 'rate' ] },
         'omit-durations|od' => \$omit_durations,
         'omit-bytes|ob' => \$omit_bytes,
         'omit-count|oc' => \$omit_count,
@@ -14028,16 +14103,16 @@ sub adapt_to_command_line_options {
         'expose-session|xs' => sub { push @expose_raw, 'session' },
         'expose-user|xu' => sub { push @expose_raw, 'user' },
         'discard|d=s' => sub { push @discard_raw, $_[1] },
-        'hide-session|hses' => \$hide_session,
-        'hide-user|hu' => \$hide_user,
-        'hide-classification|hcl' => \$hide_classification,
-        'show-classification|scl' => \$show_classification,
-        'hide-occurrences|ho' => \$hide_occurrences,
-        'hide-legend|hl' => \$hide_legend,
-        'hide-duration|hd' => \$hide_duration,
-        'hide-bytes|hb' => \$hide_bytes,
-        'hide-count|hc' => \$hide_count,
-        'hide-stats|hst' => \$hide_stats,
+        'hide-session|hses' => sub { push @section_visibility_ops, [ 'hide', 'session' ] },
+        'hide-user|hu' => sub { push @section_visibility_ops, [ 'hide', 'user' ] },
+        'hide-classification|hcl' => sub { push @section_visibility_ops, [ 'hide', 'classification' ] },
+        'show-classification|scl' => sub { push @section_visibility_ops, [ 'show', 'classification' ] },
+        'hide-occurrences|ho' => sub { push @section_visibility_ops, [ 'hide', 'occurrences' ] },
+        'hide-legend|hl' => sub { push @section_visibility_ops, [ 'hide', 'legend' ] },
+        'hide-duration|hd' => sub { push @section_visibility_ops, [ 'hide', 'duration' ] },
+        'hide-bytes|hb' => sub { push @section_visibility_ops, [ 'hide', 'bytes' ] },
+        'hide-count|hc' => sub { push @section_visibility_ops, [ 'hide', 'count' ] },
+        'hide-stats|hst' => sub { push @section_visibility_ops, [ 'hide', 'stats' ] },
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'version|v' => \$print_version,
@@ -14110,7 +14185,7 @@ sub adapt_to_command_line_options {
         print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
         exit 1;
     }
-    apply_section_visibility();
+    apply_output_visibility(0);
 
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
@@ -14568,6 +14643,7 @@ sub adapt_to_command_line_options {
     apply_parse_time_sort_gate($sort_operand_typed);
 
     parse_udm_configs() if @udm_raw_args;
+    apply_output_visibility(1);   # a user-defined metric's column is known by its heading now (#597 D24)
 
     # The exposed names resolve against the metrics the run declares, so
     # this follows the -udm configs and precedes the registry build.
@@ -18929,7 +19005,8 @@ sub normalize_data_for_output {
         for my $config (@udm_configs) {
             my $key = "udm_$config->{name}";
             if (defined $max_total{$key} && $max_total{$key} > 0) {
-                add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++);
+                add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++,
+                    visible => $config->{hidden} ? 0 : 1);
             }
         }
 
