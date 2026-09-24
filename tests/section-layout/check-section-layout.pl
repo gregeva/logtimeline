@@ -15,10 +15,10 @@
 #       NAME is reported in STATE, and with ROWS rows when given.
 #   check-section-layout.pl strip CAPTURE
 #       Standard output as the terminal shows it, -V ranges removed.
-#   check-section-layout.pl compare CAPTURE_WITH_V CAPTURE_WITHOUT_V
-#       With its -V ranges removed, the first capture prints the rows of the
-#       second: the same count, the same text, except the options row, which
-#       names -V, and the run's own time and memory figures.
+#   check-section-layout.pl compare CAPTURE_A CAPTURE_B
+#       With their -V ranges removed, the two captures print the same rows: the
+#       same count, the same text. Rows that differ between any two runs (time,
+#       memory) are dropped by the caller, through tests/lib/nondeterministic.sh.
 #
 # A row is read as the terminal leaves it: escape sequences removed, and only
 # the text after the last carriage return, which a progress row overwrites.
@@ -198,25 +198,19 @@ if ( $mode eq 'strip' ) {
 }
 
 if ( $mode eq 'compare' ) {
-    my ( $with_v, $without_v ) = @args;
-    my ($with)    = read_capture($with_v);
-    my ($without) = read_capture($without_v);
-    my $normalise = sub {
-        my ($row) = @_;
-        $row =~ s/ -V(?: \S+)?(?= |$)//g if $row =~ /command-line options:/;
-        $row =~ s/\s+[\d.]+ \S+/ N/ if $row =~ /TOTAL TIME|MAXIMUM MEMORY USED/;
-        return $row;
-    };
-    if ( @$with != @$without ) {
-        print "with -V ranges removed: " . @$with . " rows; without -V: " . @$without . " rows\n";
+    my ( $file_a, $file_b ) = @args;
+    my ($a_rows) = read_capture($file_a);
+    my ($b_rows) = read_capture($file_b);
+    if ( @$a_rows != @$b_rows ) {
+        print "$file_a: " . @$a_rows . " rows; $file_b: " . @$b_rows . " rows\n";
         exit 1;
     }
-    for my $i ( 0 .. $#$with ) {
-        next if $normalise->( $with->[$i] ) eq $normalise->( $without->[$i] );
-        print "row " . ( $i + 1 ) . " differs:\n  with -V:    '$with->[$i]'\n  without -V: '$without->[$i]'\n";
+    for my $i ( 0 .. $#$a_rows ) {
+        next if $a_rows->[$i] eq $b_rows->[$i];
+        print "row " . ( $i + 1 ) . " differs:\n  '$a_rows->[$i]'\n  '$b_rows->[$i]'\n";
         exit 1;
     }
-    print scalar(@$with) . " rows identical\n";
+    print scalar(@$a_rows) . " rows identical\n";
     exit 0;
 }
 

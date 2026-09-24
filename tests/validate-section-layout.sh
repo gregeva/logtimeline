@@ -54,6 +54,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 source "$SCRIPT_DIR/lib/rendered-output.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/nondeterministic.sh
+source "$SCRIPT_DIR/lib/nondeterministic.sh"
 
 neutralize_colour_env
 
@@ -103,6 +105,16 @@ run_ltl() {
 }
 
 capture() { echo "$TMP_DIR/$1/out"; }
+
+# Two runs print the same rows, -V ranges removed, once the rows that differ
+# between any two runs (time, memory) are dropped. Usage: same_rows <tag-a> <tag-b>
+same_rows() {
+    local tag
+    for tag in "$1" "$2"; do
+        drop_run_figure_rows < "$(capture "$tag")" > "$TMP_DIR/$tag/out.steady"
+    done
+    "$PERL" "$CHECKER" compare "$TMP_DIR/$1/out.steady" "$TMP_DIR/$2/out.steady"
+}
 
 # Standard output of a capture, -V ranges removed, does not hold TEXT.
 # Usage: text_absent <capture> <text>
@@ -374,15 +386,16 @@ fi
 # histogram, after the summary): with its ranges removed, a run prints the rows
 # of the same run without -V, so a position read from a -V probe applies to the
 # plain run (D6, D14). -o puts the aggregate-export section after the summary.
+# The options row, which echoes -V, is hidden in both runs.
 if scenario_wanted verbose-removed-matches-plain; then
     current_scenario=verbose-removed-matches-plain
-    if run_ltl withv --disable-progress -bs 1440 -g -hg duration -n 3 -tpas -o -V all "$THREAD_LOG" \
-       && run_ltl plain --disable-progress -bs 1440 -g -hg duration -n 3 -tpas -o "$THREAD_LOG"; then
+    if run_ltl withv --disable-progress -bs 1440 -g -hg duration -n 3 -tpas -o -hi options -V all "$THREAD_LOG" \
+       && run_ltl plain --disable-progress -bs 1440 -g -hg duration -n 3 -tpas -o -hi options "$THREAD_LOG"; then
         assert_accounting withv
         assert_command \
-            command     "$(checker_cmd compare "$(capture withv)" "$(capture plain)")" \
+            command     "same_rows withv plain" \
             label       'with every -V range removed, the run prints the rows of the run without -V' \
-            asserts     'Standard output of a -V all run, with every === name === ... === END name === range removed, has the same rows as the same run without -V, text included, apart from -V on the options row and the time and memory figures' \
+            asserts     'Standard output of a -V all run, with every === name === ... === END name === range removed, has the same rows as the same run without -V, text included, the time and memory rows aside' \
             produced_by 'print_verbose_output(), print_histograms() and write_aggregate_export() print -V; the section printers print the rest, in ltl' \
             contract    'features/597-section-visibility.md § D6, D14'
     fi
@@ -474,15 +487,16 @@ if scenario_wanted hide-keeps-csv; then
 fi
 
 # --hide progress is --disable-progress (D9). The options row, which echoes the
-# options given, is hidden in both; time and memory figures vary run to run.
+# options given, is hidden in both; the time and memory rows, which differ
+# between any two runs, are dropped by tests/lib/nondeterministic.sh.
 if scenario_wanted hide-progress-is-disable-progress; then
     current_scenario=hide-progress-is-disable-progress
     if run_ltl hideprog -bs 120 -n 2 -hi progress,options "$SPREAD_LOG" \
        && run_ltl disprog --disable-progress -bs 120 -n 2 -hi options "$SPREAD_LOG"; then
         assert_command \
-            command     "$(checker_cmd compare "$(capture hideprog)" "$(capture disprog)") && cmp -s $(printf '%q' "$TMP_DIR/hideprog/err") $(printf '%q' "$TMP_DIR/disprog/err")" \
+            command     "same_rows hideprog disprog && cmp -s $(printf '%q' "$TMP_DIR/hideprog/err") $(printf '%q' "$TMP_DIR/disprog/err")" \
             label       '--hide progress prints what --disable-progress prints, on both streams' \
-            asserts     '--hide progress and --disable-progress produce the same standard output, time and memory figures aside, and the same standard error' \
+            asserts     '--hide progress and --disable-progress produce the same standard output, the time and memory rows aside, and the same standard error' \
             produced_by 'apply_section_visibility() sets $disable_progress from the progress section, in ltl' \
             contract    'features/597-section-visibility.md § D9'
     fi
@@ -513,7 +527,7 @@ if scenario_wanted hide-list-repeat-and-aliases; then
     if run_ltl list --disable-progress -bs 1440 -hg duration -n 2 -tpas -hi tl,hg,opt -V section-layout "$THREAD_LOG" \
        && run_ltl repeat --disable-progress -bs 1440 -hg duration -n 2 -tpas -hi tl -hi hg -hi opt -V section-layout "$THREAD_LOG"; then
         assert_command \
-            command     "$(checker_cmd compare "$(capture list)" "$(capture repeat)") && diff <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture list)")) <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture repeat)"))" \
+            command     "same_rows list repeat && diff <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture list)")) <(sed -n '/=== section-layout ===/,/=== END section-layout ===/p' $(printf '%q' "$(capture repeat)"))" \
             label       '-hi tl,hg and -hi tl -hi hg hide the same sections' \
             asserts     'A comma-separated list and the option repeated hide the same sections: the same rows and the same section-layout report' \
             produced_by 'apply_section_visibility() in ltl' \

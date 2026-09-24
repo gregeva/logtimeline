@@ -379,11 +379,14 @@ summary. A hidden timeline under `-o` runs through `run_with_output_discarded()`
 its CSV rows, and then prints nothing of it. A hidden summary column leaves the
 other where it stands.
 
-The harness grows to 19 scenarios and 129 assertions. The equivalence of
-`--hide progress` and `--disable-progress` is checked on standard output with the
-options row hidden in both and the time and memory figures masked, and on standard
-error byte for byte. The options row echoes the options as given, and the figures
-vary run to run. Shown to fail, one change to `ltl` at a time:
+The harness grows to 19 scenarios and 129 assertions. Where it compares two runs,
+the options row is hidden in both with `--hide options`, and the time and memory
+rows, which differ between any two runs, are dropped by `drop_run_figure_rows()`
+in `tests/lib/nondeterministic.sh`. That library now holds the one list of those
+rows: `strip_nondeterministic()`, which `tests/validate-regression.sh` and
+`tests/capture-regression.sh` each carried an identical copy of, moved there.
+Re-capturing the 74 references through it reproduces the committed ones byte for
+byte. Every other row must match exactly, and standard error byte for byte. Shown to fail, one change to `ltl` at a time:
 - the STATS CSV check, with the discarded-output run removed;
 - the no-rows check, with a hidden table's header printed;
 - the progress equivalence, with `$disable_progress` not set from the section;
