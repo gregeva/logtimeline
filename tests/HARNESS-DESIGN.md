@@ -190,10 +190,10 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `percentile-algorithm` — per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats and bucket-stats (Issue #280)
 - `filter-summary` — the run's line accounting as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, highlighted (Issue #503, reserved by #229/#230; contract in features/503-yaml-aggregate-export.md § `-V filter-summary` section contract)
 - `aggregate-export` — the YAML aggregate export `-o` writes: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the `heatmap-ladder` sub-section with each bucket's retained heatmap percentile values (Issue #503; contract in features/503-yaml-aggregate-export.md § `-V aggregate-export` section contract). Printed at the writer's site after the file exists, so it appears after every section `print_verbose_output()` flushes.
-- `section-layout` — per output section and part, in print order: its state (rendered, hidden, absent), the standard-output row it starts on and its row count, as a tab-separated table; rows are those of the same run without `-V` (Issue #597; contract in features/597-section-visibility.md § D13, D14). Asserted by `tests/validate-section-layout.sh`.
 
 **Reserved by sub-issues, not yet implemented:**
 - `option-resolution` (Issue #231)
+- `section-layout` (Issue #597): per rendered section and part, its state and the row it starts on and its row count, as a tab-separated table; contract in features/597-section-visibility.md § D13
 
 ## Stability contract
 

@@ -183,9 +183,6 @@ my %verbose_section_registry = (
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
-    'section-layout' => {
-        description => 'Where each output section and part starts on standard output and how many rows it has, tab-separated: name, state (rendered, hidden, absent), start row, row count (Issue #597).',
-    },
 );
 my @verbose_section_order = qw(
     runtime-config
@@ -205,7 +202,6 @@ my @verbose_section_order = qw(
     udm-counting
     udm-specs
     aggregate-export
-    section-layout
     benchmark-data
 );
 my %verbose_sections_requested;   # Populated by adapt_to_command_line_options() from -V args
@@ -361,29 +357,6 @@ my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
 my @deferred_notices;           # notices raised mid-read, emitted once it ends
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
-my $progress_rows = 0;          # rows the progress section has ended, counted by end_progress_row()
-my $histogram_rows;             # the histogram section's rows once built (build_histogram_rows())
-my $memory_rows_shown;          # structures the summary lists under -mem, fixed with the row counts (D18)
-my %section_layout;             # per output section and part: state, start row, row count
-
-# Output sections in print order, each followed by the parts of it that can be
-# hidden on their own (#597 D7, D17). A part names its section as parent.
-my @output_sections = (
-    { name => 'title' },
-    { name => 'progress' },
-    { name => 'timeline' },
-    { name => 'histogram' },
-    { name => 'options' },
-    { name => 'messages' },
-    { name => 'messages-highlighted',    parent => 'messages',    grouping => 'highlight' },
-    { name => 'messages-overall',        parent => 'messages',    grouping => 'plain' },
-    { name => 'threadpools' },
-    { name => 'threadpools-highlighted', parent => 'threadpools', grouping => 'highlight' },
-    { name => 'threadpools-overall',     parent => 'threadpools', grouping => 'plain' },
-    { name => 'summary' },
-    { name => 'summary-values',          parent => 'summary' },
-    { name => 'summary-files',           parent => 'summary' },
-);
 
 # Repaint cadence for the read-pass progress line. The gate is time, not work:
 # repainting on a line count makes the refresh rate follow file size and I/O
@@ -6900,25 +6873,13 @@ sub open_section {
     return;
 }
 
-# End a row of the progress section, counting it for the section layout.
-sub end_progress_row {
-    print "\n";
-    $progress_rows++;
-    return;
-}
-
-# The title as the analysis output prints it. The colour reset closes the last
-# rule's row instead of opening a blank row of its own, so the title ends on
-# its rule.
-sub title_text {
-    my $title = get_title_string();
-    $title =~ s/\n(\033\[0m)\n\z/$1\n/;
-    return $title;
-}
-
 sub print_title {
     open_section();
-    print title_text();
+    # The colour reset closes the last rule's row instead of opening a blank
+    # row of its own, so the title ends on its rule.
+    my $title = get_title_string();
+    $title =~ s/\n(\033\[0m)\n\z/$1\n/;
+    print $title;
     return;
 }
 
@@ -10865,7 +10826,7 @@ sub group_similar_messages {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Consolidating similar messages completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Consolidating similar messages completed." ) );
-        end_progress_row();
+        print "\n";
     }
 }
 
@@ -16214,7 +16175,7 @@ sub read_and_process_logs {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Processing completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Processing completed." ) );
-        end_progress_row();
+        print "\n";
     }
 
     # Notices raised while the read was running, held back so they did not
@@ -17724,7 +17685,7 @@ sub calculate_all_statistics {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Calculating statistics completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Calculating statistics completed." ) );
-        end_progress_row();
+        print "\n";
     }
 
     return;
@@ -18071,7 +18032,7 @@ sub initialize_empty_time_windows {
             print "\r" . " " x ($terminal_width - 1) . "\r";		# clear the line of progress messages when moving on to the next file
             print "\r$colors{'bright-green'}Initializing empty time windows completed.$colors{'NC'}";
             print " " x ( $terminal_width - length( "Initializing empty time windows completed." ) );
-            end_progress_row();
+            print "\n";
         }
     }
 
@@ -18895,7 +18856,7 @@ sub normalize_data_for_output {
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Scaling and normalizing data completed.$colors{'NC'}";
         print " " x ( $terminal_width - length( "Scaling and normalizing data completed." ) );
-        end_progress_row();    # the last progress row: the progress section ends here
+        print "\n";    # the last progress row: the progress section ends here
     }
 
     return;
@@ -19203,112 +19164,6 @@ sub section_requested {
     return 0 unless %verbose_sections_requested;
     return 1 if $verbose_sections_requested{'all'};
     return $verbose_sections_requested{$name} ? 1 : 0;
-}
-
-# Where each output section starts and how many rows it has, settled before the
-# first row after the title and progress is rendered (#597 D3). Rows are counted
-# on standard output from the title's first row, as the same run without -V
-# prints them (D6); one blank row separates two rendered sections (D5). A
-# section is rendered, hidden (turned off), or absent (the run produced nothing
-# for it); a part takes its section's state when that is not rendered.
-sub compute_section_layout {
-    my ( %state, %rows, %offset );
-
-    $state{title} = 'rendered';
-    $rows{title}  = () = title_text() =~ /\n/g;
-
-    if( $disable_progress ) {
-        $state{progress} = 'hidden';
-    } else {
-        $state{progress} = $progress_rows ? 'rendered' : 'absent';
-        $rows{progress}  = $progress_rows;
-    }
-
-    $state{timeline} = 'rendered';
-    $rows{timeline}  = $total_lines_included ? scalar( keys %log_occurrences ) + 4 : 1;
-
-    $histogram_rows = build_histogram_rows();
-    $state{histogram} = @$histogram_rows ? 'rendered' : 'absent';
-    $rows{histogram}  = scalar @$histogram_rows;
-
-    my @option_rows = run_options_rows();
-    $state{options} = @option_rows ? 'rendered' : 'absent';
-    $rows{options}  = scalar @option_rows;
-
-    # The top-N tables: a blank row separates the highlighted table from the
-    # overall one, inside the section.
-    my %table_sections = (
-        messages    => [ $capture_messages, \%log_messages, \&message_sorted_keys ],
-        threadpools => [ $include_threadpool_summary && $capture_messages, \%threadpool_activity, \&threadpool_sorted_keys ],
-    );
-    for my $section ( sort keys %table_sections ) {
-        my ( $shown, $store, $sorted_keys ) = @{ $table_sections{$section} };
-        my @plan = $shown ? top_table_plan( $store, $sorted_keys->() ) : ();
-        $state{$section} = @plan ? 'rendered' : 'absent';
-        next unless @plan;
-        my %part_of = map { $_->{grouping} => $_->{name} } grep { ( $_->{parent} // '' ) eq $section } @output_sections;
-        my $section_rows = 0;
-        for my $i ( 0 .. $#plan ) {
-            my $part = $part_of{ $plan[$i]{grouping} };
-            $section_rows++ if $i > 0;
-            $state{$part}  = 'rendered';
-            $offset{$part} = $section_rows;
-            $rows{$part}   = 2 + scalar @{ $plan[$i]{keys} };    # header, rule, one row per key
-            $section_rows += $rows{$part};
-        }
-        $rows{$section} = $section_rows;
-    }
-
-    if( $omit_summary ) {
-        $state{summary} = 'hidden';
-    } else {
-        # The memory rows are fixed here; later measurements update only their
-        # values (D18).
-        if( $show_memory ) {
-            measure_memory_structures();
-            $memory_rows_shown = [ memory_rows_shown() ];
-        }
-        my ( $left, $right ) = build_summary_table();
-        $state{summary} = 'rendered';
-        $rows{summary}  = max( scalar @$left, scalar @$right );
-        @state{qw( summary-values summary-files )}  = ( 'rendered', 'rendered' );
-        @rows{qw( summary-values summary-files )}   = ( scalar @$left, scalar @$right );
-        @offset{qw( summary-values summary-files )} = ( 0, 0 );
-    }
-
-    %section_layout = ();
-    my $row = 1;
-    my $rendered = 0;
-    for my $entry (@output_sections) {
-        my $name = $entry->{name};
-        my $parent = $entry->{parent};
-        my $state = $state{$name} // ( $parent && $state{$parent} ne 'rendered' ? $state{$parent} : 'absent' );
-        $section_layout{$name} = { state => $state };
-        next unless $state eq 'rendered';
-        if( $parent ) {
-            $section_layout{$name}{start} = $section_layout{$parent}{start} + $offset{$name};
-        } else {
-            $row++ if $rendered++;
-            $section_layout{$name}{start} = $row;
-            $row += $rows{$name};
-        }
-        $section_layout{$name}{rows} = $rows{$name};
-    }
-    return;
-}
-
-sub emit_section_layout_verbose {
-    return unless section_requested('section-layout');
-
-    push @verbose_output, "=== section-layout ===";
-    push @verbose_output, join( "\t", qw( name state start rows ) );
-    for my $entry (@output_sections) {
-        my $layout = $section_layout{ $entry->{name} };
-        my @position = $layout->{state} eq 'rendered' ? @{$layout}{qw( start rows )} : ( '', '' );
-        push @verbose_output, join( "\t", $entry->{name}, $layout->{state}, @position );
-    }
-    push @verbose_output, "=== END section-layout ===";
-    return;
 }
 
 sub print_verbose_output {
@@ -19856,14 +19711,11 @@ sub print_bar_graph {
 # ============================================================================
 
 # Main histogram printing function
-# The histogram rows, every histogram side by side, built before anything is
-# rendered so the section layout can count them (#597 D3). Empty when no
-# histogram is shown.
-sub build_histogram_rows {
-    return [] unless $histogram_enabled;
+sub print_histograms {
+    return unless $histogram_enabled;
 
     my $layout = calculate_histogram_layout();
-    return [] unless $layout->{histogram_count};
+    return unless $layout->{histogram_count};
 
     my @metrics = @{$layout->{active_metrics}};
     my $height = $layout->{height};
@@ -19874,6 +19726,8 @@ sub build_histogram_rows {
 
     # Get box drawing characters for current weight setting
     my %box = %{$histogram_box_sets{$histogram_box_weight}};
+
+    open_section();
 
     # Build all histogram output line by line for side-by-side rendering
     my @all_lines = ();
@@ -20039,19 +19893,15 @@ sub build_histogram_rows {
     push @all_lines, $legend_line;
     push @all_lines, $legend_line_hl if $has_any_highlight;
 
-    return \@all_lines;
-}
+    # Print all lines
+    for my $line (@all_lines) {
+        print "$line\n";
+    }
 
-sub print_histograms {
-    my $rows = $histogram_rows // build_histogram_rows();
-    return unless @$rows;
-
-    open_section();
-    print "$_\n" for @$rows;
-
-    # Issue #462: the tick mapping's inputs, gathered per metric while the rows
-    # were built, print directly after the histogram they describe rather than
-    # with the sections print_verbose_output() flushes.
+    # Issue #462: the tick mapping's inputs, gathered per metric above. Printed
+    # here rather than pushed to @verbose_output because print_verbose_output()
+    # has already flushed by the time histograms render -- the inputs do not
+    # exist until the render computes the layout.
     emit_histogram_tick_inputs_verbose();
 
     return;
@@ -20622,18 +20472,12 @@ sub build_run_options_string {
     return $cli_options;
 }
 
-# The options section: the environment options row when LTL_CONFIG is set,
-# then the command-line options row when any option was given.
-sub run_options_rows {
+sub print_run_options {
+    ## PRINT COMMAND AND ARGUMENTS ##
     my @rows;
     push @rows, "$colors{'bright-black'}environment options: $ltl_config_raw$colors{'NC'}" if $ltl_config_raw ne '';
     my $cli_options = build_run_options_string();
     push @rows, "$colors{'bright-black'}command-line options: $cli_options$colors{'NC'}" if $cli_options ne '';
-    return @rows;
-}
-
-sub print_run_options {
-    my @rows = run_options_rows();
     return unless @rows;
     open_section();
     print "$_\n" for @rows;
@@ -20828,11 +20672,9 @@ sub summary_category_row {
     return $out . $colors{'NC'};
 }
 
-# The run summary's two columns: the values on the left (categories, counters,
-# timing, memory) and the files on the right (heading, file list, log-formats
-# legend). Returned as ( \@left_rows, \@right_rows, $left_width, $column_padding );
-# the physical rows are the longer of the two, side by side.
-sub build_summary_table {
+sub print_summary_table {
+    return if $omit_summary;
+
     my $category_column_width    = $summary_category_column_width;
     my $occurrences_column_width = $summary_occurrences_column_width;
     my $table_padding = 2;
@@ -20949,6 +20791,9 @@ sub build_summary_table {
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
+            # Skip structures with only empty hash/array overhead (< 1KB means effectively empty)
+            my $min_size_threshold = 1024;
+
             # Issue #356 (S3): the breakdown accounts against the peak RSS
             # itself. Percentages are shares of MAXIMUM MEMORY USED, and the
             # remainder no structure walk can attribute (interpreter baseline,
@@ -20966,7 +20811,8 @@ sub build_summary_table {
 
             # Sort by size descending, skip empty structures
             my @sorted = sort { $memory_high_water_marks{$b} <=> $memory_high_water_marks{$a} || ($a cmp $b) }
-                         memory_rows_shown();
+                         grep { $memory_high_water_marks{$_} >= $min_size_threshold }
+                         keys %memory_high_water_marks;
 
             my $emit_breakdown_row = sub {
                 my ($label, $size) = @_;
@@ -21028,102 +20874,23 @@ sub build_summary_table {
         push @file_details, "$column_padding$padding" . join('  ', map { "$colors{'periwinkle'}$format_legend{$_}$colors{'white'} $_" } @format_legend_order) . "$colors{'NC'}\n";
     }
 
-    return ( \@summary_table, \@file_details, $summary_table_width, $column_padding );
-}
-
-# Structures the summary lists under -mem: each whose high-water mark is 1 KiB
-# or more, less being an empty hash or array's overhead. The list is fixed when
-# the section layout counts the summary's rows (#597 D18); a later measurement
-# updates the values shown, not which structures appear.
-sub memory_rows_shown {
-    return @$memory_rows_shown if $memory_rows_shown;
-    return grep { $memory_high_water_marks{$_} >= 1024 } keys %memory_high_water_marks;
-}
-
-sub print_summary_table {
-    return if $omit_summary;
-
-    my ( $summary_table, $file_details, $summary_table_width, $column_padding ) = build_summary_table();
-
     open_section();
-    for (my $i = 0; $i < max(scalar @$summary_table, scalar @$file_details); $i++) {
-        if( $i >= scalar @$summary_table ) {
+    for (my $i = 0; $i < max(scalar @summary_table, scalar @file_details); $i++) {
+        if( $i >= scalar @summary_table ) {
             print " " x $summary_table_width . $column_padding;
         } else {
-            chomp $summary_table->[$i];
-            print "$summary_table->[$i]$column_padding";
+            chomp $summary_table[$i];
+            print "$summary_table[$i]$column_padding";
         }
 
-        if( $i >= scalar @$file_details ) {
+        if( $i >= scalar @file_details ) {
             print "\n";
         } else {
-            print $file_details->[$i];
+            print $file_details[$i];
         }
     }
 
     return;
-}
-
-# The display order of each message grouping, computed once in
-# calculate_all_statistics() for every sort type and reused by every reader.
-# A grouping with no message keys has no recorded order.
-sub message_sorted_keys {
-    return { map { $_ => ( $message_key_order{$_} // [] ) } qw( highlight plain ) };
-}
-
-# Thread pools ranked by their number of distinct active threads, ties by name.
-sub threadpool_sorted_keys {
-    my %sorted_keys;
-    foreach my $grouping ( qw( highlight plain ) ) {
-        $sorted_keys{$grouping} = [ sort {
-            my $occurrences_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
-            my $occurrences_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
-            ($sort_ascending
-                ? ($occurrences_a <=> $occurrences_b)
-                : ($occurrences_b <=> $occurrences_a))
-            || ($a cmp $b);
-        } keys %{$threadpool_activity{$grouping}} ];
-    }
-    return \%sorted_keys;
-}
-
-# The tables a top-N summary prints, highlighted first, each with the keys it
-# shows. A grouping holding any key gets a table. The top N is shared half and
-# half, the odd row to the highlighted table, and a grouping with fewer keys
-# than its half gives the shortfall to the other. The messages and thread-pool
-# printers and the section layout's row counts all read this one plan.
-sub top_table_plan {
-    my ( $store, $sorted_keys ) = @_;
-
-    my %available;
-    foreach my $grouping ( qw( highlight plain ) ) {
-        my $keys = scalar @{ $sorted_keys->{$grouping} // [] };
-        $available{$grouping} = $keys < $top_n_messages ? $keys : $top_n_messages;
-    }
-
-    my $half_top_n = int( $top_n_messages / 2 );
-    my %messages_to_print = ( 'highlight' => $half_top_n, 'plain' => $half_top_n );
-    $messages_to_print{'highlight'}++ if $top_n_messages % 2 != 0;
-    if ( $available{'highlight'} < $messages_to_print{'highlight'} ) {
-        $messages_to_print{'highlight'} = $available{'highlight'};
-        $messages_to_print{'plain'} = $top_n_messages - $messages_to_print{'highlight'};
-    } elsif ( $available{'plain'} < $messages_to_print{'plain'} ) {
-        $messages_to_print{'plain'} = $available{'plain'};
-        $messages_to_print{'highlight'} = $top_n_messages - $messages_to_print{'plain'};
-    }
-
-    my @plan;
-    foreach my $grouping ( qw( highlight plain ) ) {
-        next unless exists $store->{$grouping} && ref( $store->{$grouping} ) eq 'HASH';
-        next unless $available{$grouping} > 0;
-        my @top_keys = @{ $sorted_keys->{$grouping} }[ 0 .. $available{$grouping} - 1 ];
-        my $shown = min( $messages_to_print{$grouping}, scalar @top_keys );
-        push @plan, {
-            grouping => $grouping,
-            keys     => [ grep { defined $_ && exists $store->{$grouping}{$_} } @top_keys[ 0 .. $shown - 1 ] ],
-        };
-    }
-    return @plan;
 }
 
 sub print_message_summary {
@@ -21196,9 +20963,59 @@ sub print_message_summary {
         }
     }
 
-    for my $table ( top_table_plan( \%log_messages, message_sorted_keys() ) ) {
-        my $grouping = $table->{grouping};
-        {
+    ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
+    # Step 1: Sort and store available messages for each category in a hash of arrays
+    my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        # The display ordering is computed exactly once, in
+        # calculate_all_statistics, for every sort type — the available-value
+        # pool selection (#302) or the calculated-statistic two-pass
+        # selection (#303) — and reused here: same keys, same comparator,
+        # same result. A grouping with no message keys has no recorded order.
+        $sorted_keys{$grouping} = $message_key_order{$grouping} // [];
+    }
+
+    # Initialize the hash to store top message counts
+    my %top_message_occurrences = (
+        'highlight' => 0,
+        'plain' => 0,
+    );
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        for my $i (0 .. $#{$sorted_keys{$grouping}}) {
+            last if $i >= $top_n_messages;
+            $top_message_occurrences{$grouping}++;
+        }
+    }
+
+    # Step 2: Determine how many messages to print from each category
+    my $half_top_n = int($top_n_messages / 2);
+
+    # Initialize the hash to store the number of messages to print
+    my %messages_to_print = (
+        'highlight' => $half_top_n,
+        'plain' => $half_top_n,
+    );
+
+    $messages_to_print{'highlight'}++ if $top_n_messages % 2 != 0;		# if halving doesn't equate to Top N, then add another row to highlighted messages
+
+    # Step 3: Adjust if one category has fewer messages than needed, ensuring the total remains $top_n_messages
+    if ($top_message_occurrences{'highlight'} < $messages_to_print{'highlight'}) {
+        $messages_to_print{'highlight'} = $top_message_occurrences{'highlight'};
+        $messages_to_print{'plain'} = $top_n_messages - $messages_to_print{'highlight'};
+    } elsif ($top_message_occurrences{'plain'} < $messages_to_print{'plain'}) {
+        $messages_to_print{'plain'} = $top_message_occurrences{'plain'};
+        $messages_to_print{'highlight'} = $top_n_messages - $messages_to_print{'plain'};
+    }
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my $messages_printed = 0;
+
+        # Ensure the grouping exists and is a hash reference
+        if (exists $log_messages{$grouping} && ref($log_messages{$grouping}) eq 'HASH') {
+            my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
+            next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
             $tables_printed++ ? print "\n" : open_section();
             my $header_title = " ";
 
@@ -21234,8 +21051,10 @@ sub print_message_summary {
             print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n";
 
             # Print the top messages
-            foreach my $key (@{ $table->{keys} }) {
+            foreach my $key (@top_keys) {
                 memory_debug_sample("message_summary_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
+                next if $messages_printed++ >= $messages_to_print{$grouping};
+                next if !defined $key;
                 my $is_consolidated = ($log_messages{$grouping}{$key}{is_consolidated} // 0);
                 # The classification indicator (#456 D1/D2) occupies the
                 # consolidation marker's position: the bullet on a row that is
@@ -21421,9 +21240,62 @@ sub print_threadpool_summary {
     }
 
     ### DETERMINE CUT OF HIGHLIGHTED VS PLAIN MESSAGES TO PRINT ###
-    for my $table ( top_table_plan( \%threadpool_activity, threadpool_sorted_keys() ) ) {
-        my $grouping = $table->{grouping};
-        {
+    # Step 1: Sort and store available messages for each category in a hash of arrays
+    my %sorted_keys = ( 'highlight' => [], 'plain' => [] );
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my @sorted_keys = sort {
+            my $occurrences_a = scalar keys %{$threadpool_activity{$grouping}{$a}} // 0;
+            my $occurrences_b = scalar keys %{$threadpool_activity{$grouping}{$b}} // 0;
+            ($sort_ascending
+                ? ($occurrences_a <=> $occurrences_b)
+                : ($occurrences_b <=> $occurrences_a))
+            || ($a cmp $b);
+        } keys %{$threadpool_activity{$grouping}};
+
+        $sorted_keys{$grouping} = \@sorted_keys;
+    }
+
+    # Initialize the hash to store top message counts
+    my %top_message_occurrences = (
+        'highlight' => 0,
+        'plain' => 0,
+    );
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        for my $i (0 .. $#{$sorted_keys{$grouping}}) {
+            last if $i >= $top_n_messages;
+            $top_message_occurrences{$grouping}++;
+        }
+    }
+
+    # Step 2: Determine how many messages to print from each category
+    my $half_top_n = int($top_n_messages / 2);
+
+    # Initialize the hash to store the number of messages to print
+    my %messages_to_print = (
+        'highlight' => $half_top_n,
+        'plain' => $half_top_n,
+    );
+
+    $messages_to_print{'highlight'}++ if $top_n_messages % 2 != 0;		# if halving doesn't equate to Top N, then add another row to highlighted messages
+
+    # Step 3: Adjust if one category has fewer messages than needed, ensuring the total remains $top_n_messages
+    if ($top_message_occurrences{'highlight'} < $messages_to_print{'highlight'}) {
+        $messages_to_print{'highlight'} = $top_message_occurrences{'highlight'};
+        $messages_to_print{'plain'} = $top_n_messages - $messages_to_print{'highlight'};
+    } elsif ($top_message_occurrences{'plain'} < $messages_to_print{'plain'}) {
+        $messages_to_print{'plain'} = $top_message_occurrences{'plain'};
+        $messages_to_print{'highlight'} = $top_n_messages - $messages_to_print{'plain'};
+    }
+
+    foreach my $grouping ( qw( highlight plain ) ) {
+        my $messages_printed = 0;
+
+        # Ensure the grouping exists and is a hash reference
+        if (exists $threadpool_activity{$grouping} && ref($threadpool_activity{$grouping}) eq 'HASH') {
+            my @top_keys = @{$sorted_keys{$grouping}}[0 .. min($#{$sorted_keys{$grouping}}, $top_n_messages - 1)] if scalar( @{$sorted_keys{$grouping}} ) > 0;
+
+            next unless scalar(@top_keys) > 0;			# skip to the next category if their are no top message keys
             $tables_printed++ ? print "\n" : open_section();
 
             my $header_title = " ";
@@ -21442,7 +21314,8 @@ sub print_threadpool_summary {
             print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n";
 
             # Print the top thread pools
-            foreach my $key (@{ $table->{keys} }) {
+            foreach my $key (@top_keys) {
+                next if $messages_printed++ >= $messages_to_print{$grouping};
  
                 my $row = " " x $table_padding_outer;
 
@@ -21818,9 +21691,6 @@ sub pipeline_render {
     emit_udm_counting_verbose();
 
     emit_udm_specs_verbose();
-
-    compute_section_layout();
-    emit_section_layout_verbose();
 
     print_verbose_output();
 
