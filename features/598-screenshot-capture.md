@@ -114,6 +114,15 @@ documentation exposes nothing sensitive.
 > screenshot showing either is checked for sensitive content before it is
 > committed; hiding the section (`--hide`) or cropping it out removes it.
 
+**D10: locations** (architect, 2026-09-24).
+
+| What | Where |
+|---|---|
+| the tool | `build/capture-screenshots.pl`, release tooling beside `build/sync-wiki.sh` |
+| the manifest | `build/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
+| the images | `docs/screenshots/*.svg`, generated output only |
+| input paths in the manifest | relative to the repository root (`logs/...`), so one recipe resolves on every development machine |
+
 ## Open questions
 
 None.
