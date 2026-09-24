@@ -170,6 +170,24 @@ The filed default width of about 200 columns is therefore a starting point only:
 the size must be settable per screenshot in the manifest and on the tool's command
 line.
 
+## Rendering prototype (D6): reference look
+
+The prototype matches the macOS Terminal.app profiles "Clear Dark" for `dark` and
+"Clear Light" for `light` (architect, 2026-09-24): their 16 ANSI colours, default
+text colour and background, and font (SF Mono Terminal, 12 pt, line spacing 1.0).
+The profiles' backgrounds are translucent (opacity 0.95 dark, 0.93 light) and are
+drawn opaque. They are a starting point, not necessarily the right image
+backgrounds: a configuration value for the background colour of each of `-dbg` and
+`-lbg` is likely to follow (architect, 2026-09-24).
+
+Findings so far (`prototype/598-ansi-svg/findings.md`): drawn as font glyphs, full
+blocks do not fill the cell's height, leaving a background stripe between rows in
+the timeline bars, the heatmap and the histogram (2,449 of 7,276 edge samples fail
+on the dark fixture render). Drawn as rectangles at cell coordinates with crisp
+edges, none fail, on dark or light. A pixel check through Quick Look and `sips`
+(macOS only, nothing to install) tells the two apart. Pending: the side-by-side
+comparison with Terminal.app (criterion 12) and display on GitHub.
+
 ## Open questions
 
 None.
