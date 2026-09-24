@@ -1,0 +1,31 @@
+# Every documentation screenshot, regenerated at each release by
+#   build/capture-screenshots.pl --manifest build/screenshots.yaml
+# into images/screenshots/. Images are never edited by hand: change an entry
+# and regenerate. How to write an entry: docs/process/screenshots.md.
+screenshots:
+
+  # Duration and bytes histograms of a day of web-server traffic with
+  # microsecond durations, one image each: the two panels print side by side
+  # in the histogram section, duration in columns 12 to 101, bytes in 109 to 198.
+  - name: access
+    ltl: -du us logs/AccessLogs/access.log_2026-05-19_00_00_00 -hm -hmw 60 -ov -hg -hgh 8
+    background: dark
+    crops:
+      - sections: histogram
+        cols: 12,90
+        label: duration
+      - sections: histogram
+        cols: 109,90
+        label: bytes
+
+  # Two hours of an application server's access log in 5-minute buckets with
+  # the duration heatmap: the whole timeline, then the heatmap alone, which
+  # starts at column 159 and runs to the right edge.
+  - name: heatmap-5min
+    ltl: -hm duration -bs 5 -st 09:00 -et 11:00 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+    background: dark
+    crops:
+      - sections: timeline
+      - sections: timeline
+        cols: 159,0
+        label: heatmap

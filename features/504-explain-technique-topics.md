@@ -490,7 +490,7 @@ reaches its published state at the next release like every other page.
 
 ### F27 — the wiki is generated from `docs/`, and nothing asserted the map
 
-Read from `docs/process/workflow.md` § *Post-release*, step 14. The wiki is not
+Read from `docs/process/workflow.md` § *Post-release*, step 15. The wiki is not
 a second document maintained alongside the repository: the release step clones
 `logtimeline.wiki`, overwrites each page with a byte-for-byte copy of its
 `docs/` source, stages the pages by name and pushes. The note beneath the step

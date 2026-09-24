@@ -282,7 +282,15 @@ architect, is a last resort after the steps have been tried singly.
 4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift. Then `./tests/cleanup-test-artifacts.sh`.
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`
-7. Finalize `releases/v{version}.md`: every user-observable issue has its bullet. The
+7. Regenerate the documentation screenshots:
+   `build/capture-screenshots.pl --manifest build/screenshots.yaml`, which must
+   exit 0. Look at every image that changed and check each one the tool marks as
+   showing messages or the file list for sensitive content
+   (`docs/process/screenshots.md`). Then `git add images/screenshots/`: step 9's
+   `commit -a` does not pick up new files. The images are committed with the
+   release (step 9), so they are on main before the wiki is synced (step 15) and
+   before any documentation that references them.
+8. Finalize `releases/v{version}.md`: every user-observable issue has its bullet. The
    TSV and the comparison report from steps 5 and 6 are committed either way; the
    Performance **section** reproduces neither. Where nothing moved, it is one or two
    sentences saying the benchmark ran, that no improvement or regression was observed,
@@ -291,16 +299,16 @@ architect, is a last resort after the steps have been tried singly.
    performance was the point of the release. No usage examples, file lists, "Breaking
    Changes: None", "Known Issues" or root-cause analysis. Full rule:
    `.claude/rules/release-notes.md`. Template: `releases/TEMPLATE.md`.
-8. `git commit -am "Release vX.Y.Z"`
-9. `git push -u origin release/X.Y.Z`
-10. `git tag vX.Y.Z`, then `git push origin vX.Y.Z` as a **separate command**.
-11. `gh release create vX.Y.Z --notes-file releases/vX.Y.Z.md`
+9. `git commit -am "Release vX.Y.Z"`
+10. `git push -u origin release/X.Y.Z`
+11. `git tag vX.Y.Z`, then `git push origin vX.Y.Z` as a **separate command**.
+12. `gh release create vX.Y.Z --notes-file releases/vX.Y.Z.md`
 
 ### Post-release
 
-12. `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` — never `--delete-branch`, release branches are preserved.
-13. **The release is finished only when** `gh pr view {PR#} --json state` reports `MERGED` and `git log --oneline main..release/X.Y.Z` is empty. An open release PR is an unfinished release, and so is one whose wiki sync (step 14) has not run. Any session that finds main behind a release branch reports that first and fixes it before anything else; it never rebases new work onto the release branch to route around it.
-14. Sync the wiki: `./build/sync-wiki.sh publish --version X.Y.Z`
+13. `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` — never `--delete-branch`, release branches are preserved.
+14. **The release is finished only when** `gh pr view {PR#} --json state` reports `MERGED` and `git log --oneline main..release/X.Y.Z` is empty. An open release PR is an unfinished release, and so is one whose wiki sync (step 15) has not run. Any session that finds main behind a release branch reports that first and fixes it before anything else; it never rebases new work onto the release branch to route around it.
+15. Sync the wiki: `./build/sync-wiki.sh publish --version X.Y.Z`
 
     The `docs/` files are the source of truth; the wiki is overwritten each
     release. `build/sync-wiki.sh` carries the source-to-page map and is the
@@ -318,4 +326,4 @@ architect, is a last resort after the steps have been tried singly.
     its source whether or not the publish ran, so the check also reads the
     wiki's last commit and asserts it names this version. That is what makes a
     skipped sync visible instead of silent.
-15. Delete merged feature branches: `git branch -d {branch} && git push origin --delete {branch}` — never the release branch.
+16. Delete merged feature branches: `git branch -d {branch} && git push origin --delete {branch}` — never the release branch.

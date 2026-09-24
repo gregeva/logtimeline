@@ -31,7 +31,7 @@ As filed on the issue, in three parts, plus a fourth added in specification:
 2. **Batch processor.** Reads a manifest, separate from the page map in
    `build/sync-wiki.sh`, listing every screenshot: command line, input files,
    geometry overrides, crops, output image names.
-3. **Release step.** Beside `build/sync-wiki.sh`; runs the batch processor, and the
+3. **Release step.** Before `build/sync-wiki.sh` (D19); runs the batch processor, and the
    images are committed before any documentation update that references them.
 4. **Guidance for agents** (architect, 2026-09-24). Documentation written for
    machine and AI use, not for end users, explaining the intended and appropriate
@@ -166,14 +166,94 @@ match it. The look on Windows depends on the viewer's font (Consolas).
 
 **D15: the tool runs on Linux and macOS, not Windows** (architect, 2026-09-24),
 superseding the macOS and Windows requirement as filed. It is run mostly on Linux
-and macOS, in a pipeline. Criterion 9 compares Linux with macOS.
+and macOS, in a pipeline. Running on Linux is a nice-to-have, not a requirement
+(architect, 2026-09-24): the tool is built and verified on macOS, and criterion 9
+is not required.
 
 **D16: `ltl` runs in the repository root, and its output files are removed
 afterwards** (architect, 2026-09-24). Input paths in a recipe are relative to the
 root (D10) and print in the summary's file list as written. After each run the tool
-deletes `*.csv` and `*.yaml` at the top level of the repository root, which is
-where `-o` writes; both patterns are ignored by git (`*.csv`,
-`*-LTL-AGGREGATE.yaml`), so nothing a run writes is committed.
+deletes, at the top level of the repository root where `-o` writes, the files
+matching `ltl`'s output names and nothing else (architect, 2026-09-24):
+`*LTL-*STATS*.csv`, `*LTL-*MESSAGES*.csv` and `*LTL-*AGGREGATE.yaml`. A wider
+`*.csv` / `*.yaml` would delete any file of those kinds in the root; the harness
+rule that a run never deletes a file it did not create (`tests/HARNESS-DESIGN.md`
+§ A harness owns the directory it runs `ltl` in) applies once a harness runs the
+tool. A user's own earlier `ltl -o` export in the root still matches. The index
+file `ltl-index.csv` is left alone: it is ignored by git. All three patterns are
+ignored by git too (`*.csv`, `*-LTL-AGGREGATE.yaml`), so nothing a run writes is
+committed.
+
+**D17: the options row leaves out the options that stand in for the terminal**
+(architect, 2026-09-24). The capture passes options no user types for a screenshot's
+content: `--disable-progress` (progress repaints with carriage returns on standard
+output even when it is redirected, so it must be off), `--terminal-width` and
+`--terminal-height` (the size cannot be detected when output is redirected), and
+`-dbg` / `-lbg` (D7; they change no part of `ltl`'s operation, only its colours).
+Shown on the options row, they misrepresent the command behind the screenshot.
+`ltl`'s options row leaves out those five, in every form (`-tw`, `-th`,
+`--dark-background`, `--light-background`, `=value`), so the image stays `ltl`'s
+literal output (criterion 1). Every other option stays on the row, hidden or not:
+the hidden consolidation, masking and detection options change what `ltl` prints,
+and leaving them out would make the row no longer reproduce the image. `-V` /
+`--verbose` and the section names given to it are left out too (architect,
+2026-09-24): diagnostic output prints outside the view, and echoing it made a `-V`
+run differ from the same run without `-V`, against #597 D6. `-ni` is not
+passed: the index file `ltl` writes, `ltl-index.csv`, is ignored by git and left
+where it is (D16).
+
+**D18: padding around the captured area** (architect, 2026-09-24). An image has a
+margin of blank space around the cells it captures, in the image's background
+colour. Padding belongs to the output image, not to the cut: one `--pad` option
+sets it for every image of a run, in CSS's shorthand. Top and bottom count rows,
+left and right count cells; each value is 0 or more.
+
+| `--pad` | Top | Right | Bottom | Left |
+|---|---|---|---|---|
+| `1` | 1 | 1 | 1 | 1 |
+| `1,2` (default) | 1 | 2 | 1 | 2 |
+| `1,2,3` | 1 | 2 | 3 | 2 |
+| `1,4,1,2` | 1 | 4 | 1 | 2 |
+
+**D19: the manifest, batch mode and release step** (architect, 2026-09-24).
+`build/screenshots.yaml` lists one entry per run of the tool, in the ad hoc run's
+words:
+
+```yaml
+# Every documentation screenshot, regenerated at each release by
+#   build/capture-screenshots.pl --manifest build/screenshots.yaml
+screenshots:
+  # Duration and bytes histograms of a day of web traffic, one image each
+  - name: access
+    ltl: -du us logs/AccessLogs/access.log_2026-05-19_00_00_00 -hm -hmw 60 -ov -hg -hgh 8
+    background: dark        # optional; dark when not given (D7)
+    width: 211              # optional (D11)
+    height: 53              # optional (D11)
+    pad: 1,2                # optional (D18)
+    crops:                  # optional; none means the whole output
+      - sections: histogram
+        cols: 12,90
+        label: duration
+      - sections: histogram
+        cols: 109,90
+        label: bytes
+```
+
+- `ltl` is one string, split as a shell splits it, so a command is copied from a
+  terminal as it is and `-h "POST /api"` stays one argument.
+- What each screenshot is for is a YAML comment above its entry (D8).
+- `--manifest FILE` regenerates every entry into `images/screenshots/` (D10), each
+  entry all-or-nothing; `--only NAME` regenerates one entry.
+- Size and padding: the tool's command line over the entry over the default.
+- The release step runs the batch before `build/sync-wiki.sh`, and the images are
+  committed before any documentation update that references them.
+
+**D20: full blocks are drawn in front** (architect, 2026-09-24). A line glyph is
+drawn a little wider than its cell: where a histogram's horizontal grid line
+(`─`) meets a bar (`█`), the line overlapped the bar's edge by at least 1.5 device
+pixels at 2.1 per unit (4 cells of the synthetic Tomcat fixture's histogram,
+found by the criterion 11 pixel check). Runs of full blocks are drawn after all
+other text, so the bar covers the overhang.
 
 ## Capture tool design (agreed with the architect, 2026-09-24)
 
@@ -181,7 +261,7 @@ where `-o` writes; both patterns are ignored by git (`*.csv`,
 
 ```
 build/capture-screenshots.pl --name BASE [--background dark|light]
-                             [--width N] [--height N] [--out-dir DIR]
+                             [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR]
                              [--crop 'sections=A[,B] start=±N end=±N cols=L,R label=LABEL'] ...
                              -- <ltl options and input files>
 ```
@@ -208,10 +288,9 @@ build/capture-screenshots.pl --name BASE [--background dark|light]
 
 - The checkout's own `ltl`, run by the Perl that runs the tool.
 - `LTL_CONFIG`, `FORCE_COLOR` and `NO_COLOR` are removed from its environment.
-- Both runs get `--terminal-width W --terminal-height H`, `-dbg` or `-lbg`,
-  `--disable-progress` and `-ni` (no index file written into the working
-  directory); the probe run also gets `-V section-layout`. They show on the options
-  row.
+- Both runs get `--terminal-width W --terminal-height H`, `-dbg` or `-lbg` and
+  `--disable-progress`; the probe run also gets `-V section-layout`. The index file
+  `ltl` writes, `ltl-index.csv`, is ignored by git and left where it is (D16, D17).
 - Refused on the passed command line, an error with nothing run: `-tw`, `-th`,
   `-lbg`, `-dbg` (the tool sets them), `-V` (diagnostic output) and `-p` (waits for
   a key).
@@ -305,6 +384,26 @@ Measured 2026-09-24 on `release/0.18.4`:
   unwrapped however long it is (`print_run_options()`), and the row count behind
   `-V section-layout` counts it as one row, so a terminal that wraps it shows
   more rows than the report counts.
+- **The probe run's `-V section-layout` is echoed on the options row**, so a `-V`
+  run is not identical to the same run without `-V` once its `-V` ranges are
+  removed, as #597 D6 and D14 state. Before D17 only the row's text differed. With
+  D17, a recipe passing no options of its own gets no options row in the capture
+  run but one in the probe run: the help's basic example on the full-day Tomcat
+  access log printed 56 rows in the probe and 54 in the capture, and the tool's
+  row-count check stopped it.
+- **Hiding one side-by-side part does not move the other.** On the full-day Tomcat
+  access log at 211 x 53, the summary's file list starts at column 49 whether or
+  not `--hide summary-values` is given; hidden, the 49 columns to its left are
+  blank. A cut of the file list alone therefore needs its columns given
+  (`cols=49,0`), known to the recipe's author, not reported by `ltl`: columns
+  anchored on positions `ltl` reports are #599, not planned.
+- **Columns hidden for lack of width are hidden silently.** On 5,000 lines of an
+  application server's access log with `-hm duration` at 53 rows, every timeline
+  column shows at 211 columns; at 120 and at 80, `auto_hide_narrow_columns()`
+  hides the success and failure percentages, duration, bytes and the heatmap, and
+  nothing on standard output or standard error says so. Only the hidden
+  `--debug-layout` lists them (`(auto-hidden)`, on standard error). A screenshot
+  at too small a size loses them unnoticed; the guidance has the check.
 - **The timeline bars are drawn with a different character on Windows.**
   `$default_chart_block` is the full block (U+2588) elsewhere and the black square
   (U+25A0) on Windows, and no option sets it. A crop showing the timeline bars
@@ -365,35 +464,40 @@ The captured images reproduce the rendering that `tests/validate-histogram-ticks
 `tests/validate-heatmap-palette.sh` (heatmap colours) assert character by character
 and colour by colour. At least one heatmap and one histogram use case, each with a
 crop anchored on its section start line, captured on macOS and on Windows.
-Changed by D15: captured on Linux and on macOS.
+Changed by D15: captured on macOS; Linux is a nice-to-have. Delivered as the
+manifest's `access` entry (the duration and bytes histograms, each a crop of the
+histogram section) and `heatmap-5min` entry (the timeline, and its heatmap alone).
 
 ## Acceptance criteria
 
-Criteria 1 to 11 are assertable; 12 is verified by eye. The rendering prototype
+Criteria 1 to 8 and 11 are asserted by `tests/validate-screenshot-capture.sh`
+(one scenario per criterion; 22 assertions, each shown to fail on a sabotaged
+input); 10 is the documents' existence; 12 is verified by eye; 9 is not required. The rendering prototype
 (D6) settled 11 and 12, which it held as unknown (`prototype/598-ansi-svg/findings.md`).
 
-- [ ] 1. A crop's cells equal the corresponding rows of `ltl`'s standard output,
+- [x] 1. A crop's cells equal the corresponding rows of `ltl`'s standard output,
       sliced by the reported section positions, the start and end offsets and the
       column positions (for example `+15` / `-2`, and `100, -25` at width 200) (D2, D3).
-- [ ] 2. Every cell's foreground and background colour is the one `ltl` printed,
+- [x] 2. Every cell's foreground and background colour is the one `ltl` printed,
       mapped through the tool's colour table; heatmap cells are checked against the
       gradient `-V heatmap-palette` reports.
-- [ ] 3. Histogram tick glyphs sit at the columns `tests/validate-histogram-ticks.sh`
+- [x] 3. Histogram tick glyphs sit at the columns `tests/validate-histogram-ticks.sh`
       asserts.
-- [ ] 4. `light` runs `ltl` with `-lbg` and draws a light background; `dark` with
+- [x] 4. `light` runs `ltl` with `-lbg` and draws a light background; `dark` with
       `-dbg` and a dark one (D7).
-- [ ] 5. A crop naming a `hidden` or `absent` section fails with an error naming it,
+- [x] 5. A crop naming a `hidden` or `absent` section fails with an error naming it,
       and writes no image (D2).
-- [ ] 6. Size precedence is command line over manifest over the 211 x 53 default,
+- [x] 6. Size precedence is command line over manifest over the 211 x 53 default,
       observed in the `--terminal-width` and `--terminal-height` passed to `ltl` (D11).
-- [ ] 7. One execution yields several crops, with `ltl` run exactly twice per recipe.
-- [ ] 8. A batch run regenerates every manifest entry into `images/screenshots/` (D10).
-- [ ] 9. The same recipe on Linux and on macOS yields the same crop cells (D15).
-- [ ] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
+- [x] 7. One execution yields several crops, with `ltl` run exactly twice per recipe.
+- [x] 8. A batch run regenerates every manifest entry into `images/screenshots/` (D10).
+- [ ] 9. *(not required: Linux is a nice-to-have, D15)* The same recipe on Linux
+      and on macOS yields the same crop cells.
+- [x] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
       the path rule covers `images/screenshots/**` and `build/screenshots.yaml` (D12).
-- [ ] 11. Every character sits within its cell's columns as displayed: the pixel
-      check (`prototype/598-ansi-svg/check-alignment.pl`, Quick Look on macOS)
-      samples each full block's left and right edges (D14).
-- [ ] 12. *(by eye)* The rendered image matches Terminal.app's look on real data,
+- [x] 11. Every character sits within its cell's columns as displayed: the pixel
+      check (Quick Look on macOS, `edges` in `tests/lib/screenshot-cells.pl`)
+      samples each full block's left and right edges (D14, D20).
+- [x] 12. *(by eye; judged by the architect on the examples, 2026-09-24)* The rendered image matches Terminal.app's look on real data,
       block heights and the gap between rows included, which follow the viewer's
       font (D14).
