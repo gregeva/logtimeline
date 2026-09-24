@@ -180,10 +180,14 @@ What this shows:
 - With `-hm duration` in place of statistics, the timeline's row count is unchanged;
   two histograms (`-hg duration -hg bytes`) render side by side on the same rows.
 
+## Finding: the pause option adds no rows
+
+`pause_for_keypress()` prints its prompt without a newline and erases it in place
+with a carriage return and spaces when a key is pressed, so a run under `-p` prints
+the same rows as one without it. The report needs no rule for `-p`.
+
 ## Open questions
 
-- **The pause option.** Whether `-p` prompts count as lines, or the report is
-  defined for runs without it.
 - **The `-V` section name** and its keys.
 
 ## Acceptance criteria
