@@ -59,6 +59,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 2
 fi
 
+# shellcheck source=require-bash.sh
+source "$(dirname "${BASH_SOURCE[0]}")/require-bash.sh"
+
 SCENARIO_REGISTRY=()
 SCENARIO_ONLY=""
 SCENARIO_USAGE_NOTE="${SCENARIO_USAGE_NOTE:-}"

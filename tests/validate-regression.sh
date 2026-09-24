@@ -100,31 +100,10 @@ APACHE_LOG="logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_Navigate.2026
 PLOT_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log"
 DPM5K_LOG="logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
 
-# Strip ANSI escape codes and non-deterministic lines (timing, memory) from stdin.
-#
-# The version banner is normalised to [VERSION] so the goldens survive a version
-# bump. The pattern must accept the branch marker as well as the release number:
-# a feature branch stamps $version_number as X.Y.Z-{issue} (e.g. 0.18.0-432) for
-# the life of the branch, per docs/process/workflow.md § Version stamping, so every development
-# build carries a suffix. Matching only [0-9.]+ made every scenario fail on any
-# branch, for the one reason the goldens are explicitly meant to ignore.
-#
-# The TOP OVERALL MESSAGES block is not part of the layout surface these
-# references freeze, so it is dropped. The drop is bounded by the run summary
-# that closes the output: the skip ends on the summary's first line -- the rule
-# above the Category header, two spaces in and padded on the right -- so the
-# category totals, the HIGHLIGHTED row and the file/format legend stay inside
-# the asserted surface. Per tests/HARNESS-DESIGN.md an anchor that matches
-# nothing is a failure: reaching end of input with the skip still open exits 3,
-# so a truncated surface aborts instead of being asserted. A run invoked with
-# -osum prints no summary, and the echoed options line -- which sits under the
-# bar graph, ahead of the skipped block -- says so, so such a run has nothing
-# to close the skip and is exempt.
-# Must match capture-regression.sh exactly.
-strip_nondeterministic() {
-    perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g; s/\e\[\d*m//g; s/log timeline \[[^\]]+\]/log timeline [VERSION]/' \
-    | perl -ne 'BEGIN{$skip=0; $want_summary=1} END{ $? = 3 if $skip && $want_summary } $want_summary=0 if /^(?:environment|command-line) options: / && /(?:^|\s)(?:-osum|--omit-summary)(?=\s|$)/; $skip=1 if /TOP OVERALL/; $skip=0 if /^ {2}(?:─)+ +$/; print unless $skip || /PROCESSING TIME|TOTAL TIME|MAXIMUM MEMORY|INITIALIZE EMPTY|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS|GROUP SIMILAR MESSAGES|SCALE DATA|DETECT: FORMAT REGISTRY BUILD|PARSE: FILE PROCESSING|ACCUMULATE: EMPTY BUCKETS|FINALIZE: (?:GROUP SIMILAR|CALCULATE STATISTICS|HEATMAP STATISTICS|HISTOGRAM STATISTICS)|RENDER: SCALE DATA/i'
-}
+# The surface the references freeze: strip_nondeterministic() in
+# tests/lib/nondeterministic.sh, shared with the other reference script.
+# shellcheck source=lib/nondeterministic.sh
+source "$SCRIPT_DIR/lib/nondeterministic.sh"
 
 # Verify reference directory exists
 if [[ ! -d "$REF_DIR" ]]; then

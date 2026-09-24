@@ -190,10 +190,10 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `percentile-algorithm` — per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats and bucket-stats (Issue #280)
 - `filter-summary` — the run's line accounting as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, highlighted (Issue #503, reserved by #229/#230; contract in features/503-yaml-aggregate-export.md § `-V filter-summary` section contract)
 - `aggregate-export` — the YAML aggregate export `-o` writes: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the `heatmap-ladder` sub-section with each bucket's retained heatmap percentile values (Issue #503; contract in features/503-yaml-aggregate-export.md § `-V aggregate-export` section contract). Printed at the writer's site after the file exists, so it appears after every section `print_verbose_output()` flushes.
+- `section-layout` — per output section and part, in print order: its state (rendered, hidden, absent), the standard-output row it started on and the rows it printed, as a tab-separated table. Rows are counted as they print, leaving out every `-V` range wherever it prints, so they are the rows of the same run without `-V`. Printed after the run's last row (Issue #597; contract in features/597-section-visibility.md § D3, D13, D14). Asserted by `tests/validate-section-layout.sh`.
 
 **Reserved by sub-issues, not yet implemented:**
 - `option-resolution` (Issue #231)
-- `section-layout` (Issue #597): per rendered section and part, its state and the row it starts on and its row count, as a tab-separated table; contract in features/597-section-visibility.md § D13
 
 ## Stability contract
 
@@ -545,6 +545,12 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ```
 
 Add the trap on the *same logical line* as the `mktemp` so it can't be forgotten between declaration and use. If the harness uses multiple temp dirs, set the trap to clean all of them: `trap 'rm -rf "$DIR1" "$DIR2"' EXIT`.
+
+#### Trap 10a: macOS `/bin/bash` 3.2 turns a crash into a pass
+
+The `EXIT` trap of Trap 10 is only safe under bash 4 or later. Under macOS's `/bin/bash` 3.2, a script running with `set -e` and `set -u` that dies on an unbound variable exits with its `EXIT` trap's own status: 0 once `rm -rf` succeeds. `$?` reads 0 inside the trap as well, so no trap can recover the failure. Every harness runs `set -euo pipefail` and cleans up through an `EXIT` trap, and `#!/usr/bin/env bash` resolves to `/bin/bash` wherever Homebrew bash is not first on `PATH`. So a harness that crashed mid-run reported success.
+
+`tests/lib/require-bash.sh` refuses to run under bash older than 4 (exit 2, naming the interpreter). `tests/lib/scenario-select.sh` sources it, so every harness is covered; `tests/capture-regression.sh` sources it directly. `build/macos-setup.sh` installs Homebrew bash, which must come first on `PATH`, as Homebrew Perl does. Found while building `tests/validate-section-layout.sh` (Issue #597): a scenario died on an empty array under `set -u` and the harness exited 0.
 
 #### Trap 11: backticks inside double-quoted prose are command substitutions
 

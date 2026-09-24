@@ -53,21 +53,21 @@ cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 
 #### Test-harness dependencies
 
+The test harnesses run under Homebrew Perl and Homebrew bash, never the macOS system versions. `./build/macos-setup.sh` installs both; the shell you run the harnesses from must then find them first on its PATH:
+
+```bash
+export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"   # e.g. in ~/.zshrc
+bash -c 'echo $BASH_VERSION'   # 5.x, not 3.2
+perl -MText::CSV -e 1          # no "Can't locate" error
+```
+
+A harness started under bash older than 4 stops at once and names the interpreter. macOS's `/bin/bash` 3.2 would let a harness that crashes partway through report success. The system Perl lacks the modules `ltl` and the harnesses load.
+
 Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one of these fails fast with an install hint if it is missing — it does not silently skip the work that depends on it.
 
-The right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching path below:
+**macOS:** `./build/macos-setup.sh` installs Homebrew Python with NumPy and SciPy (`brew install python numpy scipy`; Homebrew's NumPy and SciPy do not pull in Homebrew Python themselves). With Homebrew first on PATH, as above, `python3` is that Python, not the system one.
 
-**macOS — Homebrew Python (`/opt/homebrew/bin/python3` or `/usr/local/bin/python3`):**
-Homebrew Python enforces [PEP 668](https://peps.python.org/pep-0668/), which blocks `pip install --user`. Use brew (NumPy and SciPy ship as brew formulas):
-```bash
-brew install numpy scipy
-```
-
-**macOS — Apple Command-Line-Tools Python (`/Library/Developer/CommandLineTools/usr/bin/python3`):**
-No PEP 668; `pip --user` works:
-```bash
-/Library/Developer/CommandLineTools/usr/bin/python3 -m pip install --user numpy scipy
-```
+**Linux:** the right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching case below.
 
 **Ubuntu/Linux — older distributions (pre-PEP-668):**
 ```bash
