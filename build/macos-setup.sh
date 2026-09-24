@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # macOS Build Environment Setup Script
-# Installs Homebrew Perl, cpanminus, PAR::Packer, and project dependencies
+# Installs Homebrew Perl, Homebrew bash, cpanminus, PAR::Packer, and project dependencies
 #
 # Requirements:
 #   - Homebrew (https://brew.sh)
@@ -33,7 +33,7 @@ if ! command -v brew &>/dev/null; then
     exit 1
 fi
 
-echo "[1/4] Installing Homebrew Perl..."
+echo "[1/5] Installing Homebrew Perl..."
 brew install perl
 
 # Ensure Homebrew Perl is first on PATH (not macOS system Perl)
@@ -47,13 +47,22 @@ fi
 
 echo "[info] Using Perl: $(which perl) ($(perl -v | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+'))"
 
-echo "[2/4] Installing cpanminus..."
+echo "[2/5] Installing Homebrew bash..."
+# The test harnesses need bash 4 or later: macOS's /bin/bash 3.2 lets a harness
+# that crashes on an unbound variable exit 0 (tests/lib/require-bash.sh).
+brew install bash
+export PATH="${BREW_PREFIX}/bin:${PATH}"
+if [ -n "${GITHUB_PATH:-}" ]; then
+    echo "${BREW_PREFIX}/bin" >> "$GITHUB_PATH"
+fi
+
+echo "[3/5] Installing cpanminus..."
 brew install cpanminus
 
-echo "[3/4] Installing PAR::Packer..."
+echo "[4/5] Installing PAR::Packer..."
 cpanm --notest PAR::Packer
 
-echo "[4/4] Generating cpanfile and installing dependencies..."
+echo "[5/5] Generating cpanfile and installing dependencies..."
 cd "$SCRIPT_DIR"
 ./generate-cpanfile.sh
 if [ "${LTL_INSTALL_DEV_DEPS:-0}" = "1" ]; then

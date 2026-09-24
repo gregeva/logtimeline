@@ -42,6 +42,8 @@ fi
 # Common options: suppress progress, summary table, and limit top messages
 COMMON="--disable-progress -ni -osum -n 1"
 
+# shellcheck source=lib/require-bash.sh
+source "$SCRIPT_DIR/lib/require-bash.sh"
 # shellcheck source=lib/fixtures.sh
 source "$SCRIPT_DIR/lib/fixtures.sh"
 
