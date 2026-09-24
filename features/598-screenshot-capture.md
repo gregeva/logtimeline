@@ -11,7 +11,7 @@ visibility and the `-V` section start-line report), specified in
 
 ## Motivating consumer
 
-The documentation. It has no screenshots because they are captured by hand. A
+The documentation. Its screenshots are captured by hand (`images/` holds 16 hand-captured PNGs; `README.md` shows two), so there are few of them and they go stale. A
 screenshot defined in code (command line, input files, terminal geometry, target
 region) is regenerated at every release and stays current without manual effort.
 This is development and release tooling, not shipped with `ltl`.
@@ -128,7 +128,7 @@ documentation exposes nothing sensitive.
 |---|---|
 | the tool | `build/capture-screenshots.pl`, release tooling beside `build/sync-wiki.sh` |
 | the manifest | `build/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
-| the images | `docs/screenshots/*.svg`, generated output only |
+| the images | `images/screenshots/*.svg`, generated output only, in a subfolder of the repository's existing `images/` so regeneration never touches the hand-captured screenshots there |
 | input paths in the manifest | relative to the repository root (`logs/...`), so one recipe resolves on every development machine |
 
 **D11: default terminal size 211 x 53, overridable twice** (architect, 2026-09-24),
@@ -145,7 +145,7 @@ command line takes precedence over the manifest, the manifest over the default.
 |---|---|
 | `docs/process/screenshots.md` | the guidance: when to use the tool, writing a manifest entry, choosing sections and offsets, the sensitivity warning, the refresh pipeline |
 | a row in the `CLAUDE.md` *Where to look* table | creating or changing a documentation screenshot points at `docs/process/screenshots.md` |
-| a path-scoped rule in `.claude/rules/` on `docs/screenshots/**` and `build/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
+| a path-scoped rule in `.claude/rules/` on `images/screenshots/**` and `build/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
 
 **D13: run-varying figures are accepted** (architect, 2026-09-24). The summary's
 `TOTAL TIME` and `MAXIMUM MEMORY USED` differ on every run, so an image showing them
@@ -201,10 +201,10 @@ scope (D6).
 - [ ] 6. Size precedence is command line over manifest over the 211 x 53 default,
       observed in the `--terminal-width` and `--terminal-height` passed to `ltl` (D11).
 - [ ] 7. One execution yields several crops, with `ltl` run exactly twice per recipe.
-- [ ] 8. A batch run regenerates every manifest entry into `docs/screenshots/` (D10).
+- [ ] 8. A batch run regenerates every manifest entry into `images/screenshots/` (D10).
 - [ ] 9. The same recipe on macOS and on Windows yields the same crop cells.
 - [ ] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
-      the path rule covers `docs/screenshots/**` and `build/screenshots.yaml` (D12).
+      the path rule covers `images/screenshots/**` and `build/screenshots.yaml` (D12).
 - [ ] 11. *(unknown: prototype)* Block and box-drawing characters align cell to cell
       in the SVG as displayed where the documentation is read.
 - [ ] 12. *(unknown: prototype)* The rendered image matches the terminal's look,
