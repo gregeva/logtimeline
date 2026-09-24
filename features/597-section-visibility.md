@@ -165,6 +165,22 @@ progress	hidden
 === END section-layout ===
 ```
 
+**D14: every row on standard output is accounted for** (architect, 2026-09-24).
+There is no `verbose` entry in `section-layout`: a `-V` section can print outside
+the main verbose block (`histogram-percentile-ticks` prints after the histogram,
+`aggregate-export` after the summary), so no single block length is true. Instead
+the harness removes every `=== name ===` ... `=== END name ===` range from standard
+output wherever it printed, and requires:
+
+    total rows - `-V` rows - reported section rows - separators - expected fixed spacing = 0
+
+Expected fixed spacing is spacing that belongs to no section but is normal, such as
+the blank row at the end of the run; the harness declares each such row by what it
+is, and the assertion is on deviation from that expectation. Any other remainder is
+a failure that names the rows it could not place. `-V` output prints no rows outside
+its delimiters, blank padding included, so a `-V` run with its ranges removed is
+identical to the same run without `-V` (D6).
+
 ## Finding: where each section starts and ends today
 
 Measured 2026-09-24 on `release/0.18.4` by rendering two small access-log fixtures
@@ -217,5 +233,30 @@ None.
 
 ## Acceptance criteria
 
-To be derived from the requirements and D4 once the open questions above are
-settled.
+All assertable. Every run pins `--terminal-width`; standard error is captured
+separately from standard output (D12).
+
+- [ ] `-hi timeline` prints no timeline rows and `section-layout` reports `timeline`
+      `hidden`; likewise for each section and each hidden part (D7), one at a time.
+- [ ] `-hi messages` prints no messages table and the MESSAGES CSV is still written
+      (D2, the difference from `-n 0`).
+- [ ] `-hi progress` produces byte-identical output to `--disable-progress` on the
+      same input (D9).
+- [ ] For every rendered section, known static text is found at a fixed row and
+      column offset from the start row `section-layout` reports (D4): for example
+      the log-formats legend title in the file list, the fiftieth-percentile marker
+      in the histogram legend. Checked under each section's variability: many
+      files, a highlight splitting the messages table, a non-default histogram
+      height, the memory option.
+- [ ] Every two rendered sections are separated by exactly one blank row, owned by
+      neither (D5).
+- [ ] A `-V` run with every `-V` range removed prints exactly the rows of the same
+      run without `-V` (D6, D14).
+- [ ] A date/time option the tool cannot handle prints its warning on standard
+      error, and standard output passes the accounting check below (D12).
+- [ ] On every run above, total rows minus `-V` rows minus reported section rows,
+      separators and declared fixed spacing equals zero (D14).
+- [ ] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias
+      resolves to its section (D8, D11).
+- [ ] `--help` and `docs/usage.md` carry the `-hi` and `-sh` rows and agree
+      (`tests/validate-help-content.sh`).
