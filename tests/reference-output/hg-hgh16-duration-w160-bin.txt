@@ -3,8 +3,6 @@
    ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
-
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
      timestamp                 legend              success failure                   occurrences                    duration          bytes           users     
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -69,5 +67,5 @@
 
                             P10: 21.2s   P25: 35.6s   P50: 47.1s   P75: 1.5m   P90: 9m   P95: 22m   P99: 1.5h   P99.9: 2h   P99.99: 2h          
 
-command-line options: --disable-progress -ni -osum -n 1 -hgdm bin --terminal-width 160 -hg duration -hgh 16 
+command-line options: -ni -osum -n 1 -hgdm bin -hg duration -hgh 16 
 

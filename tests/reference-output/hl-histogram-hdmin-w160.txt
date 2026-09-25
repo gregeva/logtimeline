@@ -3,8 +3,6 @@
    ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
-
-
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
      timestamp                    legend                 success failure                 occurrences                   duration        bytes          users     
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -62,7 +60,7 @@
                            P25: 35.5ms   P50: 47.1ms   P75: 89.3ms   P90: 541.2ms   P95: 1.3s   P99: 5.3s   P99.9: 7.4s   P99.99: 7.4s          
                               P25: 147.4ms   P50: 357.8ms   P75: 1s   P90: 3.2s   P95: 5.3s   P99: 6.9s   P99.9: 7.4s   P99.99: 7.4s            
 
-command-line options: --disable-progress -ni -n 1 -dm raw --terminal-width 160 -du us -hg duration -hdmin 100 
+command-line options: -ni -n 1 -dm raw -du us -hg duration -hdmin 100 
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
