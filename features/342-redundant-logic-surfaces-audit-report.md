@@ -560,67 +560,213 @@ additions:
 
 ## Item 3: Timestamp parsing
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four angles were run on the issue
+branch. The two gaps the scoping pass found by reading are both confirmed by a
+run, and the runs found two more: a day that is impossible for its month passes
+the scanned arm's guard and aborts the whole run from inside the generated scan
+sub, and the `-st`/`-et` bound parser drops the time of day from a `T`-separated
+value with a Perl warning. Captures are under the session scratchpad
+(`342/runs3/`), one file per run; every run passed `--disable-progress`, `-bs 1`,
+`-ni` and `-V filter-summary` or bare `-V`.
 
-### Summary of the scoping pass
+### Fixtures used by the confirmation runs
 
-Four live per-line parse arms. (1) Inline ISO fixed-offset substr/timegm arm in the generated scan blocks: iso_ms routes mt1std, mt10, mt16, mt1gen, mt2, mt5, mt6, mt7, mt17 and mtvfy (pin-only verification entry); iso_flex routes mt8; iso_flex_frac routes mt11; iso_ms_ddmm routes mt10ir with the day/month offsets swapped. (2) Inline Apache month-map arm, layout apache_clf: mt3ts, mt12, mt9, mt19, mt20, mt3, mt4. (3) CSV ISO arm via the csv entry's FR_TIME_PARSE closure (layout 'csv', which takes the iso branch). (4) CSV epoch arm, inline in read_and_process_logs, for the csv entry when the first data line is numeric. There is also a second copy of arms 1 and 2 as closures in compile_format_time_parser; the apache closure is never called. Off the per-line path: calculate_start_end_filter_timestamps (Time::Piece strptime for -st/-et), parse_iso_date_to_epoch, and format_sample_probes. One shared date cache (%timestamp_date_cache) and one last-seen memo ($format_last_ts_str/$format_last_ts_epoch, scanned arms only).
+Every fixture is two or three lines. CSV fixtures have the header `timestamp,value`
+and are read with `-udm 'value::max'`, which is what turns CSV reading on.
 
-**Shared surface today.** Partial. The date cache is shared: timestamp_date_cache_add / timestamp_date_cache_clear / timestamp_date_cache_snapshot / timestamp_date_cache_restore over %timestamp_date_cache. Every ISO and Apache arm (inline and closure) reads it. The parse logic has two authorities for the same arms: compile_format_time_parser (closures, used only by the CSV ISO arm) and the source strings in format_entry_block_src (inlined into generated scan blocks, used by every scanned format). The CSV epoch arm and the CSV fractional strip sit inline in read_and_process_logs.
+- **csv-ok**: two ISO rows. **csv-month13**: an ISO row followed by
+  `2025-13-01 10:01:00`. **csv-day32**: followed by `2025-06-32 10:01:00`.
+  **csv-feb30**: followed by `2025-02-30 10:01:00`. **csv-shape**: followed by
+  `not a date`. **csv-tz**: `2025-06-01T10:00:00+02:00` followed by
+  `2025-06-01 10:00:00`. **csv-epoch-text**: `1748772000`, then `abc`, then
+  `1748772060`.
+- **apache-nonmonth** and **apache-feb30**: access-log lines (TEST-NET address)
+  whose second line carries `[07/Xyz/2025:00:01:00 +0000]` or
+  `[30/Feb/2025:00:01:00 +0000]`.
+- **iso-month13**, **iso-day32**, **iso-feb30**: the first three lines of
+  `tests/fixtures/numeric-highlight-boundary.txt` (an application-log format
+  with a fixed three-digit fraction) with the second line's date rewritten to
+  `2026-13-26`, `2026-01-32` or `2026-02-30`.
+- The bound parser was run on the committed
+  `tests/fixtures/tomcat-access-single-sample-keys.txt` with `-st '2025-13-01 00:00:00'`,
+  `-st '2025-05-32'`, `-et '25:00'` and `-st '2025-05-07T00:02:00'`.
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+### Search angles run
 
-- **F3.1** Two copies of the ISO and Apache parse: the closures in compile_format_time_parser and the $compute source strings in format_entry_block_src restate the same timegm/substr/month-map logic. The doc comment `as compile_format_time_parser` asserts they are the same, but nothing checks it. The apache_clf closure is built into FR_TIME_PARSE for seven entries and never called.
-- **F3.2** Impossible-date guard: the inline iso arm (format_entry_block_src, `if (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) {`) guards month>12/day>31 before timegm. The CSV ISO arm (read_and_process_logs, via compile_format_time_parser's iso closure) checks only shape (`/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/`). By reading, a CSV value such as 2025-13-01 00:00:00 passes the guard and reaches an unguarded timegm, which croaks on month out of range. Not run.
-- **F3.3** The issue 328 shape guard exists only on the CSV ISO arm. The CSV epoch arm (`my $epoch_val = $timestamp_str;` ... `$timestamp = int($epoch_val);`) has none: epoch mode is decided from the first data line alone, so by reading, a later non-numeric value hits int() under `use warnings`, which would give a ' at ltl line N' warning and epoch 0. Not run.
-- **F3.4** The Apache arm has no guard in either copy: the timestamp capture is `[\[]([^\]]+)[\]]` (no shape guarantee), and `$format_month_map{$month_str} - 1` is undefined for a token that is not a month name.
-- **F3.5** The fractional strip is written twice: the 'generic' frac source in format_entry_block_src (`if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); }`) and the CSV ISO arm in read_and_process_logs (the same regex and normalisation on separate lines).
-- **F3.6** CSV epoch detection is written twice in read_and_process_logs: once on the confirmed-CSV data-line path (`$line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/`) and once on the header-validation path (`defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/`).
-- **F3.7** The last-seen memo ($format_last_ts_str / $format_last_ts_epoch) sits in front of the scanned arms only. The CSV ISO arm goes straight to the date cache, and the CSV epoch arm uses neither.
-- **F3.8** Four separate ISO-date parsers apply different validity checks: the inline iso arm (month/day range checks, no eval), the closure (no check), parse_iso_date_to_epoch (regex plus eval), and format_sample_probes (regex, range checks and eval).
+1. **By layout.** `format_registry_specs()` declares 21 entries: eleven on
+   `iso_ms` with the fixed three-digit fraction contract (one of them, the
+   Integration Runtime encoder, on `iso_ms_ddmm`), one on `iso_flex` and one on
+   `iso_flex_frac` with the generic fraction, seven on `apache_clf` with no
+   fraction, and the `csv` entry whose layout falls to the ISO branch. The
+   transform lists that touch the timestamp: `chop_tz_offset` on the seven
+   access-log entries, `chop_tz_colon_offset` with `t_to_space` on one,
+   `comma_to_dot` with `t_to_space` on two, `t_to_space` alone on one. For each
+   layout the generated source in `format_entry_block_src` and the closure in
+   `compile_format_time_parser` were read side by side: the date-key substring,
+   the `timegm` argument order, the day/month offset swap and the time-of-day
+   arithmetic are the same text in both; the memo, the fraction handling, the
+   transforms and the impossible-date guard exist in the generated source only.
+2. **By primitive.** Every `timegm` (five: the closure's two arms, the generated
+   source's two arms, `parse_iso_date_to_epoch`, `format_sample_probes`), every
+   `strptime` (five, all in `calculate_start_end_filter_timestamps`), every
+   `gmtime` (fourteen, of which three are parse-side: `fold_epoch` twice and
+   `profile_included_weekdays`), the one `%format_month_map` table and its two
+   readers, and every regex or `substr` on `$timestamp_str` (44 lines; the
+   capture is `i3-primitives.txt`).
+3. **By variable.** Every read and write of `$fractional_ms`, `$timestamp_epoch`,
+   `$bucket_epoch`, the memo pair, the date cache and the CSV epoch flag: 93
+   lines, 32 of them in `read_and_process_logs`, 13 in `format_entry_block_src`,
+   11 in `calculate_start_end_filter_timestamps`, the rest in the cache subs, the
+   validation snapshot and the occupant swap. The single join point
+   `my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);` has four
+   upstream writers of `$timestamp` (the generated block, the CSV ISO arm, the
+   CSV epoch arm, the window replay) and three of `$fractional_ms`.
+4. **By failure.** Eleven runs, listed under *Fixtures*; results in the findings.
 
-### Site inventory (scoping pass)
+### The seven parsers and what each does with a bad date
 
-- `format_entry_block_src` :: `my $compute = ($layout eq 'apache_clf')` :: Emits the inline per-format parse into each generated scan block. Picks one of two source strings by the entry's declared time layout: apache_clf (month-map arm) or everything else (fixed-offset substr/timegm ISO arm). This is the live parse for every scanned format.
-- `format_entry_block_src` :: `$timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/;` :: Inline Apache arm (layout apache_clf): the date key is the text before the first colon, the month comes from %format_month_map, timegm runs once per new date, and the time of day is added as arithmetic. There is no guard on the date parts.
-- `format_entry_block_src` :: `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` :: Inline ISO arm (every iso_* layout): reads the date parts at fixed substr offsets from $timestamp_str (key substr 0,10). Day and month offsets swap for iso_ms_ddmm.
-- `format_entry_block_src` :: `my $miss_src = $layout =~ /^iso_/` :: Guard on the memo-miss branch, iso_* layouts only: an impossible month (>12) or day (>31) carries the line at the previous epoch and signals format_probe_signal('impossible_date'). Variant-group members also get the monotonicity probe. apache_clf gets no guard.
-- `format_entry_block_src` :: `push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }` :: Last-seen memo in front of every scanned parse: if the timestamp string is unchanged from the previous line, it reuses the previous epoch.
-- `format_entry_block_src` :: `my $frac = $spec->{time}{frac} // 'generic';` :: Fractional-second handling chosen by the declared frac contract: fixed3 (substr at offset 20), none (constant 0), or generic (an s/// strip with a regex).
-- `compile_format_time_parser` :: `sub compile_format_time_parser {` :: Closure copy of the same two arms (an apache_clf closure plus an iso closure with the ddmm swap), built into FR_TIME_PARSE for every entry by build_format_registry. Its only runtime caller is the CSV ISO arm, so the apache_clf closure is built but never called.
-- `build_format_registry` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );` :: How the per-format declared layout reaches the closure parser. The inline arms read $spec->{time}{layout} directly inside format_entry_block_src.
-- `read_and_process_logs` :: `$timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);` :: CSV ISO arm (match_type 13 when the file is not epoch): calls the csv entry's closure. Layout 'csv' falls to the iso branch with mm-dd offsets.
-- `read_and_process_logs` :: `if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {` :: The shape guard added under the issue for CSV timestamps that are neither epoch nor ISO (issue 328 in the source comment). It skips the row, counts it in $csv_skipped_timestamp_rows and $excluded_other, and warns once per file. Only the CSV ISO arm has it.
-- `read_and_process_logs` :: `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {` :: CSV ISO arm's fractional strip. It is a verbatim copy of the 'generic' frac source emitted by format_entry_block_src.
-- `read_and_process_logs` :: `# Epoch timestamp: value is already epoch seconds (or other unit via -du)` :: CSV epoch arm (when $csv_epoch_timestamp is set): scales the value by -du through %time_unit_step, takes int() for the whole seconds and puts the remainder in $fractional_ms. It has no guard and does not use the date cache.
-- `read_and_process_logs` :: `if ($line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {` :: Epoch detection on the confirmed-CSV data-line path, first data line only. A second copy sits on the header-validation path: `if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {` (about line 15241). $csv_epoch_timestamp is reset per file (about line 14988).
-- `timestamp_date_cache_add` :: `sub timestamp_date_cache_add {` :: The actual timestamp cache: date string maps to midnight epoch, capped at TIMESTAMP_DATE_CACHE_MAX (100) with oldest-insertion eviction. Used by the inline ISO and Apache arms and by both closures, so the CSV ISO arm uses it too. The CSV epoch arm does not.
-- `timestamp_date_cache_clear` :: `sub timestamp_date_cache_clear {` :: Cache reset. Called from format_record_reset (at the end of build_format_registry, before line 1) and from format_registry_set_occupant, but only when the occupant actually changed (reached from format_probe_signal and apply_format_variant_selection). There is no per-file clear. The last-seen memo is reset at both of those sites too.
-- `format_validate_scan_sub` :: `my $saved_cache = timestamp_date_cache_snapshot();` :: Saves and restores the date cache and the last-seen memo around sample validation of a newly compiled scan sub.
-- `calculate_start_end_filter_timestamps` :: `$epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;` :: A separate parse surface (Time::Piece strptime) for -st/-et bounds. read_and_process_logs calls it once, until $filter_range_filter_initialized is set; it is not run per line.
-- `parse_iso_date_to_epoch` :: `return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };` :: Another ISO-to-epoch parser outside the hot loop, used for index-file and ISO 'T' strings. Its timegm is wrapped in eval.
-- `format_sample_probes` :: `my $epoch = eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) };` :: Detection-sample parser that reads each ISO date under both mm-dd and dd-mm. It has its own regex plus month>12/day>31 checks and an eval around timegm, overlapping the inline iso guard. Runs on the detection sample, not per line.
-- `read_and_process_logs` :: `$bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;` :: The per-line epoch-to-bucket arm the original task asked for ('into an epoch or bucket'). It has two branches: integer-millisecond keys under $print_milliseconds (`$bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;`) and whole-second keys otherwise. The inventory does not list it. *(added by the verifier)*
-- `read_and_process_logs` :: `my $folded = fold_epoch($timestamp_epoch, $profile_mode);` :: Per-line remap of the epoch under --profile, before bucketing. fold_epoch uses gmtime plus anchor arithmetic, which makes it a second epoch-to-position transform in the hot loop. *(added by the verifier)*
-- `read_and_process_logs` :: `my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;` :: Per-line time-of-day derivation for -st/-et bounds given without a date. The same seconds-since-midnight idea exists again as strptime '%H:%M:%S' in calculate_start_end_filter_timestamps. *(added by the verifier)*
-- `(file scope, %format_transform_code, after sub emit_index_readback_verbose)` :: `chop_tz_offset      => q{ $timestamp_str =~ s/ \+\d{4}$//; },` :: Timestamp normalisation primitives spliced into the generated blocks ahead of the fractional strip and parse: t_to_space, comma_to_dot, chop_tz_offset, chop_tz_colon_offset. The date-cache key is 'post-chop', so these are part of the parse path. The CSV ISO arm gets none of them: its guard accepts a 'T', and any timezone suffix is dropped without comment by the fixed offsets. *(added by the verifier)*
-- `read_and_process_logs` :: `my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);` :: The single point where every arm's whole-second epoch and $fractional_ms join into the fractional epoch that the filters and buckets read. *(added by the verifier)*
-- `initialize_empty_time_windows` :: `my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;` :: A second copy of the bucket arithmetic, ms and seconds branches included (`my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);`). It is off the per-line path but duplicates the read_and_process_logs bucket arm. *(added by the verifier)*
+Run evidence, one row per parser. "Aborts" means the process exits non-zero with
+a Perl message and no timeline; the message names a source line, which CLAUDE.md
+treats as a defect in itself.
+
+| Parser | Input class | Shape check | Month 13 / day 32 | Day impossible for its month | Non-numeric | Timezone suffix |
+|---|---|---|---|---|---|---|
+| Scanned ISO (generated) | every `iso_*` format | the format's pattern | note printed, line carried at the previous epoch, probe signalled (iso-month13, iso-day32: 3 lines included) | **aborts**: `Day '30' out of range 1..28 at (eval 88) line 216.` (iso-feb30, exit 1) | cannot occur | chopped by the declared transform |
+| Scanned Apache (generated) | the seven access-log formats | `[^\]]+` inside brackets | **aborts** with a Perl warning first: `Use of uninitialized value $format_month_map{"Xyz"} in subtraction` then `Month '-1' out of range 0..11 at (eval 88) line 206.` (apache-nonmonth, exit 255) | **aborts** (apache-feb30, exit 1) | as month 13 | chopped |
+| CSV ISO (closure) | CSV rows whose first data value is not numeric | `^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}` (#328): row skipped, counted, one warning per file (csv-shape: 1 excluded) | **aborts**: `Month '12' out of range 0..11 at ltl line 3510.`, `Day '32' out of range 1..30 at ltl line 3510.` (exit 255) | **aborts** (csv-feb30, exit 1) | as shape | **dropped without notice**: `2025-06-01T10:00:00+02:00` and `2025-06-01 10:00:00` land in one bucket (csv-tz: `DATA: 2`) |
+| CSV epoch (inline) | CSV rows whose first data value is numeric | none after the first row | not applicable | not applicable | **runtime warning and epoch zero**: `Argument "abc" isn't numeric in int at ltl line 15462`, the row included in a `1970-01-01 00:00` bucket (csv-epoch-text: 3 included) | not applicable |
+| `-st`/`-et` bounds (`strptime`) | option values | five regex shapes, space-separated only | **aborts** with the module's message: `Error parsing time at .../Time/Piece.pm line 637` (exit 1, no usage text) for `2025-13-01 00:00:00`, `2025-05-32` and `25:00` | as month 13 | `Warning: unhandled date/time format` deferred notice | not accepted; a `T` separator gives two Perl warnings (`Garbage at end of string in strptime: T00:02:00`) and the bound is taken as the date alone (st-T: 12 included, 0 excluded, where `00:02:00` would have excluded one) |
+| Index read-back (`parse_iso_date_to_epoch`) | index file cells | `T` required | `undef`, silently (`eval`) | `undef` | `undef` | not accepted by the regex |
+| Detection sample (`format_sample_probes`) | sample lines | regex, space only | counted out of range | counted out of range (`eval`) | not applicable | not applicable |
+
+### Findings
+
+| # | Decision | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F3.2** | The impossible-date guard | `format_entry_block_src` :: `if (substr(\$timestamp_str, $month_off, 2) > 12 \|\| substr(\$timestamp_str, $day_off, 2) > 31) {` | `compile_format_time_parser` :: `my $midnight = $timestamp_date_cache{substr($ts, 0, 10)} // timestamp_date_cache_add( substr($ts, 0, 10), timegm(` (no guard) and `compile_format_time_parser` :: `timestamp_date_cache_add( substr($ts, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) );` (no guard, either copy) | A guards the two cheap ranges on the memo-miss branch and carries the line; B and the Apache arms guard nothing, so `timegm` croaks | The table above: month 13 on a scanned ISO line prints a note and carries the line; the same value on a CSV row aborts the run at `ltl line 3510`; a February 30 aborts the run on every arm including the scanned one, from inside the eval'd scan sub. One malformed line in a multi-million-line file ends the run on three of the four per-line arms | One guard policy for every arm that can receive the same input: the cheap range test where the inline arm has it, plus a `timegm` wrapped so that a croak becomes the same note-and-carry (or skip-and-count) the inline arm gives; on the hot path the wrap sits on the memo-miss branch only, as `features/log-format-registry.md` § #384 prototype findings F3 placed the existing guard | `features/log-format-registry.md` D31 and N3; `features/58-format-registry-staged-detection.md` A6 and P8 (exact semantics of the fast path); `features/user-defined-metrics.md` § CSV Columnar Input (skip and warn, one warning per file, for a CSV timestamp that is neither epoch nor ISO) | **diverged**, *hot path* | #387 (user-defined YAML formats) lets a user declare a layout whose lines the generated arm will parse; the guard policy is what a user-declared format inherits. #23 (parsing architecture umbrella, in progress) owns D31 and D32. #181 (buffered read pipeline, on hold) would restructure the per-line arms |
+| **F3.3** | The CSV epoch arm's input | `read_and_process_logs` :: `$timestamp = int($epoch_val);` | `read_and_process_logs` :: `if (!defined $timestamp_str \|\| $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {` (the ISO arm's shape check) | A decides epoch mode on the first data row and never re-checks; B checks every row's shape | csv-epoch-text: `Argument "abc" isn't numeric in int at ltl line 15462`, and the row is included in a `1970-01-01 00:00` bucket, so the timeline gains a 1970 row and the observation range starts in 1970 | The epoch arm gets the ISO arm's skip-and-count with the same one-per-file warning, on a numeric-shape test | `features/user-defined-metrics.md` § CSV Columnar Input and § Epoch timestamps (#98) | **diverged** | #17 (input latency units) is the `-du` scaling this arm applies; informational |
+| **F3.10** | The `-st`/`-et` bound parser | `calculate_start_end_filter_timestamps` :: `if ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}/ ) {` (five shapes, space only) and `calculate_start_end_filter_timestamps` :: `$epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;` | `read_and_process_logs` :: `if (!defined $timestamp_str \|\| $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {` (accepts `T`), `parse_iso_date_to_epoch` :: `return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };` (requires `T`, fails silently), the `t_to_space` transform for scanned formats | Four acceptance rules for the ISO separator across four parsers, and a bound parser that reports a bad value through a Perl module's message | `-st '2025-05-07T00:02:00'`: two Perl warnings and the time of day silently dropped, so the bound is midnight and nothing is excluded; `-st '2025-13-01 00:00:00'`: `Error parsing time at .../Time/Piece.pm line 637`, exit 1, no usage message | One option-value timestamp parser (regex plus `timegm` under `eval`, accepting both separators, reporting through `print_usage`), which the index read-back can share | `docs/usage.md` § Filtering (the `-st`/`-et` forms) names the space form only; nothing documents the `T` behaviour | **diverged** | #154 (fixed timezone offset for rendering) names `-st`/`-et` display among the surfaces it shifts; #155 (normalise offsets to UTC) would give the bound values an offset to parse |
+| **F3.9** | Timezone suffix on a CSV timestamp | `(file scope, %format_transform_code, after sub emit_index_readback_verbose)` :: `chop_tz_offset      => q{ $timestamp_str =~ s/ \+\d{4}$//; },` (and `chop_tz_colon_offset`), spliced into generated blocks by `format_entry_block_src` :: `my $code = $format_transform_code{$t}` | `read_and_process_logs` :: `$timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);` (the CSV ISO arm receives no transform) | Scanned formats declare which suffixes to chop and the block chops them; the CSV arm reads fixed offsets and ignores whatever follows the seconds | csv-tz: a row at `10:00:00+02:00` and a row at `10:00:00` fall into the same `10:00` bucket. The offset is neither applied nor reported | The CSV entry declares the normalisation primitives the scanned formats declare, or the CSV arm reports an offset it cannot honour once per file | `features/log-format-registry.md` (the time contract's `tz` field: the `csv` entry declares `utc`) | **diverged** | #155 (parse timezone offsets and normalise to UTC) is where an offset on any arm gains a meaning; this row is its CSV case |
+| **F3.1** | The parse logic itself | `format_entry_block_src` :: `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` (the source strings inlined into every scanned block) | `compile_format_time_parser` :: `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` (the closures, built for every entry, called by the CSV ISO arm only) | The same substring offsets, `timegm` argument order and time-of-day arithmetic written twice; the Apache closure is built for seven entries and never called | Identical today (the February 30 runs abort with the same message from both copies); the doc comment in the generated source says "as compile_format_time_parser" and nothing checks it | The closure generated from the same source string the block uses (`eval` of the `$compute` text), so one text is the parse; or the CSV arm calls a closure compiled from the block source | `features/log-format-registry.md` D31 (the time contract compiles to per-layout closures) and D60; `features/58-format-registry-staged-detection.md` P8 (the closures achieve exact parity) | **latent**, *hot path* | #387 (user YAML formats): a user-declared layout has to reach both authorities today; #386 (analysis precision per format) adds a demand-driven variant of the fraction handling to the generated source, widening the gap unless the closure is derived |
+| **F3.5** | The fractional-second strip | `format_entry_block_src` :: `push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/)` | `read_and_process_logs` :: `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {` | The generic-fraction source and the CSV ISO arm restate one regex and one normalisation | Identical today | The CSV arm takes the `generic` fraction source through the same emitter, or the CSV entry declares `frac => 'generic'` and the arm is generated | `features/log-format-registry.md` (the `frac` contract) | **latent** | #386 (demand-driven sub-second handling) rewrites this strip in the generated source; a second copy in the loop would not follow |
+| **F3.6** | CSV epoch detection | `read_and_process_logs` :: `if ($line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {` | `read_and_process_logs` :: `if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {` | The steady data-line arm and the lazy-detection confirm arm each decide epoch mode from the first data line (item 8's F8.3 lists the whole duplicated sequence) | Identical today | One CSV data-line handler called from both arms | `features/user-defined-metrics.md` § Epoch timestamps | **latent** | #181 (buffered read pipeline) would restructure both arms |
+| **F3.11** | Epoch to bucket key | `read_and_process_logs` :: `$bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;` (with the millisecond branch `my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);` recomputed per included line) | `initialize_empty_time_windows` :: `my $start_bucket = int(int($output_timestamp_min * 1000 + 0.5) / $bucket_size_ms) * $bucket_size_ms;` (and its seconds branch) | The bucket arithmetic and the millisecond bucket size are written in the loop and again for the empty-window fill | Identical today (a change to one that the other did not follow would put empty rows between populated ones) | One `bucket_key_for($epoch)` resolved once for the run's precision, with the millisecond size computed before the loop (item 8 counts the per-line recomputation) | `features/524-bucket-size-unit.md` D4 (bucket width and precision are separate) | **latent**, *hot path* | #525 (a single timestamp-precision option with nanosecond) adds a precision every copy has to learn |
+| **F3.7** | The last-seen memo | `format_entry_block_src` :: `push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }` | `read_and_process_logs` :: `$timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);` (straight to the date cache, no memo) | Scanned arms reuse the previous epoch when the string repeats; the CSV ISO arm recomputes the time of day every row and the epoch arm uses neither memo nor cache | No behavioural difference; a cost asymmetry on CSV input only | none required; recorded so a generated CSV arm (F3.1's target) inherits the memo | `features/58-format-registry-staged-detection.md` P8 | **latent** | none |
+
+Sites audited and closed as **deliberate**:
+
+- The inline guard sits on the memo-miss branch behind the cache lookup, so it
+  costs nothing on a cache hit: `features/log-format-registry.md` § #384
+  prototype findings F3. Any widening of the guard (F3.2's target) keeps that
+  placement.
+- The #328 shape check on the CSV ISO arm skips and warns once per file:
+  `features/user-defined-metrics.md` § CSV Columnar Input. F3.2 and F3.3 ask for
+  the same policy on the other arms, not a change to this one.
+- The date cache (`%timestamp_date_cache`, bounded at 100 entries) is shared by
+  the generated arms and both closures: identical by construction, and the
+  bound is the #58 P8 decision after the per-second cache grew unbounded.
+- `t_to_space`, `comma_to_dot`, `chop_tz_offset` and `chop_tz_colon_offset` are
+  declared per format and spliced at build time: the registry's declarative
+  shape, not a copy.
+- `format_sample_probes` reads every sample date under both month-first and
+  day-first readings with `eval` around `timegm`: it is a scorer, and an
+  out-of-range date is evidence, not an error. Its policy is its own by design.
+
+### Open issues touching this item as a whole
+
+- **#155** (parse timezone offsets and normalise to UTC, on hold): every arm
+  gains an offset to honour; F3.9 is the CSV case it would meet first, and the
+  chop transforms are the mechanism it would replace.
+- **#154** (fixed timezone offset for rendering): names `-st`/`-et` among the
+  surfaces it shifts (F3.10).
+- **#525** (one timestamp-precision option, `next-up`): every copy of the bucket
+  arithmetic (F3.11) and the join point learn a fourth precision.
+- **#386** (default analysis precision per format, demand-driven sub-second
+  handling): rewrites the fraction handling in the generated source (F3.5) and
+  widens the inline-versus-closure gap (F3.1) unless the closure is derived.
+- **#387** (user-defined YAML formats): a user-declared time layout inherits
+  whichever guard policy the generated arm has (F3.2) and has to reach both
+  parse authorities (F3.1).
+- **#23** (core parsing architecture, in progress): the umbrella that owns D31
+  (compiled time contract) and D32 (CSV outside the scan array).
+- **#181** (buffered read pipeline, on hold): would restructure the CSV arms
+  (F3.6) and the per-line join point.
+- **#17** (input latency units): the `-du` scaling the CSV epoch arm applies;
+  informational.
+
+### Site inventory
+
+Carried from the scoping pass (*(scoping)*; its six verifier additions included)
+with the audit's additions:
+
+- `format_entry_block_src` :: `my $compute = ($layout eq 'apache_clf')` :: the live parse for every scanned format, selected by layout. *(scoping)*
+- `format_entry_block_src` :: `$timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/;` :: inline Apache arm, no guard. *(scoping)*
+- `format_entry_block_src` :: `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` :: inline ISO arm offsets (the same line exists in `compile_format_time_parser`). *(scoping)*
+- `format_entry_block_src` :: `my $miss_src = $layout =~ /^iso_/` :: the guard on the memo-miss branch, ISO layouts only. *(scoping)*
+- `format_entry_block_src` :: `push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }` :: the last-seen memo. *(scoping)*
+- `format_entry_block_src` :: `my $frac = $spec->{time}{frac} // 'generic';` :: fraction handling by declared contract (`fixed3`, `none`, `generic`). *(scoping)*
+- `format_entry_block_src` :: `my $code = $format_transform_code{$t}` :: where the declared transforms (including the timezone chops) are spliced ahead of the parse. *(audit)*
+- `compile_format_time_parser` :: `sub compile_format_time_parser {` :: the closure copy of both arms; the Apache closure is never called. *(scoping)*
+- `build_format_registry` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );` *(scoping)*
+- `(file scope, between timestamp_date_cache_restore and compile_format_time_parser)` :: `my %format_month_map = (` :: the month table read by both Apache copies; a token not in it yields `undef`. *(audit)*
+- `read_and_process_logs` :: `$timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);` :: the CSV ISO arm. *(scoping)*
+- `read_and_process_logs` :: `if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {` :: the #328 shape guard, CSV ISO only. *(scoping)*
+- `read_and_process_logs` :: `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {` :: the CSV ISO arm's fraction strip. *(scoping)*
+- `read_and_process_logs` :: `# Epoch timestamp: value is already epoch seconds (or other unit via -du)` and `$timestamp = int($epoch_val);` :: the CSV epoch arm, no guard, no cache. *(scoping, snippet added)*
+- `read_and_process_logs` :: `if ($line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {` :: epoch detection, steady arm; the confirm arm's copy is `if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {`. *(scoping)*
+- `read_and_process_logs` :: `my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);` :: the join point. *(scoping)*
+- `read_and_process_logs` :: `$bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;` :: the bucket arm, with the millisecond branch. *(scoping)*
+- `read_and_process_logs` :: `my $folded = fold_epoch($timestamp_epoch, $profile_mode);` :: the `--profile` remap. *(scoping)*
+- `read_and_process_logs` :: `my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;` :: time-of-day for date-less bounds. *(scoping)*
+- `initialize_empty_time_windows` :: `my $start_bucket = int($output_timestamp_min / $bucket_size_seconds) * $bucket_size_seconds;` :: the second bucket copy. *(scoping)*
+- `timestamp_date_cache_add` :: `sub timestamp_date_cache_add {` :: the date cache, bounded at 100. *(scoping)*
+- `timestamp_date_cache_clear` :: `sub timestamp_date_cache_clear {` :: reset at registry build and occupant swap; no per-file clear. *(scoping)*
+- `format_validate_scan_sub` :: `my $saved_cache = timestamp_date_cache_snapshot();` :: snapshot and restore around validation. *(scoping)*
+- `calculate_start_end_filter_timestamps` :: `$epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;` :: the bound parser, five shapes, space only. *(scoping)*
+- `calculate_start_end_filter_timestamps` :: `defer_notice("Warning: unhandled date/time format - option not taken into account\n");` :: its only notice, for a value matching no shape. *(audit)*
+- `parse_iso_date_to_epoch` :: `return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };` :: index read-back, `T` required, silent on failure. *(scoping)*
+- `format_sample_probes` :: `my $epoch = eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) };` and `if ($mo > 12 || $dy > 31) { $r->{oor}++; next }` :: the detection scorer's own checks. *(scoping, snippet added)*
+- `(file scope, %format_transform_code, after sub emit_index_readback_verbose)` :: `chop_tz_offset      => q{ $timestamp_str =~ s/ \+\d{4}$//; },` :: the four normalisation primitives. *(scoping)*
+- `fold_epoch` :: `my @t = gmtime($epoch);` :: a second epoch-to-position transform in the loop, under `--profile` only. *(audit)*
 
 ### Verification notes
 
-Sites reported 19, confirmed 20, refuted 0 (corrected above), added by the verifier 6, owning docs refuted 0.
+- Every snippet resolves to its enclosing sub. The generated-source sites are
+  cited by the text of the source string inside `format_entry_block_src`, as the
+  specification requires; the Perl messages quote `(eval 88)` because the
+  failing code is the compiled scan sub.
+- The scoping pass's F3.2 ("by reading, a CSV value such as 2025-13-01 passes
+  the guard and reaches an unguarded timegm, which croaks") is confirmed
+  exactly; the audit adds that the scanned arm's guard has the same gap for a
+  day impossible for its month, which the reading did not anticipate.
+- The scoping pass's F3.3 is confirmed exactly (warning text and epoch zero);
+  the audit adds the visible consequence (a 1970 bucket on the timeline).
+- The scoping pass's F3.8 (four validity policies) is superseded by the
+  seven-parser table above, which adds the bound parser's two behaviours and the
+  Apache arm's Perl warning.
+- The `-st`/`-et` run on a `T` value was not in the scoping pass; it was run
+  because three other parsers accept or require the `T` separator.
 
-- The line hint for the frac site `my $frac = $spec->{time}{frac} // 'generic';` is wrong: the snippet is at about line 4380, not 4388. It is in the right sub (format_entry_block_src).
-- The snippet `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` is not unique. It also sits in compile_format_time_parser (about line 3507). The format_entry_block_src attribution holds (about line 4393).
-- The snippet `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {` also matches inside format_entry_block_src (about line 4389). The read_and_process_logs attribution holds (about line 15482), and the duplication is already listed under divergences.
-- All six owning-doc headings exist verbatim: log-format-registry.md at about lines 623, 1068 and 581; 58-format-registry-staged-detection.md at about 186 and 358; user-defined-metrics.md at about 265, with the skip-and-warn line at about 280. All three harnesses exist.
-- Verified as stated: timestamp_cache has 0 hits in ltl. There are 7 apache_clf entries (mt3ts, mt12, mt9, mt19, mt20, mt3, mt4), and every layout route in count_summary matches format_registry_specs. FR_TIME_PARSE is called at runtime only in the CSV ISO arm, so the apache closure is never called. The last-seen memo is reset in format_registry_set_occupant and format_record_reset, and saved and restored in format_validate_scan_sub. $csv_skipped_timestamp_rows is a `my` declared per file (about line 14993), so 'warns once per file' holds.
-- The inventory's scope is incomplete against the original task. The task asked for arms that turn a timestamp 'into an epoch or bucket', but the inventory stops at the epoch. It leaves out the bucket arm, the --profile fold_epoch remap and the pre-parse timestamp transforms in %format_transform_code (see sites_missed).
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Is the inline-versus-closure duplication in scope, given D31 and P8?* The
+  runs show the two copies fail identically, so parity holds today; the cost of
+  the duplication is that every change to the guard or the fraction handling
+  (#386) has to be made twice. Generating the closure from the same source string
+  keeps both and removes the second text.
+- *Are the confirmed gaps findings of this audit or bugs of their own?* The
+  audit's recommendation: F3.2 and F3.3 are bugs of their own, filed ahead of any
+  convergence, because a single malformed line aborts a run (F3.2) or produces a
+  1970 bucket and a Perl warning (F3.3), and the fix shape (a guard policy) is
+  small; F3.10 is a bug of its own on the option surface.
+- *Should the CSV ISO arm receive the normalisation primitives and the guard?*
+  csv-tz shows the cost of not having the chops; the CSV entry already declares
+  `tz => 'utc'`, so declaring the chops is consistent with its contract.
+- *Do the off-loop parsers converge on one policy?* The bound parser's module
+  croak and `T` handling (F3.10) argue yes for the option surface; the detection
+  scorer stays separate by design.
+- *Does the issue body's wording get trued up?* § 3 of the specification records
+  the corrections; the audit adds none.
 
 
 ---
