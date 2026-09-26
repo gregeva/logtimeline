@@ -6,12 +6,13 @@ Opened 2026-09-26 with the scoping pass's verified inventory as its first entrie
 The specification, method, locked decisions and acceptance criteria are in
 `features/342-redundant-logic-surfaces.md`; this document holds the findings.
 
-Every entry below marked *scoping pass* was found by a read-only inventory of `ltl`
-at 7aa2bd5 (the base of `release/0.19.0`) and re-grepped by an independent verifier.
-The audit completes each item by running the search angles the specification names,
-confirms every *diverged* candidate by a captured run, assigns category and priority,
-and fills the site inventory. Until an item's section says *audit complete*, its
-findings are candidates, numbered so they can be discussed, not conclusions.
+Drop 1 is complete (2026-09-26): items 1 to 7 and the patterns sweep are *audit
+complete*, each with its search angles recorded as run, every *diverged* finding
+confirmed by a captured run, every finding cross-checked against the open issues,
+and the closing sections (the grouping proposal, what was not searched) written.
+`docs/architecture-patterns.md` and its two `CLAUDE.md` entries landed in the
+same commit as the patterns sweep. Item 8 (the per-line loop) is drop 2 and is
+still the scoping pass's record.
 
 ## How to read a finding
 
@@ -1438,99 +1439,294 @@ Carried in the specification, § 4, under this item; the audit adds the evidence
 
 ## Item P: Architectural patterns
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four angles were run on the issue
+branch; the fifteen candidates of the scoping pass are confirmed, three are
+merged or split on the evidence, and three shapes the scoping pass did not
+name are added. The output is `docs/architecture-patterns.md`, committed with
+the two `CLAUDE.md` entries; this section records the sweep, the inventory and
+the findings inside patterns.
 
-### Summary of the scoping pass
+### Search angles run
 
-15 candidate patterns scouted, each with 1-4 consumption sites in ltl (44 site rows in total). 12 already have an owning doc: format registry, column layout, bin counters, precision tiers, data-model selectors, demand gates, statistics-group consumer registry, -V sections, metric-operand resolution, named stages, S1-S5 pipeline, section visibility, plus sort gates (spread over 3 docs). 3 have no single owning doc: run-scoped activation flags, behavioural notices / deferred notice queue, and the one-resolution-surface rule, which exists only as a CLAUDE.md checkpoint plus scattered instances. The new file would index these docs, not duplicate them. docs/staged-processing-pipeline.md is the only existing docs/*.md written as a pattern description.
+1. **By registry.** Every file-scope hash or array whose values are specs,
+   closures, predicates or a vocabulary, with the sub that resolves against it
+   (`iP-angle1-tables.txt`, 106 file-scope declarations, of which fourteen are
+   registries in this sense): the format registry structures, `@time_unit_ladder`
+   and its views, `%verbose_section_registry` with `@verbose_section_order`,
+   `%profile_modes`, `%mask_patterns` with `@mask_order`, `%explain_topics` with
+   `%explain_aliases` and `@explain_groups`, `@STAT_CONSUMERS` with
+   `%STAT_GROUP_FIELDS`, `%TIER_BPD`, `%csv_column_family`, `@output_sections`
+   and `@visibility_columns` with their alias tables, `%format_transform_code`,
+   `@column_layout`, and the user-defined metric configs built by
+   `parse_udm_configs`. The memory-structure list in `named_structure_sizes`
+   is a registry of names with no resolver.
+2. **By flag.** Every `*_active`, `*_demand`, `*_enabled`, `*_capture_mode`,
+   `*_observed` and `*_demand_shape` global: 38 names, with the number of sites
+   that read each (from 22 for the message-stats capture mode down to 1) and
+   the sub that assigns each (`iP-angle2-flags.txt`). Every flag is assigned in
+   `adapt_to_command_line_options`, a `resolve_*` sub it calls,
+   `resolve_statistics_group_demand`, or, for the observed latches and capture
+   modes, `read_and_process_logs` before or inside the loop. Two are assigned
+   twice (FP.3).
+3. **By generation.** Three `eval $src` sites (`compile_format_scan_sub`,
+   `compile_format_classifier`, `compile_format_extractor`) and one `eval` of a
+   user regex (`parse_udm_configs`); no other source compilation.
+4. **By doc.** Every heading in `features/*.md`, `docs/*.md` and
+   `tests/HARNESS-DESIGN.md` naming a pattern, template, mechanism or single
+   source of truth: 60 headings, of which the ones that describe a reusable
+   shape are cited as owning records in the patterns file; the rest name a
+   mechanism of one feature.
 
-**Shared surface today.** Existing single-surface subs per candidate: build_format_registry() + format_scan_sub_resolve() (format recognition); @column_layout + add_dynamic_column() (columns); partition_new/bin_assign/counter_update/percentile/partition_rebin (bin counters); bpd_for_surface() over %TIER_BPD (precision); choose_data_model()/resolve_data_model() (raw|bin); demand block in adapt_to_command_line_options() + resolve_statistics_group_demand() over @STAT_CONSUMERS (demand); section_requested() over %verbose_section_registry (-V); builtin_metric_name()/resolve_metric_operand()/available_metric_names() (metric operands); format_csv_value()/resolve_csv_column_family() (CSV values); pipeline_* (stages); defer_notice()/flush_deferred_notices() (notices); resolve_visibility_name()/section_hidden() (visibility); apply_parse_time_sort_gate/apply_pre_walk_sort_gate/apply_post_walk_sort_gate (sort).
+### The patterns entered
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+| Pattern | Single surface today | Owning record | Status in the file |
+|---|---|---|---|
+| Declarative table with one resolver | `time_unit_canonical`, `_validate_dm`, `resolve_visibility_name`, `resolve_explain_topic`, `bpd_for_surface`, `resolve_csv_column_family`, `resolve_mask_names` over their tables | `features/524-bucket-size-unit.md` D1 (worked contract); this entry generalises it | needs refinement (item 1) |
+| Declarative format registry compiled into generated, cached scan subs | `format_registry_specs`, `build_format_registry`, `compile_format_scan_sub`, `format_scan_sub_resolve` | `features/log-format-registry.md`, `features/58-format-registry-staged-detection.md` | established; two refinements on record (F3.1, F8.1) |
+| Generated code compiled from source strings | the three `eval $src` subs and `format_validate_scan_sub` | `features/log-format-registry.md` D39, D40, D60 | established; item 8 asks whether the loop body becomes a fourth |
+| Single column-layout source of truth | `@column_layout`, `add_dynamic_column` | `features/column-layout-refactor.md` | established |
+| Bin-counter primitives | `partition_new`, `bin_assign`, `counter_update`, `percentile`, `partition_rebin` | `features/189-histogram-bin-counter-primitives.md` | established |
+| Precision tiers | `bpd_for_surface` over `%TIER_BPD` | `features/293-precision-lever-unification.md` | established |
+| Data-model selectors resolved once per surface | `resolve_data_model`, `choose_data_model`, `_validate_dm` | `features/266-data-model-selectors.md` | needs refinement (F1.14, item 8) |
+| Demand gates, with absence-tolerant reads and observation-count gating | the demand block of `adapt_to_command_line_options` | `features/516-...`, `features/517-...`, `features/305-...` | needs refinement (F4.10, F4.11, F4.5) |
+| Statistics-group consumer registry | `@STAT_CONSUMERS`, `%STAT_GROUP_FIELDS`, `resolve_statistics_group_demand` | `features/305-shape-moment-extended-percentile-demand.md` | established (FP.1 latent) |
+| Run-scoped activation flags resolved once | 38 flags, assigned in four places | the entry itself | needs refinement (FP.3, item 8) |
+| `-V` telemetry sections as the test surface | `%verbose_section_registry`, `section_requested`, `emit_*_verbose` | `tests/HARNESS-DESIGN.md` | established (FP.2) |
+| One resolution surface per vocabulary | the resolvers and formatters items 1 and 2 audit | the entry itself; CLAUDE.md checkpoint enforces | needs refinement (items 1 to 7) |
+| Named pipeline stages | `pipeline_detect` to `pipeline_render` | `features/180-named-pipeline-stages.md` | established |
+| Staged processing, cheap inline match and periodic discovery | `match_consolidation_patterns`, `run_consolidation_checkpoint` | `docs/staged-processing-pipeline.md` (indexed, not absorbed) | established |
+| Section visibility and boundaries | `resolve_visibility_name`, `section_hidden`, `open_section` | `features/597-section-visibility.md` | established |
+| Sort gates at three pipeline points | `apply_parse_time_sort_gate` and siblings | `features/418-...`, `features/303-...`, `features/520-...` | established |
+| Behavioural notices, deferred while progress owns the terminal | `defer_notice`, `flush_deferred_notices`, `emit_*_notices` | the entry itself, until #412 | needs refinement (F2.8, F2.9, F1.17) |
+| Optional-operand options and the filename pushback | five `unshift @ARGV` sites and the file-list filter | the entry itself | needs refinement (F1.6, F1.17) |
+| Hot-loop discipline | the loop's gate placement and the measured findings | `features/312-...` § Core mechanism, `features/478-...`, `features/567-...` § Post-release finding | needs refinement (item 8, drop 2) |
 
-- **FP.1** Timeline latency-column visibility is restated in three places rather than resolved once (identical today, a latent drift point): @STAT_CONSUMERS entry `active => sub { !$hide_stats && !$heatmap_enabled },` (line ~1005); adapt_to_command_line_options() demand block `(!$hide_stats && !$heatmap_enabled)   # timeline latency-statistics column` (line ~14747); and a third copy `my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;` (line ~18370, in the column-layout build area). Similarly the stats-csv/messages-csv consumer predicates restate `$write_messages_to_csv` / `$capture_messages` terms that the store-level demand booleans also compute.
-- **FP.2** Naming mismatch against the HARNESS-DESIGN naming rule: sub emit_bin_counter_mode_verbose() emits section 'histogram-bin-counters' (`return unless section_requested('histogram-bin-counters');`), whose harness is tests/validate-histogram-bin-counters.sh; the emitter name tracks an older name, not the section.
-- **FP.3** Run-scoped activation flags: no doc owns the pattern; it is resolved in several places (adapt_to_command_line_options() for highlight/outcome flags, resolve_expose_names()/resolve_mask_names()/resolve_discard_names() for `$expose_active`/`$mask_active`/`$discard_active`, each also re-set a second time later in the same subs: `$expose_active  = @expose_appends ? 1 : 0;` at ~13741 and `$mask_active = @mask_subs ? 1 : 0;` at ~13760).
+Answers to the specification's questions, as taken in the file:
 
-### Site inventory (scoping pass)
+- `docs/staged-processing-pipeline.md` is indexed, not absorbed: it already
+  generalises beyond consolidation and carries the named-stages section.
+- Absence-tolerant reads and observation-count gating sit inside the demand-gate
+  entry as its two travelling rules, because they are the conditions under which
+  a demand gate is safe.
+- Generated per-run code is an entry of its own (three sites today, a possible
+  fourth from item 8); the format-registry entry points at it.
+- The one-resolution-surface rule is defined in the patterns file and enforced
+  by the CLAUDE.md checkpoint, which points at the file.
+- The explain-topic, profile-mode, mask, section, CSV-family and precision
+  tables are instances under the one *declarative table with one resolver*
+  entry; the format registry and the statistics-group registry keep entries of
+  their own because each carries a compile or derivation step beyond a lookup.
 
-- `Declarative format registry compiled into a generated, cached scan sub` :: `return $format_scan_sub = $format_scan_sub_cache{$sig}` :: Per-format behaviour is declared as data in format_registry_specs(); build_format_registry() compiles it into live entries plus per-entry closures (time parser, classifier, extractor, guard), and one hot-loop scan sub is generated per most-recently-used order and cached by order signature. Defined: features/log-format-registry.md (# Feature Requirements: Log Format Registry, ## Architectural Template: Staged Pipeline) and features/58-format-registry-staged-detection.md; CLAUDE.md Architecture 'Format recognition' paragraph also describes it.
-- `Declarative format registry compiled into a generated, cached scan sub` :: `build_format_registry();` :: Consumption site: pipeline_detect() builds the registry once after option parsing, because extraction closures bake CLI-gated behaviour.
-- `Declarative format registry compiled into a generated, cached scan sub` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );` :: Consumption site: build_format_registry() compiles per-entry closures from the spec (compile_format_time_parser, compile_format_classifier, compile_format_extractor).
-- `Declarative format registry compiled into a generated, cached scan sub` :: `if ( $line_entry = $format_scan_sub->($_) ) {` :: Consumption site: read_and_process_logs() dispatches each line through the one generated scan sub.
-- `Single column-layout source of truth` :: `add_dynamic_column(\@column_layout, 'sessions', 'sessions', 3,` :: @column_layout holds every column's width, spacing, visibility and colour; dynamic columns are appended through add_dynamic_column(); rendering, CSV headers and colour resolution all read it. Defined: features/column-layout-refactor.md (## Goals, ## Layout Engine Requirements, ## Color Scheme Requirements).
-- `Single column-layout source of truth` :: `# Resolve ALL metric colors from @column_layout (single source of truth)` :: Consumption site: normalize_data_for_output() resolves all metric colours from @column_layout.
-- `Single column-layout source of truth` :: `## RENDER ROW BY ITERATING @column_layout` :: Consumption site: print_bar_graph() renders each row by iterating the visible layout entries.
-- `Bin-counter primitives (partition / assign / counter / percentile)` :: `counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;` :: One shared substrate for every histogram-shaped consumer: partition_new(), bin_assign(), counter_update(), percentile(), partition_rebin() (finalize re-bin for display-geometry-bound consumers), with over/underflow counters and -V telemetry. Defined: features/189-histogram-bin-counter-primitives.md (## Requirements R1-R12), locked by features/187-histogram-bin-counter-percentiles.md; also features/bin-counter-accuracy-and-observability.md.
-- `Bin-counter primitives (partition / assign / counter / percentile)` :: `counter_update(\%histogram_counters_hl, 'duration', $duration, $histogram_stream_bpd) if $is_highlighted;` :: Consumption site: histogram streaming counters in read_and_process_logs(), with a parallel highlight store.
-- `Bin-counter primitives (partition / assign / counter / percentile)` :: `my ($final_p, $final_bins) = partition_rebin(` :: Consumption site: histogram/heatmap finalize re-bin then percentile() for markers.
-- `Precision tiers (one lever, per-surface bins-per-decade table)` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];` :: A single --data-model-precision tier (1..9) indexes %TIER_BPD; each surface's bins-per-decade is resolved once through bpd_for_surface(). Defined: features/293-precision-lever-unification.md (## Precision-tier -> bins-per-decade (source of truth)); table matches %TIER_BPD in ltl today.
-- `Precision tiers (one lever, per-surface bins-per-decade table)` :: `$percentile_buckets_per_decade   = bpd_for_surface('message-stats');` :: Consumption site: adapt_to_command_line_options() resolves the four surfaces' bpd once at startup.
-- `Data-model selectors (raw|bin per surface)` :: `data_model      => choose_data_model('histogram')   // 'bin',` :: Each statistical surface resolves raw vs bin through one resolver, called once before the parse loop. Defined: features/266-data-model-selectors.md (### Resolution at each call site, ### `resolve_data_model($surface)` shape).
-- `Demand gates (store-level run-start booleans)` :: `$bytes_aggregate_demand = ( !$omit_bytes && (` :: A per-line capture runs only when some consumer of its output is active; the boolean is resolved once in the demand-resolution block of adapt_to_command_line_options() and downstream reads are absence-tolerant. Defined: features/516-bytes-aggregate-demand-gate.md (### D1 - Store-level demand flag...), features/517-message-outcomes-demand-gate.md (### D1 - One store-level demand flag...), features/305-shape-moment-extended-percentile-demand.md (### Store-level demand (#349, pre-existing)).
-- `Demand gates (store-level run-start booleans)` :: `if( $bytes_aggregate_demand ) {` :: Consumption site: per-line bytes capture in read_and_process_logs() tests the flag.
-- `Demand gates (store-level run-start booleans)` :: `$log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;` :: Consumption site: per-message outcome counters gated in read_and_process_logs().
-- `Declarative consumer registry for statistics-group demand` :: `{ name => 'timeline-latency-column', store => 'bucket',` :: @STAT_CONSUMERS declares each output surface (store, active predicate, statistic groups); resolve_statistics_group_demand() derives per-store per-group demand from it, layered on the store-level gates. Defined: features/305-shape-moment-extended-percentile-demand.md (# Statistics-group demand registry (#305), ## The three gate classes).
-- `Declarative consumer registry for statistics-group demand` :: `resolve_statistics_group_demand();` :: Consumption site: resolved once at the end of the demand block.
-- `Declarative consumer registry for statistics-group demand` :: `$stats = calculate_statistics($aggregated_data, $bucket_demand);` :: Consumption site: calculate_all_statistics() passes a per-store demand hash to calculate_statistics().
-- `Run-scoped activation flags resolved once at option settlement` :: `$highlight_active = ( defined($highlight_filter) || $numeric_highlight_active` :: Option-shaped behaviour is reduced to scalar *_active flags in adapt_to_command_line_options() (or the resolve_*_names subs it calls) so the per-line loop tests one scalar. No dedicated doc; described piecemeal in features/567-discard-named-values-from-message.md (Post-release finding, measured loop cost of non-executing gates) and the issue 342 comment on read_and_process_logs() structure.
-- `Run-scoped activation flags resolved once at option settlement` :: `$discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;` :: Consumption site: resolve_discard_names() sets the discard gate.
-- `Run-scoped activation flags resolved once at option settlement` :: `$outcome_filter_active = ( $include_failure || $exclude_failure` :: Consumption site: outcome filter gate resolved in adapt_to_command_line_options().
-- `-V telemetry sections as the test surface (verbose section registry)` :: `my %verbose_section_registry = (` :: Every machine-readable diagnostic is a named kebab-case section registered in %verbose_section_registry / @verbose_section_order, emitted by an emit_*_verbose sub gated on section_requested(); harnesses assert on sections, never on rendered output. Defined: tests/HARNESS-DESIGN.md (## Application-observability contract, ## Reserved section names, ## Stability contract, ### Counters serving benchmark attribution: one source, two surfaces).
-- `-V telemetry sections as the test surface (verbose section registry)` :: `return unless section_requested('statistics-demand');` :: Consumption site: emit_statistics_demand_verbose().
-- `-V telemetry sections as the test surface (verbose section registry)` :: `push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";` :: Consumption site: emit_format_registry_verbose() reports scan-sub compile/cache counters.
-- `One resolution surface per vocabulary` :: `my $resolved = resolve_metric_operand($heatmap_metric);` :: Parsing, matching, validation and formatting of a value class go through one named sub; options sharing an operand set call it. Defined as a rule in CLAUDE.md (### Before writing or changing code, first bullet); worked contract in features/histogram-charts.md (metric-name operands paragraph, line 32); further instances in features/463-friendly-log-level-category-names.md (category_display_name()), features/478-highlight-decision-read-back.md, features/447-message-control-character-normalisation.md.
-- `One resolution surface per vocabulary` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;` :: Consumption site: builtin_metric_name() used at option-parse time for -hg.
-- `One resolution surface per vocabulary` :: `die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";` :: Consumption site: unknown-metric errors name the vocabulary from available_metric_names().
-- `One resolution surface per vocabulary` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');` :: Consumption site: CSV value formatting routes every column through format_csv_value() / resolve_csv_column_family() (56 call sites).
-- `MAIN` :: `pipeline_accumulate();` :: ## MAIN ## is a thin dispatcher over pipeline_detect/parse/accumulate/finalize/render; stages are roles, not strictly sequential passes, and take resolved demand as explicit input. Defined: features/180-named-pipeline-stages.md (### R2 - Stage semantics: roles, not sequential temporal phases; ### R4 - Audited stage inventory); summarised in docs/staged-processing-pipeline.md (## Named Pipeline Stages (#180)).
-- `Named pipeline stages (roles with contracts)` :: `$elapsed_detect_registry_build = tv_interval($registry_build_start);` :: Consumption site: pipeline_detect() times the registry build as its own sub-stage.
-- `Staged processing pipeline S1-S5 (cheap inline match, periodic expensive discovery)` :: `run_consolidation_checkpoint($cat, $gk);` :: Separate expensive discovery from cheap continuous matching: inline match per line, checkpoint-triggered ceiling filter / match / pairwise discovery, interleaved re-scan, bounded transient memory. Defined: docs/staged-processing-pipeline.md (## Core Principle..., ## The S1-S5 Pipeline, ## Applicability Beyond Fuzzy Consolidation); features/fuzzy-message-consolidation.md.
-- `Staged processing pipeline S1-S5 (cheap inline match, periodic expensive discovery)` :: `my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);` :: Consumption site: S1/S3 matching through match_consolidation_patterns().
-- `Behavioural notices (always print; deferred while progress owns the terminal)` :: `push @deferred_notices, $text;` :: Auto-disable, fallback and limit-hit notices always print regardless of --disable-progress; notices raised during the read are queued with defer_notice() and emitted by flush_deferred_notices() after the progress line. Rule defined in CLAUDE.md (### Before writing or changing code) and .claude/rules/ltl-source.md; progress-side rationale in docs/progress-indication-best-practices.md. No single feature doc owns the mechanism.
-- `Behavioural notices (always print; deferred while progress owns the terminal)` :: `defer_notice( "Note: $file: the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence` :: Consumption site: format-variant ambiguity note raised during detection.
-- `Behavioural notices (always print; deferred while progress owns the terminal)` :: `emit_udm_zero_match_notices();` :: Consumption site: end-of-run notice emitters.
-- `Section visibility and section boundaries` :: `my $resolved = resolve_visibility_name($given);` :: Output sections and columns are named, aliased and hidden through one resolver (resolve_visibility_name()) and one predicate (section_hidden()); open_section() separates rendered sections. Defined: features/597-section-visibility.md (## Decisions, ## Finding: where each section starts and ends today).
-- `Section visibility and section boundaries` :: `open_section('timeline');` :: Consumption site: print_bar_graph() opens the timeline section.
-- `Sort gates at three pipeline points` :: `apply_post_walk_sort_gate($sort_defined_keys);` :: Sort-operand satisfiability is resolved at parse time, before the population walk and after it, each through a named gate sub with a fallback to occurrences. Defined: features/418-unsatisfiable-sort-selection-cost.md, features/303-calculated-statistic-sort-path.md, features/520-inert-sort-bytes-aggregate-demand.md.
-- `Generated code compiled from source strings (eval of built source)` :: `my $closure = eval $src;` :: compile_format_classifier() and compile_format_extractor() build Perl source text and eval it into closures, as compile_format_scan_sub() does ('my $sub = eval $src;'). There are three eval-generated sites today, not just the scan sub. This bears on the open question 'generated per-run code: one pattern or part of the registry entry'. *(added by the verifier)*
-- `Declarative explain-topic registry` :: `%explain_topics = (` :: --explain topics are declared as data blocks (heading/paragraph types) in %explain_topics. populate_explain_topics() fills it, it is called once at file scope ('populate_explain_topics();' just before sub print_help), and print_explain_registry() renders it. Owning doc: features/504-explain-technique-topics.md (exists). *(added by the verifier)*
-- `Declarative memory-structure registry` :: `log_occurrences        => Devel::Size::total_size(\%log_occurrences),` :: named_structure_sizes() lists every major data structure by name for memory telemetry. It is a registry-shaped single source that the inventory's open questions name but that has no site row. *(added by the verifier)*
-- `Declarative consumer registry for statistics-group demand` :: `my %STAT_GROUP_FIELDS = (` :: A global table that maps each statistic group to its ladder fields. @STAT_CONSUMERS references these groups, so the registry is two tables, not one. *(added by the verifier)*
-- `Behavioural notices (always print; deferred while progress owns the terminal)` :: `flush_deferred_notices();` :: This is the flush point of the deferred-notice queue in read_and_process_logs(). The inventory names flush_deferred_notices() but gives no site for it. *(added by the verifier)*
-- `User-defined metric specs (declarative UDM configs)` :: `sub parse_udm_configs {` :: A second declarative-spec surface: parse_udm_configs(), derive_udm_production(), udm_config_by_name() and resolve_udm_metric_names(), with its own -V sections (emit_udm_specs_verbose, emit_udm_counting_verbose). Owning doc: features/user-defined-metrics.md (exists). Not scouted. *(added by the verifier)*
+### Findings inside patterns
+
+| # | Pattern | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **FP.1** | Statistics-group consumer registry | `(file scope, GLOBALS)` :: `active => sub { !$hide_stats && !$heatmap_enabled },` (the timeline latency column's predicate) | `adapt_to_command_line_options` :: `(!$hide_stats && !$heatmap_enabled)   # timeline latency-statistics column (heatmap replaces it)` and `build_column_layout` :: `my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;` | The same visibility decision written in the registry, in the demand block and in the layout build | Identical today | The layout and the demand block read the registry's predicate | `features/305-shape-moment-extended-percentile-demand.md` | **latent** | #60 (configurable metric visibility, on hold) would make the layout a declared consumer of the demand map, which is this convergence |
+| **FP.2** | `-V` sections as the test surface | `emit_bin_counter_mode_verbose` :: `return unless section_requested('histogram-bin-counters');` | `finalize_histogram_unified` :: `if (section_requested('histogram-bin-counters') && @metrics_with_data) {` | One section with two emitters; the emitter sub's name tracks an older section name against the harness naming rule | Identical output; a naming drift | One `emit_histogram_bin_counters_verbose` that both callers feed | `tests/HARNESS-DESIGN.md` § Reserved section names | **latent** | none |
+| **FP.3** | Run-scoped activation flags | `resolve_expose_names` :: `$expose_active = @expose_appends ? 1 : 0;` and `resolve_mask_names` :: `$mask_active = @mask_subs ? 1 : 0;` | `apply_discard_precedence` :: `$expose_active  = @expose_appends ? 1 : 0;` and `$mask_active = @mask_subs ? 1 : 0;` | Each flag is derived from its list in two subs | Identical today (the second assignment re-derives after the precedence pass removes entries) | The flag derived once, after every pass that can change its list, in one settlement step | the patterns file's entry | **latent** | none |
+| **FP.4** | Declarative table with one resolver | `resolve_mask_names` :: `print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");` | `adapt_to_command_line_options` :: `print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list")` | One error derives its list from the table it validates against; the other writes it as a literal (also `_validate_profile`, `dispatch_informational_options`) | Identical today for `-m`; wrong today for `-pr` (item 1, F1.18) | Every error and help row that names a vocabulary derives it | the patterns file's entry | **latent** (F1.18 diverged) | none |
+| **FP.5** | Optional-operand pushback | `adapt_to_command_line_options` :: `warn "-hm value '$heatmap_metric' is not a built-in metric (duration\|bytes\|count) and no -udm configs are defined; treating as positional argument` | `handle_histogram_option` :: `unshift @ARGV, $opt_value;` (silent; also `-V` and `-mem`) | Two of five pushbacks say what they did | Item 1, F1.6 | One helper | the patterns file's entry | **diverged** (recorded under F1.6) | none |
+
+### Open issues touching the patterns as a whole
+
+- **#605** (numeric, byte and duration inputs accept a value with a unit,
+  `next-up`): asks for "a standard architecture pattern associated with this
+  sort of input surface" and for "development patterns and guidelines" that
+  direct developers to it. That is an entry in this file once the surface is
+  built, under the *declarative table with one resolver* entry's ladders; the
+  issue's deliverable and this file's checkpoint line are the same mechanism.
+- **#412** (notices surface, `next-up`): the future owner of the behavioural
+  notices entry.
+- **#60** (configurable metric visibility, on hold): generalises the demand
+  gate and consumer registry entries into one demand map with the layout as a
+  declared consumer.
+- **#387** (user-defined YAML formats): the first external producer of format
+  registry specs; the registry entry's validation step is its contract.
+- **#426** (per-message store representation, on hold) and **#181** (buffered
+  read pipeline, on hold): change the substrate under the demand gates and the
+  hot-loop discipline.
+- **#23** (core parsing architecture, in progress): the umbrella for the
+  registry and generation entries.
+
+### Consumption-site inventory
+
+Every site named in `docs/architecture-patterns.md`, keyed by sub, so the
+acceptance check reads them here as it reads every other item's sites:
+
+- `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };`
+- `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {`
+- `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};`
+- `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }`
+- `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;`
+- `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;`
+- `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};`
+- `bpd_for_surface` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];`
+- `pipeline_detect` :: `build_format_registry();`
+- `format_scan_sub_resolve` :: `$format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};`
+- `read_and_process_logs` :: `if ( $line_entry = $format_scan_sub->($_) ) {`
+- `build_format_registry` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );`
+- `format_entry_block_src` :: `if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }`
+- `compile_format_scan_sub` :: `my $sub = eval $src;`
+- `compile_format_classifier` :: `my $closure = eval $src;`
+- `compile_format_extractor` :: `my $closure = eval $src;`
+- `format_validate_scan_sub` :: `my $saved_cache = timestamp_date_cache_snapshot();`
+- `normalize_data_for_output` :: `# Resolve ALL metric colors from @column_layout (single source of truth)`
+- `print_bar_graph` :: `## RENDER ROW BY ITERATING @column_layout`
+- `normalize_data_for_output` :: `add_dynamic_column(\@column_layout, 'sessions', 'sessions', 3,`
+- `read_and_process_logs` :: `counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;`
+- `read_and_process_logs` :: `counter_update(\%histogram_counters_hl, 'duration', $duration, $histogram_stream_bpd) if $is_highlighted;`
+- `finalize_histogram_unified` :: `my ($final_p, $final_bins) = partition_rebin(`
+- `adapt_to_command_line_options` :: `$percentile_buckets_per_decade   = bpd_for_surface('message-stats');`
+- `_validate_dm` :: `return if defined $value && ($value eq 'raw' || $value eq 'bin');`
+- `read_and_process_logs` :: `$heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';`
+- `calculate_all_statistics` :: `my $dm = choose_data_model('bucket-stats') // 'raw';`
+- `adapt_to_command_line_options` :: `$bytes_aggregate_demand = ( !$omit_bytes && (`
+- `read_and_process_logs` :: `if( $bytes_aggregate_demand ) {`
+- `read_and_process_logs` :: `$log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;`
+- `read_and_process_logs` :: `if( $message_duration_stats_demand ) {`
+- `(file scope, GLOBALS)` :: `my @STAT_CONSUMERS = (`
+- `(file scope, GLOBALS)` :: `my %STAT_GROUP_FIELDS = (`
+- `adapt_to_command_line_options` :: `resolve_statistics_group_demand();`
+- `calculate_all_statistics` :: `$stats = calculate_statistics($aggregated_data, $bucket_demand);`
+- `adapt_to_command_line_options` :: `$highlight_active = ( defined($highlight_filter) || $numeric_highlight_active`
+- `adapt_to_command_line_options` :: `$outcome_filter_active = ( $include_failure || $exclude_failure`
+- `resolve_discard_names` :: `$discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;`
+- `read_and_process_logs` :: `if( $discard_active ) {`
+- `(file scope, GLOBALS)` :: `my %verbose_section_registry = (`
+- `emit_statistics_demand_verbose` :: `return unless section_requested('statistics-demand');`
+- `emit_format_registry_verbose` :: `push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";`
+- `adapt_to_command_line_options` :: `my $resolved = resolve_metric_operand($heatmap_metric);`
+- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;`
+- `print_bar_graph` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');`
+- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,`
+- `MAIN` :: `pipeline_accumulate();`
+- `pipeline_detect` :: `$elapsed_detect_registry_build = tv_interval($registry_build_start);`
+- `consolidation_process_key` :: `my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);`
+- `read_and_process_logs` :: `run_consolidation_checkpoint($cat, $gk);`
+- `apply_output_visibility` :: `my $resolved = resolve_visibility_name($given);`
+- `print_bar_graph` :: `open_section('timeline');`
+- `adapt_to_command_line_options` :: `apply_parse_time_sort_gate($sort_operand_typed);`
+- `calculate_all_statistics` :: `apply_post_walk_sort_gate($sort_defined_keys);`
+- `defer_notice` :: `push @deferred_notices, $text;`
+- `read_and_process_logs` :: `flush_deferred_notices();`
+- `emit_classification_percentage_notices` :: `print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification`
+- `bin_consolidation_notice` :: `print STDERR "Note: $detail, so their percentiles are approximate"`
+- `handle_histogram_option` :: `unshift @ARGV, $opt_value;`
+- `adapt_to_command_line_options` :: `unshift @ARGV, $heatmap_metric;`
+- `adapt_to_command_line_options` :: `unshift @ARGV, $group_similar_sensitivity;`
+- `adapt_to_command_line_options` :: `unshift @ARGV, $memory_usage_operand;`
+- `adapt_to_command_line_options` :: `@in_files = grep { -f $_ } @in_files;`
+- `read_and_process_logs` :: `&& ( !$numeric_highlight_active || (`
+- `format_entry_block_src` :: `my $miss_src = $layout =~ /^iso_/`
+- `read_and_process_logs` :: `if( $bytes_observed_line && !$omit_bytes ) {`
 
 ### Verification notes
 
-Sites reported 39, confirmed 44, refuted 0 (corrected above), added by the verifier 6, owning docs refuted 0.
-
-- Every snippet was found with grep -F, inside the named sub or at the stated scope. Every doc path and every cited heading exists. docs/architecture-patterns.md is absent, and ltl has 327 subs.
-- 'pipeline_accumulate();' (line 22293) is at ## MAIN ## file scope (the marker is at line 22271), after the last sub, expand_recursive_pattern(). A naive sub-range awk attributes it to expand_recursive_pattern, so it should be recorded as MAIN scope.
-- 'push @deferred_notices, $text;' is at line 12907 in defer_notice(), not 12903 (sub defer_notice starts at 12905).
-- 'my ($final_p, $final_bins) = partition_rebin(' has two sites: finalize_heatmap_unified() at line 16743 and finalize_histogram_unified() at line 17102. The row should name the sub.
-- 'if( $bytes_aggregate_demand ) {' occurs twice in read_and_process_logs() (lines 15951 and 16236). The per-message outcomes increment line also occurs twice (15923 and 16086).
-- 'my $entry = match_consolidation_patterns(...)' also occurs twice in group_similar_messages() (lines 10930 and 10971), besides consolidation_process_key() at 11815.
-- The data-model selectors snippet 'data_model => choose_data_model('histogram') // 'bin',' sits in emit_percentile_algorithm_verbose(), a -V emitter. It is not a resolution call site, so it is a weak consumption example for 'resolved once before the parse loop'.
-- The global snippets at line 131 (%verbose_section_registry) and line 1004 (@STAT_CONSUMERS entry) are at GLOBALS scope with no enclosing sub, as expected.
-- Wrong in observed_divergences: the second re-sets '$expose_active  = @expose_appends ? 1 : 0;' (13741) and '$mask_active = @mask_subs ? 1 : 0;' (13760) are NOT in the same subs. Both are in apply_discard_precedence(). The first sets are in resolve_expose_names() (13581) and resolve_mask_names() (13644).
-- Divergence addendum: section 'histogram-bin-counters' has two emitters, emit_bin_counter_mode_verbose() (6196) and finalize_histogram_unified() ('if (section_requested('histogram-bin-counters') && @metrics_with_data) {' at 17197). The section is not owned by one emit_* sub.
-- The third latency-visibility copy 'my $show_latency = ...' (18370) is in build_column_layout(). The inventory says only 'the column-layout build area'.
-
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- Every consumption site above resolves to its enclosing sub; every owning
+  record's path and cited heading was found by `grep -F` on 2026-09-26 (the
+  `%TIER_BPD` identifier is not in the precision doc's text and is not cited as
+  a heading).
+- The scoping pass's FP.3 named the wrong subs for the second assignments; the
+  verifier's correction (`apply_discard_precedence`) is carried.
+- The scoping pass's pattern rows keyed by pattern name are superseded by the
+  inventory above, which is keyed by sub.
 
 
 ---
 
 ## Grouping by target sub
 
-Filled when every item is audit complete: findings across items that converge on
-the same target sub, as the starting point for the discussion of which findings
-become issues and how they group. The decision is the architect's and is recorded
-on the issue when made.
+A proposal for the findings discussion: findings across items that converge on
+one target, and the order the audit recommends. The decision on which become
+issues, and how they group, is the architect's and is recorded on the issue when
+made. Findings are named by what they found, with their identifiers in
+parentheses so the tables above can be reached.
+
+### Bugs the audit recommends filing ahead of any convergence
+
+Each is user-visible, confirmed by a captured run, and fixable in its own
+right without touching the convergence it also belongs to.
+
+1. A byte unit on the `-udm` unit slot resolves to 1000 or 1024 by hash order
+   between runs of one command (F1.12).
+2. The `-hg` unknown-metric warning can never print, because the handler warns
+   inside the option parser's warning capture (F1.17).
+3. A date that is impossible for its month aborts the whole run from inside
+   the generated scan sub, and a CSV month 13 or day 32 aborts it at a named
+   source line (F3.2).
+4. A non-numeric CSV timestamp after epoch detection prints a Perl warning and
+   lands in a 1970 bucket (F3.3).
+5. The `-st`/`-et` parser drops the time of day from a `T`-separated value with
+   two Perl warnings and reports an impossible date through the module's
+   message (F3.10).
+6. The impact mean divides by every matched line where the duration mean
+   divides by the lines that carried one; a consolidated row is ranked on half
+   its own mean (F4.5).
+7. One pair of lines gives a bytes mean of 513 on the MESSAGES CSV and 512 on
+   the STATS CSV (F4.4).
+8. A `.123` timestamp reads `.122` in the run summary and `.123` in the run
+   index (F2.11).
+9. The benchmark data reports a key length of the terminal width while every
+   `-o` and `-g` run cut its keys at 350 (F7.4).
+10. The `-pr` error names a `day-alt` mode that does not exist (F1.18).
+
+### Convergence groups
+
+| Group | Target | Findings | Sequenced against |
+|---|---|---|---|
+| Metric, field and identifier names on `-x`, `-d`, `--hide`, `-so` | `builtin_metric_name()` called by every option taking metric names; one field-name table; `-d` identifiers through `%mask_patterns`; the built-in set as one table | the `time` alias (F1.1), case folding (F1.2), the key spellings (F1.3), the token-key fallback (F1.4), the three unknown-metric texts (F1.5), the twelve literal copies of the built-in set (F1.7), the mask identifiers (F1.10), `object` on `-d` only (F1.11), the aggregate aliases (F1.20) | #581, #601, #582, #514, #536, #537 |
+| Unit ladders | one byte ladder in the shape of the time ladder, read by parse, convert, format and help; the two decimals tables on the time ladder; a value-based climb in `format_bytes` | the byte tables (F1.12, F2.6), the help-row literals (F1.13), the decimals tables (F2.5) | #605 |
+| Option-operand messages and the pushback | derived vocabulary lists in every error and help row; one pushback helper; a notice from the file-list filter; `-hg` validated at settlement | the silent pushbacks (F1.6), the swallowed warning (F1.17), the `-so` copies (F1.8, F1.9), the `--help` topics (F1.15), the `-pr` text (F1.18), the `--explain` aliases (F1.19) | none |
+| Value formatting call shapes | one metric-kind dispatcher taking a surface tier; one trailing-zero helper; zero durations through the total formatter | the zero duration (F2.1), the three count spellings (F2.2), the dispatch copies (F2.4), the trailing zeros (F2.7), raw occurrences (F2.10), the three fit-to-width rules (F2.12) | #514, #497, #498 |
+| Notices | counts and percentages in notices through the formatters | the unclassified warning (F2.8, F2.9) | #412, #454 |
+| Timestamp rendering | one millisecond derivation; one ISO pattern | rounding against truncation (F2.11), the inline ISO patterns (F2.16) | #525, #154 |
+| The run index | means through `format_csv_value`; one `@index_columns` | index precision (F2.13, F4.8), the duplicate column list (F6.7) | none |
+| Timestamp parse guard policy | one guard policy per input class; the closure derived from the block source; the CSV arm through the generated path | the guard gaps (F3.2, F3.3, F3.9, F3.10) after their bugs; the two authorities (F3.1), the strip and detection copies (F3.5, F3.6), the memo (F3.7) | #387, #386, #155, #23 |
+| Bucket arithmetic | one bucket-key sub resolved for the run's precision | the two copies and the per-line recomputation (F3.11) | #525, item 8 |
+| Mean and ratio derivation with observation-count gating | one gated mean helper; unconditional counts; totals projected under their counts | the count-mean gates (F4.3), the user-defined means (F4.1, F4.2), the impact gate (F4.6), the zero projections (F4.10), the gated count (F4.11), the harmless `defined` tests (F4.13), the substitute divisor (F4.14) | #426, #514, #273 |
+| Raw and bin statistics | one statistics sub over both store shapes; one Welford update | the restated formulas (F4.7), the three Welford copies (F4.12) | #426, #469, #354 |
+| The bound set | one declaration of the six bound families feeding the eight enumerations; a sign check beside the inverted-range check | the exclusion reporting (F5.3), the enumerations (F5.4), negative bounds (F5.6), the help wording (F5.5) | #605, #454, #536, #537 |
+| CSV column declaration | one declaration per column (name, family, gate, accessor) read by both headers, both rows, the export and `-so` | the family labels (F6.1), the STATS chains and padding (F6.2), the family literals (F6.3, F6.4), the MESSAGES lists (F6.5), the rate spelling (F6.6) | #514, #273, #301 |
+| The key cut and the cap | one named cap and one per-run cut, reported by the benchmark data; the grouping key carried, not parsed | the two spellings (F7.1), the dead branch (F7.2), the no-op re-cut (F7.3), the parse-back (F7.5), the field cuts (F7.9), the benchmark value (F7.4) | #174, #564 |
+| Patterns | the file's *needs refinement* entries | the latency visibility copies (FP.1), the emitter name (FP.2), the flags set twice (FP.3), the literal vocabularies (FP.4) | #60, #412 |
+
+The per-line loop (item 8) is drop 2 and is not grouped here; its measurement
+decides whether the hot-path groups above (the bucket arithmetic, the Welford
+copies, the flags) are worth a generated or hoisted form.
 
 ## What was not searched
 
-Filled at the end of the audit: angles not run, surfaces not walked, and why.
+Recorded so the completeness claim is bounded:
 
+- **Item 8** (the per-line loop's structure and cost) is drop 2 and is not in
+  this report yet; its inventory in the scoping pass stands as recorded.
+- **The harnesses' own code** (`tests/`) was read only for what it asserts on
+  the surfaces above; duplicated logic inside the harnesses and the shared
+  libraries under `tests/lib/` was not audited.
+- **The build and release scripts** (`build/`), the profiling tooling and the
+  benchmark tooling were not audited.
+- **The `-V` emitters' internal arithmetic** was classified as deliberate raw
+  output and not audited for copies among themselves.
+- **The `--explain` prose** and the wiki source were not audited for numbers
+  they restate.
+- **The Windows platform branch** (`Win32::Process::Info`) was not exercised;
+  every run was on macOS with Homebrew Perl.
+- **The corpus** was not run: every confirmation used a committed fixture or a
+  scratch fixture of at most 1,200 lines, so a divergence that appears only at
+  scale (a cache eviction, a consolidation checkpoint, a memory ceiling) was
+  not sought.
+- **The rendering internals** of the heatmap and histogram (boundary
+  arithmetic, glyph selection, colour gradients) were read only where they
+  format a value; their geometry copies were not audited.
+- **The user-defined metric grammar** (`parse_udm_configs`) was read for its
+  unit slot and function slot only.
+- **Unmatched-line handling** and the detection window replay were not
+  audited beyond their timestamp arms.
+- Two angles named in the specification were narrowed: item 2's *by surface*
+  walk was done from the caller capture rather than by rendering every surface
+  on every fixture, and item 4's *by surface pair* compared the pairs that a
+  fixture could distinguish, not every pair.
+
+Every finding cited is in its item's table; every site the angles reached is
+in its item's inventory; the acceptance script found every cited snippet inside
+its named sub on 2026-09-26.
