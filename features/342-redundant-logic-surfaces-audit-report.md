@@ -1215,69 +1215,113 @@ included) with the audit's additions:
 
 ## Item 7: Message-key construction
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The three angles were run on the issue
+branch. The one candidate a user can observe (the benchmark data reporting a key
+length the run did not use) is confirmed by a run; the fifth ternary's dead
+branch and the no-op second cut are confirmed by reading the call graph; the
+cuts are counted with one the scoping pass did not have (the consolidation
+bucket key's own literal). Captures are under the session scratchpad
+(`342/runs7/`): a two-line access-log scratch fixture whose request line is 501
+characters (a path of 44 numbered segments), run at `--terminal-width 120` with
+`-bs 1 -ni -n 3 -V benchmark-data`, plain, with `-o`, and with `-g`.
 
-### Summary of the scoping pass
+### Search angles run
 
-5 copies of the ternary cut: 4 in read_and_process_logs (key variants level+thread+object, level+object, level+thread, level only) and 1 in group_similar_messages (canonical re-cut, where the ternary always picks 350). The cut length has 2 spellings: a literal 350 at those 5 sites and $consolidation_message_length_cap = 350 at 10 consolidation re-cut sites. $max_log_message_length has 1 declaration, 1 assignment (terminal width, in adapt_to_terminal_settings) and 6 readers (the 5 key sites plus one -V benchmark-data line). The key shape is parsed back from its first bracket at 5 sites in group_similar_messages. On the harness side: 3 assert exact bracketed keys from the MESSAGES CSV (expose with 31 literal-prefix lines, mask with 20, discard with 1 prefix constant); 3 freeze the key indirectly (control-characters through the render and column 2, grouping through the cluster-membership records, regression through 74 terminal-width references); csv-output only substring-matches the message column; histogram-bin-counters only asserts the '(category, log_key)' keying label. The 350 cut appears in no user doc.
+1. **By variable.** Every write and read of `$log_key`, `$canonical_log_key`,
+   `$max_log_message_length`, `$consolidation_message_length_cap`,
+   `$truncated_thread`, `$truncated_object`, `$max_object_length`, and every
+   composite key built over the message key with the unit separator: 35 lines
+   (`i7-angle1-vars.txt`). The literal `350` is at six lines (five ternaries and
+   the cap's declaration); the cap has nine readers in six subs; the terminal
+   width has one assignment and six readers.
+2. **By idiom.** Every `substr` whose first argument is a key, a message, a
+   thread name, an object or a canonical form, and every regex that reads a
+   bracketed prefix off a key: 19 lines (`i7-angle2-idioms.txt`). Beyond the
+   scoping pass: `extract_consolidation_bucket_key`, which cuts the first word
+   to 30 characters or the message to 20 under a comment that says 20.
+3. **By consumer.** The harnesses that assert on the key's shape: three assert
+   exact bracketed keys from the MESSAGES CSV (`validate-message-expose.sh`
+   with 18 literal-prefix lines, `validate-message-mask.sh` with 33,
+   `validate-message-discard.sh` with 15), one asserts through the rendered
+   message column (`validate-message-control-characters.sh`), the grouping
+   harness through the cluster-membership records, the regression harness
+   through 74 terminal-width baselines. A change to the key's assembly re-blesses
+   all six.
 
-**Shared surface today.** None.
+### Findings
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+| # | Decision | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F7.4** | The key length a run used | `print_verbose_output` :: `printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;` | `read_and_process_logs` :: `$log_key = substr("[$log_level] $message", 0,` (the four key variants, each cut by `($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length`) | A reports the terminal-width cut; B cuts at 350 whenever `-o` or `-g` is given | Fixture long-message at width 120 with `-o`: `CONFIG max_log_message_length 120` in the benchmark data, and every key in the MESSAGES CSV is 350 characters long. The benchmark TSVs under `tests/baseline/results/` carry the reported value for every `-o` and `-g` run | The cut length resolved once per run into one named variable, reported by the benchmark data and read by the four key sites | `features/fuzzy-message-consolidation.md` DD-06 (the 350-character cap when grouping is on) and the resolved IQ-02 (350 under grouping, terminal width otherwise); `tests/baseline/README.md` (the CONFIG lines a benchmark compares) | **diverged** | none; changing the reported value moves a CONFIG line every benchmark TSV carries, which the fixing issue's before/after has to account for |
+| **F7.1** | The 350-character cap's two spellings | `read_and_process_logs` :: `$log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0,` (the literal `350` inside the ternary, four times) and `group_similar_messages` :: `my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));` | `(GLOBALS)` :: `my $consolidation_message_length_cap = 350;` (read by `read_and_process_logs` :: `my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);`, twice in `group_similar_messages`, `get_consolidation_trigrams`, `run_consolidation_pass` twice, `process_final_pass_window` twice, `consolidation_cliff_edge`) | The key cut and the consolidation cap are the same number written two ways; DD-06 ties consolidation correctness (a UUID must not be cut) to the key cut | Identical today, tied by nothing: a change to the named cap leaves the five ternaries at 350 | One named cap read by the ternaries (or the resolved per-run cut of F7.4's target, whose grouping branch is the cap) | `features/fuzzy-message-consolidation.md` DD-06; `features/150-final-pass-scalability.md` | **latent**, *hot path* (the four key sites run once per retained message) | #174 (adaptive message length cap, `min(observed max, 350)`) changes the cap's value per run; with two spellings it would change one of them |
+| **F7.2** | The fifth ternary's dead branch | `group_similar_messages` :: `my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));` | `pipeline_finalize` :: `group_similar_messages();` (called under `unless( $group_similar_sensitivity eq "none" )`) | The sub runs only when grouping is on, so the ternary always picks 350 | The terminal-width branch cannot execute (confirmed from the single call site's guard) | The cut of F7.4's target; the dead branch goes with it | as F7.1 | **latent** | none |
+| **F7.3** | The no-op second cut | `read_and_process_logs` :: `my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);` (under `if ($group_similar_sensitivity ne "none") {`) | the four key sites, which have already cut the key at 350 under the same condition | The inline consolidation input re-cuts a key that is at most 350 characters at 350 | A no-op per retained message under `-g` (item 8 counts it) | Removed once F7.1's cap is the key cut | as F7.1 | **latent**, *hot path* | none |
+| **F7.5** | The grouping key | `read_and_process_logs` :: `my $grouping_key = $log_level // "";` (the inline path carries the level) | `group_similar_messages` :: `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` (three sites, and `my ($gk) = $log_key =~ /^\[([^\]]+)\]/;`), and `group_similar_messages` :: `my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;` (the sort strips the same prefix) | One path carries the level; the other parses it back out of the key's first bracket, four times, plus a fifth regex to strip it | Identical today because every key variant puts `[$log_level]` first; nothing states that as a contract | The grouping key carried with the entry (the consolidation store already keeps `$consolidation_key_message_cat_gk{$log_key}` for S1 keys), never parsed back | `features/fuzzy-message-consolidation.md` IQ-01 describes a different grouping key from the one in the code (specification § 3 item 10) | **latent** | #465 (matched lines that are stack-trace continuations) adds a class of line that never becomes a key, on the same path |
+| **F7.9** | The field and message cuts | `read_and_process_logs` :: `my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;` (a literal 20, first characters) | `read_and_process_logs` :: `my $max_object_length = 25;` (a local re-declared per retained message; last characters), the key ternary (350 or the terminal width), `extract_consolidation_bucket_key` :: `return substr($1, 0, 30);` and its `return substr($msg, 0, 20);` (the consolidation bucket key: the first word to 30 characters, else the message to 20, under a comment that says 20), and the display cuts `print_message_summary` :: `my $message = substr( $key, 0, $col_width{1} );` (also in `print_threadpool_summary`) | Five cut lengths (20, 25, 350 or width, 30 or 20, the column width) as literals or locals, none a named global with its reason | Identical today; the comment on the bucket key disagrees with its code | Named constants beside `$consolidation_message_length_cap`, with the reason each was chosen (DD-06's for the cap; the thread and object cuts have none on record) | `features/fuzzy-message-consolidation.md` (the cap); nothing for the thread and object cuts | **latent** | #564 (choose where a long message is truncated in the messages table) changes the display cut in `print_message_summary`, which is a rendering cut, not a key cut; the two must stay distinct when it lands |
+| **F7.6 / F7.7 / F7.8** | The consolidation record against the code | `features/fuzzy-message-consolidation.md` IQ-01 and IQ-02 | `read_and_process_logs` :: `my $msg_len = length($log_key);` and `my $grouping_key = $log_level // "";` | The record describes a grouping key of level, thread, object and session, a similarity scored on the message body, and an observed length tracked on the body; the code groups on the level, scores the whole capped key, and measures the whole key | Recorded in the specification § 3 item 10; not a code divergence | The record trued up when #174 or a convergence issue touches the surface | the record itself | **deliberate** (a documentation finding, recorded once) | #174 reads IQ-02 as its design and would inherit the stale text |
 
-- **F7.1** The 350 cut has two spellings: a literal 350 inside the ternary at all five key sites (read_and_process_logs: substr("[$log_level] ... $message", 0, (... ? 350 : $max_log_message_length)); group_similar_messages: substr($canonical, 0, (... ? 350 : $max_log_message_length))), and the named global $consolidation_message_length_cap = 350 used by every consolidation re-cut (substr($log_key, 0, $consolidation_message_length_cap) in read_and_process_logs and group_similar_messages, get_consolidation_trigrams, run_consolidation_pass, try_consolidation_merge_into_existing, consolidation_cliff_edge). Same value today, nothing ties them.
-- **F7.2** The ternary at group_similar_messages 'my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));' can only ever pick 350: pipeline_finalize calls group_similar_messages() only inside 'unless( $group_similar_sensitivity eq "none" )'. The $max_log_message_length branch is dead there.
-- **F7.3** S1 inline in read_and_process_logs does 'my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);' right after $log_key was already cut to 350 under the same -g condition, so the second cut does nothing.
-- **F7.4** -V benchmark-data prints 'CONFIG\tmax_log_message_length' as $max_log_message_length (terminal width, set in adapt_to_terminal_settings), but under -o or -g the key is actually cut at 350, so the reported value is not the length keys were built with in those runs.
-- **F7.5** Grouping key has two derivations: S1 inline uses 'my $grouping_key = $log_level // "";' directly, while group_similar_messages recovers it by parsing the key, 'my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;' (four sites). They agree only because every key variant puts [$log_level] first.
-- **F7.6** features/fuzzy-message-consolidation.md IQ-01 says the grouping key is "$log_level|$truncated_thread|$truncated_object|$session" and that similarity is scored on $message alone. In code the grouping key is the level only ("$category|$grouping_key"), and thread and object stay inside the scored text ($capped_msg is cut from $log_key). The doc's own implementation notes admit this for v0.14.4.
-- **F7.7** features/fuzzy-message-consolidation.md IQ-02 says $max_observed_message_length is tracked 'on $message body, not full $log_key'. read_and_process_logs does 'my $msg_len = length($log_key);'.
-- **F7.8** features/fuzzy-message-consolidation.md IQ-01 describes session being prepended to $message under --include-session. In current code session reaches the message as an appended ' session=<value>' through the -x expose loop (EXPOSE_SESSION in @expose_appends), not as a key field.
-- **F7.9** Field cuts are written three ways inside read_and_process_logs: thread 'substr($threadname, 0, 20)' (a literal 20, first characters), object through the local 'my $max_object_length = 25;' (last characters), and the key cut through the ternary. None of them is a named global.
+### Open issues touching this item as a whole
 
-### Site inventory (scoping pass)
+- **#174** (adaptive message length cap from IQ-02): changes the cap's value
+  per run; lands cleanly only on one spelling of the cap (F7.1) and reads a
+  design record the code no longer matches (F7.6 to F7.8).
+- **#564** (choose where a long message is truncated in the messages table):
+  the display cut, which the key cut must stay distinct from (F7.9).
+- **#465** (stack-trace continuation lines): a class of matched line that
+  never becomes a key, on the key-assembly path.
+- **#582** (name what to expose, discard or mask by a regular expression):
+  masking and discarding run before the cut, so what the cut keeps changes
+  with them; informational.
 
-- `read_and_process_logs` :: `$log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0,` :: Key variant 1: level + thread + object + message, cut at 350 when -o or -g is active, else at $max_log_message_length (terminal width)
-- `read_and_process_logs` :: `$log_key = substr("[$log_level] [$truncated_object] $message", 0,` :: Key variant 2: level + object + message, same ternary cut
-- `read_and_process_logs` :: `$log_key = substr("[$log_level] [$truncated_thread] $message", 0,` :: Key variant 3: level + thread + message, same ternary cut
-- `read_and_process_logs` :: `$log_key = substr("[$log_level] $message", 0,` :: Key variant 4: level + message only, same ternary cut
-- `read_and_process_logs` :: `my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;` :: Field preparation: thread cut to its first 20 characters, object to its last 25 ($max_object_length = 25, a local) before the key is assembled; $log_level is $status_code when > 0 else $category_bucket with -HL stripped
-- `read_and_process_logs` :: `my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);` :: S1 inline consolidation input: re-cuts the already-cut key at the named 350 global (a no-op under -g, since the key is already at most 350); also tracks $max_observed_message_length on length($log_key)
-- `group_similar_messages` :: `my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));` :: Fifth copy of the ternary cut: re-cuts a cluster's canonical form (from derive_canonical) before injecting it into %log_messages; the ternary is always 350 here because pipeline_finalize only calls group_similar_messages under unless( $group_similar_sensitivity eq "none" )
-- `group_similar_messages` :: `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` :: Parses the key shape back: recovers the grouping key (level) from the first bracket; appears at four sites (hints 10855, 10873 as $gk, 10915, 10966)
-- `group_similar_messages` :: `my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;` :: Parses the key shape back: strips the first bracket to sort on the remaining text
-- `group_similar_messages` :: `"  cluster: $category\x1f$canonical_log_key";` :: -V message-grouping / cluster-membership record carries the canonical key verbatim
-- `merge_log_message_entry_into_cluster` :: `my $key = "$category\x1f$log_key";` :: Composite counter-store key over the message key (also at read_and_process_logs hint 16028, group_similar_messages hint 11050, and two sites near 17717/17883)
-- `(GLOBALS)` :: `my $max_log_message_length = 0;` :: Declaration of the terminal-mode cut
-- `adapt_to_terminal_settings` :: `$max_log_message_length = $terminal_width;` :: Only assignment of the terminal-mode cut: equal to terminal width
-- `(GLOBALS)` :: `my $consolidation_message_length_cap = 350;` :: Named 350 constant used by consolidation (get_consolidation_trigrams, run_consolidation_pass, try_consolidation_merge_into_existing, consolidation_cliff_edge, S1 inline); never reassigned, not an option; the key-construction sites use a literal 350 instead
-- `print_verbose_output` :: `printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;` :: -V benchmark-data reports the terminal-mode cut; read by benchmark TSVs under tests/baseline/results/
-- `print_message_summary` :: `my $message = substr( $key, 0, $col_width{1} );` :: Second, display-only cut of the key to the message column width
-- `read_and_process_logs` :: `$message =~ tr/\x00-\x08\x0a-\x1f\x7f//d;` :: Control-character normalisation of $message upstream of key construction (447 D2), gated on $is_line_match
-- `consolidation_process_key` :: `$consolidation_key_message{$log_key} = $capped_msg;` :: Second key-to-text map: stores the 350-capped copy of the key for keys S1 did not absorb, alongside $consolidation_key_message_cat_gk{$log_key} = $cat_gk. The consolidation re-cut sites in run_consolidation_pass and process_final_pass_window read it. *(added by the verifier)*
-- `process_final_pass_window` :: `$consolidation_key_message{$log_key} = $capped_msg;` :: Refills the same key-to-capped-text map for window keys; the same sub re-cuts it again at 'my $msg_a = substr($consolidation_key_message{$log_key} // '', 0, $consolidation_message_length_cap);' *(added by the verifier)*
-- `read_and_process_logs` :: `$log_level =~ s/-HL$//;` :: Prepares the key's level field: follows 'my $log_level = $status_code > 0 ? $status_code : $category_bucket;'. The inventory mentions it only inside the role of another site; it has no site entry of its own. *(added by the verifier)*
-- `read_and_process_logs` :: `$message =~ s/$m->[0]/$m->[1]/g;` :: -m mask applied to $message just before the key is assembled (upstream of the 350 cut; this is the ordering the 580 feature doc's truncated-key note is about) *(added by the verifier)*
-- `calculate_all_statistics` :: `$log_messages_counters{"$category\x1f$log_key"},` :: Composite counter key over the message key, two sites; the inventory gives these only as line hints (17717/17883) with no sub named *(added by the verifier)*
-- `print_threadpool_summary` :: `my $message = substr( $key, 0, $col_width{1} );` :: The same display cut snippet also appears here, cutting a threadpool key rather than a message key. A grep -F for the print_message_summary snippet returns both lines. *(added by the verifier)*
+### Site inventory
+
+Carried from the scoping pass (*(scoping)*, its six verifier additions
+included) with the audit's additions:
+
+- `read_and_process_logs` :: `$log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0,` :: key variant 1; variants 2 to 4 are `$log_key = substr("[$log_level] [$truncated_object] $message", 0,`, `$log_key = substr("[$log_level] [$truncated_thread] $message", 0,` and `$log_key = substr("[$log_level] $message", 0,`. *(scoping)*
+- `read_and_process_logs` :: `my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;` :: the field cuts; `my $max_object_length = 25;` is declared four lines above the object cut. *(scoping)*
+- `read_and_process_logs` :: `my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);` :: the S1 re-cut (also at two sites in `group_similar_messages`). *(scoping)*
+- `read_and_process_logs` :: `my $grouping_key = $log_level // "";` :: the inline grouping key. *(audit)*
+- `read_and_process_logs` :: `my $msg_len = length($log_key);` :: the observed length, measured on the whole key. *(audit)*
+- `read_and_process_logs` :: `$log_level =~ s/-HL$//;` :: the level field prepared for the key. *(scoping)*
+- `read_and_process_logs` :: `$message =~ s/$m->[0]/$m->[1]/g;` :: masks applied before the cut. *(scoping)*
+- `read_and_process_logs` :: `$message =~ tr/\x00-\x08\x0a-\x1f\x7f//d;` :: control-character normalisation before the key. *(scoping)*
+- `group_similar_messages` :: `my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));` *(scoping)*
+- `group_similar_messages` :: `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` and `my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;` *(scoping)*
+- `group_similar_messages` :: `"  cluster: $category\x1f$canonical_log_key";` :: the `-V message-grouping` record. *(scoping)*
+- `merge_log_message_entry_into_cluster` :: `my $key = "$category\x1f$log_key";` :: the composite counter key (also in `read_and_process_logs` and twice in `calculate_all_statistics` as `$log_messages_counters{"$category\x1f$log_key"},`). *(scoping)*
+- `consolidation_process_key` :: `$consolidation_key_message{$log_key} = $capped_msg;` and `process_final_pass_window` :: `$consolidation_key_message{$log_key} = $capped_msg;` :: the key-to-capped-text map, re-cut again in `run_consolidation_pass` :: `my $msg_a = substr($consolidation_key_message{$key} // '', 0, $consolidation_message_length_cap);` *(scoping)*
+- `get_consolidation_trigrams` :: `my $capped = substr($str, 0, $consolidation_message_length_cap);` and `consolidation_cliff_edge` :: `my @trigrams = map { get_consolidation_trigrams(substr($_, 0, $consolidation_message_length_cap)) } @keys;` *(audit)*
+- `extract_consolidation_bucket_key` :: `return substr($1, 0, 30);` :: the bucket key's cut, five callers. *(audit)*
+- `(GLOBALS)` :: `my $max_log_message_length = 0;` and `adapt_to_terminal_settings` :: `$max_log_message_length = $terminal_width;` *(scoping)*
+- `(GLOBALS)` :: `my $consolidation_message_length_cap = 350;` *(scoping)*
+- `print_verbose_output` :: `printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;` *(scoping)*
+- `print_message_summary` :: `my $message = substr( $key, 0, $col_width{1} );` :: the display cut (also in `print_threadpool_summary`). *(scoping)*
+- `pipeline_finalize` :: `group_similar_messages();` :: the one call, under the grouping guard. *(audit)*
 
 ### Verification notes
 
-Sites reported 17, confirmed 17, refuted 0 (corrected above), added by the verifier 6, owning docs refuted 0.
+- Every snippet resolves to its enclosing sub. The scoping pass's two count
+  corrections (nine cap readers, `process_final_pass_window` not
+  `try_consolidation_merge_into_existing`) are carried.
+- The scoping pass's F7.4 is confirmed by the run: 120 reported, 350 used.
+- The audit adds the consolidation bucket key's cut (30 of the first word, 20
+  of the message) as a fifth cut, with a comment that states the wrong number.
 
-- Wrong count: the inventory says $consolidation_message_length_cap is used at 10 consolidation re-cut sites. There are 9 readers besides the declaration: group_similar_messages x2 (hints 10914, 10965), get_consolidation_trigrams x1 (11106), run_consolidation_pass x2 (12019, 12020), process_final_pass_window x2 (12163, 12164), consolidation_cliff_edge x1 (12377), read_and_process_logs S1 inline x1 (15811).
-- Wrong sub named: the inventory lists try_consolidation_merge_into_existing among the users of $consolidation_message_length_cap. It does not use it. The missing user is process_final_pass_window.
-- The capped_msg snippet 'my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);' is not unique. It matches three lines: read_and_process_logs at 15811, and group_similar_messages at 10914 and 10965. The site as attributed holds, but the two group_similar_messages re-cuts should be listed as sites of their own.
-- The grouping-key parse snippet matches three lines verbatim (10855, 10915, 10966). The fourth site (10873) is spelled 'my ($gk) = $log_key =~ /^\[([^\]]+)\]/;', which the inventory already notes. Confirmed.
-- The (GLOBALS) sites: 'my $max_log_message_length = 0;' (line 235) and 'my $consolidation_message_length_cap = 350;' (line 749) both sit between '## GLOBALS ##' (line 64) and '## SUBS ##' (line 1360). Confirmed.
-- Divergence confirmed: the fifth ternary copy, in group_similar_messages, is dead on its $max_log_message_length branch. Its only call, 'group_similar_messages();', sits inside 'unless( $group_similar_sensitivity eq "none" )' in pipeline_finalize.
-- Divergences confirmed from the code: S1 takes the grouping key directly with 'my $grouping_key = $log_level // "";', and observed length is measured on the whole key with 'my $msg_len = length($log_key);'.
-- The literal 350 appears at exactly 6 lines (the 5 ternary sites plus the cap declaration), and $max_log_message_length at 1 declaration, 1 assignment and 6 readers. Both counts confirmed.
-- Every owning doc path and heading exists: fuzzy-message-consolidation.md DD-06, IQ-01 and IQ-02 (headings struck through and marked RESOLVED); 447 D2, D5 and Affected surfaces; the 580 truncated-key note; the 350 context in 150; 528. All 8 harness paths exist.
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Should the key cut and the consolidation cap be one named value?* They are
+  the same number in two spellings; DD-06 makes the cap a correctness bound for
+  consolidation, and #174 will change it per run.
+- *Should the benchmark data report the cut the run used?* 120 against 350 in
+  the captured run. Every `-o` or `-g` benchmark TSV carries the wrong value;
+  correcting it is a one-line change whose before/after shows a CONFIG diff on
+  those runs and nothing else.
+- *Are the stale record texts trued up here?* Recorded in the specification;
+  the audit recommends the true-up lands with #174, which reads them.
+- *Does item 7 cover the display cut?* It is a rendering cut on a different
+  value (the column width) and #564 owns its future; it is listed so the two
+  are not confused, not as a copy of the key cut.
 
 
 ---
