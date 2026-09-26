@@ -2,8 +2,14 @@
 
 ## Status
 
-Specification in progress on branch `342-redundant-logic-surfaces` off
-`release/0.19.0`, written section by section with the architect.
+Specification complete on branch `342-redundant-logic-surfaces` off
+`release/0.19.0`, written section by section with the architect. Drop 1 (items
+1 to 7, the patterns sweep, `docs/architecture-patterns.md` and its `CLAUDE.md`
+entries) is delivered on the branch and under review as PR #607. Drop 2 (item 8:
+the loop inventory, the measured cost curve, the ceiling and the two remedies,
+the ScriptLog pair) is delivered on the same branch on 2026-09-26; its record is
+`tests/profile/results/342-read-loop-cost-curve/` and its probes and driver are
+`prototype/342-read-loop-cost-curve/`.
 
 Decisions taken by the architect at the start of the work (2026-09-26):
 

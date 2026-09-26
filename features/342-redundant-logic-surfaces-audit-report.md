@@ -11,8 +11,9 @@ complete*, each with its search angles recorded as run, every *diverged* finding
 confirmed by a captured run, every finding cross-checked against the open issues,
 and the closing sections (the grouping proposal, what was not searched) written.
 `docs/architecture-patterns.md` and its two `CLAUDE.md` entries landed in the
-same commit as the patterns sweep. Item 8 (the per-line loop) is drop 2 and is
-still the scoping pass's record.
+same commit as the patterns sweep. Drop 2 (item 8, the per-line loop) is complete (2026-09-26): the inventory, the
+measured cost curve, the ceiling, the two remedies assessed on paper, and the
+ScriptLog pair, with the record under `tests/profile/results/342-read-loop-cost-curve/`.
 
 ## How to read a finding
 
@@ -1329,110 +1330,203 @@ included) with the audit's additions:
 
 ## Item 8: The structure of the per-line loop
 
-**State: scoping pass recorded; audit not yet run. This item is drop 2 of the
-issue: its measurement runs in the background while items 1 to 7 and the patterns
-sweep are triaged, and its record lands here when the analysis is written.**
+**State: audit complete (drop 2, 2026-09-26).** The inventory (part 1) is
+recorded below; the cost curve (part 2), the ceiling and the two remedies (part
+3) and the ScriptLog pair (part 4) are measured and recorded in
+`tests/profile/results/342-read-loop-cost-curve/` (`hypothesis.md` dated before
+the first run, `analysis.md`, and the raw rounds `curve.tsv` and
+`scriptlog.tsv`); the probes, the interleaved driver and the summariser are under
+`prototype/342-read-loop-cost-curve/`. This section carries the numbers the
+audit cites; the record carries the tables in full.
 
-### Summary of the scoping pass
+### Part 1: inventory of what the loop carries per line
 
-The loop body (15085-16427, after the scan sub has returned) holds about 107 test sites of run-constant values, not counting the per-config tests inside the UDM loop that only run when UDM is set. By group:
-- progress/diagnostics 2
-- UDM 2 gates plus 3 unguarded foreach loops over @udm_configs
-- discard/expose/mask 5 gates plus 5 inner lookups
-- metric omission 12 ($omit_count 3, $omit_bytes 4, $omit_durations 5)
-- -du 2
-- time window and profile 3, plus the absolute range compare, which always runs
-- filters 6 outer plus 10 inner
-- highlight 1 compound gate with 12 inner terms
-- bucket precision 1
-- message capture and consolidation 16 (the key-length expression written 4 times but run once per line; $message_stats_capture_mode eq 'bin' 5 times)
-- bucket statistics 8
-- heatmap 1 outer plus 5 inner
-- histogram 1 plus 1 plus 8 metric-selection tests plus 2 UDM loops
-- threadpool 1 compound (3 terms)
-- sessions/users 0
-- index-file tracking 0 (runs under -ni)
+The loop body (`read_and_process_logs` :: `while (1) {` to the closing brace before
+`close $fh;`, 1,345 physical lines at 0.19.0) was extracted and every test of a
+value that is constant for the run was listed with its enclosing region.
+Frequency classes, by where a site sits in the loop:
 
-Also in the body: about 20 $line_is_highlighted read-back sites (constant false when highlight is off), 2 per-entry reads of FR_PCT_QUALIFYING, and file-scoped tests ($csv_detected, $csv_epoch_timestamp, $from_window, the classification-signature compare). Only 2 run options are compiled into the generated scan sub: include_query_string and expose_metric. $show_classification is folded into an entry attribute at build. The measured per-line statement count on the access-log path is 114 (NYTProf, 100k lines). These counts come from reading the source, not from a profile.
+- **every line read**: before the dispatch to the scan sub (progress, memory
+  sampling, the CSV state test);
+- **every matched line**: after the scan sub returns an entry and before the
+  filters' `next` exits (unit override, level gate, window, profile, filters,
+  the tag point);
+- **every included line**: after `$total_lines_included++` (bucket key,
+  classification bookkeeping, the per-file selection record, and, because
+  `$metrics_observed` is a per-format constant that every statistics-eligible
+  format sets, the whole bucket-statistics block);
+- **every retained message**: inside `if( $capture_messages && defined( $message ) )`
+  (expose, discard, mask, key assembly, consolidation, per-message statistics);
+- **every line carrying a metric**: the inner tests reached only when a duration,
+  bytes or count value is present.
 
-**Shared surface today.** Loop body: none. No sub owns the run-constant gates; each one is an inline scalar or hash test in read_and_process_logs(). A few options are folded ahead of time: capture modes are set once before the loop ($heatmap_capture_mode, $histogram_capture_mode, $message_stats_capture_mode, $bucket_stats_capture_mode from choose_data_model()), and the statistics-demand flags are settled during option processing. The loop still tests all of them per line, some as string eq compares. Scan sub: format_scan_sub_resolve() (signature cache) with compile_format_scan_sub() (code generation), fed by build_format_registry(), which stores $format_registry_opts and clears %format_scan_sub_cache. build_format_registry() itself compiles nothing: under D60 (elevation by election), sub generation happens at election, promotion, occupant swap or pin. format_registry_set_occupant() does its own cache lookup-or-compile inline.
+Forms: *boolean* (a scalar tested for truth), *string* (`eq` or `ne` against a
+literal), *hash* (a lookup or `exists`), *list* (an array in boolean context or a
+`foreach` over it), *defined* (a `defined` test), *numeric* (a compare against a
+run-constant number).
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+| Group | Site (`read_and_process_logs` :: snippet) | Frequency class | Form | Per line |
+|---|---|---|---|---|
+| Progress and diagnostics | `memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;` | every line read | boolean | 1 |
+| Progress and diagnostics | `if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {` | every line read | numeric then boolean | 1 (modulo first) |
+| CSV state | `if ($csv_detected) {` | every line read | boolean (file-scoped) | 1 |
+| CSV state | `if (@udm_configs && !$csv_detected) {` (lazy detection) | every line read | list then boolean | 1 |
+| Window replay | `if ($from_window) {` | every line read | boolean (file-scoped) | 1 |
+| Category gate | `unless (exists $log_level_set{$category_bucket}) {` | every matched line | hash | 1 |
+| Timestamp arm | `if ($csv_epoch_timestamp) {` and `} elsif (!$csv_epoch_timestamp && $match_type == 13) {` | every matched line | boolean, then boolean and numeric | 2 |
+| Duration unit | `if (defined $duration_unit_override) {` (twice: the scanned arm and the CSV arm) | every matched line with a duration | defined | 1 to 2 |
+| Discard fields | `if( $discard_any_field ) {` | every matched line | boolean | 1 (4 hash lookups inside) |
+| Count capture | `if( !$omit_count && defined $message ) {` | every matched line | boolean | 1 |
+| Expose count | `$message =~ s/ count\s*=\s*\d+/ count=?/g unless $expose_count;` | every line carrying `count=` | boolean | 1 |
+| User-defined metrics | `if (@udm_configs && defined $message) {` (capture gate) | every matched line | list | 1 |
+| Time window | `if (%filter_range_tod) {` and the absolute compare in its else arm | every matched line | hash (truth), then 2 numeric | 3 |
+| Profile | `if ($profile_mode) {` (twice) | every in-range line | boolean | 2 |
+| Pattern filters | `if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )` and the include twin | every in-range line | defined | 2 |
+| Outcome filter | `if( $outcome_filter_active ) {` | every in-range line | boolean | 1 (4 inside) |
+| Numeric filters | `if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {` (three families) | every in-range line | defined | 6 (10 inside when a bound is set) |
+| Per-file record, pre-filter | `$fd->{match_count}++;` and the metric blocks beneath it | every matched line | none (unconditional; the block runs under `-ni` too) | 0 tests, ~12 statements |
+| Highlight tag point | `if( $highlight_active` | every in-range line | boolean | 1 (12 inside when active) |
+| Per-file record, post-filter | `$fd->{sel_match_count}++;` and its metric blocks | every included line | none (unconditional) | 0 tests, ~12 statements |
+| Latches | `$output_timestamp_min = $bucket_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $bucket_epoch;` and the max twin | every included line | numeric | 4 |
+| Bucket precision | `if ($print_milliseconds) {` and `my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);` inside it | every included line | boolean; a recomputation | 1 (+1 multiply and `int`) |
+| Classification bookkeeping | `if ($line_entry->[FR_PCT_QUALIFYING]) {`, `unless ($line_entry->[FR_PCT_QUALIFYING]) {`, `if ($line_cls_sig != $file_cls_sig) {` | every included line | array element (per-entry constant), numeric | 3 |
+| Message capture gate | `if( $capture_messages && defined( $message ) ) {` | every included line | boolean | 1 |
+| Highlight read-back | `$line_is_highlighted` (15 reads in the body) | every included line, most inside the metrics block | boolean | up to 15 |
+| Level field | `$log_level =~ s/-HL$//;` | every retained message | none (unconditional regex) | 1 substitution |
+| Object cut | `my $max_object_length = 25;` | every retained message | none (a literal re-declared) | 1 assignment |
+| Expose, discard, mask | `if( $expose_active ) {`, `if( $discard_active ) {`, `if( $mask_active ) {` | every retained message | boolean | 3 (+1 hash lookup inside discard) |
+| Key length | `($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length` (in each of four key branches; one runs) | every retained message | numeric and string | 2 |
+| Consolidation gate | `if ($group_similar_sensitivity ne "none") {` | every retained message | string | 1 |
+| Consolidation, new key | `if ($metrics_observed) {`, `if (defined $duration && !$omit_durations) {`, `if ($message_stats_capture_mode eq 'bin') {` and the first `foreach my $config (@udm_configs) {` | every new key under `-g` | boolean, defined and boolean, string, list | 4 |
+| Per-message statistics | `if( $metrics_observed ) {`, `if( defined $bytes && !$omit_bytes ) {`, `if( $bytes_aggregate_demand ) {`, `if( defined $duration && !$omit_durations ) {`, `if( $message_duration_stats_demand ) {`, `unless $message_stats_capture_mode eq 'bin';`, `if ($message_stats_capture_mode eq 'bin') {`, `if ($message_stats_demand_shape) {`, the second `foreach my $config (@udm_configs) {` | every retained message | boolean 5, string 2, list 1, defined 2 | up to 10 |
+| Bucket statistics | `if( $metrics_observed  ) {`, `if( $duration_observed && !$omit_durations && $duration >= 0 ) {`, `if( $bucket_duration_stats_demand ) {`, `unless $bucket_stats_capture_mode eq 'bin';`, `if ($bucket_stats_capture_mode eq 'bin') {`, `if ($bucket_stats_demand_shape) {`, `if( $bytes_observed_line && !$omit_bytes ) {`, `if( $bytes_aggregate_demand ) {`, `$durations_observed = 1 if $durations_observed != 1 && $duration_observed;`, the third `foreach my $config (@udm_configs) {` | every included line (metrics observed is per-format) | boolean 7, string 2, list 1, numeric 1 | up to 11 |
+| Heatmap | `if ($heatmap_enabled) {` then `if ($heatmap_metric eq 'duration' && defined $duration && $duration >= 0) {`, its bytes and count arms, `} elsif (defined $heatmap_udm_config && defined $udm_values{$heatmap_udm_config->{name}}) {`, `if ($heatmap_capture_mode eq 'raw') {` | every included line; the inner five only under `-hm` | boolean; then string 3, defined 1, string 1 | 1 (6 under `-hm`) |
+| Histogram | `if ($histogram_enabled) {` then `if ($histogram_capture_mode eq 'raw') {` and `if ((!%histogram_metrics \|\| $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$` with its bytes, count and user-defined twins in both arms | every included line; the inner ten only under `-hg` | boolean; then string 1, hash 8, list 2 | 1 (11 under `-hg`) |
+| Thread pool | `if( ( defined $threadpool && $threadpool ne "" ) && ( ( defined $threadpool_activity_regex && $threadpool =~ /$th` | every included line carrying a thread pool | defined, string, defined, boolean | up to 4 |
+| Sessions and users | the session and user blocks | every included line carrying one | data-only (no option consulted) | 0 |
 
-- **F8.1** Two cache paths disagree with the resolve sub's own comment. format_scan_sub_resolve()'s header says 'Every point that changes the order and needs the sub live again routes through here — occupant swaps, promotion, election, the pre-line-1 fallback'. Yet format_registry_set_occupant() recomputes 'my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;' and runs '$format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);' inline. It skips '$format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};', so the scan_sub_cache_hits telemetry does not count cache hits from occupant swaps.
-- **F8.2** The key-length expression '($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length' is written out four times in read_and_process_logs() (the four key branches at 15798/15800/15802/15804) and once more in group_similar_messages() ('my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || ...'). The copies are identical today, and each is recomputed per retained message even though its value is fixed for the run.
-- **F8.3** The CSV data-line arm ('if ($csv_detected) {' ... '$line_entry->[FR_CLASSIFY]->($_);') and the lazy-detection confirm arm ('# Confirmed CSV — process line 2 as data' ... '$line_entry->[FR_CLASSIFY]->($_);') restate the same sequence: timestamp trim, epoch test, message from -ucm, DATA category, record reset, classify. The only difference is that the steady arm guards its epoch test with '$line_number == 2' and the confirm arm tests unconditionally; both apply only on line 2 in practice. Duplicated, but not diverging today.
-- **F8.4** The same '$format_detection{$in_file} //= { match_type => undef, slug => undef, ... first_match_line => undef, }' initialiser appears inside the loop (per matched line) and again after it (the per-file telemetry block). The two key lists are identical today.
-- **F8.5** The Welford-Pebay update is restated for per-message statistics ('if ($message_stats_capture_mode eq 'bin') { my $entry = $log_messages{$category}{$log_key};' ... '$entry->{duration_count} = $n;') and for per-bucket statistics ('if ($bucket_stats_capture_mode eq 'bin') { my $entry = $log_analysis{$bucket};' ... '$entry->{duration_count} = $n;'). The only difference is the counter call: the bucket one passes $bucket_stats_buckets_per_decade and the message one does not.
+**Totals.** On the default scenario (`standard`: no filters, no highlight, no
+heatmap, no histogram, no user-defined metric, no grouping) an included line on
+an access log evaluates about **64 tests of run constants** (about 17 boolean
+scalars, 8 string compares, 6 `defined` tests over undefined bound scalars, 4 hash
+or list truth tests, and the numeric latches and precision tests), plus the two
+per-file record blocks (about 24 unconditional statements), the unconditional
+level-suffix substitution and the literal re-declared per retained message. The
+scoping pass's figure of about 107 counted the sites; the per-line count depends
+on which gates are open, and 64 is the every-included-line floor on the default
+scenario. The inventory's sites number 71 (the table's rows expanded), of which
+the spec's *every included line* class holds 41 on the default scenario.
 
-### Site inventory (scoping pass)
+### Part 2: the cost curve
 
-- `read_and_process_logs` :: `while (1) {` :: Start of the per-line loop. It runs from line 15085 to the closing brace at 16427, just before 'close $fh;' (1,343 physical lines, 830 not blank or comment). The sub itself runs 14931-16549 (1,619 physical lines, 1,008 code lines). Outside the loop: per-file setup (index record, CSV state reset, detection sample, format_scan_sub_resolve(), window pre-read), and after it the per-file telemetry.
-- `read_and_process_logs` :: `if ( $line_entry = $format_scan_sub->($_) ) {` :: Where the loop hands off to the generated scan sub. It sits in the else-arm of 'if ($csv_detected)'. The sub writes the 13 record lexicals, $timestamp/$fractional_ms and $line_outcome/$line_cls_sig directly and returns the winning entry. Everything after this point is loop-body code.
-- `read_and_process_logs` :: `if ($window_entry && $window_entry->[FR_EXTRACT]->($_)) {` :: Replay of held detection-window lines. The classification was already made, so only the entry's FR_EXTRACT closure runs. The '$from_window' test runs on every line (file-scoped state, not a run option).
-- `read_and_process_logs` :: `memory_debug_sample("read_lines") if $show_memory_debug` :: Progress/diagnostics gate. Run-constant $show_memory_debug is tested on every line read.
-- `read_and_process_logs` :: `if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {` :: Progress repaint gate. The modulo is tested first, then run-constant $disable_progress, on every line.
-- `read_and_process_logs` :: `if (@udm_configs && !$csv_detected) {` :: Lazy CSV detection, gated on run-constant @udm_configs plus file-scoped $csv_detected, on every line.
-- `read_and_process_logs` :: `if (@udm_configs && defined $message) {` :: UDM capture gate, on every line. When on, the inner loop tests per-config run constants on each line: agg_kind, transform, converter, expose, and match_type == 13.
-- `read_and_process_logs` :: `foreach my $config (@udm_configs) {` :: Three foreach loops over @udm_configs with no outer gate: new consolidation key (15832), per-message store (15969), per-bucket store (16258). With no UDM configured each still enters a loop over an empty list.
-- `read_and_process_logs` :: `if( $discard_any_field ) {` :: Discard of parsed fields (-d thread|session|user|object), on every line. When on, four $discard_field{...} hash lookups follow.
-- `read_and_process_logs` :: `if( !$omit_count && defined $message ) {` :: Count-metric capture, gated on run-constant $omit_count, on every line. It is 1 of 12 omission sites in the loop: $omit_count 3, $omit_bytes 4, $omit_durations 5.
-- `read_and_process_logs` :: `$message =~ s/ count\s*=\s*\d+/ count=?/g unless $expose_count;` :: Expose gate for count masking. Runs only on lines that carry count=.
-- `read_and_process_logs` :: `if (defined $duration_unit_override) {` :: -du duration-unit gate, on every matched line with a duration (15438), plus the CSV epoch path (15454). The fallback tests the per-entry constant FR_DURATION_UNIT.
-- `read_and_process_logs` :: `if (%filter_range_tod) {` :: Time-of-day window gate (a hash tested for truth), on every matched line. The else-arm always compares against %filter_range_epoch, whose defaults are 0 and 2521843200, so a run with no -st/-et still does two compares.
-- `read_and_process_logs` :: `if ($profile_mode) {` :: --profile folding gate, on every in-range line. A second $profile_mode test comes later for $profile_included_samples.
-- `read_and_process_logs` :: `if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )` :: Pattern filter gates. The -exclude test is at 15581 and the -include test on the next line (15582). Both run on every in-range line.
-- `read_and_process_logs` :: `if( $outcome_filter_active ) {` :: Outcome filter gate. When on, four inner tests follow: include/exclude success/failure.
-- `read_and_process_logs` :: `if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {` :: The first of three numeric-filter gates (duration, bytes, count; 15600/15605/15610). Each is two defined() tests on every in-range line, with 6 inner threshold tests.
-- `read_and_process_logs` :: `if( $highlight_active` :: Highlight tag point: one compound gate. Inside it are 12 run-constant terms: $highlight_filter, $outcome_highlight_active, $highlight_failure, $highlight_success, $numeric_highlight_active, and six thresholds. It sets $line_is_highlighted, which about 20 later sites read (heatmap, histogram, bucket, UDM, threadpool, session, user). With highlight off, those reads are all constant false.
-- `read_and_process_logs` :: `if ($print_milliseconds) {` :: Bucket-key precision gate, on every included line.
-- `read_and_process_logs` :: `if ($line_entry->[FR_PCT_QUALIFYING]) {` :: Classification bookkeeping. FR_PCT_QUALIFYING is a per-entry constant baked at build from $show_classification and read at 15702 and 15710. The outcome itself ($line_outcome) is computed inside the scan sub.
-- `read_and_process_logs` :: `if( $capture_messages && defined( $message ) ) {` :: Message-capture gate, on every included line. It encloses the expose, discard, mask, key-building, consolidation and per-message statistics blocks.
-- `read_and_process_logs` :: `$log_level =~ s/-HL$//;` :: Unconditional regex substitution on each retained message, stripping the highlight suffix from the category. No gate.
-- `read_and_process_logs` :: `if( $expose_active ) {` :: Expose (-x) gate, once per retained message.
-- `read_and_process_logs` :: `if( $discard_active ) {` :: Message discard (-d) gate, once per retained message, plus a $discard_field{'query-string'} lookup inside.
-- `read_and_process_logs` :: `if( $mask_active ) {` :: Mask (-m) gate, once per retained message.
-- `read_and_process_logs` :: `($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length` :: Key-length expression, run-constant, recomputed per retained message. It is written out in 4 branches of the key build (one runs per line) and a fifth time in group_similar_messages (line 10998). Overlaps scope item 7 of the issue (message-key construction).
-- `read_and_process_logs` :: `if ($group_similar_sensitivity ne "none") {` :: Consolidation gate, a string compare per retained message.
-- `read_and_process_logs` :: `if( $message_duration_stats_demand ) {` :: Per-message statistics-demand gate. Nearby run constants: $message_outcomes_demand (3 sites), $message_stats_capture_mode eq 'bin' (5 string compares), $message_stats_demand_shape (2), $bytes_aggregate_demand (1).
-- `read_and_process_logs` :: `$log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {` :: Per-bucket statistics. Run constants: $bucket_stats_capture_mode eq 'bin' (3 string compares), $bucket_stats_demand_shape (2), $bucket_duration_stats_demand (1), $bytes_aggregate_demand (1). The Welford-Pebay block here near-duplicates the per-message one.
-- `read_and_process_logs` :: `$durations_observed = 1 if $durations_observed != 1 && $duration_observed;` :: Run-level latch flag, read and compared on each line with metrics.
-- `read_and_process_logs` :: `if ($heatmap_enabled) {` :: Heatmap gate, on each line with metrics. Inside: three $heatmap_metric eq compares, defined $heatmap_udm_config, and $heatmap_capture_mode eq 'raw'.
-- `read_and_process_logs` :: `if ($histogram_enabled) {` :: Histogram gate, on each line with metrics. Inside: $histogram_capture_mode eq 'raw', 8 metric-selection tests (!%histogram_metrics || $histogram_metrics{X}), two loops over @histogram_udm_configs, and 6 omit tests.
-- `read_and_process_logs` :: `( !defined $threadpool_activity_regex && $include_threadpool_summary )` :: Threadpool capture gate: one compound condition with three run-constant terms, reached only when a threadpool was parsed.
-- `read_and_process_logs` :: `if( defined $session && $session ne "" && $session ne "-" ) {` :: Session capture, gated on data only. No run option is consulted ($hide_session is not read here).
-- `read_and_process_logs` :: `if( defined $user && $user ne "" && $user ne "-" ) {` :: User capture, gated on data only. No run option is consulted ($hide_user is not read here).
-- `read_and_process_logs` :: `$fd->{sel_match_count}++;` :: Per-file index tracking, before and after the filters (blocks at 15513 and 15620). No gate: it runs even under -ni, and $no_index is never referenced in read_and_process_logs.
-- `read_and_process_logs` :: `format_elect_scan_front( $sample->{formats} ) unless defined $log_format_pin;` :: Per-file election before line 1: the format the sample found most often is moved to the front of the scan order.
-- `format_scan_sub_resolve` :: `$format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};` :: The one resolve point: order signature (joined FR_NAME of @format_scan_order), then %format_scan_sub_cache //= compile_format_scan_sub($format_registry_opts). Called by election and fallback (per file, before line 1), format_registry_promote() and apply_format_pin().
-- `format_registry_set_occupant` :: `$format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);` :: A second, inline cache-lookup-or-compile for variant occupant swaps. It computes the same signature but does not go through format_scan_sub_resolve().
-- `compile_format_scan_sub` :: `my $sub = eval $src;` :: Code generation. For each entry in the current order it assembles a guard, a pattern-match condition and a body (from format_entry_block_src), adds a whitespace dispatch (space-led lines go to no-match; tab-led lines try only head_class 'any' blocks), evals the whole thing as one sub, and validates it (format_validate_scan_sub, which saves and restores run state). It records telemetry: compile count, elapsed time, RSS delta.
-- `compile_format_scan_sub` :: `: "my \$winner = \$entries[$si];\nformat_registry_promote($si);\nreturn \$winner;\n";` :: Promotion code is emitted only into blocks that are not already in their best position. Steady state runs no promotion code.
-- `build_format_registry` :: `my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric };` :: The only run options baked into generated code: include_query_string (whether the strip_query_string transform is emitted) and expose_metric (which in-message metric keys are masked). Everything else run-scoped is tested in the loop body.
-- `build_format_registry` :: `$entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;` :: A run option ($show_classification) folded into a per-entry constant at build time, which the loop body then reads per line.
-- `format_entry_block_src` :: `if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }` :: Build-time use of an option inside a generated block: the transform is left out entirely rather than tested per line.
-- `format_entry_block_src` :: `my $exposed = $opts->{expose_metric} || {};` :: Build-time use of an option: metrics named on -x are dropped from the generated mask alternation.
-- `read_and_process_logs` :: `unless (exists $log_level_set{$category_bucket}) {` :: Category acceptance gate at about line 15467. It does a hash lookup on every matched line against %log_level_set, which is fixed for the run (built at GLOBALS from @log_levels and extended in the registry build around line 3862). The inventory has no group for it. *(added by the verifier)*
-- `read_and_process_logs` :: `my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);` :: Inside the 'if ($print_milliseconds) {' arm at about line 15682. A value fixed for the run is recomputed on every included line. The inventory lists the gate but not this per-line recomputation. *(added by the verifier)*
-- `read_and_process_logs` :: `$output_timestamp_min = $bucket_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $bucket_epoch;` :: Run-level min/max accumulators at about lines 15675-15676, with 4 compares per included line (the max line is the same shape). They are the same kind of thing as the $durations_observed latch the inventory lists, but are left out. *(added by the verifier)*
-- `read_and_process_logs` :: `my $max_object_length = 25;` :: A literal constant re-declared once per retained message inside the message-capture block (about line 15735) and used in the $truncated_object substr. Missed next to the key-length expression item. *(added by the verifier)*
-- `read_and_process_logs` :: `if ($match_type == 13) {` :: Inside the UDM inner loop at about line 15328. The inventory lists it as match_type == 13 in the role of the UDM-capture site. It is also tested again at about line 15480 ('} elsif (!$csv_epoch_timestamp && $match_type == 13) {') on the timestamp path, and that second site is not counted. *(added by the verifier)*
+Ten order-balanced rounds, eleven candidates, the benchmark runner's invocation,
+the tool's own `TIMING total`; every probe proven behaviour-neutral (forty
+identical comparisons) before the first timing run. Medians of ten with ranges:
 
-### Verification notes
+| file (base median) | gate-10 | gate-20 | gate-40 | str-40 | hash-40 | hoist |
+|---|---|---|---|---|---|---|
+| access log, 761,698 lines (8.849 s, 8.745 to 8.955) | +2.51 % | +4.24 % | +8.06 % (9.562 s, 9.479 to 9.777) | +10.50 % | +10.95 % | −1.20 % (8.742 s, 8.670 to 9.066) |
+| application log, 479,904 lines (3.669 s, 3.643 to 3.788) | +4.06 % | +6.09 % | +12.25 % (4.119 s, 4.081 to 4.217) | +19.42 % | +16.63 % | −0.01 % (3.668 s, 3.594 to 3.766) |
 
-Sites reported 45, confirmed 45, refuted 0 (corrected above), added by the verifier 5, owning docs refuted 0.
+Least-squares slopes over N in {0, 10, 20, 40}, residuals inside the
+round-to-round spread on both files:
 
-- All 45 snippets were found, and every attributed occurrence sits inside the named sub. The line hints match exactly.
-- The snippet 'while (1) {' also occurs in auto_hide_narrow_columns (line 18725). The attribution is right, but the snippet is not unique in the file.
-- 'foreach my $config (@udm_configs) {' occurs 9 times in ltl. Only 15832, 15969 and 16258 are in read_and_process_logs, which matches the inventory.
-- The snippets 'if (defined $duration_unit_override) {', 'if ($profile_mode) {', 'if ($group_similar_sensitivity ne "none") {', 'if ($heatmap_enabled) {', 'if ($histogram_enabled) {' and 'if ($print_milliseconds) {' also appear in other subs. The copies in read_and_process_logs are at the stated lines. Note that 'if ($group_similar_sensitivity ne "none") {' also occurs at 16484, in the sub but after the loop.
-- The loop's end was confirmed: the closing brace is just before 'close $fh;' at about line 16429 (16427 is the loop's closing brace per the inventory, and the note_unmatched_line else-arm closes just before it).
-- Every owning doc path exists, and so do both harnesses. These headings were confirmed: 567 § Completion gate (line 137) and § Post-release finding (line 155); log-format-registry.md § '#413 — lazy scan-sub compilation (elevation by election)' (line 796) and § '2026-08-21: Drop 1 (#58) implementation — D39–D40 ...' (line 1052); 478 § '4. The mechanism today' (line 177) and § 'The thirteen read-back sites' (line 198); staged-processing-pipeline.md § 'Named Pipeline Stages (#180)' (line 149). In features/58-format-registry-staged-detection.md, D26 (line 391) and the lean-loop obligation are present.
-- Minor count nuance: the loop tallies show $message_duration_stats_demand at 2 references. One is the gate; the other is the closing comment at about line 16076, so the gate count of 1 holds. The same applies to $expose_active, $discard_active and $mask_active, which each show 2 references (the gate plus a comment).
+| test form | access log, per test | per line | application log, per test | per line |
+|---|---|---|---|---|
+| boolean scalar | 0.0175 s (0.198 %) | **23.0 ns** | 0.0109 s (0.298 %) | **22.8 ns** |
+| string compare | 0.0229 s (0.259 %) | 30.1 ns | 0.0174 s (0.474 %) | 36.3 ns |
+| hash lookup | 0.0239 s (0.270 %) | 31.3 ns | 0.0151 s (0.413 %) | 31.5 ns |
 
-### Questions for the findings discussion
+The N = 10 step is positive in ten of ten rounds on both files, so the slope is
+resolved at every step, not only at N = 40. The statement-count check (NYTProf,
+100k-line access sample): 141 per-line statements in the loop sub on the base,
+181 on `gate-40`, exactly 40 more, their summed time +0.098 s (24.5 ns per
+evaluation), every other sub unchanged. The hoist probe reads −1.20 % on the
+access log (per-round median −0.078 s, negative in seven of ten rounds, range
+crossing zero) and nothing resolvable on the application log (−0.015 s, range
+−0.054 to +0.047 s).
 
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+### Part 3: the ceiling and the two remedies
+
+At 23 ns per boolean test and 30 ns per string compare, the 64 run-constant
+tests an included access-log line evaluates on the default scenario bound what
+any remedy can recover from the tests themselves at **about 13 % on the access
+log and 19 % on the application log**; the hoist probe's fifteen substitutions
+and three wraps have a ceiling near 1.3 % and measured at it on the access log.
+The remaining hoistable items (the twelve bound `defined` tests behind one flag,
+the off-by-default feature gates grouped one per block, the millisecond bucket
+size and the key length computed before the loop, the per-file record blocks
+behind the index switch) add up to about 5 % on the access log and 7 % on the
+application log by the same arithmetic. The full assessment of remedy (a),
+generating the loop body per run from option-selected blocks, and remedy (b),
+hoisting per-line option handling, is `analysis.md` § The two remedies, on
+paper: (a) is worth at most the 13 % bound on the default scenario and carries
+the generation machinery, the hoisting of the loop's lexical state and the
+debuggability of an `eval`'d body; (b) is a sequence of small proven-neutral
+changes worth about 1 % each on the access log, in the shape the demand-gate
+pattern already takes, with the hoist probe as its first step.
+
+### Part 4: generalisation
+
+The ScriptLog pair (`ScriptLog.2025-04-09.1.log`, 252,640 lines): base 2.255 s
+(2.229 to 2.291), `gate-40` 2.473 s (2.447 to 2.542), +9.69 %, 22.0 ns per test
+per line. The prediction that the ScriptLog family behaves like the access log
+is confirmed as "the same absolute cost per test per line", which holds on all
+three families (23.0, 22.8, 22.0 ns); the percentage differs because the base
+cost per line differs (11.6 µs on the access log, 7.6 µs on the application log,
+8.9 µs on the ScriptLog), so the application log is the more sensitive family
+in percentage terms on this base, the opposite of the #567 release capture's
+split.
+
+### Findings in the loop's structure
+
+| # | Decision | Site A | Site B | What each does | Observed divergence | Target | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|
+| **F8.1** | The scan-sub cache lookup | `format_scan_sub_resolve` :: `$format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};` | `format_registry_set_occupant` :: `$format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);` | The resolve sub counts cache hits; the occupant swap looks up the cache inline and counts nothing, against the resolve sub's own comment that every order change routes through it | The `scan_sub_cache_hits` telemetry undercounts on any run with an occupant swap; not exercised by a run | The occupant swap calls `format_scan_sub_resolve` | **latent** | #387 (user-defined YAML formats) adds occupants |
+| **F8.2** | The key-length expression | `read_and_process_logs` :: `($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length` (four branches, one runs per retained message) | `group_similar_messages` :: `my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 \|\| $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));` | A run constant recomputed per retained message (one numeric and one string compare, 53 ns per line at the measured rates) and written five times | Identical today (item 7, F7.1) | The per-run cut of item 7's target, computed before the loop | **latent**, *hot path* | #174 |
+| **F8.3** | The CSV data-line sequence | `read_and_process_logs` :: `if ($csv_detected) {` (the steady arm) | `read_and_process_logs` :: `# Confirmed CSV — process line 2 as data` (the lazy-detection confirm arm) | The same sequence (timestamp trim, epoch test, message from `-ucm`, the DATA category, record reset, classify) written twice; only the steady arm guards its epoch test with the line number | Identical today (item 3, F3.6) | One CSV data-line handler | **latent** | #181 |
+| **F8.4** | The per-file detection record's initialiser | `read_and_process_logs` :: `my $fdd = $format_detection{$in_file} //= {` (inside the loop, per matched line, and again after the loop in the per-file telemetry block: the same snippet finds both) | a third copy of the same key list in the detection emitter (`grep -F` on `first_match_line => undef,` finds all three) | Three identical key lists | Identical today | One initialiser sub, called before the loop and by the emitter | **latent** | none |
+| **F8.5** | The Welford update | `read_and_process_logs` :: `my $delta_n  = $delta / $n;` (per message under the bin model, and per bucket) | `merge_bin_state` :: `my $mean_ab = $mean_a + $delta * $n_b / $n_ab;` | Three copies (item 4, F4.12) | Identical today | one update sub | **latent**, *hot path* | #469 |
+| **F8.6** | The string-compare gates | `read_and_process_logs` :: `if ($message_stats_capture_mode eq 'bin') {` (five on the message-stats mode, three on the bucket-stats mode, one each on the heatmap and histogram modes, five on the grouping sensitivity) | `read_and_process_logs` :: `if( $bytes_aggregate_demand ) {` (the boolean form the demand-gate pattern uses) | A string compare costs 30 to 36 ns per line where a boolean costs 23 | Measured: the hoist probe, −1.20 % on the access log at its ceiling | Booleans resolved once, as the hoist probe does; the probe is proven neutral | **diverged** (a measured cost, not a behaviour) , *hot path* | none |
+| **F8.7** | The unguarded user-defined-metric loops | `read_and_process_logs` :: `foreach my $config (@udm_configs) {` (three sites, no outer gate) | `read_and_process_logs` :: `if (@udm_configs && defined $message) {` (the capture gate that does test the list) | Three loop setups over an empty list per line | Measured inside the hoist probe (about one boolean each) | One `if (@udm_configs)` per site, as the probe does | **diverged** (measured), *hot path* | none |
+| **F8.8** | Per-line recomputation of run constants | `read_and_process_logs` :: `my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);` (under `-ms`, per included line) and `my $max_object_length = 25;` (per retained message) | `initialize_empty_time_windows` :: `my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);` (the same value, computed once there) | A value fixed for the run computed per line | Not measured separately (a multiply and an `int`, of the order of one test) | Computed before the loop | **latent**, *hot path* | #525 |
+| **F8.9** | Data-only capture with no option consulted | `read_and_process_logs` :: `if( defined $session && $session ne "" && $session ne "-" ) {` (sessions; users likewise) and `$fd->{sel_match_count}++;` (the per-file record, run under `-ni`) | `adapt_to_command_line_options` :: `$bytes_aggregate_demand = ( !$omit_bytes && (` (the demand-gate shape) | Session and user capture and the two per-file record blocks run on every line regardless of `--hide session`, `--hide user` or `-ni` | About 24 unconditional statements per matched line for the record blocks; the session and user blocks only on lines carrying one | A demand flag per store, in the pattern's shape | **latent**, *hot path* | #60 (configurable metric visibility) |
+
+### Open issues touching this item as a whole
+
+- **#181** (buffered read pipeline, on hold): restructures the loop the
+  measurement characterises; the per-test cost is an input to its design.
+- **#426** (per-message store representation, on hold): changes the per-message
+  block's statements, which are a third of the loop's per-line work on the
+  access log.
+- **#60** (configurable metric visibility, on hold): the demand map it
+  generalises is remedy (b)'s shape.
+- **#387** (user-defined YAML formats): a user-declared format enters the
+  generated scan sub; if remedy (a) were built, it would enter a generated body
+  as well.
+- **#525** (timestamp precision option): touches the millisecond branch F8.8
+  recomputes per line.
+- **#174**, **#469**: as F8.2 and F8.5.
+
+### Questions for the findings discussion, with the evidence bearing on each
+
+- *Is the "about 870 lines" figure restated?* The loop is 1,345 physical lines,
+  830 of them code, at 0.19.0; the sub is 1,619 physical lines. The report uses
+  the loop's figures.
+- *Should session, user and index capture respond to the options that hide or
+  disable their consumers?* About 24 unconditional statements per matched line
+  for the record blocks alone; at the measured rates that is of the order of
+  half a microsecond per line, about 4 % of an access-log line, and it runs
+  under `-ni`.
+- *Is the cache bypass in the occupant swap this item's or the general sweep's?*
+  Recorded here as F8.1; it is a telemetry defect, not a cost.
+- *Are string-compare gates worth converting on their own?* Yes: measured at
+  30 to 36 ns per line against 23 for a boolean, and the hoist probe is a
+  proven-neutral first step worth about 1 % on the access log.
+- *Which remedy?* The measurement's recommendation is (b), as a sequence of
+  small proven-neutral changes each with its own before/after, starting from
+  the hoist probe; (a) is recorded with its bound (about 13 % on the default
+  access-log scenario) for the architect to weigh against its cost.
 
 
 ---
@@ -1698,8 +1792,9 @@ copies, the flags) are worth a generated or hoisted form.
 
 Recorded so the completeness claim is bounded:
 
-- **Item 8** (the per-line loop's structure and cost) is drop 2 and is not in
-  this report yet; its inventory in the scoping pass stands as recorded.
+- **Item 8** measured the every-included-line point only; a test placed on the
+  every-line-read or every-retained-message path was not costed separately, and
+  the per-file record blocks were counted, not measured.
 - **The harnesses' own code** (`tests/`) was read only for what it asserts on
   the surfaces above; duplicated logic inside the harnesses and the shared
   libraries under `tests/lib/` was not audited.
