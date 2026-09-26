@@ -773,79 +773,195 @@ with the audit's additions:
 
 ## Item 4: Aggregation and statistics gating
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four angles were run on the issue
+branch; three candidates are confirmed as diverged by captured runs (the impact
+divisor, the bytes-mean precision on the two CSVs, the formatted zero for a bucket
+with no observation of a metric), one is refined by the runs (the formatted zero
+appears only for a bucket that reached the store initialiser through some other
+metric), and the rest are classified from the captures as latent rule violations
+or restated formulas. Captures are under the session scratchpad (`342/runs4/`
+and `342/runs4-dtb/`); every run passed `--disable-progress`, `-bs 1`, `-ni`,
+`-o` and `-n 5`.
 
-### Summary of the scoping pass
+### Fixtures used by the confirmation runs
 
-26 ratio or derivation sites across 12 subs. Duplicates: count mean has 4 inline copies (per-bucket x2, per-message x2); bytes mean has 4 (per-bucket x2, sort pre-pass, print_message_summary); UDM numeric mean has 3 (per-bucket x2, per-message); duration mean/variance/cv/moments have 2 full copies (calculate_statistics, calculate_statistics_bin); impact mean has 2; the per-file index mean has 6 (3 plus 3 sel_ twins); unclassified percentage has 2. No shared mean or ratio helper exists. Rule violations: 5 defined-over-zero-init or wrong-divisor sites (the impact mean x2, the STATS CSV duration_nice/bytes_nice, the print_bar_graph latency-block OR, and normalize max_total, which is harmless), plus 2 accumulators with no unconditional observation count (raw-mode total_duration, and total_bytes when bytes demand is off).
+- **impact-mixed**: four application-log lines (the shape of
+  `tests/fixtures/numeric-highlight-boundary.txt`, one minute) reading
+  `Processing request <uuid> done`, the first two with `durationMS=100` and
+  `durationMS=300`, the last two with no duration, each with a distinct UUID so
+  that `-g 60` consolidates all four into one row.
+- **bytes-half**: two access-log lines of one path with response sizes 512 and
+  513 (mean 512.5) and durations 10 and 20 ms.
+- **bytes-then-dash**: two access-log lines of one path, one minute apart, the
+  second with `-` for its response size.
+- **duration-then-none**: two application-log lines `Heartbeat ok`, one minute
+  apart, the first with `durationMS=100`, the second carrying no metric at all.
+- **duration-then-bytes-only**: the same, the second line carrying `bytes=60`
+  and no duration.
+- The message-store data models were compared on impact-mixed under `-mdm raw`
+  and `-mdm bin`.
 
-**Shared surface today.** None for mean or ratio derivation: no sub named *mean*, *ratio*, *avg*, *pct* or *div* exists in ltl. The only shared derivation surfaces are calculate_statistics() (raw) and calculate_statistics_bin() (bin) for the duration family, and they are two parallel copies of the same formulas. Every bytes, count and UDM mean is an inline ternary at its site.
+### Search angles run
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+1. **By operator.** Every `/` whose right operand is a count-shaped name
+   (occurrences, a `_count` field, `$n`, a denominator, distinct, classified,
+   included, lines, seen, samples, the bucket width) and every `* 100`: 66
+   lines in 25 subs (`i4-angle1-divisions.txt`). Excluded as geometry: the
+   histogram and heatmap boundary ratios, the bucket-key division, column
+   scaling, the Dice coefficient. What remains is 41 derivation sites in 14
+   subs; no shared mean or ratio helper exists (no sub in `ltl` is named for a
+   mean, ratio, average or percentage).
+2. **By field pair.** Every site of `total_bytes`, `total_duration`,
+   `total_duration_num`, `bytes_occurrences`, `duration_count`, `count_sum`,
+   `count_occurrences`, the per-file `*_sum` and `*_occurrences` pairs, the
+   outcome counters, `_running_mean`, `sum_of_squares` and the user-defined
+   `udm_<name>_sum` and `_occurrences` fields: 194 lines
+   (`i4-angle2-fields.txt`). The increments are all in `read_and_process_logs`
+   (per message, per bucket, per file) plus the roll-ups in
+   `calculate_all_statistics`, `merge_consolidation_stats` and
+   `merge_bin_state`; the initialisers are the two store constructors in
+   `read_and_process_logs`, which zero `total_bytes`, `total_duration` and
+   `sum_of_squares` in both data models and leave every count field except
+   `duration_count` (bin model only) uninitialised.
+3. **By gate.** Every `defined` over a total or a sum in a condition, every
+   postfix `if defined` on a derived assignment, every `|| 1` or `// 1` divisor:
+   22 lines (`i4-angle3-gates.txt`), listed under the findings.
+4. **By surface pair.** The statistics that reach two surfaces were run and
+   their cells compared: the per-message bytes mean (terminal table and
+   MESSAGES CSV against STATS CSV), the per-bucket duration and bytes totals
+   (timeline against STATS CSV), the impact (MESSAGES CSV against the duration
+   mean on the same row), the unclassified percentage (item 2, F2.8).
 
-- **F4.1** Per-bucket vs per-message UDM mean gate: calculate_all_statistics `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` has no defined-sum guard. The per-message copy `(defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;` got it from the #326 fix (commit 6c6b172). The per-bucket copy is safe only because counting configs exit earlier through `next`.
-- **F4.2** Per-bucket UDM mean computed twice in one block: `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` (17514) and `elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0)` (17522) repeat the same division.
-- **F4.3** Per-message count mean, three differently shaped gates: sort pre-pass `( defined $entry->{count_sum} && $entry->{count_occurrences} )` (truthiness), group-calc `defined ... count_sum && defined ... count_occurrences && ... > 0 ... : undef if defined ...{count_occurrences};` (postfix-if leaves the field untouched when the count is absent), per-bucket `count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences}` (no postfix, written in two identical copies at 17434/17456).
-- **F4.4** Per-message bytes mean, precision: sort pre-pass `$entry->{bytes_mean} = $entry->{bytes_occurrences}` keeps full precision (a comment says rounding at rank time would manufacture ties), while print_message_summary `? int( $total_bytes_num / $bytes_occurrences + 0.5 )` rounds to an integer for both the display and the MESSAGES CSV. The per-bucket `bytes_mean    => ... : undef,` keeps full precision. So the STATS CSV bytes_mean is fractional and the MESSAGES CSV bytes_mean is an integer.
-- **F4.5** Duration-mean divisor: calculate_statistics `my $mean = $bucket_data->{total_duration} / $duration_count;` and calculate_statistics_bin `/ $n` divide by the duration observation count, while the impact means in read_and_process_logs (`.../ $log_messages{$category}{$log_key}{occurrences};`) and group_similar_messages (`my $mean = $entry->{total_duration} / $entry->{occurrences};`) divide by all matched lines. This is the defect shape #432 (bytes aggregate parity) F1 found and fixed for mean_bytes, still present for the impact mean.
-- **F4.6** Impact gate: the read-loop copy gates on the current line's `if( $duration > 0 )`; the consolidation copy gates on `defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0`. Same quantity, different guards.
-- **F4.7** Raw vs bin duration statistics: calculate_statistics gates `return unless $occurrences > 0;` then a non-empty durations[]; calculate_statistics_bin gates `($sidecar_entry->{occurrences} // 0) > 0` then `$n > 0`. The mean, variance (sum_of_squares - n*mean^2)/(n-1), cv and moment formulas are restated in both.
-- **F4.8** Per-file index vs everything else: write_index_file formats means inline as `sprintf("%.2f", ...)` with '-' for no data; every other surface yields undef and formats through format_csv_value. Its bytes pair also mixes names: `$fd->{bytes_sum}    / $fd->{file_bytes_occurrences}`.
-- **F4.9** Unclassified percentage derived twice: emit_format_detection_verbose `unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0')` and emit_classification_percentage_notices `my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';`, from different inputs (globals vs the reconciliation record).
+### Findings
 
-### Site inventory (scoping pass)
+| # | Derived quantity | Site A | Site B (further copies in the note) | Gate, divisor, precision at each | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F4.5** | The impact mean's divisor | `read_and_process_logs` :: `my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};` | `group_similar_messages` :: `my $mean = $entry->{total_duration} / $entry->{occurrences};` (the same divisor after consolidation) against `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;` and `calculate_statistics_bin` :: `my $mean = $sidecar_entry->{total_duration} / $n;` | Impact divides the duration total by every matched line; the duration mean divides by the lines that carried a duration. Impact is `log(mean ** 7 * occurrences)` | Fixture impact-mixed, `-g 60 -so impact`: the consolidated row's MESSAGES CSV cells read `occurrences=4`, `duration=400`, `duration_mean=200` and `impact=33.622`. The impact's own mean for that row is 400 / 4 = 100; the same formula over the duration mean the row reports (200) gives 38.475. The row is ranked as if its requests took half as long as its own mean column says | One derivation of a per-message mean with the observation count as divisor, shared by the impact and the statistics subs; impact recomputed from it | None on record defines impact's divisor. `features/432-metric-aggregate-naming-parity.md` F1 (as corrected in the specification § 3 item 10) fixed this divisor shape for the bytes mean and is the precedent | **diverged**, *hot path* | #426 (per-message store representation, on hold) rewrites every per-message accumulator read, including both impact sites. #469 (consolidated histograms on a shared grid) changes what `group_similar_messages` carries into the recompute |
+| **F4.4** | The per-message bytes mean's precision | `print_message_summary` :: `? int( $total_bytes_num / $bytes_occurrences + 0.5 )` | `calculate_all_statistics` :: `bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,` (per bucket, full precision, then `format_csv_value` at zero decimals), and `calculate_all_statistics` :: `$entry->{bytes_mean} = $entry->{bytes_occurrences}` (the sort pre-pass, full precision) | A rounds half up to an integer before the value reaches the CSV; B keeps the fraction and the CSV formatter rounds half to even | Fixture bytes-half: the MESSAGES CSV `bytes_mean` reads `513`, the STATS CSV `bytes_mean` for the one bucket holding the same two lines reads `512`. Two integers for one mean of 512.5, differing by the rounding rule of the copy | The per-message mean stored at full precision (as the sort pre-pass already does) and rounded only by `format_csv_value` on both CSVs | `features/432-metric-aggregate-naming-parity.md` D5 (bytes gains the full basic family on both CSV surfaces) says nothing about precision; `features/561-retained-durations-as-numbers.md` (storage stays precise) is the pattern | **diverged** | #273 (store precise, format at the rendering boundary) records the same shape for the duration total; this is its bytes twin |
+| **F4.10** | A total projected from a zero-initialised field | `read_and_process_logs` :: `total_duration => 0,` (both store constructors; `total_bytes => 0,` beside it) and `calculate_all_statistics` :: `duration      => $log_analysis{$bucket}{total_duration},` (ungated, twice; `bytes         => $log_analysis{$bucket}{total_bytes},` likewise) | `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),` and its bytes twin `(defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}, 'B') : undef),` (the STATS `_nice` cells); the timeline's total column reads the same projection | The store zeroes the totals; the projection copies them without an observation gate; the cell tests `defined`, which a zero passes | Fixture duration-then-bytes-only: the bucket whose only line carries bytes and no duration writes `duration_nice=0 msec`, `duration=0`, `duration_mean=` (empty) and the timeline shows `0 milliseconds`. Fixture bytes-then-dash: the bucket whose only line carries `-` for bytes writes `bytes_nice=0 B`, `bytes=0`, `bytes_occurrences=` (empty) and the timeline shows `0 B`. A reader cannot tell a zero total from no observation, while the mean beside it says "none". Fixture duration-then-none, whose second line carries no metric at all, writes empty cells for both, because that line's bucket never reached the store constructor and the total was never zeroed | The totals gated on their observation counts at projection (`duration_count` or the retained array's length; `bytes_occurrences`), as the CLAUDE.md rule requires, so a bucket with no observation carries `undef` and the cell is empty | CLAUDE.md § Before writing or changing code (derived output gated on `count > 0`, never on `defined` over a zero-initialised field); `features/516-bytes-aggregate-demand-gate.md` D2 (absence-tolerant reads) | **diverged** | #514 (count metric explicit) adds or removes a total of this shape; #426 changes the store constructors |
+| **F4.11** | Accumulators without an unconditional observation count | `read_and_process_logs` :: `if( $e->{bytes_occurrences}++ ) {` (incremented under `if( $bytes_aggregate_demand )`, per message and per bucket) | `read_and_process_logs` :: `$e->{total_bytes} += $bytes;` (unconditional, same block); the raw-model duration total `$log_messages{$category}{$log_key}{total_duration} += $duration;` with no count field in that model (`duration_count` exists in the bin model only; the raw model has `scalar @{ durations }`) | The total accumulates on every line carrying the metric; the count only when a consumer demanded the aggregate family | Observable as F4.10's `bytes_occurrences=` (empty) beside `bytes=0` in bytes-then-dash; and as the divisor question in F4.5, where the raw model has no count to divide by except the retained array's length | Every accumulator keeps its observation count unconditionally (one integer per store entry), and the demand gate governs the min, mean and max only | CLAUDE.md rule (every accumulator tracks an observation count); `features/516-bytes-aggregate-demand-gate.md` D1 (one store-level demand flag) and D2 | **latent** (the reads compensate today), *hot path* | #516 is closed; #426 rewrites the store; #514 touches the count family's counts |
+| **F4.3** | The per-message count mean's gate | `calculate_all_statistics` :: `$entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )` (sort pre-pass: truthiness) | `calculate_all_statistics` :: `: undef if defined $log_messages{$category}{$log_key}{count_occurrences};` (group calculation: the postfix leaves the field untouched when the count is absent) and `calculate_all_statistics` :: `count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences}` (per bucket, twice, word for word) | Three gate shapes for one derivation, four copies | Identical in effect today (no path sets a stale value for the postfix to preserve); the neighbouring `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};` is a self-assignment that does nothing | One `mean_of($sum, $count)` helper with the gate inside, called at all four sites | CLAUDE.md rule | **latent** | #514 (count metric explicit) is the change that would otherwise touch all four |
+| **F4.1 / F4.2** | The per-bucket user-defined mean | `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` (no defined-sum guard; the same division four lines later in `elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0)`) | `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;` (the #326 fix, per message) | The per-message copy gained a defined-sum guard from #326; the per-bucket copy relies on counting aggregations leaving the loop earlier, and computes the mean twice | Identical today | The same helper as F4.3, and the display value read from the stored mean | `features/user-defined-metrics.md` § Known Issues (#326) | **latent** | none |
+| **F4.7** | Duration mean, variance, CV and moments | `calculate_statistics` :: `my $sum_sq_dev = $bucket_data->{sum_of_squares} - $duration_count * ($mean ** 2);` | `calculate_statistics_bin` :: `my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);` (and `my $m2 = $sidecar_entry->{m2_sum} / $n;` against `my $m2 = $m2_sum / $n;`) | The raw and bin subs restate the same formulas over two store shapes; the gates differ in spelling (`occurrences > 0` then a non-empty array; `occurrences // 0 > 0` then `duration_count > 0`) | Identical on impact-mixed under `-mdm raw` and `-mdm bin` (means 100 and 300, no dispersion on single observations); the drift engine of `validate-statistics` holds them equal on the corpus | One statistics sub taking the count, sum, sum of squares and moment sums, with the raw and bin paths supplying them; percentiles stay per model | `features/duration-statistics.md` § Stores and primitives; `features/293-precision-lever-unification.md` | **latent** | #426 (store representation) and #354 (bin model memory, on hold) both change the store shapes these two subs read |
+| **F4.6** | The impact gate | `read_and_process_logs` :: `if( $duration > 0 ) {` | `group_similar_messages` :: `if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {` | The read loop gates on the current line's duration; the recompute gates on `defined` over the zero-initialised total (always true), then two positive tests | Identical in effect; the `defined` is the rule-violating shape | Folded into F4.5's target | as F4.5 | **latent** | as F4.5 |
+| **F4.12** | Welford's running mean | `read_and_process_logs` :: `my $delta_n  = $delta / $n;` (per message under the bin model, and again per bucket) | `merge_bin_state` :: `my $mean_ab = $mean_a + $delta * $n_b / $n_ab;` | Three copies of the update, two of them in the loop with the same text | Identical today | One `welford_update($entry, $value)` for the two loop copies (item 8 lists the pair as a loop-structure finding) | `features/189-histogram-bin-counter-primitives.md` | **latent**, *hot path* | #469 (shared bucket grid) changes what the merge copy combines |
+| **F4.13** | Column-scaling maxima and the latency block | `normalize_data_for_output` :: `$max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration}` (and `$log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 )` with its `-HL` twin) | `print_bar_graph` :: `if( defined $log_stats{$bucket}{bytes} \|\| defined $log_stats{$bucket}{p50}` | Both test `defined` over the zero-initialised totals: harmless for a maximum, and an always-true first disjunct for the latency block | No observable consequence: a zero maximum scales nothing and the latency block's other disjuncts decide | Same gate as F4.10 | CLAUDE.md rule | **latent** | none |
+| **F4.14** | A substitute divisor | `pipeline_finalize` :: `(1 - $final_remaining / ($keys_seen || 1)) * 100);` (twice) and `pipeline_finalize` :: `($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);` | `run_consolidation_checkpoint` :: `my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;` (gated) | The reduction percentage substitutes 1 for a zero count; its neighbours gate | `-V` consolidation diagnostics only: a run with no keys prints a reduction of 100 percent | Gate as the neighbours do | CLAUDE.md rule | **latent** (diagnostic only) | none |
+| **F4.8** | The per-file index means | `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';` | `calculate_all_statistics` :: `bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,` | Six gated means (compliant) formatted inline with a `-` sentinel, apart from every other mean; the field names mix (`bytes_sum` over `file_bytes_occurrences`) | Item 2, F2.13 (`128.75` against `129`) | The same helper as F4.3, formatted by `format_csv_value` (F2.13's target) | none | **latent** (precision is F2.13) | none |
 
-- `calculate_all_statistics` :: `count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences}` :: Per-bucket count mean (count_sum / count_occurrences) projected into %log_stats. Gate: defined sum AND defined occ AND occ > 0. The expression appears twice, word for word, at 17434 and 17456 (the duration-stats branch and the no-duration else-branch of the same $log_stats{$bucket} = {...} build). count_sum/count_occurrences are not zero-initialised in %log_analysis, so the gate is compliant. No helper.
-- `calculate_all_statistics` :: `bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,` :: Per-bucket bytes mean (total_bytes / bytes_occurrences), full precision. Gate: truthiness of bytes_occurrences, which equals count > 0 for a non-negative integer. A second copy sits at 17461 in the else-branch (the same text without the trailing comma). bytes_occurrences is only incremented under $bytes_aggregate_demand (#516, bytes aggregate family captured only on demand), so with demand off the count is absent while total_bytes still accumulates. No helper.
-- `calculate_all_statistics` :: `bytes         => $log_analysis{$bucket}{total_bytes},` :: Per-bucket bytes total projected with no gate from a field zero-initialised when the bucket is created in read_and_process_logs (total_bytes => 0). This also happens at 17447, and for duration at 17427/17449 (duration      => $log_analysis{$bucket}{total_duration}, which is also zero-initialised). The -HL twins ('bytes-HL', 'duration-HL', 'count-HL') are projected without a gate from fields that exist only when a highlighted line carried the metric.
-- `calculate_all_statistics` :: `elsif ($agg eq 'ratio')    { $display_value = $occ / $distinct; }` :: Per-bucket UDM counting aggregations: ratio = occ/distinct, rate = occ/bucket_seconds*multiplier, drate = distinct/bucket_seconds*multiplier. Gate: defined $occ && $occ > 0 (compliant; a comment states the invariant that distinct >= 1 whenever occ > 0).
-- `calculate_all_statistics` :: `elsif ($agg eq 'ratio')    { $hl_value = $occ_hl / $distinct_hl; }` :: -HL twin of the counting ratio/rate/drate. Gate: defined $occ_hl && $occ_hl > 0 (compliant).
-- `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` :: Per-bucket UDM numeric mean (udm_<name>_sum / udm_<name>_occurrences) stored as udm_<name>_mean. Gate: defined occ && occ > 0, with no defined-sum guard; it relies on counting configs having left the loop earlier through `next`. This is the per-bucket sibling of the #326 (uninitialised-value warning in a UDM full-pattern run) fix.
-- `calculate_all_statistics` :: `elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0)` :: Per-bucket UDM display value for -udm ...:mean. Recomputes the same division as 17514, four lines above, instead of reading the stored udm_<name>_mean. Same gate. The -HL twin for mean is hard-coded to undef.
-- `calculate_all_statistics` :: `$entry->{bytes_mean} = $entry->{bytes_occurrences}` :: Per-message bytes mean in the sort pre-pass (only when -so bytes_mean), full precision. Gate: truthiness of bytes_occurrences. This is a second derivation of the per-message bytes mean; the display derivation is in print_message_summary.
-- `calculate_all_statistics` :: `$entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )` :: Per-message count mean in the sort pre-pass (only when -so count_mean). Gate: defined sum && truthy occ. The gate is shaped differently from the group-calc copy at 17901.
-- `calculate_all_statistics` :: `: undef if defined $log_messages{$category}{$log_key}{count_occurrences};` :: Per-message count mean in the group-calc loop, top keys only. Gate: defined sum && defined occ && occ > 0, wrapped in a postfix `if defined count_occurrences`, so a key with no count observations keeps whatever was there (possibly a sort-pre-pass value) rather than being set to undef. Neighbouring lines hold self-assignments that do nothing (count_occurrences = count_occurrences if defined ...).
-- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;` :: Per-message UDM mean. This is the #326 fix (commit 6c6b172, merged via PR #336): `next if agg_kind eq 'counting'` plus the added defined-sum guard. The gate differs from the per-bucket sibling at 17514.
-- `calculate_all_statistics` :: `$duration_observed ||= ( ($log_messages{$category}{$log_key}{total_duration} // 0) > 0 );` :: Per-message duration-observed gate (the #330 fix, which stops a 0-initialised total_duration reading as observed). Primary gate: duration_count > 0 (bin mode) or a non-empty durations[] (raw mode), with a fallback on a positive total. It decides whether total_duration/total_duration_num and the statistics are written to the message.
-- `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;` :: Duration mean, std_dev and cv for raw-mode buckets and messages. Gate: occurrences > 0, then a non-empty durations[]; the divisor is duration_count = scalar @sorted (compliant). Variance divides by duration_count - 1 under a >= 2 guard; cv is gated on mean != 0; the moment ratios (m2/m3/m4 over n) have their own n guards.
-- `calculate_statistics_bin` :: `my $mean = $sidecar_entry->{total_duration} / $n;` :: Bin-mode twin of calculate_statistics: the same mean/variance/cv/moment derivations, restated. Gate: occurrences // 0 > 0, then n = duration_count // 0 > 0 (compliant). The formulas are duplicated rather than shared with the raw path.
-- `read_and_process_logs` :: `my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};` :: Per-message running 'impact' mean, computed in the hot loop. Gate: the current line's $duration > 0. The divisor is occurrences (all matched lines), not the duration observation count.
-- `group_similar_messages` :: `if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {` :: Recomputes impact after consolidation (my $mean = $entry->{total_duration} / $entry->{occurrences}; at 11090). Gate: defined total_duration (always true, because the field is 0-initialised) && occurrences > 0 && total > 0. Same occurrences divisor as the read-loop copy.
-- `merge_bin_state` :: `my $mean_ab = $mean_a + $delta * $n_b / $n_ab;` :: Combines Welford running means and moments during consolidation. Gate: return if n_b == 0, and a separate branch when n_a == 0 (count-gated, compliant).
-- `print_message_summary` :: `? int( $total_bytes_num / $bytes_occurrences + 0.5 )` :: Per-message bytes mean for the terminal table and the MESSAGES CSV, rounded to an integer. Gate: bytes_occurrences truthy. total_bytes_num is also gated on bytes_occurrences (the #432 fix to the zero-initialised total_bytes).
-- `normalize_data_for_output` :: `$log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;` :: Per-bucket success/failure percentages. Gate: bucket_classified > 0 (or a conflict present) and no disqualified lines; otherwise it falls back to counts (success_pct_count). Compliant.
-- `normalize_data_for_output` :: `$log_occurrences{$bucket}{'err-rate'}{occurrences} = $error_occurrences / $bucket_size_seconds` :: Per-bucket error and message rates. The denominator is the bucket width constant; the numerators default to 0 (// 0). No count gate needed or present; gated only by !$omit_rate.
-- `normalize_data_for_output` :: `$max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration}` :: Column scaling maxima for bytes, duration and count. Gate: defined, over zero-initialised bytes/duration totals. Harmless for a max, but it is the defined-over-zero-init shape.
-- `print_bar_graph` :: `if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50}` :: Terminal latency-cell block. The first disjunct is defined over bytes = total_bytes, which is zero-initialised for every bucket that has lines, so this OR is always true for such buckets.
-- `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}` :: STATS CSV duration_nice cell. Gate: defined over zero-initialised total_duration, so a bucket whose lines carried no duration writes a formatted zero rather than an empty cell. The bytes_nice twin at 19951 (defined ... ? format_bytes(...)) has the same shape over zero-initialised total_bytes.
-- `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0` :: Per-file index means: duration, file_bytes and count at 6844-6846 and the sel_ twins at 6863-6865. Gate: occurrences > 0 over fields zero-initialised at 14975/14982 (compliant). Formatted inline with sprintf('%.2f') and '-' for no data, separately from every other mean. Naming mismatch: bytes_sum / file_bytes_occurrences.
-- `classification_reconciliation` :: `success_pct    => ($eligible && $classified) ? $total_successes / $classified * 100 : undef,` :: Run-level success/failure percentages. Gate: eligible && classified (truthiness of a count, compliant).
-- `emit_classification_percentage_notices` :: `my $leak_pct = $r->{included} ?` :: Unclassified-leak percentage for the notice. Gate: truthiness of included. emit_format_detection_verbose computes unclassified_pct at 5350 as a parallel derivation with the same shape (gate $total_lines_included ?).
-- `read_and_process_logs` :: `my $delta_n  = $delta / $n;` :: The Welford running mean (_running_mean = mean + delta/n, n = duration_count + 1) is updated in the hot loop in two copies: the per-message copy under -mdm bin (hint 16059) and the per-bucket copy under -bdm bin (hint 16196). Both are gated on $n_old == 0 (count-gated, compliant). merge_bin_state holds a third copy of this derivation (its $mean_ab line). The inventory lists only the merge copy. *(added by the verifier)*
-- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,` :: Category and row share percentage in the summary table. Called from print_summary_table (share_row_text( $category_label, ... and share_row_text( $label, $n, $denominator )). Gated on the truthiness of $denominator. The inventory does not list it. *(added by the verifier)*
-- `emit_format_detection_verbose` :: `? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)` :: Mean scan time per unmatched line in -V (nomatch_scan_avg_us), from a sum/count pair. Gated on the truthiness of the sample count; '-' when there is no data. *(added by the verifier)*
-- `sample_file_for_detection` :: `$obs->{avg_line} = $obs->{lines} ? int($line_bytes / $obs->{lines} + 0.5) : 0;` :: Mean line length per detection sample part, rounded to an integer. Gated on the truthiness of lines; yields 0 rather than undef when there is no data. *(added by the verifier)*
-- `run_consolidation_checkpoint` :: `my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;` :: Consolidation absorption rate that feeds the eviction moving average. Gated on count > 0; yields 0 when there is no data. *(added by the verifier)*
-- `group_similar_messages` :: `next if ($absorbed / $seen) > $consolidation_skip_absorption;` :: Per-category streaming absorption ratio used in the decision to skip the final pass. Guarded by `next unless $seen > 0;` on the line above (count-gated). *(added by the verifier)*
-- `pipeline_finalize` :: `(1 - $final_remaining / ($keys_seen || 1)) * 100);` :: -V consolidation diagnostics: a reduction percentage (two copies, hints 21925 and 21930) and the s3 checkpoint share `(($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100` gated on s3_calls > 0. The reduction copies divide by `|| 1`, which substitutes a fake divisor instead of gating. *(added by the verifier)*
-- `normalize_data_for_output` :: `$log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 )` :: Scales a column value against its maximum, with an -HL twin on the next line. Gated on defined over the zero-initialised bytes and duration totals (the defined-over-zero-init shape) plus max != 0. The occurrences twin gates on `$max_total{occurrences} != 0`. *(added by the verifier)*
+Sites audited and closed as **deliberate** or compliant:
+
+- Every gate on a count field (`bytes_occurrences ?`, `count_occurrences > 0`,
+  `$n > 0`, `$eligible && $classified`, `$denominator`, `$pre_count > 0`,
+  `$seen > 0`, `$max_memory_usage > 0`) is compliant with the CLAUDE.md rule and
+  is listed in the inventory without a finding.
+- The per-bucket success and failure percentages
+  (`normalize_data_for_output` :: `$log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;`)
+  and the run-level ones (`classification_reconciliation`) derive the same
+  quantity from two populations by design
+  (`features/452-success-failure-percentage-columns.md`).
+- The error and message rates divide by the bucket width, a run constant, and
+  need no gate (`normalize_data_for_output` :: `$log_occurrences{$bucket}{'err-rate'}{occurrences} = $error_occurrences / $bucket_size_seconds * $rate_multiplier{$rate_unit};`).
+- The counting-aggregation ratio and rate derivations
+  (`calculate_all_statistics` :: `elsif ($agg eq 'ratio')    { $display_value = $occ / $distinct; }`)
+  are gated on `$occ > 0` with a stated invariant that `distinct >= 1` then.
+- `merge_bin_state` is count-gated (`return` on `n_b == 0`, a branch for
+  `n_a == 0`).
+
+### Open issues touching this item as a whole
+
+- **#426** (per-message statistics store as parallel arrays, on hold): every
+  per-message derivation site in this item reads the store it would replace;
+  a shared mean helper landing first gives it one site to retarget per quantity.
+- **#469** (consolidated message histograms on a shared bucket grid): changes
+  what `merge_bin_state` and the consolidation recompute (F4.5, F4.12) combine.
+- **#273** (store precise, format at the rendering boundary): F4.4 is the same
+  shape for the bytes mean.
+- **#514** (count metric capture explicit, `next-up`): the count family's four
+  mean copies (F4.3) and its totals (F4.10, F4.11).
+- **#354** (bin model memory on singleton-dominated logs, on hold): changes the
+  bin store shape `calculate_statistics_bin` reads (F4.7).
+- **#535** (normalised rates diverge at fine bucket widths): a research issue
+  on the rate derivation's meaning, not its copies; informational.
+
+### Site inventory
+
+Carried from the scoping pass (*(scoping)*; its eight verifier additions
+included) with the audit's additions:
+
+- `calculate_all_statistics` :: `count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences}` :: per-bucket count mean, twice. *(scoping)*
+- `calculate_all_statistics` :: `bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,` :: per-bucket bytes mean, twice. *(scoping)*
+- `calculate_all_statistics` :: `bytes         => $log_analysis{$bucket}{total_bytes},` :: ungated projections of the zeroed totals (with `duration      => $log_analysis{$bucket}{total_duration},` and the `-HL` twins). *(scoping)*
+- `calculate_all_statistics` :: `elsif ($agg eq 'ratio')    { $display_value = $occ / $distinct; }` and `elsif ($agg eq 'ratio')    { $hl_value = $occ_hl / $distinct_hl; }` :: counting aggregations. *(scoping)*
+- `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` and `elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0)` :: per-bucket user-defined mean, twice. *(scoping)*
+- `calculate_all_statistics` :: `$entry->{bytes_mean} = $entry->{bytes_occurrences}` and `$entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )` :: the sort pre-pass. *(scoping)*
+- `calculate_all_statistics` :: `: undef if defined $log_messages{$category}{$log_key}{count_occurrences};` :: the group-calculation count mean. *(scoping)*
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};` :: a self-assignment. *(audit)*
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;` :: the #326 site. *(scoping)*
+- `calculate_all_statistics` :: `$duration_observed ||= ( ($log_messages{$category}{$log_key}{total_duration} // 0) > 0 );` :: the #330 observed gate. *(scoping)*
+- `calculate_all_statistics` :: `$aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if defined $log_messages{$category}{$log_key}{total_bytes};` :: a roll-up gated on `defined` over a zeroed field. *(audit)*
+- `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;` :: raw-model duration statistics. *(scoping)*
+- `calculate_statistics_bin` :: `my $mean = $sidecar_entry->{total_duration} / $n;` :: bin-model twin. *(scoping)*
+- `read_and_process_logs` :: `my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};` :: impact in the loop; `$impact_time_exponent` is 7 at file scope. *(scoping)*
+- `read_and_process_logs` :: `total_duration => 0,` :: the store constructors (message and bucket, both models). *(audit)*
+- `read_and_process_logs` :: `if( $e->{bytes_occurrences}++ ) {` and `$e->{total_bytes} += $bytes;` :: the demand-gated count beside the unconditional total. *(audit)*
+- `read_and_process_logs` :: `$fd->{duration_occurrences}++;` :: the per-file pairs (unconditional counts). *(audit)*
+- `read_and_process_logs` :: `my $delta_n  = $delta / $n;` :: the Welford update, twice. *(scoping)*
+- `group_similar_messages` :: `if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {` :: the impact recompute. *(scoping)*
+- `merge_bin_state` :: `my $mean_ab = $mean_a + $delta * $n_b / $n_ab;` *(scoping)*
+- `merge_consolidation_stats` :: `$target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};` :: the consolidation roll-up, `defined` over a zeroed field. *(audit)*
+- `print_message_summary` :: `? int( $total_bytes_num / $bytes_occurrences + 0.5 )` *(scoping)*
+- `normalize_data_for_output` :: `$log_stats{$bucket}{success_pct} = ($bucket_outcome->[1] // 0) / $bucket_classified * 100;` *(scoping)*
+- `normalize_data_for_output` :: `$log_occurrences{$bucket}{'err-rate'}{occurrences} = $error_occurrences / $bucket_size_seconds * $rate_multiplier{$rate_unit};` *(scoping)*
+- `normalize_data_for_output` :: `$max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration}` and `$log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 )` *(scoping)*
+- `print_bar_graph` :: `if( defined $log_stats{$bucket}{bytes} || defined $log_stats{$bucket}{p50}` *(scoping)*
+- `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),` :: the STATS nice cells. *(scoping)*
+- `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';` *(scoping)*
+- `classification_reconciliation` :: `success_pct    => ($eligible && $classified) ? $total_successes / $classified * 100 : undef,` *(scoping)*
+- `emit_classification_percentage_notices` :: `my $leak_pct = $r->{included} ?` and `emit_format_detection_verbose` :: `? sprintf('%.1f', $format_scan_nomatch_sample_us / $format_scan_nomatch_samples)` *(scoping)*
+- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,` *(scoping)*
+- `sample_file_for_detection` :: `$obs->{avg_line} = $obs->{lines} ? int($line_bytes / $obs->{lines} + 0.5) : 0;` *(scoping)*
+- `run_consolidation_checkpoint` :: `my $absorption_rate = $pre_count > 0 ? $absorbed / $pre_count : 0;` and `group_similar_messages` :: `next if ($absorbed / $seen) > $consolidation_skip_absorption;` *(scoping)*
+- `pipeline_finalize` :: `(1 - $final_remaining / ($keys_seen || 1)) * 100);` *(scoping)*
+- `print_summary_table` :: `my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;` :: the memory share, gated. *(audit)*
 
 ### Verification notes
 
-Sites reported 26, confirmed 26, refuted 0 (corrected above), added by the verifier 8, owning docs refuted 0.
+- Every snippet resolves to its enclosing sub. The scoping pass's line hints
+  are dropped.
+- The scoping pass's claim that a STATS bucket with lines but no duration
+  observation writes a formatted zero is confirmed only for a bucket whose
+  lines carried some other metric (F4.10); a line carrying no metric at all
+  produces empty cells. The audit records both fixtures so the condition is
+  not overstated.
+- The scoping pass's F4.4 ("fractional against integer") is sharpened by the
+  run: both CSVs write integers at the default precision, and they differ by
+  their rounding rules.
+- The `-mdm raw` against `-mdm bin` comparison on the four-line fixture cannot
+  exercise the dispersion formulas (single observations); the restatement
+  finding F4.7 rests on reading and on the drift engine's coverage, and is
+  latent.
 
-- All 26 snippets were found inside the named subs. The line hints match exactly: count_mean at 17434/17456, bytes_mean at 17439/17461, the bytes/duration projections at 17425/17447, and the rest.
-- Every owning doc path and cited heading exists: user-defined-metrics.md (Data Model, Per-Message Storage, Statistics, Highlight Behavior by Aggregation, Known Issues > Resolved), 432 (F1, Locked decisions, D5 at heading line 140, Status > Found and fixed while implementing), 516 (Decisions > D1, D2), 426 (Findings from the investigation (2026-08-24), which does mention the #330 observed-vs-defined gate at line 214), duration-statistics.md (Stores and primitives, Demand model). custom-metrics-record-count-stats.md and docs/explain/statistics.md exist; the inventory made no heading claims for them. All 8 harness files exist.
-- Commit 6c6b172 exists: 'Issue #326: skip counting-aggregation UDMs in per-message mean derivation'.
-- The claim that the #432 F1 doc is stale holds: features/432-metric-aggregate-naming-parity.md line 81 still quotes '# BUG/ WRONG!!! below assumes all lines have bytes', and that comment is no longer in ltl.
-- The claim that raw mode has no duration count holds. duration_count is assigned only inside the `$message_stats_capture_mode eq 'bin'` and `$bucket_stats_capture_mode eq 'bin'` branches of read_and_process_logs, and in merge_bin_state.
-- The bytes-demand claim holds. The per-message ($e = $log_messages{...}) and per-bucket ($e = $log_analysis{$bucket}) increments of bytes_occurrences both sit under `if( $bytes_aggregate_demand )`, while total_bytes accumulates outside that gate. The per-file index counter file_bytes_occurrences is unconditional.
-- Count summary: the Welford running-mean derivation has 3 copies (two in read_and_process_logs, one in merge_bin_state), not 1. Adding the missed sites above brings the ratio-site total to 34 or more. There are also 2 more defined-over-zero-init sites: the normalize_data_for_output scaled_key and its -HL twin.
-- The rule-violation list should add the pipeline_finalize `($keys_seen || 1)` divisor, which substitutes 1 for a zero count instead of gating on it (a -V diagnostic only).
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Is the impact mean intentionally weighted by all matched lines?* The
+  consolidated row shows the effect: a mean of 100 inside impact beside a
+  reported mean of 200. If intentional, it is a different statistic from the
+  mean and its doc should say so; if not, it is the #432 F1 divisor defect for
+  duration, and the audit recommends it is filed as a bug.
+- *Should a STATS bucket with no observation of a metric write an empty cell?*
+  Two fixtures show `0 msec` and `0 B` beside empty means and counts.
+- *Is the MESSAGES integer bytes mean against the STATS integer bytes mean a
+  sanctioned difference?* `513` against `512` for one pair of lines is a
+  rounding-rule difference, not a precision choice; the audit recommends one
+  path through `format_csv_value`.
+- *Does the CLAUDE.md rule require unconditional counts?* `bytes_occurrences`
+  is absent while `total_bytes` is zero in the same row; the rule as written
+  says the count is always tracked. The demand gate can keep governing the min,
+  mean and max.
+- *Should the raw and bin statistics converge on one sub?* The formulas are the
+  same text over two shapes; the harness already proves them equal, so the
+  convergence is a maintenance change with a behaviour-neutral proof available.
 
 
 ---
