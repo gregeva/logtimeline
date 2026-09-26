@@ -219,6 +219,9 @@ about anything else, these still hold.
 - [ ] Grep for the domain nouns first. One resolution surface per vocabulary:
       parsing, matching, validation and formatting of a value class call the
       existing sub. Near-duplicates found on the way are converged in the same change.
+- [ ] Consult `docs/architecture-patterns.md` for a pattern that fits before
+      building. A change that adds a consumption site of a pattern, or
+      introduces a new one, records it there in the same commit.
 - [ ] Every accumulator tracks an observation count; derived output is gated on
       `count > 0`, never on `defined` over a zero-initialised field.
 - [ ] Any ` at <file> line <N>` on `ltl`'s stderr is a bug. Every harness that
@@ -298,6 +301,7 @@ about anything else, these still hold.
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
 | Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `build/screenshots.yaml`, generated, never captured or edited by hand) |
+| Building on, or adding to, a recurring mechanism (a registry, a gate, a generated sub, the layout, a notice) | `docs/architecture-patterns.md` |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
 | Heatmap and histogram | `features/heatmap.md`, `features/histogram-charts.md`, `docs/explain/` |
