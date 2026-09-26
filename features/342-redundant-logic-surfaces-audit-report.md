@@ -25,6 +25,59 @@ of *diverged*, *latent*, *identical by construction* or *deliberate*; *hot path*
 marks a benchmark obligation for whichever issue fixes the finding. Priority ranks
 by divergence risk, then user-visible consequence, then number of copies.
 
+## Review progress
+
+The review of this report's 87 findings is a large piece of work done over
+several sessions. This section is its persisted state: the stages, their order
+and the reason for it, and the status of each. It is updated in the same action
+as any decision taken in the review, so the next session starts from what is
+written here and not from memory. The ordering is a proposal; the architect
+decides each stage, and a decision is recorded in the *Decision* column with the
+issue numbers it produced, or with "no issue" and the reason.
+
+**How to update.** Change a stage's *Status* to *in discussion* when it is opened,
+to *decided* when every finding in it has a disposition (an issue filed, folded
+into another issue, deferred with a reason, or closed as deliberate), and to
+*done* when the issues it produced are closed. Write the issue numbers into
+*Decision* as they are filed. A stage split or merged in discussion is rewritten
+here in the same action.
+
+**Order and its reasons.** Bugs first, because each is user-visible, confirmed by
+a captured run, and fixable without the convergence it also belongs to. Then the
+convergence groups in an order set by two things: a group whose fix an open
+`next-up` issue would otherwise multiply comes before that issue (the unit
+ladders before #605; the metric vocabulary before #581, #601 and #582; the
+bound set before #605; the CSV declaration before #514), and a group that
+depends on a bug's fix comes after that bug (the timestamp guard policy after
+F3.2, F3.3 and F3.10; the mean helper after F4.5). The item 8 remedies come after
+the hoistable groups, because the hoist steps are the same changes. The patterns
+file's *needs refinement* entries close last, because each refinement is one of
+the groups above landing.
+
+| Stage | Scope (findings, by what they found) | Order reason | Status | Decision |
+|---|---|---|---|---|
+| 1. Bugs | The ten confirmed bugs in *Grouping by target sub*: the nondeterministic byte unit (F1.12), the swallowed `-hg` warning (F1.17), the run-aborting dates (F3.2), the 1970 bucket (F3.3), the `-st`/`-et` `T` value (F3.10), the impact divisor (F4.5), the 513/512 bytes mean (F4.4), the `.122` timestamp (F2.11), the benchmark key length (F7.4), the `day-alt` text (F1.18) | user-visible, run-confirmed, independent of convergence | not started | |
+| 2. Unit ladders | one byte ladder and value-based climb (F1.12, F2.6), help-row literals (F1.13), the two decimals tables (F2.5) | before #605, which adds readers | not started | |
+| 3. Metric, field and identifier vocabulary | the `time` alias (F1.1), case folding (F1.2), key spellings (F1.3), token-key fallback (F1.4), unknown-metric texts (F1.5), twelve literal copies of the built-in set (F1.7), mask identifiers (F1.10), `object` on `-d` only (F1.11), aggregate aliases (F1.20) | before #581, #601, #582; the six contract questions in item 1 are decided here | not started | |
+| 4. Operand messages and the pushback | silent pushbacks (F1.6), the swallowed warning's home (F1.17), the `-so` copies (F1.8, F1.9), `--help` topics (F1.15), `-pr` text (F1.18), `--explain` aliases (F1.19); pattern entry *optional-operand pushback* | independent; small | not started | |
+| 5. Timestamp parse guard policy | one guard policy per input class (F3.2, F3.3, F3.9, F3.10 after their bugs), the closure derived from the block source (F3.1), the strip and detection copies (F3.5, F3.6), the memo (F3.7) | after stage 1's date bugs; before #387 and #386 | not started | |
+| 6. Mean and ratio derivation with observation-count gating | the gated mean helper (F4.3, F4.1, F4.2, F4.6), zero projections (F4.10), the gated count (F4.11), the harmless `defined` tests (F4.13), the substitute divisor (F4.14) | after F4.5's fix; before #514 and #426 | not started | |
+| 7. Value formatting call shapes | the zero duration (F2.1), three count spellings (F2.2), dispatch copies (F2.4), trailing zeros (F2.7), raw occurrences (F2.10), three fit-to-width rules (F2.12) | independent; the seven display questions in item 2 are decided here | not started | |
+| 8. Notices | counts and percentages in notices (F2.8, F2.9); pattern entry *behavioural notices* | with #412 and #454 | not started | |
+| 9. Timestamp rendering | rounding against truncation (F2.11 after its bug), the inline ISO patterns (F2.16) | before #525 and #154 | not started | |
+| 10. The run index | means through the CSV formatter (F2.13, F4.8), the duplicate column list (F6.7) | independent; small | not started | |
+| 11. The bound set | one declaration of the six bound families (F5.4), exclusion reporting (F5.3), negative bounds (F5.6), help wording (F5.5) | before #605, #454, #536, #537 | not started | |
+| 12. CSV column declaration | one declaration per column (F6.2, F6.5), family literals (F6.3, F6.4), family labels (F6.1), rate spelling (F6.6), the `-so` copy (F1.8) | before #514 and #301 | not started | |
+| 13. The key cut and the cap | one named cap and per-run cut (F7.1, F7.2, F7.3, F7.4 after its bug), the grouping key carried (F7.5), the field cuts (F7.9), the stale record (F7.6 to F7.8) | before #174 and #564 | not started | |
+| 14. Raw and bin statistics | one statistics sub over both store shapes (F4.7), one Welford update (F4.12, F8.5) | with #426, #469, #354 | not started | |
+| 15. Item 8 remedies | the hoisting remedy as a sequence of proven-neutral steps (F8.6, F8.7, F8.8, F8.9, F8.2, F3.11) with the hoist probe as the first; the generated-body remedy weighed against its bound; the loop-structure copies (F8.3, F8.4) and the cache bypass (F8.1) | after stages 6, 11 and 13, which hoist the same values | not started | |
+| 16. Patterns file refinement | the *needs refinement* entries of `docs/architecture-patterns.md` and the in-pattern findings (FP.1 to FP.5) | last; each closes as a group above lands | not started | |
+
+**Review sessions.** One line per session, newest last: date, stages touched,
+decisions taken (by issue number), what the next session starts with.
+
+- 2026-09-26: the report and this section written; no stage opened. Next: stage 1.
+
 
 ---
 
