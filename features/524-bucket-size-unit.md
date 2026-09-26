@@ -103,8 +103,10 @@ class and are not part of the time ladder.
 | year | `year` | `y`, `yr`, `years` | 365 d |
 
 Matching is case-insensitive on this table (`1D`, `1H`, `1M` read as day, hour,
-minute). `m` is minute everywhere; no spelling that could be read as minute means
-month.
+minute). `m` is minute on every time-unit surface; no spelling that could be read
+as minute means month. The ladder governs time units only: a plain-number input
+reads `m` as a million, and a byte input takes explicit byte units (#605, numeric,
+byte and duration inputs accept a unit).
 
 Month and year are fixed lengths, not calendar months or years: the timeline's
 buckets are fixed-width (`int(epoch / size) * size`), so a calendar-aligned
