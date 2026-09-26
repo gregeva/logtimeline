@@ -968,58 +968,112 @@ included) with the audit's additions:
 
 ## Item 5: Filter and highlight range checks
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The three angles were run on the issue
+branch. The variable angle confirms the scoping pass's fourteen sites and adds
+none; the runs confirm that the two codings of one closed interval agree, that
+the exclusion count is reported three ways, that the missing-metric asymmetry is
+the one #321 decided, and that negative bounds are accepted and applied. Captures
+are under the session scratchpad (`342/runs5/`, `342/runs5-plain/`); every run
+used `tests/fixtures/numeric-highlight-boundary.txt` (nineteen application-log
+lines placing each metric below, at and above a bound, one line per metric with
+no value for it) with `--disable-progress`, `-bs 1440`, `-ni` and
+`-V filter-summary`.
 
-### Summary of the scoping pass
+### Search angles run
 
-12 bound options (6 filter, 6 highlight; no count-of-lines or UDM bound options exist). 14 sites across 9 subs: value-vs-bound comparisons live only in read_and_process_logs (filter: 3 per-metric blocks = 3 undefined guards + 6 comparisons; highlight: 1 six-clause predicate); 1 min-vs-max check (inverted-range table in adapt_to_command_line_options); 8 hand-enumerations of the bound variable set. All comparison sites are inclusive at both ends. Zero shared comparison subs.
+1. **By variable.** Every occurrence of the twelve bound variables, the
+   activation flag, the missing-metric tally and the exclusion counter: 77 lines
+   (`i5-angle1-vars.txt`), 21 of them in the loop and 23 in option settlement.
+   No comparison site exists outside `read_and_process_logs`; the scoping
+   pass's fourteen sites are the population.
+2. **By table.** The inverted-range table's twelve rows against the seven other
+   enumerations. Four hold all twelve (`GetOptions`, the provenance name list,
+   the `-V runtime-config` registry, the inverted-range table); three hold the
+   six filter bounds (`has_active_filters`, `serialize_filters`, the aggregate
+   export's `grep`); one holds the six highlight bounds (the activation test).
+   Every subset is complete for what it enumerates; the pairing of a metric's
+   min, max and two option names exists in the inverted-range table only.
+3. **By example text.** `docs/usage.md` names the twelve in twelve rows and in
+   prose at three places and two examples; `--help` carries the twelve rows,
+   the filter note and one example; `--explain` carries two examples of
+   `-hdmin`. Every one of these would follow a change to the option surface;
+   none carries logic.
 
-**Shared surface today.** None.
+### Findings
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+| # | Decision | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F5.3** | Whether the numeric exclusion count is reported | `write_aggregate_export` :: `$excluded->{numeric}     = $excluded_numeric if grep { defined } ($filter_duration_min, $filter_duration_max, $filter_bytes_min, $filter_bytes_max, $filter_count_min, $filter_count_max);` | `emit_filter_summary_verbose` :: `push @verbose_output, "excluded_numeric: $excluded_numeric";` and `lines_excluded_total` :: `return $excluded_time_window + $profile_dropped_samples + $excluded_filter + $excluded_numeric + $excluded_other;` | A emits the key only when a filter bound is defined; B and C use the count unconditionally | With no bound: the aggregate export's `excluded:` mapping holds `other: 0` and no `numeric` key, while the same run's verbose summary prints `excluded_numeric: 0`. With `-dmin 1`: the export holds `numeric: 1` and the summary `excluded_numeric: 1` | One rule, held with the count: either every consumer reports it whenever the run could have produced it (the filter surface exists), or every consumer reports it only when a bound was given | `features/503-yaml-aggregate-export.md` § `-V aggregate-export` section contract (locked as built) governs the export's shape; the `-V filter-summary` contract is in `tests/HARNESS-DESIGN.md` | **diverged** | #454 (notice that statistics describe a filtered subset) is a fourth consumer of "was a line-discarding filter active", and should read the one rule |
+| **F5.6** | Negative bounds | `adapt_to_command_line_options` :: `'duration-min\|dmin=i' => \$filter_duration_min,` (twelve `=i` options) | `adapt_to_command_line_options` :: `if (defined $min && defined $max && $min > $max) {` (the only validation, inverted range) | The option type accepts any integer; nothing rejects a negative one, and the loop applies it | `-dmin -5 -hbmax -1`: accepted without a notice; the duration filter runs (one line without a duration is excluded and noted), and a highlight bound below zero is active with nothing to highlight | A value check at settlement beside the inverted-range check, from the same table | `features/312-numeric-criteria-highlight-selection.md` § Decisions (inverted range validated once, for all twelve) says nothing about sign | **diverged** (an accepted value no line can satisfy is not reported, where an inverted range is) | #605 (numeric, byte and duration inputs accept a value with a unit, `next-up`) rewrites the twelve options' value parsing and is where a sign check would be added |
+| **F5.4** | The set of bound variables | `adapt_to_command_line_options` :: `[ $filter_duration_min,    $filter_duration_max,    '-dmin',  '-dmax',  'no log entries can match'         ],` (the only site pairing metric, bounds and option names) | `has_active_filters` :: `return 1 if defined $filter_duration_min \|\| defined $filter_duration_max;`, `serialize_filters` :: `push @parts, "-dmin=$filter_duration_min"     if defined $filter_duration_min;`, the aggregate export's `grep`, `adapt_to_command_line_options` :: `$numeric_highlight_active = ( grep { defined }`, `emit_runtime_config_verbose` :: `'highlight-duration-min'            => $highlight_duration_min,`, `_classify_argv_provenance` :: `'highlight-duration-min\|hdmin', 'highlight-duration-max\|hdmax',` | Eight hand-written enumerations of one set in three subsets; twelve independent scalars with no structure grouping them | Every enumeration complete today | One declaration of the six bound families (metric, filter min and max, highlight min and max, four option names) from which the eight enumerations derive, leaving the twelve scalars in place for the loop | `features/312-numeric-criteria-highlight-selection.md` § Option surface (highlight bounds stay out of the index signature): the declaration carries that as a flag | **latent** | #605 adds a unit parse to each of the twelve, one more place per option unless the declaration exists; #536 and #537 (thread name and remote host as attributes for filtering and highlighting) add families to the set |
+| **F5.1** | One closed interval, two codings | `read_and_process_logs` :: `if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }` (three filter blocks: a missing-metric guard and two complement tests each) | `read_and_process_logs` :: `( !defined( $highlight_duration_min ) \|\| ( defined( $duration ) && $duration >= $highlight_duration_min ) )` (six positive clauses in one predicate) | The filter drops on the complement with early exits; the highlight tests the positive form inside one boolean | `-dmin 100 -dmax 200` keeps four lines (`lines_included: 4`); `-hdmin 100 -hdmax 200` highlights four (`lines_highlighted: 4`) of nineteen. Equivalent today, by fifteen hand-kept comparisons | No shared per-line sub: the #312 hot-loop rule (one falsy scalar read when no numeric highlight is given) forbids a call where a scalar test is. The convergence is the declaration of F5.4, from which a generated or table-driven check could be built if item 8's measurement shows the twelve `defined` tests are worth removing | `features/312-numeric-criteria-highlight-selection.md` § Design, Core mechanism; `features/478-highlight-decision-read-back.md` D1 to D7 (one tag point) | **latent**, *hot path* | none |
+| **F5.2** | Missing-metric accounting | `read_and_process_logs` :: `if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }` | `read_and_process_logs` :: `( !defined( $highlight_duration_min ) \|\| ( defined( $duration ) && $duration >= $highlight_duration_min ) )` (fails silently) | The filter counts the line and a notice reports it; the highlight clause fails without a counter | `-dmin 1`: `Note: 1 lines carried no duration value and were excluded by the duration filter ...` and `excluded_numeric: 1`; `-hdmin 1`: no notice, `lines_highlighted: 18` of nineteen | none: recorded so a shared predicate keeps the asymmetry | `features/312-numeric-criteria-highlight-selection.md` § Undefined metric (never satisfies) and the #321 resolution (visibility for the filter only) | **deliberate** | none |
+| **F5.5** | Help wording | `print_help` :: `help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");` | `print_help` :: `help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");` (and the same split in `docs/usage.md` rows 82 to 87) | Two phrasings of one semantics across six rows | Semantics agree; `tests/validate-help-content.sh` holds `--help` and `docs/usage.md` together | One phrasing, or rows generated from F5.4's declaration | none | **latent** | none |
 
-- **F5.1** Two comparison codings of one closed interval, no shared sub: the filter in read_and_process_logs drops on the complement ('$duration < $filter_duration_min' / '$duration > $filter_duration_max', early next), while the highlight predicate in the same sub tests the positive form ('$duration >= $highlight_duration_min' / '$duration <= $highlight_duration_max'). Semantically equivalent today (both inclusive, both reject an undefined metric); the equivalence is maintained by hand across 6 filter comparisons plus 3 undefined-metric guards and 6 highlight clauses.
-- **F5.2** Missing-metric accounting differs by family: the filter increments '$numeric_filter_no_metric{duration}++' and '$excluded_numeric++' when the metric is undefined; the highlight clause '( defined( $duration ) && ... )' just fails silently with no counter. By design per 312's 'Undefined metric' decision and 321's resolution (visibility only for the filter), so not a defect, but it is a behavioural asymmetry a shared predicate would have to keep.
-- **F5.3** Exclusion reporting gated two different ways: write_aggregate_export emits 'excluded->{numeric}' only 'if grep { defined } ($filter_duration_min, ...)', while emit_filter_summary_verbose prints 'excluded_numeric: $excluded_numeric' unconditionally.
-- **F5.4** The set of bound variables is hand-enumerated at eight places with different subsets: GetOptions (12), _classify_argv_provenance (12), emit_runtime_config_verbose (12), inverted-range table (12), has_active_filters (6 filter), serialize_filters (6 filter), write_aggregate_export grep (6 filter), $numeric_highlight_active grep (6 highlight). Only the inverted-range table pairs min/max/option-name per metric.
-- **F5.5** Help wording differs across the filter rows only in phrasing: -dmin/-dmax say '(inclusive: entries exactly at N are kept)', -bmin/-bmax/-cmin/-cmax say '(inclusive)'; same in docs/usage.md rows 82-87. Semantics agree.
+### Open issues touching this item as a whole
 
-### Site inventory (scoping pass)
+- **#605** (inputs accept a value with a unit, `next-up`): every one of the
+  twelve options gains a unit parse; with F5.4's declaration that is one change,
+  without it twelve.
+- **#454** (notice for a filtered subset): reads "is a line-discarding filter
+  active", which `has_active_filters` already answers for the index and F5.3's
+  export test answers differently.
+- **#536** and **#537** (thread name and remote host as attributes for grouping,
+  filtering and highlighting, `next-up`): new criterion families on the same
+  tag point.
+- **#534** (highlight the lines of one input file): a new highlight criterion
+  that composes at the tag point by AND (455 D6); informational.
 
-- `(GLOBALS)` :: `my ( $filter_duration_min, $filter_duration_max );` :: Declares the six filter bound globals (lines 303-305); the six highlight bound globals follow at 307-309 (my ( $highlight_duration_min, $highlight_duration_max );), plus $numeric_highlight_active (310) and %numeric_filter_no_metric (306). Twelve independent scalars, no structure grouping them by metric or by filter/highlight.
-- `adapt_to_command_line_options` :: `'duration-min|dmin=i' => \$filter_duration_min,` :: GetOptions parsing of all twelve bounds, each =i (integer; negative integers accepted, no further value validation). Highlight twins at 14128-14133 ('highlight-duration-min|hdmin=i').
-- `adapt_to_command_line_options` :: `$numeric_highlight_active = ( grep { defined }` :: Activation: numeric highlight is active iff any of the six highlight bounds is defined; feeds $highlight_active. Hand-enumerated list of six highlight vars.
-- `adapt_to_command_line_options` :: `[ $filter_duration_min,    $filter_duration_max,    '-dmin',  '-dmax',  'no log entries can match'         ],` :: Inverted-range notice (issue 322): a 12-option table of [min, max, min_opt, max_opt, consequence]; warns on STDERR when both defined and $min > $max (strict, so equal bounds are silent, consistent with inclusive bounds). Only site that treats all twelve as one table. Warning text: 'Warning: $min_opt $min is greater than $max_opt $max - the range is unsatisfiable, $consequence'.
-- `read_and_process_logs` :: `if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }` :: Per-line hard filter, three copies (duration/bytes/count, 15600-15613). Order per metric: if any bound for the metric defined, undefined metric -> $numeric_filter_no_metric{metric}++ and $excluded_numeric++ then next; value < min -> drop; value > max -> drop. Kept set is the closed interval min <= v <= max (INCLUSIVE both ends), expressed as the complement with early exits.
-- `read_and_process_logs` :: `( !defined( $highlight_duration_min ) || ( defined( $duration ) && $duration >= $highlight_duration_min ) )` :: Highlight tag-point numeric predicate, one inline boolean expression of six clauses (15657-15662) gated by $numeric_highlight_active, AND-composed with match_filter() and the outcome criteria. Positive form v >= min and v <= max (INCLUSIVE both ends); an undefined metric fails any given criterion on it. No counter for metric-less lines.
-- `read_and_process_logs` :: `next unless $numeric_filter_no_metric{$metric};` :: Post-processing notice (issue 321): per metric, prints 'Note: N lines carried no <metric> value and were excluded by the <metric> filter ...' to STDERR. Filter side only; reports the count, not the bound values.
-- `has_active_filters` :: `return 1 if defined $filter_duration_min || defined $filter_duration_max;` :: Active-filter detection for the index cache; enumerates the six filter bounds (highlight bounds deliberately absent per the 312 decision 'highlight options are not filters').
-- `serialize_filters` :: `push @parts, "-bmax=$filter_bytes_max"       if defined $filter_bytes_max;` :: Index-cache filter signature; emits the six filter bounds as '-bmax=N' ... '-dmin=N' in fixed alphabetical order. Surfaces as -V 'index_filter_signature:'. Highlight bounds absent by design.
-- `write_aggregate_export` :: `$excluded->{numeric}     = $excluded_numeric if grep { defined } ($filter_duration_min, $filter_duration_max, $filter_bytes_min, $filter_bytes_max, $filter_count_min, $filter_count_max);` :: YAML aggregate export (-o): emits population.lines.excluded.numeric only when any of the six filter bounds is defined. Fourth hand-enumeration of the six filter vars.
-- `emit_filter_summary_verbose` :: `push @verbose_output, "excluded_numeric: $excluded_numeric";` :: -V filter-summary section: reports the numeric-filter exclusion count unconditionally (not gated on any bound being defined, unlike the aggregate export). Bound values themselves not reported here.
-- `emit_runtime_config_verbose` :: `'duration-min'                      => $filter_duration_min,` :: -V runtime-config resolved-values registry: all twelve bounds listed as long-name => variable (2566-2579), printed as e.g. 'highlight-duration-min: 100'.
-- `_classify_argv_provenance` :: `'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',` :: Static long|short name map for runtime-config provenance; lists all twelve bound options (2426-2432).
-- `print_help` :: `help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");` :: User-facing help rows for all twelve (9880-9891) plus the note at 9893 stating inclusive semantics, missing-metric exclusion and the inverted-range warning. Mirrored in docs/usage.md rows 82-93 and prose at lines 64, 66, 107.
-- `lines_excluded_total` :: `return $excluded_time_window + $profile_dropped_samples + $excluded_filter + $excluded_numeric + $excluded_other;` :: Adds the numeric-filter exclusion count into the total of excluded lines, unconditionally (no check that any filter bound is defined). This is a third consumer of $excluded_numeric besides the -V filter summary and the aggregate export. *(added by the verifier)*
-- `adapt_to_command_line_options` :: `$highlight_active = ( defined($highlight_filter) || $numeric_highlight_active` :: Combines numeric-highlight activation with the regex highlight and the outcome highlights into $highlight_active. The inventory mentions this in the activation site's role text but has no site entry for it. *(added by the verifier)*
-- `read_and_process_logs` :: `&& ( !$numeric_highlight_active || (` :: Hot-loop gate that wraps the six-clause highlight predicate (line 15656). It is the mechanism behind the 312 hot-loop rule that the predicate runs only when a numeric highlight is given. The inventory describes it but does not list it as a site. *(added by the verifier)*
+### Site inventory
+
+Carried from the scoping pass (*(scoping)*, its three verifier additions
+included) with the audit's additions:
+
+- `(GLOBALS)` :: `my ( $filter_duration_min, $filter_duration_max );` :: the twelve scalars, the tally and the activation flag. *(scoping)*
+- `(GLOBALS)` :: `my ( $excluded_time_window, $excluded_filter, $excluded_numeric, $excluded_other ) = ( 0, 0, 0, 0 );` :: the exclusion counters. *(audit)*
+- `adapt_to_command_line_options` :: `'duration-min|dmin=i' => \$filter_duration_min,` :: GetOptions, twelve `=i` options. *(scoping)*
+- `adapt_to_command_line_options` :: `$numeric_highlight_active = ( grep { defined }` :: activation, six highlight bounds. *(scoping)*
+- `adapt_to_command_line_options` :: `$highlight_active = ( defined($highlight_filter) || $numeric_highlight_active` *(scoping)*
+- `adapt_to_command_line_options` :: `[ $filter_duration_min,    $filter_duration_max,    '-dmin',  '-dmax',  'no log entries can match'         ],` :: the inverted-range table. *(scoping)*
+- `read_and_process_logs` :: `if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }` :: the three filter blocks. *(scoping)*
+- `read_and_process_logs` :: `&& ( !$numeric_highlight_active || (` :: the hot-loop gate on the predicate. *(scoping)*
+- `read_and_process_logs` :: `( !defined( $highlight_duration_min ) || ( defined( $duration ) && $duration >= $highlight_duration_min ) )` :: the six-clause predicate. *(scoping)*
+- `read_and_process_logs` :: `next unless $numeric_filter_no_metric{$metric};` :: the post-run notice. *(scoping)*
+- `has_active_filters` :: `return 1 if defined $filter_duration_min || defined $filter_duration_max;` *(scoping)*
+- `serialize_filters` :: `push @parts, "-bmax=$filter_bytes_max"       if defined $filter_bytes_max;` *(scoping)*
+- `write_aggregate_export` :: `$excluded->{numeric}     = $excluded_numeric if grep { defined } ($filter_duration_min, $filter_duration_max, $filter_bytes_min, $filter_bytes_max, $filter_count_min, $filter_count_max);` *(scoping)*
+- `emit_filter_summary_verbose` :: `push @verbose_output, "excluded_numeric: $excluded_numeric";` *(scoping)*
+- `lines_excluded_total` :: `return $excluded_time_window + $profile_dropped_samples + $excluded_filter + $excluded_numeric + $excluded_other;` *(scoping)*
+- `emit_runtime_config_verbose` :: `'duration-min'                      => $filter_duration_min,` *(scoping)*
+- `_classify_argv_provenance` :: `'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',` *(scoping)*
+- `print_help` :: `help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");` :: the twelve rows and the note (`my $note_text = "Note: filters affect all computed statistics.`). *(scoping)*
+- `print_help` :: `$out .= $ex->("ltl -dmin 5000 access.log",                                     "Only requests slower than 5 seconds");` :: the help example; the explain examples are `ltl -hdmin 5000 access.log` and `ltl -hdmin 60000 node-*/access.2026-05-05.log`. *(audit)*
 
 ### Verification notes
 
-Sites reported 14, confirmed 14, refuted 0 (corrected above), added by the verifier 3, owning docs refuted 0.
+- Every snippet resolves to its enclosing sub.
+- The scoping pass's inventory is confirmed complete for the twelve variables:
+  the audit's variable angle found the same sites and no other.
+- The scoping pass's F5.3 named two consumers gated two ways; the verifier's
+  third consumer (`lines_excluded_total`) is folded in, and the run shows the
+  export key absent, not zero, without a bound.
+- The negative-bound observation (F5.6) was raised as a question in the
+  specification and is answered by the run: accepted, applied, unreported.
 
-- The per-line filter snippet ('if( defined( $filter_duration_min ) && $duration < $filter_duration_min )') is at line 15602, not 15600. Line 15600 is the per-metric guard 'if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {', and the undefined-metric drop is at 15601. The sub attribution is correct.
-- The _classify_argv_provenance snippet ('highlight-duration-min|hdmin') is at line 2430, not 2426. The twelve names run from 2426 ('duration-min|dmin') to 2432 and share one static list with unrelated options, so they are not a separate block. The sub attribution is correct.
-- Every snippet exists and sits in the named sub. The GLOBALS site at line 303 comes before '## SUBS ##' at line 1360, as expected.
-- Grepping every use of (filter|highlight)_(duration|bytes|count)_(min|max) turns up no bound-variable site beyond those listed. So the inventory's coverage of the twelve bound variables is complete.
-- There are 3 consumers of $excluded_numeric, not 2: lines_excluded_total, emit_filter_summary_verbose and write_aggregate_export. Only write_aggregate_export checks that a filter bound is defined, so the observed divergence in how exclusions are reported covers all three.
-- Checked and present: all headings cited in features/312-numeric-criteria-highlight-selection.md (Decisions table rows, Design / Core mechanism, Index cache, -V runtime-config, Related findings), plus 455 D6 and D7, features/478-highlight-decision-read-back.md, and docs/usage.md '### Filtering & Highlighting' at line 60 with option rows 82-93.
-- The listed harnesses are not the only ones that pass these options. tests/validate-format-detection.sh, validate-histogram-bin-counters.sh, validate-udm-counting.sh and validate-statistics-demand.sh also mention dmin, hdmin or excluded_numeric. Whether they read this surface or only pass the options as invocation settings was not checked.
-- User-facing examples that use these options without doing any logic: the explain text ('ltl -hdmin 5000 access.log', 'ltl -hdmin 60000 ...') and the help examples ('ltl -dmin 5000 access.log'). They are not comparison sites, but a change to an option surface would have to update them too.
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Should the `-V` filter summary and the export share one gating rule?* The
+  export omits the key and the summary prints zero for the same run; #454 will
+  need the same answer. A key that is always present and zero when nothing was
+  excluded is the cheaper contract for the export's readers.
+- *Is negative-integer acceptance in scope?* It is now an observation: the
+  bound is applied and no notice says the range cannot match, where an
+  inverted range gets one. The fix belongs with #605's parse.
+- *Does one declaration of the bound set count as convergence when the
+  comparison sites stay inline?* The comparison sites are fifteen hand-kept
+  tests proven equivalent by one run; the declaration removes the eight
+  enumerations' drift, and the comparisons stay under the #312 hot-loop rule
+  until item 8 says otherwise.
 
 
 ---
