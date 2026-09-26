@@ -311,99 +311,249 @@ by the verifier 8), plus the audit's own:
 
 ## Item 2: Unit and value formatting
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four angles were run on the issue
+branch; every *diverged* candidate carries two strings produced by a run, not by
+reading; two candidates the scoping pass raised were reclassified on the evidence
+(the rate-suffix divergence is unreachable, the per-unit decimals tables produce
+no observable difference on integer source values); three findings were added (a
+formatted string stored in the message store, which an open issue already records;
+the index file's own timestamp pattern; the double trailing-zero strip inside one
+formatter). Captures are under the session scratchpad (`342/runs2/`), one file
+per run.
 
-### Summary of the scoping pass
+### Fixtures used by the confirmation runs
 
-41 subs named format_*; 13 are value/timestamp formatters (format_time, format_duration, format_duration_total, format_bytes, format_number, format_percentage, format_cv_display, format_csv_value, format_heatmap_value, format_histogram_dimensions_line, format_epoch_iso, format_bucket_timestamp, format_observation_timestamp), the rest are log-format-registry subs. Helpers: significant_decimals (2 callers), normalize (0 callers), convert_bytes/convert_duration_to_ms (parse side), legend_category_total, share_row_text, aggregate_number. 115 numeric sprintf/printf sites outside the formatters: about 95 are deliberate raw -V/TIMING/MEMORY/MEMDIAG diagnostics (pipeline_finalize 41, print_verbose_output 40, emit_* verbose), 8 in write_index_file (fixed decimals, outside -cp), and a handful restate presentation formatting (unclassified Warning percent, two histogram percent ticks). 13 observed divergences recorded.
+- **A**: `tests/fixtures/tomcat-access-single-sample-keys.txt` (twelve access-log
+  lines; two carry a duration of zero).
+- **N**: `tests/fixtures/numeric-highlight-boundary.txt` (nineteen application-log
+  lines carrying `durationMS=`, `bytes=` and `count=` keys, millisecond
+  timestamps).
+- **G**: `tests/fixtures/grouping-signed-downloads.txt` read with `-du us`;
+  **B**: `tests/fixtures/bucket-size-units.txt` read with `-du ns`.
+- Scratch fixtures, each in the Tomcat access-log shape unless said otherwise,
+  TEST-NET addresses: **bytes-edge** (four lines, one per minute, with response
+  sizes 999, 1000, 1023 and 1024); **cv-half** (three lines of one path with
+  durations 10, 20 and 30 ms, whose sample coefficient of variation is exactly
+  0.5); **zeros** (two lines with duration 0); **count-single-1500** (the first
+  line of N with `count=1500`); **ms-frac** (the first three lines of N with
+  fractional timestamps `.123`, `.456`, `.789`); **unclassified-1200** (1,200
+  lines in the classification-verification shape, one per second, each carrying
+  a duration that neither the success nor the failure rule of that format
+  matches, read with `-lf classification_verification`).
 
-**Shared surface today.** Per value class: format_time (durations, over the single @time_unit_ladder / %time_unit_step), with format_duration (latency cells) and format_duration_total (totals) as wrappers; format_bytes (bytes); format_number (counts/unitless, tiers per features/501); format_percentage (all presented percentages, docs/percentage-presentation.md); format_cv_display (CV); format_csv_value + resolve_csv_column_family + %csv_family_decimals (numeric CSV cells); significant_decimals (shared significant-digit helper). format_heatmap_value is a partial metric-kind dispatcher used only by heatmap/histogram surfaces. There is no single metric-kind -> formatter dispatch surface and no shared bytes unit ladder.
+### Search angles run
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+1. **By formatter.** Every call of the thirteen value and timestamp formatters
+   and the five helpers, with its enclosing sub and arguments: 212 call lines,
+   condensed to 78 distinct (sub, call shape) pairs. The pairs for the same value
+   class with different arguments are the findings; the full list is in the
+   captures (`i2-angle1-callers.txt`).
+2. **By idiom.** 293 `sprintf` and `printf` lines, classified by enclosing sub:
+   46 in `pipeline_finalize`, 41 in `print_verbose_output`, 20 in the
+   `emit_*_verbose` subs and 4 in `memory_debug_*` are machine-read diagnostics
+   (deliberate raw); 13 in the `explain_*` subs are prose layout; 21 in the
+   formatters themselves; 8 in `write_index_file`; the remainder are column
+   padding (`%-*s`, `%6s`) in the four table renderers, which carry no numeric
+   formatting, plus the seven presentation restatements listed in the findings.
+   Trailing-zero strips: six idioms in five formatters plus the dead
+   `normalize`. Roundings by `int(... + 0.5)`: 15, all geometry (bucket keys,
+   padding, glyph indices, tick counts) except the bytes mean in
+   `print_message_summary` (item 4) and the detection sample's mean line length.
+   `strftime`: eight sites, two inside the timestamp formatters, six outside
+   (findings F2.11 and F2.16).
+3. **By surface.** Each rendered surface walked for every number it prints and
+   the path it took: the table in *Surfaces walked* below.
+4. **By unit table.** Every hash keyed by a unit spelling or a resolved unit:
+   `%duration_display_decimals` (file scope beside `format_duration`),
+   `%decimals_by_unit` (inside `adapt_to_command_line_options`), the two byte
+   maps (`convert_bytes`, `format_bytes`), the number ladder in `format_number`,
+   `%byte_units` and `%si_units` (item 1), and the time-unit ladder's views.
+   Against `features/524-bucket-size-unit.md` D1, the two decimals tables and
+   the two byte maps are private tables; the number ladder is a private table
+   for a vocabulary no option takes.
 
-- **F2.1** Zero duration: bar-graph/total surfaces call `return format_time($value, 'ms', $format, $space) if $value != 0;` (format_duration_total renders zero in the resolved source unit, per features/444 R17) but format_heatmap_value calls `return format_time($value, 'ms');` directly, so a zero duration on heatmap/histogram labels renders in the ladder's lowest step (0ns) (features/524 records `A zero duration now renders 0ns`).
-- **F2.2** Count rendering: print_bar_graph proportional count uses `format_number( $log_stats{$bucket}{$key}, 'medium', ' ', 2)` (space, 2 decimals) while format_heatmap_value uses `return format_number($value, 'medium');` (no space, 1 decimal) and render_histogram_row uses `format_number($count_val, 'medium', undef, 0)`.
-- **F2.3** UDM rate suffix: print_bar_graph appends `$trend_value .= $rate_suffix{$rate_unit}` for rate/drate UDMs; format_heatmap_value's UDM branch `format_number($value, 'medium');` appends nothing.
-- **F2.4** Metric-kind dispatch (time/bytes/number by built-in name or UDM unit_type) is written in format_heatmap_value three times, in print_bar_graph's display branch, and in its STATS CSV builder; the width->tier rule `$col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short')` is written twice in print_bar_graph.
-- **F2.5** Per-source-unit decimals: `my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );` (format_duration) vs `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` (adapt_to_command_line_options, CSV): two private tables keyed by $duration_unit_resolved with different values, both covering only four of the ladder's tokens and defaulting `// 0`, contrary to features/524 D1 (no sub keeps a unit table of its own).
-- **F2.6** Bytes vocabulary: convert_bytes has `'kB' => 1000,` and `'KB'  => 1024,`; format_bytes's own `%units` holds only b/B/KiB..TiB and climbs by `length( $bytes_int ) >= length( $units{$u} )` whereas format_number climbs by `if ($value >= $units{$u})`. Two independent byte maps and two climbing algorithms; features/user-defined-metrics.md still states all byte units are base-1024.
-- **F2.7** Trailing-zero rule: docs/percentage-presentation.md and features/503 D13 state trailing zeros are stripped on every formatter/surface; format_number strips only `s/\.0+$//` so a 2-decimal call such as `format_number( ..., 'medium', ' ', 2)` keeps `1.50`; format_cv_display `return sprintf('%.2f', $cv);` never strips; format_csv_value and format_percentage strip partial zeros. Six separate strip idioms plus the unused `sub normalize`.
-- **F2.8** Percentage outside the formatter on a presentation surface: emit_classification_percentage_notices `sprintf('%.1f', $r->{unclassified} / $r->{included} * 100)` in a user-facing Warning, duplicating emit_format_detection_verbose `sprintf('%.1f', $unclassified / $total_lines_included * 100)` (the -V copy is exempt by the doc; the Warning is not named in the doc's exemption or migration table).
-- **F2.9** Counts in notices: `skipped $csv_skipped_timestamp_rows CSV rows` and `Warning: $r->{unclassified} included line(s)` print raw, sibling notices print `format_number($count, 'medium')`.
-- **F2.10** Occurrences: messages table prints `sprintf( "%$col_width{2}s", $occurrences )` raw; share_row_text prints `$value = "$count $share"` raw; bar-graph legend uses format_number medium and legend_category_total short.
-- **F2.11** Timestamp ms rendering: format_epoch_iso rounds `int(($epoch - $int_part) * 1000 + 0.5)`; format_observation_timestamp truncates `sprintf ".%03d", ($epoch - int($epoch)) * 1000`; write_index_file restates the ISO pattern inline `strftime("%Y-%m-%dT%H:%M:%S", gmtime())`.
-- **F2.12** Width fitting: format_duration sheds a fractional digit once `if (defined $max_chars && length($out) > $max_chars && $out =~ /\.\d/)`; format_percentage loops decimals down `while ( length($figure) > $inner_width && $decimals > 0 )`; format_cv_display fixes width by magnitude. Three fit-to-budget mechanisms.
-- **F2.13** Index CSV precision: write_index_file `sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences})` ignores -cp / format_csv_value, while STATS and MESSAGES CSVs route every numeric cell through format_csv_value.
+### Surfaces walked
 
-### Site inventory (scoping pass)
+| Surface | Numbers printed | Path |
+|---|---|---|
+| Timeline row | duration total, bytes total, count total, user-defined value, occurrences per category, rates, success and failure percentages, P50/P95/P99/P999, CV | `format_duration_total` (tier by width), `format_bytes`, `format_number` (medium, space, 2 decimals), `format_number` (medium, space, per-metric decimals; rate suffix appended), `format_number` medium, `format_percentage` significant 3, `format_duration` (rounded, width 6), `format_cv_display` |
+| Timeline legend | category totals, rate totals | `format_number` medium; `legend_category_total` (short unless precise values) |
+| Heatmap header and footer | scale minimum and maximum | `format_heatmap_value` (duration through `format_time` directly; bytes `format_bytes`; count `format_number` medium, 1 decimal, no space) |
+| Histogram | y-axis count ticks, y-axis percent ticks, x-axis value labels, percentile markers, legend values, dimensions line | `format_number` (medium, 0 decimals); inline `sprintf(" %3d%%")` twice; `format_heatmap_value` for the rest |
+| Messages table | occurrences, min, P50, P999, CV, total duration | raw `sprintf("%Ns")`; `format_duration` with the column width; `format_cv_display`; the string stored in the message store by `calculate_all_statistics` |
+| Thread-pool table | occurrences | raw `sprintf("%Ns")` |
+| Summary table | lines read, highlighted, included; observation start and end; category totals and shares; stage timings; total time; peak memory; memory breakdown sizes and percentages; per-file rows | raw `sprintf($table_format, ...)`; `format_observation_timestamp`; raw count plus `format_percentage` in `share_row_text`; `format_time(..., 's', 'medium', ' ')`; `format_bytes($x, 'B')` and `format_bytes($x, 'B', 0)`; `format_percentage` integer width 5 |
+| Notices | counts and one percentage | `format_number` medium in three read-loop notices and `bin_consolidation_notice`; raw counts in the unclassified warning and the CSV skipped-rows warning; inline `sprintf('%.1f')` for the unclassified percentage |
+| Progress line | line counts, rate, percentages | `format_number` medium; `format_percentage` integer width 3 floor |
+| STATS and MESSAGES CSVs | every numeric cell; `duration_nice`, `bytes_nice` | `format_csv_value` by column family; `format_duration_total` medium space and `format_bytes` for the nice twins |
+| Run index | means, read rate, elapsed, peak memory, timestamps | inline `sprintf("%.2f")` six times, `"%.0f"`, `"%.3f"`, raw; `format_epoch_iso`; inline `strftime` for now and file mtime |
+| Aggregate export | every measurement; total time; peak memory; observation span and bounds | `aggregate_number` (raw by decision); `format_time` and `format_bytes` with the summary table's exact arguments; `format_time($span, 's', 'long', ' ', 3)`; `format_observation_timestamp` |
+| `--explain` | worked figures in prose | inline `sprintf` in the `explain_*` subs (prose, not a value surface) |
 
-- `format_time` :: `my $milliseconds = convert_duration_to_ms($value, $unit);` :: OWNER: duration display scaler. Climbs @time_unit_ladder, picks short/medium/long name from the ladder, one fixed decimal or $significant digits via significant_decimals(); zero renders in the ladder's lowest step (0ns). 16 references.
-- `format_duration` :: `my $rounded  = sprintf( "%.${decimals}f", $value );` :: OWNER: latency-cell duration (P50/P95/P99/P999, message-table min/p50/p999). Rounds to source resolution via private %duration_display_decimals, zero renders in $duration_unit_resolved, sheds the fractional digit to fit $max_chars, then calls format_time.
-- `format_duration_total` :: `return format_time($value, 'ms', $format, $space) if $value != 0;` :: OWNER: summed-duration totals (bar-graph duration column, message total_duration, STATS/MESSAGES duration_nice). Zero-in-source-unit special case, else format_time.
-- `format_bytes` :: `if( length( $bytes_int ) >= length( $units{$u} ) ) {` :: OWNER: byte display. Private unit map (b,B,KiB..TiB), climbs by string LENGTH of the integer part (so 1000-1023 B promote to KiB), default 1 decimal, strips only an all-zero fraction. Carries an inline TO DO about 1000kB.
-- `convert_bytes` :: `'KB'  => 1024,` :: PARSE side of the bytes vocabulary: a second, separate unit map (kB/k/MB/M/GB/G/TB/T base-1000, KB/K/KiB/MiB/GiB/TiB base-1024). No shared ladder with format_bytes, unlike the time units.
-- `format_number` :: `$formatted_value =~ s/\.0+$//;` :: OWNER: counts and unitless numbers. Private 1/k/Mil/Bil/Tril ladder climbed by value, short/medium/long tiers (features/501 D1/D2), $space, $decimals (default 1); strips only an all-zero fraction.
-- `significant_decimals` :: `my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;` :: Shared helper: decimals for N significant digits; used by format_time (significant mode) and format_percentage.
-- `format_percentage` :: `$decimals = significant_decimals($value, $p{digits} // 3);` :: OWNER: every presented percentage (docs/percentage-presentation.md). Modes significant/decimals/integer, width with degrade-to-fit loop, floor, parens, floor_at/floor_text, pad; trims trailing zeros.
-- `format_cv_display` :: `return sprintf('%.1f', $cv) if $cv >= 10;` :: OWNER: CV cell (4-char budget). Magnitude-adaptive fixed decimals (int >=100, 1 dec >=10, 2 dec otherwise); does not trim trailing zeros; restates the significant-digit idea without significant_decimals().
-- `format_csv_value` :: `my $formatted = sprintf("%.${decimals}f", $value);` :: OWNER: numeric CSV cell precision (-cp default/full/N) by column family via resolve_csv_column_family() and %csv_family_decimals; pass-through for non-numeric (pre-formatted _nice strings). 56 references, all in print_bar_graph (STATS) and print_message_summary (MESSAGES).
-- `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` :: Private per-source-unit decimals table for CSV duration/percentile families; parallels %duration_display_decimals in format_duration with different values.
-- `file scope, between format_time and format_duration_total` :: `my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );` :: File-scope table next to format_duration: per-source-unit display rounding; second table keyed by the same $duration_unit_resolved tokens.
-- `format_heatmap_value` :: `return $ut eq 'time'  ? format_time($value, 'ms') :` :: Dispatcher metric/unit_type -> formatter for heatmap header/footer and histogram labels, legend, percentiles, -V dimensions line. The time/bytes/number dispatch appears three times inside this sub (built-in, heatmap UDM, histogram UDM). Duration goes to format_time (zero -> 0ns), count to format_number medium 1 decimal no space.
-- `print_bar_graph` :: `my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');` :: Display-path metric/unit_type dispatch for proportional columns (second copy of the dispatch in format_heatmap_value). Width->tier rule written twice (built-in duration and UDM time: `my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');`). Duration via format_duration_total, bytes via format_bytes, count via format_number('medium',' ',2), UDM rate appends $rate_suffix.
-- `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),` :: STATS CSV proportional builder: duration_nice / bytes_nice pre-formatted strings followed by format_csv_value raw cell; count and UDM via format_csv_value. Third copy of the metric-kind dispatch.
-- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{total_duration} = format_duration_total( $aggregated_data->{total_duration}, 'medium', 'space' ) if defined $aggregated_data->{total_duration};` :: Formats the message total at statistics time and stores the string in %log_messages; both the terminal messages table and the MESSAGES CSV duration_nice read that stored string (formatting moved into the stats phase).
-- `print_message_summary` :: `$row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner;` :: Messages table occurrences column printed raw (no format_number), unlike bar-graph legend (format_number medium / legend_category_total short). Deliberate or not is undocumented.
-- `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;` :: MESSAGES CSV bytes_nice via format_bytes; raw cells via format_csv_value (deliberate numeric emission).
-- `legend_category_total` :: `return $precise_values ? $occurrences : format_number($occurrences, 'short');` :: Wrapper: legend category totals, short tier unless precise values requested.
-- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,` :: Summary share rows (category, SUCCESS/FAILURE CLASSIFIED) through format_percentage; the count itself is printed raw.
-- `print_summary_table` :: `my $pct_str = format_percentage( $pct, mode => 'integer', width => 5, parens => 1,` :: Memory breakdown rows through format_percentage; sizes via format_bytes($size,'B',0); stage timings and TOTAL TIME via format_time(...,'s','medium',' ').
-- `write_aggregate_export` :: `$measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");` :: Aggregate export: restates the exact TOTAL TIME / MAXIMUM MEMORY USED call parameters of print_summary_table (locked D19 of features/503: same calls). observation.duration via format_time($span,'s','long',' ',3) (D13). All other numbers raw via aggregate_number() (R12, deliberate).
-- `aggregate_number` :: `return defined $v ? $v + 0 : undef;` :: Deliberate raw emission for the YAML export (numify, no rounding).
-- `emit_classification_percentage_notices` :: `my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';` :: User-facing Warning renders a percentage with inline sprintf (not format_percentage) and the count raw; duplicates the -V unclassified_pct computation and shape.
-- `emit_format_detection_verbose` :: `push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');` :: -V machine-read percentage; exempt from the percentage convention by docs/percentage-presentation.md (deliberate). success_pct/failure_pct at '%.3f' likewise.
-- `render_histogram_row` :: `$y_pct = sprintf(" %3d%%", $pct_val);` :: Histogram y-axis percent tick, inline sprintf; listed in docs/percentage-presentation.md migration table as pending (swap at next touch).
-- `render_histogram_x_axis` :: `$result .= $box->{corner_br} . sprintf(" %3d%%", 0);` :: Histogram 0% baseline corner, inline sprintf; same pending migration row.
-- `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';` :: ltl-index.csv: means rendered with fixed '%.2f' (six sites), read rate '%.0f', elapsed '%.3f', independent of format_csv_value / -cp. Internal index file; whether it should honour the CSV precision contract is undocumented.
-- `read_and_process_logs` :: `print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";` :: Notice prints a count raw, while sibling notices in the same sub use format_number(..., 'medium').
-- `read_and_process_logs` :: `print STDERR "Note: " . format_number($count, 'medium')` :: Notice counts via format_number medium (the convention the raw-count notices diverge from).
-- `progress_line_text` :: `$file_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );` :: Progress line percentages through format_percentage; line counts and rate through format_number medium.
-- `normalize` :: `sub normalize { $_[0] =~ s/\.0+$//r }` :: Trailing-zero strip helper with zero callers (dead); one of six separate trailing-zero idioms (format_bytes, format_time x2, format_number, format_csv_value, format_percentage).
-- `format_epoch_iso` :: `my $ms = int(($epoch - $int_part) * 1000 + 0.5);` :: Timestamp value formatter for ltl-index.csv and index drift: fixed ISO, ms ROUNDED, '-' for undef/0.
-- `format_observation_timestamp` :: `$str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;` :: Run summary heading and aggregate observation start/end: run output format, ms TRUNCATED by %03d of a float.
-- `format_bucket_timestamp` :: `return strftime($output_timestamp_format, gmtime($bucket / 1000)) . sprintf(".%03d", $bucket % 1000)` :: Bucket key timestamps for timeline, STATS CSV and aggregate series.
-- `write_index_file` :: `my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());` :: Inline ISO strftime (also used for $mtime_iso) restating format_epoch_iso's pattern without ms.
-- `format_histogram_dimensions_line` :: `"  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",` :: Shared line builder for the histogram dimensions diagnostic (both data-model paths call it); min/max through format_heatmap_value, rest raw.
-- `pipeline_finalize` :: `push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",` :: -V consolidation stats: ~40 raw %d / %.1f%% lines (written twice for Reduction). Deliberate raw machine-read diagnostics per docs/percentage-presentation.md exemption.
-- `print_verbose_output` :: `printf "TIMING\ttotal\t%.3f\n", $elapsed_total;` :: -V TIMING/MEMORY/COUNTS/CONFIG TSV lines: raw %.3f seconds and %d bytes/counts; deliberate raw emission.
-- `print_threadpool_summary` :: `my $occurrences = scalar keys %{$threadpool_activity{$grouping}{$key}};` :: The thread-pool table prints its occurrences column raw with `sprintf( "%$col_width{2}s", $occurrences )`, which is a second copy of the raw occurrences cell in print_message_summary. No format_number. *(added by the verifier)*
-- `print_bar_graph` :: `? format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w )` :: The success/failure percentage columns call format_percentage, falling back to `format_number( $cell_count, 'medium' )`. This is the fifth format_percentage call site. The inventory does not list it. *(added by the verifier)*
-- `print_bar_graph` :: `$trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', $decimals) : "";` :: UDM number column: format_number with a variable $decimals. This is a third count-decimals variant beside ('medium',' ',2) and render_histogram_row's (…,'medium',undef,0). *(added by the verifier)*
-- `print_bar_graph` :: `$rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";` :: Legend rate/occurrence counts via format_number medium. Their width is recomputed with `length( format_number( $occurrences, 'medium' ) . ":" )`. *(added by the verifier)*
-- `normalize_data_for_output` :: `$title_length = length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} ");` :: Recomputes the legend's formatted width during normalization. This restates the print_bar_graph legend rendering (format_number plus rate suffix) so the widths can be measured. *(added by the verifier)*
-- `render_histogram_row` :: `my $count_str = format_number($count_val, 'medium', undef, 0);  # No space, 0 decimals` :: Histogram y-axis count tick. Named only in observed_divergences, not as a site. *(added by the verifier)*
-- `bin_consolidation_notice` :: `format_number(` :: A behavioural notice that renders counts through format_number. It is not listed among the notice-count sites. *(added by the verifier)*
-- `parse_udm_configs` :: `my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );` :: A third private SI multiplier map (parse side, UDM numbers). It sits alongside convert_bytes's map and format_number's 1/k/Mil/Bil ladder, and 'K' is base-1000 here but 1024 in convert_bytes. *(added by the verifier)*
-- `emit_index_readback_verbose` :: `convert_bytes(` :: Second caller of convert_bytes (besides parse_udm_configs). The bytes parse vocabulary is used on the -V index readback path. *(added by the verifier)*
-- `write_index_file` :: `'-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters` :: Index row writes peak memory raw and elapsed at a fixed '%.3f'. These fall under the write_index_file site but are a separate line from the means. *(added by the verifier)*
+### Findings
+
+| # | Value class | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F2.1** | A duration of zero | `format_duration_total` :: `return format_time($value, 'ms', $format, $space) if $value != 0;` | `format_heatmap_value` :: `format_time($value, 'ms')` | A renders zero in the resolved source unit; B calls the ladder scaler directly, and the ladder's lowest step is the nanosecond | Fixture zeros, `-hm duration -bs 1`: the heatmap header reads `0ns heatmap [duration] 0ns`. Fixture A, `-bs 1`: the timeline's zero bucket reads `0 milliseconds` and its latency cells `0ms`. One value, two units | `format_heatmap_value` routes durations through `format_duration_total` (or `format_time` gains the zero rule) | `features/444-access-log-format-family-and-user-surface.md` R17 / D16 (a zero total renders in the source unit); `features/524-bucket-size-unit.md` records the `0ns` as a consequence, not a decision | **diverged** | none |
+| **F2.2** | A count | `print_bar_graph` :: `format_number( $log_stats{$bucket}{$key}, 'medium', ' ', 2)` | `format_heatmap_value` :: `format_number($value, 'medium')` and `render_histogram_row` :: `my $count_str = format_number($count_val, 'medium', undef, 0);` | The same formatter called with three argument sets: space and two decimals, no space and one decimal, no space and no decimals | Fixture count-single-1500: the timeline count column reads `1.50 k`; the heatmap header reads `1.5k heatmap [count] 1.5k`; the histogram x-axis reads `1.5k` and its y-axis ticks are whole numbers. Three spellings of 1500 | One count-rendering call shape held with the value class (a `format_count` wrapper, or `format_number` given a surface tier rather than raw arguments) | `features/501-legend-category-total-shortening.md` D1 and D2 (three tiers by surface) name the tier, not the decimals or the space | **diverged** | #514 (count metric capture and display become explicit): every count surface changes hands there; it should land on one call shape |
+| **F2.7** | Trailing zeros | `format_cv_display` :: `return sprintf('%.2f', $cv);` and `format_number` :: `$formatted_value =~ s/\.0+$//;` | `format_csv_value` :: `$formatted =~ s/\.0+$//;`, `format_percentage` :: `$t =~ s/0+$//;`, `format_time` :: `$formatted_value =~ s/0+$//;` and, four lines later in the same sub, `$formatted_value =~ s/\.0+(?=\s\|$)//;`, `format_bytes` :: `$formatted_value =~ s/\.0+(?=\s\|$)//;`, and the dead `normalize` :: `sub normalize { $_[0] =~ s/\.0+$//r }` | The CV cell never strips; `format_number` strips only an all-zero fraction, so a two-decimal call keeps `1.50`; the CSV, percentage and duration formatters strip partial zeros; `format_time` strips twice with two idioms | Fixture cv-half: the messages table CV cell reads `0.50`, the MESSAGES CSV `duration_cv` cell reads `0.5`. Fixture count-single-1500: the timeline count reads `1.50 k` where the heatmap reads `1.5k` for the same value | One strip helper (the existing `normalize`, made to strip partial zeros) called by every formatter; `format_cv_display` and the two-decimal count call route through it | `docs/percentage-presentation.md` and `features/503-yaml-aggregate-export.md` D13 (trailing zeros stripped as every formatter does); `features/448-category-summary-share-and-bar.md` N1 | **diverged** | none |
+| **F2.6** | Bytes near a unit boundary | `format_bytes` :: `if( length( $bytes_int ) >= length( $units{$u} ) ) {` | `format_number` :: `if ($value >= $units{$u}) {` (the value-based climb the other ladders use) and `convert_bytes` :: `'kB' => 1000,` (the parse-side map, with `KB` 1024) | A promotes by the digit count of the integer part, so 1000 to 1023 bytes promote to the kibibyte; B promotes by value | Fixture bytes-edge, `-o -bs 1`: the STATS `bytes_nice` cells read `999 B`, `1 KiB`, `1 KiB`, `1 KiB` for 999, 1000, 1023 and 1024 bytes. Three different byte counts render as one string, and 1000 bytes reads as a kibibyte | One byte ladder (item 1, F1.12's target) with a value-based climb shared with `format_number`; the `TO DO` comment in `format_bytes` says as much | `features/user-defined-metrics.md` (bytes display through `format_bytes`); `features/heatmap.md` § `format_bytes()` Float Handling Bug records the integer-length workaround | **diverged** | #605 (inputs accept a unit) adds parse-side readers of the byte vocabulary; it and this finding share the one-ladder target |
+| **F2.11** | Milliseconds of a timestamp | `format_observation_timestamp` :: `$str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;` | `format_epoch_iso` :: `my $ms = int(($epoch - $int_part) * 1000 + 0.5);` | A truncates the product of a binary fraction, so `.123` can become `122.999...` and print as `.122`; B rounds | Fixture ms-frac, `-ms -bs 1000`: the summary reads `between 2026-01-26 10:00:01.122 and ...`; the run index's `first_timestamp` reads `2026-01-26T10:00:01.123` for the same line | One millisecond derivation (rounded) in a helper both formatters call, or `format_bucket_timestamp`'s integer-millisecond key path used for both | none recorded; `features/524-bucket-size-unit.md` D4 (bucket width and timestamp precision are separate) is adjacent | **diverged** | #525 (a single timestamp-precision option, nanosecond included) would add a fourth precision to every timestamp formatter; #154 (fixed timezone offset for rendering) would touch every rendered timestamp and should land on one formatter; #155 (normalise offsets to UTC) is the parse side |
+| **F2.13** | A mean in the run index | `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';` (five more `"%.2f"` means, one `"%.0f"` rate, one `"%.3f"` elapsed) | `format_csv_value` :: `my $formatted = sprintf("%.${decimals}f", $value);` | A fixes two decimals and writes `-` for no data; B applies the `-cp` family decimals and leaves an empty cell | Fixture A, `-o -cp 0`: the run index's `duration_mean` reads `128.75`; the STATS CSV's `duration_mean` for the same file's single bucket reads `129` | The index means through `format_csv_value` with the same families, or a recorded decision that the index is outside the `-cp` contract | `features/432-metric-aggregate-naming-parity.md` D7 (the run index follows the same naming convention) says nothing about precision; `features/561-retained-durations-as-numbers.md` covers the two CSVs only | **diverged** | none |
+| **F2.8 / F2.9** | A count and a percentage in a notice | `emit_classification_percentage_notices` :: `my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';` and the raw `$r->{unclassified}` on the same line; `read_and_process_logs` :: `print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";` | `read_and_process_logs` :: `print STDERR "Note: " . format_number($count, 'medium')` (and two sibling notices, and `bin_consolidation_notice`); `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,` | A prints a raw count and an inline one-decimal percentage on a user-facing warning; B renders counts through the medium tier and percentages through the one formatter | Fixture unclassified-1200: the warning reads `Warning: 1200 included line(s) (100.0%) matched neither ...` while the same run's legend renders the same 1,200 lines as `INFO: 1.2k` and `share_row_text` would render the share as `100%` | Counts in notices through `format_number(..., 'medium')` as the sibling notices do; the percentage through `format_percentage` | `docs/percentage-presentation.md` (every presented percentage through the formatter; the `-V` copy is exempt, the warning is not named); no rule for counts in notices | **diverged** | #412 (notices surface) inventories every ad-hoc notice for migration and is where one rendering rule for notice numbers would be set; #454 (notice that statistics describe a filtered subset) adds a notice carrying counts |
+| **F2.10** | Occurrences | `print_message_summary` :: `sprintf( "%$col_width{2}s", $occurrences )` (twice; `print_threadpool_summary` once; `print_summary_table` :: `push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read );` and its two siblings) | `print_bar_graph` :: `format_number( $occurrences, 'medium' )` and `legend_category_total` :: `return $precise_values ? $occurrences : format_number($occurrences, 'short');` | The tables print the integer; the legend shortens it | Fixture unclassified-1200: the messages table row reads `same message 1200 ...` and the summary `LINES READ 1200`, the legend `INFO: 1.2k`, in one run | Either a recorded decision that tables and the summary print exact integers (the `-ov` precise-values switch already exists for the legend) or the tables take the tier | undocumented either way | **diverged** | none |
+| **F2.15** | The message total duration | `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{total_duration} = format_duration_total( $aggregated_data->{total_duration}, 'medium', 'space' ) if defined $aggregated_data->{total_duration};` | `print_message_summary` :: `sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" )` and the MESSAGES CSV `duration_nice` cell, both reading the stored string | The statistics phase formats a value and stores the string where every other statistic is stored as a number; the renderers print it verbatim | Not a divergence between two strings (one path); a divergence from the storage-stays-precise pattern every other statistic follows, so a future renderer that wants a different tier cannot have one | Store the number; format at the two emit sites (the open issue's own acceptance criteria) | `features/561-retained-durations-as-numbers.md` (storage stays precise) | **latent** | #273 (collapse `total_duration` / `total_duration_num`: store precise, format at the rendering boundary) records this exact site and its fix; this finding adds nothing to it beyond the pointer |
+| **F2.3** | A rate-type user-defined metric's unit suffix | `print_bar_graph` :: `$trend_value .= $rate_suffix{$rate_unit}` | `format_heatmap_value` :: `format_number($value, 'medium')` (the user-defined branch appends nothing) | The scoping pass read this as a divergence; the heatmap and histogram refuse counting aggregations before the branch is reached | Fixture N, `-udm 'x::rate:count' -hm x`: `Warning: Heatmap metric 'x' uses counting aggregation 'rate' - heatmap disabled`. The B branch cannot see a rate metric | none needed today; recorded so the branch is not read as live | `features/user-defined-metrics.md` (counting aggregations carry no per-line distribution) | **latent** (unreachable) | none |
+| **F2.4** | Metric-kind dispatch | `format_heatmap_value` :: `return $ut eq 'time'  ? format_time($value, 'ms') :` (three times inside the sub) | `print_bar_graph` :: `my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');` (the display branch; the width-to-tier rule is written again as `my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');`) and the STATS CSV builder in the same sub | Five copies of "which formatter for this metric kind", two of "which tier for this width" | Identical today | One `format_metric_value($kind, $value, $tier)` that every surface calls, holding the tier rule | none | **latent** | #514 changes the count arm of every copy |
+| **F2.5** | Per-source-unit decimals | `(file scope, between format_time and format_duration_total)` :: `my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );` | `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` | Two private tables keyed by the resolved duration unit, covering four of the ladder's ten tokens and defaulting to zero; the display table rounds to source resolution, the CSV table allows three more decimals | No observable difference on integer source values: fixture G under `-du us` shows `13.6ms` in the table (the width shed of `format_duration`) and `13.633` in the CSV, both the exact value; fixture B under `-du ns` shows `500ns` and `0.0005`. A source unit outside the four tokens (`-du m`) gets zero decimals in both | Both derived from the ladder (a `decimals` field per step), per #524 D1 | `features/524-bucket-size-unit.md` D1 (no sub keeps a unit table of its own) | **latent** | #605 (units on inputs) is the next reader of the ladder |
+| **F2.12** | Fitting a value to a width | `format_duration` :: `if (defined $max_chars && length($out) > $max_chars && $out =~ /\.\d/)` | `format_percentage` :: `while ( length($figure) > $inner_width && $decimals > 0 )` and `format_cv_display` :: `return sprintf('%.1f', $cv) if $cv >= 10;` | Shed one digit once; loop decimals down; fix decimals by magnitude | Identical in effect on today's widths; three mechanisms to reach for | One fit-to-width rule in a helper the three formatters call | none | **latent** | #497 (rows overflow the terminal width) and #498 (messages-table headings degrade) are open on the same table these three formatters fill; a width rule set there should be the one rule |
+| **F2.16** | ISO timestamps outside the formatters | `write_index_file` :: `my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());` (and `my $mtime_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));`, `my $current_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));`; `read_index_file` :: `my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));`; `write_aggregate_export` :: `$determining->{generated_at} = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());`) | `format_epoch_iso` :: `return sprintf("%s.%03d", strftime("%Y-%m-%dT%H:%M:%S", gmtime($int_part)), $ms);` | Five inline restatements of the ISO pattern, one with a `Z` suffix, beside the formatter that owns it | Identical today (the index reads back what it wrote through the same inline pattern) | `format_epoch_iso` with a no-milliseconds mode, or a sibling, called by all five | none | **latent** | #154 (rendering offset) touches every timestamp site |
+
+Sites audited and closed as **deliberate**:
+
+- The `-V` sections, the TIMING, MEMORY, COUNTS and CONFIG lines and the
+  MEMDIAG diagnostics: raw `sprintf` by `docs/percentage-presentation.md`'s
+  exemption and `tests/HARNESS-DESIGN.md` (machine-read output is never
+  presentation-formatted). 111 of the 293 `sprintf` lines.
+- `aggregate_number` :: `return defined $v ? $v + 0 : undef;`: the export's exact
+  values, `features/503-yaml-aggregate-export.md` R12.
+- The STATS and MESSAGES numeric cells beside their `_nice` twins: the numeric
+  cell must stay numeric (`features/561-retained-durations-as-numbers.md`).
+- The histogram's percent ticks, `render_histogram_row` :: `$y_pct = sprintf(" %3d%%", $pct_val);`
+  and `render_histogram_x_axis` :: `$result .= $box->{corner_br} . sprintf(" %3d%%", 0);`:
+  listed as pending migration in `docs/percentage-presentation.md`, so
+  deliberate until that migration; recorded here so the migration is not lost.
+- The summary table's stage timings and peak memory, and the aggregate export's
+  restatement of the same calls: `features/503-yaml-aggregate-export.md` D19
+  locks them as the same calls.
+- `format_duration`'s rounding to the source resolution before scaling:
+  `features/444-access-log-format-family-and-user-surface.md` (latency cells).
+
+### Open issues touching this item as a whole
+
+- **#273** (store the precise total duration, format at the rendering boundary):
+  records F2.15's site and its fix; the audit adds only the cross-reference.
+- **#605** (numeric, byte and duration inputs accept a value with a unit,
+  `next-up`): the parse side of the byte and time vocabularies whose display
+  side F2.6 and F2.5 audit; the one-ladder target serves both.
+- **#514** (count metric capture and display become explicit, `next-up`): every
+  count rendering site (F2.2, F2.4) is on its path.
+- **#525** (one timestamp-precision option, nanosecond included, `next-up`) and
+  **#154** / **#155** (render-side timezone offset; UTC normalisation): every
+  timestamp formatter (F2.11, F2.16) gains a mode or an offset; landing on one
+  formatter first is cheaper than on three.
+- **#412** (notices surface, `next-up`) and **#454** (a notice for filtered
+  statistics): the rendering rule for numbers in notices (F2.8, F2.9) belongs to
+  the surface #412 builds.
+- **#497** and **#498** (rows overflow the width; headings degrade): the
+  messages table whose cells F2.12's three fit-to-width mechanisms fill.
+
+### Site inventory
+
+Carried from the scoping pass (each marked *(scoping)*; the refuted attribution
+of `%duration_display_decimals` is corrected to file scope) with the audit's
+additions:
+
+- `format_time` :: `my $milliseconds = convert_duration_to_ms($value, $unit);` :: OWNER: duration scaler over the ladder; zero renders in the lowest step. 16 references. *(scoping)*
+- `format_time` :: `$formatted_value =~ s/0+$//;` :: the first of two trailing-zero strips in the sub; the second is `$formatted_value =~ s/\.0+(?=\s|$)//;`. *(audit)*
+- `format_duration` :: `my $rounded  = sprintf( "%.${decimals}f", $value );` :: OWNER: latency cells, rounds to source resolution through the private decimals table, sheds a digit to fit. *(scoping)*
+- `format_duration_total` :: `return format_time($value, 'ms', $format, $space) if $value != 0;` :: OWNER: totals; zero in the source unit. *(scoping)*
+- `format_bytes` :: `if( length( $bytes_int ) >= length( $units{$u} ) ) {` :: OWNER: bytes; private map, digit-count climb, `TO DO` about 1000kB. *(scoping)*
+- `format_bytes` :: `$formatted_value =~ s/\.0+(?=\s|$)//;` :: its strip. *(audit)*
+- `convert_bytes` :: `'KB'  => 1024,` :: the parse-side map (item 1). *(scoping)*
+- `format_number` :: `$formatted_value =~ s/\.0+$//;` :: OWNER: counts and unitless; private 1/k/Mil/Bil/Tril ladder climbed by value (`if ($value >= $units{$u}) {`); three tiers. *(scoping)*
+- `significant_decimals` :: `my $magnitude = $value >= 100 ? 3 : $value >= 10 ? 2 : $value >= 1 ? 1 : 0;` :: shared helper for `format_time` and `format_percentage`. *(scoping)*
+- `format_percentage` :: `$decimals = significant_decimals($value, $p{digits} // 3);` :: OWNER: every presented percentage; five call sites (`progress_line_text` twice, `print_bar_graph`, `share_row_text`, `print_summary_table`). *(scoping)*
+- `format_percentage` :: `$t =~ s/0+$//;` :: its strip. *(audit)*
+- `format_cv_display` :: `return sprintf('%.1f', $cv) if $cv >= 10;` :: OWNER: the CV cell; magnitude-fixed decimals, no strip. *(scoping)*
+- `format_csv_value` :: `my $formatted = sprintf("%.${decimals}f", $value);` :: OWNER: numeric CSV cells by family; 56 calls in `print_bar_graph` and `print_message_summary`. *(scoping)*
+- `format_csv_value` :: `$formatted =~ s/\.0+$//;` :: its strip. *(audit)*
+- `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` :: the CSV decimals table. *(scoping)*
+- `(file scope, between format_time and format_duration_total)` :: `my %duration_display_decimals = ( ns => 6, us => 3, ms => 0, s => 0 );` :: the display decimals table. *(scoping, attribution corrected)*
+- `format_heatmap_value` :: `return $ut eq 'time'  ? format_time($value, 'ms') :` :: the partial metric-kind dispatcher; seven callers (`format_histogram_dimensions_line` twice, `get_heatmap_column_header`, `print_heatmap_footer_scale`, `calculate_histogram_x_labels`, `select_histogram_percentiles`, `render_histogram_legend`). *(scoping)*
+- `print_bar_graph` :: `my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');` :: the display-branch dispatch and width-to-tier rule. *(scoping)*
+- `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),` :: the STATS CSV nice-cell builder. *(scoping)*
+- `print_bar_graph` :: `? format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w )` :: the success and failure percentage columns. *(scoping)*
+- `print_bar_graph` :: `$trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', $decimals) : "";` :: the user-defined number column, variable decimals. *(scoping)*
+- `print_bar_graph` :: `$rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";` :: legend counts. *(scoping)*
+- `normalize_data_for_output` :: `$title_length = length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} ");` :: the legend width measured by re-rendering. *(scoping)*
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{total_duration} = format_duration_total( $aggregated_data->{total_duration}, 'medium', 'space' ) if defined $aggregated_data->{total_duration};` :: the formatted string stored in the message store (F2.15). *(scoping)*
+- `print_message_summary` :: `$row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner;` :: raw occurrences (twice). *(scoping)*
+- `print_threadpool_summary` :: `my $occurrences = scalar keys %{$threadpool_activity{$grouping}{$key}};` :: raw occurrences, third copy. *(scoping)*
+- `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;` :: MESSAGES `bytes_nice`. *(scoping)*
+- `print_summary_table` :: `push @summary_table, sprintf( $table_format, "LINES READ", $total_lines_read );` :: raw counts in the summary (three rows). *(audit)*
+- `legend_category_total` :: `return $precise_values ? $occurrences : format_number($occurrences, 'short');` *(scoping)*
+- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,` :: share through the formatter, count raw. *(scoping)*
+- `print_summary_table` :: `my $pct_str = format_percentage( $pct, mode => 'integer', width => 5, parens => 1,` :: memory breakdown. *(scoping)*
+- `write_aggregate_export` :: `$measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");` :: the D19 restatement. *(scoping)*
+- `write_aggregate_export` :: `$determining->{generated_at} = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());` :: inline ISO with `Z`. *(audit)*
+- `aggregate_number` :: `return defined $v ? $v + 0 : undef;` *(scoping)*
+- `emit_classification_percentage_notices` :: `my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';` *(scoping)*
+- `emit_format_detection_verbose` :: `push @verbose_output, "unclassified_pct: " . ($total_lines_included ? sprintf('%.1f', $unclassified / $total_lines_included * 100) : '0.0');` :: the exempt `-V` twin. *(scoping)*
+- `render_histogram_row` :: `$y_pct = sprintf(" %3d%%", $pct_val);` and `render_histogram_x_axis` :: `$result .= $box->{corner_br} . sprintf(" %3d%%", 0);` :: pending migration. *(scoping)*
+- `render_histogram_row` :: `my $count_str = format_number($count_val, 'medium', undef, 0);  # No space, 0 decimals` *(scoping)*
+- `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';` :: six means, a rate, an elapsed. *(scoping)*
+- `write_index_file` :: `'-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters` *(scoping)*
+- `write_index_file` :: `my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());` *(scoping)*
+- `read_index_file` :: `my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));` *(audit)*
+- `read_and_process_logs` :: `print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";` *(scoping)*
+- `read_and_process_logs` :: `print STDERR "Note: " . format_number($count, 'medium')` *(scoping)*
+- `bin_consolidation_notice` :: `format_number(` *(scoping)*
+- `progress_line_text` :: `$file_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );` *(scoping)*
+- `normalize` :: `sub normalize { $_[0] =~ s/\.0+$//r }` :: dead. *(scoping)*
+- `format_epoch_iso` :: `my $ms = int(($epoch - $int_part) * 1000 + 0.5);` *(scoping)*
+- `format_observation_timestamp` :: `$str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;` *(scoping)*
+- `format_bucket_timestamp` :: `return strftime($output_timestamp_format, gmtime($bucket / 1000)) . sprintf(".%03d", $bucket % 1000)` :: the integer-millisecond path that neither of the two above uses. *(scoping)*
+- `format_histogram_dimensions_line` :: `"  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",` *(scoping)*
+- `pipeline_finalize` :: `push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",` and `print_verbose_output` :: `printf "TIMING\ttotal\t%.3f\n", $elapsed_total;` :: deliberate raw diagnostics. *(scoping)*
+- `parse_udm_configs` :: `my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );` and `emit_index_readback_verbose` :: `convert_bytes(` :: the parse-side unit maps and their second caller (item 1). *(scoping)*
+- `sample_file_for_detection` :: `$obs->{avg_line} = $obs->{lines} ? int($line_bytes / $obs->{lines} + 0.5) : 0;` :: a rounding outside the formatters, diagnostic. *(audit)*
 
 ### Verification notes
 
-Sites reported 39, confirmed 38, refuted 1 (corrected above), added by the verifier 10, owning docs refuted 0.
+- Every snippet in the table and the inventory was resolved to its enclosing sub
+  on 2026-09-26. The scoping pass's one refuted attribution (the display
+  decimals table inside `format_duration`) is corrected to file scope.
+- The scoping pass's F2.1 cited `features/524-bucket-size-unit.md`'s note that a
+  zero renders `0ns`; the run confirms it on the heatmap header. The histogram
+  did not render at all for an all-zero fixture, so the histogram half of the
+  claim is unconfirmed and stands on the shared dispatcher only.
+- The scoping pass's F2.3 (rate suffix) is refuted as a live divergence: the
+  heatmap and histogram refuse counting aggregations before the branch runs.
+- The scoping pass's F2.5 is kept as a table-duplication finding but its
+  "different values" are not observable on integer source values; the run
+  evidence is recorded so the next reader does not expect a visible difference.
+- The `-lf classification_verification` fixture had to carry a four-digit
+  duration beginning with a digit below five: a three-digit value matches that
+  format's success rule and a five-or-above leading digit its failure rule.
 
-- Only the %duration_display_decimals site is refuted. It sits at file scope (inside format_time's awk range), not in format_duration.
-- format_csv_value: 56 textual calls (confirmed). By line, 53 lines contain a call: 14 in print_bar_graph and 39 in print_message_summary. The inventory's 15 and 41 are per-call counts; the total of 56 holds.
-- format_time: 16 references confirmed. They are in print_summary_table (9), format_heatmap_value (3), write_aggregate_export (2), format_duration_total (1) and format_duration (1).
-- format_percentage has 5 call sites: progress_line_text x2, print_bar_graph, share_row_text and print_summary_table. The inventory omits the print_bar_graph success/failure column site.
-- format_heatmap_value has 7 callers: format_histogram_dimensions_line x2, get_heatmap_column_header, print_heatmap_footer_scale, calculate_histogram_x_labels, select_histogram_percentiles and render_histogram_legend.
-- The count of 41 subs named format_* is confirmed.
-- convert_bytes is called from parse_udm_configs and emit_index_readback_verbose. convert_bytes is not the only parse-side unit map: parse_udm_configs keeps its own %si_units, where 'K' means 1000; convert_bytes maps 'KB'/'K' to 1024.
-- The raw occurrences cell `sprintf( "%$col_width{2}s", $occurrences )` appears three times: print_message_summary at lines 21475 and 21483, and print_threadpool_summary at 21683.
-- All owning doc paths exist. The cited headings and labels were confirmed: percentage-presentation.md has The convention / The surfaces / Migration of the existing sites and the -V exemption paragraph; 448 has N1 and D-3; 452 has R3 and AC2; 446 has D5; 501 has Locked decisions D1 and D2; 524 has Decisions / D1 and the 0ns note; 444 has R17 and D16; 503 has R12, D13 and D19, and its example string is 393.8 MB; user-defined-metrics.md has the base-1024 sentence; heatmap.md has 'format_bytes() Float Handling Bug'; column-layout-refactor.md has '3. Conditional Rendering Cascade'. The label 'counting rendering rows' attributed to user-defined-metrics.md was not located as a heading.
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Is the zero-duration `0ns` on the heatmap header intended?* The zeros fixture
+  shows `0ns` beside a timeline that says `0ms` for the same lines. #444 R17
+  chose the source unit for totals; nothing chose the nanosecond for labels.
+- *Are the two decimals tables meant to differ?* On integer source values they
+  cannot be told apart; both cover four tokens of ten. Converging them on the
+  ladder is a #524 D1 obligation more than a behaviour question.
+- *Should bytes get one ladder and a value-based climb?* 1000, 1023 and 1024
+  bytes render identically today; the `TO DO` in `format_bytes` has asked for
+  the change since before the ladder existed. Sequencing: after item 1's F1.12
+  fix, with #605.
+- *Does the trailing-zero rule extend to the CV cell and to two-decimal counts?*
+  `0.50` against `0.5` and `1.50 k` against `1.5k` are the two observations. The
+  CV cell's four-character budget is the constraint a strip would have to keep.
+- *Are raw occurrences in the tables and the summary deliberate?* `1200` against
+  `1.2k` in one run. The legend has `-ov` for precise values; the tables have no
+  switch the other way. A decision either way is a one-line record.
+- *Does the run index honour `-cp`?* `128.75` against `129`. The index is read
+  back by `read_index_file` and compared by `detect_index_drift`, which is the
+  cost of changing its precision.
+- *Milliseconds: rounding or truncation?* `.122` against `.123` for a `.123`
+  timestamp is a defect in the truncating copy, independent of which policy is
+  chosen; the integer-millisecond key path of `format_bucket_timestamp` has
+  neither problem.
+- *Is the unclassified warning inside the percentage convention?* The doc's
+  exemption names `-V` and machine-read output; the warning is neither.
 
 
 ---
