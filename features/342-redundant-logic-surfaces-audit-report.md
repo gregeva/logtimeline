@@ -28,100 +28,283 @@ by divergence risk, then user-visible consequence, then number of copies.
 
 ## Item 1: Option-operand vocabularies
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four search angles of the
+specification were run on `ltl` at 4e2d006 (the issue branch, which differs from
+7aa2bd5 only by the version stamp); every candidate the scoping pass raised was
+re-read against the captures, every *diverged* finding was confirmed by a run, and
+three findings the scoping pass did not have were added (a warning that can never
+print, a nondeterministic unit resolution, and a help text that names a mode that
+does not exist). Captures live under the session scratchpad (`342/runs/`), one
+file per run, named by option; the report cites each by fixture and options so it
+can be reproduced from the fixture description below.
 
-### Summary of the scoping pass
+### Fixtures used by the confirmation runs
 
-Nine operand vocabularies are shared by two or more options: built-in plus user-defined metric names (-hm, -hg, -so, --hide/--show, -x, -d), time units (-du, -ru, -bs, -udm), byte and SI units (-udm unit slot plus internal converters), data model raw|bin (-dm, -hgdm, -hmdm, -mdm, -bdm), sort fields and statistic names (-so, --explain, --help statistics), mask identifiers (-m, -d), parsed-field names (-x, -d, and --hide columns session/user), format names (-lf, --help formats), and section/column names (--hide, --show and their per-column shorthands). Single-option vocabularies: -pr modes, --help topics, -V sections, -cp modes, -mem. Two vocabularies in the brief do not exist as operands: log levels and colour/background. Three are fully converged in code: time units, raw|bin validation and -V sections. Metric names are converged for -hm and -hg only. Sort fields, byte units, mask identifiers in -d and field names have no shared surface. Roughly 37 sites are listed and 16 concrete divergences observed.
+- **A**: the committed `tests/fixtures/tomcat-access-single-sample-keys.txt`
+  (twelve Tomcat access-log lines, one request each, with duration and bytes).
+- **B**: a three-line scratch fixture in the Tomcat access-log shape (TEST-NET
+  addresses, one path each, status 200, bytes 512/640/128, durations 10/20/30 ms)
+  whose request line carries the query string `?Bytes=7&time=3&object=9` (values
+  7 to 9 on the first key, 3 to 5 on the second, 9 on the third), so that a name
+  read as a line key finds a value and a name read as a metric does not change
+  the message.
+- **C**: a two-line scratch fixture of the same shape whose query string is
+  `?Bytes=7&Foo=3&bytes=5` (8, 4, 6 on the second line), so that `Bytes`,
+  `bytes` and a name of no vocabulary are all present as keys.
+- **D**: a three-line scratch fixture of the same shape whose query string is
+  `?elapsed=5&v=1` (7/2, 9/3), the input for a user-defined metric read by its
+  token key (`elapsed`) and for the byte-unit cases (`v`).
 
-**Shared surface today.** Metric names: builtin_metric_name(), resolve_metric_operand(), udm_config_by_name() and available_metric_names(). Only -hm and -hg use the full chain; --hide/--show, -x and -d use only udm_config_by_name, and -so uses none of them. Data-model raw|bin: _validate_dm() for validation and resolve_data_model()/choose_data_model() for resolution, with each surface's default repeated at every call site. Time units: @time_unit_ladder plus time_unit_canonical() and $time_unit_list, shared by -du, -ru, -bs and the -udm unit slot. Mask identifiers: %mask_patterns/@mask_order, which resolve_mask_names() uses and resolve_discard_names() does not. Format names: the registry (%format_registry_entry / %format_registry_spec). -V sections: %verbose_section_registry. No shared surface exists for byte or SI units, sort fields and statistic aliases, field names (thread/session/user/query-string/object) shared by -x and -d, --help topics, or profile-mode error text. Colour/background selectors and log-level names have no option-operand vocabulary today: -lbg and -dbg are booleans, and no option takes a level name, since @log_levels / %log_level_set are consumed only internally.
+Every run passed `--disable-progress`, `--terminal-width 220` and, where the
+verbose sections were read, bare `-V`. The scratchpad sits on a case-insensitive
+filesystem, so captures whose names differ only by case (`-x Bytes` and
+`-x bytes`) were re-taken under distinct names before being read; the byte-unit
+sample counts below come from fresh runs piped to `grep`, not from files.
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+### Search angles run
 
-- **F1.1** The 'time' alias for duration works on -hm, -hg and -so but nowhere else. builtin_metric_name accepts it (`return 'duration' if $lc eq 'duration' || $lc eq 'time';`) and the -so ladder accepts it (`$sort_type =~ /^(?:duration|time)$/i`). resolve_expose_names and resolve_discard_names match only `$name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS'`, so `-d time` falls through to discard_key_sub and removes a `time=` key from lines instead of omitting durations. resolve_visibility_name has no 'time' in %column_aliases (it has `dur => 'duration'`).
-- **F1.2** Metric names are case-insensitive in some options and case-sensitive in others. builtin_metric_name lowercases (`my $lc = lc trim($token);`), and resolve_visibility_name lowercases built-ins (`my $name  = lc $given;`). -x and -d compare exactly (`$name eq 'bytes'`), so `-x Bytes` becomes a line key.
-- **F1.3** durationMs/durationMS are accepted as duration only by -x and -d (the resolve_expose_names, resolve_discard_names and apply_discard_precedence literals). builtin_metric_name, and therefore -hm and -hg, rejects them.
-- **F1.4** A user-defined metric can be named by its token key only on -x and -d, which add `// ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0]` after udm_config_by_name. resolve_metric_operand (-hm, -hg) and resolve_visibility_name (--hide/--show) call udm_config_by_name alone.
-- **F1.5** Three unknown-metric texts disagree for -hg/-hm. handle_histogram_option warns `(valid: duration, time, bytes, count)` (it includes time and never names user-defined metrics). The -hm pushback warns `is not a built-in metric (duration|bytes|count)`. The post-UDM dies use `Available: " . join(', ', available_metric_names())`, which omits time and includes user-defined metric names.
-- **F1.6** An unknown operand is handled as a filename differently by -hg and -hm. handle_histogram_option pushes the whole value back silently when no comma part is a built-in (`unshift @ARGV, $opt_value; return;`). The -hm branch pushes back with a warning (#231, `treating as positional argument`).
-- **F1.7** The built-in metric set duration/bytes/count is written as a separate literal in builtin_metric_name, available_metric_names (`qw(duration bytes count)`), %heatmap_metric_map, @visibility_columns, resolve_expose_names, resolve_discard_names, apply_discard_precedence, the -so whitelist and ladder, sort_key_metric_family / %killer, and the help rows for -hm, -hg, -so and -udm.
-- **F1.8** -so keeps its vocabulary twice in one sub: the whitelist `qw( occurrences total duration time bytes size ...)` and the regex ladder that re-lists every name. A third copy is the print_help -so row, which omits the accepted spellings size, total, count_sum, count_total, count_avg, avg and std_dev. %explain_aliases claims to 'Mirror -so value aliases' but has no duration_ prefix strip and no count_/bytes_ aliases. The -so whitelist does not read @duration_family_stats.
-- **F1.9** The -so error names no vocabulary (`print_usage( "invalid sort type used" )`). _validate_dm names 'raw' and 'bin'. -du, -ru and -bs name the derived $time_unit_list. -lf names the registry slugs. -m names a hardcoded `uuid, ip, ipv4, ipv6`. --hide/--show name three lists (`Sections: $sections; columns: $columns$metrics`). The -udm unknown unit names none (`treating as raw number`).
-- **F1.10** Mask identifiers have two resolvers. resolve_mask_names uses `exists $mask_patterns{$name}` plus the 'ip' case. resolve_discard_names re-lists `$name eq 'uuid' || $name eq 'ipv4' || $name eq 'ipv6'` and `$name eq 'ip'` as literals, although the %mask_patterns comment says 'Every option that names one of these identifiers resolves it through this table'. The -m error list is a literal, not derived from @mask_order.
-- **F1.11** The field-name sets of -x and -d differ. resolve_expose_names accepts thread/session/user/query-string. resolve_discard_names accepts `$name eq 'thread' || $name eq 'session' || $name eq 'user' || $name eq 'object'` plus query-string. 'object' is accepted by -d only, while 567 D15 frames -x and -d as accepting the same names. The lists are not shared.
-- **F1.12** Byte units exist as three tables. parse_udm_configs has `my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );` and `%si_units ( 'k' => 1000, 'K' => 1000, ...)`. convert_bytes %units maps `'KB'  => 1024, 'K'   => 1024` but `'MB' => 1000**2`. format_bytes has its own %units. The print_help -udm row repeats the list as a literal (`Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T.`).
-- **F1.13** The time-unit ladder is converged in code, but the help rows for -du, -ru, -bs and -udm write the list as literals (`(ns, us, ms, s, m, h, d, w, month, year)`) rather than using $time_unit_list, which only the error messages use.
-- **F1.14** Each of about 14 choose_data_model call sites repeats its surface's default (for example `choose_data_model('heatmap') // 'bin'` in read_and_process_logs, calculate_heatmap_buckets and emit_percentile_algorithm_verbose, and `choose_data_model('message-stats') // 'raw'` at three sites in calculate_all_statistics). The default is not held with the surface.
-- **F1.15** --help topics: the dispatch error lists `(try: statistics, formats, profile)`, but the print_help --help row names only 'statistics' or 'formats'. _validate_profile writes the mode list as a literal (`the modes are day, week, workday, workweek, weekday,`) while validating against %profile_modes.
-- **F1.16** The -lf listing and the --help formats listing enumerate format slugs from two different structures. apply_format_pin uses `%format_registry_entry` with `unless $format_registry_spec{ $e->[FR_NAME] }{verification}`. print_help_formats uses format_registry_specs() / %format_registry_spec with `next if $spec->{verification};` in the 'Other formats' loop only.
+1. **By option.** The GetOptions block (128 lines) lists 27 options taking a
+   string value. Of those, 20 compare the value against a token vocabulary and
+   are in scope: `-bs`, `-du`, `-ru` (time units); `-lf` (format names); `--hide`
+   and `--show` with their eleven per-column and per-section shorthands (section
+   and column names); `-x` with `-xt`, `-xqs`, `-xs`, `-xu`, and `-d` (metric,
+   field, identifier and line-key names); `-m` and `-uuid` (identifiers); `-so`
+   (sort fields); `-udm` (unit and function slots); `-dm`, `-hgdm`, `-hmdm`,
+   `-mdm`, `-bdm` (`raw|bin`); `-pr` (profile modes); `-V` (section names);
+   `-cp` (precision modes); `-hm`, `-hg` (metric names); `-g`, `-mem`, `--help`
+   and `--explain` (an optional operand or a topic). The other seven take free
+   text (regular expressions, timestamps, file names, a separator) and were not
+   followed. Every variable was followed to each `eq`, `=~`, `exists`, `grep` and
+   hash lookup on it; the sites are in the inventory.
+2. **By token.** Every literal occurrence of `duration`, `time`, `bytes`, `size`,
+   `count`, `durationMs`, `durationMS` (122 lines), `raw` and `bin` (81 lines),
+   `uuid`, `ipv4`, `ipv6`, `ip` (6 lines), and `thread`, `session`, `user`,
+   `object`, `query-string` (34 lines), classified as resolution, error text,
+   help text, or internal consumer of resolved state. The internal consumers
+   (format specs' field maps, the column layout ids, the CSV family table, the
+   per-metric loops in the histogram and export code) are listed once in the
+   inventory as out of scope for this item and not counted as copies of an
+   option vocabulary.
+3. **By error and help text.** 62 `die`, `warn` and `print_usage` lines naming a
+   vocabulary and 65 `help_opt` rows naming a metric, unit, model, identifier,
+   field, topic or sort field were read. Each enumeration is classified below as
+   derived from the table the resolver reads, or as a literal.
+4. **By table.** Every reader of `@time_unit_ladder` and its five views,
+   `%mask_patterns` and `@mask_order`, `%verbose_section_registry` and
+   `@verbose_section_order`, `%profile_modes`, `@visibility_columns` and
+   `%column_aliases`, `@output_sections` and `%section_aliases`,
+   `@duration_family_stats`, `@graph_columns`, `%heatmap_metric_map`,
+   `%explain_aliases`, `%function_names`, `%byte_units`, `%si_units`,
+   `%byte_unit_canonical`, `%format_registry_spec` and `%format_registry_entry`,
+   `@log_levels` and `%log_level_set`, and the four metric-name subs. The
+   readers are in the inventory; the places that should read a table and do not
+   are the findings.
 
-### Site inventory (scoping pass)
+### Findings
 
-- `builtin_metric_name` :: `return 'duration' if $lc eq 'duration' || $lc eq 'time';` :: METRIC: the reference parse-time canonicaliser for built-in metric names. It is case-insensitive and treats 'time' as an alias for duration.
-- `resolve_metric_operand` :: `return { kind => 'udm', config => $match } if $match;` :: METRIC: full resolution (built-in first, then a user-defined metric through udm_config_by_name). Only the -hm and -hg post-UDM validation call it.
-- `udm_config_by_name` :: `($match) = grep { $_->{base_name} eq $token } @udm_configs if !$match;` :: METRIC: the one lookup of a user-defined metric by name then base_name. Its comment says it is used by -hm, -hg, --hide, --show, --expose and --discard.
-- `available_metric_names` :: `return (qw(duration bytes count), map { $_->{name} } @udm_configs);` :: METRIC: the vocabulary named in unknown-metric errors. It hardcodes its own copy of the built-in list and omits the 'time' alias.
-- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;` :: METRIC: -hg parse time. If no comma part is a built-in and no -udm is given, the value is silently pushed back onto @ARGV as a filename.
-- `handle_histogram_option` :: `(valid: duration, time, bytes, count)` :: METRIC: -hg warning for an unknown token when no -udm is given. Its hardcoded list includes 'time' and never names user-defined metrics.
-- `adapt_to_command_line_options` :: `is not a built-in metric (duration|bytes|count) and no -udm configs are defined` :: METRIC: -hm parse time. Built-ins go through builtin_metric_name. An unknown value with no -udm is pushed back as a filename, with a warning that carries its own hardcoded list.
-- `adapt_to_command_line_options` :: `die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";` :: METRIC: -hm post-UDM validation through resolve_metric_operand. It is gated on !exists $heatmap_metric_map{...}, which is a third literal copy of duration/bytes/count.
-- `adapt_to_command_line_options` :: `die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', available_metric_names()) . "\n";` :: METRIC: -hg post-UDM validation through resolve_metric_operand.
-- `(file scope, GLOBALS)` :: `my %heatmap_metric_map = (` :: METRIC: literal built-in metric keys (duration/bytes/count mapped to columns). It is also used as the 'already a built-in' test before -hm is resolved as a user-defined metric.
-- `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` :: METRIC and COLUMN: --hide/--show resolve built-in metric names as columns from @visibility_columns and %column_aliases (dur/byt/cnt, with no 'time'), lowercased. User-defined metrics go through udm_config_by_name. It does not call builtin_metric_name.
-- `apply_output_visibility` :: `Unknown section or column '" . trim($given) . "' for --$verb. Sections: $sections; columns: $columns$metrics` :: SECTION/COLUMN/METRIC: the --hide/--show error. It builds three lists (sections, columns, metrics) from @output_sections, @visibility_columns and @udm_configs.
-- `resolve_expose_names` :: `elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }` :: METRIC and FIELD: -x matches built-in metric names with its own case-sensitive literals. durationMs/durationMS are accepted, 'time' is not, and builtin_metric_name is not called. Field names are thread/session/user/query-string.
-- `resolve_expose_names` :: `// ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];` :: METRIC: -x adds a fallback from a user-defined metric's token key on top of udm_config_by_name. resolve_metric_operand and resolve_visibility_name have no such fallback.
-- `resolve_discard_names` :: `elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $omit_durations = 1 }` :: METRIC, FIELD and IDENTIFIER: -d repeats the -x literal metric list, the field list (with 'object' added) and the mask identifiers (ip/uuid/ipv4/ipv6) as its own literals. It repeats the token_key fallback. An unknown name is a line key, never an error.
-- `apply_discard_precedence` :: `delete $expose_metric{duration} if $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS';` :: METRIC: a third copy of the duration/durationMs/durationMS spelling set, used when -x and -d name the same value.
-- `resolve_mask_names` :: `print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");` :: IDENTIFIER: -m resolves through the keys of %mask_patterns plus the 'ip' special case. The error list is hardcoded, not derived from %mask_patterns / @mask_order.
-- `(file scope, before resolve_mask_names)` :: `my @mask_order = qw(uuid ipv6 ipv4);` :: IDENTIFIER: the table whose comment says 'Every option that names one of these identifiers resolves it through this table'. resolve_discard_names matches the names by literal instead.
-- `_validate_dm` :: `return if defined $value && ($value eq 'raw' || $value eq 'bin');` :: DATA MODEL: the single validator for -dm, -hgdm, -hmdm, -mdm and -bdm. It gives one error form: '--<flag>: '<v>' is not a valid data model; valid values are 'raw' and 'bin''.
-- `resolve_data_model` :: `return $data_model_omnibus if defined $data_model_omnibus;` :: DATA MODEL: resolves each surface (per-surface flag, then omnibus, then undef). choose_data_model is a pass-through wrapper. Fourteen callers apply their own literal default ('bin' for histogram and heatmap, 'raw' for message-stats and bucket-stats).
-- `read_and_process_logs` :: `$heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';` :: DATA MODEL: one of about 14 call sites that repeat each surface's default inline. Others are in emit_percentile_algorithm_verbose, emit_statistics_demand_verbose, calculate_heatmap_buckets, calculate_histogram_buckets and calculate_all_statistics (three sites).
-- `(file scope, GLOBALS)` :: `my %time_unit_by_spelling = map { my $step = $_; map { $_ => $step->{token} } @{ $step->{spellings} } } @time_unit_ladder;` :: TIME UNIT: the single ladder (from #524 D1). %time_unit_step, %time_unit_by_spelling, $time_unit_list, %rate_multiplier and %rate_suffix are all views of it.
-- `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` :: TIME UNIT: the single resolver, used by -du, -ru, -bs and the -udm unit slot.
-- `adapt_to_command_line_options` :: `print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list")` :: TIME UNIT: the -ru error, which lists $time_unit_list. -du is at 14395 ('Invalid duration unit') and -bs at 14417 ('Accepted forms ... with a unit of $time_unit_list'). All three share the derived list.
-- `parse_udm_configs` :: `my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );` :: BYTE and SI UNITS: -udm unit slot. %byte_units, %si_units and %byte_unit_canonical are local to this sub. An unknown unit gives a warning with no list ('Unknown unit ... treating as raw number').
-- `convert_bytes` :: `'KiB' => 1024,` :: BYTE UNITS: a second byte-unit table with its own key set (it adds k/M/G/T/K). K and KB map to 1024 here while kB/MB are decimal; in parse_udm_configs %si_units, K is 1000. format_bytes (12725) holds a third table.
-- `print_help` :: `Time: ns, us, ms, s, m, h, d, w, month, year. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T.` :: UNITS (help): a literal copy of the ladder, byte and SI vocabularies for the -udm unit row. The -du (9862), -ru (9864) and -bs (9856) rows also carry the ladder list as literals, not $time_unit_list.
-- `adapt_to_command_line_options` :: `do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(` :: SORT FIELD: the -so whitelist, one literal list. Its error names no vocabulary.
-- `adapt_to_command_line_options` :: `if( $sort_type =~ /^(?:duration|time)$/i ) {` :: SORT FIELD: the -so resolution ladder. It re-enumerates every whitelist name as regex arms (a second copy in the same sub) and re-encodes the duration|time and bytes|size metric aliases itself, without builtin_metric_name. User-defined metric names are not accepted.
-- `adapt_to_command_line_options` :: `$sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;` :: SORT FIELD: the #432 duration_ prefix strip, which applies only to -so.
-- `sort_key_metric_family` :: `return 'bytes'       if $key eq 'total_bytes' || $key =~ /^bytes_/;` :: SORT FIELD and METRIC: maps a resolved sort key to its metric family (duration/bytes/count/occurrences) by prefix. apply_parse_time_sort_gate holds %killer, keyed by the same families.
-- `(file scope, --explain section)` :: `my %explain_aliases = (` :: STATISTIC NAME: --explain aliases (avg, stddev, p1 to p99999). The comment says it 'Mirrors -so value aliases', but it is maintained separately from the -so whitelist and ladder. resolve_explain_topic consumes it.
-- `(file scope, GLOBALS)` :: `my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );` :: STATISTIC NAME: the CSV column-order list of duration statistics. The -so whitelist does not read it.
-- `print_help` :: `A bare metric name means its total: bytes, duration (alias time), count. Aggregates:` :: SORT FIELD (help): a third copy of the -so vocabulary. It omits the accepted spellings size, total, count_sum, count_total, count_avg, avg, std_dev and the duration_ prefix.
-- `apply_format_pin` :: `print_usage("Unknown log format '$log_format_pin' for -lf. Known formats: " . join(', ', sort keys %listed));` :: FORMAT NAME: -lf validates against the registry (%format_registry_entry FR_SLUG) and lists slugs not marked verification. This is registry-derived, with one list.
-- `print_help_formats` :: `next if $spec->{verification};   # a verification-only producer is not a format a user reads` :: FORMAT NAME: the --help formats listing enumerates slugs from format_registry_specs() and %format_registry_spec with the same verification filter written again. The family-member loop above it does not apply that filter.
-- `_validate_profile` :: `the modes are day, week, workday, workweek, weekday,` :: PROFILE MODE (single option -pr): validates against %profile_modes, but the error text lists the modes as a literal and is not derived from the table.
-- `dispatch_informational_options` :: `print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile)");` :: HELP TOPIC: an if/elsif chain with a literal list in the error. The --help row at print_help (10003) names only 'statistics' and 'formats'.
-- `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` :: VERBOSE SECTION (single option -V): one registry (%verbose_section_registry / @verbose_section_order), used for both validation and '-V list'.
-- `resolve_discard_names` :: `$discard_any_field = ( grep { $discard_field{$_} } qw( thread session user object ) ) ? 1 : 0;` :: FIELD: a second copy of the -d field-name set inside the same sub, besides the if-arm literals. *(added by the verifier)*
-- `(file scope, GLOBALS)` :: `my @visibility_columns = qw( legend occurrences duration bytes count session user classification stats values rate );` :: COLUMN/METRIC: named in the roles of resolve_visibility_name and apply_output_visibility but not listed as its own site. It is another literal copy of duration/bytes/count and the source of the --hide/--show column list. *(added by the verifier)*
-- `(file scope, GLOBALS)` :: `my @graph_columns = qw( duration bytes count );` :: METRIC: another literal copy of the built-in metric set. parse_udm_configs extends it with `push @graph_columns, map { "udm_$_->{name}" } @udm_configs;`. *(added by the verifier)*
-- `parse_udm_configs` :: `my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );` :: AGGREGATE NAME: the -udm function slot. It carries its own mean/avg alias pair and overlaps the -so aggregate names (mean, avg, count, min, max) and %explain_aliases avg => mean, with no shared table. *(added by the verifier)*
-- `adapt_to_command_line_options` :: `warn "Unknown -V section: $name. Known sections: "` :: VERBOSE SECTION: the -V unknown-name message. The inventory lists only the registry lookup, not the error that names the vocabulary. *(added by the verifier)*
-- `adapt_to_command_line_options` :: `print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")` :: CSV PRECISION MODE (single option -cp): named in count_summary but not listed as a site. It is a literal whitelist with a literal error list. *(added by the verifier)*
-- `write_aggregate_export` :: `(qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);` :: METRIC (internal): a literal built-in set written twice in one expression. Same kind of literal appears in read_and_process_logs, calculate_histogram_buckets_exact, finalize_histogram_unified, calculate_histogram_layout and normalize_data_for_output (`for my $metric (qw(duration bytes count)`). Consumers of option state, not option parsing. *(added by the verifier)*
-- `discard_identifier_sub` :: `my $pattern = $mask_patterns{$name}[0];` :: IDENTIFIER: -d does read %mask_patterns for the pattern. Only the name matching in resolve_discard_names is literal. *(added by the verifier)*
+Ranked by divergence risk, then user-visible consequence, then number of copies.
+Every site is `sub` plus an in-body snippet. "Confirmed" names the fixture and
+options of the run that produced the two observations.
+
+| # | Vocabulary | Site A | Site B (further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F1.12** | Byte units on the `-udm` unit slot | `parse_udm_configs` :: `my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;` | `convert_bytes` :: `'K'   => 1024,` (and the help row `print_help` :: `Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T.`) | A folds the unit to lowercase and looks it up in a map built from a table that holds both `kB` and `KB` (and `B` and `b`), so the two spellings collapse onto one lowercase key and the survivor is whichever `keys %byte_units` yielded last; B multiplies `kB` by 1000 and `KB` by 1024 | **Nondeterministic across processes.** Fixture D, `-udm 'v:KB:max' -V udm-specs`, sixteen fresh runs: ten reported `unit=KB(bytes)` (1024), six reported `unit=kB(bytes)` (1000). `-udm 'v:kB:max'` reported `unit=KB(bytes)` in its captured run. The same input gives a value that differs by 2.4 percent between two runs of the same command. Separately, `K` on the unit slot resolves through `parse_udm_configs` :: `if (exists $si_units{$unit}) {` to a plain number times 1000 (`unit=K(number)`), while `K` inside a heap value read by the GC transform reaches `convert_bytes` and means 1024: the `'K' => 1024` entry of `convert_bytes` is unreachable from the option | One byte-unit ladder at file scope in the shape of `@time_unit_ladder` (token, spellings, multiplier), read by `parse_udm_configs`, `convert_bytes`, `format_bytes` and the `-udm` help row; case-folding only where two spellings are not both tokens | `features/524-bucket-size-unit.md` D1 (one ladder per unit vocabulary, no private tables) is the shape; `features/user-defined-metrics.md` says every byte unit is base 1024, which the code contradicts (§ 3 item 10 of the specification) | **diverged**, nondeterministic | #605 (byte, duration and number inputs accept a value with a unit) would add every threshold option as a reader of this vocabulary and asks for the standard input-unit pattern; it must land on the one ladder or it multiplies the copies. #17 (auto-detect input latency units) is time units only, no relationship |
+| **F1.17** | `-hg` unknown-metric warning | `handle_histogram_option` :: `warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";` | `adapt_to_command_line_options` :: `local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };` | A warns from inside the GetOptions handler; B installs a warning handler around GetOptions that collects every warning and prints the collection only when GetOptions fails | **The warning can never reach the user.** Fixture A, `-hg duration,foo`: exit 0, empty stderr, histogram rendered for duration; `foo` is dropped without a word. The `-hm` counterpart (`adapt_to_command_line_options` :: `warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count)`) runs after GetOptions and prints | Validate `-hg` operands where `-hm`'s are validated, at option settlement after `parse_udm_configs()`, through `resolve_metric_operand()`; the handler only records the operand | `features/histogram-charts.md` § Command Line Interface (any option taking metric-name operands resolves through the three named subs; an unknown name is an error the user sees) | **diverged** | none on the `-hg` surface. #412 (notices surface) is where a settlement-time notice would render, informational |
+| **F1.1** | The `time` alias for duration | `builtin_metric_name` :: `return 'duration' if $lc eq 'duration' \|\| $lc eq 'time';` (read by `-hm`, `-hg`; `-so` re-encodes it in `adapt_to_command_line_options` :: `if( $sort_type =~ /^(?:duration\|time)$/i ) {`) | `resolve_discard_names` :: `elsif ( $name eq 'duration' \|\| $name eq 'durationMs' \|\| $name eq 'durationMS' ) { $omit_durations = 1 }` (same literal in `resolve_expose_names` and `apply_discard_precedence`; `resolve_visibility_name` has `dur` but no `time` in `%column_aliases`) | A and `-so` accept `time` as duration; B does not, so `time` falls through to the line-key path; `--hide time` is a usage error | Fixture B: `-d time` keeps the latency columns (the messages table row still shows `10ms 20ms 20ms`) and removes nothing visible; `-d duration` removes them. `-x time` appends ` time=3` to the message and splits the two `/app/orders` lines into rows of one occurrence each. Fixture A: `-hm time` reports `heatmap: duration`; `-so time` is accepted; `--hide time` exits 1 with `Unknown section or column 'time'` | `resolve_expose_names`, `resolve_discard_names`, `apply_discard_precedence` and `resolve_visibility_name` call `builtin_metric_name()` before their own arms; `-so` calls it for its bare metric words | `features/histogram-charts.md` § Command Line Interface (`time` aliases `duration`; any new option taking metric names resolves through the named subs) against `features/566-preserve-named-values-in-message.md` D6 and `features/567-discard-named-values-from-message.md` D14 as written (a list without `time`). Which reading is the contract is a findings-discussion question | **diverged** | #581 (deprecate `-od`, `-ob`, `-oc` in favour of `--discard`) makes `-d` the only surface for switching a metric off, so its vocabulary has to equal the shared one before the omit options go. #582 (name what to expose, discard or mask by a regular expression) rewrites the three resolvers' parse and is where a converged resolver would be built or bypassed |
+| **F1.2** | Case folding of built-in metric names | `builtin_metric_name` :: `my $lc = lc trim($token);` and `resolve_visibility_name` :: `my $name  = lc $given;` | `resolve_expose_names` :: `elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }` (same exact compare in `resolve_discard_names` and `apply_discard_precedence`) | A folds case; B compares exactly, so a capitalised built-in name becomes a line key | Fixture C: `-x Bytes` appends ` Bytes=7` to the message as a line key; `-x bytes` appends nothing (the metric is exposed in place); `-d bytes` removes the bytes column, `-d Bytes` keeps it. Fixture A: `-hm Bytes` reports `heatmap: bytes`; `--hide Bytes` reports `hide: progress,bytes`; `-so BYTES` is accepted | as F1.1 | `features/histogram-charts.md` § Command Line Interface (built-in names match case-insensitively) | **diverged** | #581 and #582 as F1.1 |
+| **F1.3** | `durationMs` and `durationMS` as duration | `resolve_expose_names` :: `elsif ( $name eq 'duration' \|\| $name eq 'durationMs' \|\| $name eq 'durationMS' ) { $expose_metric{duration} = 1 }` (same literal twice more) | `builtin_metric_name` :: `return $lc        if $lc eq 'bytes' \|\| $lc eq 'count';` (no arm for the key spellings) | A accepts the two key spellings as the duration metric; B rejects them, so `-hm` and `-hg` treat the word as a filename | Fixture A: `-x durationMs` is accepted with no notice; `-hm durationMs` warns `is not a built-in metric (duration|bytes|count)`, pushes the word back as a positional argument and uses duration; `-hg durationMs` does the same silently. In both the pushed-back word is then dropped without notice (see F1.6) | One list of accepted spellings held with `builtin_metric_name()`; whether the key spellings belong to the shared vocabulary or to the key-reading options only is a findings-discussion question | `features/566-preserve-named-values-in-message.md` D6 (the accepted spellings on `-x`) | **diverged** | #581 as F1.1 |
+| **F1.4** | A user-defined metric named by its token key | `resolve_expose_names` :: `// ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];` (same fallback in `resolve_discard_names`) | `resolve_metric_operand` :: `return { kind => 'udm', config => $match } if $match;` and `resolve_visibility_name` :: `my $config = udm_config_by_name($given);` (both call `udm_config_by_name` alone) | A resolves the metric by name, base name, then token key; B by name and base name only | Fixture D with `-udm 'lat::max:elapsed' -xqs`: `-x elapsed` and `-x lat` both leave `elapsed=5` in place in the message where the bare run shows `elapsed=?`; `-x nosuch` leaves `elapsed=?`. `-hm elapsed` and `-hg elapsed` exit 25 with `Unknown ... metric 'elapsed'. Available: duration, bytes, count, lat`; `--hide elapsed` exits 1 as an unknown column while `--hide lat` succeeds | The token-key fallback moves into `udm_config_by_name()` if it is part of the shared vocabulary, or is removed from `-x` and `-d` if it is not: a findings-discussion question | `features/597-section-visibility.md` D24 (a user-defined metric's column is hidden by the name its column shows); `features/user-defined-metrics.md` (name, base name) | **diverged** | #601 (deprecate the per-column options `--hide` duplicates) makes `--hide` the only column surface, so the name set it accepts is the one users keep |
+| **F1.11** | Parsed-field names on `-x` and `-d` | `resolve_expose_names` :: `elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }` (thread, session, user, query-string) | `resolve_discard_names` :: `if    ( $name eq 'thread' \|\| $name eq 'session' \|\| $name eq 'user' \|\| $name eq 'object' ) {` (and the second copy `$discard_any_field = ( grep { $discard_field{$_} } qw( thread session user object ) ) ? 1 : 0;`) | A's field set has no `object`; B's has it, so the same word is a parsed field on `-d` and a line key on `-x` | Fixture B: `-x object` appends ` object=9` to the message (a line key read from the query string); `-d object` clears the parsed object field, which access logs do not carry, and the message and columns are unchanged | One field-name table read by both resolvers, with `object` in or out of it by decision | `features/567-discard-named-values-from-message.md` D9 (the fields `-d` names) and D15 (`-x` and `-d` accept the same names) disagree with each other on `object`; a findings-discussion question | **diverged** | #536 (expose the thread name as an attribute) and #537 (expose the remote host as an attribute) each add a name to this vocabulary on the grouping, filter and highlight surfaces; #582 rewrites the parse of all three options |
+| **F1.6** | An operand that names nothing, pushed back as a filename | `adapt_to_command_line_options` :: `warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count) and no -udm configs are defined; treating as positional argument` (and `-g`: `warn "-g value '$group_similar_sensitivity' is not numeric; treating as positional argument`) | `handle_histogram_option` :: `unshift @ARGV, $opt_value;` (silent); `adapt_to_command_line_options` :: `unshift @ARGV, $name;` under `-V` (silent) and `unshift @ARGV, $memory_usage_operand;` under `-mem` (silent) | Five options with an optional operand treat a value they do not recognise as a filename; two say so, three do not. Every one then reaches `adapt_to_command_line_options` :: `@in_files = grep { -f $_ } @in_files;`, which drops a name that is not a file without a notice | Fixture A: `-hm foo`, `-g foo` warn and continue; `-hg foo`, `-V foo` (its own warning names the section vocabulary, not the pushback), `-mem foo` continue silently; in all five the word `foo` appears nowhere afterwards, and the verbose file list holds only the fixture | One pushback helper that decides "operand or filename" the same way for the five options and always says what it did; and a notice from the file-list filter when a positional argument is not a file | `features/histogram-charts.md` (issue #231 in the source comment surfaced the `-hm` pushback); nothing records the silent drop of a non-file positional | **diverged** | none |
+| **F1.5** | The vocabulary named by an unknown-metric message | `adapt_to_command_line_options` :: `die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";` (and the `-hg` twin) | `adapt_to_command_line_options` :: `is not a built-in metric (duration|bytes|count) and no -udm configs are defined` and `handle_histogram_option` :: `(valid: duration, time, bytes, count)` | A derives its list from `available_metric_names()` (built-ins plus user-defined names, no `time`); B and C are literals, one naming `time`, one not; C never prints (F1.17) | Fixture A: `-hm foo` prints the `(duration|bytes|count)` literal; `-hm foo -udm x::max` prints `Available: duration, bytes, count, x` | Every unknown-metric message names `available_metric_names()`, which itself reads the built-in list from `builtin_metric_name()`'s table rather than its own `qw(duration bytes count)` | `features/histogram-charts.md` § Command Line Interface | **diverged** | none |
+| **F1.8 / F1.9** | The `-so` sort-field vocabulary | `adapt_to_command_line_options` :: `do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(` (the allow-list) | `adapt_to_command_line_options` :: `if( $sort_type =~ /^(?:duration\|time)$/i ) {` (the ladder, every name again) and `print_help` :: `A bare metric name means its total: bytes, duration (alias time), count. Aggregates:` (the row) | Three copies of one vocabulary; the row omits `size`, `total`, `count_sum`, `count_total`, `count_avg`, `avg`, `std_dev` and the `duration_` prefix; the error names no vocabulary; the alias set is uneven (`avg` for `mean` and `count_mean`, none for `bytes_mean`) | Fixture A: `-so size`, `-so total`, `-so count_avg`, `-so stddev`, `-so duration_stddev` (reported as `stddev`) and `-so duration_p50` (reported as `p50`) are accepted; `-so bytes_avg` and `-so foo` exit 1 with `invalid sort type used` | One sort-field table (operand, aliases, sort key) that the allow-list, the ladder, the help row and the error all read; the bare metric words through `builtin_metric_name()` | `features/432-metric-aggregate-naming-parity.md` D1 (a bare metric word aliases its total) and D3 (duration keeps its bare spellings); D8 names `-so` a consumer of the CSV column names, which are item 6's copies | **diverged** (help against behaviour) | #514 (count metric capture becomes explicit) changes what the `count_*` operands can rank and retires the dead `-ic`; it touches the count arm of this vocabulary |
+| **F1.18** | `-pr` profile modes | `_validate_profile` :: `the modes are day, week, workday, workweek, weekday,` | `(file scope, GLOBALS)` :: `my %profile_modes = (` | A validates against the table but writes its error as a literal that ends "each with an -alt variant"; the table has no `day-alt` (fifteen keys: `day` and seven modes with an `-alt` twin) | Fixture A: `-pr day-alt` exits 1 with a message stating that `day` has an `-alt` variant; `-pr day` runs | The error lists `sort keys %profile_modes` | `features/`: the profile feature doc (not read for this item; the mode table is the contract) | **diverged** | none |
+| **F1.15** | `--help` topics | `dispatch_informational_options` :: `print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile)");` | `print_help` :: `Naming a topic shows that topic's index: 'statistics'` (the row names statistics and formats) | The dispatch is an if/elsif chain with a literal list in its error; the help row lists one topic fewer | `--help foo` exits 1 naming three topics; `--help` names two | One topic table (name, renderer) read by the dispatch, the error and the row | none recorded | **diverged** (two texts disagree) | none |
+| **F1.19** | Statistic-name aliases shared by `--explain` and `-so` | `(file scope, --explain section)` :: `my %explain_aliases = (` (comment: mirrors `-so` value aliases) | `adapt_to_command_line_options` :: `$sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;` | A maps `avg`, `stddev` and the percentile names; B strips the `duration_` prefix and accepts the metric-family names | `--explain stddev` and `--explain avg` render; `--explain duration_mean` and `--explain bytes_mean` exit 1 as unknown topics while `-so duration_mean` and `-so bytes_mean` are accepted | Either the comment is corrected to say the two vocabularies are different, or `resolve_explain_topic()` applies the same prefix strip; a findings-discussion question | `features/504-explain-technique-topics.md` (topic registry) | **diverged** (comment against behaviour) | none |
+| **F1.7** | The built-in metric set `duration`, `bytes`, `count` | `builtin_metric_name` :: `return $lc        if $lc eq 'bytes' \|\| $lc eq 'count';` | `available_metric_names` :: `return (qw(duration bytes count), map { $_->{name} } @udm_configs);` and nine more: `(file scope, GLOBALS)` :: `my @graph_columns = qw( duration bytes count );`, `(file scope, GLOBALS)` :: `my @visibility_columns = qw( legend occurrences duration bytes count session user classification stats values rate );`, `(file scope, GLOBALS)` :: `my %heatmap_metric_map = (`, the three resolver literals (F1.2), the `-so` allow-list and ladder, and the four help rows for `-hm`, `-hg`, `-so` and `-udm` | Twelve literal copies of one three-word set | Identical today | One table of built-in metrics (name, aliases, column, family) from which `builtin_metric_name()`, `available_metric_names()`, `@graph_columns`, `@visibility_columns`, `%heatmap_metric_map` and the help rows derive | CLAUDE.md checkpoint (one resolution surface per vocabulary) | **latent** | #514 would remove or demote `count` from the set and has to touch every copy; #60 (configurable metric visibility, on hold) would make the set data |
+| **F1.10** | Mask identifiers | `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }` | `resolve_discard_names` :: `elsif ( $name eq 'uuid' \|\| $name eq 'ipv4' \|\| $name eq 'ipv6' ) { push @discard_subs, discard_identifier_sub($name) }` and `resolve_mask_names` :: `print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");` | A resolves through the table; B matches the same names by literal (and reads only the pattern from the table through `discard_identifier_sub`); the `-m` error is a literal | Identical today (the table holds exactly uuid, ipv6, ipv4; `ip` is the alias both spell out) | `-d` resolves identifiers through `%mask_patterns` and `@mask_order` as `-m` does; the `-m` error lists the table | `features/580-mask-uuid-and-ip-address.md` D5 (the `-m` surface follows the `-x`/`-d` shape); the `%mask_patterns` comment ("every option that names one of these identifiers resolves it through this table") is not true of `-d` | **latent** | #582 adds a replacement field and a pattern form to `-m` and `-d`, and would rewrite both resolvers |
+| **F1.13** | Time-unit spellings in help rows | `(file scope, GLOBALS)` :: `my $time_unit_list        = join(', ', map { $_->{token} } @time_unit_ladder);` (read by the three errors) | `print_help` :: `(ns, us, ms, s, m, h, d, w, month, year)` (the `-du` row; the `-ru`, `-bs` and `-udm` rows carry the same literal) | The errors derive the list; four help rows write it by hand | Identical today (both read `ns, us, ms, s, m, h, d, w, month, year`); `tests/validate-help-content.sh` has scenarios for the `-udm` function list, the `-m` rows and the `-d` rows, and none for a unit list | The rows interpolate `$time_unit_list` | `features/524-bucket-size-unit.md` D1 and D2 | **latent** | #605 adds the unit ladder to every threshold option's help row |
+| **F1.14** | `raw\|bin` per-surface defaults | `resolve_data_model` :: `return $data_model_omnibus if defined $data_model_omnibus;` | `read_and_process_logs` :: `$heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';` and thirteen more call sites with an inline default | The resolver returns undef when no selector was given and every caller applies the surface's default itself | Identical today (fourteen sites, each surface's default consistent across its sites) | The default held with the surface inside `resolve_data_model()` | `features/266-data-model-selectors.md` § Resolution at each call site (as built) | **latent** | none |
+| **F1.20** | Aggregate-function aliases | `parse_udm_configs` :: `my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );` | the `-so` allow-list (F1.8) and `%explain_aliases` (F1.19) | Three tables each carry `avg` as an alias of `mean` | Identical today | Where a shared statistic-name table exists (F1.8's target), `avg`, `stddev` and the percentile names are read from it by all three | `features/user-defined-metrics.md` (function slot) | **latent** | none |
+| **F1.16** | Format names | `apply_format_pin` :: `$listed{ $e->[FR_SLUG] } = 1 unless $format_registry_spec{ $e->[FR_NAME] }{verification};` | `print_help_formats` :: `next if $spec->{verification};   # a verification-only producer is not a format a user reads` | Both derive from the registry; the verification filter is written twice, and the family-member loop above B does not apply it | Identical today: the `-lf foo` error lists 19 names and `--help formats` lists the same 19 | One predicate (`format_user_visible($spec)`) read by both | `features/log-format-registry.md` D49 (a run-level pin tops the precedence chain) | **identical by construction** | #387 (user-defined YAML formats) adds entries to the registry both lists read; informational |
+
+Sites audited and closed as **deliberate**, so the next reader does not re-open
+them:
+
+- `-hm LAT` is rejected while `-hm lat` resolves (fixture D): user-defined metric
+  names are case-sensitive by the `features/histogram-charts.md` contract, and
+  the help rows for `-hm` and `-hg` say so.
+- `-d nosuch` and `-x nosuch` are accepted without a notice (fixture C): by the
+  `features/567-discard-named-values-from-message.md` rule that an unknown name is
+  a key no line carries, not an error.
+- `-V` section names: one registry (`%verbose_section_registry`,
+  `@verbose_section_order`) serves validation, the `-V list` output and the
+  unknown-name warning (`adapt_to_command_line_options` :: `warn "Unknown -V section: $name. Known sections: "`). Converged.
+- `-du`, `-ru`, `-bs`: one resolver (`time_unit_canonical`) and one derived list
+  in the three errors. Converged in code (#524 D1); the help rows are F1.13.
+- `-dm` and its four siblings: one validator (`_validate_dm`) and one error form.
+  Converged (#266); the defaults are F1.14.
+- `-cp`: a single option whose allow-list and error are literals in one place
+  (`adapt_to_command_line_options` :: `print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")`). No second copy.
+- `--hide`/`--show` section and column names: one resolver
+  (`resolve_visibility_name`) over two alias tables, and an error that derives
+  its three lists from the tables. Converged for sections and columns; the
+  metric-name arm is F1.1, F1.2 and F1.4.
+
+### Open issues touching this item as a whole
+
+Read from the issue bodies captured on 2026-09-26.
+
+- **#605** (numeric, byte and duration inputs accept a value with a unit,
+  `next-up`): asks for one input-unit pattern across every threshold option and
+  for that pattern to be documented for future work. It adds readers to the time
+  ladder and to the byte vocabulary; F1.12 is the state of the byte vocabulary it
+  would build on, and F1.13 the help-row copies it would multiply. Its "standard
+  architecture pattern" deliverable overlaps this audit's patterns file.
+- **#581** (deprecate the omit options `--discard` duplicates): after it, `-d` is
+  the only way to switch a metric off, so the metric-name arm of
+  `resolve_discard_names` (F1.1, F1.2, F1.3) becomes the surface every user
+  meets.
+- **#601** (deprecate the options `--hide` and `--show` duplicate): after it,
+  `--hide` is the only column surface, so F1.4's name set is the one that
+  remains.
+- **#582** (name what to expose, discard or mask by a regular expression,
+  `next-up`): rewrites the spec grammar of `-x`, `-d` and `-m`; F1.1, F1.2, F1.3,
+  F1.4, F1.10 and F1.11 all sit in the three resolvers it would change. Its
+  record already fixes one shared grammar across the three verbs, which is the
+  direction the convergence would take; a convergence landing first gives it one
+  resolver to extend, landing second it reads this item.
+- **#514** (count metric capture and display become explicit, `next-up`): touches
+  every copy of the built-in set (F1.7) and the `count_*` arm of `-so` (F1.8).
+- **#536**, **#537** (thread name and remote host as attributes, `next-up`): each
+  adds a field name to the vocabulary F1.11 audits.
+- **#60** (configurable metric visibility, on hold) and **#387** (user-defined
+  YAML formats): would make the metric set and the format list data; informational.
+- **#17** (auto-detect input latency units): time units only, already served by
+  the ladder; no finding depends on it.
+
+### Site inventory
+
+Every site the four angles reached, including those that produced no finding.
+Sites the scoping pass recorded are kept as recorded and marked *(scoping)*;
+sites the audit added are marked *(audit)*.
+
+- `builtin_metric_name` :: `return 'duration' if $lc eq 'duration' || $lc eq 'time';` :: METRIC: the reference parse-time canonicaliser for built-in metric names; case-insensitive; `time` aliases duration. *(scoping)*
+- `resolve_metric_operand` :: `return { kind => 'udm', config => $match } if $match;` :: METRIC: full resolution, built-in then user-defined through `udm_config_by_name`. Called by the `-hm` and `-hg` settlement only. *(scoping)*
+- `udm_config_by_name` :: `($match) = grep { $_->{base_name} eq $token } @udm_configs if !$match;` :: METRIC: name then base name; no token-key arm. *(scoping)*
+- `available_metric_names` :: `return (qw(duration bytes count), map { $_->{name} } @udm_configs);` :: METRIC: the error vocabulary; its own copy of the built-in list; no `time`. *(scoping)*
+- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;` :: METRIC: `-hg` parse time; silent pushback when no part is a built-in and no `-udm` was given. *(scoping)*
+- `handle_histogram_option` :: `(valid: duration, time, bytes, count)` :: METRIC: the `-hg` unknown-token warning, never printed (F1.17). *(scoping)*
+- `adapt_to_command_line_options` :: `local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };` :: the warning capture around GetOptions that swallows F1.17's warning on a successful parse. *(audit)*
+- `adapt_to_command_line_options` :: `@in_files = grep { -f $_ } @in_files;` :: the file-list filter that silently drops a pushed-back operand that is not a file (F1.6). *(audit)*
+- `adapt_to_command_line_options` :: `is not a built-in metric (duration|bytes|count) and no -udm configs are defined` :: METRIC: `-hm` parse time; pushback with a warning. *(scoping)*
+- `adapt_to_command_line_options` :: `warn "-g value '$group_similar_sensitivity' is not numeric; treating as positional argument` :: `-g` pushback with a warning. *(audit)*
+- `adapt_to_command_line_options` :: `if ($memory_usage_operand eq 'debug') {` :: `-mem` operand: `debug` or a silent pushback. *(audit)*
+- `adapt_to_command_line_options` :: `die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";` :: METRIC: `-hm` settlement through `resolve_metric_operand`, gated on `!exists $heatmap_metric_map{...}`. *(scoping)*
+- `adapt_to_command_line_options` :: `die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', available_metric_names()) . "\n";` :: METRIC: `-hg` settlement. *(scoping)*
+- `(file scope, GLOBALS)` :: `my %heatmap_metric_map = (` :: METRIC: literal built-in keys; also the "already a built-in" test before `-hm` is resolved as user-defined. *(scoping)*
+- `(file scope, GLOBALS)` :: `my @graph_columns = qw( duration bytes count );` :: METRIC: another literal copy, extended by `parse_udm_configs`. *(scoping)*
+- `(file scope, GLOBALS)` :: `my @visibility_columns = qw( legend occurrences duration bytes count session user classification stats values rate );` :: COLUMN and METRIC: the `--hide`/`--show` column list, a literal copy of the metric set. *(scoping)*
+- `(file scope, GLOBALS)` :: `my %column_aliases = ( leg => 'legend', occ => 'occurrences', dur => 'duration', byt => 'bytes', cnt => 'count',` :: COLUMN: the fixed aliases; `dur`, no `time`. *(audit)*
+- `(file scope, GLOBALS)` :: `my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', msg => 'messages',` :: SECTION: the fixed section aliases. *(audit)*
+- `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` :: METRIC and COLUMN: lowercased section, then column, then `udm_config_by_name`; does not call `builtin_metric_name`. *(scoping)*
+- `apply_output_visibility` :: `Unknown section or column '" . trim($given) . "' for --$verb. Sections: $sections; columns: $columns$metrics` :: the `--hide`/`--show` error, three lists derived from the tables. *(scoping)*
+- `resolve_expose_names` :: `elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }` :: METRIC and FIELD: `-x` exact-case literals; fields thread, session, user, query-string. *(scoping)*
+- `resolve_expose_names` :: `// ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];` :: METRIC: the token-key fallback (`grep -F` also finds the copy in `resolve_discard_names`). *(scoping)*
+- `resolve_discard_names` :: `elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $omit_durations = 1 }` :: METRIC, FIELD and IDENTIFIER: `-d` repeats the `-x` literals, adds `object`, and matches the identifiers by literal. *(scoping)*
+- `resolve_discard_names` :: `$discard_any_field = ( grep { $discard_field{$_} } qw( thread session user object ) ) ? 1 : 0;` :: FIELD: the second copy of the `-d` field set in the same sub. *(scoping)*
+- `apply_discard_precedence` :: `delete $expose_metric{duration} if $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS';` :: METRIC: the third copy of the duration spellings. *(scoping)*
+- `discard_key_sub` :: `return [ qr/\b${escaped_key}\s*[=:]\s*${value}[&?\s]|[&?\s]?\b${escaped_key}\s*[=:]\s*${value}$/, '' ];` :: LINE KEY: the fallback every unrecognised `-d` name takes, case-sensitive on the key. *(audit)*
+- `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }` :: IDENTIFIER: `-m` resolves through the table plus the `ip` case. *(audit)*
+- `resolve_mask_names` :: `print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");` :: IDENTIFIER: the `-m` error, a literal. *(scoping)*
+- `(file scope, before resolve_mask_names)` :: `my @mask_order = qw(uuid ipv6 ipv4);` :: IDENTIFIER: the table order; the `%mask_patterns` comment above `my %mask_patterns;` claims every option resolves through it. *(scoping)*
+- `discard_identifier_sub` :: `my $pattern = $mask_patterns{$name}[0];` :: IDENTIFIER: `-d` reads the pattern from the table; only the name match is literal. *(scoping)*
+- `_validate_dm` :: `return if defined $value && ($value eq 'raw' || $value eq 'bin');` :: DATA MODEL: the one validator and error form. *(scoping)*
+- `resolve_data_model` :: `return $data_model_omnibus if defined $data_model_omnibus;` :: DATA MODEL: per-surface flag, then omnibus, then undef; fourteen callers apply the default. *(scoping)*
+- `read_and_process_logs` :: `$heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';` :: DATA MODEL: one of the fourteen call sites with an inline default (the others in `emit_percentile_algorithm_verbose`, `emit_statistics_demand_verbose`, `calculate_heatmap_buckets`, `calculate_histogram_buckets`, `calculate_all_statistics` three times). *(scoping)*
+- `(file scope, GLOBALS)` :: `my %time_unit_by_spelling = map { my $step = $_; map { $_ => $step->{token} } @{ $step->{spellings} } } @time_unit_ladder;` :: TIME UNIT: the ladder and its views (`%time_unit_step`, `$time_unit_list`, `%rate_multiplier`, `%rate_suffix`, `%rate_csv_suffix`). *(scoping)*
+- `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` :: TIME UNIT: the one resolver; callers `-du`, `-ru`, `-bs`, the `-udm` unit slot. *(scoping)*
+- `adapt_to_command_line_options` :: `print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list")` :: TIME UNIT: the `-ru` error; `-du` (`Invalid duration unit`) and `-bs` (`with a unit of $time_unit_list`) share the derived list. *(scoping)*
+- `parse_udm_configs` :: `my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );` :: BYTE UNITS: the unit-slot table; `%si_units`, `%byte_unit_canonical` local to the sub; an unknown unit warns without a list. *(scoping)*
+- `parse_udm_configs` :: `my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;` :: BYTE UNITS: the case-fold map that collapses `kB`/`KB` and `B`/`b` (F1.12). *(audit)*
+- `parse_udm_configs` :: `if (exists $si_units{$unit}) {` :: SI UNITS: checked case-sensitively before the fold, so `K` is a number times 1000 here and never reaches `convert_bytes`. *(audit)*
+- `parse_udm_configs` :: `my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );` :: SI UNITS: the parse-side multiplier map. *(scoping)*
+- `convert_bytes` :: `'KiB' => 1024,` :: BYTE UNITS: the second table (`kB` 1000, `KB` and `K` 1024); `grep -F` also finds the line in `format_bytes`. Callers: `parse_udm_configs`, `emit_index_readback_verbose`, the `gc_heap_delta` transform in `%format_transform_code`. *(scoping)*
+- `print_help` :: `Time: ns, us, ms, s, m, h, d, w, month, year. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T.` :: UNITS (help): the `-udm` unit row, all three vocabularies as literals. *(scoping)*
+- `print_help` :: `(ns, us, ms, s, m, h, d, w, month, year)` :: TIME UNIT (help): the `-du` row literal; `-ru` and `-bs` carry the same. *(audit)*
+- `parse_udm_configs` :: `my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );` :: AGGREGATE NAME: the `-udm` function slot, with its own `avg` alias. *(scoping)*
+- `adapt_to_command_line_options` :: `do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(` :: SORT FIELD: the allow-list; error names nothing. *(scoping)*
+- `adapt_to_command_line_options` :: `if( $sort_type =~ /^(?:duration|time)$/i ) {` :: SORT FIELD: the ladder, every name again, with its own `duration|time` and `bytes|size` aliases. *(scoping)*
+- `adapt_to_command_line_options` :: `$sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;` :: SORT FIELD: the `duration_` prefix strip, `-so` only. *(scoping)*
+- `sort_key_metric_family` :: `return 'bytes'       if $key eq 'total_bytes' || $key =~ /^bytes_/;` :: SORT FIELD and METRIC: resolved key to family by prefix; `apply_parse_time_sort_gate` keys `%killer` by the same families. *(scoping)*
+- `(file scope, --explain section)` :: `my %explain_aliases = (` :: STATISTIC NAME: `--explain` aliases, maintained apart from `-so` (F1.19). *(scoping)*
+- `resolve_explain_topic` :: `$key = $explain_aliases{$key} if exists $explain_aliases{$key};` :: STATISTIC NAME: the one reader of the alias table. *(audit)*
+- `(file scope, GLOBALS)` :: `my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );` :: STATISTIC NAME: the CSV column order; the `-so` allow-list does not read it. *(scoping)*
+- `print_help` :: `A bare metric name means its total: bytes, duration (alias time), count. Aggregates:` :: SORT FIELD (help): the third copy, incomplete. *(scoping)*
+- `apply_format_pin` :: `print_usage("Unknown log format '$log_format_pin' for -lf. Known formats: " . join(', ', sort keys %listed));` :: FORMAT NAME: registry-derived list. *(scoping)*
+- `print_help_formats` :: `next if $spec->{verification};   # a verification-only producer is not a format a user reads` :: FORMAT NAME: the same filter written again, in the "Other formats" loop only. *(scoping)*
+- `_validate_profile` :: `the modes are day, week, workday, workweek, weekday,` :: PROFILE MODE: validates against `%profile_modes`; error a literal that overstates the table (F1.18). *(scoping)*
+- `(file scope, GLOBALS)` :: `my %profile_modes = (` :: PROFILE MODE: fifteen keys; `day` has no `-alt` twin. *(audit)*
+- `dispatch_informational_options` :: `print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile)");` :: HELP TOPIC: if/elsif chain with a literal list. *(scoping)*
+- `print_help` :: `Naming a topic shows that topic's index: 'statistics'` :: HELP TOPIC (help): the row names two of the three topics. *(audit)*
+- `dispatch_informational_options` :: `print_usage("unknown --explain topic '$explain_topic' (try: 'ltl --explain' for the list)");` :: EXPLAIN TOPIC: the error points at the registry rather than listing it. *(audit)*
+- `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` :: VERBOSE SECTION: one registry for validation and `-V list`. *(scoping)*
+- `adapt_to_command_line_options` :: `warn "Unknown -V section: $name. Known sections: "` :: VERBOSE SECTION: the error derives its list from `@verbose_section_order`. *(scoping)*
+- `adapt_to_command_line_options` :: `print_usage("Invalid --csv-precision value '$csv_precision'. Valid values: default, full, or a non-negative integer.")` :: CSV PRECISION MODE: single option, literal allow-list and error in one place. *(scoping)*
+- `write_aggregate_export` :: `(qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);` :: METRIC (internal): consumers of resolved state that carry the literal set (`read_and_process_logs`, `calculate_histogram_buckets_exact`, `finalize_histogram_unified`, `calculate_histogram_layout`, `normalize_data_for_output`, `format_entry_block_src` :: `if    ($f eq 'bytes' || $f eq 'duration') { push @dflt_undef, "\$$f"; }`). Not option parsing; out of scope for this item, in scope for F1.7's target table. *(scoping)*
 
 ### Verification notes
 
-Sites reported 39, confirmed 40, refuted 0 (corrected above), added by the verifier 8, owning docs refuted 0.
+Carried from the scoping pass (sites reported 39, confirmed 40, refuted 0, added
+by the verifier 8), plus the audit's own:
 
-- All 40 snippets were found and each sits inside the sub it is attributed to. The file-scope sites (%heatmap_metric_map at 839, %time_unit_by_spelling at 693, @duration_family_stats at 323, %explain_aliases at 7413, @mask_order at 13621) are between subs, not inside one. The awk range method puts @mask_order inside resolve_expose_names' range and %explain_aliases inside help_opt's range only because neither has a following sub header nearby. The source shows both follow the closing brace or block.
-- Line hints that are off: udm_config_by_name 13540 (not 13538); handle_histogram_option valid-list warning 13796 (not 13795); -hm pushback warning 14333 (not 14334); apply_output_visibility error 7071 (not 7075); resolve_discard_names duration arm 13674 (not 13670); apply_discard_precedence 13744 (not 13745); resolve_mask_names error 13638 (not 13632); @mask_order 13621 (not 13613); -so whitelist 14592, ladder 14601, duration_ strip 14587 (not 14591/14599/14586); -V registry lookup 14238 (not 14236); builtin_metric_name 13515.
-- The resolve_expose_names token_key snippet also appears verbatim in resolve_discard_names at 13679. grep -F returns two hits, which is consistent with the role text.
-- The role of the convert_bytes site ('K and KB map to 1024 here while kB/MB are decimal') is confirmed. Its snippet `'KiB' => 1024,` also matches format_bytes at 12725, so it is not unique to convert_bytes.
-- Qualify the divergence 'resolve_discard_names does not use %mask_patterns': -d matches the names uuid/ipv4/ipv6/ip by literal, but gets the patterns from %mask_patterns through discard_identifier_sub (`$mask_patterns{$name}[0]`). Only the name vocabulary is duplicated.
-- The field-name set in resolve_discard_names is written twice in that sub (in the if-arm and in `qw( thread session user object )` for $discard_any_field), so there are more copies than the inventory counts.
-- The claim of 'about 14' choose_data_model call sites is confirmed as exactly 14 sites with inline defaults: 5703, 5709, 5715, 5723, 5838 (via %store_surface, default 'raw'), 14941 to 14944, 16562, 16906, 17402, 17695 and 17872.
-- The %mask_patterns comment 'Every option that names one of these identifiers resolves it through this table' exists above `my %mask_patterns;` (13598), wrapped across two lines. It is not attached to @mask_order, as the @mask_order site's role implies.
-- Owning docs: all 13 files exist. Headings confirmed: histogram-charts.md '### Command Line Interface' (line 16, contract text at line 32); 266 '### Validating `raw|bin` at option-parse time'; 524 '### D1 — One time-unit ladder...' and '### D2 — The ladder and its spellings (locked)'; 432 '## Locked decisions'; 597 '## Decisions' with a bold D24 entry. The 566 D6, 567 D9/D14/D15, 580 D5, log-format-registry D49 and 475 'no level list, no new option' texts are present.
+- Every snippet cited in the findings table and the inventory was located inside
+  the named sub by resolving each line to its preceding `sub` header on
+  2026-09-26; the new citations (`local $SIG{__WARN__}`, the file-list filter, the
+  `-g` and `-mem` pushbacks, `resolve_explain_topic`, the two `parse_udm_configs`
+  lines, `_validate_profile`, the `--help` row) all resolve to the sub named.
+- The scoping pass's line hints are not carried into this section; the
+  acceptance check is `grep -F` of the snippet within the sub's range.
+- The scoping pass's F1.5 said the `-hg` warning "includes time and never names
+  user-defined metrics"; the audit found it never prints at all (F1.17), which
+  supersedes that reading.
+- The scoping pass's F1.12 said `K` is 1000 in one table and 1024 in another; the
+  audit found the 1024 reading unreachable from the option (the SI table is
+  consulted first) and found the `kB`/`KB` collapse, which is the user-visible
+  defect.
 
-### Questions for the findings discussion
+### Questions for the findings discussion, with the evidence bearing on each
 
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Should `-x time` and `-d time` mean the duration metric or a `time=` key?*
+  Fixture B shows the key reading is live: `-x time` appends ` time=3` from a
+  query string. A log family that writes `time=` as a key exists in the corpus
+  (the ThingWorx application logs write `durationMS=`; whether any writes bare
+  `time=` was not checked). The #327 contract and the 566/567 lists disagree.
+- *Are `durationMs`/`durationMS` part of the shared vocabulary?* They are key
+  spellings a format writes; `-x` and `-d` accept them because those options read
+  keys. Extending them to `-hm`/`-hg` costs nothing; leaving them out means
+  F1.3's warning on `-hm durationMs` stands.
+- *Does the token-key fallback extend to `-hm`, `-hg` and `--hide`?* Fixture D
+  shows `-x elapsed` and `-x lat` are equivalent today; `--hide elapsed` is an
+  error. 597 D24 names the column heading as the `--hide` name, which is the
+  metric name, not the key.
+- *Is `object` on `-d` but not `-x` deliberate?* 567 D9 lists it for `-d`; 566 D6
+  does not list it for `-x`; D15 says the two accept the same names. Fixture B
+  shows the two readings of the word.
+- *Should `-so` resolve bare metric words through `builtin_metric_name()`?* It
+  re-encodes `duration|time` and `bytes|size`; `size` is accepted nowhere else.
+  Converging removes `size` unless `builtin_metric_name()` gains it.
+- *Is F1.12 a bug of its own?* It is nondeterministic and user-visible (a
+  threshold or a displayed value off by 2.4 percent between runs of one
+  command); the audit's recommendation is that it is filed and fixed ahead of
+  any convergence, on the one-ladder shape, and that #605 is sequenced after it.
+- *Are help-row literals in scope?* `tests/validate-help-content.sh` checks the
+  `-udm` function list against the code (scenario G) and nothing for unit lists
+  or the `-so` vocabulary; F1.8 shows the `-so` row already disagrees with the
+  code, so a harness scenario would fail today.
+- *New: is F1.17 a bug of its own?* A validation message that cannot print is a
+  defect independent of any convergence; the fix is to move the check to
+  settlement, where its `-hm` twin already runs.
 
 
 ---

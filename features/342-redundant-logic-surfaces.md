@@ -26,6 +26,15 @@ Decisions taken by the architect at the start of the work (2026-09-26):
   before the issues created from them are cut off it. After drop 1's PR merges the
   issue stays open and `in progress`; the completion comment and the close come
   with drop 2's PR.
+- **Every finding is cross-checked against the open issues** (the architect's
+  instruction of 2026-09-26, given after the specification was written and
+  transcribed here). For each finding the report names every open issue whose
+  scope touches the same surface, and states the relationship in words: the issue
+  would remove one of the copies, would add a copy or a reader of the vocabulary,
+  depends on the contract the finding leaves open, or has already recorded the
+  same observation. A finding with no open issue on its surface says so. The
+  open-issue list is captured once per audit session (`gh issue list --state
+  open`) and each relationship is read from the issue body, not from its title.
 - **A fix to any finding follows the normal development workflow** (`docs/process/workflow.md`):
   its own issue, branch, specification, completion gate, and, where it touches the hot
   path (the per-line processing loop, sorts, anything executed per line or per key at
@@ -1429,7 +1438,15 @@ Per scope item, in the order of § 4:
   the third finding of item 1, and every later reference carries its meaning in the
   same sentence). Columns: vocabulary, value class or decision; site A and site B
   (sub plus snippet; further copies listed in a note); what each site does; observed
-  divergence; target sub; contract and owner; category; priority.
+  divergence; target sub; contract and owner; category; priority; related open
+  issues.
+- **Related open issues** names every open issue whose scope touches the
+  finding's surface, each with its relationship stated in words (removes a copy,
+  adds a copy or a reader, depends on the open contract, already records the
+  observation), or "none" when the sweep of the open-issue list found nothing.
+  Each item's section also carries one list of the open issues that touch the
+  item as a whole, so the findings discussion can see which issues a grouping
+  would have to be sequenced against.
 - **Category** is one of: *diverged* (the copies already disagree, and a user can
   observe it: recorded with the two observations); *latent* (the copies agree today
   and nothing ties them); *identical by construction* (agree because they read the
@@ -1508,6 +1525,12 @@ Triaged per `docs/test-driven-development.md`.
 - [ ] Every scope item's report section lists the search angles § 4 names for it
       and records each as run, so a reader can see coverage.
       *Method: review against § 4.*
+- [ ] Every finding carries a related-open-issues entry, and every issue it names
+      is open at the time the report section is written and is cited with its
+      relationship in words.
+      *Method: the same scratch script extracts every `#NNN` from the report's
+      findings and runs `gh issue view --json state` on each; a closed or
+      missing issue is a failure of the report.*
 - [ ] The item 8 record reports, for each probe, the median and range of at least
       ten interleaved rounds against the base on the access log and the application
       log, the per-gate slope with its range, the NYTProf statement count for the
