@@ -1080,70 +1080,135 @@ included) with the audit's additions:
 
 ## Item 6: CSV emission column lists
 
-**State: scoping pass recorded; audit not yet run.**
+**State: audit complete (2026-09-26).** The four angles were run on the issue
+branch. The family-label disagreement the scoping pass found is confirmed by a
+mechanical diff of the rules TSVs against the tool's table and shown to change no
+emitted decimals; the header and row lists of both CSVs agree field for field on
+captured output; the rest are latent copies. No run was added for this item: the
+CSVs captured under item 2 (`342/runs2/cp0.stats.csv`, `cp0.messages.csv`, from
+the committed access-log fixture with `-o -cp 0`) carry the headers and rows the
+findings cite.
 
-### Summary of the scoping pass
+### Search angles run
 
-Two CSV files with 2 header sites and 2 row sites: MESSAGES header in pipeline_render and row in print_message_summary; STATS header built in normalize_data_for_output, written in pipeline_render, row in print_bar_graph. Around them sit 1 parallel family-name table (%csv_column_family) plus its pattern resolver, 1 parallel walk in the YAML aggregate export (write_aggregate_export), and 1 index CSV declared twice (write_index_file, read_index_file). Shared parts: @duration_family_stats (3 of 4 duration sites; MESSAGES is the exception), udm_csv_columns() (5 consumers), 2 gate predicates. Literal copies: bytes family 4x, count family 4x, user-defined-metric fallback list 3x plus the one inside udm_csv_columns(), duration names 1 extra hand copy (MESSAGES header) plus 21 row tags. Outside ltl, the column names are kept a third time in tests/csv-output/rules/messages-columns.tsv (52 lines) and stats-columns.tsv (136 lines). One family-label divergence exists today (std_dev and cv as shape vs dispersion, impact as shape vs duration), and the stated mirror comment is wrong about it.
+1. **By emitter.** Every `$csv->print`, `push @output_columns`, `push @row` and
+   `push @csv_data`, plus the `@index_columns` and `udm_csv_columns()` sites: 52
+   lines (`i6-angle1-emitters.txt`). Four CSV files, two header sites and two row
+   sites for the STATS and MESSAGES files, four emits for the run index, one walk
+   for the aggregate export.
+2. **By family.** Every `qw(...)` holding `occurrences`, `min`, `mean`, `max` or
+   `sum`, every `"${key}_..."` and `"${prefix}_..."` construction, and every
+   literal `bytes_*` or `count_*` name: 243 lines (`i6-angle2-families.txt`).
+   The column-list copies are the eleven listed under the findings; the rest are
+   store field names and statistic ladders.
+3. **By rules TSV.** Each column of `messages-columns.tsv` (52 rows) and
+   `stats-columns.tsv` (136 rows) against the tool's `%csv_column_family` table
+   (30 entries, six families) three ways (`i6-angle3-tsv-diff.txt`): present in
+   both, present in one, family disagreeing. Present in the TSVs only: the
+   twelve percentile columns and every level, rate, session, thread-pool and
+   user-defined column, all resolved in the tool by pattern in
+   `resolve_csv_column_family` rather than by the table; present in the tool
+   only: `timestamp`, and `category`, `message`, `impact` on the STATS side
+   (columns of the other file). Family disagreeing: three columns, F6.1.
+4. **By harness.** `tests/csv-output/validate-csv-output.pl` checks the header
+   against the rules (every header name must have a rule, every required rule a
+   column), the per-row field count against the header, each cell's type and
+   decimals against its rule, and the family group consistency (if one
+   conditional column of a family is populated, all are). It cannot catch a row
+   padded to the header width (F6.2) or a value written under the wrong header
+   of the same type.
 
-**Shared surface today.** No one declaration covers either CSV. The only shared parts are partial. @duration_family_stats covers the duration family on the STATS header, STATS row and aggregate export, but not on the MESSAGES CSV. udm_csv_columns() covers user-defined-metric columns on all four CSV sites and the aggregate export. stats_csv_duration_columns_active() and stats_csv_bytes_columns_active() are shared gates, not name lists. On the STATS side, @output_columns is the header list, and the row reads it only for the category segment (up to 'occurrences'); everything after that is rebuilt by a parallel walk of @populated_graph_columns.
+### Findings
 
-### Candidate findings (scoping pass; category and priority assigned by the audit)
+| # | Column or family | Site A (header or record) | Site B (row or second record; further copies in the note) | What each does | Observed divergence | Target | Contract and owner | Category | Related open issues |
+|---|---|---|---|---|---|---|---|---|---|
+| **F6.1** | The precision family of three columns | `(file scope in SUBS, before resolve_csv_column_family)` :: `'duration_std_dev'  => 'shape',` (and `'duration_cv'       => 'shape',`, `'impact'            => 'shape',`), under a comment that says the table mirrors the rules TSVs | `tests/csv-output/rules/stats-columns.tsv` and `messages-columns.tsv`: `duration_std_dev` and `duration_cv` in family `dispersion`, `impact` in family `duration` (messages only); no `dispersion` family exists in the tool | The tool's family decides the emitted decimals (shape: 3 at the default precision); the TSV's family decides the harness's group-consistency check and each row carries its own `max_decimals` | The two records of one contract disagree and the comment is false; the emitted decimals do not change (the tool writes three, the rules allow five for all three columns, so the harness passes). A reader of either record is misled about which family a column belongs to, and a future decimals change to `shape` or `dispersion` lands on different column sets | The table's comment corrected, and the two records reconciled on one label per column (the rules TSVs stay hand-maintained by design); `impact` decided as a duration or a shape statistic once | `tests/csv-output/README.md` § Rules TSV schema and § Updating rules when columns change (the tool and the rules TSV change in the same commit); `features/224-validate-statistics-test-harness.md` Decision 5 | **diverged** (record against record; no output consequence today) | #301 (per-release correctness manifest) would make the rules TSVs part of a versioned record; the disagreement would be frozen into it |
+| **F6.2** | The STATS row against its header | `normalize_data_for_output` :: `push @output_columns, "${key}_nice" if $key =~ /^(duration\|bytes)$/;` (the header walk over `@populated_graph_columns`) | `print_bar_graph` :: `if( $key =~ /^(time\|duration)$/i ) {` (the row walk over the same list in a second if/elsif chain) and `print_bar_graph` :: `push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;` (the padding) | Two chains kept in step by comment; the row's `time` arm can never match (`@graph_columns` holds `duration`, `bytes`, `count`), and if it did the row would gain a field the header lacks; a short row is padded to the header width before it is written, so the harness's field-count check cannot see it | Identical today: the captured STATS file has 37 header fields and 37 in every row | One column declaration per STATS column (name, family, gate, value accessor) that the header push, the row push and the aggregate export's walk all read; the padding removed or replaced by a hard failure | `features/432-metric-aggregate-naming-parity.md` D8 (`@output_columns` drives the CSV); `features/column-layout-refactor.md` § Required Separation (the declaration is new, not the layout) | **latent** | #514 (count metric explicit) changes the count arm of both chains |
+| **F6.5** | The MESSAGES row against its header | `pipeline_render` :: `$csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean` (41 names) | `print_message_summary` :: `format_csv_value($occurrences,       'occurrences'),` (a positional list of 41 values, 37 of them repeating the column name as the family tag; the per-column locals such as `my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};` are a third spelling) | Two hand-written lists of 41 and a third of tags, none reading `@duration_family_stats` | Identical today: 41 header fields and 41 in every row of the captured MESSAGES file, and every tag matches its header name by position | The same per-column declaration as F6.2, shared by both files where the columns are the same statistic | `features/432-metric-aggregate-naming-parity.md` D3 (CSV headers take the `duration_` prefix) and D5 | **latent** | #273 (store precise, format at the boundary) touches the `duration_nice` slot of this list |
+| **F6.3 / F6.4** | The bytes and count families | `normalize_data_for_output` :: `push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );` and `push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;` | `print_bar_graph` :: `foreach my $metric ( qw( occurrences min mean max ) ) {` and `foreach my $metric ( qw( occurrences min mean max sum ) ) {`; `write_aggregate_export` :: `$block->{$_} = aggregate_number($stats->{"bytes_$_"}) for grep { defined $stats->{"bytes_$_"} } qw(occurrences min mean` and its count twin; the user-defined fallback `qw(occurrences min mean max sum)` in the header, the row and the export beside `udm_csv_columns` :: `my @stats = qw(occurrences min mean max sum);` | The bytes family written four times, the count family four times, the user-defined fallback three times plus the one inside the sub that exists to prevent exactly this | Identical today | `@bytes_family_stats` and `@count_family_stats` at file scope beside `@duration_family_stats`, and the user-defined fallback read from `udm_csv_columns` | `features/432-metric-aggregate-naming-parity.md` D5 | **latent** | #514 |
+| **F6.6** | The rate columns' spelling | `pipeline_render` :: `if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }` (header) | `print_bar_graph` :: `push @csv_data, format_csv_value($output_columns{$category_bucket}, $category_bucket);` (the row formats under the bare name) and `resolve_csv_column_family` :: `return 'level' if $column =~ /^(err\|msg)-rate(_(sec\|min\|hr\|day))?$/;` (both spellings resolve to one family) | The header renames, the row does not; the family resolver accepts both | Identical output: the captured header reads `err-rate_min` and `msg-rate_min` and the cells format the same either way | The renamed name held in `@output_columns` itself, so the header writes what the row formats | none | **identical by construction** | none |
+| **F6.7** | The run index's columns | `write_index_file` :: `my @index_columns = qw(` | `read_index_file` :: `my @index_columns = qw(` (identical contents) and the four positional `$index_csv->print` emits | The writer and the reader each declare the list | Identical today (the read-back harness passes) | One file-scope `@index_columns` | `features/432-metric-aggregate-naming-parity.md` D7 | **latent** | none |
 
-- **F6.1** The precision-family labels disagree today between ltl and the rules TSVs. The %csv_column_family comment says 'Mirrors the family annotations in tests/csv-output/rules/{messages,stats}-columns.tsv', but ltl has `'duration_std_dev'  => 'shape'` and `'duration_cv'       => 'shape'` where both TSVs have `duration_std_dev ... dispersion` and `duration_cv ... dispersion`. ltl also has `'impact'            => 'shape'` where messages-columns.tsv has `impact\t41\tfloat\tconditional:duration\t5\tduration`. ltl has no 'dispersion' family at all; the harness uses the TSV family for its group-consistency check and the drift engine uses it for its per-family rollup. I did not run anything to see whether the emitted decimals differ.
-- **F6.2** The STATS header and row walk @populated_graph_columns in two separate if/elsif chains that must stay in step. The header loop in normalize_data_for_output adds `"${key}_nice" if $key =~ /^(duration|bytes)$/`. The row loop in print_bar_graph matches `$key =~ /^(time|duration)$/i` and pushes two values (nice and raw). No 'time' key exists in @graph_columns (`qw( duration bytes count )`), so that alternation is dead today. If it ever matched, the row would emit one more field than the header.
-- **F6.3** The bytes family (occurrences min mean max) is written as a literal list four times: `push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );` (STATS header), `foreach my $metric ( qw( occurrences min mean max ) )` (STATS row), `for grep { defined $stats->{"bytes_$_"} } qw(occurrences min mean max)` (aggregate export), and the MESSAGES qw. The four copies agree today.
-- **F6.4** The count family (occurrences min mean max sum) is written as `"${key}_occurrences", "${key}_min", ...` in the STATS header, `qw( occurrences min mean max sum )` in the STATS row, a qw in the aggregate export and the MESSAGES qw. The user-defined-metric fallback `qw(occurrences min mean max sum)` appears again in the header, the row and the aggregate export, separate from the `my @stats = qw(occurrences min mean max sum);` inside udm_csv_columns(). They agree today.
-- **F6.5** MESSAGES: the header qw has 41 names and the row list has 41 values. Pairing them by position, every tagged value's format_csv_value column name matches its header name, and the four untagged slots are category, message, bytes_nice and duration_nice. They agree today, but only because the two lists were written by hand to match; the duplicated duration names do not come from @duration_family_stats.
-- **F6.6** STATS err-rate/msg-rate: the header written in pipeline_render uses `"err-rate$rate_csv_suffix{$rate_unit}"`, while the row formats the value under the bare name (`format_csv_value($output_columns{$category_bucket}, $category_bucket)`). Both resolve to the 'level' family with the rate override, so the output is the same, but header and row spell the column differently.
-- **F6.7** ltl-index.csv: `my @index_columns = qw(` is declared twice with identical contents, once in write_index_file and once in read_index_file. The write-side rows are positional lists that parallel it.
+Sites audited and closed as **deliberate**:
 
-### Site inventory (scoping pass)
+- The rules TSVs are a copy of the column names by design: the harness checks
+  the tool against a specification the tool did not generate
+  (`tests/csv-output/README.md`). They are recorded as copies and excluded as a
+  target.
+- `udm_csv_columns` :: `return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };`
+  is the one declaration serving five consumers, and the template the other
+  columns should follow.
+- `stats_csv_duration_columns_active` :: `return ($write_messages_to_csv && !$omit_durations && $durations_observed) ? 1 : 0;`
+  and its bytes twin are shared gates, called by the header, the row and the
+  export.
+- The aggregate export's keys are YAML mapping keys in STATS order by the
+  `features/503-yaml-aggregate-export.md` section contract, so its walk is a
+  consumer of the same declaration, not a fifth spelling to be removed.
 
-- `(GLOBALS)` :: `my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );` :: The one shared declaration in this area: the duration statistics in column order. The STATS header, the STATS row and the aggregate export read it. The MESSAGES CSV does not; it spells the same 21 names out by hand.
-- `normalize_data_for_output` :: `push @output_columns, "timestamp";` :: Starts the STATS CSV header list (@output_columns, a global declared as `my ( @in_files, @output_columns );`), then pushes the category columns in @log_levels order.
-- `normalize_data_for_output` :: `push @output_columns, "successes", "failures", "conflicts";` :: STATS header: the occurrences column plus the three outcome-count columns.
-- `normalize_data_for_output` :: `# Build @populated_graph_columns and @output_columns (still needed for scaling and CSV)` :: STATS header: walks @graph_columns, building @populated_graph_columns and the metric headers in the same loop. It adds the _nice columns, the count family written as literal strings, the user-defined-metric columns via udm_csv_columns() with a literal fallback list, and the sessions/users -HL twins.
-- `normalize_data_for_output` :: `push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );` :: STATS header: the CSV-only bytes family and duration family, each gated on its shared predicate (stats_csv_bytes_columns_active / stats_csv_duration_columns_active).
-- `stats_csv_duration_columns_active` :: `return ($write_messages_to_csv && !$omit_durations && $durations_observed) ? 1 : 0;` :: Shared gate that the STATS header push and row push both call (its comment says 'MUST both call this'). stats_csv_bytes_columns_active is the same pattern for bytes. The aggregate export also calls both.
-- `pipeline_render` :: `if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }` :: Writes the STATS header. It maps @output_columns, renaming err-rate and msg-rate to their unit-suffixed spellings, then calls $csv->print. The rename happens only here: the row side formats those values under the bare names.
-- `print_bar_graph` :: `last if $category_bucket =~ /^occurrences$/;` :: STATS row: re-walks the @output_columns header list to emit category counts, stopping at 'occurrences'. This is the one place where the row reads the header list directly.
-- `print_bar_graph` :: `# 'successes','failures' header pushes in normalize_data_for_output().` :: STATS row: occurrences plus the outcome counts, kept in step with the header by a comment only.
-- `print_bar_graph` :: `# @populated_graph_columns in the SAME order as the @output_columns` :: STATS row: a second if/elsif over @populated_graph_columns that mirrors the header loop's branches. It has its own literal count stat list and its own user-defined-metric fallback list.
-- `print_bar_graph` :: `foreach my $metric ( qw( occurrences min mean max ) ) {` :: STATS row: the bytes family written out as a second literal list, parallel to the header's qw list. The duration family follows and reads @duration_family_stats.
-- `print_bar_graph` :: `push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;` :: STATS row: pads a short row with empty fields up to the header width. This hides a row that comes out shorter than the header.
-- `pipeline_render` :: `$csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences` :: MESSAGES header: 41 fixed names in one literal qw list, then the user-defined-metric headers from udm_csv_columns().
-- `print_message_summary` :: `format_csv_value($occurrences,       'occurrences'),` :: MESSAGES row: a positional list of 41 values that parallels the header's qw. 37 of them repeat the column name as the format_csv_value family tag, which makes the names a second copy. The four untagged slots are category, message, bytes_nice and duration_nice.
-- `print_message_summary` :: `? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $csv->{columns}[0])` :: MESSAGES row, user-defined-metric tail: reads udm_csv_columns() like the header does, so these columns share one declaration.
-- `udm_csv_columns` :: `return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };` :: Declares the user-defined-metric CSV columns. Its comment says it exists so that header and row 'can never disagree about shape or spelling'. It returns the column names and the accumulator for each column, and the STATS header, STATS row, MESSAGES header, MESSAGES row and aggregate export all call it. It is the template the rest of the CSV columns could follow.
-- `file scope in SUBS, before resolve_csv_column_family` :: `my %csv_column_family = (` :: %csv_column_family: a third hand-kept list of the fixed column names, mapping each name to a precision family. Its comment says it mirrors the rules TSV family annotations.
-- `resolve_csv_column_family` :: `return 'count' if $column =~ /_(min|mean|max|sum|occurrences)$/;` :: Resolves families for dynamic columns (levels, rates, user-defined metrics) by pattern, outside the static table.
-- `write_aggregate_export` :: `# The STATS CSV column families, in the order the row writes them.` :: YAML aggregate export, bucket series: a third walk over @populated_graph_columns in STATS order. It has its own literal bytes list (occurrences min mean max) and count list (occurrences min mean max sum), and reads @duration_family_stats and udm_csv_columns(). Its keys are YAML mapping keys, not CSV headers.
-- `write_index_file` :: `my @index_columns = qw(` :: ltl-index.csv header on the write side. Each row (@file_row, @sel_row) is a positional list that parallels it.
-- `read_index_file` :: `next unless @$row >= scalar(@index_columns);` :: ltl-index.csv read side. It declares a second, identical copy of @index_columns and maps values to columns by position.
-- `build_column_layout` :: `my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;` :: Display column declaration: the timestamp, legend, success_pct/failure_pct, separator, occurrences/duration/bytes/count, latency or heatmap columns, as hashes with id, type, name, width, spacing, visible, color and hide_order. There is no CSV field.
-- `add_dynamic_column` :: `my ($columns_ref, $id, $name, $color_index, %opts) = @_;` :: Adds the sessions, users, thread-pool and user-defined-metric columns to @column_layout as single proportional columns (one id per metric). It carries no CSV sub-columns, statistic list or -HL twin.
-- `adapt_to_command_line_options` :: `do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(` :: The -so sort-operand allow-list. It spells out bytes_occurrences bytes_min bytes_mean bytes_max, count_occurrences..count_max and the full duration stat/percentile/shape names (unprefixed) as a separate literal list. An elsif ladder follows that maps each operand to a sort key (e.g. '} elsif( $sort_type =~ /^bytes_occurrences$/i ) {'). features/432 D8 names this as a consumer of the same bytes_* vocabulary. The inventory raised it only as an open question and did not list it. *(added by the verifier)*
-- `print_help` :: `$out .= help_opt("-so,  --sort-on <field>",` :: A hand-written copy of the same aggregate, stat and percentile name list in the -so help row (bytes_occurrences, bytes_min, ... count_max, impact, p1..p99999, iqr, skewness, kurtosis, bimodality_coef). *(added by the verifier)*
-- `print_message_summary` :: `my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};` :: MESSAGES row: per-column local variables are pulled from %log_messages before the positional format_csv_value list. This is a third per-column spelling on the MESSAGES side that must match the header qw and the tags. *(added by the verifier)*
-- `write_index_file` :: `$csv->print(` :: ltl-index.csv has four separate $csv->print row/header emits (lines 6827, 6830, 6857, 6875) with positional rows. The inventory named @file_row/@sel_row but not the count of emit sites. *(added by the verifier)*
+### Open issues touching this item as a whole
+
+- **#514** (count metric capture and display explicit, `next-up`): the count
+  family's four literal copies and both if/elsif chains change with it.
+- **#273** (store precise, format at the rendering boundary): the MESSAGES
+  `duration_nice` slot reads the stored string this issue removes.
+- **#301** (per-release correctness manifest): the rules TSVs would enter a
+  versioned record; F6.1's disagreement should be settled before it is frozen.
+
+### Site inventory
+
+Carried from the scoping pass (*(scoping)*, its four verifier additions
+included) with the audit's additions:
+
+- `(GLOBALS)` :: `my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );` :: the one shared declaration; read by the STATS header, STATS row and export, not by the MESSAGES file. *(scoping)*
+- `normalize_data_for_output` :: `push @output_columns, "timestamp";` :: STATS header start. *(scoping)*
+- `normalize_data_for_output` :: `push @output_columns, "successes", "failures", "conflicts";` *(scoping)*
+- `normalize_data_for_output` :: `# Build @populated_graph_columns and @output_columns (still needed for scaling and CSV)` :: the header walk. *(scoping)*
+- `normalize_data_for_output` :: `push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );` *(scoping)*
+- `normalize_data_for_output` :: `push @output_columns, map { "duration_$_" } @duration_family_stats;` *(audit)*
+- `stats_csv_duration_columns_active` :: `return ($write_messages_to_csv && !$omit_durations && $durations_observed) ? 1 : 0;` *(scoping)*
+- `pipeline_render` :: `if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }` :: STATS header write. *(scoping)*
+- `print_bar_graph` :: `last if $category_bucket =~ /^occurrences$/;` :: the row reads the header list for the category segment. *(scoping)*
+- `print_bar_graph` :: `# 'successes','failures' header pushes in normalize_data_for_output().` *(scoping)*
+- `print_bar_graph` :: `# @populated_graph_columns in the SAME order as the @output_columns` :: the row walk. *(scoping)*
+- `print_bar_graph` :: `foreach my $metric ( qw( occurrences min mean max ) ) {` *(scoping)*
+- `print_bar_graph` :: `foreach my $stat ( @duration_family_stats ) {` *(audit)*
+- `print_bar_graph` :: `push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;` *(scoping)*
+- `pipeline_render` :: `$csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences` :: MESSAGES header. *(scoping)*
+- `print_message_summary` :: `format_csv_value($occurrences,       'occurrences'),` :: MESSAGES row. *(scoping)*
+- `print_message_summary` :: `my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};` :: the per-column locals. *(scoping)*
+- `print_message_summary` :: `? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $csv->{columns}[0])` :: the user-defined tail. *(scoping)*
+- `udm_csv_columns` :: `return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };` *(scoping)*
+- `(file scope in SUBS, before resolve_csv_column_family)` :: `my %csv_column_family = (` :: the family table and its mirror comment. *(scoping)*
+- `resolve_csv_column_family` :: `return 'count' if $column =~ /_(min|mean|max|sum|occurrences)$/;` :: dynamic families by pattern. *(scoping)*
+- `adapt_to_command_line_options` :: `my %decimals_by_unit = ( ns => 9, us => 6, ms => 0, s => 0 );` and the three `%csv_family_decimals` tables that follow it (default, full, integer). *(audit)*
+- `write_aggregate_export` :: `# The STATS CSV column families, in the order the row writes them.` :: the export walk. *(scoping)*
+- `write_index_file` :: `my @index_columns = qw(` and `read_index_file` :: `next unless @$row >= scalar(@index_columns);` *(scoping)*
+- `write_index_file` :: `$index_csv->print($ofh, \@index_columns);` :: the header emit; three positional row emits follow it. *(scoping, snippet corrected)*
+- `build_column_layout` :: `my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;` and `add_dynamic_column` :: `my ($columns_ref, $id, $name, $color_index, %opts) = @_;` :: the display layout, which carries no CSV field. *(scoping)*
+- `adapt_to_command_line_options` :: `do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(` and `print_help` :: `$out .= help_opt("-so,  --sort-on <field>",` :: the `-so` copies of the same names (item 1, F1.8). *(scoping)*
 
 ### Verification notes
 
-Sites reported 23, confirmed 20, refuted 3 (corrected above), added by the verifier 4, owning docs refuted 0.
+- Every snippet resolves to its enclosing sub. The scoping pass's three refuted
+  line hints are irrelevant to the snippet check.
+- The scoping pass asked whether the family disagreement changes emitted
+  decimals; the answer from the rules rows and the tool's table is no (three
+  emitted, five allowed).
+- The scoping pass's F6.2 ("if it ever matched, the row would carry one more
+  field than the header") is confirmed by reading: the row arm pushes two
+  values where the header pushes `_nice` plus the bare name only for
+  `duration` and `bytes`; the `time` arm cannot match today.
 
-- The line hints are off by 1-5 lines for several sites. Actual lines: stats_csv_duration_columns_active return 18792; the err-rate rename in pipeline_render 22059; 'last if $category_bucket =~ /^occurrences$/;' 19738; the successes/failures comment 19755; the row padding 20006; the MESSAGES row format_csv_value($occurrences...) 21517; the udm_csv_columns return 10290; resolve_csv_column_family's count regex 13257.
-- 'my @index_columns = qw(' occurs at line 1915 (read_index_file, which starts at 1903) and line 6755 (write_index_file, which starts at 6752). Both attributions hold. The read_index_file site's snippet 'next unless @$row >= scalar(@index_columns);' is at line 1934.
-- @duration_family_stats (line 323) is confirmed in GLOBALS (lines 64 to 1360). Its consumers are exactly write_aggregate_export (6650), normalize_data_for_output (19093) and print_bar_graph (19994). print_message_summary does not use it.
-- udm_csv_columns() has exactly 5 callers, as claimed: write_aggregate_export 6678, normalize_data_for_output 19069, print_bar_graph 19961, print_message_summary 21496 and pipeline_render 22084.
-- Family divergence confirmed. In ltl, 'duration_std_dev', 'duration_cv' and 'impact' map to 'shape' (lines 13234, 13235, 13238). Both rules TSVs give dispersion for duration_std_dev and duration_cv, and messages-columns.tsv gives impact as the duration family. 'dispersion' does not occur anywhere in ltl.
-- @graph_columns is confirmed as 'qw( duration bytes count )' (line 247), so a 'time' match in the STATS row loop cannot happen.
-- Rules TSV line counts are confirmed: messages-columns.tsv has 52 lines and stats-columns.tsv has 136. The per-row field-count check 'if (scalar(@$row) != scalar(@$header_row))' is confirmed at line 136 of tests/csv-output/validate-csv-output.pl, and the 'unknown column' rule at line 285.
-- Every owning doc heading exists: column-layout-refactor.md Goals (37), Architectural Principle (301), Required Separation (313), Automatic Visibility (323), Identified Problem Areas (333), 5. Column Selection Scatter (377); 432 D3 (116), D5 (140), D8 (163), D7 (188); 224 Decision 5 (162), Decision 10 (271); 503 '-V aggregate-export section contract (locked as built, 2026-09-03; ...)' (390); tests/csv-output/README.md Rules TSV schema (56), Updating rules when columns change (97). features/452-success-failure-percentage-columns.md exists. The three harnesses exist.
+### Questions for the findings discussion, with the evidence bearing on each
 
-### Questions for the findings discussion
-
-Carried in the specification, § 4, under this item; the audit adds the evidence bearing on each here.
+- *Does the family disagreement change emitted decimals?* No; it changes which
+  record a maintainer trusts, and the comment that claims a mirror is wrong.
+- *Does the STATS row padding stay?* It exists so a short row never breaks a
+  reader; the captured file shows no short row today. A hard failure in its
+  place would surface a drift the harness cannot otherwise see.
+- *Is the `-so` vocabulary a further copy of these lists?* Yes for the
+  `bytes_*` and `count_*` names (item 1, F1.8); one declaration per column
+  would give `-so` its allow-list as well.
 
 
 ---
