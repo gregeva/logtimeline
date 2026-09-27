@@ -60,7 +60,7 @@ unevenly: the metric-name resolver is called by two of six options that take
 metric names; the `-so` vocabulary is written three times with no table; the
 `-m`, `-pr` and `--help` errors list their vocabularies as literals beside the
 tables they validate against; the byte-unit slot folds two spellings onto one
-key and resolves nondeterministically.
+key and resolves nondeterministically. Refined by #613 (one vocabulary for metric, field, identifier and statistic names), #614 (operand checks and texts derive from the vocabulary) and #608 (the byte ladder).
 
 ---
 
@@ -103,7 +103,7 @@ parse exists as the generated source strings and again as closures in
 `compile_format_time_parser`, tied by a comment (item 3, F3.1); and
 `format_registry_set_occupant` does its own cache lookup instead of calling
 `format_scan_sub_resolve`, so occupant swaps bypass the cache-hit telemetry
-(item 8, F8.1).
+(item 8, F8.1). The time parse is #615 (CSV as a header-instantiated entry, one generated parse); the cache bypass is #620.
 
 ---
 
@@ -137,7 +137,7 @@ election, promotion, occupant swap or pin).
 
 **Status.** Established for the three sites. Whether the per-line loop body of
 `read_and_process_logs` becomes a fourth is the audit's item 8 question,
-measured in drop 2.
+measured in drop 2. The per-line loop body as a switchable generated variant is #621, not planned, after #620.
 
 ---
 
@@ -165,7 +165,7 @@ Requirements, § Required Separation (the CSV and summary outputs stay out of th
 layout by design).
 
 **Status.** Established. The CSV columns have no equivalent declaration (item
-6); the layout is deliberately not it.
+6); the layout is deliberately not it. The CSV column declaration is #618.
 
 ---
 
@@ -246,7 +246,7 @@ time and § Resolution at each call site).
 
 **Status.** Needs refinement: each surface's default is repeated at fourteen
 call sites instead of held with the surface (item 1, F1.14), and the resolved
-capture modes are tested per line as string compares (item 8).
+capture modes are tested per line as string compares (item 8). Both are #620 (the default held with the surface; the capture modes as booleans).
 
 ---
 
@@ -284,7 +284,7 @@ the CLAUDE.md checkpoint on observation counts.
 **Status.** Needs refinement: the observation-count rule is violated at the
 projection of zeroed totals (item 4, F4.10) and the bytes count is demand-gated
 while its total is not (F4.11); the impact mean divides by the wrong count
-(F4.5).
+(F4.5). Refined by #616 (unconditional observation counts, one gated derivation) and #620 (demand flags for session, user and index capture).
 
 ---
 
@@ -315,7 +315,7 @@ classes).
 
 **Status.** Established. One latent drift: the timeline latency column's
 visibility is restated in the registry's `active` predicate, in the demand
-block and in `build_column_layout` (audit, FP.1).
+block and in `build_column_layout` (audit, FP.1). The drift is #620 (the layout and the demand block read the registry predicate).
 
 ---
 
@@ -351,7 +351,7 @@ which is the cost a flag exists to bound.
 and mask flags are set in their resolve subs and again in
 `apply_discard_precedence` (audit, FP.3); the capture modes are string compares
 in the loop rather than booleans (item 8); the loop carries about 107 tests of
-run constants per line, whose cost drop 2 measures.
+run constants per line, whose cost drop 2 measures. The expose and mask flags are #613; the capture modes and the run-constant tests are #620.
 
 ---
 
@@ -379,7 +379,7 @@ contract).
 **Owning record.** `tests/HARNESS-DESIGN.md`.
 
 **Status.** Established. One naming drift: the `histogram-bin-counters` section
-has two emitters and its emitter sub carries an older name (audit, FP.2).
+has two emitters and its emitter sub carries an older name (audit, FP.2). The naming drift is noted on #469, the next change to that section.
 
 ---
 
@@ -411,7 +411,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #608, #613, #614, #615, #616, #617, #618, #619 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
 
 ---
 
@@ -547,7 +547,7 @@ inventories every ad-hoc notice.
 
 **Status.** Needs refinement: notices render counts and percentages three ways
 (audit, item 2, F2.8 and F2.9); one warning is emitted inside the option
-parser's warning capture and never prints (item 1, F1.17).
+parser's warning capture and never prints (item 1, F1.17). The number rendering is #617; the swallowed warning is #614.
 
 ---
 
@@ -576,7 +576,7 @@ the decision and the notice the same for all five.
 
 **Owning record.** This entry.
 
-**Status.** Needs refinement (F1.6, F1.17).
+**Status.** Needs refinement (F1.6, F1.17). Refined by #614 (one pushback rule, a usage error for an argument that resolves to no file).
 
 ---
 
@@ -614,4 +614,4 @@ Core mechanism; `features/478-highlight-decision-read-back.md`;
 
 **Status.** Needs refinement: the loop carries about 107 tests of run constants
 per line and recomputes the millisecond bucket size and the key length per
-line (audit, item 8, measured in drop 2).
+line (audit, item 8, measured in drop 2). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.
