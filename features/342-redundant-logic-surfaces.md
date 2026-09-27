@@ -29,6 +29,16 @@ Decisions taken by the architect at the start of the work (2026-09-26):
   merge of PR #607 delivered the report, the patterns file and the loop
   measurement; the completion comment written at that merge covers those
   deliverables only.
+- **The review is complete (2026-09-27).** All sixteen stages of the audit
+  report's § Review progress are decided in one session with the architect: the
+  eighty-seven findings are dispositioned, twelve issues stand (#608, #609, #611,
+  #613 to #621), two small bugs filed on the way were closed into their stages
+  (#610, #612), five stages folded into existing issues as their first
+  requirement or an added point (#525, #605, #616, #617, #273), every ordering
+  is a native blocked-by edge, #174's premise was found not to hold and is
+  commented for disposition, and each `docs/architecture-patterns.md` entry
+  needing refinement names the issue that refines it. The issue is closed with
+  the completion comment for this deliverable.
 - **Delivery is staged in two drops on the issue branch** (decided 2026-09-26, after
   the item 8 measurement was confirmed in scope). Drop 1 is the audit of scope
   items 1 to 7 and the patterns sweep: the report's findings, the start of their
