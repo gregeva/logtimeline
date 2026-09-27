@@ -38,7 +38,8 @@ Decisions taken by the architect at the start of the work (2026-09-26):
   is a native blocked-by edge, #174's premise was found not to hold and is
   commented for disposition, and each `docs/architecture-patterns.md` entry
   needing refinement names the issue that refines it. The issue is closed with
-  the completion comment for this deliverable.
+  the completion comment for this deliverable. The dispatched refactoring is
+  gathered under #622 as sub-issues.
 - **Delivery is staged in two drops on the issue branch** (decided 2026-09-26, after
   the item 8 measurement was confirmed in scope). Drop 1 is the audit of scope
   items 1 to 7 and the patterns sweep: the report's findings, the start of their
