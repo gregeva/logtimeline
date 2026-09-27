@@ -17,9 +17,18 @@ Decisions taken by the architect at the start of the work (2026-09-26):
   recorded in this document, plus `docs/architecture-patterns.md` and its two
   `CLAUDE.md` entries. It changes no executable line of `ltl`, so no before/after
   benchmark is captured on this branch.
-- **The audit files no sub-issues.** Which findings become issues of their own, and
-  which are grouped, is decided in discussion of the findings once they are recorded
-  here. The audit record stays in this document whatever that discussion decides.
+- **The audit files no sub-issues during the sweep.** Which findings become issues
+  of their own, and which are grouped, is decided in discussion of the findings once
+  they are recorded here. The audit record stays in this document whatever that
+  discussion decides.
+- **The triage and dispatch of the follow-up actions are a deliverable of this
+  issue** (the architect, 2026-09-27, reopening the issue after it was closed at the
+  merge of PR #607). The issue stays open and `in progress` through the review
+  stages recorded in the audit report's § Review progress; it closes when every
+  stage is decided and every follow-up action is filed or dispositioned. The
+  merge of PR #607 delivered the report, the patterns file and the loop
+  measurement; the completion comment written at that merge covers those
+  deliverables only.
 - **Delivery is staged in two drops on the issue branch** (decided 2026-09-26, after
   the item 8 measurement was confirmed in scope). Drop 1 is the audit of scope
   items 1 to 7 and the patterns sweep: the report's findings, the start of their

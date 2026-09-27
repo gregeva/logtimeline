@@ -27,13 +27,18 @@ by divergence risk, then user-visible consequence, then number of copies.
 
 ## Review progress
 
-The review of this report's 87 findings is a large piece of work done over
-several sessions. This section is its persisted state: the stages, their order
-and the reason for it, and the status of each. It is updated in the same action
-as any decision taken in the review, so the next session starts from what is
-written here and not from memory. The ordering is a proposal; the architect
-decides each stage, and a decision is recorded in the *Decision* column with the
-issue numbers it produced, or with "no issue" and the reason.
+The triage and dispatch of this report's 87 findings is the remaining
+deliverable of issue #342, which stays open and `in progress` until every stage
+below is decided (the architect's decision of 2026-09-27, recorded in the
+specification's § Status). It is a large piece of work done over several
+sessions. This section is its persisted state: the stages, their order and the
+reason for it, and the status of each. It is updated in the same action as any
+decision taken in the review, so the next session starts from what is written
+here and not from memory. The ordering is a proposal; the architect decides each
+stage, and a decision is recorded in the *Decision* column with the issue
+numbers it produced, or with "no issue" and the reason. The issue's own comments
+point here; the issue closes when the last stage is *decided*, with a completion
+comment for this deliverable.
 
 **How to update.** Change a stage's *Status* to *in discussion* when it is opened,
 to *decided* when every finding in it has a disposition (an issue filed, folded
