@@ -692,7 +692,10 @@ in § 7.
     boundary fixture in one run render SI and print exactly one notice naming
     both formats and `-bn`; the G1 GC fixture given twice renders IEC and prints
     no notice; the mixed pair with `-bn iec` renders IEC and prints no notice
-    (D20). The notice prints under `--disable-progress`. Harnesses:
+    (D20); the G1 GC fixture beside a file no format recognises (a two-line
+    scratch file of plain text) renders SI and prints the one notice, the
+    unrecognised file counting as declaring nothing (D20). The notice prints
+    under `--disable-progress`. Harnesses:
     `tests/validate-byte-units.sh` reading stderr and the rendered cells, and
     `validate-format-detection.sh` reading `-V format-detection`.
 11. **One notation reaches every byte string** (assertable; D15). In one run of
