@@ -166,6 +166,9 @@ about anything else, these still hold.
       artifact: no `rm`, `mv`, `git clean`, `git checkout -- .`, truncating
       redirect. `./tests/cleanup-test-artifacts.sh` is the only cleanup. A corpus
       that looks missing is a finding to report, never a state to repair.
+      The exception is Claude's own leftovers: output files an `ltl` run made
+      while testing (CSVs, the aggregate export, the run index) are deleted
+      without asking, never offered to the architect as a question.
 - [ ] Subagents and workflow agents run Opus 5 at medium effort, set explicitly
       on every call.
 - [ ] A step that publishes (a tag push, a release, a PR) is its own command,
