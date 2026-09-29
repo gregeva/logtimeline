@@ -5,6 +5,9 @@
 Specification agreed with the architect 2026-09-28 on branch
 `619-per-run-key-cut` off `release/0.19.0`; implementation not started. Nothing
 in `ltl` has changed on the branch, and `$version_number` has not been stamped.
+Before implementation drop 1, the inert re-scan partition is validated against
+the consolidation specification and the finding is brought to the architect for
+his disposition (D7, the partition validated rather than skipped; § 5.5, § 9).
 
 The issue comes from stage 13 (the key cut and the cap) of the #342 review of
 duplicated logic, decided by the architect on 2026-09-27. It is a sub-issue of
@@ -50,14 +53,16 @@ The consumers are three readers who today get a wrong or unstated answer.
    table). Each needs the grouping key and the key's shape to be stated facts.
 
 The work changes no rendered output and no CSV cell. The only value a user can
-see move is the `-V benchmark-data` CONFIG line on `-o` and `-g` runs.
+see move is the `-V benchmark-data` CONFIG line on `-o` and `-g` runs. This holds
+on the architect's disposition of the re-scan partition's validation (D7) that
+keeps behaviour; a disposition that changes consolidation states what moves.
 
 ---
 
 ## 2. Requirement
 
 The architect's terms, from the issue body, the review's stage rows and the
-decisions of 2026-09-28 (§ 4), arranged by topic:
+decisions of 2026-09-28 and 2026-09-29 (§ 4), arranged by topic:
 
 - **One per-run cut.** The length at which a message key is cut is resolved
   once per run into one named value. Everything that cuts, compares or reports
@@ -73,10 +78,18 @@ decisions of 2026-09-28 (§ 4), arranged by topic:
 - **The consolidation record is trued up to the code**, including the fact that
   consolidation across log levels is the design.
 - **The unread counter of the observed maximum key length goes.**
-- **Done when:** the benchmark data reports the cut the run used; the MESSAGES
-  CSV keys and consolidation output are byte-identical to today's on the fixtures;
-  the before/after benchmark shows the moved CONFIG line on `-o` and `-g` runs and
-  nothing else; the record describes the code.
+- **The inert re-scan partition is validated, not skipped.** Before
+  implementation, it is validated against the consolidation specification: what
+  it was meant to do, what it does, and whether the difference is a defect or a
+  leftover, with the measured effect of each disposition. The architect disposes
+  of it (D7).
+- **Done when:** the partition's validation is recorded and disposed of; the
+  benchmark data reports the cut the run used; the MESSAGES CSV keys and
+  consolidation output are byte-identical to today's on the fixtures, on the
+  disposition that keeps behaviour (a disposition that changes consolidation
+  states the output it accepts); the before/after benchmark shows the moved CONFIG
+  line on `-o` and `-g` runs and nothing else, on the same condition; the record
+  describes the code.
 
 ---
 
@@ -95,7 +108,7 @@ options.
 | 5 | The consolidation input re-cuts every retained key at 350 after the key sites did | **Holds, and applies to every consolidation cut.** Under `-g` every key is at most 350 characters. The other eight readers of the cap each cut a string that is already at most 350: a key, the capped message stored for a key, or a canonical form built from those. `derive_canonical` emits at most one character per input character, so it never lengthens its input. All nine cap cuts, and the canonical form's cut in the fifth ternary, are no-ops under `-g`. |
 | 6 | The batch path parses the level four times and strips it with a fifth regex | **Holds.** `group_similar_messages` has `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` at three sites and `my ($gk) = $log_key =~ /^\[([^\]]+)\]/;` at one. The sort comparator strips the prefix with `/^\[[^\]]+\]\s*(.*)/s`, and when that fails it falls back to the whole key. |
 | 7 | The audit's target for the grouping key says the consolidation store "already keeps" it in `%consolidation_key_message_cat_gk` | **Does not hold as a carrier; the map is written and never read.** `consolidation_process_key` writes it, `run_consolidation_checkpoint` deletes from it on eviction and consumption, and `group_similar_messages` empties it when the final pass starts. No site reads it. It costs memory for every key in the streaming working set and has no reader. |
-| 8 | The bucket-key cut takes the first word to 30 characters, else the message to 20, and its comment says 20 | **Holds; the cut changes no key, and the split it makes is by level.** `extract_consolidation_bucket_key` receives the capped whole key, or a canonical form, not the message body. The first word of every key is its bracketed level, which every key of one group shares. So within one group the re-scan split is a single bucket. The 20-character branch cannot run, because every key starts with `[`, which is not whitespace. The 30-character cut acts only on a level longer than 29 characters. A probe on a scratch copy of `ltl` printed each final-pass window's buckets on five committed fixtures (two application logs carrying thread and logger, one holding a line at each of six levels and one holding INFO and WARN lines that carry control characters; and three access logs whose level is the HTTP status, two answering only 200 and one answering 200 and 500): a window holding keys of one level held one bucket; a window holding keys of two levels (item 9) held two. The partition that `docs/staged-processing-pipeline.md` credits with a 21 % speed-up (`[LEVEL][class]` in the prototype) does not divide a group in `ltl`. How this relates to the plain and highlighted split is § 5.5. |
+| 8 | The bucket-key cut takes the first word to 30 characters, else the message to 20, and its comment says 20 | **Holds; the cut changes no key, and the split it makes is by level.** `extract_consolidation_bucket_key` receives the capped whole key, or a canonical form, not the message body. The first word of every key is its bracketed level, which every key of one group shares. So within one group the re-scan split is a single bucket. The 20-character branch cannot run, because every key starts with `[`, which is not whitespace. The 30-character cut acts only on a level longer than 29 characters. A probe on a scratch copy of `ltl` printed each final-pass window's buckets on five committed fixtures (two application logs carrying thread and logger, one holding a line at each of six levels and one holding INFO and WARN lines that carry control characters; and three access logs whose level is the HTTP status, two answering only 200 and one answering 200 and 500): a window holding keys of one level held one bucket; a window holding keys of two levels (item 9) held two. The partition that `docs/staged-processing-pipeline.md` credits with a 21 % speed-up (`[LEVEL][class]` in the prototype) does not divide a group in `ltl`. How this relates to the plain and highlighted split is § 5.5; the partition is validated against the consolidation specification before implementation (D7). |
 | 9 | (not in the issue) `features/fuzzy-message-consolidation.md` § Grouping Key Design says an ERROR message is never compared with a WARN message | **The record does not describe the code; the code is the design (D1 below).** In the final pass of `group_similar_messages`, a window with fewer than two keys is not processed and is carried on, so a lone key of one level joins the window of the next level. Two application-log lines with the same thread, logger and body, one at ERROR and one at WARN, print under `-g` as one row with the level shown as `[*]` and 2 occurrences. The probe of item 8 found windows holding two levels on three of the five fixtures: both application logs (the six-level log and the INFO and WARN log) and the access log answering 200 and 500. Nothing in the key text is exempt from consolidation, the level included; the record is trued up to say so. |
 | 10 | IQ-01 names `--consolidate-full-key`, and treats session as a grouping field under `--include-session` | **Neither option exists in `ltl`.** |
 | 11 | The cap's reason is DD-06 | **DD-06 gives the reason for grouping only.** The value 350 came first from the CSV option: the commit that added MESSAGES CSV output used `$write_messages_to_csv == 1 ? 350 : $max_log_message_length`. The grouping change adopted it "same as CSV output". No record gives a reason for the CSV's 350; its reason is now that it shares the grouping cap, so `-o` and `-o -g` produce the same keys (D5). |
@@ -103,7 +116,7 @@ options.
 | 13 | `docs/architecture-patterns.md` § Hot-loop discipline says #620 refines the key length recomputed per line | **The owner is this issue.** #620's body says "the key cut is #619". This issue corrects the status line by adding its own token and changing nothing else in it. |
 | 14 | #174 was closed as not planned on 2026-09-28 | **Closed 2026-09-27** (20:46 UTC). The closing comment is in the architect's terms and points the unread counter to this issue. |
 | 15 | The completion gate's benchmark case would show the moved CONFIG line | **It would not.** `docs/process/workflow.md` § 3 (b) names `single-day-access-log-standard`, which runs neither `-o` nor `-g`. `compare-results.sh summary` does not print CONFIG rows. `detailed` does print them, and it labels a 200 to 350 step as `REGRESS +75.0%`. The gate is widened to four cases (D6). |
-| 16 | (not in the issue) The bucket-key split has one caller per path | **A third, dead copy exists.** `partition_consolidation_keys` builds the same buckets as the loops in `run_consolidation_pass` and `process_final_pass_window`, and nothing calls it. |
+| 16 | (not in the issue) The bucket-key split has one caller per path | **A third, dead copy exists.** `partition_consolidation_keys` builds the same buckets as the loops in `run_consolidation_pass` and `process_final_pass_window`, and nothing calls it. It is an input to the partition's validation (D7). |
 
 ---
 
@@ -175,11 +188,17 @@ govern.
   enters the trigram index cut. The change is behaviour-identical, proven by the
   equivalence matrix (AC3).
 - **D4. The re-scan partition's constants are named with what the code does
-  today; no separate issue is filed.** Locked by the architect 2026-09-28.
-  Behaviour does not change. The architect's reading was that the inert
-  partition is the split between plain and highlighted messages, active when
-  highlighted messages are many and inert when no highlight is active; § 5.5
-  records what the code does beside that reading.
+  today; no separate issue is filed.** Locked by the architect 2026-09-28, with
+  his amendment of 2026-09-29 (D7). The constants are still named, and behaviour
+  still does not change in the byte-identity drops. The architect's reading was
+  that the inert partition is the split between plain and highlighted messages,
+  active when highlighted messages are many and inert when no highlight is
+  active; § 5.5 records what the code does beside that reading. By the
+  amendment, a validation stage precedes drop 1 (§ 9): the partition is
+  validated against the consolidation specification, and the finding is brought
+  to the architect with candidate dispositions. The byte-identity of the later
+  drops holds on the disposition that keeps behaviour; a disposition that
+  changes the partition restates it.
 - **D5. A cut length with no reason on record is recorded as such.** Locked by
   the architect 2026-09-28. The thread's first 20 characters and the object's
   last 25: "no reason on record". The CSV's 350: it shares the grouping cap, so that
@@ -191,6 +210,42 @@ govern.
   with a boundary note in `tests/baseline/README.md` in the shape of the existing
   note on the consolidating scenarios gaining `-m uuid`. The comparison tool's
   labelling of CONFIG rows stays as it is.
+
+### 4.3 Locked by the architect on 2026-09-29
+
+In reply to being told that the split between plain and highlighted messages he
+described exists and behaves as he said, but that the inert partition this
+specification found is a different one: the re-scan bucket inside a group, split
+by the key's first word (the bracketed level), inert whether or not a highlight
+is active.
+
+- **D7. The inert re-scan partition is validated against the consolidation
+  specification before implementation, not skipped.** Locked by the architect
+  2026-09-29. His words: "This was meant as a pre-filter if I recall correctly,
+  to quickly eliminate candidate messages which were not alike, using the log
+  level to do so, reducing the potential number of keys that we needed to look
+  at. Over time we tried SO many things to get that functionality working
+  performantly that I don't know if that was something that ended up sticking or
+  not. If you say that it is inert, this sounds like either a defect or a
+  leftover which was not cleaned up which needs to be validated against the
+  message consolidation specification. We shouldn't just see this here and skip
+  it." The partition is not left as it is. This issue validates it against
+  `features/fuzzy-message-consolidation.md`, the speed-up claim of
+  `docs/staged-processing-pipeline.md` § Partitioning Composes with
+  Interleaving, and the partition's own code and callers, including the uncalled
+  third copy (§ 3 item 16). The validation answers what the specification
+  intends the pre-filter to do, what the code does, and whether the difference
+  is a defect (the pre-filter should work and does not) or a leftover
+  (superseded by another mechanism and never cleaned up). The finding, with the
+  measured effect of each candidate disposition on consolidation output and on
+  final-pass time, is brought to the architect for his decision before
+  implementation drop 1 (§ 9, stage 0). It is neither skipped nor filed away as
+  a separate issue. It is recorded in § 5.5 of this document, and in the
+  consolidation record when that record is trued up (§ 10). The validation
+  states one tension plainly: a level pre-filter that works would stop an ERROR
+  line and a WARN line with the same body from consolidating, which D1
+  (consolidation across log levels is the design) locks as intended, so the
+  disposition may be that the pre-filter was superseded by that design.
 
 ---
 
@@ -215,8 +270,8 @@ decide. Everything else follows from a lock of § 4.
 | `print_verbose_output` :: `printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;` | reports the terminal width | unchanged text; it now reports the per-run cut (lock 7). The key name stays, so benchmark rows keep pairing across the change. |
 | `read_and_process_logs` :: `my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;` | literal 20 | named constant, "no reason on record" (lock 3, D5) |
 | `read_and_process_logs` :: `my $max_object_length = 25;` | local re-declared per retained message | named constant at file scope, "no reason on record" (lock 3, D5) |
-| `extract_consolidation_bucket_key` :: `return substr($1, 0, 30);` and `return substr($msg, 0, 20);` | literals; the comment says 20 | named constants stating what they do today, and a comment stating what the sub receives (D4, § 5.5) |
-| `partition_consolidation_keys` | defined, never called (§ 3 item 16) | removed, under the standing rule that near-duplicates found on the way are converged in the same change (CLAUDE.md § Before writing or changing code) |
+| `extract_consolidation_bucket_key` :: `return substr($1, 0, 30);` and `return substr($msg, 0, 20);` | literals; the comment says 20 | named constants stating what they do today, and a comment stating what the sub receives (D4, § 5.5); anything beyond that follows the architect's disposition of the partition's validation (D7) |
+| `partition_consolidation_keys` | defined, never called (§ 3 item 16) | an input to the partition's validation (D7); then removed, under the standing rule that near-duplicates found on the way are converged in the same change (CLAUDE.md § Before writing or changing code), unless the disposition decides otherwise |
 | `read_and_process_logs` :: `my $msg_len = length($log_key);` and `(GLOBALS)` :: `my $max_observed_message_length      = 0;` | written, never read | removed (lock 6) |
 | `read_and_process_logs` :: `my $grouping_key = $log_level // "";` | the inline path's grouping key | also written onto the store entry under `-g` (lock 2) |
 | `group_similar_messages` :: `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` (three sites), `my ($gk) = $log_key =~ /^\[([^\]]+)\]/;` | parsed back | read from the entry (lock 2) |
@@ -243,6 +298,10 @@ the run.
 
 `$consolidation_message_length_cap` is replaced by the cap constant, because the
 CSV reads the same value (**proposed** name above).
+
+The two re-scan bucket constants state what the code does today (D4). If the
+architect's disposition of the partition's validation (D7) changes the
+partition, their names, values and reasons follow that disposition.
 
 ### 5.3 The grouping key on the entry (lock 2, D2)
 
@@ -302,7 +361,46 @@ whose cut lengths this issue names is not that one.
 | **Re-scan bucket (`extract_consolidation_bucket_key`).** Inside one group, after a new pattern is found, only the keys whose bucket matches the pattern's bucket are re-scanned against it. The bucket is the key's first word cut to 30 characters, else its first 20 characters. | Keys by their first word, which is the bracketed level. | Inert within a group whether or not highlighting is active, because every key of a group shares its level. It separates keys only in a final-pass window that holds keys of two levels (§ 5.4). The 20-character branch never runs. |
 
 The constants of § 5.2 are named for the second split, with what it does
-today. No behaviour changes and no issue is filed.
+today, and no separate issue is filed (D4). The second split is not left as it
+is: before drop 1 it is validated against the consolidation specification (D7).
+The validation's scope:
+
+- **Question.** What does the consolidation specification intend the partition
+  to do, what does the code do, and is the difference a defect (the pre-filter
+  should work and does not) or a leftover (superseded by another mechanism and
+  never cleaned up)?
+- **Inputs.** `features/fuzzy-message-consolidation.md`: PF-07 (level
+  partitioning deferred), PF-16 (the re-scan research that chose partitioning),
+  PF-17 (the partitioned interleaved re-scan, recorded as splitting keys by
+  level plus class), lesson 7 (level prefixes separate levels naturally), lesson
+  15 (partitioning composes with the interleaved re-scan) and § Grouping Key
+  Design. `docs/staged-processing-pipeline.md` § Partitioning
+  Composes with Interleaving, whose 21 % speed-up was measured on the
+  prototype's level-plus-class key. The code: `extract_consolidation_bucket_key`,
+  its callers in `run_consolidation_pass` (the streaming checkpoints) and
+  `process_final_pass_window` (the final pass), and the uncalled
+  `partition_consolidation_keys` (§ 3 item 16). `git log -S` on each establishes
+  by which change the bucket became the key's first word.
+- **Method.** A probe on a scratch copy of `ltl` for each candidate disposition:
+  the partition as it is, with its constants named; the partition removed, so
+  every key of a group is re-scanned; and the partition made to divide a group
+  as the record describes, where the key carries the part it divides on. Each
+  runs on the corpus logs of the AC3 matrix and on the `-g` cases of § 8.
+  Measured against the partition as it is: consolidation output (the MESSAGES
+  CSV, and `-V message-grouping` with `/ cluster-membership`) and final-pass and
+  streaming-checkpoint time, medians of three with ranges. Captures go to the
+  scratchpad.
+- **The tension, stated plainly.** A level pre-filter that works would stop an
+  ERROR line and a WARN line with the same body from consolidating, which D1
+  (consolidation across log levels is the design) locks as intended. A
+  disposition that makes the partition split by level
+  conflicts with D1, and the finding says so; the disposition may be that the
+  pre-filter was superseded by that design.
+- **Exit.** The finding, recorded in this section, brought to the architect with
+  the candidate dispositions, their measured effects and a recommendation,
+  before drop 1. His disposition is recorded in § 4. The byte-identity of the
+  later drops (AC3, keys and consolidation output identical to the base
+  commit) is conditional on it.
 
 ### 5.6 User surfaces
 
@@ -314,6 +412,10 @@ today. No behaviour changes and no issue is filed.
 | MESSAGES CSV, STATS CSV | none (byte-identical) |
 | `-V benchmark-data` | `CONFIG max_log_message_length` reads the per-run cut: the cap on `-o` or `-g` runs, the terminal width otherwise. The key name is unchanged. |
 | `-V message-grouping` (and `/ cluster-membership`) | none (byte-identical) |
+
+Every "none" above holds on the disposition of the partition's validation (D7)
+that keeps behaviour. A disposition that changes the partition states its own
+surface changes when it is locked.
 
 ### 5.7 Patterns file
 
@@ -387,14 +489,17 @@ Edits to `docs/architecture-patterns.md`:
       probe used to prove itself behaviour-neutral
       (`features/342-redundant-logic-surfaces-audit-report.md` § Item 8, Part 2:
       forty identical before/after comparisons before any timing run); the count
-      of identical comparisons is recorded in this document.
+      of identical comparisons is recorded in this document. The claim is
+      conditional on the architect's disposition of the partition's validation
+      (D7): it holds on the disposition that keeps behaviour, and a disposition
+      that changes consolidation replaces it with the output changes it accepts.
 - [ ] **AC4. No assertion or golden changes.** `validate-regression.sh` (74
       terminal-width baselines), `validate-message-expose.sh`,
       `validate-message-mask.sh`, `validate-message-discard.sh`,
       `validate-message-control-characters.sh` and `validate-message-grouping.sh`
-      pass with their existing expectations untouched. *Assertable:* the full
-      suite at the completion gate, with `git diff` showing no expectation file
-      changed.
+      pass with their existing expectations untouched, on the same condition as
+      AC3. *Assertable:* the full suite at the completion gate, with `git diff`
+      showing no expectation file changed.
 - [ ] **AC5. One cap, one per-run cut, read everywhere.** The literal `350`
       appears once in `ltl`, at the cap constant, and no `? 350 :` remains. The
       four key sites, the trigram guard and the CONFIG line read the one per-run
@@ -425,13 +530,14 @@ Edits to `docs/architecture-patterns.md`:
       three captures per side, each pair compared in `detailed` mode:
       `CONFIG max_log_message_length` steps from 200 to 350 on
       `top25-consolidate`, `heatmap-histogram-consolidate` and
-      `heatmap-histogram-export`, and stays 200 on `standard`. Every other
-      metric, memory included, stays within 1 %, the regression threshold of
-      `docs/process/workflow.md` § 3 (b). A memory movement on the `-g` cases
-      beyond it is not pre-accepted: the findings report gives it with its
-      attribution (the carried grouping key, the removed unread key-to-group map)
-      for the architect's disposition (D2). *Assertable:*
-      `compare-results.sh detailed` on each before/after pair of TSVs.
+      `heatmap-histogram-export`, and stays 200 on `standard`. Every other metric, memory included, stays within 1 %,
+      the regression threshold of `docs/process/workflow.md` § 3 (b), unless the
+      disposition of the partition's validation (D7) accepts a measured
+      movement. A memory movement on the `-g` cases beyond it is not
+      pre-accepted: the findings report gives it with its attribution (the
+      carried grouping key, the removed unread key-to-group map) for the
+      architect's disposition (D2). *Assertable:* `compare-results.sh detailed`
+      on each before/after pair of TSVs.
 - [ ] **AC11. The consolidation record describes the code.** The sections of
       § 10 state that a group is category plus grouping key (the level, or the
       status code on an access log), and that the grouping key is the batching
@@ -454,6 +560,14 @@ Edits to `docs/architecture-patterns.md`:
       regression across that boundary is expected. It sits in the one
       boundary-notes section shared with #615's named CSV selection.
       *Unassertable* by a harness; checked by reading it at review.
+- [ ] **AC14. The re-scan partition's validation is recorded and disposed of
+      before drop 1.** § 5.5 holds the finding: what the consolidation
+      specification intends the partition to do, what the code does, whether the
+      difference is a defect or a leftover, the measured effect of each candidate
+      disposition on consolidation output and on final-pass time (medians of
+      three with ranges), and the tension with D1. The architect's disposition is
+      recorded in § 4 before drop 1 begins (D7). *Unassertable* by a harness;
+      checked by reading it before drop 1.
 
 ---
 
@@ -527,6 +641,10 @@ running two regular expressions per comparison. Memory on the `-g` cases may mov
 with the carried grouping key and the removal of the unread map; the findings
 report gives the measured figure and its attribution (D2).
 
+**Validation measurements (D7):** the probe runs of § 5.5 are taken before drop 1
+on the landing tree, captured to the scratchpad, and are not committed TSVs. The
+findings report gives them with medians of three and ranges.
+
 **Prototype: none.** The architect ruled the carrier question not relevant (D2);
 the change to the entry's shape is measured by the before/after benchmark.
 
@@ -538,9 +656,14 @@ Each drop is a commit and a push on the issue branch. There is one PR, at the en
 
 | Drop | Content | What it proves |
 |---|---|---|
-| 1 | Named constants with their reasons (lock 3, D4, D5); the per-run cut resolved once and read by the key sites, the trigram guard and the CONFIG line (lock 1, lock 7); the dead branch and every redundant consolidation cut removed (D3); the unread counter removed (lock 6); the uncalled third copy of the bucket split removed (§ 3 item 16); the AC1 and AC2 scenarios and fixture; `docs/architecture-patterns.md` § Hot-loop discipline gains the key-site consumption and this issue's token on the status line (§ 5.7); the boundary note in `tests/baseline/README.md` (§ 8) | AC1, AC2, AC5, AC6, AC8, AC9, AC13; AC3 matrix identical; before/after on the four cases |
+| 0 | Validation of the inert re-scan partition against the consolidation specification (D7), with the question, inputs, method and exit of § 5.5; the finding recorded in § 5.5 and brought to the architect with candidate dispositions, measured | AC14; the architect's disposition recorded in § 4 before drop 1 |
+| 1 | Named constants with their reasons (lock 3, D4, D5); the per-run cut resolved once and read by the key sites, the trigram guard and the CONFIG line (lock 1, lock 7); the dead branch and every redundant consolidation cut removed (D3); the unread counter removed (lock 6); the uncalled third copy of the bucket split removed (§ 3 item 16), unless the disposition of D7 decides otherwise; the AC1 and AC2 scenarios and fixture; `docs/architecture-patterns.md` § Hot-loop discipline gains the key-site consumption and this issue's token on the status line (§ 5.7); the boundary note in `tests/baseline/README.md` (§ 8) | AC1, AC2, AC5, AC6, AC8, AC9, AC13; AC3 matrix identical; before/after on the four cases |
 | 2 | The grouping key carried on the entry and read by the final pass and the sort (lock 2); the unread key-to-group map removed if the carried key makes it redundant (D2) | AC7; AC3 matrix identical again; before/after with the memory figure |
-| 3 | Records: the consolidation record trued up (lock 4, D1); `features/150-final-pass-scalability.md` § Sort Order (§ 10) | AC11 |
+| 3 | Records: the consolidation record trued up (lock 4, D1), carrying the partition's validation finding and its disposition (D7); `features/150-final-pass-scalability.md` § Sort Order (§ 10) | AC11 |
+
+Drops 1 and 2 prove byte-identity (AC3) on the disposition of the partition's
+validation (D7) that keeps behaviour. A disposition that changes the partition
+adds its content and its proof to drop 1, stated when it is locked.
 
 **Merge gate:** `$version_number` restored to `0.19.0`; the full harness suite
 (`CI=1 validate-csv-output.sh`, then `CI=1 validate-statistics.sh`, then the
@@ -553,7 +676,7 @@ rest) on the head commit; the before/after of § 8 on the head commit;
 
 | Record | Change |
 |---|---|
-| `features/fuzzy-message-consolidation.md` | Trued up to the code (lock 4, D1). § Grouping Key Design: the group is category plus grouping key, the grouping key is the batching key the code uses to order its work and is not a barrier to consolidation, and keys of different levels can consolidate, as the final pass does when a lone key joins the next level's window; the sentence saying an ERROR message is never compared with a WARN message, and the "why not coarser grouping" paragraph's claim that level grouping prevents cross-level merges, are replaced. Also replaced: PF-09's 'The `[level]` prefix naturally prevents cross-level merges (see PF-07)'; PF-07's 'cross-level candidates that will never match'; IQ-01's implementation note 'ensures keys are only compared within the same level, so the prefix doesn't cause cross-level false matches', and the '(incorrect merge)' labels on the same-body WARN/ERROR examples under 'Reasoning — prefix domination'; IQ-02's resolved sub-question 'Per IQ-01, thread is an exact-match grouping field' (thread takes part in similarity and wildcarding). IQ-01 and IQ-02: the similarity input is the whole key cut at the cap, level included; no part of the key is exempt from consolidation; no observed-length counter exists; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` do not exist. DD-08 (similarity on the message body) points at PF-09 (similarity on the full key), which governs. PF-07 and lesson 7 (level prefixes separate levels naturally) state that they do not prevent consolidation across levels. DD-06 and lesson 35: the references to an adaptive cap "not yet implemented" point at #174's closure (its premise does not hold). |
+| `features/fuzzy-message-consolidation.md` | Trued up to the code (lock 4, D1). § Grouping Key Design: the group is category plus grouping key, the grouping key is the batching key the code uses to order its work and is not a barrier to consolidation, and keys of different levels can consolidate, as the final pass does when a lone key joins the next level's window; the sentence saying an ERROR message is never compared with a WARN message, and the "why not coarser grouping" paragraph's claim that level grouping prevents cross-level merges, are replaced. Also replaced: PF-09's 'The `[level]` prefix naturally prevents cross-level merges (see PF-07)'; PF-07's 'cross-level candidates that will never match'; IQ-01's implementation note 'ensures keys are only compared within the same level, so the prefix doesn't cause cross-level false matches', and the '(incorrect merge)' labels on the same-body WARN/ERROR examples under 'Reasoning — prefix domination'; IQ-02's resolved sub-question 'Per IQ-01, thread is an exact-match grouping field' (thread takes part in similarity and wildcarding). IQ-01 and IQ-02: the similarity input is the whole key cut at the cap, level included; no part of the key is exempt from consolidation; no observed-length counter exists; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` do not exist. DD-08 (similarity on the message body) points at PF-09 (similarity on the full key), which governs. PF-07 and lesson 7 (level prefixes separate levels naturally) state that they do not prevent consolidation across levels. DD-06 and lesson 35: the references to an adaptive cap "not yet implemented" point at #174's closure (its premise does not hold). PF-17 and lesson 15 (the partitioned re-scan) gain the finding of the partition's validation (D7, § 5.5): what the partition does in `ltl` and the architect's disposition. |
 | `docs/architecture-patterns.md` | § 5.7 |
 | `tests/baseline/README.md` | the boundary note of § 8, in the one boundary-notes section shared with #615's named CSV selection (whichever lands second merges) |
 | `tests/HARNESS-DESIGN.md` | none; the CONFIG row's contract lives in § 7 here |
@@ -561,7 +684,7 @@ rest) on the head commit; the before/after of § 8 on the head commit;
 | `features/342-redundant-logic-surfaces-audit-report.md` | § Review progress, stage 13 status set to *done* at close-out |
 | `docs/usage.md`, `--help` | none |
 | Release notes | **proposed: no bullet**, because the only moved value is a diagnostic row of `-V benchmark-data`; the decision is taken at close-out (`docs/process/workflow.md` § 4) |
-| Issue #619 | a comment pointing at this document as the agreed specification, naming D1 to D6 by what they decide |
+| Issue #619 | a comment pointing at this document as the agreed specification, naming D1 to D7 by what they decide |
 | Issue #564 (choose where a long message is truncated) | a comment carrying the hand-forward of § 5.8: without `-o` or `-g` the stored key is already cut to the terminal width, so a left or middle display cut cannot show the message's tail; how a run that chooses a left or middle cut keeps the tail is #564's to decide, and after this issue the stored key's length is one per-run value resolved at one site |
 | Issue #616 (one gated derivation of means) | none from this issue; #616's delivery rewrites its note on cross-level consolidation as the design and cross-references § 5.4 |
 | Native edge: this issue blocked by #616 (the message-store entry gains its counts first) | exists |
