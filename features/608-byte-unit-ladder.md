@@ -583,6 +583,11 @@ the GC spec, beside the `iec` notation this issue declares there, and makes the
 base-1024 change with the value movement it brings; its done-condition ("the
 heap delta is unchanged") is corrected by a comment there (§ 10).
 
+Delivered by #609 (the GC suffix convention) in another form: no map moved into
+the spec. HotSpot's `K`, `M`, `G` are powers of 1024, so the letters are read as
+the ladder step they prefix at the spec's existing `byte_notation`, and the
+GC-local map is deleted (`features/609-gc-heap-suffix-convention.md` D1, D2).
+
 ### 5.10 Pattern entries
 
 `docs/architecture-patterns.md` is edited only where this issue's own token

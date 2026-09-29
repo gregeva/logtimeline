@@ -4,9 +4,11 @@
 # strings it renders.
 #
 # Contract: features/608-byte-unit-ladder.md (D5 one byte ladder, D6/D16 the
-# value climb, D7/D17 one notation per run and its option, D11 GC heap values
-# unchanged, D12 the format's declaration, D13/D20 mixed declarations, D15
-# one notation on every byte string) and its Acceptance criteria. The byte-unit feature has no
+# value climb, D7/D17 one notation per run and its option, D12 the format's
+# declaration, D13/D20 mixed declarations, D15 one notation on every byte
+# string) and its Acceptance criteria; features/609-gc-heap-suffix-convention.md
+# (D1 a GC heap figure's letter is an IEC prefix, D2 read on the one ladder at
+# the format's declared notation) and its Acceptance criteria. The byte-unit feature has no
 # owning -V section: the criteria read the STATS CSV cells a run writes, so
 # the harness is named for the feature, as validate-bucket-size-units.sh is.
 #
@@ -35,6 +37,11 @@ neutralize_colour_env
 # bucket size, so one day-wide bucket, no empty buckets, no index. The G1 GC
 # fixture carries five heap transitions, all written in M.
 GC_FIXTURE="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+# Four G1 pause lines, one per minute, one heap transition per prefix letter:
+# 3K->1K, 3M->1M, 3G->1G and 3T->1T. HotSpot writes only M on a pause line;
+# these lines are constructed so every step of the ladder is read. At -bs 1
+# each line is its own bucket, so the STATS bytes cells read one delta each.
+GC_PREFIX_FIXTURE="$REPO_DIR/tests/fixtures/gc-heap-byte-units.txt"
 # Nine access-log lines, one per minute, whose response sizes sit either side
 # of each step: 999, 1000, 1023, 1024, 999999, 1000000, 1048575, 1048576 and
 # 1500000 bytes. At -bs 1 each line is its own bucket, so the STATS
@@ -44,7 +51,7 @@ BOUNDARY_FIXTURE="$REPO_DIR/tests/fixtures/byte-boundary.txt"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-for f in "$LTL" "$GC_FIXTURE" "$BOUNDARY_FIXTURE"; do
+for f in "$LTL" "$GC_FIXTURE" "$GC_PREFIX_FIXTURE" "$BOUNDARY_FIXTURE"; do
     if [[ ! -e "$f" ]]; then
         echo "ERROR: required file missing: $f" >&2
         exit 1
@@ -58,7 +65,7 @@ CONTRACT_DECLARE='features/608-byte-unit-ladder.md D7 and D12 (a format declares
 CONTRACT_MIXED='features/608-byte-unit-ladder.md D13 and D20 (IEC only when every file declares IEC, else SI with one notice; no notice under -bn; an unrecognised file declares nothing)'
 CONTRACT_REACH='features/608-byte-unit-ladder.md D15 (the run notation reaches every byte string, the memory rows and the export included)'
 CONTRACT_STRUCT='features/608-byte-unit-ladder.md D5 (one byte ladder; no sub keeps a table of its own), D8 (help rows interpolate the ladder lists) and D9/D18 (decimals are a field of the time-ladder step)'
-CONTRACT_D11='features/608-byte-unit-ladder.md D11 (the GC transform maps its suffixes to ladder tokens at their present values; no GC value changes)'
+CONTRACT_GC_IEC="features/609-gc-heap-suffix-convention.md D1 (the letter of a GC heap figure is an IEC prefix: K, M, G, T are KiB, MiB, GiB, TiB) and D2 (read on the one ladder at the notation the format declares, not the run output notation)"
 
 pass=0
 fail=0
@@ -239,11 +246,11 @@ scenario_format_declaration() {
     current_scenario="format-declaration"
     echo "[$current_scenario]"
     run_ltl_in "$TMP_DIR/decl" run --disable-progress -ni -bs 1440 -oe -o "$GC_FIXTURE"
-    expect_equal "a GC run renders IEC" "$(stats_column "$TMP_DIR/decl" bytes_nice)" "65 GiB" \
+    expect_equal "a GC run renders IEC" "$(stats_column "$TMP_DIR/decl" bytes_nice)" "68.2 GiB" \
         'The GC format declares IEC, and a run of its files alone renders in it' \
         'format_registry_specs() (the java_gc_g1 byte_notation) + resolve_byte_notation() in ltl' "$CONTRACT_DECLARE"
     run_ltl_in "$TMP_DIR/decl-si" run --disable-progress -ni -bs 1440 -oe -o -bn si "$GC_FIXTURE"
-    expect_equal "a GC run under -bn si renders SI" "$(stats_column "$TMP_DIR/decl-si" bytes_nice)" "69.8 GB" \
+    expect_equal "a GC run under -bn si renders SI" "$(stats_column "$TMP_DIR/decl-si" bytes_nice)" "73.2 GB" \
         'The option overrides the format declaration' 'resolve_byte_notation() in ltl' "$CONTRACT_DECLARE"
 }
 
@@ -260,7 +267,7 @@ scenario_mixed_declarations() {
     printf 'first line of plain text\nsecond line of plain text\n' > "$plain"
 
     run_ltl_in "$TMP_DIR/mix" run "${common[@]}" "$GC_FIXTURE" "$BOUNDARY_FIXTURE"
-    expect_equal "GC and access log render SI" "$(stats_column "$TMP_DIR/mix" bytes_nice)" "69.8 GB|5.6 MB" \
+    expect_equal "GC and access log render SI" "$(stats_column "$TMP_DIR/mix" bytes_nice)" "73.2 GB|5.6 MB" \
         'Files whose formats declare different notations render SI' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
     expect_equal "GC and access log print one notice" "$(notice_count "$TMP_DIR/mix" run)" "1" \
         'One notice for the run, not one per file' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
@@ -273,19 +280,19 @@ scenario_mixed_declarations() {
     fi
 
     run_ltl_in "$TMP_DIR/twice" run "${common[@]}" "$GC_FIXTURE" "$GC_FIXTURE"
-    expect_equal "GC twice renders IEC" "$(stats_column "$TMP_DIR/twice" bytes_nice)" "130 GiB" \
+    expect_equal "GC twice renders IEC" "$(stats_column "$TMP_DIR/twice" bytes_nice)" "136.3 GiB" \
         'Every file declaring IEC renders IEC' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
     expect_equal "GC twice prints no notice" "$(notice_count "$TMP_DIR/twice" run)" "0" \
         'Files that agree print no notice' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
 
     run_ltl_in "$TMP_DIR/mix-bn" run "${common[@]}" -bn iec "$GC_FIXTURE" "$BOUNDARY_FIXTURE"
-    expect_equal "the mixed pair under -bn iec renders IEC" "$(stats_column "$TMP_DIR/mix-bn" bytes_nice)" "65 GiB|5.3 MiB" \
+    expect_equal "the mixed pair under -bn iec renders IEC" "$(stats_column "$TMP_DIR/mix-bn" bytes_nice)" "68.2 GiB|5.3 MiB" \
         'The option decides over any declarations' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
     expect_equal "the mixed pair under -bn iec prints no notice" "$(notice_count "$TMP_DIR/mix-bn" run)" "0" \
         'With -bn given the declarations decide nothing, so there is nothing to say' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
 
     run_ltl_in "$TMP_DIR/gc-plain" run "${common[@]}" "$GC_FIXTURE" "$plain"
-    expect_equal "GC beside an unrecognised file renders SI" "$(stats_column "$TMP_DIR/gc-plain" bytes_nice)" "69.8 GB" \
+    expect_equal "GC beside an unrecognised file renders SI" "$(stats_column "$TMP_DIR/gc-plain" bytes_nice)" "73.2 GB" \
         'A file no format recognised declares nothing, so not every file declares IEC' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
     expect_equal "GC beside an unrecognised file prints one notice" "$(notice_count "$TMP_DIR/gc-plain" run)" "1" \
         'The unrecognised file counts as a disagreeing declaration' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
@@ -364,8 +371,7 @@ my @decl = grep { /^my \@byte_unit_ladder\b/ } @lines;
 $check->('one-ladder', @decl == 1 && @ladder_lines > 1, scalar(@decl) . ' declarations');
 my @private = grep { /\bsub convert_bytes\b|%byte_units\b|%byte_unit_canonical\b/ } @lines;
 $check->('no-private-byte-table', !@private, join(' | ', map { s/^\s+|\s+$//gr } @private));
-my @tokens = grep { !$in_ladder{$_} && $lines[$_] !~ /^my %gc_heap_suffix_token\b/
-                    && $lines[$_] =~ /'(?:kB|KB|MB|GB|TB|KiB|MiB|GiB|TiB)'/ } 0 .. $#lines;
+my @tokens = grep { !$in_ladder{$_} && $lines[$_] =~ /'(?:kB|KB|MB|GB|TB|KiB|MiB|GiB|TiB)'/ } 0 .. $#lines;
 $check->('byte-tokens-only-in-ladder', !@tokens, join(' | ', map { 'line ' . ($_ + 1) } @tokens));
 my @mult = grep { !$in_ladder{$_} && $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /1024\s*\*\*|=>\s*1024\b/ } 0 .. $#lines;
 $check->('byte-multipliers-only-in-ladder', !@mult, join(' | ', map { 'line ' . ($_ + 1) } @mult));
@@ -373,7 +379,12 @@ my @dec = grep { $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /\b(?:ns|us)\s*=>\s*\d/ 
 $check->('no-unit-keyed-decimals-table', !@dec, join(' | ', map { 'line ' . ($_ + 1) } @dec));
 $check->('unit-slot-reads-ladder', scalar(($sub_body{parse_udm_configs} // '') =~ /byte_unit_canonical\(/ && ($sub_body{parse_udm_configs} // '') =~ /\$byte_unit_bytes\{/) ? 1 : 0, 'parse_udm_configs');
 $check->('formatter-reads-ladder', scalar(($sub_body{format_bytes} // '') =~ /\@byte_unit_ladder|\$byte_unit_ladder\[/) ? 1 : 0, 'format_bytes');
-$check->('gc-reader-reads-ladder', scalar(($sub_body{gc_heap_size_bytes} // '') =~ /\$byte_unit_bytes\{/) ? 1 : 0, 'gc_heap_size_bytes');
+$check->('gc-reader-reads-ladder', scalar(($sub_body{gc_heap_size_bytes} // '') =~ /byte_prefix_bytes\(\$letter, \$notation\)/
+                                    && ($sub_body{byte_prefix_bytes} // '') =~ /\$byte_unit_by_prefix\{/
+                                    && grep { /^my %byte_unit_by_prefix\s*=.*\@byte_unit_ladder;/ } @lines) ? 1 : 0, 'gc_heap_size_bytes -> byte_prefix_bytes -> %byte_unit_by_prefix, a view of @byte_unit_ladder');
+my @letters = grep { $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /\b[KMGT]\s*=>\s*(?:'[kKMGT]i?B'|\d)/ } 0 .. $#lines;   # a prefix letter mapped to a byte token or a multiplier
+$check->('no-prefix-letter-table', !@letters, join(' | ', map { 'line ' . ($_ + 1) } @letters));
+$check->('gc-transform-reads-declared-notation', scalar(grep { /^\s*gc_heap_delta\s*=>.*gc_heap_size_bytes\( \$heap_from, 'BYTE_NOTATION' \)/ } @lines) ? 1 : 0, 'the gc_heap_delta snippet passes the entry byte_notation');
 $check->('display-decimals-from-step', scalar(($sub_body{format_duration} // '') =~ /\$time_unit_step\{\$unit\}\{decimals\}/) ? 1 : 0, 'format_duration');
 $check->('csv-decimals-from-step', scalar(($sub_body{adapt_to_command_line_options} // '') =~ /\$time_unit_step\{\$duration_unit_resolved\}\{decimals\}/) ? 1 : 0, 'adapt_to_command_line_options');
 my $help = $sub_body{print_help} // '';
@@ -383,6 +394,7 @@ PL
     local name status detail
     local -a expected=(one-ladder no-private-byte-table byte-tokens-only-in-ladder byte-multipliers-only-in-ladder
                        no-unit-keyed-decimals-table unit-slot-reads-ladder formatter-reads-ladder gc-reader-reads-ladder
+                       no-prefix-letter-table gc-transform-reads-declared-notation
                        display-decimals-from-step csv-decimals-from-step help-has-no-unit-literal)
     for name in "${expected[@]}"; do
         IFS=$'\t' read -r _ _ status detail < <(awk -F'\t' -v n="$name" '$1 == "CHECK" && $2 == n' "$report") || true
@@ -425,45 +437,54 @@ scenario_ladder_decimals() {
 }
 
 # ---------------------------------------------------------------------------
-# Criterion 12 — the GC heap delta is byte-identical: the suffixes read
-# through the ladder at their present values (K 1024; M, G, T powers of
-# 1000), so 69,786,000,000 bytes over the fixture's five transitions. The run
-# exiting 0 is also the GC entry's self-validation passing: its sample rows
-# (2433M->66M expecting 2367000000) are checked on every invocation, and a
-# mismatch ends the run.
+# 609 AC1, AC2, AC4 — a GC heap figure's letter is an IEC prefix, read at the
+# notation the format declares. The fixture's five transitions, all in M, sum
+# to 69,786 MiB: 73,175,924,736 bytes. The run exiting 0 is also the GC
+# entry's self-validation passing: its sample rows (2433M->66M expecting
+# 2481979392, 512M->128M expecting 402653184) are checked on every
+# invocation, and a mismatch ends the run. Under -bn si the same bytes are
+# read and only the rendering changes: the letters follow the format's
+# declaration, not the run's output notation.
 # ---------------------------------------------------------------------------
-scenario_gc_heap_values_unchanged() {
-    current_scenario="gc-heap-values-unchanged"
+scenario_gc_heap_figures_iec() {
+    current_scenario="gc-heap-figures-iec"
     echo "[$current_scenario]"
-    local dir="$TMP_DIR/gc" rc bytes nice
+    local dir="$TMP_DIR/gc" rc
     run_ltl_in "$dir" gc --disable-progress -ni -bs 1440 -oe -o "$GC_FIXTURE"
     rc=$(cat "$dir/gc.rc")
     if [[ "$rc" == 0 ]]; then
         pass_with "the run exits 0: the GC entry's self-validation rows pass"
     else
         fail_with "the run exits 0: the GC entry's self-validation rows pass" \
-            'The GC entry sample 2433M->66M still extracts 2367000000 bytes; a self-validation mismatch ends the run' \
+            'The GC entry sample 2433M->66M extracts 2481979392 bytes and 512M->128M 402653184; a self-validation mismatch ends the run' \
             'build_format_registry() self-validation in ltl, over the gc_heap_delta transform and gc_heap_size_bytes()' \
-            "$CONTRACT_D11" "exit: $rc" "stderr: $(head -3 "$dir/gc.err")"
+            "$CONTRACT_GC_IEC" "exit: $rc" "stderr: $(head -3 "$dir/gc.err")"
     fi
-    bytes=$(stats_cell "$dir" bytes)
-    if [[ "$bytes" == "69786000000" ]]; then
-        pass_with "STATS bytes total is 69786000000"
-    else
-        fail_with "STATS bytes total is 69786000000" \
-            'The five heap transitions in M sum to 69,786,000,000 bytes: M is read as a power of 1000, as before' \
-            'gc_heap_size_bytes() via the gc_heap_delta transform in ltl' \
-            "$CONTRACT_D11" "got: $bytes"
-    fi
-    nice=$(stats_cell "$dir" bytes_nice)
-    if [[ "$nice" == "65 GiB" ]]; then
-        pass_with "STATS bytes_nice is 65 GiB"
-    else
-        fail_with "STATS bytes_nice is 65 GiB" \
-            'The GC total renders as it did before the byte ladder' \
-            'format_bytes() in ltl' \
-            "$CONTRACT_D11" "got: $nice"
-    fi
+    expect_equal "STATS bytes total is 73175924736" "$(stats_cell "$dir" bytes)" "73175924736" \
+        'The five heap transitions in M sum to 69,786 MiB: M is read as 1024 squared bytes' \
+        'gc_heap_size_bytes() via the gc_heap_delta transform in ltl' "$CONTRACT_GC_IEC"
+    expect_equal "STATS bytes_nice is 68.2 GiB" "$(stats_cell "$dir" bytes_nice)" "68.2 GiB" \
+        'The GC total renders in the IEC notation the format declares' \
+        'format_bytes() in ltl' "$CONTRACT_GC_IEC"
+
+    run_ltl_in "$TMP_DIR/gc-si" gc --disable-progress -ni -bs 1440 -oe -o -bn si "$GC_FIXTURE"
+    expect_equal "-bn si: STATS bytes total is still 73175924736" "$(stats_cell "$TMP_DIR/gc-si" bytes)" "73175924736" \
+        'The letters are read at the notation the format declares; the run output notation changes only the rendering' \
+        'gc_heap_size_bytes() via the gc_heap_delta transform in ltl (BYTE_NOTATION filled from the entry at compile)' "$CONTRACT_GC_IEC"
+}
+
+# ---------------------------------------------------------------------------
+# 609 AC3 — every step of the ladder is a prefix the GC figures accept: one
+# 3X->1X transition per letter frees 2 KiB, 2 MiB, 2 GiB and 2 TiB.
+# ---------------------------------------------------------------------------
+scenario_gc_heap_prefixes() {
+    current_scenario="gc-heap-prefixes"
+    echo "[$current_scenario]"
+    run_ltl_in "$TMP_DIR/prefix" run --disable-progress -ni -bs 1 -oe -o "$GC_PREFIX_FIXTURE"
+    expect_equal "K, M, G, T read as KiB, MiB, GiB, TiB" "$(stats_column "$TMP_DIR/prefix" bytes)" \
+        "2048|2097152|2147483648|2199023255552" \
+        'Each letter is the IEC step of the byte ladder it prefixes: 1024, 1024^2, 1024^3, 1024^4 bytes' \
+        'gc_heap_size_bytes() and byte_prefix_bytes() in ltl' "$CONTRACT_GC_IEC"
 }
 
 scenario_register one-ladder-structure \
@@ -474,7 +495,8 @@ scenario_register one-ladder-structure \
                   mixed-declarations \
                   one-notation-reach \
                   ladder-decimals \
-                  gc-heap-values-unchanged
+                  gc-heap-figures-iec \
+                  gc-heap-prefixes
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -487,7 +509,8 @@ while read -r _scenario; do
         mixed-declarations      ) scenario_mixed_declarations ;;
         one-notation-reach      ) scenario_one_notation_reach ;;
         ladder-decimals         ) scenario_ladder_decimals ;;
-        gc-heap-values-unchanged) scenario_gc_heap_values_unchanged ;;
+        gc-heap-figures-iec     ) scenario_gc_heap_figures_iec ;;
+        gc-heap-prefixes        ) scenario_gc_heap_prefixes ;;
     esac
 done < <(scenario_selected)
 

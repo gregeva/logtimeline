@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-609";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -724,6 +724,7 @@ my @byte_unit_ladder = (
 my @byte_unit_notations   = qw( si iec );
 my %byte_unit_bytes       = map { my $step = $_; map { $step->{$_}{token} => $step->{$_}{bytes} } @byte_unit_notations } @byte_unit_ladder;
 my %byte_unit_by_spelling = map { lc($_) => $_ } keys %byte_unit_bytes;
+my %byte_unit_by_prefix   = map { uc(substr($_->{iec}{token}, 0, 1)) => $_ } @byte_unit_ladder;   # B, K, M, G, T: the letter both notations' tokens of a step begin with
 my $byte_unit_si_list     = join(', ', map { $_->{si}{token} } @byte_unit_ladder);                                   # B, kB, MB, GB, TB
 my $byte_unit_iec_list    = join(', ', map { $_->{iec}{token} } grep { $_->{iec}{token} ne $_->{si}{token} } @byte_unit_ladder);   # KiB, MiB, GiB, TiB: the tokens only IEC has
 my $byte_unit_list        = "$byte_unit_si_list, $byte_unit_iec_list";    # every token, SI then IEC, for usage messages and help rows
@@ -2892,10 +2893,6 @@ my %wgm_msgtype_names = (
     S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY',
 );
 
-# Java GC heap-size suffixes → byte-ladder tokens. The JVM writes K, M, G
-# and T; each names the ladder step whose multiplier the heap delta uses.
-my %gc_heap_suffix_token = ( K => 'KiB', M => 'MB', G => 'GB', T => 'TB' );
-
 # Transform primitives: named post-capture mutation snippets spliced into
 # generated extraction closures. One resolution surface for this
 # vocabulary — new formats reference these names; a new mutation gets a
@@ -2920,7 +2917,8 @@ my %format_transform_code = (
     # +8 bytes per retained duration, +6 MB on a 762k-line access log).
     duration_from_unit_token => q{ $duration = '' . convert_duration_to_ms($duration, $duration_unit_token) if defined $duration && $duration_unit_token ne 'ms'; },
     strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
-    gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = gc_heap_size_bytes( $heap_from ) - gc_heap_size_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; } },
+    # BYTE_NOTATION is filled at compile from the entry's byte_notation.
+    gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = gc_heap_size_bytes( $heap_from, 'BYTE_NOTATION' ) - gc_heap_size_bytes( $heap_to, 'BYTE_NOTATION' ); $bytes = $bytes < 0 ? 0 : $bytes; } },
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
@@ -3344,8 +3342,8 @@ sub format_registry_specs {
         '[2025-06-05T11:17:57.418+0000][info][gc] Using G1',
       ],
       expect => [
-        [ '2025-04-05T11:10:47', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2367000000', '18.406', '0', '1' ],
-        [ '2025-04-05T12:00:03', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Concurrent Start) (Metadata GC Threshold)', '384000000', '7.250', '0', '1' ],
+        [ '2025-04-05T11:10:47', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2481979392', '18.406', '0', '1' ],
+        [ '2025-04-05T12:00:03', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Concurrent Start) (Metadata GC Threshold)', '402653184', '7.250', '0', '1' ],
         [ '2025-04-05T11:10:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '2.422', '0', '1' ],
         [ '2025-04-05T11:10:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.204', '0', '1' ],
         [ '2024-10-16T05:27:56', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
@@ -4406,6 +4404,11 @@ sub format_entry_block_src {
         if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
         my $code = $format_transform_code{$t}
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
+        if ($code =~ /BYTE_NOTATION/) {
+            die "ltl: format registry: entry '$spec->{name}' transform '$t' reads byte sizes, so the entry must declare byte_notation\n"
+                unless defined $spec->{byte_notation};
+            $code =~ s/BYTE_NOTATION/$spec->{byte_notation}/g;
+        }
         push @body, $code;
     }
 
@@ -10687,6 +10690,16 @@ sub byte_unit_canonical {
     return $byte_unit_by_spelling{ lc $spelling };
 }
 
+# The byte count of the ladder step a bare prefix letter names (K, M, G, T,
+# or B), in the notation its producer writes (si or iec), or undef when no
+# step carries the letter. A bare letter is not a byte unit spelling; the
+# notation that gives it a meaning comes from the log format's declaration.
+sub byte_prefix_bytes {
+    my ($letter, $notation) = @_;
+    my $step = $byte_unit_by_prefix{ uc $letter } or return undef;
+    return $step->{$notation}{bytes};
+}
+
 # A value in any ladder unit, as milliseconds: one lookup and one multiply,
 # or one division for the sub-millisecond steps so the result is the
 # correctly rounded quotient. An unknown unit is read as milliseconds.
@@ -12725,11 +12738,14 @@ sub memory_debug_decomposition {
     }
 }
 
-# A JVM heap size as written in a GC log (2433M), in bytes: the suffix names
-# a byte-ladder token and the ladder gives the multiplier.
+# A JVM heap size as written in a GC log (2433M), in bytes: the letter is
+# the prefix of a byte-ladder step, read in the notation the format declares
+# (HotSpot's K, M and G are powers of 1024). A size it cannot read is 0.
 sub gc_heap_size_bytes {
-    my ($value, $suffix) = $_[0] =~ /^(\d+)\s?([KMGT])$/ or return 0;
-    return $value * $byte_unit_bytes{ $gc_heap_suffix_token{$suffix} };
+    my ($figure, $notation) = @_;
+    my ($value, $letter) = $figure =~ /^(\d+)\s?([A-Za-z])$/ or return 0;
+    my $bytes = byte_prefix_bytes($letter, $notation) or return 0;
+    return $value * $bytes;
 }
 
 # The run's byte notation, once, after the read: -bn when given; else the

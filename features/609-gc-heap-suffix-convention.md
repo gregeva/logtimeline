@@ -55,9 +55,8 @@ The HotSpot source is the authority read for these three points.
   holds them. In practice only `M` occurs on a pause line (§ 1), so every GC
   byte value rises 4.86 percent: the format's sample row `2433M->66M` reads
   2,481,979,392 bytes instead of 2,367,000,000, and the G1 test fixture's STATS
-  `bytes` total 73,175,924,736 instead of 69,786,000,000 (`68 GiB` instead of
-  `65 GiB`), figures computed from the fixture's values and confirmed by a run
-  at implementation. A user-observable change, so it carries a release-notes
+  `bytes` total 73,175,924,736 instead of 69,786,000,000 (`68.2 GiB` instead
+  of `65 GiB`), confirmed by a run at implementation (§ 6). A user-observable change, so it carries a release-notes
   line. The issue's done-condition becomes: the GC format's spec declares the
   notation its heap figures are written in, and they are read at that notation.
   Locked by the architect 2026-09-29 ("Use what the HotSpot uses"; "This is
@@ -82,10 +81,12 @@ Derived from D1 and D2 (§ 2). The G1 test fixture is
 figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
 
 - [ ] **AC1. A GC heap figure is read as IEC.** Over the G1 test fixture the
-      STATS `bytes` total is 73,175,924,736 and `bytes_nice` reads `68 GiB`.
-      *Assertable:* the GC scenario of `tests/validate-byte-units.sh`, whose
-      present expectations (69,786,000,000, `65 GiB`, contract
-      `features/608-byte-unit-ladder.md` D11) are rewritten to D1 of this doc.
+      STATS `bytes` total is 73,175,924,736 and `bytes_nice` reads `68.2 GiB`.
+      *Assertable:* scenario `gc-heap-figures-iec` of
+      `tests/validate-byte-units.sh`, which replaces the scenario that pinned
+      69,786,000,000 and `65 GiB` under `features/608-byte-unit-ladder.md` D11.
+      The GC display strings of the notation scenarios move with it
+      (`format-declaration`, `mixed-declarations`).
 - [ ] **AC2. The format's own samples expect the IEC value.** The GC spec's
       self-validation rows read `2433M->66M` as 2,481,979,392 bytes and
       `512M->128M` as 402,653,184, and the run exits 0 (a self-validation
@@ -96,25 +97,29 @@ figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
       `M` is at 1024². *Assertable:* a new committed fixture,
       `tests/fixtures/gc-heap-byte-units.txt`, of four G1 pause lines, one
       transition per letter, read by one new scenario of
-      `tests/validate-byte-units.sh` asserting each line's bytes. A separate
+      `tests/validate-byte-units.sh` (`gc-heap-prefixes`) asserting each line's
+      bytes: 2048, 2097152, 2147483648, 2199023255552. A separate
       fixture, so no existing byte-units scenario moves. HotSpot writes only
       `M` on this line (§ 1), so these lines are constructed, which the
       harness's fixture comment says (a `.txt` fixture carries no header of
       its own: every line is read as log input).
 - [ ] **AC4. The letters are read at the notation the format declares, not the
       run's output notation.** With `-bn si` the STATS `bytes` total over the G1
-      test fixture is still 73,175,924,736, rendered in SI (`73 GB`).
-      *Assertable:* one scenario in the same harness.
+      test fixture is still 73,175,924,736, rendered in SI (`73.2 GB`).
+      *Assertable:* scenario `gc-heap-figures-iec`.
 - [ ] **AC5. The one ladder is the only table.** The GC transform resolves a
       letter through `@byte_unit_ladder` at the entry's declared byte notation;
-      no table of letters exists beside the transforms. *Unassertable by a
-      harness* (AC4 is the behavioural half): verified at review of the diff.
+      no table of letters exists beside the transforms. *Assertable:* the
+      source checks of scenario `one-ladder-structure`: `gc-reader-reads-ladder`
+      (the reader goes through `byte_prefix_bytes()` and the prefix view of the
+      ladder), `no-prefix-letter-table` and
+      `gc-transform-reads-declared-notation`. AC4 is the behavioural half.
 - [ ] **AC6. No runtime warnings.** No ` at <file> line <N>` on stderr in any
       scenario above. *Assertable:* the harness's runtime-warning check.
 - [ ] **AC7. On a real G1 log the only change is the byte values.** Over the
       largest G1 log in the corpus, before against after: line counts and pause
       durations identical, and the bytes total rises by exactly 1.048576 (every
-      figure in `M`). *Measured once* and recorded in this doc's implementation record; the
+      figure in `M`). *Measured once* and recorded in § 6; the
       corpus is not committed, so no harness reads it.
 
 ## 4. Design
@@ -152,3 +157,31 @@ Before it, `$version_number` is stamped `0.19.0-609` and the before benchmark
 (`single-day-access-log-standard`, label `609-before`) is captured on the base
 commit be93f58. Then AC7 is measured and recorded here, the version restored,
 and the completion gate run: the full harness suite and the after benchmark.
+
+## 6. Implementation record
+
+### Drop 1 (2026-09-29)
+
+Built as § 4 describes. `byte_prefix_bytes()` and `%byte_unit_by_prefix` sit
+beside `byte_unit_canonical()`; `gc_heap_size_bytes()` takes the notation as
+its second argument; the `gc_heap_delta` snippet carries a `BYTE_NOTATION`
+placeholder that the transform loop of `format_entry_block_src()` fills from
+the entry; `%gc_heap_suffix_token` is deleted; the GC spec's sample rows expect
+2481979392 and 402653184.
+
+**Acceptance criteria.** `tests/validate-byte-units.sh`: 48 passed, 0 failed.
+Each new or changed assertion was shown to fail first, on a sabotaged `ltl`:
+
+| Sabotage | Assertions that failed |
+|---|---|
+| The GC spec declares `si` | `gc-heap-figures-iec`: all four (the self-validation rows end the run; the total; the rendering; the `-bn si` total). `gc-heap-prefixes`: its one |
+| The transform reads the run's `-bn` value in place of the entry's notation | `gc-heap-figures-iec`: the `-bn si` total only. `one-ladder-structure`: `gc-transform-reads-declared-notation` |
+| A private letter-to-token table beside the ladder | `one-ladder-structure`: `no-prefix-letter-table` and `byte-tokens-only-in-ladder` |
+
+**AC7, the largest G1 log in the corpus** (781,118 lines, 83 MB), before on
+be93f58 and after on this drop, both `-ni -bs 1440 -oe -o -V`: 781,118 lines
+read in both; the STATS CSV has 54 rows in both, and the only columns that
+differ are `bytes`, `bytes_max`, `bytes_mean` and `bytes_nice`. On every row the
+byte value after is exactly 1.048576 times the value before. No stderr on
+either run.
+
