@@ -281,7 +281,7 @@ alias** (`_running_mean`, `m2_sum`, `m3_sum`, `m4_sum`, and the transient `bin_e
 | class | fields |
 |---|---|
 | Universal | `occurrences` |
-| Aggregates | `total_bytes`, `total_duration`, `total_duration_num`, `sum_of_squares`, `impact` |
+| Aggregates | `total_bytes`, `total_duration`, `sum_of_squares`, `impact` |
 | Raw-mode sample store | `durations` (arrayref; **absent entirely under `-mdm bin`**) |
 | Bin-mode sidecars | `duration_count`, `_running_mean`, `min`, `max`, and under shape demand `m2_sum`, `m3_sum`, `m4_sum` |
 | Count family | `count_sum`, `count_occurrences`, `count_min`, `count_max`, `count_mean` |
@@ -294,10 +294,13 @@ Notes that matter for a fixed column layout:
 
 - **`min` and `max` carry two provenances** — bin-mode producer sidecars *and* raw-mode
   calculated-statistics outputs. Same name, different writer.
-- **`total_duration` is dual-typed**: numeric during accumulation, then overwritten with
-  a *formatted string* by `format_time(...)` in the group-calc loop. (Issue #273 proposes
-  collapsing this with `total_duration_num`; a compact store makes that collapse
-  cheaper — see § Related issues.)
+- **`total_duration` is one number for the whole run**: accumulated per line, merged
+  under consolidation, and rendered only at the messages table's and the MESSAGES
+  CSV's emit sites (#273, store precise and format at the output boundary;
+  `features/273-store-precise-duration-totals.md`). The mini-store prototypes
+  (`prototype/426-store-mini.pl`, `prototype/426-bin-store-mini.pl`) mirror the read
+  loop as it was, with a second numeric total per key, so a resumed #426 re-slices
+  its baseline arm from the current loop.
 - **`udm_*_distinct` is NOT a field of this store.** Distinct-value tracking for counting
   aggregations lives in the bucket-scoped `%udm_distinct`. Verified — the `distinct`
   suffix appears in UDM name construction elsewhere and must not be mistaken for a
@@ -1499,7 +1502,7 @@ computed, and that distinction is re-recorded here when it does.
   withdrawn. Where a structure turns out not to need changing, that is a *conclusion of
   the analysis*, recorded with its grounds.
 - **Out of scope**: the `mean_bytes` / `count_mean` sort-key bug (F8, filed as #428);
-  #273's `total_duration` collapse (adjacent, not folded in).
+  #273's `total_duration` collapse (adjacent, not folded in; landed separately).
 - **This document does not lock decisions.** `Dxx` entries appear only after the
   prototype that grounds them.
 
@@ -1559,8 +1562,8 @@ computed, and that distinction is re-recorded here when it does.
   column set would surface this defect class mechanically.
 - **#418 — sort-on-statistic pays full population cost when no key is eligible.**
   Operates on the same `sort_selection` block; strong interaction with arm B.
-- **#273 — collapse `total_duration` / `total_duration_num`.** A compact store makes this
-  cheaper; kept separate.
+- **#273 — collapse `total_duration` / `total_duration_num`.** Landed separately: one
+  numeric `total_duration` per key, formatted at the emit sites.
 - **#58 / #23 — format registry.** The generated scan sub is this store's producer; F16
   in `features/log-format-registry.md` is rewritten against the new store when this lands.
 - **#349 / #305 — demand contract.** The gating this store must preserve; recorded in

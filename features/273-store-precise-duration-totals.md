@@ -3,8 +3,18 @@
 ## Status
 
 Specification agreed with the architect 2026-09-29 on branch
-`273-store-precise-duration-totals` off `release/0.19.0`; implementation not
-started.
+`273-store-precise-duration-totals` off `release/0.19.0`. Drop 1 (the message
+store) implemented 2026-09-29; drop 2 (the time-bucket store) not started.
+
+**Drop 1 progress.** The two CSV-output scenarios (`messages-sort-duration`,
+`messages-omit-durations`) were written first. The `-od` scenario failed on the
+base with `duration_nice` = `0` on all twelve MESSAGES rows and nothing else;
+the sort scenario passed on the base and failed on a build whose sort key
+named a missing field (row 4 carried a total of 2 below a row of 1); the
+zero-cell check failed on a MESSAGES CSV doctored to read `0ns`; the STATS
+absence check of a switched-off family failed on a STATS CSV carrying the
+duration columns (23 columns reported). After the change both scenarios pass.
+Criterion 6's method changed with the architect (§ Acceptance criteria 6).
 
 Every site below was re-located in the worktree's `ltl` (base 4b238ff; `ltl`
 is unchanged since 58f8d94) by enclosing sub plus an in-body snippet that
@@ -427,7 +437,9 @@ issue body.
       `tests/csv-output/validate-csv-output.pl`: the ordering check (MESSAGES
       rows non-increasing on a named column) and the zero-cell check (each row
       whose `duration` is `0` carries the scenario's declared `duration_nice`,
-      here `0 msec`), each declaring `asserts`, `produced_by` and `contract`.
+      here `0 msec`), each declaring `asserts`, `produced_by` and `contract`,
+      declared as the directives `@non_increasing` and `@zero_duration_nice`
+      in the scenario's expected-categories file beside `@no_highlight_rows`.
       No harness runs `-so duration` today; a sort key naming a missing field
       ranks every key at zero and passes every existing assertion, which is
       the failure the scenario is shown to catch. The
@@ -451,11 +463,17 @@ issue body.
       and `impact` empty.
       *Method: a new `tests/validate-csv-output.sh` scenario on the same
       twelve-line fixture, `-bs 1440 -oe -ni -n 12 -od`, declaring the duration
-      family active so the validator's existing family-consistency check (the
-      rules TSV's `duration` family: min, mean, max, the total, its nice twin
-      and impact; "all populated or all empty") and its `nice` type check read
-      the row. It fails on the base (`duration_nice` = `0`, a bare number,
-      beside empty cells) and passes after.*
+      family switched off (`-duration` in its families column). Declaring the
+      family active, as first specified, does not work: the declaration binds
+      both CSVs, and under `-od` the STATS CSV leaves its duration columns out,
+      which the validator reports as missing. The harness therefore learns the
+      switched-off state `-od` creates: every column the rules make
+      `conditional:duration` (the duration statistics, percentiles, dispersion,
+      shape, the total, its nice twin and impact) is absent from the STATS
+      header and empty in every MESSAGES row. It fails on the base
+      (`duration_nice` = `0` on all twelve rows) and passes after; the STATS
+      absence check is shown to fail on a STATS CSV that carries the columns.
+      Architect's direction 2026-09-29.*
 - [ ] **7. No nice formatting per line; cost measured (D6).** The per-line path
       of `read_and_process_logs` carries only numeric accumulation of the
       total: no display formatter is reachable per line. The before/after
@@ -513,7 +531,7 @@ None. No prototyping scope.
 |---|---|---|
 | `-V` sections | none read by a new assertion, none changed | no key, header or format moves |
 | `-V benchmark-data` `MEMORY log_messages` | read by the benchmark only | a value, not a key; expected lower |
-| `tests/validate-csv-output.sh` | two scenarios added (criteria 4 and 6), two opt-in checks (ordering, zero cell) added to `tests/csv-output/validate-csv-output.pl` | the rules TSV types `duration_nice` as a unit-bearing string in family `duration`; an empty cell in an all-empty family is what the family-consistency check already requires |
+| `tests/validate-csv-output.sh` | two scenarios added (criteria 4 and 6); two opt-in directives (ordering, zero cell) and the switched-off family declaration added to `tests/csv-output/validate-csv-output.pl`, documented in `tests/csv-output/README.md` | the rules TSV types `duration_nice` as a unit-bearing string conditional on durations; a switched-off family's columns are absent where dynamic and empty where fixed |
 | `tests/validate-statistics.sh` | no baseline moves | output is byte-identical |
 | `tests/validate-regression.sh` | no reference moves | output is byte-identical |
 | `tests/validate-index-read-back.sh` | unchanged, run in the gate | the index reads its own per-file accumulators (§ 3 item 12) |

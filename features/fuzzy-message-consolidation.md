@@ -1111,10 +1111,9 @@ Tested against ltl CSV baseline for two unconsolidated entries that exist in bot
 
 **All fields match exactly** across both log formats. The stats merging implementation is correct and matches ltl's computation.
 
-**DD-07 update — missing fields identified:** DD-07 omits three fields that ltl actually stores and that must be merged:
+**DD-07 update — missing fields identified:** DD-07 omits two fields that ltl actually stores and that must be merged:
 - `sum_of_squares` — sum (required for variance/std_dev/CV calculation)
 - `impact` — must be **recomputed** after merging, not summed (derived from `log(mean^exp * occ)`)
-- `total_duration_num` — sum (numeric copy of total_duration, used for CSV/sorting)
 
 **Key insight — initial risk assessment was partially wrong:** The arithmetic of stats merging is straightforward (sums and mins). The actual risk was in matching ltl's specific formulas (population vs sample variance, percentile indexing, rounding). These turned out to differ from standard implementations and required reading ltl's `calculate_statistics()` to get right.
 
@@ -1404,7 +1403,7 @@ The following questions must be addressed before integrating the prototype into 
 
 ### ~~IQ-03: Stats Merging~~ — Resolved (PF-25)
 
-Stats merging validated in prototype. All fields match ltl's MESSAGES CSV output exactly (tested on both access logs and ThingWorx DPM logs). DD-07 updated with three missing fields: `sum_of_squares` (sum), `impact` (recompute), `total_duration_num` (sum). See PF-25 for details.
+Stats merging validated in prototype. All fields match ltl's MESSAGES CSV output exactly (tested on both access logs and ThingWorx DPM logs). DD-07 updated with two missing fields: `sum_of_squares` (sum), `impact` (recompute). See PF-25 for details.
 
 ### ~~IQ-04: Per-Bucket Data (`%log_analysis`) Routing~~ — RESOLVED (non-issue)
 
@@ -1453,7 +1452,6 @@ Fields set during parsing (must be merged by `merge_stats()`):
 | `occurrences` | sum | Yes |
 | `total_bytes` | sum | Yes |
 | `total_duration` | sum | Yes |
-| `total_duration_num` | sum | No — add |
 | `sum_of_squares` | sum | Yes |
 | `durations` | concatenate arrays | Yes |
 | `impact` | **recompute** after merge | No — add |
@@ -1467,7 +1465,7 @@ Fields set during parsing (must be merged by `merge_stats()`):
 | `udm_${name}_max` | max of maxes | No — add |
 | `is_consolidated` | set to 1 on canonical entry | N/A — new field |
 
-Fields computed downstream in `calculate_all_statistics()` — **not merged**, recomputed from raw fields: `min`, `mean`, `max`, `std_dev`, `cv`, `p1`-`p999`, `count_mean`, `udm_${name}_mean`, `total_duration` (overwritten with formatted string).
+Fields computed downstream in `calculate_all_statistics()` — **not merged**, recomputed from raw fields: `min`, `mean`, `max`, `std_dev`, `cv`, `p1`-`p999`, `count_mean`, `udm_${name}_mean`. `total_duration` stays the merged number; it is rendered at the emit sites (`features/273-store-precise-duration-totals.md`).
 
 **Key insight:** All merge rules follow the same three patterns: sum, min-of-mins, or concatenate. The count/UDM fields use the same rules as the duration/bytes fields already implemented in PF-25. `impact` is the only field that requires recomputation rather than arithmetic merge. The downstream `calculate_all_statistics()` function handles all derived fields correctly from the raw merged data — no changes needed there.
 
