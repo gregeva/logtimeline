@@ -4,7 +4,7 @@
 
 Specification agreed with the architect 2026-09-29 on branch
 `273-store-precise-duration-totals` off `release/0.19.0`. Drop 1 (the message
-store) implemented 2026-09-29; drop 2 (the time-bucket store) not started.
+store) and drop 2 (the time-bucket store) implemented 2026-09-29.
 
 **Drop 1 progress.** The two CSV-output scenarios (`messages-sort-duration`,
 `messages-omit-durations`) were written first. The `-od` scenario failed on the
@@ -15,6 +15,21 @@ zero-cell check failed on a MESSAGES CSV doctored to read `0ns`; the STATS
 absence check of a switched-off family failed on a STATS CSV carrying the
 duration columns (23 columns reported). After the change both scenarios pass.
 Criterion 6's method changed with the architect (§ Acceptance criteria 6).
+
+**Drop 2 progress.** The bucket accumulator takes the column id from the read
+loop on (`duration`, `duration-HL`), the name the statistics store and every
+metric-generic reader already use; the staged statistics input keeps
+`total_duration` and no longer seeds `total_duration-HL`. Both statistics subs
+now read the mean's numerator from the staged input. For
+`calculate_statistics_bin` that needed one caller change beyond the bucket
+path: the message-key sort pre-pass passed an empty staged input and relied on
+the sub reading the message entry's total, so it now stages
+`{ total_duration => $entry->{total_duration} }` as its raw twin does. No
+statistics drift scenario sorts on a computed statistic under the bin data
+model, so that call was proven directly: on the 5,000-line Tomcat access log
+with millisecond durations, `-bs 60 -n 15 -mdm bin -bdm bin -cp full -o` with
+`-so mean`, `-so p99` and `-so cv`, the terminal output and both CSVs are
+byte-identical to the drop 1 commit, with no runtime warning.
 
 Every site below was re-located in the worktree's `ltl` (base 4b238ff; `ltl`
 is unchanged since 58f8d94) by enclosing sub plus an in-body snippet that

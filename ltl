@@ -16114,7 +16114,7 @@ sub read_and_process_logs {
                     $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
                         occurrences => 0,
                         total_bytes => 0,
-                        total_duration => 0,
+                        duration => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
                         # count_min => undef,
@@ -16129,7 +16129,7 @@ sub read_and_process_logs {
                     } : {
                         occurrences => 0,
                         total_bytes => 0,
-                        total_duration => 0,
+                        duration => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
                         # count_min => undef,
@@ -16144,9 +16144,9 @@ sub read_and_process_logs {
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        $log_analysis{$bucket}{total_duration} += $duration;
+                        $log_analysis{$bucket}{duration} += $duration;
 
-                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $line_is_highlighted;
+                        $log_analysis{$bucket}{'duration-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
@@ -17347,7 +17347,6 @@ sub calculate_all_statistics {
         my $aggregated_data = {
             occurrences         => 0,
             total_duration      => 0,
-            'total_duration-HL' => 0,
             total_bytes         => 0,
             'total_bytes-HL'    => 0,
             count_sum           => 0,
@@ -17364,7 +17363,7 @@ sub calculate_all_statistics {
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
-        $aggregated_data->{total_duration} += $log_analysis{$bucket}{total_duration};
+        $aggregated_data->{total_duration} += $log_analysis{$bucket}{duration};
         $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
@@ -17405,7 +17404,7 @@ sub calculate_all_statistics {
             my $stats;
             if ($dm eq 'bin') {
                 $stats = calculate_statistics_bin(
-                    $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/total_duration/sum_of_squares/occurrences)
+                    $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/sum_of_squares/occurrences)
                     $bucket_stats_counters{$bucket},     # counter entry (undef when every duration was 0)
                     $aggregated_data,
                     $bucket_demand,                      # statistics-group demand (#305)
@@ -17420,8 +17419,8 @@ sub calculate_all_statistics {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $log_analysis{$bucket}{total_bytes},
                 'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration      => $log_analysis{$bucket}{total_duration},
-                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                duration      => $log_analysis{$bucket}{duration},
+                'duration-HL' => $log_analysis{$bucket}{'duration-HL'},
                 count         => $log_analysis{$bucket}{count_sum},
                 'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
@@ -17442,8 +17441,8 @@ sub calculate_all_statistics {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $log_analysis{$bucket}{total_bytes},
                 'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration      => $log_analysis{$bucket}{total_duration},
-                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                duration      => $log_analysis{$bucket}{duration},
+                'duration-HL' => $log_analysis{$bucket}{'duration-HL'},
                 count         => $log_analysis{$bucket}{count_sum},
                 'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
@@ -17711,7 +17710,7 @@ sub calculate_all_statistics {
                         $stats = calculate_statistics_bin(
                             $entry,
                             $log_messages_counters{"$category\x1f$log_key"},
-                            {},
+                            { total_duration => $entry->{total_duration} },
                             $population_demand,
                         );
                     } else {
@@ -18152,8 +18151,10 @@ sub calculate_statistics_bin {
     # R3.2 table in features/287-message-stats-bin-counter-data-model.md:
     #   min/max:                 sidecar (R2.2; populated unconditionally per
     #                            sample so 0-duration samples are captured).
-    #   mean:                    total_duration / duration_count (matches the
-    #                            raw path's `scalar @sorted` denominator).
+    #   mean:                    the staged input's total_duration /
+    #                            duration_count (matches the raw path's
+    #                            `scalar @sorted` denominator); every caller
+    #                            stages the total, as for calculate_statistics.
     #   std_dev/cv:              sum_of_squares accumulator with the same
     #                            cancellation guard as calculate_statistics
     #                            at ltl:~8855.
@@ -18201,7 +18202,7 @@ sub calculate_statistics_bin {
 
     my $min  = $sidecar_entry->{min};
     my $max  = $sidecar_entry->{max};
-    my $mean = $sidecar_entry->{total_duration} / $n;
+    my $mean = $aggregated_data->{total_duration} / $n;
 
     my ($std_dev, $cv);
     if ($n >= 2) {
