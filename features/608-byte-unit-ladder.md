@@ -6,8 +6,8 @@ Specification agreed with the architect 2026-09-28 on branch
 `608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
 in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
 (the byte ladder and the unit slot), drop 2 (help rows), drop 3 (notation and
-display) and drop 4 (decimals) delivered; the completion gate and delivery
-records (§ 9, § 10) remain. § 11
+display) and drop 4 (decimals) delivered; the completion gate passed on
+4ec9785 (§ 11); the delivery records of § 9 and § 10 remain. § 11
 records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
@@ -1059,4 +1059,31 @@ move. `validate-byte-units.sh` passes whole (44).
 
 **Not affected.** Every statistics-drift scenario runs with `-cp full`, which
 bypasses the default decimals, so the drift baselines do not move.
+
+### Completion gate (2026-09-29, on 4ec9785)
+
+`$version_number` restored to `0.19.0` in 4ec9785; the gate ran on that commit.
+
+**Harness suite.** `CI=1 validate-csv-output.sh` (25 scenarios, 30 pass), then
+`CI=1 validate-statistics.sh` (22 drift scenarios pass), then every other
+`tests/validate-*.sh`: all 44 exit 0, each summary showing its assertions ran,
+and no captured stderr carries a runtime warning.
+
+**Benchmark.** `single-day-access-log-standard`, `608-before` on 99fd43a and
+`608-after` on 4ec9785, one machine, one session: `parse/read_files` 9.1 s to
+8.9 s (−1.9 %), total 9.2 s to 9.0 s (−1.9 %); `rss_peak` +272 KB (+0.3 %). The
+one memory row above 1 %, `format_scan_subs` +32 KB (+2.8 %), is the
+resident-memory delta read around each scan-sub compile, which moves in 16 KB
+pages; three further runs of each tree on the standard log gave before
+1,163,264 to 1,228,800 bytes (median 1,212,416) and after 1,179,648 to
+1,245,184 (median 1,196,032), overlapping ranges with a lower median, so it is
+noise, not growth. The per-line measurements of drop 1 stand (byte-unit
+`-udm` −8.8 %, G1 GC −11.9 %). Both benchmark TSVs deleted after the
+comparison.
+
+**Rendered check.** Criterion 17 was done on drop 3's tree (§ Drop 3); drop 4
+changes no rendered surface (`validate-duration-display.sh` unchanged).
+
+This record is a `features/`-only commit after the gate: the scope test skips
+the suite for it.
 
