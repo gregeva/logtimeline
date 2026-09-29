@@ -884,6 +884,30 @@ sub check_observability_surface {
         $f++;
     }
 
+    # Default mode: the duration and percentile families take the resolved
+    # unit's ladder-step decimals, the source's resolution (ns 6, us 3, every
+    # other step 0), and the ceiling is that or 5, whichever is larger.
+    if ($vp->{precision_mode} eq 'default' && $vp->{duration_unit_resolved} =~ /^\w+$/) {
+        my %step_decimals = ( ns => 6, us => 3 );
+        my $want = $step_decimals{ $vp->{duration_unit_resolved} } // 0;
+        my $want_ceiling = $want > 5 ? $want : 5;
+        for my $check ( [ decimals_duration => $want ], [ decimals_percentile => $want ], [ max_decimals_ceiling => $want_ceiling ] ) {
+            my ($field, $expected) = @$check;
+            next if $vp->{$field} eq $expected;
+            emit_fail({
+                scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,
+                column => "(v-csv-output/$field)",
+                asserts => "in default mode $field follows the resolved duration unit's ladder-step decimals (ns 6, us 3, others 0; ceiling at least 5)",
+                produced_by => 'adapt_to_command_line_options() in ltl (%csv_family_decimals from $time_unit_step{...}{decimals})',
+                contract => 'features/608-byte-unit-ladder.md D9 and D18 (one default decimals rule, from the ladder step)',
+                expected => $expected,
+                actual => $vp->{$field},
+                rule => 'ladder-step decimals',
+            });
+            $f++;
+        }
+    }
+
     if ($vp->{max_decimals_ceiling} !~ /^(5|n\/a|\d+)$/) {
         emit_fail({
             scenario => $opt{scenario}, file => $opt{file_kind}, row => 0,

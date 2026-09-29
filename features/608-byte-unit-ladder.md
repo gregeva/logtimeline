@@ -5,8 +5,9 @@
 Specification agreed with the architect 2026-09-28 on branch
 `608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
 in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
-(the byte ladder and the unit slot), drop 2 (help rows) and drop 3 (notation
-and display) delivered; drop 4 not started. § 11
+(the byte ladder and the unit slot), drop 2 (help rows), drop 3 (notation and
+display) and drop 4 (decimals) delivered; the completion gate and delivery
+records (§ 9, § 10) remain. § 11
 records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
@@ -1022,4 +1023,40 @@ corpus, under its declared IEC and `-bn si`; and the two together, which
 printed the notice and rendered SI. Each run's timeline bytes column, heatmap
 scale, histogram axis and percentile row, and memory rows carried one
 notation's tokens only, and no runtime warning printed.
+
+### Drop 4 — decimals (2026-09-29)
+
+**Built.** Each `@time_unit_ladder` step gains `decimals`, derived when the
+table is built from the step's divisor into milliseconds (`per_ms`): the digits
+after the leading one, so `ns` 6 and `us` 3; a step without a divisor (the
+millisecond and every longer step) 0. `%duration_display_decimals` and
+`%decimals_by_unit` are gone: `format_duration` rounds to
+`$time_unit_step{$unit}{decimals}`, and the default `-cp` mode's duration and
+percentile families take `$time_unit_step{$duration_unit_resolved}{decimals}`.
+`-V csv-output` under `-du ns`, `us`, `ms`, `m` reports `decimals_duration` 6,
+3, 0, 0 and `max_decimals_ceiling` 6, 5, 5, 5, the table of § 5.7; `-cp 9`
+reports 9. `format_bytes` starts its climb from the ladder's first step rather
+than a literal `'B'`. The `-cp` help and usage rows say "derived from the
+source's duration unit".
+
+**Proof.** `tests/validate-byte-units.sh` scenario `one-ladder-structure`
+(criterion 5), 11 checks read from the `ltl` source: one `@byte_unit_ladder`;
+no `convert_bytes` or private byte table; quoted byte tokens and `1024`
+multipliers only inside the ladder (the GC suffix map, which names ladder
+tokens, excepted); no table keyed by `ns`/`us` to a number; the unit slot,
+`format_bytes`, `gc_heap_size_bytes`, `format_duration` and the CSV decimals
+each read the ladder; `print_help` holds no literal unit list. All 11 fail on
+the base commit's `ltl`; the three decimals checks fail on drop 3's. Scenario
+`ladder-decimals` (criterion 15) reads `decimals_duration` for the four units
+and `-cp 9`; it fails on the base commit under `-du ns` (9) and `-du us` (6).
+`tests/csv-output/validate-csv-output.pl` gains the same rule as an invariant
+of every default-mode scenario (decimals and ceiling from the resolved unit's
+step); on the base commit's `-du us` output it fails `decimals_duration`,
+`decimals_percentile` (6, expected 3); the `precision-default-us`,
+`access-bytes-duration` and `precision-n4` scenarios pass.
+`validate-duration-display.sh` passes unchanged (21): the latency cells do not
+move. `validate-byte-units.sh` passes whole (44).
+
+**Not affected.** Every statistics-drift scenario runs with `-cp full`, which
+bypasses the default decimals, so the drift baselines do not move.
 

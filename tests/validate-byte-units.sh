@@ -57,6 +57,7 @@ CONTRACT_OPTION='features/608-byte-unit-ladder.md D7 and D17 (one notation per r
 CONTRACT_DECLARE='features/608-byte-unit-ladder.md D7 and D12 (a format declares its byte notation in its spec; the Java GC format declares IEC)'
 CONTRACT_MIXED='features/608-byte-unit-ladder.md D13 and D20 (IEC only when every file declares IEC, else SI with one notice; no notice under -bn; an unrecognised file declares nothing)'
 CONTRACT_REACH='features/608-byte-unit-ladder.md D15 (the run notation reaches every byte string, the memory rows and the export included)'
+CONTRACT_STRUCT='features/608-byte-unit-ladder.md D5 (one byte ladder; no sub keeps a table of its own), D8 (help rows interpolate the ladder lists) and D9/D18 (decimals are a field of the time-ladder step)'
 CONTRACT_D11='features/608-byte-unit-ladder.md D11 (the GC transform maps its suffixes to ladder tokens at their present values; no GC value changes)'
 
 pass=0
@@ -332,6 +333,98 @@ scenario_one_notation_reach() {
 }
 
 # ---------------------------------------------------------------------------
+# Criterion 5 — one byte ladder, read by every byte surface; no private byte
+# table, byte multiplier or unit-keyed decimals table elsewhere; no literal
+# unit list in print_help. Read from the source: the mechanism is the
+# requirement, so it is checked where it lives.
+# ---------------------------------------------------------------------------
+scenario_one_ladder_structure() {
+    current_scenario="one-ladder-structure"
+    echo "[$current_scenario]"
+    local report="$TMP_DIR/structure.txt"
+    perl - "$LTL" > "$report" <<'PL'
+use strict; use warnings;
+open my $fh, '<', $ARGV[0] or die "cannot read $ARGV[0]: $!\n";
+my @lines = <$fh>;
+my (%sub_body, $cur, $in_ladder, @ladder_lines);
+for my $i (0 .. $#lines) {
+    my $l = $lines[$i];
+    $cur = $1 if $l =~ /^sub (\w+)/;
+    $sub_body{$cur} .= $l if defined $cur;
+    undef $cur if defined $cur && $l =~ /^\}/;
+    $in_ladder = 1 if $l =~ /^my \@byte_unit_ladder = \(/;
+    push @ladder_lines, $i if $in_ladder;
+    $in_ladder = 0 if $in_ladder && $l =~ /^\);/;
+}
+my %in_ladder = map { $_ => 1 } @ladder_lines;
+# Every call passes its condition through scalar(): a failed match in list
+# context is an empty list, which would shift the detail into the verdict.
+my $check = sub { my ($name, $ok, $detail) = @_; print "CHECK\t$name\t", ($ok ? 'ok' : 'fail'), "\t", ($detail // ''), "\n"; };
+my @decl = grep { /^my \@byte_unit_ladder\b/ } @lines;
+$check->('one-ladder', @decl == 1 && @ladder_lines > 1, scalar(@decl) . ' declarations');
+my @private = grep { /\bsub convert_bytes\b|%byte_units\b|%byte_unit_canonical\b/ } @lines;
+$check->('no-private-byte-table', !@private, join(' | ', map { s/^\s+|\s+$//gr } @private));
+my @tokens = grep { !$in_ladder{$_} && $lines[$_] !~ /^my %gc_heap_suffix_token\b/
+                    && $lines[$_] =~ /'(?:kB|KB|MB|GB|TB|KiB|MiB|GiB|TiB)'/ } 0 .. $#lines;
+$check->('byte-tokens-only-in-ladder', !@tokens, join(' | ', map { 'line ' . ($_ + 1) } @tokens));
+my @mult = grep { !$in_ladder{$_} && $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /1024\s*\*\*|=>\s*1024\b/ } 0 .. $#lines;
+$check->('byte-multipliers-only-in-ladder', !@mult, join(' | ', map { 'line ' . ($_ + 1) } @mult));
+my @dec = grep { $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /\b(?:ns|us)\s*=>\s*\d/ } 0 .. $#lines;
+$check->('no-unit-keyed-decimals-table', !@dec, join(' | ', map { 'line ' . ($_ + 1) } @dec));
+$check->('unit-slot-reads-ladder', scalar(($sub_body{parse_udm_configs} // '') =~ /byte_unit_canonical\(/ && ($sub_body{parse_udm_configs} // '') =~ /\$byte_unit_bytes\{/) ? 1 : 0, 'parse_udm_configs');
+$check->('formatter-reads-ladder', scalar(($sub_body{format_bytes} // '') =~ /\@byte_unit_ladder|\$byte_unit_ladder\[/) ? 1 : 0, 'format_bytes');
+$check->('gc-reader-reads-ladder', scalar(($sub_body{gc_heap_size_bytes} // '') =~ /\$byte_unit_bytes\{/) ? 1 : 0, 'gc_heap_size_bytes');
+$check->('display-decimals-from-step', scalar(($sub_body{format_duration} // '') =~ /\$time_unit_step\{\$unit\}\{decimals\}/) ? 1 : 0, 'format_duration');
+$check->('csv-decimals-from-step', scalar(($sub_body{adapt_to_command_line_options} // '') =~ /\$time_unit_step\{\$duration_unit_resolved\}\{decimals\}/) ? 1 : 0, 'adapt_to_command_line_options');
+my $help = $sub_body{print_help} // '';
+my @lit = grep { $help =~ /$_/ } ('ns, us, ms', 'kB, MB', 'KiB, MiB', 'B, kB');
+$check->('help-has-no-unit-literal', length($help) && !@lit, join(' | ', @lit));
+PL
+    local name status detail
+    local -a expected=(one-ladder no-private-byte-table byte-tokens-only-in-ladder byte-multipliers-only-in-ladder
+                       no-unit-keyed-decimals-table unit-slot-reads-ladder formatter-reads-ladder gc-reader-reads-ladder
+                       display-decimals-from-step csv-decimals-from-step help-has-no-unit-literal)
+    for name in "${expected[@]}"; do
+        IFS=$'\t' read -r _ _ status detail < <(awk -F'\t' -v n="$name" '$1 == "CHECK" && $2 == n' "$report") || true
+        if [[ "$status" == ok ]]; then
+            pass_with "$name"
+        else
+            fail_with "$name" \
+                'The byte vocabulary lives in one ladder that every byte surface reads; decimals live on the time-ladder step; help rows carry no literal unit list' \
+                'the source of ltl (@byte_unit_ladder, @time_unit_ladder, print_help)' "$CONTRACT_STRUCT" \
+                "status: ${status:-MISSING-ANCHOR}" "detail: ${detail:-}"
+        fi
+        status=""; detail=""
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Criterion 15 — the step's decimals are the source's resolution relative to
+# millisecond storage: -V csv-output reports 6 under -du ns, 3 under -du us,
+# 0 under -du ms and -du m; -cp 9 gives nine back.
+# ---------------------------------------------------------------------------
+scenario_ladder_decimals() {
+    current_scenario="ladder-decimals"
+    echo "[$current_scenario]"
+    local row unit want dir got
+    for row in "ns|6" "us|3" "ms|0" "m|0"; do
+        IFS='|' read -r unit want <<< "$row"
+        dir="$TMP_DIR/decimals-$unit"
+        run_ltl_in "$dir" run --disable-progress -ni -bs 1440 -oe -o -du "$unit" -V csv-output "$BOUNDARY_FIXTURE"
+        got=$(sed -nE 's/^decimals_duration: //p' "$dir/run.out" | head -1)
+        expect_equal "-du $unit: decimals_duration $want" "${got:-MISSING-ANCHOR}" "$want" \
+            'The CSV duration family takes the resolved unit step decimals' \
+            'adapt_to_command_line_options() in ltl ($time_unit_step{...}{decimals})' "$CONTRACT_STRUCT"
+    done
+    dir="$TMP_DIR/decimals-cp9"
+    run_ltl_in "$dir" run --disable-progress -ni -bs 1440 -oe -o -du us -cp 9 -V csv-output "$BOUNDARY_FIXTURE"
+    got=$(sed -nE 's/^decimals_duration: //p' "$dir/run.out" | head -1)
+    expect_equal "-du us -cp 9: decimals_duration 9" "${got:-MISSING-ANCHOR}" "9" \
+        'Higher precision for follow-up analysis is -cp, not a different default' \
+        'adapt_to_command_line_options() in ltl' "$CONTRACT_STRUCT"
+}
+
+# ---------------------------------------------------------------------------
 # Criterion 12 — the GC heap delta is byte-identical: the suffixes read
 # through the ladder at their present values (K 1024; M, G, T powers of
 # 1000), so 69,786,000,000 bytes over the fixture's five transitions. The run
@@ -373,23 +466,27 @@ scenario_gc_heap_values_unchanged() {
     fi
 }
 
-scenario_register value-climb \
+scenario_register one-ladder-structure \
+                  value-climb \
                   boundary-carry \
                   notation-option \
                   format-declaration \
                   mixed-declarations \
                   one-notation-reach \
+                  ladder-decimals \
                   gc-heap-values-unchanged
 scenario_parse_args "$@"
 
 while read -r _scenario; do
     case "$_scenario" in
+        one-ladder-structure    ) scenario_one_ladder_structure ;;
         value-climb             ) scenario_value_climb ;;
         boundary-carry          ) scenario_boundary_carry ;;
         notation-option         ) scenario_notation_option ;;
         format-declaration      ) scenario_format_declaration ;;
         mixed-declarations      ) scenario_mixed_declarations ;;
         one-notation-reach      ) scenario_one_notation_reach ;;
+        ladder-decimals         ) scenario_ladder_decimals ;;
         gc-heap-values-unchanged) scenario_gc_heap_values_unchanged ;;
     esac
 done < <(scenario_selected)
