@@ -73,3 +73,41 @@ The HotSpot source is the authority read for these three points.
   ("this is existing pattern spec which you should be following. The only
   thing that you needed to know is what is the byte notation implied by the
   single letter. Now that you know, the standard ladder applies.").
+
+## 3. Acceptance criteria
+
+Derived from D1 and D2 (§ 2). The G1 test fixture is
+`tests/fixtures/gc-g1-categories.txt`: seven lines, five heap transitions, every
+figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
+
+- [ ] **AC1. A GC heap figure is read as IEC.** Over the G1 test fixture the
+      STATS `bytes` total is 73,175,924,736 and `bytes_nice` reads `68 GiB`.
+      *Assertable:* the GC scenario of `tests/validate-byte-units.sh`, whose
+      present expectations (69,786,000,000, `65 GiB`, contract
+      `features/608-byte-unit-ladder.md` D11) are rewritten to D1 of this doc.
+- [ ] **AC2. The format's own samples expect the IEC value.** The GC spec's
+      self-validation rows read `2433M->66M` as 2,481,979,392 bytes and
+      `512M->128M` as 402,653,184, and the run exits 0 (a self-validation
+      mismatch ends every run). *Assertable:* the same scenario's exit-status
+      assertion.
+- [ ] **AC3. Every prefix on the ladder applies.** A pause line whose figures
+      carry `K`, `G` or `T` is read at 1024, 1024³ or 1024⁴ bytes per unit, as
+      `M` is at 1024². *Assertable:* a new committed fixture of four pause lines,
+      one transition per letter, and one scenario asserting each line's bytes.
+      HotSpot writes only `M` on this line (§ 1), so these lines are
+      constructed, and the fixture's header says so.
+- [ ] **AC4. The letters are read at the notation the format declares, not the
+      run's output notation.** With `-bn si` the STATS `bytes` total over the G1
+      test fixture is still 73,175,924,736, rendered in SI (`73 GB`).
+      *Assertable:* one scenario in the same harness.
+- [ ] **AC5. The one ladder is the only table.** The GC transform resolves a
+      letter through `@byte_unit_ladder` at the entry's declared byte notation;
+      no table of letters exists beside the transforms. *Unassertable by a
+      harness* (AC4 is the behavioural half): verified at review of the diff.
+- [ ] **AC6. No runtime warnings.** No ` at <file> line <N>` on stderr in any
+      scenario above. *Assertable:* the harness's runtime-warning check.
+- [ ] **AC7. On a real G1 log the only change is the byte values.** Over the
+      largest G1 log in the corpus, before against after: line counts and pause
+      durations identical, and the bytes total rises by exactly 1.048576 (every
+      figure in `M`). *Measured once* and recorded in § 11 of this doc; the
+      corpus is not committed, so no harness reads it.
