@@ -4,7 +4,8 @@
 
 Planning on branch `609-gc-heap-suffix-convention` off `release/0.19.0`
 (base commit be93f58). Unblocked by #608 (one byte-unit ladder with SI and IEC
-notation), merged 2026-09-29. D1 and D2 locked 2026-09-29 (§ 2).
+notation), merged 2026-09-29. D1 and D2 locked, acceptance criteria agreed
+2026-09-29 (§ 2, § 3).
 
 Record of the finding that produced this issue:
 `features/342-redundant-logic-surfaces-audit-report.md`, finding F1.12 (byte
@@ -92,10 +93,14 @@ figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
       assertion.
 - [ ] **AC3. Every prefix on the ladder applies.** A pause line whose figures
       carry `K`, `G` or `T` is read at 1024, 1024³ or 1024⁴ bytes per unit, as
-      `M` is at 1024². *Assertable:* a new committed fixture of four pause lines,
-      one transition per letter, and one scenario asserting each line's bytes.
-      HotSpot writes only `M` on this line (§ 1), so these lines are
-      constructed, and the fixture's header says so.
+      `M` is at 1024². *Assertable:* a new committed fixture,
+      `tests/fixtures/gc-heap-byte-units.txt`, of four G1 pause lines, one
+      transition per letter, read by one new scenario of
+      `tests/validate-byte-units.sh` asserting each line's bytes. A separate
+      fixture, so no existing byte-units scenario moves. HotSpot writes only
+      `M` on this line (§ 1), so these lines are constructed, which the
+      harness's fixture comment says (a `.txt` fixture carries no header of
+      its own: every line is read as log input).
 - [ ] **AC4. The letters are read at the notation the format declares, not the
       run's output notation.** With `-bn si` the STATS `bytes` total over the G1
       test fixture is still 73,175,924,736, rendered in SI (`73 GB`).
