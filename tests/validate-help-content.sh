@@ -627,6 +627,160 @@ scenario_G_udm_function_list_parity() {
         contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)'
 }
 
+# Unit-list parity (issue #608, one byte-unit ladder, D8): a help row that
+# names a unit vocabulary carries the list the tool's own messages print,
+# derived from the ladder, never a literal; docs/usage.md carries the same.
+CONTRACT_UNIT_LISTS='features/608-byte-unit-ladder.md D4 (the records say what -udm accepts) and D8 (help rows interpolate the ladder list, with a help-content scenario asserting it)'
+UNIT_FIXTURE="$REPO_DIR/tests/fixtures/udm-byte-units.txt"
+
+# assert_row_carries FILE ROW_REGEX TEXT label L asserts A produced_by P contract C
+# The first line matching ROW_REGEX must contain TEXT verbatim; a row that
+# is not found is a failure, never a pass.
+assert_row_carries() {
+    local file="$1" row_regex="$2" text="$3"
+    shift 3
+    local label asserts produced_by contract row
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            label)       label="$2";       shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            *) echo "assert_row_carries: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    row=$(grep -E -- "$row_regex" "$file" | head -1 || true)
+    if [[ -n "$row" && -n "$text" && "$row" == *"$text"* ]]; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        label:       $label"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        echo "        expected:    $text"
+        echo "        row:         ${row:-(no row matches $row_regex in $file)}"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+# "ns, us" -> "`ns`, `us`": a list as docs/usage.md writes it.
+backticked_list() {
+    sed -E 's/([^, ]+)/`\1`/g' <<< "$1"
+}
+
+scenario_J_unit_list_parity() {
+    current_scenario="J-unit-list-parity"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-units.txt"
+    "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+
+    # The lists the tool's own rejections and warning print. Each run exits
+    # non-zero by design (a usage error) except the -udm one, which warns.
+    local err="$TMP_DIR/unit-errors"
+    mkdir -p "$err"
+    "$LTL" --disable-progress -ni -du xyz "$UNIT_FIXTURE" > "$err/du" 2>&1 || true
+    "$LTL" --disable-progress -ni -ru xyz "$UNIT_FIXTURE" > "$err/ru" 2>&1 || true
+    "$LTL" --disable-progress -ni -bs 5qq "$UNIT_FIXTURE" > "$err/bs" 2>&1 || true
+    "$LTL" --disable-progress -ni -bn xyz "$UNIT_FIXTURE" > "$err/bn" 2>&1 || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v:xyz:max' "$UNIT_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    local f
+    for f in du ru bs bn udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local du_list ru_list bs_list udm_time udm_bytes
+    du_list=$(sed -n "s/^Error: Invalid duration unit 'xyz'\. Valid values: //p" "$err/du")
+    ru_list=$(sed -n "s/^Error: Invalid rate unit 'xyz'\. Valid values: //p" "$err/ru")
+    bs_list=$(sed -n "s/^Error: Invalid bucket size '5qq'.* with a unit of //p" "$err/bs")
+    local bn_list
+    bn_list=$(sed -n "s/^Error: Invalid byte notation 'xyz'\. Valid values: //p" "$err/bn")
+    udm_time=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*(time units: \(.*\); byte units: .*)$/\1/p" "$err/udm")
+    udm_bytes=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*; byte units: \(.*\))$/\1/p" "$err/udm")
+
+    assert_equal "$( [[ -n "$du_list" && -n "$ru_list" && -n "$bs_list" && -n "$bn_list" && -n "$udm_time" && -n "$udm_bytes" ]] && echo found )" "found" \
+        label       'the -du, -ru, -bs and -bn rejections and the -udm unknown-unit warning each print their list' \
+        asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
+        produced_by 'adapt_to_command_line_options() and parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_equal "$ru_list|$bs_list|$udm_time" "$du_list|$du_list|$du_list" \
+        label       'the four messages print one time-unit list' \
+        asserts     'Every time-unit message derives its list from the one time-unit ladder' \
+        produced_by '$time_unit_list over @time_unit_ladder in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # --help rows
+    assert_row_carries "$help_out" '^ +-du, +--duration-unit' "($du_list)" \
+        label       'the --help -du row carries the -du rejection list' \
+        asserts     'The -du help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +-ru, +--rate-unit' "any of $ru_list; default m (the minute)" \
+        label       'the --help -ru row carries the -ru rejection list and names its default' \
+        asserts     'The -ru help row interpolates the time-unit list and names the minute as the default' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +-bs, +--bucket-size' "(units: $bs_list;" \
+        label       'the --help -bs row carries the -bs rejection list' \
+        asserts     'The -bs help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +unit +Time: ' "Time: $udm_time. " \
+        label       'the --help -udm unit row carries the warning time-unit list' \
+        asserts     'The -udm unit help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl (User-Defined Metrics subheading, unit row)' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # The byte list: the row gives it by notation; together the two are the
+    # list the warning prints.
+    local unit_row si_list iec_list
+    unit_row=$(grep -E '^ +unit +Time: ' "$help_out" | head -1 || true)
+    si_list=$(sed -n 's/.*Bytes: \(.*\) are powers of 1000, .*/\1/p' <<< "$unit_row")
+    iec_list=$(sed -n 's/.* are powers of 1000, \(.*\) powers of 1024;.*/\1/p' <<< "$unit_row")
+    assert_equal "$si_list, $iec_list" "$udm_bytes" \
+        label       'the --help -udm unit row byte lists are the warning byte list' \
+        asserts     'The -udm unit help row names the SI tokens as powers of 1000 and the IEC tokens as powers of 1024, from the byte-unit ladder' \
+        produced_by 'print_help() in ltl ($byte_unit_si_list, $byte_unit_iec_list over @byte_unit_ladder)' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # The -bn row names the values its usage error accepts and the two
+    # notations' byte lists.
+    assert_row_carries "$help_out" '^ +-bn, +--byte-notation' "SI units ($si_list; powers of 1000) or IEC units ($iec_list; powers of 1024): one of $bn_list." \
+        label       'the --help -bn row carries the -bn usage-error values and both byte lists' \
+        asserts     'The -bn help row interpolates the notation names and the ladder byte lists' \
+        produced_by 'print_help() in ltl ($byte_notation_list, $byte_unit_si_list, $byte_unit_iec_list)' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
+
+    # docs/usage.md rows: the same lists, each token in backticks
+    assert_row_carries "$USAGE_MD" '^\| `-du, --duration-unit' "($(backticked_list "$du_list"))" \
+        label       'the docs/usage.md -du row carries the -du rejection list' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-ru, --rate-unit' "any of $(backticked_list "$ru_list"); default \`m\` (the minute)" \
+        label       'the docs/usage.md -ru row carries the -ru rejection list and names its default' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-bs, --bucket-size' "(units: $(backticked_list "$bs_list");" \
+        label       'the docs/usage.md -bs row carries the -bs rejection list' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-bn, --byte-notation' "SI units ($(backticked_list "$si_list"); powers of 1000) or IEC units ($(backticked_list "$iec_list"); powers of 1024): one of $(backticked_list "$bn_list")." \
+        label       'the docs/usage.md -bn row carries the -bn values and both byte lists' \
+        asserts     'docs/usage.md agrees with the ladder lists the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
+    assert_row_carries "$USAGE_MD" '^\| `unit` \| \*\*Time:\*\*' "**Time:** $(backticked_list "$udm_time") — **Bytes:** $(backticked_list "$si_list") are powers of 1000, $(backticked_list "$iec_list") powers of 1024;" \
+        label       'the docs/usage.md -udm unit row carries the time and byte lists' \
+        asserts     'docs/usage.md agrees with the ladder lists the tool prints' \
+        produced_by 'docs/usage.md UDM spec table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+}
+
 scenario_register A-help-contains-visible-longs \
                   B-usage-contains-visible-longs \
                   C-help-short-forms-match-getopts \
@@ -635,6 +789,7 @@ scenario_register A-help-contains-visible-longs \
                   G-udm-function-list-parity \
                   H-mask-option-rows \
                   I-discard-option-rows \
+                  J-unit-list-parity \
                   F-description-quality-soft
 scenario_parse_args "$@"
 
@@ -648,6 +803,7 @@ while read -r _scenario; do
         G-udm-function-list-parity      ) scenario_G_udm_function_list_parity ;;
         H-mask-option-rows              ) scenario_H_mask_option_rows ;;
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
+        J-unit-list-parity              ) scenario_J_unit_list_parity ;;
         F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
     esac
     echo ""

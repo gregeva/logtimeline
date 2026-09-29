@@ -43,6 +43,9 @@ COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
 MS_IR_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-integration-runtime.txt"
 MS_CS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-connection-server.txt"
 MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
+# Byte units on the unit slot: three lines in one bucket whose query strings
+# carry v=1, 2 and 3, so max is 3 x the unit's byte count and sum 6 x it.
+BYTE_FIXTURE="$REPO_DIR/tests/fixtures/udm-byte-units.txt"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -56,7 +59,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$BYTE_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -80,6 +83,11 @@ CONTRACT='features/user-defined-metrics.md section Diagnostics and -V udm-specs 
 # refused, and a repeated identical argument is dropped with a notice.
 CONTRACT_482='features/user-defined-metrics.md section Colliding metric names become separate metrics (Issue #482) - decisions D1-D13; section content stability-contracted per tests/HARNESS-DESIGN.md'
 
+# Issue #608 (one byte-unit ladder): a byte spelling on the unit slot resolves
+# case-insensitively to one canonical ladder token, SI tokens powers of 1000
+# and IEC tokens powers of 1024, and the metric carries that token everywhere.
+CONTRACT_608='features/608-byte-unit-ladder.md D1 (case-insensitive lookup), D2 (SI and IEC meanings), D3 (no assumed base), D5 (one byte ladder), D14 (the canonical token everywhere)'
+
 # Run ltl with the given args against the fixture; stdout to the echoed file,
 # stderr beside it as <capture>.stderr.
 run_ltl() {
@@ -99,6 +107,14 @@ run_collision() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
     LAST_EXIT=$?
     set -e
+    echo "$outfile"
+}
+
+# Same shape against the byte-unit fixture.
+run_bytes() {
+    local outfile
+    outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
+    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs "$@" "$BYTE_FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -1036,6 +1052,173 @@ scenario_milliseconds_replacement() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Scenario: byte-unit-one-meaning — one byte spelling gives the same unit,
+# value and CSV column on every run (criterion 1 of the byte-unit ladder).
+# Twenty fresh processes: with the spelling folded by hash order, as it was,
+# the chance of twenty identical runs is about one in two thousand.
+# ---------------------------------------------------------------------------
+scenario_byte_unit_one_meaning() {
+    current_scenario="byte-unit-one-meaning"
+    echo "[$current_scenario]"
+    local work="$TMP_DIR/one-meaning" i out stats
+    mkdir -p "$work"
+    : > "$TMP_DIR/one-meaning.results"
+    for i in $(seq 1 20); do
+        mkdir -p "$work/$i"
+        out="$work/$i/run.out"
+        ( cd "$work/$i" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -o -V udm-specs \
+            -udm 'v:KB:max' "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        stats=$(ls "$work/$i"/*STATS*.csv 2>/dev/null | head -1)
+        printf '%s|%s|%s\n' \
+            "$(grep -o 'unit=[^ ]*' "$out" | head -1)" \
+            "$(grep -o 'max=[^ ]*' "$out" | head -1)" \
+            "$( [ -n "$stats" ] && head -1 "$stats" | tr ',' '\n' | grep '^v_.*_max$' )" >> "$TMP_DIR/one-meaning.results"
+    done
+    assert_command \
+        command     "[ \"\$(grep -c . '$TMP_DIR/one-meaning.results')\" = 20 ] && [ \"\$(sort -u '$TMP_DIR/one-meaning.results' | grep -c .)\" = 1 ]" \
+        label       'twenty runs of -udm v:KB:max report one unit, one value and one column name' \
+        asserts     'The same -udm command gives the same unit, value and CSV column on every run' \
+        produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+        contract    "$CONTRACT_608"
+    assert_command \
+        command     "[ \"\$(sort -u '$TMP_DIR/one-meaning.results')\" = 'unit=kB(bytes)|max=3000|v_kB_max' ]" \
+        label       'that one reading is kB, 3000 bytes, column v_kB_max' \
+        asserts     'KB is a spelling of the SI kilobyte: 1000 bytes, reported and named by its canonical token kB' \
+        produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -rf "$work"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: byte-unit-meanings — every ladder token, in any case, reads as its
+# SI or IEC byte count (criterion 2). Values 1, 2, 3: max is 3 x the count.
+# ---------------------------------------------------------------------------
+scenario_byte_unit_meanings() {
+    current_scenario="byte-unit-meanings"
+    echo "[$current_scenario]"
+    local row spelling token expected out
+    local rows=(
+        "B|B|3" "b|B|3"
+        "kB|kB|3000" "KB|kB|3000" "kb|kB|3000" "Kb|kB|3000"
+        "KiB|KiB|3072" "kib|KiB|3072" "KIB|KiB|3072"
+        "MB|MB|3000000" "mb|MB|3000000" "MiB|MiB|3145728" "mib|MiB|3145728"
+        "GB|GB|3000000000" "gb|GB|3000000000" "GiB|GiB|3221225472" "GIB|GiB|3221225472"
+        "TB|TB|3000000000000" "tb|TB|3000000000000" "TiB|TiB|3298534883328" "tib|TiB|3298534883328"
+    )
+    for row in "${rows[@]}"; do
+        IFS='|' read -r spelling token expected <<< "$row"
+        out=$(run_bytes -udm "v:$spelling:max")
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$token(bytes)" \
+            asserts     "The spelling $spelling resolves to the ladder token $token" \
+            produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_line "$out" \
+            pattern     "  produced: occurrences=3 buckets=1 sum=$((expected * 2)) min=$((expected / 3)) max=$expected" \
+            asserts     "The spelling $spelling multiplies each value by the byte count of $token" \
+            produced_by 'parse_udm_configs() (the byte converter closure) + derive_udm_production() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -f "$out" "$out.stderr"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: byte-unit-canonical-token — the metric carries the canonical token
+# in the section, the CSV column and the rendered heading, and a
+# non-canonical spelling prints no notice (criterion 3).
+# ---------------------------------------------------------------------------
+scenario_byte_unit_canonical_token() {
+    current_scenario="byte-unit-canonical-token"
+    echo "[$current_scenario]"
+    local spelling work out stats
+    for spelling in KB kb kB; do
+        work="$TMP_DIR/canonical-$spelling"
+        mkdir -p "$work"
+        out="$work/run.out"
+        ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -o -V udm-specs \
+            -udm "v:$spelling:max" "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     '  read_as: unit=kB(bytes)' \
+            asserts     "-udm v:$spelling reports the canonical token kB" \
+            produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+            contract    "$CONTRACT_608"
+        stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1)
+        assert_command \
+            command     "[ -n '$stats' ] && head -1 '$stats' | tr ',' '\\n' | grep -qx 'v_kB_max'" \
+            label       "-udm v:$spelling names the STATS column v_kB_max" \
+            asserts     'The CSV column carries the canonical token for any spelling of it' \
+            produced_by 'parse_udm_configs() + udm_csv_columns() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_command \
+            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            label       "-udm v:$spelling prints no notice or warning" \
+            asserts     'A non-canonical spelling of a byte unit is accepted silently' \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -rf "$work"
+    done
+
+    # Two metrics of one name told apart by unit: the heading carries each
+    # canonical token (a pinned width keeps the heading on one line).
+    work="$TMP_DIR/canonical-heading"
+    mkdir -p "$work"
+    out="$work/run.out"
+    ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms --terminal-width 200 \
+        -udm 'v:KB:max' -udm 'v:MiB:max' "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+    check_capture_warnings "$out"
+    assert_command \
+        command     "sed -E 's/\\x1b\\[[0-9;]*m//g' '$out' | grep -E ' v:kB +v:MiB '" \
+        label       'the rendered headings read v:kB and v:MiB' \
+        asserts     'The heading of a unit-disambiguated metric carries the canonical token, not the spelling typed' \
+        produced_by 'resolve_udm_metric_names() + add_dynamic_column() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -rf "$work"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: number-multiplier-and-unknown-unit — k and K stay number
+# multipliers (x1000), not bytes; an unknown spelling warns, naming both
+# ladders' vocabularies, and reads the metric as a raw number (criterion 4).
+# ---------------------------------------------------------------------------
+scenario_number_multiplier_and_unknown_unit() {
+    current_scenario="number-multiplier-and-unknown-unit"
+    echo "[$current_scenario]"
+    local spelling out
+    for spelling in k K; do
+        out=$(run_bytes -udm "v:$spelling:max")
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$spelling(number)" \
+            asserts     "$spelling on the unit slot is a number multiplier, not a byte unit: a metric assumes no base" \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_line "$out" \
+            pattern     '  produced: occurrences=3 buckets=1 sum=6000 min=1000 max=3000' \
+            asserts     "$spelling multiplies by 1000" \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -f "$out" "$out.stderr"
+    done
+
+    out=$(run_bytes -udm 'v:KBytes:max')
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
+        pattern     "Warning: Unknown unit 'KBytes' in -udm 'v:KBytes:max', treating as raw number (time units: ns, us, ms, s, m, h, d, w, month, year; byte units: B, kB, MB, GB, TB, KiB, MiB, GiB, TiB)" \
+        asserts     'An unknown unit warns and names the time and byte vocabularies the slot accepts' \
+        produced_by 'parse_udm_configs() in ltl (the lists are the ladders own)' \
+        contract    "$CONTRACT_608"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=3 buckets=1 sum=6 min=1 max=3' \
+        asserts     'A metric with an unknown unit is read as a raw number' \
+        produced_by 'parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -f "$out" "$out.stderr"
+}
+
 scenario_register milliseconds-replacement \
                   undelimited-regex \
                   whole-match \
@@ -1054,7 +1237,11 @@ scenario_register milliseconds-replacement \
                   delta-shorthand-canonical \
                   collision-csv-and-export \
                   collision-operands \
-                  collision-columnar
+                  collision-columnar \
+                  byte-unit-one-meaning \
+                  byte-unit-meanings \
+                  byte-unit-canonical-token \
+                  number-multiplier-and-unknown-unit
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -1078,6 +1265,10 @@ while read -r _scenario; do
         collision-csv-and-export   ) scenario_collision_csv_and_export ;;
         collision-operands         ) scenario_collision_operands ;;
         collision-columnar         ) scenario_collision_columnar ;;
+        byte-unit-one-meaning      ) scenario_byte_unit_one_meaning ;;
+        byte-unit-meanings         ) scenario_byte_unit_meanings ;;
+        byte-unit-canonical-token  ) scenario_byte_unit_canonical_token ;;
+        number-multiplier-and-unknown-unit) scenario_number_multiplier_and_unknown_unit ;;
     esac
 done < <(scenario_selected)
 

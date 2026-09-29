@@ -247,6 +247,11 @@ Recorded on the tree as implemented (2026-09-03).
   `$bucket_size_unit` and read by the seconds conversion in
   `adapt_to_terminal_settings()`, which no longer restates the minute and
   millisecond multipliers.
+- **Each step carries its decimals** (#608 one byte-unit ladder, D18): the
+  rounding precision relative to millisecond storage, derived from the step's
+  length when the table is built (`ns` 6, `us` 3, `ms` and every longer step
+  0). `format_duration()` and the default `-cp` duration and percentile
+  families read it; no sub keeps a decimals table of its own.
 - **A zero duration now renders `0ns`, not `0us`.** `format_time()` climbs
   the ladder from its lowest step, and a value that reaches no step renders in
   that step; the old scaler started at microseconds, so zero read `0us`. One

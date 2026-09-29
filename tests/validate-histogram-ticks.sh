@@ -230,8 +230,9 @@ inspect_output() {
                     ""    => 1,          "us" => 1,        "\x{00B5}s" => 1,
                     "ms"  => 1e3,        "s"  => 1e6,      "m" => 6e7,
                     "h"   => 3.6e9,      "d"  => 8.64e10,
-                    "B"   => 1,          "KiB" => 1024,    "MiB" => 1048576,
-                    "GiB" => 1073741824, "KB" => 1000,     "MB" => 1e6, "GB" => 1e9,
+                    # the byte-unit ladder tokens, SI and IEC: a run renders one notation
+                    "B"   => 1,          "kB"  => 1e3,     "MB"  => 1e6,     "GB"  => 1e9,     "TB"  => 1e12,
+                    "KiB" => 1024,       "MiB" => 1048576, "GiB" => 1073741824, "TiB" => 1099511627776,
                 );
                 my @vals;
                 my $unparsed = 0;

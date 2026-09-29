@@ -2138,6 +2138,119 @@ echo "Validating format-detection -V section (issue #228)"
 echo "  ltl:       $LTL"
 echo ""
 
+# ---------------------------------------------------------------------------
+# Scenario: byte-notation — the run-level byte_notation key names the run's
+# notation and what decided it (-bn, the formats that declare it, the SI
+# default, or a mix of declarations), and the per-file key names the
+# declaration of the file's format (features/608-byte-unit-ladder.md,
+# criteria 8 to 10, the -V format-detection half).
+# ---------------------------------------------------------------------------
+BYTE_NOTATION_CONTRACT='features/608-byte-unit-ladder.md D7, D12, D13, D17, D20 and section 5.5 (-V surface); features/log-format-registry.md -V format-detection section contract - additions are non-breaking'
+
+# run_byte_notation TAG ARGS... — the section for a run over several files
+# (run_format_detection takes one); same invocation shape.
+run_byte_notation() {
+    local tag="$1"; shift
+    local outfile="$TMP_DIR/byte-notation-$tag.out"
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection "$@" > "$outfile" 2>"$outfile.stderr"
+    local ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]] || ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo "FAIL: ltl exited $ec or printed no format-detection section for byte-notation/$tag" >&2
+        sed 's/^/    /' "$outfile.stderr" >&2
+        exit 1
+    fi
+    echo "$outfile"
+}
+
+scenario_byte_notation() {
+    current_scenario="byte-notation"
+    echo "[$current_scenario]"
+    local boundary="$REPO_DIR/tests/fixtures/byte-boundary.txt"
+    local gc="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+    local plain="$TMP_DIR/byte-notation-plain.txt"
+    printf 'first line of plain text\nsecond line of plain text\n' > "$plain"
+    local out
+
+    out=$(run_byte_notation default "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(default\)$' \
+        asserts     'A run whose formats declare no notation, with no -bn, renders SI by default' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: -$' \
+        asserts     'An access-log file declares no byte notation' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file, from the bound entry FR_BYTE_NOTATION)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation option -bn IEC "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(-bn\)$' \
+        asserts     '-bn in any case sets the notation and is named as its source' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation declared "$gc")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(format java_gc_g1\)$' \
+        asserts     'A run of GC logs alone takes the notation the GC format declares, and names the format' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: iec$' \
+        asserts     'The GC file reports its format declaration, IEC' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation declared-overridden -bn si "$gc")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(-bn\)$' \
+        asserts     '-bn overrides the format declaration' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: iec$' \
+        asserts     'The per-file key reports the declaration even when -bn decides the run' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation mixed "$gc" "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(mixed\)$' \
+        asserts     'Files whose formats declare different notations render SI, and the source says the declarations were mixed' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_command \
+        command     "[ \"\$(grep -E '^  byte_notation: ' '$out' | tr -d ' ' | tr '\n' ,)\" = 'byte_notation:iec,byte_notation:-,' ]" \
+        label       'the mixed run reports iec for the GC file and - for the access log, in input order' \
+        asserts     'Each file reports its own format declaration' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation mixed-option -bn iec "$gc" "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(-bn\)$' \
+        asserts     'With -bn given, the option decides a mixed run' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation unrecognised "$gc" "$plain")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(mixed\)$' \
+        asserts     'A file no format recognised declares nothing, so a GC log beside it does not decide the run' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+}
+
 scenario_register tomcat9-ms \
                   tomcat-common \
                   jboss-enhanced \
@@ -2185,7 +2298,8 @@ scenario_register tomcat9-ms \
                   wgm-filename-family \
                   wgm-client-localtime \
                   unregistered-levels-per-file \
-                  format-pin
+                  format-pin \
+                  byte-notation
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -2238,6 +2352,7 @@ while read -r _scenario; do
         wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
+        byte-notation                          ) scenario_byte_notation ;;
     esac
     echo ""
 done < <(scenario_selected)

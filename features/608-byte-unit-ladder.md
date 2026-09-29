@@ -3,8 +3,12 @@
 ## Status
 
 Specification agreed with the architect 2026-09-28 on branch
-`608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94); implementation
-not started.
+`608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
+in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
+(the byte ladder and the unit slot), drop 2 (help rows), drop 3 (notation and
+display) and drop 4 (decimals) delivered; the completion gate passed on
+4ec9785 (§ 11); the delivery records of § 9 and § 10 remain. § 11
+records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
 ladders): the `-udm` byte-unit bug found in stage 1, and the three stage 2
@@ -863,3 +867,223 @@ criterion 17 done.
 | Comment on #613 (one name vocabulary) | the help-content parity scenario it adds its rows to (§ 5.6) |
 | Comment on #525 (a single timestamp-precision option) | the `-bs` help row is interpolated here; its edit starts from that form |
 | Release notes | three bullets: "Fix `-udm` byte units resolving differently between runs: `KB` always means 1000 bytes, and the column carries the canonical unit.", "Show byte values in SI units by default, or in a log format's declared notation; `-bn iec` shows KiB and MiB. See docs/usage.md." and "Set CSV duration decimals to the source unit's resolution under `-du ns` and `-du us`; `-cp` gives more. See docs/usage.md." |
+
+---
+
+## 11. Implementation progress
+
+### Drop 1 — the byte ladder and the unit slot (2026-09-29)
+
+**Built.** `@byte_unit_ladder` at file scope beside `@time_unit_ladder`: five
+steps, each carrying an `si` and an `iec` part of `{ token, bytes }`; the views
+`%byte_unit_bytes` (token to byte count), `%byte_unit_by_spelling` (lower-cased
+token to token) and `$byte_unit_list` (every token, SI then IEC, `B` once); the
+resolver `byte_unit_canonical()`. `parse_udm_configs` resolves the unit slot as
+number multiplier (case-sensitive), then `time_unit_canonical()`, then
+`byte_unit_canonical()`; the byte converter multiplies by the step's byte count
+captured at parse. Its private byte list and fold, and the unread `formatter`
+field, are gone. `convert_bytes` is gone; the GC transform calls
+`gc_heap_size_bytes()`, which reads the suffix through
+`%gc_heap_suffix_token` (`K` `KiB`, `M` `MB`, `G` `GB`, `T` `TB`) and takes the
+multiplier from the ladder (D11). The unknown-unit warning appends
+`(time units: <time list>; byte units: <byte list>)`, both interpolated.
+
+**Correction to criterion 4.** `k` reports `unit=k(number)`, not
+`unit=K(number)`: a number multiplier is kept as typed, as before this issue.
+The harness asserts `unit=<spelling>(number)` and the ×1000 value.
+
+**Behaviour of the GC reader outside the JVM's form.** A heap size that is not
+digits followed by `K`, `M`, `G` or `T` reads as 0 bytes. The removed converter
+multiplied by an undefined table entry there, which gave 0 with a runtime
+warning; no line of the committed G1 fixture or of the G1 GC logs of the corpus
+takes that path.
+
+**Proof.** `tests/validate-udm-specs.sh` scenarios `byte-unit-one-meaning`
+(criterion 1), `byte-unit-meanings` (2), `byte-unit-canonical-token` (3) and
+`number-multiplier-and-unknown-unit` (4), 60 assertions, pass; run against the
+base commit's `ltl` they fail 11 assertions (the one-meaning pair, the `kB` and
+`B` spellings the hash-order fold flipped, the column name, the headings, the
+warning). The new `tests/validate-byte-units.sh` scenario
+`gc-heap-values-unchanged` (criterion 12) passes: exit 0 with the GC entry's
+self-validation rows, STATS `bytes` 69786000000 and `bytes_nice` `65 GiB`; with
+`M` sabotaged to `MiB` it fails on the self-validation row (got 2481979392,
+expected 2367000000). The G1 fixture's STATS and MESSAGES CSVs are
+byte-identical between the base and this drop. `validate-udm-specs.sh` (186)
+and `validate-format-registry.sh` (24) pass whole.
+
+**Per-line measurement (§ 8).** Three runs each, `parse/read_files` seconds,
+base 99fd43a against this drop, on one machine. Byte-unit metric: the
+web-server access log of the standard benchmark case with
+`-udm '_twsr:KB:max'` (643,366 values). G1: the largest G1 GC log of the corpus
+(781,118 lines).
+
+| Path | Before, median (range) | Drop 1, median (range) | Change |
+|---|---|---|---|
+| byte-unit `-udm` | 12.470 (12.225–12.606) | 11.371 (11.193–11.442) | −8.8 % |
+| G1 GC heap delta | 8.666 (8.573–8.681) | 7.633 (7.575–7.679) | −11.9 % |
+
+Both gains are the per-value hash build of the removed converter (§ 3 item 6);
+the `-V` output of each pair differs only in a timing row. The
+`single-day-access-log-standard` before benchmark is captured as `608-before`
+on 99fd43a; the after capture runs at the completion gate.
+
+### Drop 2 — help rows (2026-09-29)
+
+**Built.** Two views beside `$byte_unit_list`: `$byte_unit_si_list` (`B, kB,
+MB, GB, TB`) and `$byte_unit_iec_list` (`KiB, MiB, GiB, TiB`, the tokens only
+IEC has); `$byte_unit_list` is now the two joined, so the unknown-unit warning
+prints the same list as before. The `-du`, `-bs` and `-udm unit` help rows
+interpolate `$time_unit_list`; the `-ru` row reads "Set the time unit for rate
+normalization: any of <time list>; default m (the minute)"; the `-udm unit` row
+reads "Time: <time list>. Bytes: <SI list> are powers of 1000, <IEC list>
+powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000)."
+`KB` has left the list. The number clause says "powers of 1000" where § 5.6
+proposed "×1000 per step": plain text, and the same words as the byte clause.
+The `docs/usage.md` `-ru` and `-udm unit` rows carry the same text; the `-du`
+and `-bs` rows already carried the list.
+
+**Proof.** `tests/validate-help-content.sh` scenario `J-unit-list-parity`
+(criterion 13 for the `-du`, `-ru`, `-bs` and `-udm unit` rows), 11 assertions:
+it reads the list from the `-du`, `-ru` and `-bs` rejections and the `-udm`
+unknown-unit warning, requires the four time lists to agree, then requires each
+help row and each `docs/usage.md` row to carry its list (and the `-udm` row's
+two byte lists joined to equal the warning's). Against the base commit's `ltl`
+and `docs/usage.md` it fails 7; with the `docs/usage.md` `-du` row missing
+`year` it fails that one row. `validate-help-content.sh` (33) and
+`validate-help-layout.sh` (6) pass whole. The `-bn` row joins the scenario in
+drop 3; the structural check that `print_help` holds no literal list is
+criterion 5, in drop 4.
+
+### Drop 3 — notation and display (2026-09-29)
+
+**Built.** Globals `$byte_notation` (the run's notation, `si` until resolved),
+`$byte_notation_source`, `$byte_notation_option` and `$byte_notation_list`
+(`si, iec`, from `@byte_unit_notations`). `format_bytes($bytes, $decimals)`
+climbs `@byte_unit_ladder` in the run's notation, comparing the value against
+each step's byte count, and keeps no table; its unit argument, `'B'` at every
+caller, is gone. The `byte_notation` spec field is validated at build (`si` or
+`iec`) and carried as `FR_BYTE_NOTATION => 30`; the Java GC entry declares
+`iec`. The per-file detection record takes the bound entry's declaration at
+first bind. `resolve_byte_notation()` runs once, in `pipeline_parse` right after
+the read, and prints the mixed-declarations notice directly to stderr (the
+deferred notices have already been flushed at that point). `-bn,
+--byte-notation` is registered at the option spec, the short-to-long map, the
+`-V runtime-config` option map, its validation (lower-cased, else
+`Invalid byte notation '<value>'. Valid values: si, iec`) and its help and
+usage rows. `-V format-detection` gains run-level `byte_notation: <si|iec>
+(<-bn|format <names>|default|mixed>)` after `format_pin:` and per-file
+`byte_notation: <si|iec|->` after `event_ledger:`.
+
+**Wording as built.** The notice names each format by the name `--help
+formats` lists, and a file no format recognised as `no format recognised`:
+`Note: the log formats of this run declare different byte notations
+(java_gc_g1: IEC; access_common_duration: none); byte values are shown in SI
+units. Use -bn si or -bn iec to choose.` The `-bn` row reads "Show byte values
+in SI units (B, kB, MB, GB, TB; powers of 1000) or IEC units (KiB, MiB, GiB,
+TiB; powers of 1024): one of si, iec. Default: the log format's convention,
+else SI."
+
+**Regression captures: 58 of 74 re-blessed, not 43.** Every difference was
+classified before the re-bless by normalising byte values in the old and new
+captures and comparing what remained: each is a byte value in the new notation;
+a narrow timeline bytes cell cut at its column width (`16.4 KiB` shown as
+`16.4 K`, now `16.8 kB` shown as `16.8 k`; at the narrowest widths the unit is
+cut off entirely, `864.7` now `885.5`, the same bytes); or a histogram axis on
+which one more label fits because SI labels are a character shorter
+(`hg-bytes`: a `167.5 kB` label at the right end, the percentile row
+re-centred). The count of 43 in D15 missed the captures whose byte cells are
+cut short of their unit. No difference outside those three kinds.
+
+**Surfaces not in § 7 that the notation reaches.** The statistics-drift
+baselines under `tests/statistics-drift/baselines/` carry `bytes_nice` cells in
+IEC; the drift engine compares numeric columns only, so they need no change.
+The example text of the CSV `nice`-type check in
+`tests/csv-output/validate-csv-output.pl` now reads `1.5 MB`.
+
+**Proof.** `tests/validate-byte-units.sh` scenarios `value-climb` (criterion 6),
+`boundary-carry` (7), `notation-option` (8), `format-declaration` (9),
+`mixed-declarations` (10) and `one-notation-reach` (11): 25 new assertions, all
+passing; against drop 2's `ltl` 21 of them fail (the four that pass there are
+the GC run's IEC cells and the two runs that print no notice, which the old
+tree also gave). `validate-format-detection.sh` scenario `byte-notation` (the
+`-V` half of criteria 8 to 10), 11 assertions, fails on drop 2's `ltl` at its
+first `-bn` run. `validate-help-content.sh` `J-unit-list-parity` gains the
+`-bn` help and usage rows (criterion 13) and scenarios A to C cover the option
+surface (14). Whole-harness runs: `validate-byte-units.sh` 28,
+`validate-format-detection.sh` 283, `validate-help-content.sh` 35,
+`validate-histogram-ticks.sh` 21 (its label reader now knows every ladder token),
+`validate-regression.sh` 74 after the re-bless, `validate-screenshot-capture.sh`
+22, all passing. The `access` screenshot entry was regenerated: the duration
+image is byte-identical, the bytes image reads in SI.
+
+**Rendered check (criterion 17).** On the terminal at width 200 with `-hm bytes
+-hg bytes -mem`: a day of web-server access log with responses up to about
+100 MB, under the default (SI) and `-bn iec`; the largest G1 GC log of the
+corpus, under its declared IEC and `-bn si`; and the two together, which
+printed the notice and rendered SI. Each run's timeline bytes column, heatmap
+scale, histogram axis and percentile row, and memory rows carried one
+notation's tokens only, and no runtime warning printed.
+
+### Drop 4 — decimals (2026-09-29)
+
+**Built.** Each `@time_unit_ladder` step gains `decimals`, derived when the
+table is built from the step's divisor into milliseconds (`per_ms`): the digits
+after the leading one, so `ns` 6 and `us` 3; a step without a divisor (the
+millisecond and every longer step) 0. `%duration_display_decimals` and
+`%decimals_by_unit` are gone: `format_duration` rounds to
+`$time_unit_step{$unit}{decimals}`, and the default `-cp` mode's duration and
+percentile families take `$time_unit_step{$duration_unit_resolved}{decimals}`.
+`-V csv-output` under `-du ns`, `us`, `ms`, `m` reports `decimals_duration` 6,
+3, 0, 0 and `max_decimals_ceiling` 6, 5, 5, 5, the table of § 5.7; `-cp 9`
+reports 9. `format_bytes` starts its climb from the ladder's first step rather
+than a literal `'B'`. The `-cp` help and usage rows say "derived from the
+source's duration unit".
+
+**Proof.** `tests/validate-byte-units.sh` scenario `one-ladder-structure`
+(criterion 5), 11 checks read from the `ltl` source: one `@byte_unit_ladder`;
+no `convert_bytes` or private byte table; quoted byte tokens and `1024`
+multipliers only inside the ladder (the GC suffix map, which names ladder
+tokens, excepted); no table keyed by `ns`/`us` to a number; the unit slot,
+`format_bytes`, `gc_heap_size_bytes`, `format_duration` and the CSV decimals
+each read the ladder; `print_help` holds no literal unit list. All 11 fail on
+the base commit's `ltl`; the three decimals checks fail on drop 3's. Scenario
+`ladder-decimals` (criterion 15) reads `decimals_duration` for the four units
+and `-cp 9`; it fails on the base commit under `-du ns` (9) and `-du us` (6).
+`tests/csv-output/validate-csv-output.pl` gains the same rule as an invariant
+of every default-mode scenario (decimals and ceiling from the resolved unit's
+step); on the base commit's `-du us` output it fails `decimals_duration`,
+`decimals_percentile` (6, expected 3); the `precision-default-us`,
+`access-bytes-duration` and `precision-n4` scenarios pass.
+`validate-duration-display.sh` passes unchanged (21): the latency cells do not
+move. `validate-byte-units.sh` passes whole (44).
+
+**Not affected.** Every statistics-drift scenario runs with `-cp full`, which
+bypasses the default decimals, so the drift baselines do not move.
+
+### Completion gate (2026-09-29, on 4ec9785)
+
+`$version_number` restored to `0.19.0` in 4ec9785; the gate ran on that commit.
+
+**Harness suite.** `CI=1 validate-csv-output.sh` (25 scenarios, 30 pass), then
+`CI=1 validate-statistics.sh` (22 drift scenarios pass), then every other
+`tests/validate-*.sh`: all 44 exit 0, each summary showing its assertions ran,
+and no captured stderr carries a runtime warning.
+
+**Benchmark.** `single-day-access-log-standard`, `608-before` on 99fd43a and
+`608-after` on 4ec9785, one machine, one session: `parse/read_files` 9.1 s to
+8.9 s (−1.9 %), total 9.2 s to 9.0 s (−1.9 %); `rss_peak` +272 KB (+0.3 %). The
+one memory row above 1 %, `format_scan_subs` +32 KB (+2.8 %), is the
+resident-memory delta read around each scan-sub compile, which moves in 16 KB
+pages; three further runs of each tree on the standard log gave before
+1,163,264 to 1,228,800 bytes (median 1,212,416) and after 1,179,648 to
+1,245,184 (median 1,196,032), overlapping ranges with a lower median, so it is
+noise, not growth. The per-line measurements of drop 1 stand (byte-unit
+`-udm` −8.8 %, G1 GC −11.9 %). Both benchmark TSVs deleted after the
+comparison.
+
+**Rendered check.** Criterion 17 was done on drop 3's tree (§ Drop 3); drop 4
+changes no rendered surface (`validate-duration-display.sh` unchanged).
+
+This record is a `features/`-only commit after the gate: the scope test skips
+the suite for it.
+

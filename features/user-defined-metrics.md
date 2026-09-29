@@ -25,7 +25,7 @@ Multiple metrics can be specified with repeated `-udm` flags:
 | Field | Required | Description | Examples |
 |-------|----------|-------------|----------|
 | `name` | Yes | Metric identifier (used in column headers); also the default extraction key when no `key` or `/pattern/` is given | `rows`, `latency`, `tcp_errors` |
-| `unit` | No | Measurement unit for conversion/display; ignored (with a warning) for counting aggregations | `ms`, `s`, `m`, `min`, `h`, `us`, `ns`, `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`, `k`, `K`, `M`, `G`, `T` |
+| `unit` | No | Measurement unit for conversion/display; ignored (with a warning) for counting aggregations | `ms`, `s`, `m`, `min`, `h`, `us`, `ns`, `B`, `kB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`, `k`, `K`, `M`, `G`, `T` |
 | `function` | No | Transform and/or aggregation function | `delta`, `max`, `mean(delta)`, `distinct` |
 | `key` | No | Token key: default patterns are built from this token instead of the name, leaving the name a pure display label. Mutually exclusive with `/pattern/` (both → warn + skip) | `exception_variety::distinct:JavaException` |
 | `/pattern/` | No | Custom regex with capture group for value extraction | `/in (\d+\.\d+)/` |
@@ -33,8 +33,9 @@ Multiple metrics can be specified with repeated `-udm` flags:
 ### Unit Types
 
 - **Time units**: `ns`, `us`, `ms`, `s`, `m` (or `min`), `h` — converted to milliseconds internally, displayed via `format_time()`
-- **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). All byte units currently use base-1024 (see #63 — `kB` should use base-1000 per SI convention).
-- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), displayed via `format_number()`. Case-sensitive (`m` = minutes, `M` = mega).
+- **Byte units**: the tokens of the byte-unit ladder (`@byte_unit_ladder`), SI `B`, `kB`, `MB`, `GB`, `TB` (powers of 1000) and IEC `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024), converted to bytes internally, displayed via `format_bytes()`. Each token is its own only spelling, matched case-insensitively through `byte_unit_canonical()`: `kb`, `KB`, `Kb` and `kB` are the one SI kilobyte, 1000 bytes. The metric keeps the canonical token as its unit (`-V udm-specs` `unit=kB`, CSV column `v_kB_max`, heading `v:kB` when the unit tells two metrics apart). A metric assumes no base: the base comes from the unit given (`features/608-byte-unit-ladder.md` D1, D2, D3, D14).
+- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), displayed via `format_number()`. Case-sensitive and checked first (`m` = minutes, `M` = mega); `K` is a number ×1000, not a byte unit.
+- **Unknown unit**: warns, naming the time and byte vocabularies the slot accepts (the ladders' own lists), and reads the metric as a raw number.
 - **No unit**: displayed as raw numbers via `format_number()`
 
 ### Functions
@@ -154,12 +155,12 @@ Counting aggregations get a single token-capture pattern:
 | Delta state | Reset between files | Avoids spurious deltas at file boundaries |
 | Delta on raw vs converted | Delta on raw, then convert | Preserves counter semantics |
 | Column key prefix | `udm_` prefix internally | Avoids collision with existing keys; stripped for display headers |
-| CSV column naming | `name[_unit]_stat` lowercase | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined (e.g., `latency_ms_min`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
+| CSV column naming | `name[_unit]_stat` | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined, as its canonical ladder token in that token's case (e.g., `latency_ms_min`, `w_m_max` for `-udm w:minutes:max`, `resp_kB_max` for any spelling of `kB`, `resp_KiB_max`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
 | Unit auto-detection | Not implemented | Users declare units explicitly |
 | Non-access-log support | Set `$is_access_log = 1` when UDM values captured | Follows count metric precedent (line 1593); enables storage in time-bucket and per-message blocks |
 | Latency stats suppression | `$durations_observed` only set when a duration value is observed | Prevents empty or fabricated-zero P50/P95/P99/P999 columns when the source carries no durations (bytes/count alone do not activate latency surfaces; issue #345) |
 | Default aggregation | `sum` | Consistent with pre-aggregation behavior; `delta` without explicit aggregation means `sum(delta)` |
-| Case normalization | Normalize in `parse_udm_configs()` before lookup | Avoids changing `convert_bytes()` / `convert_duration_to_ms()` which are used elsewhere |
+| Case normalization | `parse_udm_configs()` resolves the unit through the ladders' resolvers (`time_unit_canonical()`, `byte_unit_canonical()`) after the case-sensitive number multipliers | One resolution surface per vocabulary: the slot keeps no unit table of its own |
 | Aggregation affects display only | Bar graph column driven by aggregation; CSV always outputs all five stats | CSV preserves full data regardless of display selection |
 
 ## Data Model
@@ -255,12 +256,12 @@ Added IEC binary units and case-insensitive unit matching.
 - [x] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition and `convert_bytes()`
 - [x] Case normalization: `kb` → `KB`, `kib` → `KiB`, `ms` → `ms`, etc.
 - [ ] Test each time unit: `-udm "metric:ns"`, `us`, `ms`, `s`, `m`, `min`, `h`
-- [ ] Test each byte unit: `-udm "metric:B"`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`
+- [x] Test each byte unit: every ladder token in several cases (`tests/validate-udm-specs.sh` scenario `byte-unit-meanings`, #608 one byte-unit ladder)
 - [ ] Test SI number units: `-udm "metric:k"`, `K`, `M`, `G`, `T` — verify base-1000 conversion
 - [ ] Case edge: `-udm "metric:m"` = minutes, `-udm "metric:M"` = mega
 - [ ] Alias: `-udm "metric:min"` = same as `m`
-- [ ] Verify unknown unit warning: `-udm "metric:xyz"`
-- [ ] GC log regression: verify `convert_bytes("512M")` still works (non-UDM path)
+- [x] Verify unknown unit warning: `-udm "metric:xyz"` (`tests/validate-udm-specs.sh` scenario `number-multiplier-and-unknown-unit`, #608 one byte-unit ladder)
+- [x] GC log regression: the GC heap sizes read through the byte ladder at unchanged values (`tests/validate-byte-units.sh` scenario `gc-heap-values-unchanged`, #608 one byte-unit ladder)
 
 ### CSV Columnar Input — DONE
 
@@ -443,7 +444,7 @@ udm: spec='<raw argument>' rejected=<reason-token>                        # pars
 |---|---|
 | `name` | the resolved metric name; on a duplicate-name collision it carries the fields that differ within the colliding group, the function field then the unit field, each as the spec carries it (the naming rule of #482 — two `-udm` specs with the same name and aggregation but different transforms collapse into one column) |
 | `spec` | the argument as given, unmodified |
-| `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source (`line`, or `csv:<column>` when the file is columnar and the metric is bound to a column) |
+| `read_as` | every field of the interpretation the extraction loop acts on: unit (the canonical ladder token the spelling resolves to; a number multiplier as typed) and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source (`line`, or `csv:<column>` when the file is columnar and the metric is bound to a column) |
 | `pattern[i]` | the source of each compiled pattern, in scan order — as compiled, not as typed |
 | `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice |
 | `hint` | the token of the D6 rule that fired; absent otherwise |
