@@ -4,7 +4,7 @@
 
 Planning on branch `609-gc-heap-suffix-convention` off `release/0.19.0`
 (base commit be93f58). Unblocked by #608 (one byte-unit ladder with SI and IEC
-notation), merged 2026-09-29. D1 locked 2026-09-29 (§ 2).
+notation), merged 2026-09-29. D1 and D2 locked 2026-09-29 (§ 2).
 
 Record of the finding that produced this issue:
 `features/342-redundant-logic-surfaces-audit-report.md`, finding F1.12 (byte
@@ -60,3 +60,17 @@ The HotSpot source is the authority read for these three points.
   The issue's done-condition becomes: the GC format's spec declares what its
   heap-size suffixes mean, and heap figures are read at that meaning. Locked by
   the architect 2026-09-29 ("Use what the HotSpot uses").
+- **D2: the suffix meanings are their own spec field.** The GC spec declares
+  `byte_suffixes => { K => 'KiB', M => 'MiB', G => 'GiB' }`, each letter mapped
+  to a byte-ladder token, validated against the ladder when the registry builds
+  (an unknown token fails the build). The GC transform reads the entry's
+  declaration; the private map `%gc_heap_suffix_token` beside the transforms
+  goes. `byte_notation => 'iec'` stays the format's output default only.
+  Locked by the architect 2026-09-29.
+
+  The architect's framing at the lock: a mebibyte is IEC notation, so this
+  format's bare letters are IEC notation, the same notation its output default
+  declares. The surface that would state that once, a format's units
+  declaration in the format data model (#386), does not exist yet; the
+  follow-up is recorded in `features/382-gc-log-g1-format-coverage.md` § Open
+  items.

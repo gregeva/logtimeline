@@ -199,3 +199,12 @@ producing a negative repeat count warning. The dead assignment is removed.
   bucket statistics, the graph legend, and the category totals. Whether these
   forms should carry a synthesized message to gain per-message statistics is
   undecided.
+- The format's byte notation is stated twice in its spec. HotSpot's `K`, `M`
+  and `G` are powers of 1024, so the bare letters on a pause line are IEC
+  notation: `byte_suffixes` maps each letter to its IEC ladder token
+  (`features/609-gc-heap-suffix-convention.md` D2), and `byte_notation => 'iec'`
+  is the output default (`features/608-byte-unit-ladder.md` D7). When a format's
+  units declaration exists in the format data model (#386, default analysis
+  precision per format, which absorbs the format's units), the GC format
+  declares IEC byte notation once there, covering both how its letters are read
+  and its output default. Recorded by the architect 2026-09-29 for follow-up.
