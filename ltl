@@ -716,7 +716,9 @@ my @byte_unit_ladder = (
 my @byte_unit_notations   = qw( si iec );
 my %byte_unit_bytes       = map { my $step = $_; map { $step->{$_}{token} => $step->{$_}{bytes} } @byte_unit_notations } @byte_unit_ladder;
 my %byte_unit_by_spelling = map { lc($_) => $_ } keys %byte_unit_bytes;
-my $byte_unit_list        = do { my %seen; join(', ', grep { !$seen{$_}++ } map { my $n = $_; map { $_->{$n}{token} } @byte_unit_ladder } @byte_unit_notations) };    # every token, SI then IEC, for usage messages
+my $byte_unit_si_list     = join(', ', map { $_->{si}{token} } @byte_unit_ladder);                                   # B, kB, MB, GB, TB
+my $byte_unit_iec_list    = join(', ', map { $_->{iec}{token} } grep { $_->{iec}{token} ne $_->{si}{token} } @byte_unit_ladder);   # KiB, MiB, GiB, TiB: the tokens only IEC has
+my $byte_unit_list        = "$byte_unit_si_list, $byte_unit_iec_list";    # every token, SI then IEC, for usage messages and help rows
 
 # Rate unit override (Issue #122): the seconds-per-unit multiplier and the
 # terminal and CSV suffixes are views of the ladder, keyed by canonical token.
@@ -9882,15 +9884,15 @@ sub print_help {
 
     # Time & Buckets
     $out .= help_subheading("Time & Buckets");
-    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: ns, us, ms, s, m, h, d, w, month, year; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with -s and -ms.");
+    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: $time_unit_list; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with -s and -ms.");
     $out .= help_opt("-s,   --seconds",               "Read a bare -bs number as seconds, and render timestamps with seconds precision");
     $out .= help_opt("-ms,  --milliseconds",          "Read a bare -bs number as milliseconds, and render timestamps with .fff precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
-    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name (ns, us, ms, s, m, h, d, w, month, year)");
+    $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name ($time_unit_list)");
     $out .= help_opt("-lf,  --log-format <name>",     "Read every file as this log format instead of detecting it - the escape hatch when detection picks the wrong variant; an unknown name lists the known formats");
-    $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: s (second), m (minute, default), h (hour), d (day), or any other unit of the same ladder (ns, us, ms, w, month, year)");
+    $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: any of $time_unit_list; default m (the minute)");
 
     # Filtering
     $out .= help_subheading("Filtering & Highlighting");
@@ -10008,7 +10010,7 @@ sub print_help {
     $out .= help_subheading("User-Defined Metrics");
     $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line; patterns match against the whole raw line, not only the message. Format: name[:unit[:function]][:key|:/regex/]. A metric that produces nothing is reported with how its spec was read.");
     $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
-    $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h, d, w, month, year. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
+    $out .= help_opt("      unit",                   "Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000). Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");

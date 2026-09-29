@@ -43,6 +43,7 @@ the errors and help rows read cannot disagree with the parser.
 **Consumption sites.**
 - `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` over `@time_unit_ladder`, read by `-du`, `-ru`, `-bs` and the `-udm` unit slot; the three errors interpolate `$time_unit_list`.
 - `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count), read by the `-udm` unit slot; the GC heap-size reader `gc_heap_size_bytes` takes its multipliers from `%byte_unit_bytes`; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
+- `print_help` :: `"Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; ..."`: the `-du`, `-ru`, `-bs` and `-udm unit` rows interpolate both ladders' lists, never a literal; `tests/validate-help-content.sh` scenario `J-unit-list-parity` compares each row, and its `docs/usage.md` row, with the list the matching error or warning prints.
 - `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` over `%verbose_section_registry`, which also serves `-V list` and the unknown-name warning.
 - `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`.
 - `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }` over `%mask_patterns` and `@mask_order`.

@@ -36,7 +36,7 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`) |
 | `-lf, --log-format <name>` | Read every file as this log format instead of detecting it — the escape hatch when detection picks the wrong variant; an unknown name lists the known formats |
-| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: `s` (second), `m` (minute, default), `h` (hour), `d` (day), or any other unit of the same ladder (`ns`, `us`, `ms`, `w`, `month`, `year`) |
+| `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: any of `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; default `m` (the minute) |
 
 ```bash
 # 5-minute buckets (default unit is minutes)
@@ -422,7 +422,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | Part | Description |
 |------|-------------|
 | `name` | Metric name and column label — also used as default pattern to match `name=value` or `name: value` when no `key` or `/regex/` is given |
-| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year` — **Bytes:** `B`, `kB`, `KB`, `MB`, `GB`, `TB`, `KiB`, `MiB`, `GiB`, `TiB` — **SI:** `k`/`K` (×1000), `M`, `G`, `T` — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
+| `unit` | **Time:** `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year` — **Bytes:** `B`, `kB`, `MB`, `GB`, `TB` are powers of 1000, `KiB`, `MiB`, `GiB`, `TiB` powers of 1024; case does not matter — **Numbers:** `k`/`K`, `M`, `G`, `T` (powers of 1000) — leave empty for raw numbers (`name::max`, not `name:max`). Ignored for counting aggregations |
 | `function` | **Aggregations:** `sum` (default), `min`, `max`, `mean` (alias `avg`) — **Counting:** `count`, `distinct` (alias `dcount`, `unique`), `ratio`, `rate`, `drate` — **Transforms:** `delta` (clamped ≥0), `idelta` (unclamped) — **Combined:** `sum(delta)`, `mean(delta)`, `max(idelta)`, etc. |
 | `key` | Token key — builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. `exception_variety::distinct:JavaException` extracts the `JavaException:` token but labels the column `exception_variety`. A fourth field without `/…/` is always a token key and is matched literally |
 | `/regex/` | Custom extraction pattern, recognised by its slashes at the end of the spec — `rows:/…/` and `rows:::/…/` read the same (overrides default name/key matching). A capture group narrows the value; without one the whole match is the value. e.g. for `[Duration 134ms]`: `/\[Duration (\d+)(?:ms\|Ms)\]/` |

@@ -5,7 +5,8 @@
 Specification agreed with the architect 2026-09-28 on branch
 `608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
 in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
-(the byte ladder and the unit slot) delivered; drops 2 to 4 not started. § 11
+(the byte ladder and the unit slot) and drop 2 (help rows) delivered; drops 3
+and 4 not started. § 11
 records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
@@ -924,4 +925,31 @@ Both gains are the per-value hash build of the removed converter (§ 3 item 6);
 the `-V` output of each pair differs only in a timing row. The
 `single-day-access-log-standard` before benchmark is captured as `608-before`
 on 99fd43a; the after capture runs at the completion gate.
+
+### Drop 2 — help rows (2026-09-29)
+
+**Built.** Two views beside `$byte_unit_list`: `$byte_unit_si_list` (`B, kB,
+MB, GB, TB`) and `$byte_unit_iec_list` (`KiB, MiB, GiB, TiB`, the tokens only
+IEC has); `$byte_unit_list` is now the two joined, so the unknown-unit warning
+prints the same list as before. The `-du`, `-bs` and `-udm unit` help rows
+interpolate `$time_unit_list`; the `-ru` row reads "Set the time unit for rate
+normalization: any of <time list>; default m (the minute)"; the `-udm unit` row
+reads "Time: <time list>. Bytes: <SI list> are powers of 1000, <IEC list>
+powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000)."
+`KB` has left the list. The number clause says "powers of 1000" where § 5.6
+proposed "×1000 per step": plain text, and the same words as the byte clause.
+The `docs/usage.md` `-ru` and `-udm unit` rows carry the same text; the `-du`
+and `-bs` rows already carried the list.
+
+**Proof.** `tests/validate-help-content.sh` scenario `J-unit-list-parity`
+(criterion 13 for the `-du`, `-ru`, `-bs` and `-udm unit` rows), 11 assertions:
+it reads the list from the `-du`, `-ru` and `-bs` rejections and the `-udm`
+unknown-unit warning, requires the four time lists to agree, then requires each
+help row and each `docs/usage.md` row to carry its list (and the `-udm` row's
+two byte lists joined to equal the warning's). Against the base commit's `ltl`
+and `docs/usage.md` it fails 7; with the `docs/usage.md` `-du` row missing
+`year` it fails that one row. `validate-help-content.sh` (33) and
+`validate-help-layout.sh` (6) pass whole. The `-bn` row joins the scenario in
+drop 3; the structural check that `print_help` holds no literal list is
+criterion 5, in drop 4.
 
