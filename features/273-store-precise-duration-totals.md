@@ -620,7 +620,7 @@ removed. `compare-results.sh summary` on the first pair alone reports
 `rss_peak` +0.3% (+320 KB) as a regression; over three runs the medians
 differ by 0.16% with overlapping ranges, and the only store the change
 touches got smaller, so it is run-to-run variation of the process peak, not
-an effect of the change. `log_stats` grows by 10 bytes over 24 buckets, the
+an effect of the change. `log_stats` grows by 10 bytes, the
 longer `duration_sum` key.
 
 ---
