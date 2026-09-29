@@ -185,3 +185,24 @@ differ are `bytes`, `bytes_max`, `bytes_mean` and `bytes_nice`. On every row the
 byte value after is exactly 1.048576 times the value before. No stderr on
 either run.
 
+
+### Completion gate (2026-09-29, on d3511a7)
+
+`$version_number` restored to `0.19.0` first (d3511a7).
+
+**Full harness suite:** all 44 `tests/validate-*.sh` exit 0, each summary
+showing assertions run (`validate-csv-output.sh` then `validate-statistics.sh`
+under `CI=1`, then the rest). `validate-statistics.sh`: 22 of 22 scenarios, with
+its one registered known failure reported as XFAIL. No ` at <file> line <N>`
+in any capture.
+
+**Benchmark** (`single-day-access-log-standard`, 761,698 lines, before on the
+unchanged tool of be93f58, after on d3511a7, one run each): total 9.1 s to
+8.9 s, `rss_peak` 99.7 MB to 99.2 MB, line counts identical. One memory row
+read as a regression: `format_scan_subs` +64 KB (+5.7%). That row is the RSS
+growth across scan-sub compilation, which moves in whole pages. Measured again
+three times each on the same log with `-V format-registry`,
+`scan_subs_rss_bytes`: before median 1,212,416 (range 1,196,032 to 1,228,800),
+after median 1,146,880 (range 1,146,880 to 1,261,568). The ranges overlap and
+the after median is lower: noise, not a cost of the change. Both benchmark TSVs
+deleted after the comparison.
