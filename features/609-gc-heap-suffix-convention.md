@@ -2,10 +2,9 @@
 
 ## Status
 
-Planning on branch `609-gc-heap-suffix-convention` off `release/0.19.0`
-(base commit be93f58). Unblocked by #608 (one byte-unit ladder with SI and IEC
-notation), merged 2026-09-29. D1 and D2 locked, acceptance criteria agreed
-2026-09-29 (§ 2, § 3).
+Delivered 2026-09-29: PR #636 merged into `release/0.19.0` as 4197efe (drop
+commit 5de8f32, completion gate on d3511a7, § 6). D1 and D2 locked and the
+acceptance criteria agreed with the architect 2026-09-29 (§ 2, § 3).
 
 Record of the finding that produced this issue:
 `features/342-redundant-logic-surfaces-audit-report.md`, finding F1.12 (byte
