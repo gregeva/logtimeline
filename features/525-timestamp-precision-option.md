@@ -6,9 +6,11 @@ Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`; implementation not
 started. Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
-follows the runtime options) and D14 (the bucket key's scale follows `-bs`
-alone). The architect's decisions are § 4 (D1 to D14). A design element that no
-decision settles is implementation detail and is marked **proposed**.
+follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
+and D15 (the drift check compares at the run's precision, or at the stored
+row's when that is coarser). The architect's decisions are § 4 (D1 to D15). A
+design element that no decision settles is implementation detail and is marked
+**proposed**.
 
 ---
 
@@ -79,7 +81,8 @@ organised, not reinterpreted.
   (D9).
 - The run index handles the new precisions: it writes its timestamps at the
   run's resolved precision, and its drift check is relevant to the options
-  given at runtime (D13).
+  given at runtime (D13), comparing at the run's precision, or at the stored
+  row's precision when that is coarser (D15).
 - The bucket key's scale follows `-bs` alone, never the timestamp precision
   (D14).
 
@@ -97,7 +100,7 @@ renumbered.
 | `features/503-yaml-aggregate-export.md` D6 (`generated_at` is a clock reading) | The export's `generated_at` is `gmtime()` in `%Y-%m-%dT%H:%M:%SZ`, a real clock reading. |
 | `features/503-yaml-aggregate-export.md` D7, D8 (export strings are the heading's) | The export's observation window and bucket timestamps are the strings the run summary heading and the STATS CSV print, verbatim, at the run's precision; under `-pr` the folded day and time strings. |
 | `features/179-index-read-back.md` § freshness | The on-disk file time is formatted as `YYYY-MM-DDTHH:MM:SS` UTC and compared by string equality with the index row's `file_mtime`. |
-| Audit report § Review progress, stage 10 (the run index) | The run index keeps a fixed precision outside `-cp` (the CSV precision option) for its means, because it is read back and compared for drift. Its timestamps are governed by D13 instead: written at the run's resolved precision and compared for drift at the precision the run's options give. |
+| Audit report § Review progress, stage 10 (the run index) | The run index keeps a fixed precision outside `-cp` (the CSV precision option) for its means, because it is read back and compared for drift. Its timestamps are governed by D13 and D15 instead: written at the run's resolved precision and compared for drift at that precision, or at the stored row's precision when that is coarser. |
 
 ---
 
@@ -362,9 +365,11 @@ Only the architect's decisions are numbered here.
   `ts_precision` column states which. The drift check compares the stored and
   live values at the precision the current run's options give, never as
   strings of unequal precision: a whole-second run over a file whose index row
-  was written at millisecond precision reports no drift. The capture gate
-  (§ 6.3) is therefore not held open for the index's sake: the index reads what
-  the run captured. Locked by the architect 2026-09-29.
+  was written at millisecond precision reports no drift. Where the stored row
+  is coarser than the run, the comparison is at the row's precision (D15: a
+  finer run over a coarser row reports no drift the row cannot express). The
+  capture gate (§ 6.3) is therefore not held open for the index's sake: the
+  index reads what the run captured. Locked by the architect 2026-09-29.
 
 - **D14. The bucket key's scale follows `-bs` alone.** Put to the architect: a
   width with a millisecond part keys buckets in integer milliseconds, a width
@@ -372,6 +377,17 @@ Only the architect's decisions are numbered here.
   The architect: "yes". The key never depends on the timestamp precision:
   `-tp` changes how a key is rendered, not how it is formed. Locked by the
   architect 2026-09-29.
+
+- **D15. The drift check compares at the run's precision, or at the stored row's
+  when that is coarser.** Put to the architect: the drift check compares at the
+  run's precision, or at the stored row's precision when that is coarser, so a
+  millisecond run over an index row written in whole seconds reports no false
+  drift. The architect: "yes". A stored timestamp carries no digit finer than
+  the precision it was written at, so a run at a finer precision over a row
+  written at a coarser one reports no drift that the coarser row cannot express;
+  a run at a coarser precision than the row compares at its own. Refines D13
+  (the index at the run's resolved precision, drift relevant to the runtime
+  options). Locked by the architect 2026-09-29.
 
 ---
 
@@ -551,22 +567,23 @@ in the read loop. Selection rows state it too, since a selection row can be
 written by a later run than its preserved file row (proposed; today they carry
 `-`).
 
-**The drift check at the run's precision (D13).** `detect_index_drift` compares
-the stored and live values at the precision the current run's options give:
-the run's written index precision, or the stored value's own precision where
-that is coarser, since a stored value carries no digit finer than it was
+**The drift check at the run's precision (D13, D15).** `detect_index_drift`
+compares the stored and live values at the run's resolved precision, the one
+it writes the index at (D13), or at the stored value's own precision where that
+is coarser (D15), since a stored value carries no digit finer than it was
 written (the source-resolution floor of § 6.4, applied to the index). The
 stored value's precision is read from the digits its string carries (none,
 three or six), so rows written before this change, whose timestamps always
-carry three digits, and selection rows are read alike (proposed). Both values
-are brought to integers at that precision with the formatter's rounding
-(§ 6.1) and compared as numbers; `_lt` and `_gt` no longer compare timestamps
-as strings (proposed mechanism). A whole-second run over a row written at
-millisecond precision therefore compares whole seconds and reports no drift; a
-millisecond run over a row written at whole seconds likewise; a millisecond run
-over a millisecond row reports a line one millisecond past the stored bound.
-The `-V index-read-back` drift block writes its `live=` value at the comparison
-precision; its keys do not change.
+carry three digits, and selection rows are read alike. Both values are brought
+to integers at that precision with the formatter's rounding (§ 6.1) and
+compared as numbers; `_lt` and `_gt` no longer compare timestamps as strings
+(proposed mechanism). A whole-second run over a row written at millisecond
+precision therefore compares whole seconds and reports no drift; a millisecond
+run over a row written at whole seconds compares at the row's whole seconds
+and likewise reports none (D15); a millisecond run over a millisecond row
+reports a line one millisecond past the stored bound. The `-V index-read-back`
+drift block writes its `live=` value at the comparison precision; its keys do
+not change.
 
 **The bucket key below the second (D14).** The millisecond key is untouched
 (D7). The key's scale (1, 1000 or 1 000 000) is a run constant chosen at
@@ -720,8 +737,9 @@ the notice.
   timestamps were written at, `s`, `ms` or `us` (`ns` from the final drop), on
   file and selection rows (correction 10, D13).
 - `features/179-index-read-back.md`: the note on `ts_precision` and the drift
-  conditions: timestamps compared at the precision the run's options give, not
-  as strings (D13).
+  conditions: timestamps compared at the precision the run's options give, or
+  at the stored row's precision when that is coarser, not as strings (D13,
+  D15).
 - `features/503-yaml-aggregate-export.md`: its implementation note naming the
   two timestamp subs points at the one formatter.
 - The audit report's stage 9 row moves to *done* when this issue closes.
@@ -819,11 +837,12 @@ directory, and is shaped to the assertion that reads it.
   same run without `-tp` writes `T10:00:01` and `s`; a `-tp us` run on the
   six-digit set writes six digits and `us`. *Assertable:* the index file,
   `validate-index-read-back.sh`.
-- [ ] **Drift at the runtime precision (D13).** A row written at millisecond
-  precision read back by a whole-second run, and a row written at whole seconds
-  read back by a `-tp ms` run, each report `drift_detected: no`; the precision
-  column states the resolved precision of the run that wrote the row. A row
-  whose `last_timestamp` is narrowed by one millisecond reports
+- [ ] **Drift at the runtime precision (D13, D15).** A row written at
+  millisecond precision read back by a whole-second run, and a row written at
+  whole seconds read back by a `-tp ms` run (compared at the row's coarser
+  precision, D15), each report `drift_detected: no`; the precision column
+  states the resolved precision of the run that wrote the row. A row whose
+  `last_timestamp` is narrowed by one millisecond reports
   `last_timestamp: ... drifted=yes` under `-tp ms` and `drift_detected: no`
   under a whole-second run. *Assertable:* `validate-index-read-back.sh`, rows
   orchestrated by its `edit_index_row` helper, read from `-V index-read-back`.
