@@ -47,30 +47,29 @@ The HotSpot source is the authority read for these three points.
 
 ## 2. Locked decisions
 
-- **D1: the suffixes mean what HotSpot's size constants mean.** `K` is 1,024
-  bytes, `M` is 1,048,576 bytes (`K*K`) and `G` is 1,073,741,824 bytes (`M*K`),
-  the constants in HotSpot's `globalDefinitions.hpp`: the ladder's `KiB`, `MiB`
-  and `GiB`. `T` is not a HotSpot size constant and is not declared. In practice
-  only `M` occurs on a pause line (§ 1), so every GC byte value rises 4.86
-  percent: the format's sample row `2433M->66M` reads 2,481,979,392 bytes
-  instead of 2,367,000,000, and the G1 test fixture's STATS `bytes` total
-  73,175,924,736 instead of 69,786,000,000 (`68 GiB` instead of `65 GiB`),
-  figures computed from the fixture's values and confirmed by a run at
-  implementation. A user-observable change, so it carries a release-notes line.
-  The issue's done-condition becomes: the GC format's spec declares what its
-  heap-size suffixes mean, and heap figures are read at that meaning. Locked by
-  the architect 2026-09-29 ("Use what the HotSpot uses").
-- **D2: the suffix meanings are their own spec field.** The GC spec declares
-  `byte_suffixes => { K => 'KiB', M => 'MiB', G => 'GiB' }`, each letter mapped
-  to a byte-ladder token, validated against the ladder when the registry builds
-  (an unknown token fails the build). The GC transform reads the entry's
-  declaration; the private map `%gc_heap_suffix_token` beside the transforms
-  goes. `byte_notation => 'iec'` stays the format's output default only.
-  Locked by the architect 2026-09-29.
-
-  The architect's framing at the lock: a mebibyte is IEC notation, so this
-  format's bare letters are IEC notation, the same notation its output default
-  declares. The surface that would state that once, a format's units
-  declaration in the format data model (#386), does not exist yet; the
-  follow-up is recorded in `features/382-gc-log-g1-format-coverage.md` § Open
-  items.
+- **D1: the letters are IEC notation, and the whole ladder applies.** HotSpot's
+  size constants are powers of 1024 (`K = 1024`, `M = K*K`, `G = M*K`,
+  `globalDefinitions.hpp`), so a bare letter on a GC heap figure is an IEC
+  prefix: `K` is KiB, `M` is MiB, `G` is GiB and `T` is TiB, as the byte ladder
+  holds them. In practice only `M` occurs on a pause line (§ 1), so every GC
+  byte value rises 4.86 percent: the format's sample row `2433M->66M` reads
+  2,481,979,392 bytes instead of 2,367,000,000, and the G1 test fixture's STATS
+  `bytes` total 73,175,924,736 instead of 69,786,000,000 (`68 GiB` instead of
+  `65 GiB`), figures computed from the fixture's values and confirmed by a run
+  at implementation. A user-observable change, so it carries a release-notes
+  line. The issue's done-condition becomes: the GC format's spec declares the
+  notation its heap figures are written in, and they are read at that notation.
+  Locked by the architect 2026-09-29 ("Use what the HotSpot uses"; "This is
+  clearly IEC format. You know what the prefixes mean and you know the
+  notation. Apply the full ladder.").
+- **D2: the existing pattern, no new surface.** The declaration is the spec's
+  existing `byte_notation` field, defined in `features/log-format-registry.md`
+  as the notation the format's own producer writes byte sizes in; the GC spec
+  already declares `iec`. A bare letter is read as the byte-ladder step it
+  prefixes, at the notation the entry declares. No new spec field and no table
+  of letters: the private map `%gc_heap_suffix_token` beside the transforms is
+  deleted, and the one ladder stays the only table of byte units
+  (`features/608-byte-unit-ladder.md` D5). Locked by the architect 2026-09-29
+  ("this is existing pattern spec which you should be following. The only
+  thing that you needed to know is what is the byte notation implied by the
+  single letter. Now that you know, the standard ladder applies.").
