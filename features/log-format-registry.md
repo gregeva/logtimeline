@@ -316,7 +316,7 @@ Three fundamental unit categories, plus raw:
 | Category | Internal baseline | Existing functions |
 |----------|------------------|--------------------|
 | Time/Duration | milliseconds | `convert_duration_to_ms()`, `format_time()` |
-| Bytes | bytes | `convert_bytes()`, `format_bytes()` |
+| Bytes | bytes | `@byte_unit_ladder` with `byte_unit_canonical()` and `%byte_unit_bytes`, `format_bytes()` |
 | Count | raw number | `format_number()` |
 | Percent | raw (0-100) | none |
 | Raw (unitless) | as-is | none |
@@ -333,7 +333,7 @@ Three fundamental unit categories, plus raw:
 
 The following functions already exist in `ltl` and provide a solid base:
 - `convert_duration_to_ms()` (line ~559) — handles s, ms, us, ns
-- `convert_bytes()` (line ~726) — handles B, kB, KB, MB, GB, TB; accepts "100 MB" string format
+- `@byte_unit_ladder` — the one byte-unit table: each step's SI token and byte count (`B`, `kB`, `MB`, `GB`, `TB`, powers of 1000) and IEC token and byte count (`KiB`, `MiB`, `GiB`, `TiB`, powers of 1024); `byte_unit_canonical()` resolves a spelling case-insensitively, `%byte_unit_bytes` gives a token's multiplier, and `gc_heap_size_bytes()` reads a GC log's `K`/`M`/`G`/`T` heap sizes through it (`features/608-byte-unit-ladder.md` D5, D11)
 - `format_time()` (line ~894) — display formatting with short/medium/long styles, handles us through days
 - `format_bytes()` (line ~757) — display formatting with automatic unit promotion
 - `format_number()` (line ~864) — SI-style abbreviations (k, Mil, Bil, Tril)

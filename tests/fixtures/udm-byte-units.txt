@@ -1,0 +1,3 @@
+192.0.2.10 - - [07/May/2025:00:00:01 +0000] "GET /store/catalog?elapsed=5&v=1 HTTP/1.1" 200 512 11
+192.0.2.10 - - [07/May/2025:00:00:02 +0000] "GET /store/catalog?elapsed=7&v=2 HTTP/1.1" 200 512 12
+192.0.2.10 - - [07/May/2025:00:00:03 +0000] "GET /store/catalog?elapsed=9&v=3 HTTP/1.1" 200 512 13

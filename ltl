@@ -697,6 +697,27 @@ my %time_unit_step        = map { $_->{token} => $_ } @time_unit_ladder;
 my %time_unit_by_spelling = map { my $step = $_; map { $_ => $step->{token} } @{ $step->{spellings} } } @time_unit_ladder;
 my $time_unit_list        = join(', ', map { $_->{token} } @time_unit_ladder);    # the canonical tokens, for usage messages
 
+# Byte-unit ladder: the one definition of every byte unit the tool reads,
+# converts or names. Each step carries its token and byte count in both
+# notations: SI (powers of 1000) and IEC (powers of 1024). Each token is its
+# own only spelling, matched case-insensitively, so kb, KB and kB are the
+# one SI kilobyte; the nine lower-cased tokens are distinct, which is what
+# makes the fold safe. Every byte surface (the metric unit slot, the GC
+# heap-size transform) reads this ladder through %byte_unit_bytes,
+# byte_unit_canonical() and the views derived below; no sub keeps a byte
+# table of its own.
+my @byte_unit_ladder = (
+    { si => { token => 'B',  bytes => 1 },        iec => { token => 'B',   bytes => 1 }        },
+    { si => { token => 'kB', bytes => 1000 },     iec => { token => 'KiB', bytes => 1024 }     },
+    { si => { token => 'MB', bytes => 1000**2 },  iec => { token => 'MiB', bytes => 1024**2 }  },
+    { si => { token => 'GB', bytes => 1000**3 },  iec => { token => 'GiB', bytes => 1024**3 }  },
+    { si => { token => 'TB', bytes => 1000**4 },  iec => { token => 'TiB', bytes => 1024**4 }  },
+);
+my @byte_unit_notations   = qw( si iec );
+my %byte_unit_bytes       = map { my $step = $_; map { $step->{$_}{token} => $step->{$_}{bytes} } @byte_unit_notations } @byte_unit_ladder;
+my %byte_unit_by_spelling = map { lc($_) => $_ } keys %byte_unit_bytes;
+my $byte_unit_list        = do { my %seen; join(', ', grep { !$seen{$_}++ } map { my $n = $_; map { $_->{$n}{token} } @byte_unit_ladder } @byte_unit_notations) };    # every token, SI then IEC, for usage messages
+
 # Rate unit override (Issue #122): the seconds-per-unit multiplier and the
 # terminal and CSV suffixes are views of the ladder, keyed by canonical token.
 my $rate_unit = 'm';                                     # Default: per-minute
@@ -2851,6 +2872,10 @@ my %wgm_msgtype_names = (
     S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY',
 );
 
+# Java GC heap-size suffixes → byte-ladder tokens. The JVM writes K, M, G
+# and T; each names the ladder step whose multiplier the heap delta uses.
+my %gc_heap_suffix_token = ( K => 'KiB', M => 'MB', G => 'GB', T => 'TB' );
+
 # Transform primitives: named post-capture mutation snippets spliced into
 # generated extraction closures. One resolution surface for this
 # vocabulary — new formats reference these names; a new mutation gets a
@@ -2875,7 +2900,7 @@ my %format_transform_code = (
     # +8 bytes per retained duration, +6 MB on a 762k-line access log).
     duration_from_unit_token => q{ $duration = '' . convert_duration_to_ms($duration, $duration_unit_token) if defined $duration && $duration_unit_token ne 'ms'; },
     strip_trailing_ws   => q{ $message =~ s/\s+$//g; },
-    gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = convert_bytes( $heap_from ) - convert_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; } },
+    gc_heap_delta       => q{ if( defined $heap_from && defined $heap_to ) { $bytes = gc_heap_size_bytes( $heap_from ) - gc_heap_size_bytes( $heap_to ); $bytes = $bytes < 0 ? 0 : $bytes; } },
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
@@ -10350,7 +10375,6 @@ sub counting_token_pattern {
 
 sub parse_udm_configs {
     my $number = qr/-?\d+(?:\.\d+)?/;
-    my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
     my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
@@ -10362,10 +10386,6 @@ sub parse_udm_configs {
         my ($spec, $reason, $at_index) = @_;
         push @udm_rejected_specs, { spec => $spec, reason => $reason, spec_index => $at_index // $spec_index };
     };
-
-    # Case normalization: map lowercase variants to canonical forms (time
-    # units go through the ladder's own spelling map)
-    my %byte_unit_canonical = map { lc($_) => $_ } keys %byte_units;
 
     foreach my $raw_arg (@udm_raw_args) {
         $spec_index++;
@@ -10457,45 +10477,33 @@ sub parse_udm_configs {
             $unit = undef;
         }
 
-        # Normalize unit case: SI units checked case-sensitively first
-        # (m = minutes, M = mega), then lowercase lookups for time/byte
-        if (defined $unit) {
-            if (exists $si_units{$unit}) {
-                # Case-sensitive match — $unit stays as-is
-            } else {
-                my $lc = lc($unit);
-                if (defined(my $canonical = time_unit_canonical($unit))) {
-                    $unit = $canonical;
-                } elsif (exists $byte_unit_canonical{$lc}) {
-                    $unit = $byte_unit_canonical{$lc};
-                }
-            }
+        # Resolve the unit to its canonical token: the number multipliers
+        # case-sensitively first (m = minutes, M = mega), then the time and
+        # byte ladders, each case-insensitively
+        if (defined $unit && !exists $si_units{$unit}) {
+            $unit = time_unit_canonical($unit) // byte_unit_canonical($unit) // $unit;
         }
 
-        # Determine unit type, converter, and formatter
-        my ($unit_type, $converter, $formatter);
+        # Determine unit type and converter
+        my ($unit_type, $converter);
         if (defined $unit && exists $time_unit_step{$unit}) {
             $unit_type = 'time';
             $converter = sub { convert_duration_to_ms($_[0], $unit) };
-            $formatter = \&format_time;
         } elsif (defined $unit && exists $si_units{$unit}) {
             $unit_type = 'number';
             my $multiplier = $si_units{$unit};
             $converter = sub { $_[0] * $multiplier };
-            $formatter = \&format_number;
-        } elsif (defined $unit && exists $byte_units{$unit}) {
+        } elsif (defined $unit && exists $byte_unit_bytes{$unit}) {
             $unit_type = 'bytes';
-            $converter = sub { convert_bytes($_[0], $unit) };
-            $formatter = \&format_bytes;
+            my $multiplier = $byte_unit_bytes{$unit};
+            $converter = sub { $_[0] * $multiplier };
         } elsif (defined $unit) {
-            print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number\n";
+            print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number (time units: $time_unit_list; byte units: $byte_unit_list)\n";
             $unit_type = 'raw';
             $converter = undef;
-            $formatter = \&format_number;
         } else {
             $unit_type = 'raw';
             $converter = undef;
-            $formatter = \&format_number;
         }
 
         # Build default patterns if no custom pattern provided; the token key
@@ -10532,7 +10540,6 @@ sub parse_udm_configs {
             patterns    => \@patterns,
             unit_type   => $unit_type,
             converter   => $converter,
-            formatter   => $formatter,
         };
     }
 
@@ -10643,6 +10650,14 @@ sub time_unit_canonical {
     my ($spelling) = @_;
     return undef unless defined $spelling;
     return $time_unit_by_spelling{ lc $spelling };
+}
+
+# The canonical byte-ladder token for a spelling, matched case-insensitively,
+# or undef when the spelling is not a byte unit.
+sub byte_unit_canonical {
+    my ($spelling) = @_;
+    return undef unless defined $spelling;
+    return $byte_unit_by_spelling{ lc $spelling };
 }
 
 # A value in any ladder unit, as milliseconds: one lookup and one multiply,
@@ -12683,39 +12698,11 @@ sub memory_debug_decomposition {
     }
 }
 
-sub convert_bytes {
-    my ($input_value, $input_unit) = @_;
-    my ($value, $unit);
-
-    if( defined( $input_unit ) ) {
-        $value = $input_value;
-        $unit = $input_unit;
-    } else {
-        ( $value, $unit ) = $input_value =~ /^(\d+)[ ]?(\w+)$/;
-    }
-
-    my %units = (
-        'B'  => 1,
-        'b'  => 1,
-        'kB' => 1000,
-        'k'  => 1000,
-        'MB' => 1000**2,
-        'M'  => 1000**2,
-        'GB' => 1000**3,
-        'G'  => 1000**3,
-        'TB' => 1000**4,
-        'T'  => 1000**4,
-        'KB'  => 1024,
-        'K'   => 1024,
-        'KiB' => 1024,
-        'MiB' => 1024**2,
-        'GiB' => 1024**3,
-        'TiB' => 1024**4,
-    );
-
-    my $bytes = $value * $units{$unit};
-
-    return $bytes;
+# A JVM heap size as written in a GC log (2433M), in bytes: the suffix names
+# a byte-ladder token and the ladder gives the multiplier.
+sub gc_heap_size_bytes {
+    my ($value, $suffix) = $_[0] =~ /^(\d+)\s?([KMGT])$/ or return 0;
+    return $value * $byte_unit_bytes{ $gc_heap_suffix_token{$suffix} };
 }
 
 sub format_bytes {

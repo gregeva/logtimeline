@@ -3,8 +3,10 @@
 ## Status
 
 Specification agreed with the architect 2026-09-28 on branch
-`608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94); implementation
-not started.
+`608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
+in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
+(the byte ladder and the unit slot) delivered; drops 2 to 4 not started. § 11
+records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
 ladders): the `-udm` byte-unit bug found in stage 1, and the three stage 2
@@ -863,3 +865,63 @@ criterion 17 done.
 | Comment on #613 (one name vocabulary) | the help-content parity scenario it adds its rows to (§ 5.6) |
 | Comment on #525 (a single timestamp-precision option) | the `-bs` help row is interpolated here; its edit starts from that form |
 | Release notes | three bullets: "Fix `-udm` byte units resolving differently between runs: `KB` always means 1000 bytes, and the column carries the canonical unit.", "Show byte values in SI units by default, or in a log format's declared notation; `-bn iec` shows KiB and MiB. See docs/usage.md." and "Set CSV duration decimals to the source unit's resolution under `-du ns` and `-du us`; `-cp` gives more. See docs/usage.md." |
+
+---
+
+## 11. Implementation progress
+
+### Drop 1 — the byte ladder and the unit slot (2026-09-29)
+
+**Built.** `@byte_unit_ladder` at file scope beside `@time_unit_ladder`: five
+steps, each carrying an `si` and an `iec` part of `{ token, bytes }`; the views
+`%byte_unit_bytes` (token to byte count), `%byte_unit_by_spelling` (lower-cased
+token to token) and `$byte_unit_list` (every token, SI then IEC, `B` once); the
+resolver `byte_unit_canonical()`. `parse_udm_configs` resolves the unit slot as
+number multiplier (case-sensitive), then `time_unit_canonical()`, then
+`byte_unit_canonical()`; the byte converter multiplies by the step's byte count
+captured at parse. Its private byte list and fold, and the unread `formatter`
+field, are gone. `convert_bytes` is gone; the GC transform calls
+`gc_heap_size_bytes()`, which reads the suffix through
+`%gc_heap_suffix_token` (`K` `KiB`, `M` `MB`, `G` `GB`, `T` `TB`) and takes the
+multiplier from the ladder (D11). The unknown-unit warning appends
+`(time units: <time list>; byte units: <byte list>)`, both interpolated.
+
+**Correction to criterion 4.** `k` reports `unit=k(number)`, not
+`unit=K(number)`: a number multiplier is kept as typed, as before this issue.
+The harness asserts `unit=<spelling>(number)` and the ×1000 value.
+
+**Behaviour of the GC reader outside the JVM's form.** A heap size that is not
+digits followed by `K`, `M`, `G` or `T` reads as 0 bytes. The removed converter
+multiplied by an undefined table entry there, which gave 0 with a runtime
+warning; no line of the committed G1 fixture or of the G1 GC logs of the corpus
+takes that path.
+
+**Proof.** `tests/validate-udm-specs.sh` scenarios `byte-unit-one-meaning`
+(criterion 1), `byte-unit-meanings` (2), `byte-unit-canonical-token` (3) and
+`number-multiplier-and-unknown-unit` (4), 60 assertions, pass; run against the
+base commit's `ltl` they fail 11 assertions (the one-meaning pair, the `kB` and
+`B` spellings the hash-order fold flipped, the column name, the headings, the
+warning). The new `tests/validate-byte-units.sh` scenario
+`gc-heap-values-unchanged` (criterion 12) passes: exit 0 with the GC entry's
+self-validation rows, STATS `bytes` 69786000000 and `bytes_nice` `65 GiB`; with
+`M` sabotaged to `MiB` it fails on the self-validation row (got 2481979392,
+expected 2367000000). The G1 fixture's STATS and MESSAGES CSVs are
+byte-identical between the base and this drop. `validate-udm-specs.sh` (186)
+and `validate-format-registry.sh` (24) pass whole.
+
+**Per-line measurement (§ 8).** Three runs each, `parse/read_files` seconds,
+base 99fd43a against this drop, on one machine. Byte-unit metric: the
+web-server access log of the standard benchmark case with
+`-udm '_twsr:KB:max'` (643,366 values). G1: the largest G1 GC log of the corpus
+(781,118 lines).
+
+| Path | Before, median (range) | Drop 1, median (range) | Change |
+|---|---|---|---|
+| byte-unit `-udm` | 12.470 (12.225–12.606) | 11.371 (11.193–11.442) | −8.8 % |
+| G1 GC heap delta | 8.666 (8.573–8.681) | 7.633 (7.575–7.679) | −11.9 % |
+
+Both gains are the per-value hash build of the removed converter (§ 3 item 6);
+the `-V` output of each pair differs only in a timing row. The
+`single-day-access-log-standard` before benchmark is captured as `608-before`
+on 99fd43a; the after capture runs at the completion gate.
+

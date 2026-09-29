@@ -42,6 +42,7 @@ the errors and help rows read cannot disagree with the parser.
 
 **Consumption sites.**
 - `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` over `@time_unit_ladder`, read by `-du`, `-ru`, `-bs` and the `-udm` unit slot; the three errors interpolate `$time_unit_list`.
+- `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count), read by the `-udm` unit slot; the GC heap-size reader `gc_heap_size_bytes` takes its multipliers from `%byte_unit_bytes`; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
 - `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` over `%verbose_section_registry`, which also serves `-V list` and the unknown-name warning.
 - `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`.
 - `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }` over `%mask_patterns` and `@mask_order`.
@@ -60,8 +61,7 @@ metric names; `tests/HARNESS-DESIGN.md` § Reserved section names for `-V`.
 unevenly: the metric-name resolver is called by two of six options that take
 metric names; the `-so` vocabulary is written three times with no table; the
 `-m`, `-pr` and `--help` errors list their vocabularies as literals beside the
-tables they validate against; the byte-unit slot folds two spellings onto one
-key and resolves nondeterministically. Refined by #613 (one vocabulary for metric, field, identifier and statistic names), #614 (operand checks and texts derive from the vocabulary) and #608 (the byte ladder).
+tables they validate against. Refined by #613 (one vocabulary for metric, field, identifier and statistic names) and #614 (operand checks and texts derive from the vocabulary).
 
 ---
 
@@ -412,7 +412,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #608, #613, #614, #615, #616, #617, #618, #619 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #613, #614, #615, #616, #617, #618, #619 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
 
 ---
 
