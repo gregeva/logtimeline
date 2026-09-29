@@ -37,6 +37,7 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`) |
 | `-lf, --log-format <name>` | Read every file as this log format instead of detecting it — the escape hatch when detection picks the wrong variant; an unknown name lists the known formats |
 | `-ru, --rate-unit <unit>` | Set the time unit for rate normalization: any of `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; default `m` (the minute) |
+| `-bn, --byte-notation <name>` | Show byte values in SI units (`B`, `kB`, `MB`, `GB`, `TB`; powers of 1000) or IEC units (`KiB`, `MiB`, `GiB`, `TiB`; powers of 1024): one of `si`, `iec`. Default: the log format's convention, else SI. |
 
 ```bash
 # 5-minute buckets (default unit is minutes)

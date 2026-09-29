@@ -154,6 +154,7 @@ Each log format definition must include:
 - **Timestamp format**: How to parse the timestamp
 - **Duration field**: Which field contains duration (if any)
 - **Duration unit**: The unit for duration values (ns, us, ms, s) - this is format-specific knowledge
+- **Byte notation** (`byte_notation`, optional): `si` or `iec`, the notation the format's own producer writes byte sizes in; anything else fails the build. Carried onto the entry as `FR_BYTE_NOTATION` and read once per run, after the read, to choose the run's byte notation when `-bn` is not given (every file's format declaring the same notation decides; otherwise SI, with a notice when the declarations differ). The Java GC entry declares `iec`; no other entry declares one (`features/608-byte-unit-ladder.md` D7, D12, D13, D20)
 - **Event ledger flag** and **success/failure classification**: whether the format has maximal coverage of the operations it describes, and how its lines are recognised as successes or failures — specified in `features/453-success-failure-classification-event-ledger.md` (#453); this replaces the former access-log flag
 - **Declared levels** (optional): the category names the format writes, when they are not the usual severity names — the G1 pause kinds, the HTTP status families the access family folds a status code into, the Workgroup Manager names its letter map produces, a producer's own severity names beside the standard ones. An entry may declare them or not; nothing is inferred from an entry that declares none, and the static vocabulary stays the base a run works from. A declared level joins the run's category vocabulary at the moment its entry binds a file, not at build, so a run pays for the vocabularies of the formats its files use rather than for every format defined. Specified in `features/476-per-format-log-level-declarations.md` (#476)
 - **Format name/description**: Human-readable identifier
@@ -342,7 +343,7 @@ The following functions already exist in `ltl` and provide a solid base:
 ##### TODOs for Issue #22
 
 - [ ] Audit existing conversion functions for gaps and edge cases
-- [ ] Known issue: `format_bytes()` uses string length comparison instead of numeric thresholds for unit promotion (line ~779)
+- [x] `format_bytes()` climbs by comparing the value against each ladder step's byte count, in the run's notation (`features/608-byte-unit-ladder.md` D6, D16)
 - [ ] Determine if percent formatting function is needed
 - [ ] Ensure conversion functions handle edge cases (negative values, zero, very large values)
 - [ ] Verify that all conversion functions can be called uniformly (consistent interface for any unit type)
@@ -902,9 +903,12 @@ Per-file keys:
   - `flips: N` — occupant changes after the first decision (N5).
   - `probes: sample_out_of_range=N sample_monotonic_violations=N out_of_range=N monotonic_violations=N filename_date=match|mismatch|-` — the sample's counts under the selected member's layout, the steady-loop counts for the file (distinct timestamps, selected layout), and the sample's filename-date cross-check under that layout.
 
+Per-file key (after `event_ledger:`): `byte_notation: si|iec|-` — the byte notation the file's format declares, `-` when it declares none or no format recognised the file (#608 one byte-unit ladder).
+
 Run-level keys (parent section, after `format_pin:`):
 
 - `format_pin: -|<name>` — the `-lf` value (emitted after `duration_unit_override:`).
+- `byte_notation: si|iec (<source>)` — the run's byte notation (emitted after `format_pin:`) and what decided it: `-bn` (the option, command line or `LTL_CONFIG`), `format <name>[,<name>…]` (every file's format declares that notation; the names are the format names `--help formats` lists), `default` (no file's format declares one), or `mixed` (the declarations differ, a file no format recognised counting as declaring none; SI, with the notice) (`features/608-byte-unit-ladder.md` § 5.5, #608 one byte-unit ladder).
 - `legend: 1=<name>,2=<name>|-` — the console legend, numbered in first-detection order across the run (I8).
 
 Sub-section `format-detection / scan` additions:

@@ -70,7 +70,7 @@ tables they validate against. Refined by #613 (one vocabulary for metric, field,
 
 **Definition.** Per-format behaviour is data: `format_registry_specs()` declares
 each format's pattern, field map, transforms, time contract, duration unit,
-guards, classification rules and sample lines. `build_format_registry()`
+byte notation (the format's declared unit convention for bytes), guards, classification rules and sample lines. `build_format_registry()`
 resolves the specs into live entries with per-entry closures; one scan sub per
 most-recently-used order is generated from source strings and cached by order
 signature; every generated sub is validated against every entry's sample lines

@@ -472,7 +472,7 @@ sub check_type_and_decimals {
                 asserts => "column '$col_name' must be human-readable (string + unit), not a bare number",
                 produced_by => producer($opt{file_kind}),
                 contract => 'Issue #223 § Data-type correctness',
-                expected => 'string with unit (e.g., "1.5 MiB", "230 ms")',
+                expected => 'string with unit (e.g., "1.5 MB", "230 ms")',
                 actual => $val,
                 rule => "type=nice",
             });

@@ -686,19 +686,22 @@ scenario_J_unit_list_parity() {
     "$LTL" --disable-progress -ni -du xyz "$UNIT_FIXTURE" > "$err/du" 2>&1 || true
     "$LTL" --disable-progress -ni -ru xyz "$UNIT_FIXTURE" > "$err/ru" 2>&1 || true
     "$LTL" --disable-progress -ni -bs 5qq "$UNIT_FIXTURE" > "$err/bs" 2>&1 || true
+    "$LTL" --disable-progress -ni -bn xyz "$UNIT_FIXTURE" > "$err/bn" 2>&1 || true
     ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v:xyz:max' "$UNIT_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
     local f
-    for f in du ru bs udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+    for f in du ru bs bn udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
 
     local du_list ru_list bs_list udm_time udm_bytes
     du_list=$(sed -n "s/^Error: Invalid duration unit 'xyz'\. Valid values: //p" "$err/du")
     ru_list=$(sed -n "s/^Error: Invalid rate unit 'xyz'\. Valid values: //p" "$err/ru")
     bs_list=$(sed -n "s/^Error: Invalid bucket size '5qq'.* with a unit of //p" "$err/bs")
+    local bn_list
+    bn_list=$(sed -n "s/^Error: Invalid byte notation 'xyz'\. Valid values: //p" "$err/bn")
     udm_time=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*(time units: \(.*\); byte units: .*)$/\1/p" "$err/udm")
     udm_bytes=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*; byte units: \(.*\))$/\1/p" "$err/udm")
 
-    assert_equal "$( [[ -n "$du_list" && -n "$ru_list" && -n "$bs_list" && -n "$udm_time" && -n "$udm_bytes" ]] && echo found )" "found" \
-        label       'the -du, -ru and -bs rejections and the -udm unknown-unit warning each print their unit list' \
+    assert_equal "$( [[ -n "$du_list" && -n "$ru_list" && -n "$bs_list" && -n "$bn_list" && -n "$udm_time" && -n "$udm_bytes" ]] && echo found )" "found" \
+        label       'the -du, -ru, -bs and -bn rejections and the -udm unknown-unit warning each print their list' \
         asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
         produced_by 'adapt_to_command_line_options() and parse_udm_configs() in ltl' \
         contract    "$CONTRACT_UNIT_LISTS"
@@ -742,6 +745,14 @@ scenario_J_unit_list_parity() {
         produced_by 'print_help() in ltl ($byte_unit_si_list, $byte_unit_iec_list over @byte_unit_ladder)' \
         contract    "$CONTRACT_UNIT_LISTS"
 
+    # The -bn row names the values its usage error accepts and the two
+    # notations' byte lists.
+    assert_row_carries "$help_out" '^ +-bn, +--byte-notation' "SI units ($si_list; powers of 1000) or IEC units ($iec_list; powers of 1024): one of $bn_list." \
+        label       'the --help -bn row carries the -bn usage-error values and both byte lists' \
+        asserts     'The -bn help row interpolates the notation names and the ladder byte lists' \
+        produced_by 'print_help() in ltl ($byte_notation_list, $byte_unit_si_list, $byte_unit_iec_list)' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
+
     # docs/usage.md rows: the same lists, each token in backticks
     assert_row_carries "$USAGE_MD" '^\| `-du, --duration-unit' "($(backticked_list "$du_list"))" \
         label       'the docs/usage.md -du row carries the -du rejection list' \
@@ -758,6 +769,11 @@ scenario_J_unit_list_parity() {
         asserts     'docs/usage.md agrees with the ladder list the tool prints' \
         produced_by 'docs/usage.md option table' \
         contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-bn, --byte-notation' "SI units ($(backticked_list "$si_list"); powers of 1000) or IEC units ($(backticked_list "$iec_list"); powers of 1024): one of $(backticked_list "$bn_list")." \
+        label       'the docs/usage.md -bn row carries the -bn values and both byte lists' \
+        asserts     'docs/usage.md agrees with the ladder lists the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
     assert_row_carries "$USAGE_MD" '^\| `unit` \| \*\*Time:\*\*' "**Time:** $(backticked_list "$udm_time") — **Bytes:** $(backticked_list "$si_list") are powers of 1000, $(backticked_list "$iec_list") powers of 1024;" \
         label       'the docs/usage.md -udm unit row carries the time and byte lists' \
         asserts     'docs/usage.md agrees with the ladder lists the tool prints' \

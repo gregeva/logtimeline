@@ -547,11 +547,7 @@ Based on prototype evaluation and user feedback, the following decisions have be
 
 **Root Cause**: `format_bytes()` uses string length comparison to determine unit. Float values like `801.000765678898` have string length 16, which exceeds the TB threshold (13 characters).
 
-**Fix**: Use `int($bytes)` for the length comparison:
-```perl
-my $bytes_int = int($bytes);
-if( length( $bytes_int ) >= length( $units{$u} ) ) {
-```
+**Fix**: `format_bytes()` compares the value itself against each byte-ladder step's byte count, in the run's notation, so a float's string length plays no part (`features/608-byte-unit-ladder.md` D6).
 
 #### 3. Heatmap Width Not Affecting Layout
 **Symptom**: Using `-hmw 80` didn't adjust other graph columns.

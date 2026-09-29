@@ -5,8 +5,8 @@
 Specification agreed with the architect 2026-09-28 on branch
 `608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
 in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1
-(the byte ladder and the unit slot) and drop 2 (help rows) delivered; drops 3
-and 4 not started. § 11
+(the byte ladder and the unit slot), drop 2 (help rows) and drop 3 (notation
+and display) delivered; drop 4 not started. § 11
 records what each drop built and measured.
 
 This issue carries stage 2 of the review of the redundant-logic audit (unit
@@ -952,4 +952,74 @@ and `docs/usage.md` it fails 7; with the `docs/usage.md` `-du` row missing
 `validate-help-layout.sh` (6) pass whole. The `-bn` row joins the scenario in
 drop 3; the structural check that `print_help` holds no literal list is
 criterion 5, in drop 4.
+
+### Drop 3 — notation and display (2026-09-29)
+
+**Built.** Globals `$byte_notation` (the run's notation, `si` until resolved),
+`$byte_notation_source`, `$byte_notation_option` and `$byte_notation_list`
+(`si, iec`, from `@byte_unit_notations`). `format_bytes($bytes, $decimals)`
+climbs `@byte_unit_ladder` in the run's notation, comparing the value against
+each step's byte count, and keeps no table; its unit argument, `'B'` at every
+caller, is gone. The `byte_notation` spec field is validated at build (`si` or
+`iec`) and carried as `FR_BYTE_NOTATION => 30`; the Java GC entry declares
+`iec`. The per-file detection record takes the bound entry's declaration at
+first bind. `resolve_byte_notation()` runs once, in `pipeline_parse` right after
+the read, and prints the mixed-declarations notice directly to stderr (the
+deferred notices have already been flushed at that point). `-bn,
+--byte-notation` is registered at the option spec, the short-to-long map, the
+`-V runtime-config` option map, its validation (lower-cased, else
+`Invalid byte notation '<value>'. Valid values: si, iec`) and its help and
+usage rows. `-V format-detection` gains run-level `byte_notation: <si|iec>
+(<-bn|format <names>|default|mixed>)` after `format_pin:` and per-file
+`byte_notation: <si|iec|->` after `event_ledger:`.
+
+**Wording as built.** The notice names each format by the name `--help
+formats` lists, and a file no format recognised as `no format recognised`:
+`Note: the log formats of this run declare different byte notations
+(java_gc_g1: IEC; access_common_duration: none); byte values are shown in SI
+units. Use -bn si or -bn iec to choose.` The `-bn` row reads "Show byte values
+in SI units (B, kB, MB, GB, TB; powers of 1000) or IEC units (KiB, MiB, GiB,
+TiB; powers of 1024): one of si, iec. Default: the log format's convention,
+else SI."
+
+**Regression captures: 58 of 74 re-blessed, not 43.** Every difference was
+classified before the re-bless by normalising byte values in the old and new
+captures and comparing what remained: each is a byte value in the new notation;
+a narrow timeline bytes cell cut at its column width (`16.4 KiB` shown as
+`16.4 K`, now `16.8 kB` shown as `16.8 k`; at the narrowest widths the unit is
+cut off entirely, `864.7` now `885.5`, the same bytes); or a histogram axis on
+which one more label fits because SI labels are a character shorter
+(`hg-bytes`: a `167.5 kB` label at the right end, the percentile row
+re-centred). The count of 43 in D15 missed the captures whose byte cells are
+cut short of their unit. No difference outside those three kinds.
+
+**Surfaces not in § 7 that the notation reaches.** The statistics-drift
+baselines under `tests/statistics-drift/baselines/` carry `bytes_nice` cells in
+IEC; the drift engine compares numeric columns only, so they need no change.
+The example text of the CSV `nice`-type check in
+`tests/csv-output/validate-csv-output.pl` now reads `1.5 MB`.
+
+**Proof.** `tests/validate-byte-units.sh` scenarios `value-climb` (criterion 6),
+`boundary-carry` (7), `notation-option` (8), `format-declaration` (9),
+`mixed-declarations` (10) and `one-notation-reach` (11): 25 new assertions, all
+passing; against drop 2's `ltl` 21 of them fail (the four that pass there are
+the GC run's IEC cells and the two runs that print no notice, which the old
+tree also gave). `validate-format-detection.sh` scenario `byte-notation` (the
+`-V` half of criteria 8 to 10), 11 assertions, fails on drop 2's `ltl` at its
+first `-bn` run. `validate-help-content.sh` `J-unit-list-parity` gains the
+`-bn` help and usage rows (criterion 13) and scenarios A to C cover the option
+surface (14). Whole-harness runs: `validate-byte-units.sh` 28,
+`validate-format-detection.sh` 283, `validate-help-content.sh` 35,
+`validate-histogram-ticks.sh` 21 (its label reader now knows every ladder token),
+`validate-regression.sh` 74 after the re-bless, `validate-screenshot-capture.sh`
+22, all passing. The `access` screenshot entry was regenerated: the duration
+image is byte-identical, the bytes image reads in SI.
+
+**Rendered check (criterion 17).** On the terminal at width 200 with `-hm bytes
+-hg bytes -mem`: a day of web-server access log with responses up to about
+100 MB, under the default (SI) and `-bn iec`; the largest G1 GC log of the
+corpus, under its declared IEC and `-bn si`; and the two together, which
+printed the notice and rendered SI. Each run's timeline bytes column, heatmap
+scale, histogram axis and percentile row, and memory rows carried one
+notation's tokens only, and no runtime warning printed.
 

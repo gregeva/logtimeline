@@ -151,7 +151,7 @@ my %verbose_section_registry = (
         description => 'Line accounting for the run as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, and highlighted (Issue #503).',
     },
     'format-detection' => {
-        description => 'Per-file detected log-format slug, duration unit assumed vs applied, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
+        description => 'Per-file detected log-format slug, duration unit assumed vs applied, the byte notation each format declares and the one the run uses, matched/unmatched line counts, plus registry scan telemetry: order, promotions, per-entry match counts, sampled no-match cost (Issues #228, #58).',
     },
     'format-registry' => {
         description => 'The compiled format registry itself: entry inventory, variant groups and their occupants, static scan order and derived ancestor constraints, and scan-sub compile state (Issue #413).',
@@ -589,6 +589,9 @@ use constant {
                                # the entry declares none; joined into the run's
                                # category vocabulary when the entry first binds
                                # a file, never consulted per line
+    FR_BYTE_NOTATION   => 30,  # the byte notation the format declares ('si' or
+                               # 'iec'), or undef when it declares none; read
+                               # once per run by resolve_byte_notation()
 };
 my @format_registry;           # scanned entries, static cascade order: one
                                # occupant per variant-group slot (D47/F1)
@@ -719,6 +722,15 @@ my %byte_unit_by_spelling = map { lc($_) => $_ } keys %byte_unit_bytes;
 my $byte_unit_si_list     = join(', ', map { $_->{si}{token} } @byte_unit_ladder);                                   # B, kB, MB, GB, TB
 my $byte_unit_iec_list    = join(', ', map { $_->{iec}{token} } grep { $_->{iec}{token} ne $_->{si}{token} } @byte_unit_ladder);   # KiB, MiB, GiB, TiB: the tokens only IEC has
 my $byte_unit_list        = "$byte_unit_si_list, $byte_unit_iec_list";    # every token, SI then IEC, for usage messages and help rows
+my $byte_notation_list    = join(', ', @byte_unit_notations);           # si, iec: the -bn values, for its usage error and help row
+
+# The run's byte notation: one per run, the key of @byte_unit_ladder's step
+# parts that format_bytes() climbs and names. Resolved once after the read by
+# resolve_byte_notation(): -bn when given, else the notation every file's
+# format declares, else SI.
+my $byte_notation_option;                  # -bn as given (validated, lower-cased), or undef
+my $byte_notation        = 'si';
+my $byte_notation_source = 'default';      # '-bn' | 'format <names>' | 'default' | 'mixed'
 
 # Rate unit override (Issue #122): the seconds-per-unit multiplier and the
 # terminal and CSV suffixes are views of the ladder, keyed by canonical token.
@@ -2451,7 +2463,7 @@ sub _classify_argv_provenance {
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
                 'version|v', 'duration-min|dmin', 'duration-max|dmax',
-                'duration-unit|du', 'rate-unit|ru',
+                'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
                 'bytes-min|bmin', 'bytes-max|bmax',
                 'count-min|cmin', 'count-max|cmax',
                 'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',
@@ -2594,6 +2606,7 @@ sub emit_runtime_config_verbose {
         'duration-max'                      => $filter_duration_max,
         'duration-unit'                     => $duration_unit_override,
         'rate-unit'                         => $rate_unit,
+        'byte-notation'                     => $byte_notation_option,
         'bytes-min'                         => $filter_bytes_min,
         'bytes-max'                         => $filter_bytes_max,
         'count-min'                         => $filter_count_min,
@@ -3312,7 +3325,7 @@ sub format_registry_specs {
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
-      duration_unit => 'ms', stats_eligible => 1,
+      duration_unit => 'ms', byte_notation => 'iec', stats_eligible => 1,   # the JVM states heap sizes in powers of 1024
       levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
       event_ledger => 1,
       classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
@@ -4702,6 +4715,8 @@ sub build_format_registry {
     for my $spec (@specs) {
         die "ltl: format registry: entry '$spec->{name}' event_ledger must be 0 or 1\n"
             if defined $spec->{event_ledger} && $spec->{event_ledger} !~ /^[01]$/;
+        die "ltl: format registry: entry '$spec->{name}' byte_notation must be one of $byte_notation_list\n"
+            if defined $spec->{byte_notation} && !grep { $_ eq $spec->{byte_notation} } @byte_unit_notations;
         $spec->{_cls} = format_classification_resolve($spec);
         $spec->{_cls_both} = ($spec->{_cls}
                               && @{ $spec->{_cls}{success} // [] }
@@ -4939,6 +4954,7 @@ sub build_format_registry {
         $entry->[FR_PCT_QUALIFYING]  = ($spec->{_cls_both} && ($spec->{event_ledger} || $show_classification)) ? 1 : 0;
         $entry->[FR_CLS_BOTH]        = $spec->{_cls_both} ? 1 : 0;
         $entry->[FR_LEVELS]          = $spec->{levels};
+        $entry->[FR_BYTE_NOTATION]   = $spec->{byte_notation};
         if ($spec->{scanned}) {
             push @format_registry_members, $entry;
             push @format_registry, $entry if $entry->[FR_GROUP_DEFAULT];
@@ -5294,6 +5310,7 @@ sub emit_format_detection_verbose {
     push @verbose_output, "duration_unit_override: " .
         (defined $duration_unit_override ? $duration_unit_override : '-');
     push @verbose_output, "format_pin: " . ($log_format_pin // '-');
+    push @verbose_output, "byte_notation: $byte_notation ($byte_notation_source)";
     push @verbose_output, "legend: " . (join(',', map { "$format_legend{$_}=$_" } @format_legend_order) || '-');
     push @verbose_output, "files: " . scalar(@in_files);
 
@@ -5308,6 +5325,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  match_type: -";
             push @verbose_output, "  metrics_observed: -";
             push @verbose_output, "  event_ledger: -";
+            push @verbose_output, "  byte_notation: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
             push @verbose_output, "  first_match_line: -";
@@ -5323,6 +5341,7 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  match_type: $mt";
         push @verbose_output, "  metrics_observed: " . ($fdd->{metrics_observed} ? 'yes' : 'no');
         push @verbose_output, "  event_ledger: " . ($fdd->{event_ledger} ? 'yes' : 'no');
+        push @verbose_output, "  byte_notation: " . ($fdd->{byte_notation} // '-');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
         push @verbose_output, "  first_match_line: " .
@@ -6587,7 +6606,7 @@ sub write_aggregate_export {
     }
     $measurements->{categories}      = $categories;
     $measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");
-    $measurements->{max_memory_used} = format_bytes($max_memory_usage, 'B');
+    $measurements->{max_memory_used} = format_bytes($max_memory_usage);
 
     my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
         (qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);
@@ -9893,6 +9912,7 @@ sub print_help {
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name ($time_unit_list)");
     $out .= help_opt("-lf,  --log-format <name>",     "Read every file as this log format instead of detecting it - the escape hatch when detection picks the wrong variant; an unknown name lists the known formats");
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: any of $time_unit_list; default m (the minute)");
+    $out .= help_opt("-bn,  --byte-notation <name>",  "Show byte values in SI units ($byte_unit_si_list; powers of 1000) or IEC units ($byte_unit_iec_list; powers of 1024): one of $byte_notation_list. Default: the log format's convention, else SI.");
 
     # Filtering
     $out .= help_subheading("Filtering & Highlighting");
@@ -12707,42 +12727,58 @@ sub gc_heap_size_bytes {
     return $value * $byte_unit_bytes{ $gc_heap_suffix_token{$suffix} };
 }
 
+# The run's byte notation, once, after the read: -bn when given; else the
+# notation every file's format declares; else SI. A file no format
+# recognised declares nothing. When the declarations differ and -bn was not
+# given, one behavioural notice names each format's declaration and the
+# option; it prints whatever --disable-progress says, and must never carry
+# an ` at ... line` suffix (runtime-warning discriminator, HARNESS-DESIGN.md).
+sub resolve_byte_notation {
+    if (defined $byte_notation_option) {
+        ($byte_notation, $byte_notation_source) = ($byte_notation_option, '-bn');
+        return;
+    }
+    my (%declaration_of, @formats);
+    for my $file (@in_files) {
+        my $fdd = $format_detection{$file};
+        my $format = ($fdd && defined $fdd->{slug} && $fdd->{slug} ne 'unknown') ? $fdd->{slug} : 'no format recognised';
+        push @formats, $format unless exists $declaration_of{$format};
+        $declaration_of{$format} = ($fdd && $fdd->{byte_notation}) // 'none';
+    }
+    my %declared = map { $_ => 1 } values %declaration_of;
+    if (!%declared || (keys %declared == 1 && $declared{none})) {
+        ($byte_notation, $byte_notation_source) = ('si', 'default');
+    } elsif (keys %declared == 1) {
+        ($byte_notation) = keys %declared;
+        $byte_notation_source = 'format ' . join(',', @formats);
+    } else {
+        ($byte_notation, $byte_notation_source) = ('si', 'mixed');
+        print STDERR "Note: the log formats of this run declare different byte notations ("
+            . join('; ', map { "$_: " . ($declaration_of{$_} eq 'none' ? 'none' : uc $declaration_of{$_}) } @formats)
+            . "); byte values are shown in SI units. Use -bn si or -bn iec to choose.\n";
+    }
+    return;
+}
+
+# A byte count in the run's notation: the largest ladder step whose byte
+# count the value reaches names the unit, so 1000 bytes is 1 kB in SI and
+# 1000 B in IEC. The ladder is the only table.
 sub format_bytes {
-    my ($value, $unit, $decimals) = @_;
+    my ($bytes, $decimals) = @_;
+    return undef unless defined $bytes;
     $decimals = 1 if !defined $decimals;
-    my %units = (
-        'b'  => 1,
-        'B'  => 1,
-        'KiB' => 1024,
-        'MiB' => 1024**2,
-        'GiB' => 1024**3,
-        'TiB' => 1024**4,
-    );
 
-    return undef unless defined $value;
-
-    my $bytes = $value * $units{$unit};
-    my $bytes_int = int($bytes);  # Use integer for unit comparison to avoid float string length issues
-
-    my @unit_order = ('B', 'KiB', 'MiB', 'GiB', 'TiB');
-    my $formatted_value = $bytes;
-    my $formatted_unit = 'B';
-
-    foreach my $u (@unit_order) {                                           # Determine the most relevant unit
-        if( length( $bytes_int ) >= length( $units{$u} ) ) {
-# TO DO: 1000kB should convert to MB
-        #if ($bytes >= $units{$u}) {
-            $formatted_value = $bytes / $units{$u};
-            $formatted_unit = $u;
-        } else {
-            last;
-        }
+    my ($step_bytes, $token) = (1, 'B');
+    for my $step (@byte_unit_ladder) {
+        my $part = $step->{$byte_notation};
+        last if abs($bytes) < $part->{bytes};
+        ($step_bytes, $token) = ($part->{bytes}, $part->{token});
     }
 
-    $formatted_value = sprintf("%.${decimals}f", $formatted_value);
+    my $formatted_value = sprintf("%.${decimals}f", $bytes / $step_bytes);
     $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
 
-    return "$formatted_value $formatted_unit";
+    return "$formatted_value $token";
 }
 
 # Build CSV output filename with truncation to avoid filesystem errors
@@ -14118,6 +14154,7 @@ sub adapt_to_command_line_options {
         'duration-unit|du=s' => \$duration_unit_override,
         'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
+        'byte-notation|bn=s' => \$byte_notation_option,
         'bytes-min|bmin=i' => \$filter_bytes_min,
         'bytes-max|bmax=i' => \$filter_bytes_max,
         'count-min|cmin=i' => \$filter_count_min,
@@ -14392,6 +14429,14 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid duration unit '$duration_unit_override'. Valid values: $time_unit_list"); exit 1; }
             unless defined $canonical;
         $duration_unit_override = $canonical;
+    }
+
+    # Byte notation option: si or iec, in any case
+    if (defined $byte_notation_option) {
+        my $notation = lc $byte_notation_option;
+        do { print_usage("Invalid byte notation '$byte_notation_option'. Valid values: $byte_notation_list"); exit 1; }
+            unless grep { $_ eq $notation } @byte_unit_notations;
+        $byte_notation_option = $notation;
     }
 
     # Rate unit option validation (Issue #122): any ladder spelling
@@ -15400,6 +15445,9 @@ sub read_and_process_logs {
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
+                    # The byte notation the bound format declares, read once
+                    # after the read by resolve_byte_notation().
+                    $fdd->{byte_notation}    = $line_entry ? $line_entry->[FR_BYTE_NOTATION] : undef;
                     # The levels the bound format declares join the run's
                     # category vocabulary here, once per file rather than for
                     # every format at startup.
@@ -19181,18 +19229,18 @@ sub format_heatmap_value {
     if ($metric eq 'duration') {
         return format_time($value, 'ms');
     } elsif ($metric eq 'bytes') {
-        return format_bytes($value, 'B');
+        return format_bytes($value);
     } elsif ($metric eq 'count') {
         return format_number($value, 'medium');
     } elsif (defined $heatmap_udm_config && ($metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name})) {
         my $ut = $heatmap_udm_config->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
-               $ut eq 'bytes' ? format_bytes($value, 'B') :
+               $ut eq 'bytes' ? format_bytes($value) :
                                 format_number($value, 'medium');
     } elsif (my ($hcfg) = grep { $_->{name} eq $metric } @histogram_udm_configs) {
         my $ut = $hcfg->{unit_type};
         return $ut eq 'time'  ? format_time($value, 'ms') :
-               $ut eq 'bytes' ? format_bytes($value, 'B') :
+               $ut eq 'bytes' ? format_bytes($value) :
                                 format_number($value, 'medium');
     } else {
         return $value;
@@ -19847,7 +19895,7 @@ sub print_bar_graph {
                             my $time_space = $time_format eq 'short' ? undef : ' ';
                             $trend_value = " " . format_duration_total( $log_stats{$bucket}{$field}, $time_format, $time_space );
                         } elsif( $key =~ /^bytes$/i ) {
-                            $trend_value = " " . format_bytes( $log_stats{$bucket}{$field}, 'B' );
+                            $trend_value = " " . format_bytes( $log_stats{$bucket}{$field} );
                         } elsif( $key =~ /^count$/i ) {
                             $trend_value = " " . format_number( $log_stats{$bucket}{$field}, 'medium', ' ', 2);
                         } elsif( $key =~ /^udm_(.+)$/ ) {
@@ -19860,7 +19908,7 @@ sub print_bar_graph {
                                     my $spc = $fmt eq 'short' ? undef : ' ';
                                     $trend_value = " " . format_duration_total($log_stats{$bucket}{$field}, $fmt, $spc);
                                 } elsif ($unit_type eq 'bytes') {
-                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$field}, 'B');
+                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$field});
                                 } else {
                                     $trend_value = " " . format_number($log_stats{$bucket}{$field}, 'medium', ' ', 2);
                                     $trend_value .= $rate_suffix{$rate_unit}
@@ -19944,7 +19992,7 @@ sub print_bar_graph {
                         format_csv_value( $log_stats{$bucket}{duration_sum}, 'duration' );
                 } elsif( $key =~ /^bytes$/i ) {
                     push @csv_data,
-                        (defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}, 'B') : undef),
+                        (defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}) : undef),
                         format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
                 } elsif( $key =~ /^count$/i ) {
                     next if $omit_count;
@@ -21121,7 +21169,7 @@ sub print_summary_table {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
     }
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage, 'B' ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage ) );
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
@@ -21160,7 +21208,7 @@ sub print_summary_table {
                                                  floor_at => 1, floor_text => '<1%', pad => 1 );
 
                 my $indented_label = sprintf(" %-25s %5s", $label, $pct_str);
-                push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 'B', 0 ) );
+                push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 0 ) );
             };
 
             $emit_breakdown_row->($_, $memory_high_water_marks{$_}) for @sorted;
@@ -21430,7 +21478,7 @@ sub print_message_summary {
                     my $total_bytes_num = $log_messages{$grouping}{$key}{bytes_occurrences}
                         ? $log_messages{$grouping}{$key}{total_bytes}
                         : undef;
-                    my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;
+                    my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num ) : undef;
                     my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
                     my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
                     my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
@@ -21741,6 +21789,7 @@ sub pipeline_parse {
     read_and_process_logs();
     $end_time = [gettimeofday];
     $elapsed_parse_read_files = tv_interval($start_time, $end_time);
+    resolve_byte_notation();
     measure_memory_structures();
     memory_debug_decomposition("after_read");
 }
