@@ -4,7 +4,7 @@
 
 Planning on branch `609-gc-heap-suffix-convention` off `release/0.19.0`
 (base commit be93f58). Unblocked by #608 (one byte-unit ladder with SI and IEC
-notation), merged 2026-09-29. No decision locked yet.
+notation), merged 2026-09-29. D1 locked 2026-09-29 (§ 2).
 
 Record of the finding that produced this issue:
 `features/342-redundant-logic-surfaces-audit-report.md`, finding F1.12 (byte
@@ -44,3 +44,19 @@ What follows for this format:
    mebibyte either way.
 
 The HotSpot source is the authority read for these three points.
+
+## 2. Locked decisions
+
+- **D1: the suffixes mean what HotSpot's size constants mean.** `K` is 1,024
+  bytes, `M` is 1,048,576 bytes (`K*K`) and `G` is 1,073,741,824 bytes (`M*K`),
+  the constants in HotSpot's `globalDefinitions.hpp`: the ladder's `KiB`, `MiB`
+  and `GiB`. `T` is not a HotSpot size constant and is not declared. In practice
+  only `M` occurs on a pause line (§ 1), so every GC byte value rises 4.86
+  percent: the format's sample row `2433M->66M` reads 2,481,979,392 bytes
+  instead of 2,367,000,000, and the G1 test fixture's STATS `bytes` total
+  73,175,924,736 instead of 69,786,000,000 (`68 GiB` instead of `65 GiB`),
+  figures computed from the fixture's values and confirmed by a run at
+  implementation. A user-observable change, so it carries a release-notes line.
+  The issue's done-condition becomes: the GC format's spec declares what its
+  heap-size suffixes mean, and heap figures are read at that meaning. Locked by
+  the architect 2026-09-29 ("Use what the HotSpot uses").
