@@ -49,6 +49,7 @@ the errors and help rows read cannot disagree with the parser.
 - `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` over `@output_sections`, `@visibility_columns` and their alias tables.
 - `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
 - `bpd_for_surface` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];` over `%TIER_BPD`.
+- `column_total_field` :: `return $column_total_field{$column} // $column;` over `%column_total_field`, read by the bar scaling in `normalize_data_for_output` and the timeline cell in `print_bar_graph`.
 
 **Owning record.** `features/524-bucket-size-unit.md` D1 and D2 (the time-unit
 ladder: one ladder at file scope, no sub keeps a table of its own) is the
@@ -440,7 +441,7 @@ the sort and the CSV's raw cell.
 
 **Consumption sites.**
 - `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;`
-- `print_bar_graph` :: `ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' '))`
+- `print_bar_graph` :: `ltrim(format_duration_total($log_stats{$bucket}{duration_sum}, 'medium', ' '))`
 - `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;`
 - `print_message_summary` :: `format_duration_total( $total_duration, 'medium', 'space' ) // ""` (the messages-table total)
 - `print_message_summary` :: `format_duration_total( $total_duration, 'medium', 'space' ),` (the MESSAGES CSV `duration_nice`, beside `format_csv_value($total_duration,    'duration'),`)
