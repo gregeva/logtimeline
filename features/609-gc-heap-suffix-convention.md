@@ -116,3 +116,39 @@ figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
       durations identical, and the bytes total rises by exactly 1.048576 (every
       figure in `M`). *Measured once* and recorded in this doc's implementation record; the
       corpus is not committed, so no harness reads it.
+
+## 4. Design
+
+- **The prefix view of the ladder.** Beside `byte_unit_canonical()`, one view
+  derived from `@byte_unit_ladder`: each step keyed by its prefix letter (the
+  first letter of its tokens, `B`, `K`, `M`, `G`, `T`; `kB` and `KiB` agree on
+  `K`), and one resolver, `byte_prefix_bytes($letter, $notation)`, returning
+  the step's byte count in that notation, or undef for a letter no step
+  carries. No letters are written anywhere; a step added to the ladder is a
+  prefix the GC figures accept.
+- **The GC read.** `gc_heap_size_bytes($figure, $notation)` splits the figure
+  into its number and letter and multiplies by `byte_prefix_bytes()`. The
+  private map `%gc_heap_suffix_token` is deleted. A figure it cannot read
+  returns 0, as today (unchanged behaviour; HotSpot writes none, § 1).
+- **The notation reaches the transform at compile time.** The `gc_heap_delta`
+  snippet names the notation as a placeholder that the transform loop of the
+  scan-sub codegen replaces with the entry's declared `byte_notation`, the way
+  the mask pattern's `KEYS` placeholder is filled from the spec. A spec that
+  lists the transform without declaring `byte_notation` fails the registry
+  build. The per-line cost is the same two lookups and a multiply as today.
+- **The spec's sample rows** expect the IEC values: `2433M->66M` 2481979392,
+  `512M->128M` 402653184 (AC2).
+- **Records.** `features/log-format-registry.md`: the `byte_notation` field
+  entry gains how the format's bare size letters are read, and the ladder
+  entry names the prefix view and resolver in place of the GC map.
+  `features/608-byte-unit-ladder.md` § 5.9: its hand-forward is marked
+  delivered here. `releases/v0.19.0.md`: one bullet in the fixes section.
+
+## 5. Delivery
+
+One drop on this branch: the code, the spec's sample rows, the harness
+scenarios and fixture of § 3, and the records of § 4, in one commit and a push.
+Before it, `$version_number` is stamped `0.19.0-609` and the before benchmark
+(`single-day-access-log-standard`, label `609-before`) is captured on the base
+commit be93f58. Then AC7 is measured and recorded here, the version restored,
+and the completion gate run: the full harness suite and the after benchmark.
