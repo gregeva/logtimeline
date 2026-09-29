@@ -109,5 +109,5 @@ figure in `M`. Each criterion runs `-bs 1440 -oe -o` over it unless stated.
 - [ ] **AC7. On a real G1 log the only change is the byte values.** Over the
       largest G1 log in the corpus, before against after: line counts and pause
       durations identical, and the bytes total rises by exactly 1.048576 (every
-      figure in `M`). *Measured once* and recorded in § 11 of this doc; the
+      figure in `M`). *Measured once* and recorded in this doc's implementation record; the
       corpus is not committed, so no harness reads it.
