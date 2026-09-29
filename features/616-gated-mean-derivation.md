@@ -105,7 +105,8 @@ models; the landing order; impact's duration term floored so it is never
 negative; impact undefined when durations are thrown away; no count on the
 highlighted totals; the latency section a fixed-size block; the heatmap's bytes
 pre-seed corrected; an impact topic in `--explain`; the consolidation final
-pass as designed).
+pass as designed) and D27 of 2026-09-29 (impact exempt from the CSV harness's
+per-row family check and required on every row whenever durations are read).
 
 **Done when** (the issue body): the two fixtures write empty cells where nothing
 was observed; impact and the reported mean agree on every row; the two CSVs
@@ -258,13 +259,16 @@ base commit and pass once the projection is gated.
     `float` with 5.
 13. **The CSV rules put `impact` in the duration family.** The MESSAGES rules
     row for `impact` is `conditional:duration`, family `duration`, and it
-    stays there (D21: impact is defined only while durations are read). The
-    group-consistency assertion of `tests/csv-output/validate-csv-output.pl`
-    holds every conditional column of an active family populated or empty
-    together on each row. Under D11 a row whose duration is unobserved while
-    durations are read carries impact as its occurrences part beside empty
-    duration columns, which that assertion reads as a failure while the row
-    keeps `conditional:duration` (section 5.2 under D11).
+    stays in that family (D21: impact is defined only while durations are
+    read). The group-consistency assertion of
+    `tests/csv-output/validate-csv-output.pl` holds every conditional column of
+    an active family populated or empty together on each row. Under D11 (impact
+    reduces to its occurrences part) a row whose duration is unobserved while
+    durations are read carries impact beside empty duration columns, which that
+    assertion would read as a failure. D27 exempts impact from the per-row
+    all-or-nothing check and gives it its own presence rule: populated on every
+    row whenever durations are read, empty on every row when they are thrown
+    away by `-od` or `-d duration` (section 5.2 under D11, section 7).
 14. **The heatmap's bytes pre-seed never reads the index (pre-existing, found
     while checking D17; corrected in this issue, D24).** `read_index_file`
     looks up `"${hm_metric_col}_min"` with `$hm_metric_col = 'bytes'`, while the
@@ -304,7 +308,8 @@ issue body with their source in the review-progress rows. D11 to D19 are his
 decisions of 2026-09-28, in reply to this specification's draft; D20 to D25 are
 his decisions of the same day on the follow-up questions the review of this
 specification left open, and D26 his decision of the same day given on #619's
-turn (one per-run key cut). Nothing else in this document is numbered Dxx.
+turn (one per-run key cut). D27 is his decision of 2026-09-29 on how the CSV
+harness checks impact. Nothing else in this document is numbered Dxx.
 
 - **D1:** "**Every accumulator keeps its observation count unconditionally**,
   one integer per store entry, for the time-bucket store and the message store
@@ -487,12 +492,26 @@ turn (one per-run key cut). Nothing else in this document is numbered Dxx.
   document states it as the design (section 3 item 15), and #619's record trues
   up the consolidation record to match. *Locked by the architect
   2026-09-28.*
+- **D27: Impact is exempt from the CSV harness's per-row family check and
+  required on every row whenever durations are read.** Put to the architect:
+  the CSV-output harness requires every conditional column of an active family
+  to be all filled or all empty on a row, and under D11 (impact reduces to its
+  occurrences part) a row whose duration is unobserved while durations are read
+  carries impact beside empty duration columns, which fails that check. His
+  reply: "sure". Impact stays in the duration column family in the CSV rules
+  (D21) but is exempt from the per-row all-or-nothing consistency check. In
+  its place it carries its own presence rule: populated on every MESSAGES row
+  whenever durations are read (the occurrences part where a row's duration is
+  zero or unobserved, D11), and empty on every row when durations are thrown
+  away by `-od` or `-d duration` (D21). The other conditional duration columns
+  keep the all-or-nothing check among themselves.
+  *Locked by the architect 2026-09-29.*
 
 ---
 
 ## 5. Design
 
-Everything in this section follows from D1 to D26 unless it is labelled
+Everything in this section follows from D1 to D27 unless it is labelled
 **proposed**. A proposed element is implementation detail the architect did not
 decide: a name, a spelling, an argument shape.
 
@@ -643,14 +662,23 @@ decide: a name, a spelling, an argument shape.
   and the `-od` row of `docs/usage.md` stands. The occurrences part applies only
   while durations are read and a row's observed duration is zero or
   unobserved.
-- The MESSAGES rules row for `impact` stays `conditional:duration`, family
-  `duration`, type and decimals unchanged (D21): impact is defined only while
-  durations are read. Section 3 item 13 records how the family group-consistency
-  assertion reads a row whose duration is unobserved while durations are read.
-  #618 (one declaration per column) labels impact a `shape` statistic in the
-  rules; whichever lands later rebases the row, and its declaration reads D21's
-  rule: impact is defined whenever durations are read and undefined, with an
-  empty cell, when they are thrown away.
+- The MESSAGES rules row for `impact` stays in family `duration`, type and
+  decimals unchanged (D21: impact is defined only while durations are read),
+  and is exempt from the per-row family group-consistency check of
+  `tests/csv-output/validate-csv-output.pl` (D27, section 3 item 13). In its
+  place the validator holds impact to its own presence rule: populated on every
+  MESSAGES row of a scenario that declares the duration family active, and
+  empty on every row of a scenario that throws durations away by `-od` or
+  `-d duration`. The other conditional duration columns keep the all-or-nothing
+  check among themselves.
+  **Proposed:** the exemption is declared on the rules row itself, by a
+  `required` value of its own in place of `conditional:duration`, so the
+  validator reads it from the rules file rather than from a column name held in
+  its code.
+- #618 (one declaration per column) labels impact a `shape` statistic in the
+  rules; whichever lands later rebases the row, and #618's per-column
+  declaration carries D27's presence rule for impact: populated on every row
+  whenever durations are read, empty on every row when they are thrown away.
 - An `impact` topic is added to `--explain` (D25): an entry in
   `%explain_topics`, listed by the topic registry, stating the formula, the
   floor, the occurrences-only case and the undefined case; it is mirrored in
@@ -836,7 +864,8 @@ count and the means keep two decimals whatever `-cp` is.
   #273's `-od` scenario is this issue's regression check, its `impact`
   expectation still empty (D21). #273's twelve-line `-so duration` scenario
   leaves `impact` empty on four zero-total rows today; after this issue those
-  rows write `0` (`log(1)`), so the duration family is consistent on them.
+  rows write `0` (`log(1)`), as D27's presence rule (impact on every row while
+  durations are read) requires.
 - **#619 (one per-run key cut).** Lands third (D19) and is blocked by this
   issue; each re-takes its memory baseline on the tree it lands on. Its record
   trues up the consolidation record to state the final pass of section 3 item
@@ -850,8 +879,11 @@ count and the means keep two decimals whatever `-cp` is.
 - **#525 (one timestamp formatter).** Shares `write_index_file`; the seam is
   under D8 above.
 - **#618 (one declaration per column).** The `impact` rules row stays in the
-  duration family, defined whenever durations are read and undefined when they
-  are thrown away (D21), under D11 above.
+  duration family (D21), exempt from the per-row all-or-nothing family check
+  and required instead on every row whenever durations are read, empty on every
+  row when they are thrown away by `-od` or `-d duration` (D27); #618's
+  per-column declaration carries that presence rule for impact, under D11
+  above.
 - **#620 (hoisting the loop's per-line option handling).** Blocked by this issue.
   If arm (d) lands, converting the two capture-mode compares to booleans, #620's
   record is trued up in the same change so the step is not done twice.
@@ -918,7 +950,12 @@ Fixtures are described in section 7.
   checks every drift scenario in both models, consolidated ones included. It
   fails on the base commit on 129 cells (the 45 order-dependent ones and the
   122 whose sub-unit mean gives a negative duration term, 38 of them in both)
-  and on 2 empty cells (section 3 item 2).
+  and on 2 empty cells (section 3 item 2). The presence half is also asserted
+  by the CSV-output harness under D27: `impact` populated on every MESSAGES row
+  of every scenario that declares the duration family active, whatever the
+  row's other duration cells hold, and empty on every row of the `-od` scenario
+  and its `-d duration` twin; `impact` takes no part in the duration family's
+  per-row all-or-nothing check.
 - [ ] **Impact does not depend on line order, and a consolidated row's impact
   follows its reported mean.** Two access-log lines of one path with durations
   100 and 0, in both orders: both runs write `impact=28.077`. The four-line
@@ -939,7 +976,9 @@ Fixtures are described in section 7.
   `-d duration`, every row's `impact` cell is empty, as are every duration
   column and `duration_nice` (D21). *Assertable:* a fixture scenario in
   `validate-csv-output.sh` with a `-d duration` twin, and the `-od` scenario of
-  #273 (store precise) unchanged.
+  #273 (store precise) unchanged. The two-line key with no duration carries
+  `impact` beside empty duration columns, which the duration family check
+  passes because `impact` is exempt from it (D27).
 - [ ] **One value for one mean.** On the access-log fixture (one path, sizes 512
   and 513 in one bucket): MESSAGES and STATS `bytes_mean` are both `512` at the
   default precision and both `512.5` under `-cp full`. *Assertable:* fixture
@@ -1030,7 +1069,8 @@ benchmark). No key is added, renamed or removed.
 | same, bin scenarios | moment-column cells only if the arm chosen under D12 reorders the arithmetic, listed and attributed | D12; the rounding difference `features/287-message-stats-bin-counter-data-model.md` records |
 | `compare-statistics-drift.pl` L2 `bytes_deriv` | `produced_by` names `print_message_summary()` and the rule says "integer-typed"; both are rewritten for the stored precise mean | D6 |
 | `compare-statistics-drift.pl` L2 | a new impact invariant (section 6) | D5, D11, D20 |
-| `tests/csv-output/rules/messages-columns.tsv` | `bytes_mean` becomes `float`, 5 decimals, as in the STATS rules; `impact` unchanged, in the duration family | D6, D21 |
+| `tests/csv-output/rules/messages-columns.tsv` | `bytes_mean` becomes `float`, 5 decimals, as in the STATS rules; `impact` stays in the duration family, type and decimals unchanged, its row declaring the exemption from the per-row family check and the every-row presence rule | D6, D21, D27 |
+| `tests/csv-output/validate-csv-output.pl` | the per-row group-consistency check skips a column declared exempt; a new per-row check holds such a column populated on every row when its family is declared active and empty on every row of a scenario that throws the family away (`-od`, `-d duration`), declaring `asserts`, `produced_by` and `contract` like its neighbours; every other column's family check is unchanged | D11, D21, D27 |
 | The `-od` scenario of #273 (store precise) in `validate-csv-output.sh` | none: its `impact` expectation stays empty, and it runs as this issue's regression check | D19, D21 |
 | `tests/reference-output/*` (21 goldens: the heatmap, histogram, highlight and application-log width captures) | `0 B` and zero-duration cells in the timeline's total columns become blank; on the application log those goldens render, 7 of 8 one-minute buckets carry no bytes | D4 (a bucket with no observation of a metric carries no total, and its cell is empty on the STATS CSV and the timeline) |
 | `tests/validate-index-read-back.sh` and its generated index fixture | mean cells lose trailing zeros and write empty for no data; bytes cells count zero-byte responses; a new `-hm bytes` pre-seed scenario | D15, D16, D17, D24 |
@@ -1130,7 +1170,7 @@ is added).
 | 1 | `mean_of` at the post-loop sites whose output does not change (the count, bytes and user-defined means per bucket, in the sort pre-pass and in the group calculation), the single per-bucket projection, the self-assignments, the diagnostic (D7); the impact, per-message bytes mean and index sites move to the helper in drops 4, 5 and 6 | behaviour-neutral: `validate-csv-output.sh`, `validate-statistics.sh`, `validate-aggregate-export.sh` and `validate-statistics-demand.sh`, the harnesses that read the changed sites, pass with no golden or baseline moved |
 | 2 | unconditional counts and one `duration_count` in both models (D1, D2, D18), the count gate replacing the observation decision of #273 (store precise), the count-gated projections, merge and reinject (D4) | the empty-cell criteria; #273's `-od` scenario passing; the 21 goldens re-captured and attributed; loop A/B |
 | 3 | one statistics sub (D9), its early return gated on `duration_count > 0` | each model unchanged against its own baseline on every drift scenario, before any drift baseline moves (D14) |
-| 4 | impact derived once after the loop, occurrences part without a mean (D5, D11), the duration term floored (D20), undefined when the duration is thrown away (D21); the `impact` topic of `--explain` (D25) | the impact criteria and the new L2 invariant; the 129 moved and 2 empty impact cells re-blessed; #273's `-od` scenario passing unchanged; the explain topic rendered; loop A/B |
+| 4 | impact derived once after the loop, occurrences part without a mean (D5, D11), the duration term floored (D20), undefined when the duration is thrown away (D21); the CSV-output harness's exemption of `impact` from the per-row family check and its every-row presence rule, in the validator and the rules row (D27); the `impact` topic of `--explain` (D25) | the impact criteria and the new L2 invariant; the presence rule executed and seen to assert on every MESSAGES scenario of `validate-csv-output.sh`; the 129 moved and 2 empty impact cells re-blessed; #273's `-od` scenario passing unchanged; the explain topic rendered; loop A/B |
 | 5 | the bytes mean stored precise (D6) | the one-value criterion; the 97 cells re-blessed; rules row retyped |
 | 6 | the index: means (D8, D15, D16), bytes population (D17), the heatmap's bytes pre-seed (D24) | the index criteria, the `-cp` scenario, the pre-seed scenario |
 | 7 | the one Welford formula (D10, D12), in the arm the prototype's table supports | the prototype's table recorded first; the bin-model pair; the drift run's moved-cell list |
@@ -1200,7 +1240,7 @@ comparison and the bin-model pair, with `$version_number` restored to `0.19.0`.
 
 **Issue comments**, each pointing at this document:
 
-- on #616 (this issue): the specification agreed, D11 to D26 transcribed by what each means;
+- on #616 (this issue): the specification agreed, D11 to D27 transcribed by what each means;
 - on #273 (store precise, format at the output boundary): the edge and its
   reason; its `-od` scenario is this issue's regression check, its `impact`
   expectation staying empty (D21); its four zero-total rows write `impact=0`
@@ -1221,9 +1261,11 @@ comparison and the bin-model pair, with `$version_number` restored to `0.19.0`.
   unobserved, undefined under `-od` and `-d duration`; the count-metric work
   lands on that one site (D11, D20, D21);
 - on #618 (one declaration per column): the `impact` rules row stays in the
-  duration family, defined whenever durations are read (the occurrences part
-  when a row's duration is zero or unobserved) and undefined, with an empty
-  cell, when they are thrown away (D11, D21).
+  duration family, is exempt from the per-row all-or-nothing family check, and
+  is required on every row whenever durations are read (the occurrences part
+  when a row's duration is zero or unobserved), empty on every row when they
+  are thrown away by `-od` or `-d duration`; #618's per-column declaration
+  carries that presence rule (D11, D21, D27).
 
 **Release notes: yes.** Proposed bullets:
 
