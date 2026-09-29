@@ -22,3 +22,6 @@ omit-stats-csv-decoupling	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill
 gc-g1-categories	tests/fixtures/gc-g1-categories.txt	-bs 1440 -oe -n 1	duration,bytes,percentile,dispersion,shape,level
 profile-weekend	@PROFILE_LOG@	-bs 1440 -oe -n 25 -pr weekend	duration,percentile,dispersion,shape,bytes
 profile-weekends	@PROFILE_LOG@	-bs 1440 -oe -n 25 -pr weekends	duration,percentile,dispersion,shape,bytes
+# -bs 1440 -oe -n 12: the assertions read the MESSAGES rows and, under -od, which STATS columns exist; twelve keys, one request each, four with a zero duration, so every key is a row
+messages-sort-duration	tests/fixtures/tomcat-access-single-sample-keys.txt	-bs 1440 -oe -n 12 -so duration	bytes,level	expected/messages-sort-duration.tsv
+messages-omit-durations	tests/fixtures/tomcat-access-single-sample-keys.txt	-bs 1440 -oe -n 12 -od	-duration,bytes,level

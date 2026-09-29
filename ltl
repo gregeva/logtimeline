@@ -221,6 +221,10 @@ my %verbose_sections_requested;   # Populated by adapt_to_command_line_options()
 my %verbose_section_buffer;
 # this is where the counts of log entries are tallied across the time buckets
 my ( %log_occurrences, %category_totals, %log_analysis, %log_messages, %log_stats, %log_threadpools, %threadpool_activity, %log_sessions, %log_users );
+# The %log_stats field holding a graph column's per-bucket total, where it is not
+# the column id itself; its highlighted share is the field plus -HL. Resolved by
+# column_total_field(); scaled-bar keys stay by column id.
+my %column_total_field = ( duration => 'duration_sum' );
 # Per-bucket classification outcomes (#453 D17/D30, #456 D7): the outcome
 # value is the slot, so $bucket_outcomes{$bucket}[1] successes, [2] failures,
 # [4] classification conflicts; [3] lines from non-qualifying sources and
@@ -6641,11 +6645,11 @@ sub write_aggregate_export {
         my ($udm, $threadpools);
         for my $key (@populated_graph_columns) {
             if ($key eq 'duration') {
-                next unless defined $stats->{duration};
+                next unless defined $stats->{duration_sum};
                 my $block = aggregate_mapping();
                 $block->{data_model}  = $bucket_stats_capture_mode;
                 $block->{occurrences} = aggregate_number($stats->{duration_count}) if defined $stats->{duration_count};
-                $block->{sum}         = aggregate_number($stats->{duration});
+                $block->{sum}         = aggregate_number($stats->{duration_sum});
                 if ($duration_family_active) {
                     for my $stat (@duration_family_stats) {
                         next unless defined $stats->{$stat};
@@ -11018,7 +11022,6 @@ sub group_similar_messages {
             # Copy duration stats
             if (defined $cluster->{total_duration}) {
                 $entry->{total_duration}     = $cluster->{total_duration};
-                $entry->{total_duration_num} = $cluster->{total_duration_num};
                 $entry->{sum_of_squares}     = $cluster->{sum_of_squares};
                 $entry->{durations}          = $cluster->{durations} // [];
                 $entry->{min}                = $cluster->{min} if defined $cluster->{min};
@@ -11713,7 +11716,6 @@ sub merge_consolidation_stats {
     # Duration stats
     if (defined $source->{total_duration}) {
         $target->{total_duration} = ($target->{total_duration} // 0) + $source->{total_duration};
-        $target->{total_duration_num} = ($target->{total_duration_num} // 0) + ($source->{total_duration_num} // 0);
         $target->{sum_of_squares} = ($target->{sum_of_squares} // 0) + ($source->{sum_of_squares} // 0);
         $target->{min} = $source->{min} if defined $source->{min} && (!defined $target->{min} || $source->{min} < $target->{min});
         $target->{max} = $source->{max} if defined $source->{max} && (!defined $target->{max} || $source->{max} > $target->{max});
@@ -13244,6 +13246,12 @@ my %csv_column_family = (
 # err-rate_min, etc.). Returns the matching family for UDM dynamic columns
 # (which always have a *_min/_mean/_max/_sum/_occurrences suffix). Returns
 # undef for unknown columns; the formatter falls back to pass-through.
+# The %log_stats field holding a graph column's per-bucket total.
+sub column_total_field {
+    my ($column) = @_;
+    return $column_total_field{$column} // $column;
+}
+
 sub resolve_csv_column_family {
     my ($column) = @_;
     return undef unless defined $column;
@@ -14599,7 +14607,7 @@ sub adapt_to_command_line_options {
     );
 
     if( $sort_type =~ /^(?:duration|time)$/i ) {
-        $sort_key = "total_duration_num";
+        $sort_key = "total_duration";
     } elsif( $sort_type =~ /^min$/i ) {
         $sort_key = "min";
     } elsif( $sort_type =~ /^(?:mean|avg)$/i ) {
@@ -15840,7 +15848,6 @@ sub read_and_process_logs {
                                 }
                                 if (defined $duration && !$omit_durations) {
                                     $stats_source->{total_duration} = $duration;
-                                    $stats_source->{total_duration_num} = $duration;
                                     $stats_source->{sum_of_squares} = $duration ** 2;
                                     # Issue #287 Commit 5: skip the raw-array allocation under
                                     # -mdm bin — the bin-counter store + Welford-Pébay sidecars
@@ -15983,7 +15990,6 @@ sub read_and_process_logs {
 
                         if( defined $duration && !$omit_durations ) {
                             $log_messages{$category}{$log_key}{total_duration} += $duration;
-                            $log_messages{$category}{$log_key}{total_duration_num} += $duration;
 
                             # Statistics machinery (sum of squares, raw samples or bin
                             # counters + moment sidecars) is captured only when a surface
@@ -16118,7 +16124,7 @@ sub read_and_process_logs {
                     $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
                         occurrences => 0,
                         total_bytes => 0,
-                        total_duration => 0,
+                        duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
                         # count_min => undef,
@@ -16133,7 +16139,7 @@ sub read_and_process_logs {
                     } : {
                         occurrences => 0,
                         total_bytes => 0,
-                        total_duration => 0,
+                        duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
                         # count_min => undef,
@@ -16148,9 +16154,9 @@ sub read_and_process_logs {
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        $log_analysis{$bucket}{total_duration} += $duration;
+                        $log_analysis{$bucket}{duration_sum} += $duration;
 
-                        $log_analysis{$bucket}{'total_duration-HL'} += $duration if $line_is_highlighted;
+                        $log_analysis{$bucket}{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
@@ -17351,7 +17357,6 @@ sub calculate_all_statistics {
         my $aggregated_data = {
             occurrences         => 0,
             total_duration      => 0,
-            'total_duration-HL' => 0,
             total_bytes         => 0,
             'total_bytes-HL'    => 0,
             count_sum           => 0,
@@ -17368,7 +17373,7 @@ sub calculate_all_statistics {
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
-        $aggregated_data->{total_duration} += $log_analysis{$bucket}{total_duration};
+        $aggregated_data->{total_duration} += $log_analysis{$bucket}{duration_sum};
         $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
@@ -17409,7 +17414,7 @@ sub calculate_all_statistics {
             my $stats;
             if ($dm eq 'bin') {
                 $stats = calculate_statistics_bin(
-                    $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/total_duration/sum_of_squares/occurrences)
+                    $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/sum_of_squares/occurrences)
                     $bucket_stats_counters{$bucket},     # counter entry (undef when every duration was 0)
                     $aggregated_data,
                     $bucket_demand,                      # statistics-group demand (#305)
@@ -17424,8 +17429,8 @@ sub calculate_all_statistics {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $log_analysis{$bucket}{total_bytes},
                 'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration      => $log_analysis{$bucket}{total_duration},
-                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                duration_sum  => $log_analysis{$bucket}{duration_sum},
+                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
                 count         => $log_analysis{$bucket}{count_sum},
                 'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
@@ -17446,8 +17451,8 @@ sub calculate_all_statistics {
                 occurrences   => $aggregated_data->{occurrences},
                 bytes         => $log_analysis{$bucket}{total_bytes},
                 'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration      => $log_analysis{$bucket}{total_duration},
-                'duration-HL' => $log_analysis{$bucket}{'total_duration-HL'},
+                duration_sum  => $log_analysis{$bucket}{duration_sum},
+                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
                 count         => $log_analysis{$bucket}{count_sum},
                 'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
                 count_occurrences => $log_analysis{$bucket}{count_occurrences},
@@ -17585,7 +17590,7 @@ sub calculate_all_statistics {
             # A calculated-statistic sort key is exactly a key of the #305
             # group registry (%STAT_FIELD_GROUP covers the full 22-field
             # duration ladder); available-value sort keys (occurrences,
-            # total_duration_num, bytes, impact, count_*) are not in it.
+            # total_duration, bytes, impact, count_*) are not in it.
             if( !exists $STAT_FIELD_GROUP{$sort_key} ) {
                 # Two-stage selection (Issue #302). Only the top N keys are ever
                 # displayed, but a deterministic total order (the metric, then a
@@ -17715,7 +17720,7 @@ sub calculate_all_statistics {
                         $stats = calculate_statistics_bin(
                             $entry,
                             $log_messages_counters{"$category\x1f$log_key"},
-                            {},
+                            { total_duration => $entry->{total_duration} },
                             $population_demand,
                         );
                     } else {
@@ -17846,14 +17851,14 @@ sub calculate_all_statistics {
                     # would auto-vivify it as an empty arrayref. Skip the push.
                     push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
                         unless $message_stats_capture_mode eq 'bin';
-                } elsif ( !$duration_observed && !$omit_durations ) {
-                    # No duration was ever observed for this key: clear the
-                    # 0-initialized accumulator so duration-total consumers
-                    # (summary table, MESSAGES CSV duration/duration_nice)
-                    # emit blank rather than a zero indistinguishable from a
-                    # measured total of zero (Issue #330). A key with real
-                    # observations keeps its total even when no statistics
-                    # surface is active.
+                } elsif ( !$duration_observed ) {
+                    # No duration was ever observed for this key, including
+                    # every key under -od: clear the 0-initialized accumulator
+                    # so duration-total consumers (summary table, MESSAGES CSV
+                    # duration/duration_nice) emit blank rather than a zero
+                    # indistinguishable from a measured total of zero (Issue
+                    # #330). A key with real observations keeps its total even
+                    # when no statistics surface is active.
                     delete $log_messages{$category}{$log_key}{total_duration};
                 }
 
@@ -17890,8 +17895,6 @@ sub calculate_all_statistics {
                     if ($stats && %$stats) {
                         @{ $log_messages{$category}{$log_key} }{ keys %$stats } = values %$stats;
                     }
-                    $log_messages{$category}{$log_key}{total_duration_num} = $aggregated_data->{total_duration} if defined $aggregated_data->{total_duration};
-                    $log_messages{$category}{$log_key}{total_duration} = format_duration_total( $aggregated_data->{total_duration}, 'medium', 'space' ) if defined $aggregated_data->{total_duration};
                 }
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
@@ -18158,8 +18161,10 @@ sub calculate_statistics_bin {
     # R3.2 table in features/287-message-stats-bin-counter-data-model.md:
     #   min/max:                 sidecar (R2.2; populated unconditionally per
     #                            sample so 0-duration samples are captured).
-    #   mean:                    total_duration / duration_count (matches the
-    #                            raw path's `scalar @sorted` denominator).
+    #   mean:                    the staged input's total_duration /
+    #                            duration_count (matches the raw path's
+    #                            `scalar @sorted` denominator); every caller
+    #                            stages the total, as for calculate_statistics.
     #   std_dev/cv:              sum_of_squares accumulator with the same
     #                            cancellation guard as calculate_statistics
     #                            at ltl:~8855.
@@ -18207,7 +18212,7 @@ sub calculate_statistics_bin {
 
     my $min  = $sidecar_entry->{min};
     my $max  = $sidecar_entry->{max};
-    my $mean = $sidecar_entry->{total_duration} / $n;
+    my $mean = $aggregated_data->{total_duration} / $n;
 
     my ($std_dev, $cv);
     if ($n >= 2) {
@@ -18895,7 +18900,7 @@ sub normalize_data_for_output {
         # Calculate the maximum value of the selected trend type if it is activated
         $max_total{occurrences} = $total_occurrences if !defined $max_total{occurrences} || $total_occurrences > $max_total{occurrences};
         $max_total{bytes} = $total_bytes if ( defined $total_bytes && !$omit_bytes && $total_bytes > $max_total{bytes} );
-        $max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration} && $log_stats{$bucket}{duration} > $max_total{duration} );
+        $max_total{duration} = $log_stats{$bucket}{duration_sum} if ( defined $log_stats{$bucket}{duration_sum} && $log_stats{$bucket}{duration_sum} > $max_total{duration} );
         $max_total{count} = $log_stats{$bucket}{count} if ( defined $log_stats{$bucket}{count} && !$omit_count && $log_stats{$bucket}{count} > $max_total{count} );
 
         # Track UDM max values (Issue #22)
@@ -19100,13 +19105,14 @@ sub normalize_data_for_output {
             foreach my $key ( @populated_graph_columns ) {			# go through the list of possible columns and populate the scaled value for that metric for the current time bucket
                 # 2025-12-07 - counts are handled separately below with additional logic which should be incorporated here in the future for coherence and performance improvements
                 next if $key =~ /^occurrences$/;					# the occurrences have already been printed, so should skip this entry even if it is legitimate
-                my $key_highlight = "$key-HL";
+                my $field = column_total_field($key);
+                my $key_highlight = "$field-HL";
                 my $scaled_key = "scaled_${key}";
                 my $scaled_key_highlight = "${scaled_key}-HL";
 
                 my ($col) = grep { $_->{id} eq $key } @column_layout;
                 my $col_width = ($col && $col->{width}) ? $col->{width} : 0;
-                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$key} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key} / $max_total{$key} ) * $col_width ) : 0;
+                $log_stats{$bucket}{$scaled_key} = ( defined $log_stats{$bucket}{$field} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$field} / $max_total{$key} ) * $col_width ) : 0;
                 $log_stats{$bucket}{$scaled_key_highlight} = ( defined $log_stats{$bucket}{$key_highlight} && defined $max_total{$key} && $max_total{$key} != 0 ) ? int(( $log_stats{$bucket}{$key_highlight} / $max_total{$key} ) * $col_width ) : 0;
             }
         }
@@ -19834,12 +19840,13 @@ sub print_bar_graph {
                 } elsif ($col_type eq 'proportional' && $col_id ne 'occurrences') {
                     # Secondary metric bar (duration, bytes, count, UDMs, threadpools)
                     my $key = $col_id;
+                    my $field = column_total_field($key);
                     my $scaled_trend_key = "scaled_${key}";
                     my $scaled_trend_key_highlight = "${scaled_trend_key}-HL";
                     my $scaled_trend_value = $log_stats{$bucket}{$scaled_trend_key};
-                    my $trend_value = $log_stats{$bucket}{$key};
+                    my $trend_value = $log_stats{$bucket}{$field};
 
-                    if( defined $log_stats{$bucket}{$key} ) {
+                    if( defined $log_stats{$bucket}{$field} ) {
                         # Issue #289: this branch now computes $trend_value for terminal
                         # DISPLAY only. CSV emission of the proportional-metric columns
                         # moved to the visibility-independent post-loop builder below
@@ -19849,11 +19856,11 @@ sub print_bar_graph {
                         if( $key =~ /^(time|duration)$/i ) {
                             my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                             my $time_space = $time_format eq 'short' ? undef : ' ';
-                            $trend_value = " " . format_duration_total( $log_stats{$bucket}{$key}, $time_format, $time_space );
+                            $trend_value = " " . format_duration_total( $log_stats{$bucket}{$field}, $time_format, $time_space );
                         } elsif( $key =~ /^bytes$/i ) {
-                            $trend_value = " " . format_bytes( $log_stats{$bucket}{$key}, 'B' );
+                            $trend_value = " " . format_bytes( $log_stats{$bucket}{$field}, 'B' );
                         } elsif( $key =~ /^count$/i ) {
-                            $trend_value = " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', 2);
+                            $trend_value = " " . format_number( $log_stats{$bucket}{$field}, 'medium', ' ', 2);
                         } elsif( $key =~ /^udm_(.+)$/ ) {
                             my $metric_name = $1;
                             my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
@@ -19862,18 +19869,18 @@ sub print_bar_graph {
                                 if ($unit_type eq 'time') {
                                     my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
                                     my $spc = $fmt eq 'short' ? undef : ' ';
-                                    $trend_value = " " . format_duration_total($log_stats{$bucket}{$key}, $fmt, $spc);
+                                    $trend_value = " " . format_duration_total($log_stats{$bucket}{$field}, $fmt, $spc);
                                 } elsif ($unit_type eq 'bytes') {
-                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$key}, 'B');
+                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$field}, 'B');
                                 } else {
-                                    $trend_value = " " . format_number($log_stats{$bucket}{$key}, 'medium', ' ', 2);
+                                    $trend_value = " " . format_number($log_stats{$bucket}{$field}, 'medium', ' ', 2);
                                     $trend_value .= $rate_suffix{$rate_unit}
                                         if $config->{aggregation} =~ /^(rate|drate)$/;
                                 }
                             }
                         } else {
                             my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
-                            $trend_value = defined $log_stats{$bucket}{$key} ? " " . format_number( $log_stats{$bucket}{$key}, 'medium', ' ', $decimals) : "";
+                            $trend_value = defined $log_stats{$bucket}{$field} ? " " . format_number( $log_stats{$bucket}{$field}, 'medium', ' ', $decimals) : "";
                         }
 
                         # Render the metric bar using color from column layout
@@ -19944,8 +19951,8 @@ sub print_bar_graph {
             foreach my $key (@populated_graph_columns) {
                 if( $key =~ /^(time|duration)$/i ) {
                     push @csv_data,
-                        (defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total($log_stats{$bucket}{$key}, 'medium', ' ')) : undef),
-                        format_csv_value( $log_stats{$bucket}{$key}, 'duration' );
+                        (defined $log_stats{$bucket}{duration_sum} ? ltrim(format_duration_total($log_stats{$bucket}{duration_sum}, 'medium', ' ')) : undef),
+                        format_csv_value( $log_stats{$bucket}{duration_sum}, 'duration' );
                 } elsif( $key =~ /^bytes$/i ) {
                     push @csv_data,
                         (defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}, 'B') : undef),
@@ -21467,7 +21474,6 @@ sub print_message_summary {
                     my $skewness = $log_messages{$grouping}{$key}{skewness};
                     my $kurtosis = $log_messages{$grouping}{$key}{kurtosis};
                     my $bimodality_coef = $log_messages{$grouping}{$key}{bimodality_coef};
-                    my $total_duration_num = $log_messages{$grouping}{$key}{total_duration_num};
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
                     if( $statistics_variant && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
@@ -21477,7 +21483,7 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", format_duration( $p50, $col_width{4} ) ) . " " x $table_padding_inner;
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", format_duration( $p999, $col_width{5} ) ) . " " x $table_padding_inner;
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", format_cv_display( $cv ) ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", defined $total_duration ? $total_duration : "" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", format_duration_total( $total_duration, 'medium', 'space' ) // "" ) . " " x $table_padding_inner; 
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
@@ -21509,8 +21515,8 @@ sub print_message_summary {
                         # Issue #268: format each numeric column per the resolved
                         # --csv-precision mode. Column names mirror the MESSAGES
                         # header pipeline_render() writes, so format_csv_value()
-                        # can resolve each value's family. Pre-formatted strings (bytes_nice, duration_nice)
-                        # and metadata pass through unchanged.
+                        # can resolve each value's family. The nice columns (bytes_nice, duration_nice)
+                        # are rendered here from the stored numbers; they and the metadata pass through unchanged.
                         $csv->print($csv_fh, [
                             $grouping,
                             $key,
@@ -21550,8 +21556,8 @@ sub print_message_summary {
                             format_csv_value($skewness,          'duration_skewness'),
                             format_csv_value($kurtosis,          'duration_kurtosis'),
                             format_csv_value($bimodality_coef,   'duration_bimodality_coef'),
-                            format_csv_value($total_duration_num,'duration'),
-                            $total_duration,
+                            format_csv_value($total_duration,    'duration'),
+                            format_duration_total( $total_duration, 'medium', 'space' ),
                             format_csv_value($impact,            'impact'),
                             @udm_csv_values,
                         ]);

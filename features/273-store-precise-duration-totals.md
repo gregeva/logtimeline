@@ -3,8 +3,51 @@
 ## Status
 
 Specification agreed with the architect 2026-09-29 on branch
-`273-store-precise-duration-totals` off `release/0.19.0`; implementation not
-started.
+`273-store-precise-duration-totals` off `release/0.19.0`. Drop 1 (the message
+store) and drop 2 (the time-bucket store) implemented 2026-09-29; the
+completion gate passed on 49d3e09 (§ Completion gate).
+
+**Drop 1 progress.** The two CSV-output scenarios (`messages-sort-duration`,
+`messages-omit-durations`) were written first. The `-od` scenario failed on the
+base with `duration_nice` = `0` on all twelve MESSAGES rows and nothing else;
+the sort scenario passed on the base and failed on a build whose sort key
+named a missing field (row 4 carried a total of 2 below a row of 1); the
+zero-cell check failed on a MESSAGES CSV doctored to read `0ns`; the STATS
+absence check of a switched-off family failed on a STATS CSV carrying the
+duration columns (23 columns reported). After the change both scenarios pass.
+Criterion 6's method changed with the architect (§ Acceptance criteria 6).
+
+**Drop 2 progress.** A bucket's duration total and its highlighted share are
+named `duration_sum` and `duration_sum-HL` from the read loop to the last
+reader, in `%log_analysis` and `%log_stats` alike (architect, 2026-09-29: a
+field named `duration` cannot hold a total; the metric plus the `sum`
+statistic is the name, as `count_sum`, a user-defined metric's `<name>_sum`
+and the per-file index record's `duration_sum` already are). The exposed
+surfaces keep their names: the STATS CSV header stays `duration` (#432 D1, a
+bare metric word is its sum) and the aggregate export's key stays `sum`.
+Readers that walk the graph columns resolve the field through
+`column_total_field()` over `%column_total_field` (`duration =>
+'duration_sum'`), which maps a column id to its total's field only where they
+differ (a consumption site of the declarative-table pattern); scaled-bar keys and the bar
+maximum stay keyed by the column id. Bytes and the message store's
+`total_duration` keep their names; their naming is #613's (one vocabulary for
+names). The staged statistics input keeps `total_duration` and no longer
+seeds `total_duration-HL`. Both statistics subs
+now read the mean's numerator from the staged input. For
+`calculate_statistics_bin` that needed one caller change beyond the bucket
+path: the message-key sort pre-pass passed an empty staged input and relied on
+the sub reading the message entry's total, so it now stages
+`{ total_duration => $entry->{total_duration} }` as its raw twin does. No
+statistics drift scenario sorts on a computed statistic under the bin data
+model, so that call was proven directly: on the 5,000-line Tomcat access log
+with millisecond durations, `-bs 60 -n 15 -mdm bin -bdm bin -cp full -o` with
+`-so mean`, `-so p99` and `-so cv`, the terminal output and both CSVs are
+byte-identical to the drop 1 commit, with no runtime warning. After the
+rename, the same log compared against the drop 1 build under `-bs 60 -n 15
+-cp full -o` with `-mdm bin -bdm bin -so mean`, with `-mdm raw -bdm raw -h
+GetDateAndTime` and with `-mdm bin -bdm bin -so p99 -hdmin 200`: terminal
+output, MESSAGES and STATS CSVs byte-identical, the aggregate export differing
+only in its run-time and memory lines, no runtime warning.
 
 Every site below was re-located in the worktree's `ltl` (base 4b238ff; `ltl`
 is unchanged since 58f8d94) by enclosing sub plus an in-body snippet that
@@ -389,7 +432,7 @@ issue body.
 
 **Assertable**
 
-- [ ] **1. The accumulator never changes type; one precise field (D3, D8).**
+- [x] **1. The accumulator never changes type; one precise field (D3, D8).**
       Given the change, `ltl` holds no field named `total_duration_num`, and
       every write to a message entry's `total_duration` is arithmetic (the lazy
       initialiser, the per-line accumulation, the consolidation seed, merge and
@@ -400,13 +443,13 @@ issue body.
       against the message-store table of § 5; a formatter result assigned into
       `%log_messages`, `%log_stats`, `%log_analysis`, `%heatmap_data` or
       `%log_occurrences` is a failure (the search of § 3 item 10 finds none).*
-- [ ] **2. Converged readers (D5).** `print_message_summary` reads the total
+- [x] **2. Converged readers (D5).** `print_message_summary` reads the total
       once into one local; the sort key names `total_duration`; the total is
       rendered nice only by the two `format_duration_total` calls at the emit
       sites, and the CSV `duration` cell passes it through `format_csv_value`.
       *Method: a source check in the PR against the message-store table of
       § 5; each row's "after" column is found as written.*
-- [ ] **3. The nice rendering at the write, raw value beside it (D4).** The
+- [x] **3. The nice rendering at the write, raw value beside it (D4).** The
       MESSAGES `duration_nice` cell is rendered from the stored number by
       `format_duration_total` in the row being written, and the `duration` cell
       beside it is the same number through `format_csv_value`; the
@@ -417,7 +460,7 @@ issue body.
       scenario of criterion 4 also asserts that each row whose `duration` is
       `0` carries `duration_nice` = `0 msec` (the source unit), which a direct
       call of the ladder scaler would fail.*
-- [ ] **4. `-so duration` ranks by the stored total.** With `-so duration`, the
+- [x] **4. `-so duration` ranks by the stored total.** With `-so duration`, the
       MESSAGES rows are in non-increasing order of `duration`.
       *Method: a new `tests/validate-csv-output.sh` scenario on the twelve-line
       synthetic access log with millisecond durations, one request per
@@ -427,7 +470,9 @@ issue body.
       `tests/csv-output/validate-csv-output.pl`: the ordering check (MESSAGES
       rows non-increasing on a named column) and the zero-cell check (each row
       whose `duration` is `0` carries the scenario's declared `duration_nice`,
-      here `0 msec`), each declaring `asserts`, `produced_by` and `contract`.
+      here `0 msec`), each declaring `asserts`, `produced_by` and `contract`,
+      declared as the directives `@non_increasing` and `@zero_duration_nice`
+      in the scenario's expected-categories file beside `@no_highlight_rows`.
       No harness runs `-so duration` today; a sort key naming a missing field
       ranks every key at zero and passes every existing assertion, which is
       the failure the scenario is shown to catch. The
@@ -435,7 +480,7 @@ issue body.
       base leaves `impact` empty on the four zero-total rows beside a populated
       total, which the family-consistency check would report; that gate is
       #616's (the impact gate, audit finding F4.6), not this issue's.*
-- [ ] **5. Output byte-identical elsewhere.** The messages table, the MESSAGES
+- [x] **5. Output byte-identical elsewhere.** The messages table, the MESSAGES
       CSV `duration` and `duration_nice` cells, and every other output are
       byte-identical to the base on the raw and bin data models, with and
       without consolidation, and at `-cp full`; the run index's duration
@@ -446,17 +491,23 @@ issue body.
       and sorted scenarios over four log families carry both cells;
       `tests/validate-csv-output.sh` passes its existing scenarios;
       `tests/validate-index-read-back.sh` passes unchanged.*
-- [ ] **6. An unobserved total is empty in both cells under `-od` (D7).** Under
+- [x] **6. An unobserved total is empty in both cells under `-od` (D7).** Under
       `-od -o`, every MESSAGES row has every duration column, `duration_nice`
       and `impact` empty.
       *Method: a new `tests/validate-csv-output.sh` scenario on the same
       twelve-line fixture, `-bs 1440 -oe -ni -n 12 -od`, declaring the duration
-      family active so the validator's existing family-consistency check (the
-      rules TSV's `duration` family: min, mean, max, the total, its nice twin
-      and impact; "all populated or all empty") and its `nice` type check read
-      the row. It fails on the base (`duration_nice` = `0`, a bare number,
-      beside empty cells) and passes after.*
-- [ ] **7. No nice formatting per line; cost measured (D6).** The per-line path
+      family switched off (`-duration` in its families column). Declaring the
+      family active, as first specified, does not work: the declaration binds
+      both CSVs, and under `-od` the STATS CSV leaves its duration columns out,
+      which the validator reports as missing. The harness therefore learns the
+      switched-off state `-od` creates: every column the rules make
+      `conditional:duration` (the duration statistics, percentiles, dispersion,
+      shape, the total, its nice twin and impact) is absent from the STATS
+      header and empty in every MESSAGES row. It fails on the base
+      (`duration_nice` = `0` on all twelve rows) and passes after; the STATS
+      absence check is shown to fail on a STATS CSV that carries the columns.
+      Architect's direction 2026-09-29.*
+- [x] **7. No nice formatting per line; cost measured (D6).** The per-line path
       of `read_and_process_logs` carries only numeric accumulation of the
       total: no display formatter is reachable per line. The before/after
       benchmark shows no metric worse by more than 1 percent across repeated
@@ -469,7 +520,7 @@ issue body.
       not per line. Then `tests/baseline/run-benchmark.sh
       single-day-access-log-standard` before and after, and
       `compare-results.sh summary`.*
-- [ ] **8. The bucket total on one surface, output unchanged (D5, D9).** Given
+- [x] **8. The bucket total on one surface, output unchanged (D5, D9).** Given
       the bucket-store drop, a bucket's total and its highlighted share are
       each held under one name from the read loop to the last reader: no site
       copies them under a second name, and the staged statistics input seeds no
@@ -487,7 +538,7 @@ issue body.
 
 **Visual**
 
-- [ ] **9. The messages-table total reads as before.** On a real web-server
+- [x] **9. The messages-table total reads as before.** On a real web-server
       access log carrying millisecond durations, with `-n 12 -so duration`
       (statistics variant on), the messages table's `Duration` column is looked
       at on the base and on the change: every total, zero totals included,
@@ -513,7 +564,7 @@ None. No prototyping scope.
 |---|---|---|
 | `-V` sections | none read by a new assertion, none changed | no key, header or format moves |
 | `-V benchmark-data` `MEMORY log_messages` | read by the benchmark only | a value, not a key; expected lower |
-| `tests/validate-csv-output.sh` | two scenarios added (criteria 4 and 6), two opt-in checks (ordering, zero cell) added to `tests/csv-output/validate-csv-output.pl` | the rules TSV types `duration_nice` as a unit-bearing string in family `duration`; an empty cell in an all-empty family is what the family-consistency check already requires |
+| `tests/validate-csv-output.sh` | two scenarios added (criteria 4 and 6); two opt-in directives (ordering, zero cell) and the switched-off family declaration added to `tests/csv-output/validate-csv-output.pl`, documented in `tests/csv-output/README.md` | the rules TSV types `duration_nice` as a unit-bearing string conditional on durations; a switched-off family's columns are absent where dynamic and empty where fixed |
 | `tests/validate-statistics.sh` | no baseline moves | output is byte-identical |
 | `tests/validate-regression.sh` | no reference moves | output is byte-identical |
 | `tests/validate-index-read-back.sh` | unchanged, run in the gate | the index reads its own per-file accumulators (§ 3 item 12) |
@@ -533,6 +584,44 @@ Each new scenario lists under `--list`, runs alone under `--scenario`, carries
 runtime-warning check, and is shown to fail on the base before the change is
 applied. Any `ltl` output a check writes into the worktree is deleted by the
 run that made it.
+
+---
+
+## Completion gate
+
+Run 2026-09-29 on 49d3e09 (`$version_number` restored to `0.19.0`), on the
+architect's development machine.
+
+**Harness suite.** All 43 `tests/validate-*.sh` exit 0, run with `CI=1`,
+`validate-csv-output.sh` first and `validate-statistics.sh` second; every
+summary reports assertions run, no FAIL line, no runtime warning. Among them:
+CSV output 25 scenarios, statistics drift 22 scenarios, regression 74,
+aggregate export 146, index read-back all passing, statistics demand 102.
+
+**Benchmark.** `single-day-access-log-standard` (the 761,698-line Tomcat 9
+access log with millisecond durations), three runs each, interleaved; the
+before runs on the base `ltl` (identical in `release/0.19.0` at 977e017 and
+at the specification commit), the after runs on 49d3e09. Medians with ranges:
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| `TIMING parse/read_files` | 9.05 s [8.98–9.39] | 8.95 s [8.80–9.12] | −1.1% |
+| `TIMING finalize/calculate_statistics` | 104 ms [101–117] | 102 ms [99–103] | −1.9% |
+| `TIMING total` | 9.18 s [9.10–9.51] | 9.06 s [8.92–9.23] | −1.3% |
+| `MEMORY log_messages` | 28.17 MB [28.17–28.18] | 28.03 MB [28.02–28.03] | −0.52% |
+| `MEMORY log_stats` | 28,220 B | 28,230 B | +0.03% |
+| `MEMORY rss_peak` | 104.2 MB [104.1–104.5] | 104.3 MB [104.1–104.4] | +0.16% |
+
+No metric is worse by more than 1 percent. The message store falls by one
+numeric field per message key that saw a duration, as § Measurement
+obligations expected. The read loop is no slower: the ranges overlap and the
+medians favour the change, consistent with one hash update per timed line
+removed. `compare-results.sh summary` on the first pair alone reports
+`rss_peak` +0.3% (+320 KB) as a regression; over three runs the medians
+differ by 0.16% with overlapping ranges, and the only store the change
+touches got smaller, so it is run-to-run variation of the process peak, not
+an effect of the change. `log_stats` grows by 10 bytes, the
+longer `duration_sum` key.
 
 ---
 

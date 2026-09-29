@@ -49,6 +49,7 @@ the errors and help rows read cannot disagree with the parser.
 - `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` over `@output_sections`, `@visibility_columns` and their alias tables.
 - `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
 - `bpd_for_surface` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];` over `%TIER_BPD`.
+- `column_total_field` :: `return $column_total_field{$column} // $column;` over `%column_total_field`, read by the bar scaling in `normalize_data_for_output` and the timeline cell in `print_bar_graph`.
 
 **Owning record.** `features/524-bucket-size-unit.md` D1 and D2 (the time-unit
 ladder: one ladder at file scope, no sub keeps a table of its own) is the
@@ -412,6 +413,46 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `features/524-bucket-size-unit.md` D1 (time units).
 
 **Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #608, #613, #614, #615, #616, #617, #618, #619 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
+
+---
+
+## Precise storage, formatting at the output boundary
+
+**Definition.** A value in a data store (`%log_messages`, `%log_stats`,
+`%log_analysis`, `%heatmap_data`, `%log_occurrences`) keeps the type and
+precision the computation produced for its whole life. Rounding and unit
+formatting happen only where the value leaves the tool, per surface, once per
+write, and the result is never stored: the CSV writers pass numbers through
+`format_csv_value`, and a nice column is rendered beside its raw twin in the
+row being written.
+
+**Intended uses.** Any stored statistic, total or mean, and any new renderer
+of one. A renderer that wants a different tier, width or unit formats the
+number itself at its own emit site; it never reads a string another surface
+made.
+
+**Reasoning.** Measured cases: the integer-truncated mean behind #271 made
+the emitted standard deviation 15.664 against the reference implementation's
+12.495 on a 155,109-sample access-log message; storage-time rounding behind
+#268 hid any drift below display precision from the statistics harness; the
+per-message duration total stored as its medium-tier string (until #273) left
+no tier to any later renderer and needed a second numeric field beside it for
+the sort and the CSV's raw cell.
+
+**Consumption sites.**
+- `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;`
+- `print_bar_graph` :: `ltrim(format_duration_total($log_stats{$bucket}{duration_sum}, 'medium', ' '))`
+- `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num,'B' ) : undef;`
+- `print_message_summary` :: `format_duration_total( $total_duration, 'medium', 'space' ) // ""` (the messages-table total)
+- `print_message_summary` :: `format_duration_total( $total_duration, 'medium', 'space' ),` (the MESSAGES CSV `duration_nice`, beside `format_csv_value($total_duration,    'duration'),`)
+- `format_csv_value` :: `my $family = resolve_csv_column_family($column);` (every CSV emit)
+
+**Owning record.** `features/273-store-precise-duration-totals.md`, with
+#268's completion record and `releases/v0.15.0.md`.
+
+**Status.** Established. #616 (one gated derivation of means and totals) adds
+the per-message bytes mean as a site; its entry (observation counts and gated
+means) cross-references this one.
 
 ---
 

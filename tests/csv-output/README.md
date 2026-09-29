@@ -84,7 +84,23 @@ One row per scenario:
 | `scenario` | Short identifier; pass to `--scenario` |
 | `logfile` | Path under repo root |
 | `options` | `ltl` command-line options (excluding `--disable-progress` and `-o`, which the harness adds) |
-| `expected_families` | Comma-separated families expected to be active for this scenario |
+| `expected_families` | Comma-separated families expected to be active for this scenario. A family prefixed `-` is switched off (`-duration` under `-od`): every column the rules make `conditional:<family>` must be absent from the header where its position is dynamic (STATS) and empty in every row where it is fixed (MESSAGES) |
+| `expected_categories` | Optional. Path under `tests/csv-output/` of a TSV of content assertions on the MESSAGES rows (below) |
+
+### Expected-categories TSV
+
+Header `message_match<TAB>expected`, then one assertion per row: a fixed
+substring of the `message` column and the category every matching row carries
+(`highlight`, `plain`) or `absent` (no row may match). Directive rows:
+
+| Directive | Asserts |
+|---|---|
+| `@no_highlight_rows` | no row carries category `highlight` |
+| `@non_increasing<TAB><column>` | rows are in non-increasing numeric order of the column (the `-so` sort) |
+| `@zero_duration_nice<TAB><value>` | every row whose `duration` is 0 carries that `duration_nice` (a zero total in the source's unit) |
+
+A directive whose rows are missing (no zero-duration row, fewer than two rows
+to order) fails; an unknown directive stops the validator.
 
 ## Known outstanding finding
 

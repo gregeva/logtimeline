@@ -16,13 +16,23 @@
 #   validate-csv-output.pl --rules <rules.tsv> --csv <file.csv>
 #                          --scenario <name> --file-kind messages|stats
 #                          --expected-families <comma-list>
+#                          (a family prefixed '-' is switched off: see below)
 #                          [--expected-categories <expected.tsv>]
 #
 # Expected-categories TSV (messages kind only): header `message_match\texpected`,
 # one row per assertion. `message_match` is a fixed substring matched against
 # the message column; `expected` is `highlight`, `plain`, or `absent` (no row
 # may match). A directive row `@no_highlight_rows` asserts the file contains
-# no highlight-category rows at all.
+# no highlight-category rows at all. `@non_increasing<TAB><column>` asserts the
+# rows are in non-increasing numeric order of that column (the sort under
+# `-so`); `@zero_duration_nice<TAB><value>` asserts every row whose `duration`
+# is zero carries that `duration_nice` (a zero total in the source's unit).
+#
+# A family prefixed '-' in --expected-families (`-duration`) declares the metric
+# switched off for the scenario (`-od` switches off durations). Every column
+# the rules make conditional on it (`required = conditional:<family>`) must
+# then be absent from the header where its position is dynamic (the STATS
+# CSV), and empty in every row where its position is fixed (the MESSAGES CSV).
 #
 # Exit 0 on success, 1 on any FAIL.
 
@@ -75,13 +85,29 @@ if ($opt{profile_mode} ne '' && !exists $PROFILE_MODE_CARRIES_WEEKDAY{ $opt{prof
     die "unknown --profile mode '$opt{profile_mode}': add it to %PROFILE_MODE_CARRIES_WEEKDAY\n";
 }
 
-my %active_family = map { $_ => 1 } split /,/, $opt{expected_families};
+my (%active_family, %off_family);
+for my $family (split /,/, $opt{expected_families}) {
+    if ($family =~ /^-(.+)$/) { $off_family{$1} = 1 } else { $active_family{$family} = 1 }
+}
+for my $family (sort keys %off_family) {
+    die "family '$family' is declared both expected and switched off\n" if $active_family{$family};
+}
 
 # Parse the -V csv-output / precision block — locked observability surface
 # per #268. Field-name keys without source-annotation suffix.
 my %vp = load_v_precision($opt{v_precision});
 
 my @rules = load_rules($opt{rules});
+
+# Columns that exist only because a switched-off family's metric is captured.
+# A switched-off family no rule is conditional on would assert nothing.
+my @off_rules;
+for my $family (sort keys %off_family) {
+    my @conditional = grep { $_->{required} eq "conditional:$family" } @rules;
+    die "switched-off family '$family': no rules column is conditional:$family in $opt{rules}\n"
+        unless @conditional;
+    push @off_rules, @conditional;
+}
 
 my @expected_categories;
 if (defined $opt{expected_categories}) {
@@ -109,6 +135,7 @@ if ($opt{file_kind} eq 'messages') {
 
 # --- Phase 1: column structure ---
 $fails += check_column_structure($header_row, \@rules);
+$fails += check_off_family_columns_absent($header_row, \@off_rules);
 
 my %rule_by_name = map { $_->{column} => $_ } @rules;
 my %col_index;
@@ -129,6 +156,7 @@ while (my $row = $csv->getline($fh)) {
             row      => $row_num,
             category => $row->[$col_index{category}] // '',
             message  => $row->[$col_index{message}] // '',
+            cells    => { map { $_ => $row->[$col_index{$_}] // '' } keys %col_index },
         };
     }
 
@@ -187,6 +215,10 @@ while (my $row = $csv->getline($fh)) {
         $fails += check_storage_precision_invariants($row, \%col_index, $row_num);
     }
 
+    # switched-off family: every fixed-position column it conditions is empty.
+    $fails += check_off_family_cells_empty($row, \%col_index, \@off_rules, $row_num);
+    $checks++ if grep { $_->{position} ne '*' } @off_rules;
+
     # group-consistency check: for each active family, all conditional columns
     # in this row must be uniformly populated or uniformly empty.
     for my $family (keys %active_family) {
@@ -223,6 +255,22 @@ while (my $row = $csv->getline($fh)) {
     }
 }
 close $fh;
+
+# A switched-off family with fixed-position columns is asserted row by row, so
+# a file with no data rows asserted nothing about it.
+if ($row_num == 1 && grep { $_->{position} ne '*' } @off_rules) {
+    emit_fail({
+        scenario => $opt{scenario}, file => $opt{file_kind}, row => '-',
+        column => '(switched-off family)',
+        asserts => 'a scenario declaring a switched-off family writes at least one data row to check it against',
+        produced_by => producer($opt{file_kind}),
+        contract => 'tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors',
+        expected => 'at least one data row',
+        actual => 'header only',
+        rule => 'switched-off family',
+    });
+    $fails++;
+}
 
 # --- Phase 3: expected-categories checks (messages kind, opt-in per scenario) ---
 if (@expected_categories) {
@@ -510,6 +558,54 @@ sub check_type_and_decimals {
     return $f;
 }
 
+# A switched-off family's dynamic-position columns are not emitted at all.
+sub check_off_family_columns_absent {
+    my ($header, $off_rules) = @_;
+    my %header_set = map { $_ => 1 } @$header;
+    my $fails = 0;
+    for my $r (@$off_rules) {
+        next unless $r->{position} eq '*';
+        next unless $header_set{$r->{column}};
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 1,
+            column => $r->{column},
+            asserts => "column '$r->{column}' is absent from the header when its metric is switched off ($r->{required})",
+            produced_by => producer($opt{file_kind}),
+            contract => 'tests/csv-output/README.md § Scenarios TSV schema — a switched-off family',
+            expected => 'absent from header',
+            actual => 'present',
+            rule => "switched-off family, dynamic column",
+        });
+        $fails++;
+    }
+    return $fails;
+}
+
+# A switched-off family's fixed-position columns stay in the header, empty in
+# every row: no value is emitted for a metric the run never captured.
+sub check_off_family_cells_empty {
+    my ($row, $col_index, $off_rules, $row_num) = @_;
+    my @populated;
+    for my $r (@$off_rules) {
+        next if $r->{position} eq '*';
+        next unless exists $col_index->{$r->{column}};
+        my $v = $row->[$col_index->{$r->{column}}];
+        push @populated, "$r->{column}=$v" if defined $v && $v ne '';
+    }
+    return 0 unless @populated;
+    emit_fail({
+        scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+        column => '(switched-off family)',
+        asserts => 'every column conditional on a switched-off metric is empty in every row',
+        produced_by => producer($opt{file_kind}),
+        contract => 'features/273-store-precise-duration-totals.md § Acceptance criteria 6 — an unobserved total is empty in every cell under -od',
+        expected => 'all empty',
+        actual => 'populated: ' . join(', ', @populated),
+        rule => 'switched-off family, fixed column',
+    });
+    return 1;
+}
+
 sub producer {
     my ($kind) = @_;
     return $kind eq 'messages' ? 'print_message_summary' : 'print_bar_graph';
@@ -528,6 +624,15 @@ sub load_expected_categories {
             push @exps, { directive => 'no_highlight_rows' };
             next;
         }
+        if ($line =~ /^\@non_increasing\t(\S+)$/) {
+            push @exps, { directive => 'non_increasing', column => $1 };
+            next;
+        }
+        if ($line =~ /^\@zero_duration_nice\t(.+)$/) {
+            push @exps, { directive => 'zero_duration_nice', value => $1 };
+            next;
+        }
+        die "unknown expected-categories directive: $line\n" if $line =~ /^\@/;
         my ($match, $expected) = split /\t/, $line, -1;
         die "bad expected-categories row (need message_match<TAB>expected): $line\n"
             unless defined $match && $match ne ''
@@ -540,6 +645,10 @@ sub load_expected_categories {
 
 sub check_expected_category {
     my ($exp, $rows) = @_;
+
+    my $directive = $exp->{directive} // '';
+    return check_non_increasing($exp->{column}, $rows)      if $directive eq 'non_increasing';
+    return check_zero_duration_nice($exp->{value}, $rows)   if $directive eq 'zero_duration_nice';
 
     if (($exp->{directive} // '') eq 'no_highlight_rows') {
         my @hl = grep { $_->{category} eq 'highlight' } @$rows;
@@ -603,6 +712,72 @@ sub check_expected_category {
         rule => "expected=$exp->{expected} match='$exp->{match}'",
     });
     return 1;
+}
+
+# The rows appear in non-increasing order of the named column: the order
+# the -so sort key gives the MESSAGES rows. A missing column, fewer than two
+# rows or a non-numeric cell is a failure, never a vacuous pass.
+sub check_non_increasing {
+    my ($column, $rows) = @_;
+    my %fail = (
+        scenario => $opt{scenario}, file => $opt{file_kind},
+        column => $column,
+        asserts => "MESSAGES rows are in non-increasing order of '$column' under the scenario's -so sort",
+        produced_by => 'calculate_all_statistics() sort comparator over $sort_key in ltl',
+        contract => 'features/273-store-precise-duration-totals.md § Acceptance criteria 4 — -so duration ranks by the stored total',
+        rule => "\@non_increasing $column",
+    );
+    if (@$rows < 2 || !exists $rows->[0]{cells}{$column}) {
+        emit_fail({ %fail, row => '-', expected => "at least two rows carrying '$column'",
+                    actual => scalar(@$rows) . ' rows' });
+        return 1;
+    }
+    for my $r (@$rows) {
+        my $v = $r->{cells}{$column};
+        next if $v =~ /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+        emit_fail({ %fail, row => $r->{row}, expected => 'a number', actual => qquote($v) });
+        return 1;
+    }
+    for my $i (1 .. $#$rows) {
+        my ($prev, $cur) = ($rows->[$i - 1], $rows->[$i]);
+        next if $cur->{cells}{$column} <= $prev->{cells}{$column};
+        emit_fail({ %fail, row => $cur->{row},
+                    expected => "<= $prev->{cells}{$column} (row $prev->{row})",
+                    actual => "$cur->{cells}{$column} ($cur->{message})" });
+        return 1;
+    }
+    return 0;
+}
+
+# Every row whose duration total is zero renders its nice twin as declared:
+# a zero total in the source's resolved unit, not the ladder's lowest step.
+# No zero-total row is a failure: the scenario's fixture must carry one.
+sub check_zero_duration_nice {
+    my ($value, $rows) = @_;
+    my %fail = (
+        scenario => $opt{scenario}, file => $opt{file_kind},
+        column => 'duration_nice',
+        asserts => "every MESSAGES row whose duration is 0 carries duration_nice '$value'",
+        produced_by => 'print_message_summary() MESSAGES CSV emission (format_duration_total) in ltl',
+        contract => 'features/273-store-precise-duration-totals.md § Acceptance criteria 3 — a zero total renders in the source unit',
+        rule => "\@zero_duration_nice $value",
+    );
+    my @zero = grep {
+        my $d = $_->{cells}{duration} // '';
+        $d ne '' && $d =~ /^[-+]?[\d.]+(?:[eE][-+]?\d+)?$/ && $d == 0
+    } @$rows;
+    if (!@zero) {
+        emit_fail({ %fail, row => '-', expected => 'at least one row with duration 0', actual => 'none' });
+        return 1;
+    }
+    for my $r (@zero) {
+        my $nice = $r->{cells}{duration_nice} // '';
+        next if $nice eq $value;
+        emit_fail({ %fail, row => $r->{row}, expected => qquote($value),
+                    actual => qquote($nice) . " ($r->{message})" });
+        return 1;
+    }
+    return 0;
 }
 
 sub emit_fail {
