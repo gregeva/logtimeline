@@ -74,6 +74,12 @@ warnings, and turns `UDM metric … not found in CSV headers` in
 `detect_and_parse_csv_header()` into a run-level note. #638 D5 also changes
 `udm_read_as()` (`source=`) and the `-V udm-specs` section.
 
+**Sequence (architect, 2026-09-30): #637, then #638, then #640, one after
+another.** Each issue branches from `release/0.18.5` only after the previous
+one's PR has merged and its close-out is complete, because all three change
+the same metric-capture block. Recorded as native blocked-by edges: #638 is
+blocked by #637, #640 is blocked by #638. Start with #637.
+
 Next steps, per issue, following `docs/process/workflow.md`:
 
 1. Check out `release/0.18.5` and sync it; branch `{issue}-{short-description}`
