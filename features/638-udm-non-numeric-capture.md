@@ -155,9 +155,18 @@ path, which share the coercion line.
   - On a run that reads a CSV file, a metric declared with unit `B` is shown as
     `unit=b(bytes)`; `KB`, `ms` and `k` are shown correctly, and `B` is shown
     correctly on a run without CSV input. Minimal reproduction: a two-line CSV
-    with no `timestamp` column and `-udm "q:B:max:/q=(\d+)/"`. The stored
-    unit is already `b` when the section is rendered; root cause under
-    investigation.
+    with no `timestamp` column and `-udm "q:B:max:/q=(\d+)/"`. Root cause,
+    found after D5 was recorded: CSV input is not involved. In
+    `parse_udm_configs()`, `%byte_unit_canonical = map { lc($_) => $_ } keys %byte_units`
+    folds `B`/`b` and `kB`/`KB` onto the same lower-case key, so which spelling
+    wins depends on Perl's per-process hash order. Measured over 20 runs per
+    unit: `B` rendered `B` 24 times and `b` 16 times per output line, on CSV and
+    plain log input alike; `KB` resolved to `KB` (1024) or `kB` (1000) at
+    random, so `-udm 'q:KB:max'` over `q=1000` reported `max=1024000` on one
+    hash seed and `max=1000000` on another, with CSV columns `q_KB_*` or
+    `q_kB_*`. This is #608 (byte unit resolves nondeterministically), closed
+    and fixed on release/0.19.0 by one byte-unit ladder in which `KB` is the SI
+    kilobyte (1000). It is present on release/0.18.5.
   Any `-V udm-specs` key change follows `tests/HARNESS-DESIGN.md` and updates
   the section contract in `features/user-defined-metrics.md` in the same
   commit.
