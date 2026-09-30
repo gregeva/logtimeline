@@ -121,14 +121,14 @@ are unchanged.
 
 ## Acceptance criteria
 
-- [ ] A CSV file with no parsable timestamp in any row (the index is the
+- [x] A CSV file with no parsable timestamp in any row (the index is the
       reference case) produces no stderr output and shows as nothing matched
       in the file list; `-V filter-summary` counts its rows as read and not
       matched (assertable: `tests/validate-csv-input.sh`).
-- [ ] A CSV mixing parsable and unparsable rows places the parsable rows on
+- [x] A CSV mixing parsable and unparsable rows places the parsable rows on
       the timeline and prints no per-row or per-file timestamp message
       (assertable: same harness).
-- [ ] A CSV row without a parsable timestamp is skipped before the metric
+- [x] A CSV row without a parsable timestamp is skipped before the metric
       capture: it sets no `delta` baseline and does not count in
       `matched_lines` (assertable: four-row ISO CSV whose second data row reads
       `not a date`, `-udm 'value::delta:sum'`: the third data row's delta is
@@ -136,15 +136,23 @@ are unchanged.
       three data rows, not 3). Today the capture and the match count run
       before the timestamp check (`features/615-csv-registry-entry.md` § 3
       item 4 on release/0.19.0 measured this; #615 D8 is amended to match).
-- [ ] With `-udm` naming a column absent from a CSV whose rows matched, stderr
+- [x] With `-udm` naming a column absent from a CSV whose rows matched, stderr
       carries exactly one `Note: -udm '<spec>': …` line for that spec across
       any number of such files, giving their count and no file name
       (assertable: two such files in one run).
-- [ ] With the same `-udm` over a CSV whose rows never matched, no such note
+- [x] With the same `-udm` over a CSV whose rows never matched, no such note
       prints (assertable: the index as input).
-- [ ] No row without a parsable timestamp reaches the date parse: no runtime
+- [x] No row without a parsable timestamp reaches the date parse: no runtime
       warning, no fatal error (assertable: `tests/lib/runtime-warnings.sh`
       on a quoted-timestamp CSV, the #328 reproduction shape).
+
+Gate (2026-09-30, commit bdc3135, version 0.18.5): full suite 43 of 43
+harnesses exit 0; `single-day-access-log-standard` before/after on this
+machine: total 9.7 s to 9.5 s (single run, the change is off the log-line
+path), rss_peak 100.1 MB to 99.6 MB, lines read and included identical.
+The index criterion is asserted with the index read beside a log that
+produces the metric: read alone, the run-level zero-match note (#443) rightly
+prints, since nothing in that run produced it.
 
 ## Implementation
 
