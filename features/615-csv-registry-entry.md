@@ -129,8 +129,9 @@ impossible-date guard, the CSV epoch arm's input, the timezone suffix and the
 `-st`/`-et` parser) belongs to #611 (the timestamp acceptance pattern), which
 lands on the one generated parse this issue produces. This issue keeps today's
 per-row behaviour: the abort on a date that is impossible under the order the
-file is read with (D7) and the late skip of a row whose timestamp is neither
-epoch nor ISO (D8). The one date question this issue does answer is per file,
+file is read with (D7), and a row whose timestamp is neither epoch nor ISO read
+and not matched, silently, before any further processing (D8, as #640 D1
+delivers it on release 0.18.5). The one date question this issue does answer is per file,
 before any row is read: which of the two date orders the file's sampled rows are
 written in (D9). It is settled once, so a file whose sampled dates are real only
 when read day first is read day first instead of aborting (D15).
@@ -197,8 +198,8 @@ was looked for and what was found.
    row reads `not a date`, with `-udm 'value::delta:sum'`: the third data row's
    delta is 70, the difference from the skipped row's value, where skipping the
    row outright would give 165; `-V format-detection` reports `matched_lines: 3`
-   for three data rows of which one was skipped. D8 keeps this as it is and
-   hands the case to the issue that owns delta semantics (§ 5.5, § 10).
+   for three data rows of which one was skipped. D8 removes both: the row is
+   skipped before the capture and the match count (§ 5.5).
 
 5. **The CSV February 30 case exits 255, not 1.** Looked for: the audit
    table's exit code for a CSV row carrying `2025-02-30`. Found: a two-row CSV
@@ -302,16 +303,17 @@ this document is numbered Dxx.
   generated text. *Locked by the architect 2026-09-28; the clause "under the
   order the file is read with" is the architect's amendment of 2026-09-28
   (D15).*
-- **D8 — The skip of a row with an unacceptable timestamp stays where it is.** A
-  row whose timestamp is neither epoch nor ISO is skipped after the metric
-  capture, as today, so the skipped row still sets the `delta` baseline for the
-  next row and still counts as matched. The measured case (§ 3 item 4: the next
-  row's delta reads 70 where skipping the row outright would give 165) is
-  recorded here and also on the open issue that will handle the delta cases in
-  the future, found by searching the open issues; if no open issue owns delta
-  semantics, that is reported back rather than filed. *Locked by the architect
-  2026-09-28 ("make sure this is recoreded also to the ticket which will handle
-  the delta cases in the future (look for it)").*
+- **D8 — A row with an unacceptable timestamp is not matched, and nothing
+  further happens to it.** A row whose timestamp is neither epoch nor ISO is
+  read and not matched: it is skipped before the metric capture and the
+  per-file match count, never sets the `delta` baseline, does not count in
+  `matched_lines`, and prints nothing, per row or per file. This is #640 D1
+  (`features/640-csv-unplaced-rows-silent.md`, release 0.18.5): a line is
+  placed on the timeline only once its timestamp parses, and only a placed line
+  goes on to any further processing. The measured case of § 3 item 4 (the next
+  row's delta read 70 from the skipped row) becomes 165. *Locked by the
+  architect 2026-09-28; amended by the architect 2026-09-30 to follow #640 D1,
+  replacing "the skip stays after the metric capture, as today".*
 - **D9 — An instantiated CSV block is validated on the file's actual data, not
   on synthetic rows.** Following the tool's standard practice, the block is
   validated on rows sampled from several parts of the file through the existing
@@ -390,7 +392,7 @@ Standing decisions this work must keep (not re-locked here, owned elsewhere):
 | `features/log-format-registry.md` | trap F11 of the lazy scan-sub compilation record (a mid-run compile disturbs nothing of the run's state) | validating the CSV block snapshots and restores the record lexicals, the memo and the date cache |
 | `features/log-format-registry.md` | N3 (the date cache is keyed by date string alone; an occupant change clears it and the memo) | the CSV block clears the memo and the date cache at instantiation, and a day-first CSV block leaves no day-first reading behind (§ 5.4) |
 | `features/58-format-registry-staged-detection.md` | A6 and P8 (the fast path's exact semantics and the date cache's parity) | per-row epoch, fractional milliseconds, cache keys and the index precision hint stay identical for a month-first file |
-| `features/user-defined-metrics.md` | § CSV Columnar Input (skip, count, warn once per file for a timestamp that is neither epoch nor ISO) and § Epoch timestamps (epoch detected on the first data row; `-du` sets its unit) | kept as they are (D7, D8); #611 (the timestamp acceptance pattern) owns any change |
+| `features/user-defined-metrics.md` | § CSV Columnar Input (a row whose timestamp is neither epoch nor ISO is an unmatched line, silently, per #640 D1) and § Epoch timestamps (epoch detected on the first data row; `-du` sets its unit) | kept as they are (D7, D8); #611 (the timestamp acceptance pattern) owns any change |
 
 D31 of the format registry (the time contract compiled to per-layout parse
 closures) is the decision that this issue's D4 (the uncalled closures go)
@@ -514,7 +516,7 @@ one does. The layout's name is an implementation detail.
   (`delta`, `idelta`), unit conversion, counting and aggregation stay in the
   shared capture block, which reads the values the CSV block extracted, by the
   metric's position in the `-udm` list, with no column-map lookup per row (D10).
-  Because the capture stays where it is, the late skip stays after it (D8).
+  The skip of a row with an unacceptable timestamp comes before it (D8).
 - **Instantiation clears the memo and the date cache** (`$format_last_ts_str`,
   `$format_last_ts_epoch`, and the date cache), as an occupant swap does (N3:
   the date cache is keyed by date string alone). A file read day first clears
@@ -533,21 +535,11 @@ one does. The layout's name is an implementation detail.
 
 ### 5.5 Where a row with an unacceptable timestamp is skipped
 
-Settled by D8: the skip stays after the metric capture and the per-file match
-count, so the skipped row still sets the `delta` baseline and counts as matched.
-The block runs at the top of the loop, where the parse for scanned lines runs,
-so it records that the row's timestamp failed the shape check and does not
-parse it; the skip, its count and its once-per-file warning stay at their
-current place, reading that flag instead of re-testing the string (proposed:
-the flag is the mechanism). The warning text and the value it quotes (after the
-fraction strip) are unchanged.
-
-The measured delta case of § 3 item 4 is handed to the issue that owns delta
-semantics (D8). A search of the open issues on 2026-09-28 (`gh issue list
---state open --search delta`, and the user-defined-metrics record's delta and
-implied-duration references) found #61 (derived metrics, intra-line and
-inter-line), whose inter-line section owns the `delta` and `idelta` state; the
-specification's delivery confirms it and comments the case there (§ 10).
+Settled by D8: before the metric capture and the per-file match count. The
+block runs at the top of the loop, where the parse for scanned lines runs; a
+row whose timestamp fails the shape check is not parsed and leaves the loop as
+an unmatched line, with no message, as #640 D1 has it on release 0.18.5. No
+delta case is handed on: a skipped row sets no baseline.
 
 ### 5.6 Validation of an instantiated block
 
@@ -578,8 +570,8 @@ layout. How:
   for that row (the wiring proof: timestamp, every metric, every message
   column), and the row's timestamp, when it is of the file's kind, gives a real
   date under the block's date order. A row whose timestamp is not of the file's
-  kind, or neither epoch nor ISO, is not a failure: its handling is today's
-  per-row contract (D7, D8).
+  kind, or neither epoch nor ISO, is not a failure: it is handled per row by
+  D7 and D8.
 - **A wiring mismatch** stops the run before line 2 is processed, with the
   registry's codegen diagnostic, as a generated scan sub that fails its samples
   does.
@@ -666,8 +658,9 @@ one block alive at a time".
 - **Telemetry.** The compile counts of § 5.7, and the `TIMING
   detect/scan_sub_compile` row on CSV runs, which now includes one small compile
   per header shape.
-- Unchanged: every other option, notice, CSV cell and rendered string; the
-  once-per-file CSV skip warning is byte-identical.
+- Unchanged: every other option, notice, CSV cell and rendered string. The
+  per-row and per-file CSV timestamp warnings are gone, as #640 D1 removes
+  them on release 0.18.5 (D8).
 
 ### 5.10 The pattern entries
 
@@ -702,23 +695,22 @@ mechanism to reuse, the criterion names it.
       a CSV read with `-ucm` give the same bucket timestamps and metric values,
       the same `-V filter-summary` line accounting and the same `-V
       format-detection` per-file counts as before, with stderr clean of runtime
-      warnings beyond the intentional skip warning. **Assertable**: new
+      warnings. **Assertable**: new
       scenarios in `tests/validate-csv-input.sh`, fixtures generated inline,
       each run `-ni -bs 1 -o`; the expected bucket rows derived by hand from the
       fixture values, not captured from a run; the runtime-warning check
       (`tests/lib/runtime-warnings.sh`) in every scenario.
-- [ ] **AC2. Today's bad-row behaviour holds** (D7, D8, D15). A row whose
-      timestamp is neither epoch nor ISO is skipped, counted as
-      `excluded_other`, and warned once per file naming file, line and value;
-      the next row's `delta` reads from the skipped row's value (70 on the
-      four-row fixture of § 3 item 4) and the skipped row counts in
-      `matched_lines`; a February 30 row aborts the run; a month-13 row outside
+- [ ] **AC2. The bad-row behaviour holds** (D7, D8, D15). A row whose
+      timestamp is neither epoch nor ISO is read and not matched, prints
+      nothing, is absent from `matched_lines`, and leaves the next row's
+      `delta` reading from the previous placed row (165 on the four-row
+      fixture of § 3 item 4); a February 30 row aborts the run; a month-13 row outside
       the sample of a file whose sampled rows settled month first aborts the
       run, being impossible under the order the file is read with (D15); an
       epoch file's text row is handled as today.
-      **Assertable**: the skip, count and warning by the existing scenarios
+      **Assertable**: the skip and its accounting by the scenarios
       `csv-input` in `tests/validate-csv-input.sh` and `csv-unparseable-row` in
-      `tests/validate-filter-summary.sh`, unchanged; the rest by comparison,
+      `tests/validate-filter-summary.sh` as #640 leaves them; the rest by comparison,
       not a harness (so #611, the acceptance pattern, can change them without
       rewriting harnesses): the prototype's parity battery, and at delivery the
       same fixtures run on the base commit's `ltl` and the branch's, outputs
@@ -835,7 +827,7 @@ variables and move on CSV runs; attributed in the completion comment.
 | `tests/validate-csv-input.sh` | new scenarios for AC1 (same output for a month-first or epoch CSV), AC5 (the header builds the routine: the metric values), AC6 (validation on sampled rows with the day-first retry: a to c, and e) and AC11 (the `-ucs` and `-ucm` rows say what the options do: the behaviours) | the CSV Columnar Input contract names the values; D9, D14 and D15 are the new contract lines; nothing existing changes |
 | `tests/validate-format-registry.sh` | new scenarios for AC5 (the header builds the routine: the compile count), AC6 (d) (the day-first signature listed) and AC7 (one CSV block alive, counted by the existing counters); the `asserts` text of the election invariants and of the inventory assertion that says `csv` is outside the compiled scan restated to include the CSV block | D11 restates the invariants; the keys and the `role=stateful` value are unchanged (`tests/HARNESS-DESIGN.md` § Stability contract) |
 | `tests/validate-help-content.sh` | nothing in the harness; it checks the corrected rows agree (AC11, the `-ucs` and `-ucm` rows say what the options do) | the rows change on both surfaces in one commit |
-| `tests/validate-filter-summary.sh` | nothing | the unparseable-row accounting is unchanged (D8) |
+| `tests/validate-filter-summary.sh` | nothing | the unparseable-row accounting is as #640 D1 leaves it (D8) |
 | `tests/validate-format-detection.sh` | nothing | `format: csv`, `match_type: 13` and `event_ledger: no` are unchanged; CSV rows stay outside `scan_attempts` |
 
 **Fixtures.** Generated inline by the harnesses, following
@@ -956,8 +948,7 @@ named CSV case; `tests/validate-help-content.sh`; `$version_number` stamped
 | Record | Update |
 |---|---|
 | #386 (per-format analysis precision) | native edge: blocked by this issue (D13) |
-| #61 (derived metrics, intra-line and inter-line), or the open issue the delivery's search confirms owns delta semantics | a comment with the measured case of § 3 item 4 (on a four-row ISO CSV whose second data row is not a date, read with `-udm 'value::delta:sum'`, the third row's delta reads 70 from the skipped row, where skipping outright gives 165; the skipped row counts as matched), pointing here (D8); if no open issue owns delta semantics, that is reported back, not filed |
-| #611 (the timestamp acceptance pattern) | a comment pointing here: the late skip and its delta baseline are kept by D8 and handed to it; a CSV file's date order is settled once per file from its sampled rows with a day-first retry, before any row is read (D9, D15), and a row impossible under that order keeps today's abort (D7) until it lands its pattern; its inverted-layout design builds on this |
+| #611 (the timestamp acceptance pattern) | a comment pointing here: a row whose timestamp is unacceptable is not matched and prints nothing (D8, #640 D1); a CSV file's date order is settled once per file from its sampled rows with a day-first retry, before any row is read (D9, D15), and a row impossible under that order keeps today's abort (D7) until it lands its pattern; its inverted-layout design builds on this |
 | #608 (the byte ladder) | a comment: this issue removes the time-parse closure slot and renumbers the later slot constants, #608 adds a byte-notation slot; whichever lands second rebases the constants |
 | #619 (the per-run key cut) | a comment: both issues add to one boundary-notes section of `tests/baseline/README.md` (this issue the named CSV selection, #619 its boundary note); whichever lands second merges. #619 moves a CONFIG line of `-V benchmark-data` on `-o` and `-g` runs; this issue moves the compile-count COUNTS rows on CSV runs |
 | #615 | a comment pointing here: specification agreed; the nine decisions of 2026-09-28 (D7 to D15) recorded |
