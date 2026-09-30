@@ -56,24 +56,24 @@ are unchanged.
   midnight, and exits 0. Owned by #611 (one rule for accepting timestamps),
   into which #612 was merged.
 
-- **The index as a CSV input test case** (architect: `ltl-index.csv` is a test
-  case for CSV input and should give valid output). Measured on the index from
-  the #629 reproduction, with `-ni -bs 1 -udm "line_count::sum"`:
+- **The index read as CSV input.** Measured on the index from the #629
+  reproduction, with `-ni -bs 1 -udm "line_count::sum"`:
   - The file is comma-separated (26 fields, no tab). Tab-separated input is
     already supported: `detect_and_parse_csv_header()` picks among `,`, `;`
-    and tab by count, and `-ucs` overrides it; the same index converted to
-    tabs reads identically.
-  - As written: every row is skipped on `'file'` (column 0), `produced:
-    occurrences=0`.
-  - With only the header `first_timestamp` renamed to `timestamp`: the
-    `2026-08-11T19:30:10.495` values parse, `produced: occurrences=20
-    buckets=8`. The index writes a readable timestamp and CSV input reads that
-    form; the failure is solely which column is taken.
-  - The index has four time columns (`entry_date`, `file_mtime`,
-    `first_timestamp`, `last_timestamp`) with different meanings, and its
-    selection rows write `-` for an absent value; those rows are skipped
-    (`CSV timestamp '-'`), and a `-` in a numeric column prints the #638
-    (non-numeric capture) runtime warning.
+    and tab by count, and `-ucs` overrides it.
+  - Every row is skipped on `'file'`, the `entry_type` value in column 0,
+    with the "neither epoch nor ISO" warning; `produced: occurrences=0`.
+  - The index's own timestamp is `entry_date` (column 2), the time the entry
+    was written. `first_timestamp` and `last_timestamp` are not the row's time:
+    they record what ltl saw inside the analysed file the row describes.
+  - Selection rows write `-` for an absent value; a `-` in a numeric column
+    prints the #638 (non-numeric capture) runtime warning.
+- **Disposition of the index (architect).** The index is not a file ltl is
+  designed to analyse: its first field is an entry type, not a time. ltl does
+  not parse it. Its lines are skipped, as ltl skips any line that has no
+  acceptable timestamp where one is expected; a file read to the end with no
+  matched line prints no error or warning, and the file list shows that
+  nothing matched in it.
 
 ## Overlapping specifications on release 0.19.0
 
