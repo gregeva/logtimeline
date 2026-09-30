@@ -3,7 +3,8 @@
 #
 # Removes the shared scratch directory tests/.artifacts/ used by the test
 # harnesses for cross-harness artifact sharing (e.g., the CSV cache used
-# by validate-csv-output.sh and validate-statistics.sh).
+# by validate-csv-output.sh and validate-statistics.sh), and the run index
+# ltl-index.csv that ltl writes into the repository root when run from it.
 #
 # Per-harness traps that delete the cache are forbidden because they would
 # defeat cross-harness reuse. This is the only script in the test suite
@@ -22,9 +23,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/.artifacts"
+RUN_INDEX="$SCRIPT_DIR/../ltl-index.csv"
 
 if [[ -d "$ARTIFACTS_DIR" ]]; then
     rm -rf "$ARTIFACTS_DIR"
+fi
+
+if [[ -f "$RUN_INDEX" ]]; then
+    rm -f "$RUN_INDEX"
 fi
 
 exit 0
