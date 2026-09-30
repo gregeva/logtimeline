@@ -39,6 +39,9 @@ about anything else, these still hold.
   confirmation before the next. Do not solve everything up front.
 - **Challenge and contribute.** Question assumptions; push back when something
   seems wrong; say "I have not read X yet" rather than frame from a guess.
+  A locked decision that measurement shows costing or blocking is brought back
+  with the evidence and a recommendation, never worked around or silently
+  accepted, whoever worded it.
 - **When stuck, ask.** A technical snag (precision, a toolchain trap, an
   unexpected result) gets one question, not a run of failed attempts; the
   architect often has the answer.
