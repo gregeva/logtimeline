@@ -61,14 +61,14 @@ with a `*` glob, run from inside the log directory, twice.
 
 ## Resumption
 
-State at 2026-09-30: #637 and #638 delivered; #640 is next.
+State at 2026-09-30: #637, #638 and #640 delivered; next, close #629 and cut release 0.18.5.
 
 | Issue | State | Specification |
 |---|---|---|
 | #637 (metric patterns tried on continuation lines) | delivered: PR #641 merged to `release/0.18.5` (merge a994c82), issue closed | `features/637-udm-continuation-lines.md` |
 | #638 (non-numeric capture recorded as a fabricated value) | delivered: PR #643 merged to `release/0.18.5` (merge 3c8dc62), issue closed; D6 (accepted written forms of a number) added during implementation | `features/638-udm-non-numeric-capture.md` |
 | #642 (a metric without a `/regex/` cuts `1e3` or `1,000` short and misses `+5` and `.5`) | filed during #638, backlog; its blocked-by edge on #638 released at #638's close | `features/638-udm-non-numeric-capture.md` § Hand-forward |
-| #640 (CSV input reports rows it cannot place, per row and per file) | spec complete: D1, D2 locked, acceptance criteria written | `features/640-csv-unplaced-rows-silent.md` |
+| #640 (CSV input reports rows it cannot place, per row and per file) | delivered: PR #644 merged to `release/0.18.5` (merge 92fd306), issue closed; D3 (the same rule for an epoch-timestamp CSV) added during implementation | `features/640-csv-unplaced-rows-silent.md` |
 | #639 (own index and `-o` outputs read as input) | closed as not planned | `features/639-own-artifacts-as-input.md` D1 |
 
 Where the three fixes meet in the code: #637 and #638 both change the
