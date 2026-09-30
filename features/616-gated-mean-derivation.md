@@ -1835,3 +1835,40 @@ bytes_occurrences`. The drift engine's Layer 2 checks pass on all 50 baseline
 files. Targeted checks only (the architect's direction): the four CSV-output
 scenarios above and their neighbours (`access-bytes-duration`,
 `gated-means-access`) pass.
+
+**Drop 6 (2026-09-30): the run index (D8, D15, D16, D17, D24).**
+`format_csv_value` takes an optional third argument, a fixed decimal count that
+bypasses `-cp` and its full mode. `write_index_file` writes the six means (the
+duration, bytes and count means of the file row and of the selection row)
+through `mean_of` and `format_csv_value` at two decimals, trailing zeros
+stripped, and the empty cell for no data; the bounds and the not-applicable
+cells keep `-`. The two index blocks of `read_and_process_logs` (file row and
+selection row) take every line whose bytes field parsed, zero included, as a
+bytes observation, as both statistics stores do. `read_index_file` pre-seeds
+the bytes heatmap from `file_bytes_min` and `file_bytes_max`, the keys the
+index writes, where it looked up `bytes_min` and `bytes_max` and found nothing.
+The heatmap's log axis already floors at 1, so a zero bytes minimum needs no
+floor of its own.
+
+*Assertions*, four new scenarios of `tests/validate-index-read-back.sh`, each
+shown failing on the drop 5 tree by the same run made directly:
+- `index-means-fixed-precision` (the twelve-line access fixture): the file
+  row's `duration_mean` is `128.75` under the default `-cp`, `-cp 0`, `-cp 4`
+  and `-cp full`; `count_mean` is empty on both rows (the drop 5 tree wrote
+  `-`), and the `count_min` bound keeps `-`.
+- `index-means-integral` (the gated-means access fixture under
+  `-i /gm/order`): the selection row's `duration_mean` is `50` under the default
+  precision and `-cp full` (the drop 5 tree wrote `50.00`).
+- `index-bytes-counted`: the file row holds `file_bytes_occurrences` 12,
+  `file_bytes_min` 0 and `file_bytes_mean` 18683.33, and the STATS CSV of the
+  same run under `-cp 2` writes the same bytes mean (the drop 5 tree wrote 11,
+  2 and 20381.82).
+- `index-heatmap-bytes-preseed`: with both index rows' `file_bytes_max` edited
+  to 999999, `-hm bytes -V index-read-back` reports
+  `heatmap_preseed_max: 999999` (the drop 5 tree, reading the same edited
+  index, `index_used: yes`, reported the live 102400).
+
+The 59 existing assertions of the harness pass on this tree with the prebuilt
+index fixture unchanged. `docs/usage.md` carries no description of the index
+file's contents; `features/index-file.md` and `features/179-index-read-back.md`
+are brought up to date at delivery (section 10).

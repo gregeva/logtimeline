@@ -2114,7 +2114,7 @@ sub read_index_file {
     my $hm_metric_col;
     if ($heatmap_enabled) {
         if    ($heatmap_metric eq 'duration') { $hm_metric_col = 'duration'; }
-        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'bytes';    }
+        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'file_bytes'; }   # the index writes file_bytes_min/_max (#616 D24)
         elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
         # UDM heatmap metrics are not in the index schema; skip.
     }
@@ -6904,9 +6904,11 @@ sub write_index_file {
                 my $first_ts  = format_epoch_iso($fd->{first_timestamp});
                 my $last_ts   = format_epoch_iso($fd->{last_timestamp});
 
-                my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';
-                my $file_bytes_mean = $fd->{file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{file_bytes_occurrences})    : '-';
-                my $count_mean = $fd->{count_occurrences}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_occurrences})    : '-';
+                # The means through the one helper and the CSV formatter at two
+                # decimals whatever -cp says, empty for no data (#616 D8, D15, D16).
+                my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';
+                my $file_bytes_mean = format_csv_value( mean_of( $fd->{bytes_sum},    $fd->{file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
+                my $count_mean      = format_csv_value( mean_of( $fd->{count_sum},    $fd->{count_occurrences} ),      'count_mean',    2 ) // '';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
                 my @file_row = (
@@ -6923,9 +6925,9 @@ sub write_index_file {
             {
                 my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
                 my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
-                my $sel_dur_avg   = $fd->{sel_duration_occurrences} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_occurrences}) : '-';
-                my $sel_file_bytes_mean = $fd->{sel_file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_file_bytes_occurrences})    : '-';
-                my $sel_count_mean = $fd->{sel_count_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_occurrences})    : '-';
+                my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration_mean', 2 ) // '';
+                my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
+                my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count_mean',    2 ) // '';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
@@ -13343,21 +13345,29 @@ sub resolve_csv_column_family {
 #                       like 'duration_nice', rate strings, etc. pass through)
 #   - sprintf("%.<N>f") otherwise, where N is the resolved decimals for the
 #                       column's family (or 0 if family is unknown)
+# An optional third argument fixes the decimals, bypassing -cp and its full
+# mode: the run index writes its means at two decimals whatever the run's
+# precision, since it is compared across runs (#616 D8, D16).
 sub format_csv_value {
-    my ($value, $column) = @_;
+    my ($value, $column, $fixed_decimals) = @_;
     return undef unless defined $value;
-    return $value if $csv_precision eq 'full';
+    return $value if $csv_precision eq 'full' && !defined $fixed_decimals;
     # Non-numeric values (pre-formatted strings) pass through unchanged.
     return $value unless $value =~ /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
-    my $family = resolve_csv_column_family($column);
-    my $decimals = defined $family && exists $csv_family_decimals{$family}
-        ? $csv_family_decimals{$family}
-        : 0;
-    # Per-column override: rate columns within the level family always use
-    # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
-    # In N mode, N wins.
-    if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
-        $decimals = 1;
+    my $decimals;
+    if (defined $fixed_decimals) {
+        $decimals = $fixed_decimals;
+    } else {
+        my $family = resolve_csv_column_family($column);
+        $decimals = defined $family && exists $csv_family_decimals{$family}
+            ? $csv_family_decimals{$family}
+            : 0;
+        # Per-column override: rate columns within the level family always use
+        # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
+        # In N mode, N wins.
+        if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
+            $decimals = 1;
+        }
     }
     return $value if $decimals eq 'n/a';  # defensive — should not occur outside full mode
     # Round to the resolved decimal count, then strip trailing zeros (and a
@@ -15618,7 +15628,7 @@ sub read_and_process_logs {
                         $fd->{duration_min} = $duration if !defined $fd->{duration_min} || $duration < $fd->{duration_min};
                         $fd->{duration_max} = $duration if !defined $fd->{duration_max} || $duration > $fd->{duration_max};
                     }
-                    if (defined $bytes && $bytes > 0) {
+                    if (defined $bytes) {   # a zero-byte response is an observation, as the stores count it (#616 D17)
                         $fd->{file_bytes_occurrences}++;
                         $fd->{bytes_sum} += $bytes;
                         $fd->{file_bytes_min} = $bytes if !defined $fd->{file_bytes_min} || $bytes < $fd->{file_bytes_min};
@@ -15724,7 +15734,7 @@ sub read_and_process_logs {
                         $fd->{sel_duration_min} = $duration if !defined $fd->{sel_duration_min} || $duration < $fd->{sel_duration_min};
                         $fd->{sel_duration_max} = $duration if !defined $fd->{sel_duration_max} || $duration > $fd->{sel_duration_max};
                     }
-                    if (defined $bytes && $bytes > 0) {
+                    if (defined $bytes) {   # a zero-byte response is an observation, as the stores count it (#616 D17)
                         $fd->{sel_file_bytes_occurrences}++;
                         $fd->{sel_bytes_sum} += $bytes;
                         $fd->{sel_file_bytes_min} = $bytes if !defined $fd->{sel_file_bytes_min} || $bytes < $fd->{sel_file_bytes_min};
