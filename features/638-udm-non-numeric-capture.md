@@ -284,50 +284,52 @@ Branch `638-udm-non-numeric-capture` from `release/0.18.5`.
 
 ## Acceptance criteria
 
-- [ ] When a numeric-aggregation metric captures `12abc`, `abc12`, `abc`,
+- [x] When a numeric-aggregation metric captures `12abc`, `abc12`, `abc`,
       ` : 100` or an empty value, `produced:` in `-V udm-specs` counts only
       the lines whose capture is a number, and `min`/`sum`/`max` are computed
       from those alone (assertable: fixture of the shapes above; seven lines
       with two numeric captures give `occurrences=2 sum=49 min=7 max=42`).
-- [ ] That run prints no runtime warning (assertable:
+- [x] That run prints no runtime warning (assertable:
       `tests/lib/runtime-warnings.sh`).
-- [ ] Under `delta`, a skipped capture between two numeric captures leaves
+- [x] Under `delta`, a skipped capture between two numeric captures leaves
       the delta equal to their difference (assertable: `produced:`).
-- [ ] A skipped capture is not masked: the line's message keeps the text
+- [x] A skipped capture is not masked: the line's message keeps the text
       (assertable: messages section or MESSAGES CSV).
-- [ ] An empty capture never masks anything in the message (assertable: same).
-- [ ] A CSV input column holding `n/a` or `5ms` is skipped the same way
+- [x] An empty capture never masks anything in the message (assertable: same).
+- [x] A CSV input column holding `n/a` or `5ms` is skipped the same way
       (assertable: the columnar scenario of `tests/validate-udm-specs.sh`).
-- [ ] When some but not all matched lines of a `/regex/` metric are skipped,
+- [x] When some but not all matched lines of a `/regex/` metric are skipped,
       stderr carries one informational notice for that metric giving the
       recorded count, the skipped count and the skipped percentage; with no
       skip, no such notice (assertable: fixture above; notice line matched on
       stderr, absent on an all-numeric fixture).
-- [ ] On a run whose every matched line is recorded, `-V udm-specs` carries
+- [x] On a run whose every matched line is recorded, `-V udm-specs` carries
       no skipped figure for the metric and stderr carries no skip notice
       (assertable: all-numeric fixture).
-- [ ] On a run mixing a log file and a CSV file, `-V udm-specs` reports each
+- [x] On a run mixing a log file and a CSV file, `-V udm-specs` reports each
       metric's source as what it was actually read from, whichever file is
       read last (assertable: two orderings of the same inputs).
-- [ ] Lines removed by `-e`/`-i` or the time window count toward neither
+- [x] Lines removed by `-e`/`-i` or the time window count toward neither
       figure (assertable: same fixture with an exclude that removes a skipped
       line).
-- [ ] The notice carries no ` at <file> line <N>` suffix (assertable:
+- [x] The notice carries no ` at <file> line <N>` suffix (assertable:
       `tests/lib/runtime-warnings.sh`).
-- [ ] Under `distinct`, `abc123` is counted as a value (assertable:
+- [x] Under `distinct`, `abc123` is counted as a value (assertable:
       `produced:` and `tests/validate-udm-counting.sh`).
-- [ ] Counting aggregations still record non-numeric captures as today
+- [x] Counting aggregations still record non-numeric captures as today
       (assertable: `tests/validate-udm-counting.sh` unchanged and passing).
-- [ ] A capture written as `42`, `-5`, `+5`, `1.5`, `.5`, `5.`, `1e3` or
+- [x] A capture written as `42`, `-5`, `+5`, `1.5`, `.5`, `5.`, `1e3` or
       `1.5E-2` is recorded at its full value under a numeric aggregation;
       `1,000`, `0x10`, `Inf` and `NaN` are skipped and reported (D6;
       assertable: scenario `number-forms` of `tests/validate-udm-specs.sh`,
       with the pattern the documentation teaches).
-- [ ] `--help` examples and `docs/usage.md` carry the whole-value capture
+- [x] `--help` examples and `docs/usage.md` carry the whole-value capture
       example, list the accepted forms and name the capture shapes that cut a
       value short, and agree (assertable: `tests/validate-help-content.sh`).
-- [ ] Hot path: the before/after benchmark on
-      `single-day-access-log-standard` shows no regression beyond 1%.
+- [x] Hot path: the before/after benchmark on
+      `single-day-access-log-standard` shows no regression beyond 1% (+0.2%
+      total, −0.5% peak memory on 33d0d25; the `-udm` path +0.9%,
+      § Implementation, Cost of the check).
 
 ## Harness
 
