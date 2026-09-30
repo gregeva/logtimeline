@@ -17447,9 +17447,12 @@ sub calculate_all_statistics {
         undef $log_analysis{$bucket}{durations};
         delete $log_analysis{$bucket}{durations};
     
-        # The duration based statistics won't catch the counts if there are no durations (see else condition below).
-        # Demand (≥1 active consumer of per-bucket statistics) and observation
-        # (≥1 duration value seen in the data) must both hold.
+        # The duration statistics are merged into the bucket's projection only
+        # when there are durations to describe: demand (≥1 active consumer of
+        # per-bucket statistics) and observation (≥1 duration value seen in
+        # the data) must both hold. The totals, counts and the other metrics'
+        # means are projected either way.
+        my $stats = {};
         if( $bucket_duration_stats_demand && $durations_observed ) {
             # Issue #266/#289: caller-side data-model dispatch. Surface 4
             # (per-time-bucket statistics). Under 'bin' the statistics are
@@ -17468,7 +17471,6 @@ sub calculate_all_statistics {
                 extended => $bucket_stats_demand_extended,
                 shape    => $bucket_stats_demand_shape,
             };
-            my $stats;
             if ($dm eq 'bin') {
                 $stats = calculate_statistics_bin(
                     $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/sum_of_squares/occurrences)
@@ -17481,48 +17483,27 @@ sub calculate_all_statistics {
                 $stats = calculate_statistics($aggregated_data, $bucket_demand);
             }
             $stats //= {};
-
-            $log_stats{$bucket} = {
-                occurrences   => $aggregated_data->{occurrences},
-                bytes         => $log_analysis{$bucket}{total_bytes},
-                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration_sum  => $log_analysis{$bucket}{duration_sum},
-                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
-                count         => $log_analysis{$bucket}{count_sum},
-                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
-                count_occurrences => $log_analysis{$bucket}{count_occurrences},
-                count_min     => $log_analysis{$bucket}{count_min},
-                count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
-                count_sum     => $log_analysis{$bucket}{count_sum},
-                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
-                bytes_min     => $log_analysis{$bucket}{bytes_min},
-                bytes_max     => $log_analysis{$bucket}{bytes_max},
-                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,
-                %$stats,
-            };
-
-        } else {
-            # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
-            $log_stats{$bucket} = {
-                occurrences   => $aggregated_data->{occurrences},
-                bytes         => $log_analysis{$bucket}{total_bytes},
-                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration_sum  => $log_analysis{$bucket}{duration_sum},
-                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
-                count         => $log_analysis{$bucket}{count_sum},
-                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
-                count_occurrences => $log_analysis{$bucket}{count_occurrences},
-                count_min     => $log_analysis{$bucket}{count_min},
-                count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
-                count_sum     => $log_analysis{$bucket}{count_sum},
-                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
-                bytes_min     => $log_analysis{$bucket}{bytes_min},
-                bytes_max     => $log_analysis{$bucket}{bytes_max},
-                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef
-            }
         }
+
+        $log_stats{$bucket} = {
+            occurrences   => $aggregated_data->{occurrences},
+            bytes         => $log_analysis{$bucket}{total_bytes},
+            'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
+            duration_sum  => $log_analysis{$bucket}{duration_sum},
+            'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
+            count         => $log_analysis{$bucket}{count_sum},
+            'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
+            count_occurrences => $log_analysis{$bucket}{count_occurrences},
+            count_min     => $log_analysis{$bucket}{count_min},
+            count_max     => $log_analysis{$bucket}{count_max},
+            count_mean    => mean_of( $log_analysis{$bucket}{count_sum}, $log_analysis{$bucket}{count_occurrences} ),
+            count_sum     => $log_analysis{$bucket}{count_sum},
+            bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
+            bytes_min     => $log_analysis{$bucket}{bytes_min},
+            bytes_max     => $log_analysis{$bucket}{bytes_max},
+            bytes_mean    => mean_of( $log_analysis{$bucket}{total_bytes}, $log_analysis{$bucket}{bytes_occurrences} ),
+            %$stats,
+        };
 
         # Populate UDM stats for this bucket (Issue #22)
         foreach my $config (@udm_configs) {
@@ -17573,7 +17554,7 @@ sub calculate_all_statistics {
             $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
             $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
             $log_stats{$bucket}{"udm_${name}_max"}  = $log_analysis{$bucket}{"udm_${name}_max"};
-            $log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef;
+            $log_stats{$bucket}{"udm_${name}_mean"} = mean_of( $log_analysis{$bucket}{"udm_${name}_sum"}, $occ );
             $log_stats{$bucket}{"udm_${name}_sum"}  = $log_analysis{$bucket}{"udm_${name}_sum"};
 
             # Select display value based on aggregation function
@@ -17581,7 +17562,7 @@ sub calculate_all_statistics {
             if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
             elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
             elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
-            elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            elsif ($agg eq 'mean') { $display_value = $log_stats{$bucket}{"udm_${name}_mean"}; }
             $log_stats{$bucket}{"udm_$name"} = $display_value;
 
             # Aggregation-aware highlight value
@@ -17632,15 +17613,11 @@ sub calculate_all_statistics {
             # undef, which the comparator's // 0 handles.
             if( $sort_key eq 'bytes_mean' ) {
                 foreach my $entry (values %{$log_messages{$category}}) {
-                    $entry->{bytes_mean} = $entry->{bytes_occurrences}
-                        ? ( $entry->{total_bytes} / $entry->{bytes_occurrences} )
-                        : undef;
+                    $entry->{bytes_mean} = mean_of( $entry->{total_bytes}, $entry->{bytes_occurrences} );
                 }
             } elsif( $sort_key eq 'count_mean' ) {
                 foreach my $entry (values %{$log_messages{$category}}) {
-                    $entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )
-                        ? ( $entry->{count_sum} / $entry->{count_occurrences} )
-                        : undef;
+                    $entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );
                 }
             }
 
@@ -17956,11 +17933,7 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
 
-                $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
-                $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? ($log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
-                $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
-                $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
+                $log_messages{$category}{$log_key}{count_mean} = mean_of( $log_messages{$category}{$log_key}{count_sum}, $log_messages{$category}{$log_key}{count_occurrences} );
 
                 # Calculate UDM per-message mean (Issue #22)
                 foreach my $config (@udm_configs) {
@@ -17968,7 +17941,7 @@ sub calculate_all_statistics {
                     my $name = $config->{name};
                     my $occ = $log_messages{$category}{$log_key}{"udm_${name}_occurrences"};
                     my $sum = $log_messages{$category}{$log_key}{"udm_${name}_sum"};
-                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;
+                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );
                 }
 
                 # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
@@ -18067,6 +18040,14 @@ sub calculate_all_statistics {
     }
 
     return;
+}
+
+# The one derivation of a mean from an accumulated sum and its observation
+# count: undef unless the count holds an observation, so a mean is never
+# derived from, or shown for, a metric nothing observed.
+sub mean_of {
+    my ($sum, $count) = @_;
+    return ( defined $count && $count > 0 ) ? $sum / $count : undef;
 }
 
 # Function to calculate the log scale bucket
@@ -21986,12 +21967,12 @@ sub pipeline_finalize {
                     $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
                     push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                         $keys_seen, $final_remaining,
-                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 } else {
                     $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
                     push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                         $keys_seen, $final_remaining,
-                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 }
             }
 

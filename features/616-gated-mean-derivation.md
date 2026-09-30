@@ -12,7 +12,7 @@ section 5.1 was re-resolved inside its sub (section 3, *Re-audit at the start of
 implementation*), the version is stamped `0.19.0-616`, and the `before`
 benchmarks of section 8 are captured (`616-before`, `616-before-bin`). The D12
 prototype ran before drop 1 (section 8, *Prototype findings*), and the arm that
-lands is locked (D28). Drop 1 is in progress.
+lands is locked (D28). Drop 1 has landed (section 11).
 
 This issue is one of the refactoring issues the #342 review (the audit of
 redundant logic surfaces across `ltl`) dispatched under #622 (the parent
@@ -1407,3 +1407,43 @@ comparison and the bin-model pair, with `$version_number` restored to `0.19.0`.
   see docs/usage.md."
 - "Count zero-byte responses in the index file and keep its means at two
   decimals whatever `-cp` says; see docs/usage.md."
+
+---
+
+## 11. Implementation record
+
+**Drop 1 (2026-09-30): the helper at the sites whose output does not change.**
+`mean_of($sum, $count)` added to `## SUBS ##` beside `log_bucket`, returning
+`undef` unless the count is defined and above zero. Called for the per-bucket
+count, bytes and user-defined means, the sort pre-pass's bytes and count means,
+and the group calculation's count and user-defined means; the per-bucket
+user-defined display value for `mean` reads the stored mean. The per-bucket
+projection is one literal with the statistics hash merged when the duration
+statistics run, where there were two copies, one per branch. The four
+self-assignments of the group calculation are removed, and the count mean there
+is assigned without its `if defined count_occurrences` suffix: no reader tests
+the key's existence, and an undefined count gives `undef` through the helper.
+The two reduction percentages of `pipeline_finalize` take the
+`$keys_seen > 0 ? ... : 0` shape (D7).
+
+The helper drops two `defined $sum` tests, the per-message count mean's and
+user-defined mean's. Neither changes a value: the read loop increments each
+count in the same block that adds to its sum (`if( defined $count ) {` for the
+count; the per-configuration block for a user-defined metric, counting
+aggregations excepted, which the loop skips), the consolidation merge carries
+the sum with its count, and every store constructor initialises `total_bytes`
+to 0.
+
+Behaviour-neutral, proved by the harnesses that read the changed sites, all on
+this commit's tree, none with a golden or baseline changed:
+`validate-csv-output.sh` (25 scenarios, 30 pass),
+`validate-statistics.sh` (22 scenarios pass; every cell of all 44 MESSAGES and
+STATS comparisons in the drift layer's tightest tier), `validate-statistics-demand.sh`
+(102 pass), `validate-aggregate-export.sh` (146 pass), `validate-udm-specs.sh`
+(186 pass; the user-defined mean display) and `validate-message-grouping.sh`
+(27 pass; the reduction line). No runtime warning on any harness's output.
+
+The pattern entry *Observation counts and gated means* is added to
+`docs/architecture-patterns.md` in this drop with its seven sites, marked as
+needing refinement until the issue completes (section 5.5).
+

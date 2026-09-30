@@ -290,6 +290,48 @@ while its total is not (F4.11); the impact mean divides by the wrong count
 
 ---
 
+## Observation counts and gated means
+
+**Definition.** Every accumulator carries its observation count, and every
+mean is derived by one helper, `mean_of($sum, $count)`, from a sum and that
+count, with the gate inside: the mean is `undef` unless the count holds an
+observation. A total is projected only when its count is positive. The helper
+runs after the read loop, never per line.
+
+**Intended uses.** Any new mean, at any store or surface: call `mean_of` with
+the accumulator's sum and count rather than dividing inline. Any new
+accumulator keeps its count beside its sum.
+
+**Reasoning.** The audit of redundant logic found eleven inline derivations of
+a mean with three gate shapes, the per-bucket user-defined mean computed twice,
+and a total projected as zero beside an empty mean for a bucket in which no
+line carried the metric
+(`features/342-redundant-logic-surfaces-audit-report.md` § Item 4). One helper
+makes the count gate hold by construction, and the next change to a store's
+representation retargets one site per quantity.
+
+**Consumption sites.**
+- `calculate_all_statistics` :: `count_mean    => mean_of( $log_analysis{$bucket}{count_sum}, $log_analysis{$bucket}{count_occurrences} ),`
+- `calculate_all_statistics` :: `bytes_mean    => mean_of( $log_analysis{$bucket}{total_bytes}, $log_analysis{$bucket}{bytes_occurrences} ),`
+- `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = mean_of( $log_analysis{$bucket}{"udm_${name}_sum"}, $occ );`
+- `calculate_all_statistics` :: `$entry->{bytes_mean} = mean_of( $entry->{total_bytes}, $entry->{bytes_occurrences} );` (the sort pre-pass)
+- `calculate_all_statistics` :: `$entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );` (the sort pre-pass)
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_mean} = mean_of(`
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );`
+
+**Owning record.** `features/616-gated-mean-derivation.md` D1 to D4; the
+CLAUDE.md checkpoint on observation counts. Cross-reference: *Precise storage,
+formatting at the output boundary*, to which the same issue adds the
+per-message bytes mean and the run index's means as sites.
+
+**Status.** Needs refinement until #616 (one gated derivation of means and
+totals) completes: the observation counts are not yet unconditional, the
+projected totals are not yet gated on them, and impact, the per-message bytes
+mean, the duration mean and the run index's six means do not yet call the
+helper.
+
+---
+
 ## Statistics-group consumer registry
 
 **Definition.** `@STAT_CONSUMERS` declares each output surface with the store it
