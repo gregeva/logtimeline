@@ -56,12 +56,11 @@ with a `*` glob, run from inside the log directory, twice.
 
 ## Resumption
 
-State at 2026-09-30, end of investigation and specification. No code has been
-written; no issue branch exists.
+State at 2026-09-30: #637 delivered; #638 is next.
 
 | Issue | State | Specification |
 |---|---|---|
-| #637 (metric patterns tried on continuation lines) | spec complete: D1 locked, acceptance criteria written | `features/637-udm-continuation-lines.md` |
+| #637 (metric patterns tried on continuation lines) | delivered: PR #641 merged to `release/0.18.5` (merge a994c82), issue closed | `features/637-udm-continuation-lines.md` |
 | #638 (non-numeric capture recorded as a fabricated value) | spec complete: D1 to D5 locked, acceptance criteria written | `features/638-udm-non-numeric-capture.md` |
 | #640 (CSV input reports rows it cannot place, per row and per file) | spec complete: D1, D2 locked, acceptance criteria written | `features/640-csv-unplaced-rows-silent.md` |
 | #639 (own index and `-o` outputs read as input) | closed as not planned | `features/639-own-artifacts-as-input.md` D1 |
