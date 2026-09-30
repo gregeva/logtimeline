@@ -115,9 +115,10 @@ path, which share the coercion line.
 - **D3 — A partly skipped `/regex/` metric is reported, with its share.** For
   each `/regex/` metric, the run counts the lines where the pattern matched and
   the value was recorded, and the lines where the pattern matched but the
-  capture could not be used by the aggregation function (D1). When any line
-  was skipped, one informational notice per metric goes to stderr after the
-  read, giving both counts and the skipped share as a percentage, so the user
+  capture could not be used by the aggregation function (D1). Only when at
+  least one line was skipped does one informational notice for that metric go
+  to stderr after the read; a metric whose every matched line was recorded
+  prints nothing. The notice giving both counts and the skipped share as a percentage, so the user
   can tell one or two stray lines from half the population and knows to revise
   the pattern. Rationale (architect): a pattern that matches but whose capture
   is not deterministic extracts only part of the population, and that must not
@@ -130,6 +131,36 @@ path, which share the coercion line.
   lines that reach accumulation after the include/exclude, time-window and
   numeric filters; the capture runs before those filters, so a skip is counted
   only once the line is retained.
+- **D4 — The recorded count comes from the existing model; the skipped count
+  exists only once something is skipped.** The recorded figure is the
+  `produced` occurrences already derived after the read loop from the
+  per-bucket accumulators (#443 D7); nothing new is counted for it. The skipped
+  count is created for a metric the first time one of its lines is skipped: no
+  counter is declared, allocated or incremented for a metric that never skips,
+  so a normal run carries no memory or per-line cost for it. `-V udm-specs`
+  shows the skipped figure only for a metric that has one. Rationale
+  (architect): #443 D7 guards against the memory and processing cost of
+  standing counters across many metrics that in a normal run never move; a
+  counter that exists only when it has something to say does not carry that
+  cost.
+- **D5 — `-V udm-specs` reports what the run actually did, and its defects
+  are fixed here.** The section is the introspection into how the code ran
+  against the data; a wrong value there leads to a wrong reading of the run,
+  which is not acceptable. Two defects found during #629 are in scope of this
+  issue:
+  - `source=` is computed in `udm_read_as()` from the run-global
+    `$csv_detected` and the last CSV header read, so it describes whichever
+    file was read last: a run whose values all came from log lines reports
+    `source=csv:unbound` when a CSV file sorts last.
+  - On a run that reads a CSV file, a metric declared with unit `B` is shown as
+    `unit=b(bytes)`; `KB`, `ms` and `k` are shown correctly, and `B` is shown
+    correctly on a run without CSV input. Minimal reproduction: a two-line CSV
+    with no `timestamp` column and `-udm "q:B:max:/q=(\d+)/"`. The stored
+    unit is already `b` when the section is rendered; root cause under
+    investigation.
+  Any `-V udm-specs` key change follows `tests/HARNESS-DESIGN.md` and updates
+  the section contract in `features/user-defined-metrics.md` in the same
+  commit.
 
 ## Acceptance criteria
 
@@ -152,6 +183,14 @@ path, which share the coercion line.
       recorded count, the skipped count and the skipped percentage; with no
       skip, no such notice (assertable: fixture above; notice line matched on
       stderr, absent on an all-numeric fixture).
+- [ ] On a run whose every matched line is recorded, `-V udm-specs` carries
+      no skipped figure for the metric and stderr carries no skip notice
+      (assertable: all-numeric fixture).
+- [ ] On a run mixing a log file and a CSV file, `-V udm-specs` reports each
+      metric's source as what it was actually read from, whichever file is
+      read last (assertable: two orderings of the same inputs).
+- [ ] A metric declared with unit `B` is shown as `B` on every run, with or
+      without CSV input (assertable: `read_as:` line).
 - [ ] Lines removed by `-e`/`-i` or the time window count toward neither
       figure (assertable: same fixture with an exclude that removes a skipped
       line).
