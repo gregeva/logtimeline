@@ -1,0 +1,6 @@
+category,message,occurrences,successes,failures,conflicts,bytes_occurrences,bytes_min,bytes_mean,bytes_max,bytes,bytes_nice,count_occurrences,count_min,count_mean,count_max,count_sum,duration_min,duration_mean,duration_max,duration_std_dev,duration_p1,duration_p5,duration_p10,duration_p25,duration_p50,duration_p75,duration_iqr,duration_p90,duration_p95,duration_p99,duration_p999,duration_p9999,duration_p99999,duration_cv,duration_skewness,duration_kurtosis,duration_bimodality_coef,duration,duration_nice,impact
+plain,"[200] GET /gm/order",2,2,0,0,2,100,100,100,200,"200 B",,,,,,0,50,100,70.7106781186548,0,0,0,0,100,100,100,100,100,100,100,100,100,1.4142135623731,,,,100,"100 msec",28.077308218557
+plain,"[200] GET /gm/sizes",2,2,0,0,2,512,513,513,1025,"1 kB",,,,,,10,15,20,7.07106781186548,10,10,10,10,20,20,10,20,20,20,20,20,20,0.471404520791032,,,,30,"30 msec",19.6494985882754
+plain,"[200] GET /gm/subunit",2,2,0,0,2,64,64,64,128,"128 B",,,,,,0,0.5,1,0.707106781186548,0,0,0,0,1,1,1,1,1,1,1,1,1,1.4142135623731,,,,1,"1 msec",0.693147180559945
+plain,"[200] GET /gm/nosize",1,1,0,0,,,,,,,,,,,,30,30,30,,30,30,30,30,30,30,0,30,30,30,30,30,30,,,,,30,"30 msec",23.8083816716351
+plain,"[204] GET /gm/empty",1,1,0,0,1,0,0,0,0,"0 B",,,,,,40,40,40,,40,40,40,40,40,40,0,40,40,40,40,40,40,,,,,40,"40 msec",25.8221561787976

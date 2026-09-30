@@ -7492,6 +7492,7 @@ my @explain_groups = (
     { category => 'statistics',     name => 'Spread',             topics => [qw(std_dev cv iqr)] },
     { category => 'statistics',     name => 'Percentiles',        topics => [qw(percentiles)] },
     { category => 'statistics',     name => 'Distribution shape', topics => [qw(skewness kurtosis bimodality_coef)] },
+    { category => 'statistics',     name => 'Ranking',            topics => [qw(impact)] },
     # Visualizations: each chart gets its own group so each appears as an
     # underlined subheading under the VISUALIZATIONS category. Mirrors the
     # Percentiles group (one topic per group) and leaves room for future
@@ -7525,7 +7526,9 @@ my %explain_category_heading = (
 # Number of leading groups tagged 'statistics'. --help statistics slices
 # @explain_groups[0..$_explain_stats_group_count-1] so that the stats
 # index stays narrow even as Visualizations and future categories grow.
-my $_explain_stats_group_count = 5;
+my $_explain_stats_group_count = 0;
+$_explain_stats_group_count++ while $_explain_stats_group_count < @explain_groups
+    && $explain_groups[$_explain_stats_group_count]{category} eq 'statistics';
 
 # One-line summary per topic, used by the grouped index views. Long-form
 # content lives in %explain_topics below.
@@ -7540,6 +7543,7 @@ my %explain_summary = (
     skewness        => 'Distribution asymmetry (>0 = right-tail-heavy)',
     kurtosis        => 'Tail-heaviness (>3 = heavy outliers; >10 = pathological)',
     bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
+    impact          => 'Ranking figure weighing occurrences against mean duration (ln of occurrences x mean^7)',
     heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
     histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
     classification  => 'Success/failure classification, the event-ledger property, and what a log can legitimately tell you',
@@ -8102,6 +8106,9 @@ my $explain_max_compute = q{The largest duration observed for the bucket or mess
 # --- mean ---
 my $explain_mean_intuition = q{The arithmetic average of all observed values: sum of values divided by count. For latency, `mean` answers "on average, how long does this operation take?" -- the typical experience weighted equally across every request.};
 my $explain_mean_operational = q{The `mean` is highly sensitive to tail behavior: a single 10-second request mixed into 10,000 fast requests pulls the mean up significantly. This makes `mean` *misleading* for skewed distributions (which is most production latency data). Prefer `p50` (the median) when you want a "typical" value robust to outliers. Use `mean` when you specifically want a measure of *total work performed* -- mean × count = total duration, which is the right signal for capacity-planning and impact-ranking analysis. ltl's `-so mean` ranks messages by average latency; `-so duration` ranks by total duration (= mean × count). The two answer different operational questions.};
+my $explain_impact_intuition = q{A ranking figure that weighs how often a message occurs against how long it takes: the natural logarithm of occurrences times the mean duration to the seventh power. The seventh power lets a slow operation outrank a far more frequent fast one; the logarithm keeps the figure small enough to read and compare across messages.};
+my $explain_impact_operational = q{Rank with `-so impact` to find the messages whose combined cost -- frequency and slowness together -- is greatest, which neither `-so occurrences` nor `-so mean` shows on its own. A message with no duration, or with a mean of one unit or below, ranks by its occurrences alone: its impact is ln(occurrences), 0 for a single line. A duration never ranks a message below the same message without one; only a mean above one unit raises it.};
+my $explain_impact_compute = q{impact = ln(max(mean, 1)^7 x occurrences), where mean is the message's mean duration in the source unit, as the MESSAGES CSV reports it: the total duration divided by the lines that carried a duration. A mean of one unit or below, zero, or no duration at all counts as 1, so the duration term contributes nothing. Computed once per message after the log is read, so the order of its lines does not matter. When durations are discarded with -od or -d duration, impact is not computed and its column is empty.};
 my $explain_mean_compute = q{Computed as `total_duration / count` per time bucket (or per message key when consolidating). One pass through the data; exact.};
 
 # --- std_dev ---
@@ -9279,6 +9286,19 @@ sub populate_explain_topics {
         ],
 
         # ---- mean ----
+        impact => [
+            { type => 'heading',   text => 'IMPACT' },
+            { type => 'paragraph', text => $explain_impact_intuition },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_impact_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so impact -n 20 access.log       # rank by frequency and slowness together\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_impact_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'mean, occurrences (-so occurrences), total duration (-so duration).' },
+        ],
+
         mean => [
             { type => 'heading',   text => 'MEAN' },
             { type => 'paragraph', text => $explain_mean_intuition },
@@ -11148,11 +11168,6 @@ sub group_similar_messages {
                 $entry->{"udm_${name}_max"} = $cluster->{"udm_${name}_max"};
             }
 
-            # Recompute impact
-            if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {
-                my $mean = $entry->{total_duration} / $entry->{occurrences};
-                $entry->{impact} = log($mean ** $impact_time_exponent * $entry->{occurrences});
-            }
         }
     }
 
@@ -16172,11 +16187,6 @@ sub read_and_process_logs {
                             # which reads it as the count before this observation.
                             $me->{duration_count}++;
 
-                            # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
-                            if( $duration > 0 ) {
-                                my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};
-                                $log_messages{$category}{$log_key}{impact} = log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} );
-                            }
                         }
                     } else {
                         $log_messages{$category}{$log_key}{occurrences}++;
@@ -17668,6 +17678,10 @@ sub calculate_all_statistics {
                 foreach my $entry (values %{$log_messages{$category}}) {
                     $entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );
                 }
+            } elsif( $sort_key eq 'impact' ) {
+                foreach my $entry (values %{$log_messages{$category}}) {
+                    $entry->{impact} = impact_of($entry);
+                }
             }
 
             # A calculated-statistic sort key is exactly a key of the #305
@@ -17981,6 +17995,10 @@ sub calculate_all_statistics {
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
 
                 $log_messages{$category}{$log_key}{count_mean} = mean_of( $log_messages{$category}{$log_key}{count_sum}, $log_messages{$category}{$log_key}{count_occurrences} );
+                # Impact for the retained rows, from the mean they report; under
+                # -so impact the sort pre-pass has already derived it for every key.
+                $log_messages{$category}{$log_key}{impact} = impact_of( $log_messages{$category}{$log_key} )
+                    unless $sort_key eq 'impact';
 
                 # Calculate UDM per-message mean (Issue #22)
                 foreach my $config (@udm_configs) {
@@ -18095,6 +18113,20 @@ sub calculate_all_statistics {
 sub mean_of {
     my ($sum, $count) = @_;
     return ( defined $count && $count > 0 ) ? $sum / $count : undef;
+}
+
+# Impact ranks a message by occurrences and mean duration together:
+# ln(max(mean, 1) ** $impact_time_exponent * occurrences), the mean being the
+# one the row reports (#616 D5). A mean of one unit or below, zero or
+# unobserved contributes nothing, so the row ranks by its occurrences alone
+# (D11, D20); when durations are thrown away (-od, -d duration) impact is
+# undefined (D21). Derived once, after the read loop.
+sub impact_of {
+    my ($entry) = @_;
+    return undef if $omit_durations;
+    my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;
+    $mean = 1 if $mean < 1;
+    return log( $mean ** $impact_time_exponent * $entry->{occurrences} );
 }
 
 # Function to calculate the log scale bucket

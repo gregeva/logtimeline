@@ -337,7 +337,7 @@ assert_max_line_width() {
 # Scenarios
 # ============================================================================
 
-TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram classification)
+TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef impact heatmap histogram classification)
 
 # Analysis-technique topics (#504). TECHNIQUE_GROUPS are the group pages,
 # one per group; TECHNIQUE_TOPICS are the technique leaf pages. The two
@@ -585,7 +585,7 @@ scenario_help_statistics() {
 
     # Every statistics topic appears in the index. heatmap and histogram
     # are excluded per the narrowing rule.
-    local stats_topics=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef)
+    local stats_topics=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef impact)
     for topic in "${stats_topics[@]}"; do
         assert_line "$out" \
             pattern     "^    ${topic}[[:space:]]" \

@@ -1753,3 +1753,60 @@ checks again. The L1 and L2 `produced_by` strings that named subs no longer in
 `ltl` (`accumulate_log_record`, `finalize_buckets`,
 `calculate_percentiles_for_bucket`, `calculate_shape_statistics`) name the subs
 that produce those values today.
+
+**Drop 4 (2026-09-30): impact derived once, from the reported mean (D5, D11,
+D20, D21, D25, D27).** `impact_of($entry)` returns
+`ln(max(mean, 1) ** $impact_time_exponent * occurrences)` with the mean from
+`mean_of(total_duration, duration_count)`, 0 when there is none, and `undef`
+under `-od` or `-d duration` (both set `$omit_durations`). It runs after the
+read loop: in the sort pre-pass for every key under `-so impact`, otherwise in
+the group calculation for the retained keys. The per-line derivation in the
+read loop and the recompute after consolidation are removed.
+
+*Assertions*, each shown failing on the drop 3 tree:
+- `compare-statistics-drift.pl` Layer 2 `impact_formula`: impact equals the
+  formula within 1e-9 relative and is never empty. On the committed baselines it
+  failed on exactly 131 cells, the 129 and 2 of section 3 item 2.
+- Three fixture scenarios in `tests/statistics-drift/scenarios.tsv` with
+  committed baselines: `gated-means-access` and `gated-means-access-reversed`
+  (the access fixture and its copy with one path's durations reversed; both
+  write `impact=28.077308218557` for that path, where the drop 3 tree wrote
+  32.236 in one order; the path with durations 1 and 0 writes 0.693, where it
+  wrote 0) and `gated-means-consolidated` (the four `Processing request` lines
+  at `-g 50 -so impact`, kept alone by `-i Processing.request` because the
+  fixture's other lines also consolidate at that sensitivity: occurrences 4,
+  duration 400, mean 200, impact 38.4745159, where the drop 3 tree wrote 33.622).
+- `validate-csv-output.sh`: the `impact` rules row's `required` becomes
+  `every-row:duration`, a value the validator now reads as populated on every
+  row while the family is active, exempt from the per-row family check, and
+  absent or empty when the family is switched off (D27); scenarios
+  `gated-means-impact` (the untimed pair writes `0.693`, the zero-duration key
+  `0`, by `@cell` reads) and `gated-means-impact-discard` (`-d duration`, every
+  impact cell empty). On the drop 3 tree's MESSAGES CSV the every-row check
+  failed on each of its four empty impact cells.
+
+*Explain.* The `impact` topic of `--explain`, under a new Ranking group of
+`--help statistics`, states the formula, the floor, the occurrences-only case
+and the undefined case (D25), mirrored in `docs/explain/statistics.md`; the
+`-so` paragraph of `docs/usage.md` states the rule and points at it;
+`validate-explain.sh` lists the topic. The number of leading statistics groups
+`--help statistics` slices is now counted from the group list, where it was a
+literal.
+
+*Baselines re-blessed*, each change attributed against the committed version:
+131 `impact` cells over nine scenarios (every new value equal to the formula; 2
+were empty), and 425 `bytes_nice` cells (372 MESSAGES, 53 STATS), each the same
+byte count written in SI units where the baseline held IEC: #608's default
+notation, never re-blessed because the drift engine does not compare the `_nice`
+text columns. No other cell and no row order moved.
+
+*Harnesses* (fresh captures): `validate-csv-output.sh` 29 scenarios,
+`validate-statistics.sh` 25 scenarios (every drift cell in the tightest tier),
+`validate-statistics-demand.sh`, `validate-regression.sh`,
+`validate-message-grouping.sh`, `validate-message-grouping-notices.sh`,
+`validate-aggregate-export.sh`, `validate-duration-display.sh`,
+`validate-explain.sh` (695) and `validate-help-content.sh` pass, no runtime
+warning. By the architect's direction of the same day, drops from here run
+targeted checks only, and the per-drop loop A/B is left to the completion
+gate's before/after benchmark: this drop removes per-line work (a division, a
+power and a logarithm on every duration-bearing line) and adds none.

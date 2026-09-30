@@ -1,0 +1,4 @@
+message_match	expected
+# Impact while durations are read: two untimed lines take ln(2), one zero-duration line ln(1) = 0
+@cell	messages	message=[INFO] [pool-a] [GatedMeansFixture] GM-untimed-pair executed	impact	0.693	features/616-gated-mean-derivation.md D11 and D20 (while durations are read, a row with no duration mean above one unit takes the occurrences part of impact, ln(occurrences))
+@cell	messages	message=[INFO] [pool-a] [GatedMeansFixture] GM-zero-duration executed durationMS=?	impact	0	features/616-gated-mean-derivation.md D11 and D20 (while durations are read, a row with no duration mean above one unit takes the occurrences part of impact, ln(occurrences))

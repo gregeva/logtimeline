@@ -64,3 +64,9 @@ apache-bin-consolidated	logs/AccessLogs/ApacheHTTP2Server-access_log-Windchill_N
 thingworx-bin-consolidated	logs/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean.log	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
 codebeamer-bin-consolidated	logs/Codebeamber/codebeamer_access_log.2025-10-29.txt	-cp full -bs 240 -g 90 -n 25 -mdm bin -bdm bin
 tomcat-histogram-export	logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt	-cp full -bs 240 -n 25 -hg duration -mdm bin -bdm bin
+# Issue #616 fixture scenarios: impact from the reported mean. -bs 1440 -oe -n 20 reads every key of a one-day fixture;
+# the access pair differs only in the order of one path's durations (100 then 0, and 0 then 100); the consolidated row
+# is four 'Processing request <uuid> done' lines, two with a duration, merged at -g 50 (-i keeps the four lines only).
+gated-means-access	tests/fixtures/gated-means-access.txt	-cp full -bs 1440 -oe -n 20 -mdm raw -bdm raw
+gated-means-access-reversed	tests/fixtures/gated-means-access-reversed.txt	-cp full -bs 1440 -oe -n 20 -mdm raw -bdm raw
+gated-means-consolidated	tests/fixtures/gated-means-application.txt	-cp full -bs 1440 -oe -n 20 -g 50 -so impact -i Processing.request -mdm raw -bdm raw

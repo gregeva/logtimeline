@@ -111,7 +111,7 @@ my @rules = load_rules($opt{rules});
 # A switched-off family no rule is conditional on would assert nothing.
 my @off_rules;
 for my $family (sort keys %off_family) {
-    my @conditional = grep { $_->{required} eq "conditional:$family" } @rules;
+    my @conditional = grep { $_->{required} eq "conditional:$family" || $_->{required} eq "every-row:$family" } @rules;
     die "switched-off family '$family': no rules column is conditional:$family in $opt{rules}\n"
         unless @conditional;
     push @off_rules, @conditional;
@@ -196,6 +196,22 @@ while (my $row = $csv->getline($fh)) {
 
         # population check
         if ($val eq '') {
+            # every-row:<family> (impact, #616 D27): populated on every row
+            # while the family is active, whatever the row's other cells in
+            # the family hold; exempt from the per-row family check below.
+            if ($rule->{required} =~ /^every-row:(.+)$/ && $active_family{$1}) {
+                emit_fail({
+                    scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+                    column => $col_name,
+                    asserts => "column '$col_name' must be populated on every row while family '$1' is active",
+                    produced_by => producer($opt{file_kind}),
+                    contract => 'features/616-gated-mean-derivation.md D27 (impact is populated on every row whenever durations are read, empty on every row when they are thrown away)',
+                    expected => 'non-empty',
+                    actual => 'empty',
+                    rule => "required=$rule->{required}",
+                });
+                $fails++;
+            }
             if ($rule->{required} eq 'yes') {
                 emit_fail({
                     scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
@@ -392,7 +408,7 @@ sub check_column_structure {
             # For dynamic-position with conditional:<other-family>, the column
             # is optional unless the *other* family is active.
             my $cond_family = $family;
-            if ($r->{required} =~ /^conditional:(.+)$/) {
+            if ($r->{required} =~ /^(?:conditional|every-row):(.+)$/) {
                 $cond_family = $1;
             }
             next unless $active_family{$cond_family};

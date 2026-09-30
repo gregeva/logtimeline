@@ -39,7 +39,7 @@ duration_kurtosis	37	float	conditional:duration	5	shape
 duration_bimodality_coef	38	float	conditional:duration	5	shape
 duration	39	float	conditional:duration	9	duration
 duration_nice	40	nice	conditional:duration	n/a	duration
-impact	41	float	conditional:duration	5	duration
+impact	41	float	every-row:duration	5	duration
 users_distinct	*	int	no	0	udm-counting
 actions_count	*	int	conditional:udm-counting	0	udm-counting
 repeat_ratio	*	float	no	5	udm-counting

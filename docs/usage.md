@@ -217,7 +217,7 @@ ltl -dbg access.log
 
 ### Sorting
 
-The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, latency statistics (min/max/mean/stddev/cv), per-percentile latency (p1–p99999), distribution-shape moments (iqr/skewness/kurtosis/bimodality_coef), bytes, count, or impact (occurrences × mean duration). Use `-sa` to reverse the sort order.
+The summary table is sorted by occurrence count by default. Use `-so` to rank messages by a different metric — total duration, latency statistics (min/max/mean/stddev/cv), per-percentile latency (p1–p99999), distribution-shape moments (iqr/skewness/kurtosis/bimodality_coef), bytes, count, or impact: the logarithm of occurrences × mean duration to the seventh power, a mean below one unit counting as one, so that a message with no duration ranks by its occurrences; empty when durations are not read (`ltl --explain impact`). Use `-sa` to reverse the sort order.
 
 | Option | Description |
 |--------|-------------|

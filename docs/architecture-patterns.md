@@ -328,6 +328,8 @@ representation retargets one site per quantity.
 - `calculate_all_statistics` :: `$entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );` (the sort pre-pass)
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_mean} = mean_of(`
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );`
+- `derive_moment_statistics` :: `my $mean = mean_of($total, $n);` (the duration mean, both data models)
+- `impact_of` :: `my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;` (impact from the reported mean)
 
 **Owning record.** `features/616-gated-mean-derivation.md` D1 to D4; the
 CLAUDE.md checkpoint on observation counts. Cross-reference: *Precise storage,
@@ -335,8 +337,8 @@ formatting at the output boundary*, to which the same issue adds the
 per-message bytes mean and the run index's means as sites.
 
 **Status.** Needs refinement until #616 (one gated derivation of means and
-totals) completes: impact, the per-message bytes mean, the duration mean and
-the run index's six means do not yet call the helper.
+totals) completes: the per-message bytes mean and the run index's six means do
+not yet call the helper.
 
 ---
 

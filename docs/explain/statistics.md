@@ -317,3 +317,23 @@ ltl -so bimodality_coef -n 20 access.log     # most likely multimodal APIs
 **How ltl computes this.** Sarle's formula with sample-size correction: `BC = (skewness² + 1) / (kurtosis + 3 × (n−1)² / ((n−2)(n−3)))`. The denominator's sample-size adjustment is what distinguishes Sarle's BC from the unadjusted moment-based version — it prevents small-sample false positives from being even worse. Requires `n ≥ 4` and non-zero `std_dev`; emitted blank otherwise. Total cost: three arithmetic operations on numbers (`skewness`, `kurtosis`, `n`) already computed for the other shape moments.
 
 **See also.** `skewness`, `kurtosis`, `cv`, `std_dev`.
+
+---
+
+## Ranking
+
+### impact
+
+A ranking figure that weighs how often a message occurs against how long it takes: the natural logarithm of occurrences times the mean duration to the seventh power. The seventh power lets a slow operation outrank a far more frequent fast one; the logarithm keeps the figure small enough to read and compare across messages.
+
+**Operational use.** Rank with `-so impact` to find the messages whose combined cost — frequency and slowness together — is greatest, which neither `-so occurrences` nor `-so mean` shows on its own. A message with no duration, or with a mean of one unit or below, ranks by its occurrences alone: its impact is ln(occurrences), 0 for a single line. A duration never ranks a message below the same message without one; only a mean above one unit raises it.
+
+**Example.**
+
+```text
+ltl -so impact -n 20 access.log       # rank by frequency and slowness together
+```
+
+**How ltl computes this.** `impact = ln(max(mean, 1)^7 × occurrences)`, where `mean` is the message's mean duration in the source unit, as the MESSAGES CSV reports it: the total duration divided by the lines that carried a duration. A mean of one unit or below, zero, or no duration at all counts as 1, so the duration term contributes nothing. Computed once per message after the log is read, so the order of its lines does not matter. When durations are discarded with `-od` or `-d duration`, impact is not computed and its column is empty.
+
+**See also.** `mean`, occurrences (`-so occurrences`), total duration (`-so duration`).

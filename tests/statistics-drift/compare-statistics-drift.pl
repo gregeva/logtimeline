@@ -714,6 +714,11 @@ my %L2_INVARIANTS = (
         produced_by => 'calculate_statistics() (raw) and calculate_statistics_bin() (bin) in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — IQR derivation',
     },
+    impact_formula => {
+        asserts     => 'impact equals ln(max(duration_mean, 1)^7 x occurrences), an empty duration_mean read as 0, so a row with no duration mean above one unit ranks by its occurrences alone; impact is never empty on a row while durations are read',
+        produced_by => 'impact_of() in ltl, from the row\'s reported mean through mean_of()',
+        contract    => 'features/616-gated-mean-derivation.md D5, D11 and D20 (impact from the reported mean, the occurrences part when there is none, the duration term floored)',
+    },
     level_partition => {
         asserts     => 'occurrences equals the sum of all populated level columns (plain and -HL): highlighted and plain keys partition the bucket lines (Issue #320)',
         produced_by => 'print_bar_graph() in ltl (per-bucket $total_occurrences accumulation)',
@@ -798,6 +803,32 @@ sub check_layer2_row {
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
                 rule => 'duration_mean >= duration / occurrences (tolerance 1e-9 relative, float precision)',
+            );
+        }
+    }
+
+    # Impact from the row's reported mean (#616 D5, D11, D20). The exponent is
+    # ltl's $impact_time_exponent (7). Drift scenarios all read durations, so
+    # an empty impact on a MESSAGES row is itself a failure.
+    if ($file_kind eq 'messages' && exists $row->{impact}) {
+        my $imp  = as_num($row->{impact});
+        my $io   = as_num($row->{occurrences});
+        my $im   = as_num($row->{duration_mean}) // 0;
+        my $inv  = $L2_INVARIANTS{impact_formula};
+        my $expected = (defined $io && $io > 0) ? log( ($im > 1 ? $im : 1) ** 7 * $io ) : undef;
+        my $scale = defined $expected && abs($expected) > 1 ? abs($expected) : 1;
+        if (!defined $imp || !defined $expected || abs($imp - $expected) > DERIVATION_EPS * $scale) {
+            $stats->{T4}++;
+            emit_l2_failure(
+                scenario => $scenario, file => $file_kind, key => $k,
+                invariant => "impact_formula ($side)",
+                observed => sprintf("impact=%s duration_mean=%s occurrences=%s expected=%s",
+                    $row->{impact} // '', $row->{duration_mean} // '', $row->{occurrences} // '',
+                    defined $expected ? sprintf('%.9f', $expected) : 'undefined'),
+                asserts => $inv->{asserts},
+                produced_by => $inv->{produced_by},
+                contract => $inv->{contract},
+                rule => 'impact == ln(max(duration_mean, 1)^7 * occurrences) (tolerance 1e-9 relative), never empty',
             );
         }
     }
