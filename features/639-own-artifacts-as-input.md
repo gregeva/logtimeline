@@ -60,7 +60,7 @@ Measured on release/0.18.5; identical on release/0.19.0.
   selects `ltl-index.csv` or an `-o` output, the file is read like any other
   file, under the established practice: a line without a parsable timestamp is
   read and not matched, silently (#640 D1, CSV input,
-  `features/640-csv-input-timestamp-column.md`). No file is left out of the
+  `features/640-csv-unplaced-rows-silent.md`). No file is left out of the
   input, and no notice is added. That the index then records an entry for
   itself which is never fresh is accepted (architect: "I don't care that it is
   out of date"), as is `index_used: no` on later runs in that directory: the
