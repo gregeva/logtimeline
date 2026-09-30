@@ -139,6 +139,37 @@ are unchanged.
       warning, no fatal error (assertable: `tests/lib/runtime-warnings.sh`
       on a quoted-timestamp CSV, the #328 reproduction shape).
 
+## Implementation
+
+- `csv_timestamp_placeable()` decides whether a CSV row can be placed: epoch
+  seconds when the file's first data row was epoch, otherwise the ISO shape
+  the date parse already required (`/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/`,
+  anchored at the start, so accepted forms are unchanged). Both CSV paths
+  call it (the header-confirming second line and every later row) before the
+  row counts as a match; a refused row goes to `note_unmatched_line()` like
+  the CSV header. The later check in the timestamp parse arm, its per-row
+  warning and the per-file total are removed.
+- The epoch arm is new: an epoch CSV row whose timestamp is not a number
+  previously reached `int()` with a Perl runtime warning
+  (`Argument "abc" isn't numeric in int`) and was placed at epoch 0.
+- `detect_and_parse_csv_header()` no longer prints; `udm_note_sources()`,
+  called once per file on its first matched line, counts the files whose
+  header lacks the metric's column (`@udm_csv_unbound_files`), and
+  `emit_udm_csv_unbound_notices()` prints after the read, beside the other
+  `-udm` notices: `Note: -udm '<spec>': no column named '<name>' in the header
+  of N CSV file(s)`.
+- `-V filter-summary`: an unplaceable CSV row moves from `excluded_other` to
+  `lines_unmatched`; the section contract in
+  `features/503-yaml-aggregate-export.md` is updated to match.
+- `-V udm-specs` `source=` reflects only files whose rows matched: a CSV none
+  of whose rows is placed no longer contributes `csv:<column>`.
+- Measured on the base commit and this branch with the same inline fixtures
+  (the `tests/validate-csv-input.sh` scenarios): base prints the row warning,
+  counts `matched_lines: 3` and a delta sum of 70 on the mixed-row CSV, prints
+  `not found in CSV headers` once per file, and emits the runtime warning on the
+  epoch fixture; this branch passes all 15 assertions, base fails the 11 that
+  carry #640's contract.
+
 ## Overlapping specifications on release 0.19.0
 
 - **#615 (CSV input as a header-instantiated registry entry)**, specification
