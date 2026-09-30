@@ -28,13 +28,11 @@ with a `*` glob, run from inside the log directory, twice.
 | "CSV output was not activated, so functionality relating to the output CSV files should be gated" | The index is not a CSV-output feature: it is written on every run unless `-ni`, by design (`features/index-file.md`). The defect is that a later `*` run reads it, and the `-o` files, as input | #639 |
 | "Inconsistency on how timestamps are being written to and read from the index file" | The index's write and read-back agree (both use the `T` form). CSV input takes column 0 as the timestamp when no column is named `timestamp` (for the index: `entry_type`, value `file`), and rejects the quoted minute-precision timestamp ltl's own STATS CSV carries | #640 (CSV input timestamp column and accepted forms), `features/640-csv-input-timestamp-column.md` |
 
-## Side findings, not filed
+## Side findings
 
-- `-V udm-specs` reports `source=` from whichever file was read last: when
-  `ltl-index.csv` sorts last, the run reports `source=csv:unbound` although
-  every value came from log lines (`udm_read_as()` reads the global
-  `$csv_detected`). On the same run the unit rendered as `unit=b(bytes)`
-  against `unit=B(bytes)` on the first run; not investigated.
+- `-V udm-specs` reports `source=` from whichever file was read last, and
+  shows unit `B` as `b` on a run that reads a CSV file. Both are in the scope
+  of #638 (`features/638-udm-non-numeric-capture.md` D5).
 - `tests/validate-index-read-back.sh --list` regenerates the harness's
   fixtures (the two derived 5k-line slices under `logs/` and the prebuilt
   index) when it judges them stale, instead of only listing scenario names.
