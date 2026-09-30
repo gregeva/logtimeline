@@ -43,6 +43,13 @@ COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
 MS_IR_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-integration-runtime.txt"
 MS_CS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-connection-server.txt"
 MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
+# A Windchill MethodServer log4j log carrying a multi-line entry between two
+# timestamped lines: the timestamped lines carry dataQueue size10 and size30,
+# the entry's continuation lines (no timestamp) carry " dataQueue size : 22440"
+# (a non-numeric capture) and " dataQueue size99" (a numeric one). Only the
+# timestamped lines count: sum 40 over 2 (10..30), delta 20 over 1.
+CONT_FIXTURE="$REPO_DIR/tests/fixtures/udm-continuation-lines.txt"
+CONTRACT_637='features/637-udm-continuation-lines.md section Decisions D1 (a metric pattern is tried only on lines that matched a log format) and section Acceptance criteria'
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -56,7 +63,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$CONT_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -1036,6 +1043,56 @@ scenario_milliseconds_replacement() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Scenario: continuation-lines — a metric's pattern matches continuation lines
+# of a multi-line entry, one with a non-numeric capture and one with a numeric
+# one. Neither is tried: no runtime warning, the delta state is untouched, and
+# the figures equal those of the same log without its continuation lines.
+# -bs 1440 -oe: production is run-wide, the same at any bucket size.
+# ---------------------------------------------------------------------------
+scenario_continuation_lines() {
+    current_scenario="continuation-lines"
+    echo "[$current_scenario]"
+    local specs=(-udm 'queue::sum:/dataQueue size(.+)/' -udm 'queuedelta::delta:/dataQueue size(.+)/')
+    local out stripped_fixture stripped
+    out="$TMP_DIR/continuation.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "${specs[@]}" "$CONT_FIXTURE" > "$out" 2>"$out.stderr" || true
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    # The same log with the multi-line entry's continuation lines removed.
+    stripped_fixture="$TMP_DIR/continuation-stripped.txt"
+    grep -E '^[0-9]{4}-' "$CONT_FIXTURE" > "$stripped_fixture"
+    stripped="$TMP_DIR/continuation-stripped.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "${specs[@]}" "$stripped_fixture" > "$stripped" 2>"$stripped.stderr" || true
+    check_capture_warnings "$stripped"
+
+    assert_line "$out" \
+        pattern     "udm: name=queuedelta spec='queuedelta::delta:/dataQueue size(.+)/'" \
+        asserts     'The delta metric is listed, so the produced line below it is its own' \
+        produced_by 'emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "sed -n '/^udm: name=queuedelta /,/^  produced: /p' '$out' | grep -qxF '  produced: occurrences=1 buckets=1 sum=20 min=20 max=20'" \
+        label       'delta over size10 and size30 is 20, the continuation line between them untouched' \
+        asserts     'D1: a continuation line carrying a numeric capture does not overwrite the delta state, so delta is the difference of the two timestamped values' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "sed -n '/^udm: name=queue /,/^  produced: /p' '$out' | grep -qxF '  produced: occurrences=2 buckets=1 sum=40 min=10 max=30'" \
+        label       'sum metric counts the two timestamped lines only' \
+        asserts     'D1: only lines that matched a log format feed a metric - occurrences 2, sum 40, min 10, max 30' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "[ -n \"\$(grep '^  produced: ' '$out')\" ] && [ \"\$(grep '^  produced: ' '$out')\" = \"\$(grep '^  produced: ' '$stripped')\" ]" \
+        label       'every metric produces the same with and without the continuation lines' \
+        asserts     'D1: continuation lines change nothing any metric reports' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    rm -f "$out" "$out.stderr" "$stripped" "$stripped.stderr" "$stripped_fixture"
+}
+
 scenario_register milliseconds-replacement \
                   undelimited-regex \
                   whole-match \
@@ -1054,7 +1111,8 @@ scenario_register milliseconds-replacement \
                   delta-shorthand-canonical \
                   collision-csv-and-export \
                   collision-operands \
-                  collision-columnar
+                  collision-columnar \
+                  continuation-lines
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -1078,6 +1136,7 @@ while read -r _scenario; do
         collision-csv-and-export   ) scenario_collision_csv_and_export ;;
         collision-operands         ) scenario_collision_operands ;;
         collision-columnar         ) scenario_collision_columnar ;;
+        continuation-lines         ) scenario_continuation_lines ;;
     esac
 done < <(scenario_selected)
 
