@@ -3,11 +3,16 @@
 ## Status
 
 **Specification agreed with the architect 2026-09-28 on branch
-`616-gated-mean-derivation` off `release/0.19.0`; implementation not started.**
-The specification was written at `58f8d94`. No code has changed, the version is
-not stamped, and the `before` benchmarks are not captured: they are taken on the
-release-branch commit this issue lands on, after #273 (store the duration total
-precise, format at the output boundary) has merged (D19, the landing order).
+`616-gated-mean-derivation` off `release/0.19.0`; implementation started
+2026-09-30.** The specification was written at `58f8d94`. Implementation starts
+from `release/0.19.0` at `a32eb32`, after #273 (store the duration total precise,
+format at the output boundary) and #608 (one byte ladder) merged, so D19's
+landing order holds and no blocking edge remains. On that commit every site of
+section 5.1 was re-resolved inside its sub (section 3, *Re-audit at the start of
+implementation*), the version is stamped `0.19.0-616`, and the `before`
+benchmarks of section 8 are captured (`616-before`, `616-before-bin`). Next: the
+D12 prototype (section 8), run before drop 1 so that a result in conflict with
+D10 and D12 reaches the architect before any drop lands.
 
 This issue is one of the refactoring issues the #342 review (the audit of
 redundant logic surfaces across `ltl`) dispatched under #622 (the parent
@@ -299,6 +304,27 @@ base commit and pass once the projection is gated.
 16. `docs/explain/statistics.md` lists `impact` under *See also* for the mean,
     and no `impact` topic exists; D25 adds one.
 
+**Re-audit at the start of implementation (2026-09-30, `a32eb32`).** Every
+snippet of section 5.1 was searched for with `grep -F` inside the sub its row
+names, on the tree implementation starts from.
+
+- All sites resolve, as often as the table says. The one change is #273's
+  (store precise): the time-bucket store's duration total is named
+  `duration_sum`, in the bucket constructor, in `%log_analysis` and in the
+  projected `%log_stats` entry, where the table named it `total_duration` and
+  `duration`. The table and section 5.2 are updated to the current names; the
+  message store keeps `total_duration`. The design is unchanged.
+- The drift-baseline cells section 3 item 2 and section 7 count were recounted
+  on the committed baselines of this commit, with the same tolerance (1e-9
+  relative, the drift scenarios writing at `-cp full`): 45 impact cells differ
+  from `log(duration_mean^7 × occurrences)`, 122 have a mean above zero and below
+  one unit, 38 are in both, 129 move in all; 2 impact cells are empty beside
+  `duration_mean=0`; 97 per-message `bytes_mean` cells differ from the precise
+  `bytes / bytes_occurrences`. All as recorded. One precision on item 2: the 45
+  differ by less than 0.1 percent only where the mean is at least one unit
+  (largest 0.0004 percent); the 38 with a sub-unit mean differ by up to 3
+  percent, and D20 (the floor) moves those to `log(occurrences)` in any case.
+
 ---
 
 ## 4. Locked decisions
@@ -519,7 +545,7 @@ decide: a name, a spelling, an argument shape.
 
 | Quantity | Site (sub :: snippet) | Decision |
 |---|---|---|
-| Store constructors | `read_and_process_logs` :: `total_duration => 0,` (message and bucket, both models) | D1, D4, D18 |
+| Store constructors | `read_and_process_logs` :: `total_duration => 0,` (message, both models) and `duration_sum => 0,` (bucket, both models) | D1, D4, D18 |
 | Per-message duration count | `read_and_process_logs` :: `my $n_old = $entry->{duration_count};` (bin, inside `if( $message_duration_stats_demand ) {`); raw has none | D1, D18 |
 | Per-bucket duration count | the same snippet under `if( $bucket_duration_stats_demand ) {` (bin only) | D1, D18 |
 | Bytes count, both stores | `read_and_process_logs` :: `if( $e->{bytes_occurrences}++ ) {` under `if( $bytes_aggregate_demand ) {` | D1 |
@@ -529,7 +555,7 @@ decide: a name, a spelling, an argument shape.
 | Impact after consolidation | `group_similar_messages` :: `if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {` | D5, D11 |
 | Duration statistics, raw | `calculate_statistics` :: `my $sum_sq_dev = $bucket_data->{sum_of_squares} - $duration_count * ($mean ** 2);` | D9 |
 | Duration statistics, bin | `calculate_statistics_bin` :: `my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);` | D9 |
-| Per-bucket projection (twice, one per demand branch) | `calculate_all_statistics` :: `duration      => $log_analysis{$bucket}{total_duration},` and `bytes         => $log_analysis{$bucket}{total_bytes},` | D4 |
+| Per-bucket projection (twice, one per demand branch) | `calculate_all_statistics` :: `duration_sum  => $log_analysis{$bucket}{duration_sum},` and `bytes         => $log_analysis{$bucket}{total_bytes},` | D4 |
 | Per-bucket count mean (twice) | `calculate_all_statistics` :: `count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences}` | D3 |
 | Per-bucket bytes mean (twice) | `calculate_all_statistics` :: `bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? (` | D3 |
 | Per-bucket user-defined mean (stored, then again for display) | `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0)` and `elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0)` | D3 |
@@ -541,10 +567,10 @@ decide: a name, a spelling, an argument shape.
 | Per-message bytes mean | `print_message_summary` :: `? int( $total_bytes_num / $bytes_occurrences + 0.5 )` | D3, D6 |
 | Consolidation merge | `merge_consolidation_stats` :: `if (defined $source->{total_duration}) {` and `$target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};` | D1, D4 |
 | Consolidation reinject | `group_similar_messages` :: `if (defined $cluster->{total_duration}) {` and `$entry->{duration_count} = $cluster->{duration_count} if defined $cluster->{duration_count};` (bin only) | D1, D4, D18 |
-| Column-scaling maxima and scaled keys | `normalize_data_for_output` :: `$max_total{duration} = $log_stats{$bucket}{duration} if ( defined $log_stats{$bucket}{duration}` | D4 |
+| Column-scaling maxima and scaled keys | `normalize_data_for_output` :: `$max_total{duration} = $log_stats{$bucket}{duration_sum} if ( defined $log_stats{$bucket}{duration_sum}` | D4 |
 | Timeline latency block | `print_bar_graph` :: `if( defined $log_stats{$bucket}{bytes} \|\| defined $log_stats{$bucket}{p50}` | D4, D23 |
-| STATS `_nice` cells | `print_bar_graph` :: `(defined $log_stats{$bucket}{$key} ? ltrim(format_duration_total(` and its bytes twin | D4 |
-| YAML series blocks | `write_aggregate_export` :: `next unless defined $stats->{duration};` and `next unless defined $stats->{bytes};` | D4 |
+| STATS `_nice` cells | `print_bar_graph` :: `(defined $log_stats{$bucket}{duration_sum} ? ltrim(format_duration_total(` and its bytes twin | D4 |
+| YAML series blocks | `write_aggregate_export` :: `next unless defined $stats->{duration_sum};` and `next unless defined $stats->{bytes};` | D4 |
 | Index bytes accumulation (file row and selection row) | `read_and_process_logs` :: `if (defined $bytes && $bytes > 0) {` (twice) | D17 |
 | Index means, six | `write_index_file` :: `my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", ...` and the five siblings | D3, D8, D15, D16 |
 | Heatmap pre-seed from the index (bytes arm corrected) | `read_index_file` :: `$heatmap_min = $index_aggregated{"${hm_metric_col}_min"}{value} + 0;` | D17, D24 |
@@ -605,7 +631,7 @@ decide: a name, a spelling, an argument shape.
 
 **D4: output gated on the count.**
 
-- The per-bucket projection writes `duration` only when `duration_count > 0` and
+- The per-bucket projection writes `duration_sum` only when `duration_count > 0` and
   `bytes` only when `bytes_occurrences > 0`; otherwise the keys are absent. The
   `defined` tests downstream then read a count-gated projection rather than a
   zero-initialised field, and the `_nice` cells, the timeline cells, the scaling
@@ -1130,6 +1156,13 @@ store's loop update unmeasured, so the string adds `-bdm bin`. It names the two
 stores rather than passing `-dm bin`, which would add nothing measurable here.
 The merge's one-line case runs only under consolidation, which the standard case
 does not do; the prototype below measures it.
+
+**Captured 2026-09-30 on `a32eb32`, one run each:** `616-before` 9.412 s total,
+peak RSS 104,792,064 bytes; `616-before-bin` 11.850 s, peak RSS 53,821,440
+bytes. The runner writes the `--options` string into neither the TSV's
+`options` column nor any other row, so the bin-model file is identified by its
+label alone; the halved peak memory confirms the bin models took effect. The
+`after` pair is captured with the same two option strings.
 
 **Prototype: required by D12, measurement-only, trigger execution frequency ×
 per-execution cost** (`prototype/README.md`). Question: which arm of section 5.2
