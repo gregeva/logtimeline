@@ -17472,6 +17472,7 @@ sub calculate_all_statistics {
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
+        $aggregated_data->{duration_count} = $log_analysis{$bucket}{duration_count};
         $aggregated_data->{total_duration} += $log_analysis{$bucket}{duration_sum};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
@@ -17811,6 +17812,7 @@ sub calculate_all_statistics {
                         # never mutates its input.
                         $stats = calculate_statistics({
                             occurrences    => $entry->{occurrences},
+                            duration_count => $entry->{duration_count},
                             total_duration => $entry->{total_duration},
                             sum_of_squares => $entry->{sum_of_squares},
                             durations      => $entry->{durations},
@@ -17919,6 +17921,7 @@ sub calculate_all_statistics {
                 my $duration_observed = $log_messages{$category}{$log_key}{duration_count};
 
                 if( $duration_observed && $message_duration_stats_demand ) {
+                    $aggregated_data->{duration_count} = $log_messages{$category}{$log_key}{duration_count};
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
                     $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
                     # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
@@ -18101,6 +18104,58 @@ sub log_bucket {
     return $value > 0 ? floor(log($value) / log($base)) : 0;
 }
 
+# The statistics both data models derive the same way, from the observation
+# count, the total, the sum of squares and, under shape demand, the three
+# central-moment sums (#616 D9): the raw model computes the moment sums with
+# a pass over its samples, the bin model keeps them as running sums. Returns
+# (mean, std_dev, cv, skewness, kurtosis, bimodality_coef); std_dev and cv
+# need n >= 2, the shape statistics n >= 4 and a positive second moment, and
+# are undef otherwise. Records the shape group's -V statistics-demand outcome.
+# Percentiles stay with each model's own sub.
+sub derive_moment_statistics {
+    my ($n, $total, $sum_of_squares, $moments, $demand, $t) = @_;
+    my $mean = mean_of($total, $n);
+    my ($std_dev, $cv);
+    if ($n >= 2) {
+        my $sum_sq_dev = $sum_of_squares - $n * ($mean ** 2);
+        $sum_sq_dev = 0 if $sum_sq_dev < 0;  # guard floating-point underflow on near-constant data
+        my $variance = $sum_sq_dev / ($n - 1);
+        $std_dev = sqrt($variance);
+        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    }
+
+    # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
+    # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
+    # suspect multimodal; threshold is the canonical cutoff from the bimodality
+    # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
+    # non-degenerate distribution (positive second moment); derived only under
+    # shape-group demand (#305).
+    my ($skewness, $kurtosis, $bimodality_coef);
+    if ($demand->{shape}) {
+        if ($n >= 4) {
+            $t->{shape_moments}{computed}++ if $t;
+            my ($m2_sum, $m3_sum, $m4_sum) = @$moments;
+            my $m2 = $m2_sum / $n;
+            my $m3 = $m3_sum / $n;
+            my $m4 = $m4_sum / $n;
+            if ($m2 > 0) {
+                my $g1 = $m3 / ($m2 ** 1.5);
+                my $g2 = $m4 / ($m2 ** 2) - 3;
+                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+            }
+        } elsif ($t) {
+            $t->{shape_moments}{ineligible}++;
+        }
+    } elsif ($t) {
+        if ($n >= 4) { $t->{shape_moments}{skipped_demand}++ }
+        else         { $t->{shape_moments}{ineligible}++ }
+    }
+    return ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef);
+}
+
 # Function to calculate statistical metrics for the raw data model.
 # $demand is the #305 statistics-group demand descriptor for the calling
 # store: { csv_body => 0|1, extended => 0|1, shape => 0|1 }. terminal_core
@@ -18121,27 +18176,32 @@ sub calculate_statistics {
         ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
         : undef;
     $t->{stats_calls}++ if $t;
-    my $occurrences = $bucket_data->{occurrences};
-    return unless $occurrences > 0;
-
-    # Guard against empty durations array - not all entries may have duration data
-    return unless defined $bucket_data->{durations} && @{$bucket_data->{durations}};
+    # The observation count is the gate (#616 D9): no timed line, no statistic.
+    return unless ($bucket_data->{duration_count} // 0) > 0;
 
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
     my $duration_count = scalar @sorted;
 
-    # Use duration_count (entries with duration data) for statistics, not occurrences (total entries)
     my $min = min(@sorted);
-    my $mean = $bucket_data->{total_duration} / $duration_count;
     my $max = max(@sorted);
-    my ($std_dev, $cv);
-    if ($duration_count >= 2) {
-        my $sum_sq_dev = $bucket_data->{sum_of_squares} - $duration_count * ($mean ** 2);
-        $sum_sq_dev = 0 if $sum_sq_dev < 0;  # guard floating-point underflow on near-constant data
-        my $variance = $sum_sq_dev / ($duration_count - 1);
-        $std_dev = sqrt($variance);
-        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    # The shape group's moment sums come from one pass over the samples about
+    # the mean: the dominant per-key cost of this function, run only under
+    # shape demand at n >= 4 (#305).
+    my $moments;
+    if ($demand->{shape} && $duration_count >= 4) {
+        my $mu = mean_of($bucket_data->{total_duration}, $duration_count);
+        my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
+        for my $x (@sorted) {
+            my $d = $x - $mu;
+            my $d2 = $d * $d;
+            $m2_sum += $d2;
+            $m3_sum += $d2 * $d;
+            $m4_sum += $d2 * $d2;
+        }
+        $moments = [ $m2_sum, $m3_sum, $m4_sum ];
     }
+    my ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef) = derive_moment_statistics(
+        $duration_count, $bucket_data->{total_duration}, $bucket_data->{sum_of_squares}, $moments, $demand, $t);
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
@@ -18177,46 +18237,8 @@ sub calculate_statistics {
         $t->{extended_percentiles}{skipped_demand}++;
     }
 
-    # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
-    # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
-    # suspect multimodal; threshold is the canonical cutoff from the bimodality
-    # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
-    # non-degenerate distribution (positive second moment). The O(n) moment pass
-    # is the dominant per-key cost of this function and runs only under
-    # shape-group demand (#305).
-    if ($demand->{shape}) {
-        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-        if ($duration_count < 4 && $t) {
-            $t->{shape_moments}{ineligible}++;
-        }
-        if ($duration_count >= 4) {
-            $t->{shape_moments}{computed}++ if $t;
-            my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
-            for my $x (@sorted) {
-                my $d = $x - $mean;
-                my $d2 = $d * $d;
-                $m2_sum += $d2;
-                $m3_sum += $d2 * $d;
-                $m4_sum += $d2 * $d2;
-            }
-            my $n  = $duration_count;
-            my $m2 = $m2_sum / $n;
-            my $m3 = $m3_sum / $n;
-            my $m4 = $m4_sum / $n;
-            if ($m2 > 0) {
-                my $g1 = $m3 / ($m2 ** 1.5);
-                my $g2 = $m4 / ($m2 ** 2) - 3;
-                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
-            }
-        }
-        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
-    } elsif ($t) {
-        if ($duration_count >= 4) { $t->{shape_moments}{skipped_demand}++ }
-        else                      { $t->{shape_moments}{ineligible}++ }
-    }
+    @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef)
+        if $demand->{shape};
 
     return \%stats;
 }
@@ -18288,22 +18310,17 @@ sub calculate_statistics_bin {
         ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
         : undef;
     $t->{stats_calls}++ if $t;
-    return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
-    my $n = $sidecar_entry->{duration_count} // 0;
+    # The observation count is the gate (#616 D9): no timed line, no statistic.
+    my $n = $sidecar_entry ? ($sidecar_entry->{duration_count} // 0) : 0;
     return unless $n > 0;
 
     my $min  = $sidecar_entry->{min};
     my $max  = $sidecar_entry->{max};
-    my $mean = $aggregated_data->{total_duration} / $n;
-
-    my ($std_dev, $cv);
-    if ($n >= 2) {
-        my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);
-        $sum_sq_dev = 0 if $sum_sq_dev < 0;   # guard floating-point underflow on near-constant data
-        my $variance = $sum_sq_dev / ($n - 1);
-        $std_dev = sqrt($variance);
-        $cv = $mean != 0 ? $std_dev / $mean : undef;
-    }
+    # The moment sums are the running sums the Welford-Pébay update keeps
+    # (M_k_sum / n = m_k), present under shape demand.
+    my ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef) = derive_moment_statistics(
+        $n, $aggregated_data->{total_duration}, $sidecar_entry->{sum_of_squares},
+        ( $demand->{shape} ? [ @$sidecar_entry{qw(m2_sum m3_sum m4_sum)} ] : undef ), $demand, $t);
 
     # Quantiles to derive, by demand: terminal_core always; csv_body and
     # extended_percentiles when demanded. p75 is additionally needed as an
@@ -18380,34 +18397,8 @@ sub calculate_statistics_bin {
         $t->{extended_percentiles}{skipped_demand}++;
     }
 
-    # Distribution-shape moments — same downstream formulas as calculate_statistics,
-    # with m2/m3/m4 sourced from the Welford-Pébay sidecar accumulators
-    # (M_k_sum / n = m_k central moment). O(1) here; gated on demand so the
-    # fields are neither derived nor stored when no consumer reads them.
-    if ($demand->{shape}) {
-        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-        if ($t) {
-            if ($n >= 4) { $t->{shape_moments}{computed}++ }
-            else         { $t->{shape_moments}{ineligible}++ }
-        }
-        if ($n >= 4) {
-            my $m2 = $sidecar_entry->{m2_sum} / $n;
-            my $m3 = $sidecar_entry->{m3_sum} / $n;
-            my $m4 = $sidecar_entry->{m4_sum} / $n;
-            if ($m2 > 0) {
-                my $g1 = $m3 / ($m2 ** 1.5);
-                my $g2 = $m4 / ($m2 ** 2) - 3;
-                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
-            }
-        }
-        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
-    } elsif ($t) {
-        if ($n >= 4) { $t->{shape_moments}{skipped_demand}++ }
-        else         { $t->{shape_moments}{ineligible}++ }
-    }
+    @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef)
+        if $demand->{shape};
 
     return \%stats;
 }

@@ -1554,6 +1554,15 @@ scenario and its `-so duration` sibling unchanged), `validate-statistics.sh`
 `validate-filter-summary.sh`, `validate-numeric-criteria-notices.sh`,
 `validate-udm-specs.sh` and `validate-udm-counting.sh` pass, with no runtime
 warning; `validate-regression.sh` failed on 21 goldens, as section 7 predicts.
+What this run proves of the CSV surfaces is narrower than it reads: the CSV
+cache that `validate-csv-output.sh` and `validate-statistics.sh` share
+(`tests/lib/csv-cache.sh`) fingerprints only the CSV-writing code and trusts
+upstream code for its 60-minute validity period, and this run printed no stale
+warning, so its 25 pre-existing CSV scenarios and the drift layer read captures
+the drop 1 run had taken, not this tree's output; the two new scenarios were
+captured fresh. The run on the amended tree below refreshed every capture (31
+stale warnings, the captures 184 minutes old) and is the one that validates
+this drop's CSV surfaces.
 
 *Goldens.* The 21 were re-captured with `capture-regression.sh` into a scratch
 directory and compared line by line with the committed references before any
@@ -1672,3 +1681,36 @@ and bucket sections made through one reference, measured 6.2 percent faster on
 a day of web-server access log in both models, in every one of twenty rounds,
 with byte-identical output. It changes lines that predate this issue and is
 left to #620.
+
+**Drop 3 (2026-09-30): one statistics sub over both store shapes (D9, D14).**
+`derive_moment_statistics($n, $total, $sum_of_squares, $moments, $demand, $t)`
+derives the mean (through `mean_of`), the standard deviation and coefficient of
+variation from the sum of squares, and, under shape demand at n ≥ 4, skewness,
+kurtosis and the bimodality coefficient from the three central-moment sums,
+recording the shape group's `-V statistics-demand` outcome; it returns the six
+values. `calculate_statistics` (raw) computes the moment sums with its pass over
+the sorted samples, only under shape demand at n ≥ 4, and passes them;
+`calculate_statistics_bin` passes the running sums its update keeps, under
+shape demand. Both keep their names, their percentile ladders (D9: percentiles
+stay per model) and their `stats_calls` count on every call, and both gate
+their early return on `duration_count > 0`, the one gate spelling; the three
+raw callers (the bucket pass, the sort pre-pass and the group calculation) hand
+the count in the aggregate they build.
+
+*Proof (D14),* on captures produced fresh for the run (the CSV cache emptied by
+`tests/cleanup-test-artifacts.sh` first, since the cache does not fingerprint
+statistics code): `validate-statistics.sh` passes 22 scenarios, raw and bin,
+with every cell of all 44 MESSAGES and STATS comparisons in the drift layer's
+tightest tier, so no advisory on `mean`, `std_dev`, `cv`, `skewness`,
+`kurtosis` or `bimodality_coef`, and the L3 oracle layer OK on all 44; no drift
+baseline was re-blessed. `validate-statistics-demand.sh` passes 102 (the
+`stats_calls` and group counters, whose producers keep their names) and
+`validate-csv-output.sh` 27 scenarios; no runtime warning.
+
+*Cost.* The sub runs once per key after the read loop, never per line. Its
+overhead over the inline arithmetic measured 605 ns per call on this host
+(the call and the `mean_of` call inside it). The run of the corpus with the
+most calls is a day of web-server access log under `-so p99`, 3,194 calls:
+about 2 ms. The corpus's highest-cardinality selection (286,621 message keys)
+carries no duration and makes no call; were every such key timed, the cost
+would be about 0.17 s.
