@@ -91,8 +91,13 @@ path, which share the coercion line.
   For a numeric aggregation (`sum`, `min`, `max`, `mean`, and the
   `delta`/`idelta` transforms), a capture such as `abc`, `12abc`, ` : 22440` or
   an empty capture records nothing, leaves the delta state alone, prints no
-  warning, and is not masked in the message. Clean numeric captures, counting
-  aggregations and the built-in name and token-key patterns are unchanged.
+  warning, and is not masked in the message. Clean numeric captures and the
+  built-in name and token-key patterns are unchanged. **Whether a capture is
+  usable depends on the aggregation function**: a counting aggregation
+  (`count`, `distinct`, `ratio`, `rate`, `drate`) counts values rather than
+  doing arithmetic on them, so `abc123` is a relevant value there and is
+  counted as today; under `sum`, `min`, `max`, `mean`, `delta` or `idelta` it
+  is not a number and is skipped.
   Rationale: reading a number out of the capture (`abc12` → 12) is the guess
   #443 D2 (the capture group is the value) and D4 (no speculative guesses)
   exclude; the duration guard in `read_and_process_logs()` already treats a
@@ -107,6 +112,24 @@ path, which share the coercion line.
   numeric aggregation the capture must be a number. (Architect's instruction:
   the associated example makes its way into, or updates, the help usage
   examples.)
+- **D3 — A partly skipped `/regex/` metric is reported, with its share.** For
+  each `/regex/` metric, the run counts the lines where the pattern matched and
+  the value was recorded, and the lines where the pattern matched but the
+  capture could not be used by the aggregation function (D1). When any line
+  was skipped, one informational notice per metric goes to stderr after the
+  read, giving both counts and the skipped share as a percentage, so the user
+  can tell one or two stray lines from half the population and knows to revise
+  the pattern. Rationale (architect): a pattern that matches but whose capture
+  is not deterministic extracts only part of the population, and that must not
+  happen silently; a metric that produces nothing already speaks through the
+  zero-match notice, but a partial extraction had no signal at all. Scope:
+  `/regex/` metrics, the only extraction where the user writes the capture.
+  This narrows #443 D7 (no new counters on the hot path,
+  `features/user-defined-metrics.md`): a count is kept for the matched-but-
+  unusable case. Constraint: the two counts describe the same population, the
+  lines that reach accumulation after the include/exclude, time-window and
+  numeric filters; the capture runs before those filters, so a skip is counted
+  only once the line is retained.
 
 ## Acceptance criteria
 
@@ -124,6 +147,18 @@ path, which share the coercion line.
 - [ ] An empty capture never masks anything in the message (assertable: same).
 - [ ] A CSV input column holding `n/a` or `5ms` is skipped the same way
       (assertable: the columnar scenario of `tests/validate-udm-specs.sh`).
+- [ ] When some but not all matched lines of a `/regex/` metric are skipped,
+      stderr carries one informational notice for that metric giving the
+      recorded count, the skipped count and the skipped percentage; with no
+      skip, no such notice (assertable: fixture above; notice line matched on
+      stderr, absent on an all-numeric fixture).
+- [ ] Lines removed by `-e`/`-i` or the time window count toward neither
+      figure (assertable: same fixture with an exclude that removes a skipped
+      line).
+- [ ] The notice carries no ` at <file> line <N>` suffix (assertable:
+      `tests/lib/runtime-warnings.sh`).
+- [ ] Under `distinct`, `abc123` is counted as a value (assertable:
+      `produced:` and `tests/validate-udm-counting.sh`).
 - [ ] Counting aggregations still record non-numeric captures as today
       (assertable: `tests/validate-udm-counting.sh` unchanged and passing).
 - [ ] `--help` examples and `docs/usage.md` carry the narrowed-capture example
