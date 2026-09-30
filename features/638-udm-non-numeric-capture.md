@@ -166,7 +166,12 @@ path, which share the coercion line.
     hash seed and `max=1000000` on another, with CSV columns `q_KB_*` or
     `q_kB_*`. This is #608 (byte unit resolves nondeterministically), closed
     and fixed on release/0.19.0 by one byte-unit ladder in which `KB` is the SI
-    kilobyte (1000). It is present on release/0.18.5.
+    kilobyte (1000). It is present on release/0.18.5. Disposition
+    (architect): the fix belongs to release 0.19.0, where #608 (a child of #622,
+    the redundant-logic-surfaces refactoring) already delivered it (PR #635,
+    merged into release/0.19.0; `B` and `b` render `B` on every run there). No
+    new issue, and the unit item leaves this issue's scope; release 0.18.5 is
+    not given the fix.
   Any `-V udm-specs` key change follows `tests/HARNESS-DESIGN.md` and updates
   the section contract in `features/user-defined-metrics.md` in the same
   commit.
@@ -198,8 +203,6 @@ path, which share the coercion line.
 - [ ] On a run mixing a log file and a CSV file, `-V udm-specs` reports each
       metric's source as what it was actually read from, whichever file is
       read last (assertable: two orderings of the same inputs).
-- [ ] A metric declared with unit `B` is shown as `B` on every run, with or
-      without CSV input (assertable: `read_as:` line).
 - [ ] Lines removed by `-e`/`-i` or the time window count toward neither
       figure (assertable: same fixture with an exclude that removes a skipped
       line).
