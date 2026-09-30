@@ -10,9 +10,9 @@ format at the output boundary) and #608 (one byte ladder) merged, so D19's
 landing order holds and no blocking edge remains. On that commit every site of
 section 5.1 was re-resolved inside its sub (section 3, *Re-audit at the start of
 implementation*), the version is stamped `0.19.0-616`, and the `before`
-benchmarks of section 8 are captured (`616-before`, `616-before-bin`). Next: the
-D12 prototype (section 8), run before drop 1 so that a result in conflict with
-D10 and D12 reaches the architect before any drop lands.
+benchmarks of section 8 are captured (`616-before`, `616-before-bin`). The D12
+prototype ran before drop 1 (section 8, *Prototype findings*); the arm that
+lands awaits the architect's decision on its table.
 
 This issue is one of the refactoring issues the #342 review (the audit of
 redundant logic surfaces across `ltl`) dispatched under #622 (the parent
@@ -965,7 +965,13 @@ Fixtures are described in section 7.
   count exists without a consumer demanding it, in both models (D1, D18).
   *Assertable:* a scenario in `tests/validate-duration-display.sh` using
   `timeline_cell_report` from `tests/lib/rendered-output.sh`. The rendered rows
-  are also looked at on a real application log before the work is called done.
+  are also looked at before the work is called done, at `-bs 1`, on two
+  application script logs that between them hold both cases (each counted on
+  the base commit from its STATS CSV at `-bs 1`): a day of script log carrying
+  `durationMS=` on some lines only, whose first 100k lines give 96 of 121
+  one-minute buckets holding lines and no duration; and a script log carrying
+  duration, result bytes and result counts, in which 131 of 157 one-minute
+  buckets hold a duration and no bytes.
 - [ ] **Impact equals the formula on every row.** For every MESSAGES row of a
   run that reads durations: `impact == ln(max(duration_mean, 1)^7 × occurrences)`,
   with an empty `duration_mean` read as 0, so `impact == ln(occurrences)` when
@@ -1157,6 +1163,15 @@ stores rather than passing `-dm bin`, which would add nothing measurable here.
 The merge's one-line case runs only under consolidation, which the standard case
 does not do; the prototype below measures it.
 
+What the pair does not exercise: the standard case demands no shape statistic
+on either store (`-V statistics-demand` on the web-server access log of the
+standard case at `-mdm bin -bdm bin`: `group shape_moments: demanded=0` for
+both), so the loop update it times is the running mean alone; the three moment
+sums are updated only when skewness, kurtosis or bimodality is demanded (`-o`
+on both stores, `-so skewness` on the message store). The arms of D12 differ
+chiefly in that moment arithmetic, so the prototype below adds a selection that
+demands it.
+
 **Captured 2026-09-30 on `a32eb32`, one run each:** `616-before` 9.412 s total,
 peak RSS 104,792,064 bytes; `616-before-bin` 11.850 s, peak RSS 53,821,440
 bytes. The runner writes the `--options` string into neither the TSV's
@@ -1168,16 +1183,75 @@ label alone; the halved peak memory confirms the bin models took effect. The
 per-execution cost** (`prototype/README.md`). Question: which arm of section 5.2
 under D10, D12 lands, given its per-line cost at the bin model? Arms (a) to
 (d). Method: the interleaved order-balanced driver of
-`prototype/342-read-loop-cost-curve/`, ten rounds, medians with ranges, on the
-access-log and application-log selections at `-mdm bin -bdm bin`, and on a
-consolidating selection (`-g -m uuid -mdm bin`) for the merge's one-line case,
-after a behaviour proof per arm on the 100k-line slice: arms (a), (c) and (d)
-byte-identical to the base on every statistic; arm (b) with every moved cell in
-the mean, standard deviation, coefficient of variation and shape columns listed
-and attributed (D12). Staged scale: a
-100k-line slice for the proof, the full day for timing. Exit: the arm that
+`prototype/342-read-loop-cost-curve/`, ten rounds, medians with ranges, every
+selection at `-mdm bin -bdm bin` and every log carrying a duration on its lines,
+since a log without one never reaches the update:
+
+| Selection | Log | Options added | What it exercises |
+|---|---|---|---|
+| access, standard | a day of web-server access log carrying execution time in the duration field (the standard benchmark's) | none | both loop sites, running mean only |
+| access, shape | the same | `-o` | both loop sites with the three moment sums |
+| application, standard | a day of application script log carrying `durationMS=`, result bytes and result counts on its lines | none | both loop sites, running mean only, on an application-log key population |
+| access, consolidated | the same access log | `-g -m uuid` | the merge's one-line and absorbed-key cases |
+
+The standard benchmark's application-log selection is not used: that log
+carries no duration on any line (`-V statistics-demand` at `-mdm bin -bdm bin`
+computes no statistic on either store), so no arm's code runs on it. The
+behaviour proof runs per arm first, on a 100k-line slice of each log, at
+`-o -cp full` so that the moment columns are written, plain and consolidated
+(`-g -m uuid`): arms (a), (c) and (d) byte-identical to the base on every
+statistic; arm (b) with every moved cell in the mean, standard deviation,
+coefficient of variation and shape columns listed and attributed (D12). Staged
+scale: a 100k-line slice for the proof, the full file for timing. Exit: the arm that
 lands, recorded here as a finding with its table. Cost: about half a day of
 machine time.
+
+**Prototype findings (2026-09-30, `48117be`, this host).** Scripts in
+`prototype/616-welford-update-arms/` (`make-probes.pl` builds each arm from
+`ltl` by asserted mechanical edits, slicing the combine out of
+`merge_bin_state` and the one-observation update out of the per-message loop
+site; `prove.sh` and `compare.pl` the proof; `run-arms.sh` and `summarise.pl`
+the timing); results in `tests/profile/results/616-welford-update-arms/`
+(`proof.txt`, `arms.tsv`, `summary.md`). Arm (d) was built both ways, as
+`b-hoist` and `c-hoist`, and a `hoist` probe (today's code with only the hoist)
+separates the hoist's own effect.
+
+*Behaviour proof* (100k-line slices, `-mdm bin -bdm bin -o -cp full`, every
+MESSAGES and STATS cell against the base): arm (c), the hoist and `c-hoist`
+are byte-identical to the base on all six runs (access log, application script
+log, each plain and consolidated with `-g -m uuid`). Arm (b) moves cells on
+every run, only in `duration_skewness`, `duration_kurtosis` and
+`duration_bimodality_coef`: 137 MESSAGES and 7 STATS cells on the access log,
+28 and 7 consolidated, 15 and 2 on the script log, 4 and 2 consolidated. Every
+moved cell is within 3.6e-13 relative, except skewness cells of about 1e-16 on
+symmetric rows whose exact skewness is 0. Mean, standard deviation and
+coefficient of variation never move. Attribution: the combine evaluates the
+moment sums in a different order from the one-observation update.
+
+*Timing* (full files, ten interleaved order-balanced rounds, per-round delta
+against the same round's base, median and range; the access log has 761,698
+lines, each carrying a duration, so two update calls per line, one per store):
+
+| Selection | Base median (range) s | (b) | (c) | hoist | `b-hoist` | `c-hoist` |
+|---|---|---|---|---|---|---|
+| access, standard | 11.611 (11.186 to 12.108) | +0.259 (−0.409 to 0.454), +2.2% | +0.330 (−0.414 to 0.454), +2.8% | −0.193 (−0.644 to 0.928), −1.7% | +0.379 (−0.314 to 0.632), +3.3% | +0.320 (−0.244 to 1.141), +2.8% |
+| access, shape (`-o`) | 12.520 (12.286 to 13.227) | +1.354 (0.896 to 1.778), +10.8% | +0.331 (−0.031 to 0.893), +2.6% | −0.123 (−0.436 to 0.968), −1.0% | +1.269 (0.943 to 1.623), +10.1% | +0.364 (−0.062 to 1.646), +2.9% |
+| application script log, standard | 2.403 (2.306 to 2.457) | +0.018, +0.8% | +0.029, +1.2% | +0.022, +0.9% | +0.023, +1.0% | +0.024, +1.0% |
+| access, consolidated (`-g -m uuid`) | 14.194 (13.223 to 18.405) | +0.230 (−4.164 to 0.711), +1.6% | +0.221 (−4.459 to 0.724), +1.6% | +0.069, +0.5% | +0.055, +0.4% | +0.341, +2.4% |
+
+Rounds in which the arm was slower than that round's base, of ten: access
+standard (b) 7, (c) 8, hoist 3, `c-hoist` 9; access shape (b) 10, (c) 9, hoist 3,
+`c-hoist` 9. Peak memory is unchanged in every arm (within 0.3 MB).
+
+Reading: (c) costs about 0.33 s on the access log with or without the moment
+sums, about 215 ns per call over 1.52 million calls, which is the call itself;
+(b) adds about 1.0 s more under shape demand, about 670 ns per call for the
+combine's moment arithmetic. The hoist alone saves about 0.1 to 0.2 s, but on
+top of (c) it recovers nothing measurable here (`c-hoist` equals (c) within its
+range). The consolidated selection's spread (one base round at 18.4 s) leaves
+it inconclusive. The cost falls only on runs that select the bin model for a
+store; the default raw model never calls the update. The arm that lands is the
+architect's decision on this table.
 
 The unconditional counts are a small change to an existing path; the standard
 pair is their evidence (D18) and no prototype is run for them.
