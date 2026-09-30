@@ -129,22 +129,17 @@ csv_cache_logfile_shorthand() {
     printf '%s' "$base"
 }
 
-# The sidecar recording which CSV-emitting code produced an artifact.
+# The sidecar recording which ltl produced an artifact.
 csv_cache_signature_path() {
     local msg_path="$1"
     printf '%s__csv-signature.txt' "${msg_path%__messages.csv}"
 }
 
-# A digest of everything that decides what the CSV files contain: the subs of
-# ltl dedicated to CSV, the CSV-writing lines of the subs that write one, and
-# the column-rule spec the validators read (a column added to the tool lands in
-# both in the same commit, so the spec is a second, independent witness).
-#
-# Deliberately NOT the whole of ltl: an edit anywhere in the tool would then
-# throw the cache away, and the regeneration cost would fall on every session
-# that touches the timeline or the summary table. What this does not see — a
-# value computed further upstream and then written into a column — is covered
-# by the validity period above rather than by this digest.
+# A digest of what decides the CSV files' content: the whole ltl source and
+# the column-rule spec the validators read. Every line of ltl can change a
+# value some column writes (a statistic, a total, a projection upstream of the
+# writers), so an edit anywhere expires every capture; an artifact is reused
+# only while ltl and the rules are byte for byte the ones that produced it.
 _CSV_CACHE_SIGNATURE=""
 csv_cache_ltl_signature() {
     if [[ -z "$_CSV_CACHE_SIGNATURE" ]]; then
@@ -153,17 +148,8 @@ csv_cache_ltl_signature() {
             use Digest::MD5 qw(md5_hex);
             my ($ltl, $rules_dir) = @ARGV;
             open my $fh, "<", $ltl or die "csv-cache: cannot read $ltl: $!\n";
-            my $src = do { local $/; <$fh> };
+            my @parts = ( do { local $/; <$fh> } );
             close $fh;
-            my @parts;
-            while ($src =~ /^(sub (\w+) \{.*?^\})$/msg) {
-                my ($body, $name) = ($1, $2);
-                if ($name =~ /csv|aggregate/i) { push @parts, $body; next }
-                my @lines = grep { /\$csv\b|\$csv_fh\b|\$csv->|csv_columns|csv_headers|csv_prefix/ }
-                            split /\n/, $body;
-                push @parts, join( "\n", @lines ) if @lines;
-            }
-            die "csv-cache: no CSV-emitting code found in $ltl\n" unless @parts;
             my @rules = sort ( glob( "$rules_dir/*.tsv" ), glob( "$rules_dir/../../aggregate-export/rules/*.tsv" ) );
             die "csv-cache: no column rules found under $rules_dir\n" unless @rules;
             for my $rule (@rules) {
@@ -202,13 +188,13 @@ csv_cache_staleness_reason() {
 
     sig_path="$(csv_cache_signature_path "$msg_path")"
     if [[ ! -s "$sig_path" ]]; then
-        printf 'captured without a record of the CSV-emitting code that produced it'
+        printf 'captured without a record of the ltl that produced it'
         return 0
     fi
     stored="$(cat "$sig_path")"
     current="$(csv_cache_ltl_signature)" || return 2
     if [[ "$stored" != "$current" ]]; then
-        printf 'the CSV-emitting code in ltl or the column rules changed after it was captured'
+        printf 'ltl or the column rules changed after it was captured'
         return 0
     fi
     return 1

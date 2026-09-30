@@ -1714,3 +1714,17 @@ most calls is a day of web-server access log under `-so p99`, 3,194 calls:
 about 2 ms. The corpus's highest-cardinality selection (286,621 message keys)
 carries no duration and makes no call; were every such key timed, the cost
 would be about 0.17 s.
+
+*The CSV cache fingerprints the whole of `ltl`* (architect's direction,
+2026-09-30). `csv_cache_ltl_signature` in `tests/lib/csv-cache.sh` digests the
+whole `ltl` source and the column rules, where it digested only the subs named
+for CSV and the CSV-writing lines, which let a harness run within an hour of an
+upstream edit validate the previous tool's output (drop 2's first run above).
+Shown on this tree: a first `validate-csv-output.sh` run after the change
+refreshed its 28 cached scenarios; a second reused them (the one refresh being
+the cache-validity check's own); a third, after a comment line was added inside
+`calculate_statistics`, refreshed all 28 again, where the old digest would have
+reused them. All three passed. A fresh capture costs about 8.5 minutes on this
+host, paid on the first statistics-harness run after an edit.
+`tests/HARNESS-DESIGN.md` § Cached capture artifacts expire and the
+cache-validity assertions of `validate-csv-output.sh` state the rule.

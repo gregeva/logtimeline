@@ -303,7 +303,7 @@ set -e
 cache_assert 'a freshly captured artifact is read back rather than produced again' \
     "$([[ $rc -eq 1 ]] && echo 0 || echo 1)" \
     "staleness_rc=$rc reason=${reason:-<none>}" \
-    'The cache must still do its job: within the validity period, and with the CSV-emitting code unchanged, the artifact is reused. An expiry that refuses everything would turn a chained CI run into two full captures and the sharing this helper exists for would be gone.'
+    'The cache must still do its job: within the validity period, and with ltl and the column rules unchanged, the artifact is reused. An expiry that refuses everything would turn a chained CI run into two full captures and the sharing this helper exists for would be gone.'
 
 # 2. Past the validity period.
 cache_backdate "$CACHE_MSG" $(( (_CSV_CACHE_MAX_AGE_MINUTES + 5) * 60 ))
@@ -315,16 +315,16 @@ cache_assert 'an artifact older than the validity period is stale' \
     "staleness_rc=$rc reason=${reason:-<none>}" \
     'Age alone expires an artifact. This is the case that shipped the incident: the artifacts were left behind by a CI=1 run days earlier and were read back without anything noticing that the tool had moved on.'
 
-# 3. The CSV-emitting code changed since the capture.
+# 3. ltl or the column rules changed since the capture.
 "$CACHE_PERL" -e 'my $t = time; utime($t, $t, $ARGV[0]) or die;' "$CACHE_MSG"
 printf 'not-the-signature-that-produced-this\n' > "$CACHE_SIG"
 set +e
 reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
 set -e
-cache_assert 'an artifact whose producing CSV code has changed is stale whatever its age' \
+cache_assert 'an artifact whose producing ltl has changed is stale whatever its age' \
     "$([[ $rc -eq 0 && "$reason" == *"changed after it was captured"* ]] && echo 0 || echo 1)" \
     "staleness_rc=$rc reason=${reason:-<none>}" \
-    'A minutes-old artifact is still wrong if the CSV columns moved under it. The signature covers the CSV-emitting code of ltl and the column-rule spec, so an edit to either expires the capture while an edit elsewhere in the tool leaves it alone — the cache would be worthless if every touch of ltl threw it away.'
+    'A minutes-old artifact is still wrong if the tool changed under it. The signature covers the whole of ltl and the column-rule spec, so an edit to either expires the capture: a statistic, a total or a projection computed upstream of the writers changes what a column holds as surely as the writer does.'
 
 # 4. No record of what produced it.
 rm -f "$CACHE_SIG"
