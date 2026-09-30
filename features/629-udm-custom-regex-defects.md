@@ -37,6 +37,11 @@ with a `*` glob, run from inside the log directory, twice.
   fixtures (the two derived 5k-line slices under `logs/` and the prebuilt
   index) when it judges them stale, instead of only listing scenario names.
 
+- A metric without a `/regex/` cuts a value written as `1e3`, `1.5E-2` or
+  `1,000` short and does not match `+5` or `.5`: found during #638, filed as
+  #642 (blocked by #638), `features/638-udm-non-numeric-capture.md`
+  § Hand-forward.
+
 ## Branching
 
 - **Release branch: `release/0.18.5`**, cut from main (v0.18.4 plus a
