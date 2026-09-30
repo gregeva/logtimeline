@@ -37,6 +37,18 @@ features/287-message-stats-bin-counter-data-model.md and
 features/289-bucket-stats-bin-counter-data-model.md). Both take the same
 per-call demand descriptor and return only the demanded groups' fields.
 
+Both primitives share one derivation of the mean, standard deviation,
+coefficient of variation and shape statistics, `derive_moment_statistics()`,
+fed the count, total, sum of squares and central-moment sums by each model
+(the raw model computes the moment sums with a pass over its samples, the bin
+model keeps them as running sums); the percentile ladders stay per model. Both
+stores carry `duration_count`, kept beside the duration total on every timed
+line in both models, and both primitives return early when it is zero. The bin
+model is an officially supported model on both statistics stores: its parity
+with the raw model is proved as each model unchanged against its own drift
+baseline and the oracle layer checking both
+(features/616-gated-mean-derivation.md D9, D14, D18).
+
 ## Demand model
 
 Per-store, per-group demand is resolved by

@@ -289,10 +289,11 @@ line produces it and a surface demands it, at each store);
 `features/305-shape-moment-extended-percentile-demand.md` § Store-level demand;
 the CLAUDE.md checkpoint on observation counts.
 
-**Status.** Needs refinement: the observation-count rule is violated at the
-projection of zeroed totals (item 4, F4.10) and the bytes count is demand-gated
-while its total is not (F4.11); the impact mean divides by the wrong count
-(F4.5). Refined by #616 (unconditional observation counts, one gated derivation) and #620 (demand flags for session, user and index capture).
+**Status.** Established for the observation-count rule by #616 (counts kept
+beside their totals under the same gate, a total projected only when counted,
+bytes processed only when produced and demanded at each store). Needs
+refinement for the per-line captures #620 gates (session, user and index
+capture).
 
 ---
 
@@ -328,6 +329,8 @@ representation retargets one site per quantity.
 - `calculate_all_statistics` :: `$entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );` (the sort pre-pass)
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_mean} = mean_of(`
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );`
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{bytes_mean} = mean_of(` (the per-message bytes mean, stored precise)
+- `write_index_file` :: `my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';` and its five siblings
 - `derive_moment_statistics` :: `my $mean = mean_of($total, $n);` (the duration mean, both data models)
 - `impact_of` :: `my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;` (impact from the reported mean)
 
@@ -336,9 +339,7 @@ CLAUDE.md checkpoint on observation counts. Cross-reference: *Precise storage,
 formatting at the output boundary*, to which the same issue adds the
 per-message bytes mean and the run index's means as sites.
 
-**Status.** Needs refinement until #616 (one gated derivation of means and
-totals) completes: the per-message bytes mean and the run index's six means do
-not yet call the helper.
+**Status.** Established.
 
 ---
 
@@ -503,9 +504,11 @@ the sort and the CSV's raw cell.
 **Owning record.** `features/273-store-precise-duration-totals.md`, with
 #268's completion record and `releases/v0.15.0.md`.
 
-**Status.** Established. #616 (one gated derivation of means and totals) adds
-the per-message bytes mean as a site; its entry (observation counts and gated
-means) cross-references this one.
+**Status.** Established. The per-message bytes mean (`print_message_summary` ::
+`my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};`) and the run
+index's six means (`write_index_file`, through `format_csv_value` at a fixed two
+decimals) are sites; the entry *Observation counts and gated means*
+cross-references this one.
 
 ---
 

@@ -148,6 +148,9 @@ today.
 
 On Surface B these are **not** rendered columns — see D8.
 
+Both CSVs round the bytes mean through `format_csv_value` from a value stored
+precise, so they print one value for one mean (features/616-gated-mean-derivation.md D6).
+
 ### D6 — Basic aggregates only; no bytes distribution statistics
 
 The family is `occurrences`/`min`/`mean`/`max`/`sum`. Bytes percentiles, std_dev, cv
@@ -194,6 +197,10 @@ not metric aggregates. A naive `_count` → `_occurrences` sweep corrupts them. 
 columns in scope are `duration_count`, `duration_avg`, `bytes_count`, `bytes_avg`,
 `count_count`, `count_avg` — and the bytes pair is subject to D4's scope renaming as
 well.
+
+The index's six means are written through the CSV formatter at two decimals
+whatever `-cp` says, trailing zeros stripped, and empty for no data
+(features/616-gated-mean-derivation.md D8, D15, D16).
 
 ## Prototyping obligation
 

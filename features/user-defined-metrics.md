@@ -192,7 +192,7 @@ $log_messages{$cat}{$key}{"udm_${name}_max"}
 $log_messages{$cat}{$key}{"udm_${name}_mean"}   # numeric aggregations only
 ```
 
-The per-message mean is derived in `calculate_all_statistics()` as `sum / occurrences` and exists only for numeric aggregations. Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) track `udm_${name}_occurrences` without ever writing `udm_${name}_sum`, so the mean derivation skips `agg_kind eq 'counting'` configs entirely and guards against an undefined sum (Issue #326).
+The per-message mean is derived in `calculate_all_statistics()` by `mean_of(sum, occurrences)`, the one gated mean derivation (features/616-gated-mean-derivation.md D3), and exists only for numeric aggregations. Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) track `udm_${name}_occurrences` without ever writing `udm_${name}_sum`, so the mean derivation skips `agg_kind eq 'counting'` configs entirely and guards against an undefined sum (Issue #326).
 
 ### Statistics (`%log_stats`)
 ```
@@ -203,6 +203,7 @@ $log_stats{$bucket}{"udm_${name}_min"}
 $log_stats{$bucket}{"udm_${name}_max"}
 $log_stats{$bucket}{"udm_${name}_mean"}
 $log_stats{$bucket}{"udm_${name}_sum"}
+# udm_${name}_mean is derived once by mean_of(); a `mean` aggregation's display value reads it
 ```
 
 Counting configs additionally store (consumed by the `-V udm-counting` section):
