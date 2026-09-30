@@ -85,6 +85,52 @@ validation has to precede the converter.
 Any of these also settles the empty-capture masking hazard and the CSV cell
 path, which share the coercion line.
 
+## Decisions
+
+- **D1 — A capture that is not entirely a number is skipped for that metric.**
+  For a numeric aggregation (`sum`, `min`, `max`, `mean`, and the
+  `delta`/`idelta` transforms), a capture such as `abc`, `12abc`, ` : 22440` or
+  an empty capture records nothing, leaves the delta state alone, prints no
+  warning, and is not masked in the message. Clean numeric captures, counting
+  aggregations and the built-in name and token-key patterns are unchanged.
+  Rationale: reading a number out of the capture (`abc12` → 12) is the guess
+  #443 D2 (the capture group is the value) and D4 (no speculative guesses)
+  exclude; the duration guard in `read_and_process_logs()` already treats a
+  non-numeric duration as unobserved. Consequence accepted: a pattern such as
+  `(.+)` that spans a separator produces nothing until the capture is narrowed
+  to the number.
+- **D2 — The way to avoid the skipped case is taught by example.** The `-udm`
+  example in `--help` and in `docs/usage.md` shows a pattern whose capture is
+  narrowed to the digits where a separator sits between the key and the value
+  (the shape of `/dataQueue size\D*(\d+)/`), so the capture holds the number
+  and nothing else. The `/regex/` row of `docs/usage.md` states that for a
+  numeric aggregation the capture must be a number. (Architect's instruction:
+  the associated example makes its way into, or updates, the help usage
+  examples.)
+
+## Acceptance criteria
+
+- [ ] When a numeric-aggregation metric captures `12abc`, `abc12`, `abc`,
+      ` : 100` or an empty value, `produced:` in `-V udm-specs` counts only
+      the lines whose capture is a number, and `min`/`sum`/`max` are computed
+      from those alone (assertable: fixture of the shapes above; seven lines
+      with two numeric captures give `occurrences=2 sum=49 min=7 max=42`).
+- [ ] That run prints no runtime warning (assertable:
+      `tests/lib/runtime-warnings.sh`).
+- [ ] Under `delta`, a skipped capture between two numeric captures leaves
+      the delta equal to their difference (assertable: `produced:`).
+- [ ] A skipped capture is not masked: the line's message keeps the text
+      (assertable: messages section or MESSAGES CSV).
+- [ ] An empty capture never masks anything in the message (assertable: same).
+- [ ] A CSV input column holding `n/a` or `5ms` is skipped the same way
+      (assertable: the columnar scenario of `tests/validate-udm-specs.sh`).
+- [ ] Counting aggregations still record non-numeric captures as today
+      (assertable: `tests/validate-udm-counting.sh` unchanged and passing).
+- [ ] `--help` examples and `docs/usage.md` carry the narrowed-capture example
+      and agree (assertable: `tests/validate-help-content.sh`).
+- [ ] Hot path: the before/after benchmark on
+      `single-day-access-log-standard` shows no regression beyond 1%.
+
 ## Harness
 
 `tests/validate-udm-specs.sh` (per-shape `produced:` contract, runtime-warning
