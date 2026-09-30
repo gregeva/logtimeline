@@ -61,7 +61,7 @@ with a `*` glob, run from inside the log directory, twice.
 
 ## Resumption
 
-State at 2026-09-30: #637, #638 and #640 delivered; next, close #629 and cut release 0.18.5.
+State at 2026-09-30: #637, #638 and #640 delivered, #639 closed as not planned; #629 closed. Next: cut release 0.18.5.
 
 | Issue | State | Specification |
 |---|---|---|
