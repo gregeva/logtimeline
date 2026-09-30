@@ -121,6 +121,14 @@ are unchanged.
 - [ ] A CSV mixing parsable and unparsable rows places the parsable rows on
       the timeline and prints no per-row or per-file timestamp message
       (assertable: same harness).
+- [ ] A CSV row without a parsable timestamp is skipped before the metric
+      capture: it sets no `delta` baseline and does not count in
+      `matched_lines` (assertable: four-row ISO CSV whose second data row reads
+      `not a date`, `-udm 'value::delta:sum'`: the third data row's delta is
+      165, not 70, and `-V format-detection` reports `matched_lines: 2` for the
+      three data rows, not 3). Today the capture and the match count run
+      before the timestamp check (`features/615-csv-registry-entry.md` § 3
+      item 4 on release/0.19.0 measured this; #615 D8 is amended to match).
 - [ ] With `-udm` naming a column absent from a CSV whose rows matched, stderr
       carries exactly one `Note: -udm '<spec>': …` line for that spec across
       any number of such files, giving their count and no file name
