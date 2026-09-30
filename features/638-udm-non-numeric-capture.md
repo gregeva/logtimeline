@@ -184,7 +184,13 @@ path, which share the coercion line.
   (`0x10`), `Inf` and `NaN` are not numbers and are skipped per D1. Rationale:
   the unchanged code recorded the first five forms correctly and without a
   warning; a capture written in a standard spelling of a number is the value
-  the user declared (#443 D2). The documentation teaches the pattern that
+  the user declared (#443 D2). A comma is never read as part of a number:
+  depending on the culture it is a thousands separator, a decimal separator,
+  or a separator between two values, so no general rule can interpret it.
+  Inferring the convention from the analyst's locale is ruled out as well:
+  the locale of the server that wrote the log and that of the analyst's
+  terminal can differ, and the tool would be assuming where the log came
+  from (architect, 2026-09-30). The documentation teaches the pattern that
   catches these forms and names the ones a habitual pattern silently cuts
   short: `--help` and `docs/usage.md` show `/queue size[\s:=]*(\S+)/`, which
   skips the separator and captures the whole value so the tool checks it, and
