@@ -71,23 +71,41 @@ release/0.19.0 and every result below reproduces there.
 
 ## Acceptance criteria
 
-- [ ] When a metric's pattern matches a continuation line whose capture is not
+Each is asserted by the `continuation-lines` scenario of
+`tests/validate-udm-specs.sh` on `tests/fixtures/udm-continuation-lines.txt`
+(two timestamped lines carrying `size10` and `size30`, a multi-line entry
+between them whose continuation lines carry ` dataQueue size : 22440` and
+` dataQueue size99`). Before the gate was added the scenario failed on the
+first three: two runtime warnings, `delta` sum -69, and the with/without
+comparison differing.
+
+- [x] When a metric's pattern matches a continuation line whose capture is not
       a number, the run prints no runtime warning (assertable: the
       runtime-warning check of `tests/lib/runtime-warnings.sh` on a fixture
       carrying such a line).
-- [ ] When a continuation line carrying a numeric capture sits between two
+- [x] When a continuation line carrying a numeric capture sits between two
       timestamped lines, the `delta` sum equals the difference of the two
       timestamped values (assertable: `produced:` in `-V udm-specs`; fixture
       `size10`, continuation ` dataQueue size99`, `size30` gives 20).
-- [ ] With continuation lines present, `occurrences`, `sum`, `min` and `max`
+- [x] With continuation lines present, `occurrences`, `sum`, `min` and `max`
       of a `sum` metric equal those of the same fixture with the continuation
       lines removed (assertable: `produced:` in `-V udm-specs`, two runs).
-- [ ] Hot path: the before/after benchmark on
+- [x] Hot path: the before/after benchmark on
       `single-day-access-log-standard` shows no regression beyond 1%.
+      Measured 2026-09-30, one run each on one machine: total 9.2 s before,
+      9.0 s after; RSS peak 100 MB before, 99.7 MB after; no metric worse. The
+      case carries no `-udm`, so the added condition is never reached there.
 
 ## Harness
 
 `tests/validate-udm-specs.sh` owns what a spec produced per line shape
 (`produced:` in `-V udm-specs`) and already sources the runtime-warning check.
-Neither of its fixtures carries continuation lines, so a committed `.txt`
-fixture is needed.
+Scenario `continuation-lines`, fixture `tests/fixtures/udm-continuation-lines.txt`
+(a Windchill MethodServer log4j log with one multi-line entry); the
+continuation-free comparison log is derived from it inside the scenario.
+
+## Implementation
+
+The `## USER DEFINED METRICS CAPTURE` block in `read_and_process_logs()` is
+gated on `@udm_configs && $is_line_match && defined $message`. CSV rows set
+`$is_line_match` on their own path, so they are unaffected.

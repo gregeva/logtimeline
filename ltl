@@ -15318,8 +15318,12 @@ sub read_and_process_logs {
             }
 
             ## USER DEFINED METRICS CAPTURE (Issue #22) ##
+            # Only a line that matched a format is tried: a continuation line
+            # of a multi-line entry leaves the previous record's $message in
+            # place, and is never recorded, so trying it could only coerce its
+            # text and move the delta state (features/637-udm-continuation-lines.md D1).
             my %udm_values;
-            if (@udm_configs && defined $message) {
+            if (@udm_configs && $is_line_match && defined $message) {
                 foreach my $config_idx (0 .. $#udm_configs) {
                     my $config = $udm_configs[$config_idx];
                     my $name = $config->{name};
