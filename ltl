@@ -467,6 +467,7 @@ my @udm_rejected_specs;                     # -udm arguments skipped at parse ti
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
 my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
 my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
+my @udm_csv_unbound_files;                  # Per config index: CSV files whose rows matched and whose header has no column for the metric (Issue #640)
 # The UDM value vocabulary. The default name and token-key patterns extract
 # $udm_number_re. A numeric aggregation records a capture only when the whole
 # capture is a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2 (no
@@ -6088,9 +6089,21 @@ sub udm_note_sources {
                 $source = 'csv:' . ($col_name // $col);
             } else {
                 $source = 'csv:unbound';
+                $udm_csv_unbound_files[$idx]++;
             }
         }
         $udm_sources[$idx]{$source} = 1;
+    }
+}
+
+# Issue #640: one notice per metric whose column was missing from the header
+# of CSV files whose rows matched, with their count and never their names.
+# Spoken after the read loop, beside the other -udm notices.
+sub emit_udm_csv_unbound_notices {
+    for my $idx (0 .. $#udm_configs) {
+        my $files = $udm_csv_unbound_files[$idx] or next;
+        my $config = $udm_configs[$idx];
+        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of $files CSV file(s)\n";
     }
 }
 
@@ -10607,6 +10620,19 @@ sub parse_udm_configs {
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
 }
 
+# A CSV row is placed on the timeline only when its timestamp column holds
+# epoch seconds (when the file's first data row did) or an ISO date and time;
+# any other row is a line no format matched, read silently (Issue #640 D1).
+# Checked before the row counts as a match, so it never reaches the metric
+# capture or the date parse (Issue #328).
+sub csv_timestamp_placeable {
+    my ($timestamp_str) = @_;
+    return 0 unless defined $timestamp_str;
+    return $csv_epoch_timestamp
+        ? $timestamp_str =~ /^\d+(?:\.\d+)?$/
+        : $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;
+}
+
 # CSV header detection and column mapping for UDM (Issue #22)
 sub detect_and_parse_csv_header {
     my ($header_line) = @_;
@@ -10651,8 +10677,7 @@ sub detect_and_parse_csv_header {
         if (exists $csv_col_index{$col_name}) {
             $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
         } else {
-            $csv_udm_col_indices[$i] = -1;
-            print STDERR "Warning: UDM metric '$udm_configs[$i]->{base_name}' not found in CSV headers\n";
+            $csv_udm_col_indices[$i] = -1;  # reported once per run by emit_udm_csv_unbound_notices()
         }
     }
 
@@ -15030,7 +15055,6 @@ sub read_and_process_logs {
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
         my $potential_csv_header;
-        my $csv_skipped_timestamp_rows = 0;
 
         # Detection evidence (D53, dual process). Primary: the read-only
         # sample of the file, taken before its first line is processed;
@@ -15191,6 +15215,11 @@ sub read_and_process_logs {
                     $csv_epoch_timestamp = 1;
                 }
 
+                unless (csv_timestamp_placeable($timestamp_str)) {
+                    note_unmatched_line($in_file);
+                    next;
+                }
+
                 # Build message from -ucm columns or default label
                 if (@csv_message_col_indices) {
                     $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
@@ -15280,6 +15309,11 @@ sub read_and_process_logs {
 
                             if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {
                                 $csv_epoch_timestamp = 1;
+                            }
+
+                            unless (csv_timestamp_placeable($timestamp_str)) {
+                                note_unmatched_line($in_file);
+                                next;
                             }
 
                             if (@csv_message_col_indices) {
@@ -15528,9 +15562,7 @@ sub read_and_process_logs {
                     # The reject branch, and only the reject branch: keep the
                     # token, the format that produced it and the count of lines
                     # that carried it, so the end of the run can say what was
-                    # dropped. The elsif below handles an unparseable CSV row
-                    # and increments the same counter, which is why the
-                    # collection attaches here rather than after the chain.
+                    # dropped.
                     my $slug = $format_detection{$in_file}{slug} // 'unknown';
                     $unregistered_levels{$slug}{$category_bucket}++;
                     $unregistered_levels_by_file{$in_file}{$category_bucket}++;
@@ -15544,19 +15576,6 @@ sub read_and_process_logs {
                         $fractional_ms = $2 * (10 ** (3 - length($2)));
                     } else {
                         $fractional_ms = 0;
-                    }
-                    # CSV rows carry arbitrary column text where the
-                    # regex-matched formats guarantee timestamp shape. A value that is
-                    # neither epoch (handled above) nor ISO would feed garbage into the
-                    # fixed-offset substr extraction and die inside timegm(), so skip
-                    # the row instead (Issue #328).
-                    if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {
-                        $csv_skipped_timestamp_rows++;
-                        $excluded_other++;
-                        if ($csv_skipped_timestamp_rows == 1) {
-                            print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
-                        }
-                        next;
                     }
                     # Declarative time contract (D31): the csv entry's
                     # compiled layout parser, sharing %timestamp_date_cache
@@ -16531,10 +16550,6 @@ sub read_and_process_logs {
                 push @format_legend_order, $slug;
                 $format_legend{$slug} = scalar @format_legend_order;
             }
-        }
-
-        if ($csv_skipped_timestamp_rows > 1) {
-            print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";
         }
 
         # Index file: finalize per-file counters (Issue #46)
@@ -22034,6 +22049,7 @@ sub pipeline_finalize {
     calculate_all_statistics();
     emit_udm_zero_match_notices();
     emit_udm_skipped_capture_notices();
+    emit_udm_csv_unbound_notices();
     emit_classification_percentage_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);

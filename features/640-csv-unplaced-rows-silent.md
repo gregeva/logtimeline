@@ -112,16 +112,23 @@ are unchanged.
   accepted until 0.19.x: a STATS CSV fed back to ltl shows nothing matched, and
   a CSV whose column 0 holds a numeric id is placed on wrong dates.
 
+- **D3 — The same rule holds for an epoch-timestamp CSV (architect, locked
+  2026-09-30).** In a CSV whose first data row carried epoch seconds, a row
+  whose timestamp is not a number is read and not matched, silently, like any
+  other unplaceable row. Before this, it reached the epoch conversion with a
+  Perl runtime warning and was placed at epoch 0 (1 January 1970). Asserted by
+  the `unplaced-rows` scenario of `tests/validate-csv-input.sh`.
+
 ## Acceptance criteria
 
-- [ ] A CSV file with no parsable timestamp in any row (the index is the
+- [x] A CSV file with no parsable timestamp in any row (the index is the
       reference case) produces no stderr output and shows as nothing matched
       in the file list; `-V filter-summary` counts its rows as read and not
       matched (assertable: `tests/validate-csv-input.sh`).
-- [ ] A CSV mixing parsable and unparsable rows places the parsable rows on
+- [x] A CSV mixing parsable and unparsable rows places the parsable rows on
       the timeline and prints no per-row or per-file timestamp message
       (assertable: same harness).
-- [ ] A CSV row without a parsable timestamp is skipped before the metric
+- [x] A CSV row without a parsable timestamp is skipped before the metric
       capture: it sets no `delta` baseline and does not count in
       `matched_lines` (assertable: four-row ISO CSV whose second data row reads
       `not a date`, `-udm 'value::delta:sum'`: the third data row's delta is
@@ -129,15 +136,54 @@ are unchanged.
       three data rows, not 3). Today the capture and the match count run
       before the timestamp check (`features/615-csv-registry-entry.md` § 3
       item 4 on release/0.19.0 measured this; #615 D8 is amended to match).
-- [ ] With `-udm` naming a column absent from a CSV whose rows matched, stderr
+- [x] With `-udm` naming a column absent from a CSV whose rows matched, stderr
       carries exactly one `Note: -udm '<spec>': …` line for that spec across
       any number of such files, giving their count and no file name
       (assertable: two such files in one run).
-- [ ] With the same `-udm` over a CSV whose rows never matched, no such note
+- [x] With the same `-udm` over a CSV whose rows never matched, no such note
       prints (assertable: the index as input).
-- [ ] No row without a parsable timestamp reaches the date parse: no runtime
+- [x] No row without a parsable timestamp reaches the date parse: no runtime
       warning, no fatal error (assertable: `tests/lib/runtime-warnings.sh`
       on a quoted-timestamp CSV, the #328 reproduction shape).
+
+Gate (2026-09-30, commit bdc3135, version 0.18.5): full suite 43 of 43
+harnesses exit 0; `single-day-access-log-standard` before/after on this
+machine: total 9.7 s to 9.5 s (single run, the change is off the log-line
+path), rss_peak 100.1 MB to 99.6 MB, lines read and included identical.
+The index criterion is asserted with the index read beside a log that
+produces the metric: read alone, the run-level zero-match note (#443) rightly
+prints, since nothing in that run produced it.
+
+## Implementation
+
+- `csv_timestamp_placeable()` decides whether a CSV row can be placed: epoch
+  seconds when the file's first data row was epoch, otherwise the ISO shape
+  the date parse already required (`/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/`,
+  anchored at the start, so accepted forms are unchanged). Both CSV paths
+  call it (the header-confirming second line and every later row) before the
+  row counts as a match; a refused row goes to `note_unmatched_line()` like
+  the CSV header. The later check in the timestamp parse arm, its per-row
+  warning and the per-file total are removed.
+- The epoch arm is new (D3): an epoch CSV row whose timestamp is not a number
+  previously reached `int()` with a Perl runtime warning
+  (`Argument "abc" isn't numeric in int`) and was placed at epoch 0.
+- `detect_and_parse_csv_header()` no longer prints; `udm_note_sources()`,
+  called once per file on its first matched line, counts the files whose
+  header lacks the metric's column (`@udm_csv_unbound_files`), and
+  `emit_udm_csv_unbound_notices()` prints after the read, beside the other
+  `-udm` notices: `Note: -udm '<spec>': no column named '<name>' in the header
+  of N CSV file(s)`.
+- `-V filter-summary`: an unplaceable CSV row moves from `excluded_other` to
+  `lines_unmatched`; the section contract in
+  `features/503-yaml-aggregate-export.md` is updated to match.
+- `-V udm-specs` `source=` reflects only files whose rows matched: a CSV none
+  of whose rows is placed no longer contributes `csv:<column>`.
+- Measured on the base commit and this branch with the same inline fixtures
+  (the `tests/validate-csv-input.sh` scenarios): base prints the row warning,
+  counts `matched_lines: 3` and a delta sum of 70 on the mixed-row CSV, prints
+  `not found in CSV headers` once per file, and emits the runtime warning on the
+  epoch fixture; this branch passes all 15 assertions, base fails the 11 that
+  carry #640's contract.
 
 ## Overlapping specifications on release 0.19.0
 

@@ -277,7 +277,9 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - All transforms (`delta`, `idelta`) and aggregations (`min`, `max`, `avg`) work with CSV input
 - CSV lines use fixed category `DATA` (no log levels in CSV)
 - Without `-ucm`, all CSV rows group under a single "CSV data" message
-- Rows whose timestamp column is neither epoch nor ISO (`YYYY-MM-DD HH:MM:SS`) are skipped, never fed to the fixed-offset substr/`timegm()` parse: the first such row in a file warns with file, line, and offending value; a per-file total is reported at end of file (Issue #328 — a quoted-timestamp CSV from a previous `ltl -o` run swept into a multi-file glob previously died fatally with `Month '-1' out of range`). Covered by `tests/validate-csv-input.sh`. Superseded by #640 D1 (`features/640-csv-unplaced-rows-silent.md`): such a row is an unmatched line, silent; the metric-column note is run-level.
+- A row is placed on the timeline only when its timestamp column holds epoch seconds (when the file's first data row did) or an ISO `YYYY-MM-DD HH:MM:SS` date and time. Any other row is a line no format matched: read, counted as unmatched, never reported, and never passed to the metric capture or the date parse (`csv_timestamp_placeable()`; #640 D1, `features/640-csv-unplaced-rows-silent.md`). The date-parse guard is what keeps a quoted-timestamp CSV from a previous `ltl -o` run, swept into a multi-file glob, from dying with `Month '-1' out of range` (Issue #328). A CSV none of whose rows is placed shows as nothing matched.
+- A metric whose column is missing from the header of CSV files whose rows matched is reported once per run, after the read, with the count of such files and never their names: `Note: -udm '<spec>': no column named '<name>' in the header of N CSV file(s)` (`emit_udm_csv_unbound_notices()`; #640 D1).
+- Covered by `tests/validate-csv-input.sh`.
 
 **Limitations:**
 - No support for quoted fields with embedded separators (uses simple `split()`)
