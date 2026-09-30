@@ -45,6 +45,7 @@ use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
 use List::Util qw(min max);
+use Scalar::Util qw(looks_like_number);
 use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
@@ -467,11 +468,12 @@ my %udm_production;                         # Run-wide per-metric production der
 my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
 my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
 # The UDM value vocabulary. The default name and token-key patterns extract
-# $udm_number_re; a numeric aggregation records a capture only when the whole
-# capture is a number in one of the written forms 42, -5, +5, 1.5, .5, 5.,
-# 1e3, 1.5E-2 (no thousands separator, hexadecimal, Inf or NaN).
-my $udm_number_re       = qr/-?\d+(?:\.\d+)?/;
-my $udm_number_whole_re = qr/\A[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\z/;
+# $udm_number_re. A numeric aggregation records a capture only when the whole
+# capture is a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2 (no
+# thousands separator, hexadecimal, Inf, NaN or non-ASCII digit): the shape
+# [-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)? over ASCII digits, tested in the
+# USER DEFINED METRICS CAPTURE block of read_and_process_logs().
+my $udm_number_re = qr/-?\d+(?:\.\d+)?/;
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -15403,7 +15405,10 @@ sub read_and_process_logs {
                     # entirely a number; anything else is not observed for this
                     # metric: no value, no delta state, no mask. A /regex/
                     # metric's skip is counted once the line is retained.
-                    unless ($matched_value =~ $udm_number_whole_re) {
+                    # Only the characters of the written forms, then Perl's own
+                    # number test: the pair accepts exactly the shape above the
+                    # UDM globals, at a fraction of an anchored regex's cost.
+                    unless (($matched_value =~ tr/0-9.eE+\-//c) == 0 && looks_like_number($matched_value)) {
                         push @$udm_skipped, $name unless $match_type == 13;
                         next;
                     }

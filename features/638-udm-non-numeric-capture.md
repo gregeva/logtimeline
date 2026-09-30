@@ -207,13 +207,29 @@ path, which share the coercion line.
 
 Branch `638-udm-non-numeric-capture` from `release/0.18.5`.
 
-- **Number shape (D1, D6).** `$udm_number_whole_re` is the one definition of
-  a capture a numeric aggregation records: the whole capture is
-  `[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`. `$udm_number_re` beside it
-  stays the shape the default name and token-key patterns extract. The check
-  sits before the delta transform, the unit converter and the mask, so a
-  skipped capture touches none of them. The CSV column path goes through the
-  same check.
+- **Number shape (D1, D6).** A capture is a number when it holds only the
+  characters `0-9 . e E + -` (one `tr` count) and Perl's `looks_like_number()`
+  accepts it. The pair accepts exactly
+  `[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?` over ASCII digits: compared
+  over all 37,448 strings of up to five characters from `019.eE+-`, with no
+  difference, and on `Inf`, `NaN`, `0x10`, `1_000`, `1,000`, `0 but true`,
+  surrounding whitespace and a non-ASCII digit. The anchored regex matched the
+  non-ASCII digit `١` (unflagged `\d` is Unicode) and Perl would have
+  recorded it as 0; the pair rejects it. The shape is stated beside
+  `$udm_number_re`, which stays the shape the default name and token-key
+  patterns extract. The check sits before the delta transform, the unit
+  converter and the mask, so a skipped capture touches none of them. The CSV
+  column path goes through the same check.
+- **Cost of the check.** Measured on the 148 MB single-day access log
+  (761,698 lines), old and new `ltl` alternated, five runs each, `-udm
+  'b::max:/HTTP\/1.1" \d+ (\d+) /'` (a capture on every line): the anchored
+  regex held in a `qr//` object cost +2.3% total (median 12.03 s → 12.31 s),
+  about 0.37 µs per capture; in isolation, matching through the `qr//` object
+  costs 0.35 µs a value against 0.19 µs for the same pattern written inline
+  and 0.055 µs for the `tr` plus `looks_like_number()` pair. With the pair:
+  +0.9% (12.26 s, range 12.08 to 12.49, → 12.37 s, range 12.24 to 12.68).
+  Without `-udm` (the standard benchmark case): −0.3% (9.14 s → 9.11 s,
+  ranges overlapping).
 - **Masking.** The counting branch no longer masks an empty capture (an empty
   pattern re-runs whichever regex last matched). On the fixture below, the
   unchanged code's empty pattern reused a regex that does not match the
