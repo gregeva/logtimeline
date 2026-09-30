@@ -336,7 +336,7 @@ his decisions of the same day on the follow-up questions the review of this
 specification left open, and D26 his decision of the same day given on #619's
 turn (one per-run key cut). D27 is his decision of 2026-09-29 on how the CSV
 harness checks impact. D28 is his decision of 2026-09-30 on the D12 prototype's
-table. Nothing else in this document is numbered Dxx.
+table, and D29 his decision of the same day at the start of drop 2. Nothing else in this document is numbered Dxx.
 
 - **D1:** "**Every accumulator keeps its observation count unconditionally**,
   one integer per store entry, for the time-bucket store and the message store
@@ -548,6 +548,18 @@ table. Nothing else in this document is numbered Dxx.
   issue: it recovered nothing measurable on top of (c) and is left to #620
   (hoisting the read loop's per-line option handling). *Locked by the
   architect 2026-09-30.*
+- **D29: The message store's counts are absent until their first observation.**
+  The per-message entry is not initialised with `duration_count` (raw model) or
+  `bytes_occurrences` (both models); each is created by its first increment,
+  which is still unconditional (D1, D18), and every reader takes an absent count
+  as zero. A key that never sees a metric carries no field for it, so a log with
+  no durations adds no field to every key, and the MESSAGES CSV keeps
+  `bytes_occurrences` empty for a key with no bytes, as today. The time-bucket
+  store, one entry per bucket, initialises `duration_count => 0` in both models.
+  The counts are owned by the accumulation beside the totals: the running-mean
+  update reads the count and never writes it, running before the loop's
+  increment and before the merge sums the two counts. *Locked by the architect
+  2026-09-30.*
 
 ---
 
@@ -601,9 +613,9 @@ decide: a name, a spelling, an argument shape.
   count is `bytes_occurrences`, moved out of the bytes demand gate. No second
   count field is added. The raw model's retained array stays under the
   statistics demand, and its length is no longer read as a count.
-- Both constructors initialise `duration_count => 0`; the lazy message entry
-  gains `bytes_occurrences => 0` so the loop increments without a definedness
-  test.
+- The time-bucket constructor initialises `duration_count => 0` in both
+  models; the message entry initialises neither count, each being created by
+  its first increment (D29).
 - In the loop, the duration count increments beside `total_duration`, under the
   existing `defined $duration && !$omit_durations` (message) and
   `$duration_observed && !$omit_durations && $duration >= 0` (bucket) guards,
@@ -1446,4 +1458,112 @@ STATS comparisons in the drift layer's tightest tier), `validate-statistics-dema
 The pattern entry *Observation counts and gated means* is added to
 `docs/architecture-patterns.md` in this drop with its seven sites, marked as
 needing refinement until the issue completes (section 5.5).
+
+
+**Drop 2 (2026-09-30): observation counts kept unconditionally, totals projected
+only when counted.**
+
+*Counts.* The per-message and per-bucket loops increment `duration_count` beside
+the duration total on every timed line, in both models, after the running-mean
+update, which reads the count as the count before the observation and no longer
+writes it (D29). The time-bucket constructor initialises it in both models; the
+message entry creates it on the first increment (D29). `bytes_occurrences` is
+incremented on every line that carried a bytes value, outside
+`$bytes_aggregate_demand`, which governs only `bytes_min` and `bytes_max`. The
+single-line source that streaming consolidation merges carries
+`duration_count => 1` in both models and, for a line carrying bytes,
+`bytes_occurrences => 1` with its extrema, so the merge, which now gates each
+family on its count, never drops a line's total for want of a count; on the
+access log that path is not reached (`-V message-grouping`: no inline match),
+and the consolidated rows' bytes counts were checked against the log itself:
+the gap between `occurrences` and `bytes_occurrences` on the two largest rows
+equals the number of their lines whose size is `-` (15,005 and 7,386).
+`merge_consolidation_stats` reads the target's count before the merge, hands it
+to `merge_bin_state`, which no longer writes a count, and sums the counts after
+it; the reinject copies `duration_count` in both models.
+
+*Gates.* The group calculation's observation test is the count
+(`$log_messages{$category}{$log_key}{duration_count}`), replacing the durations
+list, the bin counter and the positive-total fallback; the per-message bytes
+roll-up is gated on `bytes_occurrences`. The per-bucket projection writes
+`bytes` and `bytes-HL` only when `bytes_occurrences` is positive and
+`duration_sum` and `duration_sum-HL` only when `duration_count` is positive
+(D4); the `_nice` cells, the timeline cells, the scaling maxima and the YAML
+blocks follow with no change of their own.
+
+*New assertions*, each shown failing on the drop 1 tree for the defect and
+passing after:
+- `tests/validate-csv-output.sh` scenarios `gated-means-application` and
+  `gated-means-access` (`-bs 1 -oe -n 1` over the two committed fixtures of
+  section 7): on the drop 1 tree the family group-consistency check fails on
+  every bucket carrying one metric and not the other (4 rows and 1 row), and
+  the new STATS cell reads fail on each projected zero; the observed-zero reads
+  (`bytes=0`, `bytes_occurrences=1`; `duration=0`) pass on both trees. The cell
+  reads use a new directive of the validator, `@cell`, which reads one cell of
+  the MESSAGES or STATS file by a key column; a key matching no row and a
+  column the header lacks were each shown to fail.
+- `tests/validate-duration-display.sh` scenarios `unobserved-blank-raw`,
+  `unobserved-blank-bin`, `unobserved-blank-hm-raw` and
+  `unobserved-blank-hm-bin`: the timeline's duration and bytes total cells,
+  located by the layout engine's own offsets, are blank for the unobserved
+  buckets and show the zero for the observed ones, with the bucket statistics
+  demanded (the latency column) and not demanded (`-hm duration` without `-o`,
+  `-V statistics-demand`: `store_demand: 0` for the bucket store), under each
+  bucket model.
+- `tests/validate-aggregate-export.sh` scenario `unobserved-metric-absent`: the
+  YAML series writes no `duration` or `bytes` block for an unobserved bucket
+  and keeps an observed zero's.
+
+*Harnesses* on this tree: `validate-csv-output.sh` (27 scenarios, #273's `-od`
+scenario and its `-so duration` sibling unchanged), `validate-statistics.sh`
+(22 scenarios, every cell of the drift layer in its tightest tier), `validate-statistics-demand.sh`, `validate-aggregate-export.sh`,
+`validate-duration-display.sh`, `validate-message-grouping.sh`,
+`validate-message-grouping-notices.sh`, `validate-byte-units.sh`,
+`validate-bucket-size-units.sh`, `validate-csv-input.sh`,
+`validate-histogram-bin-counters.sh`, `validate-profile-render.sh`,
+`validate-summary-contribution-bar.sh`, `validate-section-layout.sh`,
+`validate-filter-summary.sh`, `validate-numeric-criteria-notices.sh`,
+`validate-udm-specs.sh` and `validate-udm-counting.sh` pass, with no runtime
+warning; `validate-regression.sh` failed on 21 goldens, as section 7 predicts.
+
+*Goldens.* The 21 were re-captured with `capture-regression.sh` into a scratch
+directory and compared line by line with the committed references before any
+was replaced: every one of the 135 changed lines differs only where a `0 B`
+total cell became blank, at the same width (D4: the application-log captures,
+in which most one-minute buckets carry no bytes). No duration cell moved: no
+capture holds a bucket whose lines carry no duration among lines that do. The
+other 53 re-captured byte-identical. After replacing the 21,
+`validate-regression.sh` passes 74 of 74.
+
+*User documentation.* `docs/usage.md`: the display and output section says a
+bucket in which no line carried a metric leaves its total empty on the
+timeline and in the CSV and YAML files, and the aggregate export's series
+bullet says no block is written for such a metric.
+
+*Loop A/B* (section 9: each drop that changes the loop), drop 2 against drop 1
+(`6d1a2ac`), ten interleaved order-balanced rounds on this host with the
+benchmark runner's invocation, per-round delta against the same round's drop 1
+run, median and range (`tests/profile/results/616-drop-ab/`):
+
+| Selection | Drop 1 median (range) s | Drop 2 per-round delta | Rounds slower |
+|---|---|---|---|
+| day of web-server access log, default (raw) models | 9.649 (9.229 to 10.309) | +0.215 s (−0.084 to 0.558), +2.2% | 9 of 10 |
+| the same, `-mdm bin -bdm bin` | 11.986 (11.530 to 13.467) | +0.061 s (−1.113 to 0.681), +0.5% | 6 of 10 |
+| day of application script log carrying `durationMS=`, default models | 2.478 (2.363 to 2.551) | −0.030 s (−0.135 to 0.061), −1.2% | 4 of 10 |
+
+Peak memory moves by under 0.5 MB on every selection.
+
+The raw-model cost exceeds section 8's 1 percent threshold and was
+investigated. The drop adds, on every line of that access log (each carries a
+duration and a size, and the standard invocation demands no bytes aggregate), a
+duration-count increment and a bytes-count increment on each store: four
+hash-field increments per line, about 280 ns per line in all. A variant taking
+the message and bucket entry references once in their duration blocks, so the
+count increment reuses the reference the total's addition looked up, measured
+the same in a second ten-round run (+0.248 s against drop 2's +0.249 s, both
+against drop 1), so the cost is the increments themselves, not the lookups; the
+variant was not kept. The cost is D1's and D18's (every accumulator keeps its
+observation count unconditionally), reported as D18 asks. Drop 4 removes the
+per-line impact derivation (a division, a power and a logarithm on every
+duration-bearing line), measured in its own A/B.
 

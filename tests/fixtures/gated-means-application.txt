@@ -1,0 +1,9 @@
+2026-01-26 10:00:05.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] GM-duration-only executed durationMS=40
+2026-01-26 10:01:05.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] GM-bytes-only executed bytes=60
+2026-01-26 10:02:01.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Processing request 1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed done durationMS=100
+2026-01-26 10:02:02.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Processing request 6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b done durationMS=300
+2026-01-26 10:02:03.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Processing request 9f1c7a3e-5d2b-4e8a-b6c4-0d3e2f1a7b9c done
+2026-01-26 10:02:04.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Processing request c4e8a2b1-7f3d-4a6c-8e9b-1d5f0a3c7e2b done
+2026-01-26 10:03:01.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] GM-untimed-pair executed
+2026-01-26 10:03:02.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] GM-untimed-pair executed
+2026-01-26 10:04:01.000+0000 [L: INFO] [O: GatedMeansFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] GM-zero-duration executed durationMS=0

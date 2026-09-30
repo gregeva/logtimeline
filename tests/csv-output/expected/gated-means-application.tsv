@@ -1,0 +1,9 @@
+message_match	expected
+# A bucket whose lines carry one metric and not the other leaves the other's total empty; a measured zero prints
+@cell	stats	timestamp=2026-01-26 10:00	bytes	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2026-01-26 10:00	bytes_nice	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2026-01-26 10:01	duration	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2026-01-26 10:01	duration_nice	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2026-01-26 10:01	bytes	60	features/616-gated-mean-derivation.md § 6, observed zeros still print (a count of one observation of zero is a measured zero)
+@cell	stats	timestamp=2026-01-26 10:04	duration	0	features/616-gated-mean-derivation.md § 6, observed zeros still print (a count of one observation of zero is a measured zero)
+@cell	stats	timestamp=2026-01-26 10:04	bytes	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)

@@ -11074,8 +11074,9 @@ sub group_similar_messages {
                     "    member: $_" for sort @{ $cluster->{member_keys} };
             }
 
-            # Copy duration stats
-            if (defined $cluster->{total_duration}) {
+            # Copy duration stats, gated on the observation count (#616 D4)
+            if ($cluster->{duration_count}) {
+                $entry->{duration_count}     = $cluster->{duration_count};
                 $entry->{total_duration}     = $cluster->{total_duration};
                 $entry->{sum_of_squares}     = $cluster->{sum_of_squares};
                 $entry->{durations}          = $cluster->{durations} // [];
@@ -11090,7 +11091,6 @@ sub group_similar_messages {
                 # side dispatch at calculate_all_statistics sees a single keyed
                 # entry, indistinguishable from a non-consolidated key.
                 if ($message_stats_capture_mode eq 'bin') {
-                    $entry->{duration_count} = $cluster->{duration_count} if defined $cluster->{duration_count};
                     $entry->{_running_mean}  = $cluster->{_running_mean}  if defined $cluster->{_running_mean};
                     $entry->{m2_sum}         = $cluster->{m2_sum}         if defined $cluster->{m2_sum};
                     $entry->{m3_sum}         = $cluster->{m3_sum}         if defined $cluster->{m3_sum};
@@ -11111,8 +11111,8 @@ sub group_similar_messages {
             }
 
             # Copy bytes stats — the whole family, as count does below (#432)
-            $entry->{total_bytes} = $cluster->{total_bytes} if defined $cluster->{total_bytes};
-            if (defined $cluster->{bytes_occurrences}) {
+            if ($cluster->{bytes_occurrences}) {
+                $entry->{total_bytes}       = $cluster->{total_bytes};
                 $entry->{bytes_occurrences} = $cluster->{bytes_occurrences};
                 $entry->{bytes_min}         = $cluster->{bytes_min};
                 $entry->{bytes_max}         = $cluster->{bytes_max};
@@ -11690,8 +11690,7 @@ sub collapse_bin_counter_entry {
 # M3 uses M2 from both sides, M2 uses only n/mean. See feature file
 # § Algorithm appendix for the formulas.
 sub merge_bin_state {
-    my ($target, $source) = @_;
-    my $n_a = $target->{duration_count} // 0;
+    my ($target, $source, $n_a) = @_;
     my $n_b = $source->{duration_count} // 0;
     return if $n_b == 0;
 
@@ -11700,7 +11699,6 @@ sub merge_bin_state {
         # exist on entries only under shape-group demand (#305): the capture
         # sites never update them otherwise, so the merge skips them
         # symmetrically rather than writing zero-valued fields.
-        $target->{duration_count} = $n_b;
         $target->{_running_mean}  = $source->{_running_mean};
         if ($message_stats_demand_shape) {
             $target->{m2_sum}         = $source->{m2_sum} // 0;
@@ -11737,7 +11735,6 @@ sub merge_bin_state {
             $target->{m4_sum}         = $M4_ab;
         }
         my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
-        $target->{duration_count} = $n_ab;
         $target->{_running_mean}  = $mean_ab;
     }
 
@@ -11768,8 +11765,12 @@ sub merge_consolidation_stats {
         $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2, 4;
     }
 
-    # Duration stats
-    if (defined $source->{total_duration}) {
+    # The target's duration count before this merge, for the running-mean
+    # update, which reads it and never writes a count (#616 D29).
+    my $n_a = $target->{duration_count} // 0;
+
+    # Duration stats, gated on the observation count (#616 D4)
+    if ($source->{duration_count}) {
         $target->{total_duration} = ($target->{total_duration} // 0) + $source->{total_duration};
         $target->{sum_of_squares} = ($target->{sum_of_squares} // 0) + ($source->{sum_of_squares} // 0);
         $target->{min} = $source->{min} if defined $source->{min} && (!defined $target->{min} || $source->{min} < $target->{min});
@@ -11780,8 +11781,8 @@ sub merge_consolidation_stats {
     # Bytes stats. The whole family merges, not just the sum (#432): a
     # consolidated row that carried the total without its observation count
     # would report a total no aggregate could be derived from.
-    $target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};
-    if (defined $source->{bytes_occurrences}) {
+    if ($source->{bytes_occurrences}) {
+        $target->{total_bytes} = ($target->{total_bytes} // 0) + ($source->{total_bytes} // 0);
         $target->{bytes_occurrences} = ($target->{bytes_occurrences} // 0) + $source->{bytes_occurrences};
         $target->{bytes_min} = $source->{bytes_min} if defined $source->{bytes_min} && (!defined $target->{bytes_min} || $source->{bytes_min} < $target->{bytes_min});
         $target->{bytes_max} = $source->{bytes_max} if defined $source->{bytes_max} && (!defined $target->{bytes_max} || $source->{bytes_max} > $target->{bytes_max});
@@ -11824,8 +11825,9 @@ sub merge_consolidation_stats {
     # only updates the duration_count, _running_mean, m2/m3/m4 sidecars
     # and the bin counter.
     if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
-        merge_bin_state($target, $source);
+        merge_bin_state($target, $source, $n_a);
     }
+    $target->{duration_count} = $n_a + $source->{duration_count} if $source->{duration_count};
 }
 
 # Issue #287: wrapper for the seven consolidation sites that merge a
@@ -15887,7 +15889,12 @@ sub read_and_process_logs {
                             my $stats_source = { occurrences => 1 };
                             $stats_source->{outcomes}[$line_outcome] = 1 if $message_outcomes_demand && $line_outcome;
                             if ($metrics_observed) {
-                                $stats_source->{total_bytes} = $bytes if defined $bytes;
+                                if (defined $bytes && !$omit_bytes) {
+                                    $stats_source->{total_bytes}       = $bytes;
+                                    $stats_source->{bytes_occurrences} = 1;
+                                    $stats_source->{bytes_min}         = $bytes;
+                                    $stats_source->{bytes_max}         = $bytes;
+                                }
                                 if (defined $count) {
                                     $stats_source->{count_sum} = $count;
                                     $stats_source->{count_occurrences} = 1;
@@ -15917,6 +15924,7 @@ sub read_and_process_logs {
                                     # per-file index block's duration_sum read out of it, so a plain
                                     # copy retains a string buffer no consumer of this array reads.
                                     $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
+                                    $stats_source->{duration_count} = 1;
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
                                     # sample stats_source. merge_consolidation_stats's
@@ -15924,7 +15932,6 @@ sub read_and_process_logs {
                                     # the cluster. min/max from $stats_source->{min,max}
                                     # already populated above via raw producer fields.
                                     if ($message_stats_capture_mode eq 'bin') {
-                                        $stats_source->{duration_count} = 1;
                                         $stats_source->{_running_mean}  = $duration;
                                         $stats_source->{m2_sum}         = 0;
                                         $stats_source->{m3_sum}         = 0;
@@ -16012,6 +16019,8 @@ sub read_and_process_logs {
                         if( defined $bytes && !$omit_bytes ) {
                             my $e = $log_messages{$category}{$log_key};
                             $e->{total_bytes} += $bytes;
+                            # The count is kept whatever the demand (#616 D1); the
+                            # demand gate governs only the extrema.
                             if( $bytes_aggregate_demand ) {
                                 if( $e->{bytes_occurrences}++ ) {
                                     $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -16019,6 +16028,8 @@ sub read_and_process_logs {
                                 } else {
                                     $e->{bytes_min} = $e->{bytes_max} = $bytes;
                                 }
+                            } else {
+                                $e->{bytes_occurrences}++;
                             }
                         }
 
@@ -16108,10 +16119,11 @@ sub read_and_process_logs {
                                     # distinct from {occurrences}, which counts all matched lines
                                     # for this (category, log_key) regardless of duration presence,
                                     # and matches the raw path's `scalar @{$bucket_data->{durations}}`.
-                                    # duration_count and _running_mean stay unconditional (consumed
-                                    # by core derivation and merge_bin_state); the M2/M3/M4 moment
-                                    # accumulation runs only under shape-group demand (#305) — the
-                                    # moments feed nothing else.
+                                    # The update reads duration_count as the count before this
+                                    # observation; the count is incremented beside the total, after
+                                    # this block (#616 D29). The M2/M3/M4 moment accumulation runs
+                                    # only under shape-group demand (#305) — the moments feed
+                                    # nothing else.
                                     my $n_old = $entry->{duration_count};
                                     my $n     = $n_old + 1;
                                     if ($n_old == 0) {
@@ -16134,9 +16146,14 @@ sub read_and_process_logs {
                                             $entry->{m2_sum} += $term1;
                                         }
                                     }
-                                    $entry->{duration_count} = $n;
                                 }
                             }  # end: if ($message_duration_stats_demand)
+
+                            # The observation count of the duration total, kept on every
+                            # timed line whatever the statistics demand (#616 D1, D18).
+                            # It is incremented after the running-mean update above,
+                            # which reads it as the count before this observation.
+                            $log_messages{$category}{$log_key}{duration_count}++;
 
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
@@ -16202,6 +16219,7 @@ sub read_and_process_logs {
                         # count_min => undef,
                         # count_max => undef,
                         sum_of_squares => 0,
+                        duration_count => 0,
                         durations => [],
                     });
 
@@ -16246,8 +16264,9 @@ sub read_and_process_logs {
 
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
                                 # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
-                                # duration_count and _running_mean stay unconditional (core
-                                # derivation consumes them); the M2/M3/M4 accumulation runs only
+                                # The update reads duration_count as the count before this
+                                # observation; the count is incremented beside the total, after
+                                # this block (#616 D29). The M2/M3/M4 accumulation runs only
                                 # under shape-group demand (#305).
                                 my $n_old = $entry->{duration_count};
                                 my $n     = $n_old + 1;
@@ -16271,9 +16290,14 @@ sub read_and_process_logs {
                                         $entry->{m2_sum} += $term1;
                                     }
                                 }
-                                $entry->{duration_count} = $n;
                             }
                         }
+
+                        # The observation count of the duration total, kept on every
+                        # timed line whatever the statistics demand (#616 D1, D18),
+                        # after the running-mean update, which reads it as the count
+                        # before this observation.
+                        $log_analysis{$bucket}{duration_count}++;
                     }
 
                     # Nothing about the bytes metric is captured under -ob (#432).
@@ -16296,6 +16320,8 @@ sub read_and_process_logs {
                             $e->{total_bytes} += $bytes;
                             $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         }
+                        # The count is kept whatever the demand (#616 D1); the
+                        # demand gate governs only the extrema.
                         if( $bytes_aggregate_demand ) {
                             if( $e->{bytes_occurrences}++ ) {
                                 $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -16303,6 +16329,8 @@ sub read_and_process_logs {
                             } else {
                                 $e->{bytes_min} = $e->{bytes_max} = $bytes;
                             }
+                        } else {
+                            $e->{bytes_occurrences}++;
                         }
                     }
 
@@ -17487,10 +17515,17 @@ sub calculate_all_statistics {
 
         $log_stats{$bucket} = {
             occurrences   => $aggregated_data->{occurrences},
-            bytes         => $log_analysis{$bucket}{total_bytes},
-            'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-            duration_sum  => $log_analysis{$bucket}{duration_sum},
-            'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
+            # A total is projected only when its count holds an observation
+            # (#616 D4): a bucket in which no line carried the metric has no
+            # total, and every surface reading the projection shows it empty.
+            ( $log_analysis{$bucket}{bytes_occurrences} ? (
+                bytes         => $log_analysis{$bucket}{total_bytes},
+                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
+            ) : () ),
+            ( $log_analysis{$bucket}{duration_count} ? (
+                duration_sum  => $log_analysis{$bucket}{duration_sum},
+                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
+            ) : () ),
             count         => $log_analysis{$bucket}{count_sum},
             'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
             count_occurrences => $log_analysis{$bucket}{count_occurrences},
@@ -17860,19 +17895,15 @@ sub calculate_all_statistics {
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
                 $aggregated_data->{occurrences} += $log_messages{$category}{$log_key}{occurrences};
-                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if defined $log_messages{$category}{$log_key}{total_bytes};
+                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if $log_messages{$category}{$log_key}{bytes_occurrences};
 
                 # total_duration is initialized to 0 for every message key, so
                 # "defined" cannot distinguish "no duration ever observed" from
                 # "durations observed summing to zero" — a consumer of the
                 # MESSAGES CSV must be able to tell them apart (Issue #330).
-                # Gate on actual observations: the raw durations list or the
-                # bin-mode observation counter, with a positive total as a
-                # fallback for any path that accumulated without either.
-                my $duration_observed = $message_stats_capture_mode eq 'bin'
-                    ? ( ($log_messages{$category}{$log_key}{duration_count} // 0) > 0 )
-                    : ( scalar @{ $log_messages{$category}{$log_key}{durations} // [] } > 0 );
-                $duration_observed ||= ( ($log_messages{$category}{$log_key}{total_duration} // 0) > 0 );
+                # The gate is the observation count, kept on every timed line in
+                # both data models (#616 D1, D18); absent means none (D29).
+                my $duration_observed = $log_messages{$category}{$log_key}{duration_count};
 
                 if( $duration_observed && $message_duration_stats_demand ) {
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};

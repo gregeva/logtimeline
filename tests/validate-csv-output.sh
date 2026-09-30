@@ -183,7 +183,8 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
     fi
 
     # Expected-categories file (optional 5th scenario column, Issue #312):
-    # categorical content assertions against the MESSAGES CSV. Path is
+    # content assertions against the MESSAGES CSV, and `@cell stats` reads of
+    # the STATS CSV, each validator run taking its own kind's. Path is
     # relative to the harness dir; a declared-but-missing file is a hard
     # failure, not a silent skip.
     expected_args=()
@@ -208,7 +209,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         else
             rules="$RULES_STATS"
             csv="$stats_csv"
-            kind_expected_args=()
+            kind_expected_args=("${expected_args[@]+"${expected_args[@]}"}")
         fi
 
         set +e

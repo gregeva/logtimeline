@@ -71,6 +71,7 @@ scenario_register histogram-n0 \
                   directories-absolute \
                   environment-options \
                   heatmap-vs-bucket-store-pinned \
+                  unobserved-metric-absent \
                   oracle-chain
 scenario_parse_args "$@"
 
@@ -427,6 +428,33 @@ if want "$current_scenario"; then
             assert_near "heatmap.$p = duration.$p" "$hv" "$dv" asserts 'Same model, same bins per decade, same values: the two ladders agree' produced_by "$PRODUCER; finalize_heatmap_unified() and calculate_statistics_bin() in ltl" contract "$CONTRACT (D4)"; n=$((n+1))
         done
         [[ $n -gt 0 ]] || fail_with "heatmap vs bucket store" 'At least one percentile compared' "$PRODUCER" "$CONTRACT (D4)" "no shared percentile present"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+current_scenario="unobserved-metric-absent"
+if want "$current_scenario"; then
+    # #616 D4: a time bucket in which no line carried a metric writes no block
+    # for it; a bucket whose lines carried the metric at zero keeps its block
+    # with the measured zero. -bs 1 -oe -n 1: the assertions read one-minute
+    # buckets of two committed fixtures whose minutes separate the metrics.
+    UNOBS_CONTRACT='features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total) and features/503-yaml-aggregate-export.md section Conventions (absent means not produced, not observed, or not eligible, never null or 0)'
+    UNOBS_PRODUCER="$PRODUCER (series blocks) from calculate_all_statistics() (the per-bucket projection gated on the observation count)"
+    run_export -bs 1 -oe -n 1 "$FIXTURES/gated-means-application.txt" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "application log: bucket 0 is 10:00" "$(yget series.buckets.0.timestamp)" "2026-01-26 10:00" asserts 'The bucket indices the assertions below read are the fixture minutes they name' produced_by "$PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.0.bytes asserts 'The duration-only minute carried no bytes: no bytes block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.1.duration asserts 'The bytes-only minute carried no duration: no duration block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the duration-only minute keeps its duration sum" "$(yget series.buckets.0.duration.sum)" 40 asserts 'An observed metric keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the bytes-only minute keeps its bytes sum" "$(yget series.buckets.1.bytes.sum)" 60 asserts 'An observed metric keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the zero-duration minute keeps a zero duration sum" "$(yget series.buckets.4.duration.sum)" 0 asserts 'A measured zero is a value, and keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+    fi
+    current_scenario="unobserved-metric-absent/access"
+    run_export -bs 1 -oe -n 1 "$FIXTURES/gated-means-access.txt" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "access log: bucket 1 is 00:01" "$(yget series.buckets.1.timestamp)" "2025-05-07 00:01" asserts 'The bucket indices the assertions below read are the fixture minutes they name' produced_by "$PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.1.bytes asserts "The minute whose size is '-' carried no bytes: no bytes block" produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "access log: the zero-byte minute keeps a zero bytes sum" "$(yget series.buckets.2.bytes.sum)" 0 asserts 'A zero-byte response is a measured zero, and keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
     fi
 fi
 

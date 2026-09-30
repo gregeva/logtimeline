@@ -52,6 +52,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/rendered-output.sh
+source "$SCRIPT_DIR/lib/rendered-output.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -306,12 +308,72 @@ run_jboss_duration_scenario() {
         contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #365'
 }
 
+# Unobserved-metric cells: a time bucket in which no line carried a metric
+# shows that metric's total cell blank, and a bucket whose lines carried a zero
+# shows the zero. Two committed fixtures, one-minute buckets: an application
+# script log whose buckets carry a duration only, bytes only, or a zero
+# duration, and an access log with a bucket whose size is '-' and one with a
+# zero-byte response. Run with bucket statistics demanded (the timeline's
+# latency column) and not demanded (-hm duration without -o), under each bucket
+# model, so the count behind the blank exists without a statistics consumer.
+# Invocation shape: -bs 1 -oe -n 1 --debug-layout at width 200: the assertions
+# read single timeline cells located by the layout engine's own offsets.
+# Usage: run_unobserved_scenario <tag> <ltl-args...>
+run_unobserved_scenario() {
+    local tag="$1"; shift
+    current_scenario="$tag"
+    echo "[$current_scenario]"
+    local app="$REPO_DIR/tests/fixtures/gated-means-application.txt"
+    local acc="$REPO_DIR/tests/fixtures/gated-means-access.txt"
+    local r_app="$TMP_DIR/render-$tag-application.txt" r_acc="$TMP_DIR/render-$tag-access.txt"
+    # The debug-layout table prints on stderr; the column selector reads it
+    # from the capture, so the delimited block (and only it) is appended.
+    local r f
+    for r in app acc; do
+        if [[ $r == app ]]; then f="$r_app"; else f="$r_acc"; fi
+        capture_render "$f" "${!r}" -bs 1 -oe -n 1 --debug-layout --terminal-width 200 "$@" || return 0
+        sed -n '/^--- Layout Engine Debug/,/^---$/p' "$TMP_DIR/render.stderr" >> "$f"
+        if ! grep -q '^--- Layout Engine Debug' "$f"; then
+            echo "  FAIL  $current_scenario :: no debug-layout table on stderr for ${!r}" >&2
+            fail=$((fail + 1)); failures+=("$current_scenario :: missing debug-layout table"); return 0
+        fi
+    done
+
+    local blank_asserts='A time bucket in which no line carried the metric carries no total for it, so its total cell on the timeline is blank rather than a zero indistinguishable from a measured one.'
+    local zero_asserts='A time bucket whose lines carried the metric with the value zero shows the measured zero in its total cell.'
+    local produced='calculate_all_statistics() in ltl (the per-bucket projection gated on the observation count) and print_bar_graph() (the total cells)'
+    local contract='features/616-gated-mean-derivation.md D1 and D4 (every accumulator keeps its observation count unconditionally; a bucket with no observation of a metric carries no total and its cell is empty on the timeline)'
+
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:01 ' duration | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "application log: the bytes-only bucket's duration cell is blank" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:00 ' bytes | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "application log: the duration-only bucket's bytes cell is blank" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:04 ' duration | tee /dev/stderr | grep -qE \"^text=' *0 [a-z]\"" \
+        label       "application log: the zero-duration bucket's duration cell shows the zero" \
+        asserts     "$zero_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:01 ' bytes | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "access log: the bucket whose size is '-' has a blank bytes cell" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:02 ' bytes | tee /dev/stderr | grep -qE \"^text=' *0 B\"" \
+        label       "access log: the zero-byte bucket's bytes cell shows 0 B" \
+        asserts     "$zero_asserts" produced_by "$produced" contract "$contract"
+}
+
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 # The data-model/width matrix names one scenario per combination; the two
 # format-specific cases carry the names they already print.
 SCENARIO_USAGE_NOTE="  (data-model x width matrix, plus the absence and enhanced-format cases)"
 scenario_register dm-bin-w200 dm-bin-w120 dm-raw-w200 dm-raw-w120 \
-                  du-us-bin-w200 no-duration-w200 jboss-duration-w200
+                  du-us-bin-w200 no-duration-w200 jboss-duration-w200 \
+                  unobserved-blank-raw unobserved-blank-bin \
+                  unobserved-blank-hm-raw unobserved-blank-hm-bin
 scenario_parse_args "$@"
 
 echo "Validating duration-statistic display invariants (Issue #292)"
@@ -352,6 +414,18 @@ if scenario_wanted jboss-duration-w200; then
     run_jboss_duration_scenario
     echo ""
 fi
+
+# Unobserved metrics render blank, observed zeros render (#616).
+for model in raw bin; do
+    if scenario_wanted "unobserved-blank-$model"; then
+        run_unobserved_scenario "unobserved-blank-$model" -bdm "$model"
+        echo ""
+    fi
+    if scenario_wanted "unobserved-blank-hm-$model"; then
+        run_unobserved_scenario "unobserved-blank-hm-$model" -bdm "$model" -hm duration
+        echo ""
+    fi
+done
 
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 ]]; then
