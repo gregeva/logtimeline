@@ -54,6 +54,19 @@ Measured on release/0.18.5; identical on release/0.19.0.
   change this**: it keeps the lazy detection and `detect_and_parse_csv_header()`
   unchanged, so the index would still be confirmed as CSV.
 
+## Decisions
+
+- **D1 — ltl's own files are ordinary input; no exclusion.** When a glob
+  selects `ltl-index.csv` or an `-o` output, the file is read like any other
+  file, under the established practice: a line without a parsable timestamp is
+  read and not matched, silently (#640 D1, CSV input,
+  `features/640-csv-input-timestamp-column.md`). No file is left out of the
+  input, and no notice is added. That the index then records an entry for
+  itself which is never fresh is accepted (architect: "I don't care that it is
+  out of date"), as is `index_used: no` on later runs in that directory: the
+  index has no bearing on the overall performance of ltl. The candidate
+  designs above are not pursued.
+
 ## Records that bear on it
 
 `features/index-file.md` § Location: primary `ltl-index.csv` in the working
