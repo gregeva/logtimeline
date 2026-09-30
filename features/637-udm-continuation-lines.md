@@ -58,6 +58,33 @@ release/0.19.0 and every result below reproduces there.
 - **Keep the gate, stop continuation lines touching delta state only.**
   Smallest change; keeps the per-line cost and leaves the warnings to #638.
 
+## Decisions
+
+- **D1 — A user-defined metric's patterns are tried only on lines that matched
+  a log format.** Continuation lines are ignored by every metric: no capture, no
+  coercion, no mask, no delta state. Rationale: their value is never recorded
+  today, so nothing reported changes; the warnings and the delta corruption go,
+  and so does the per-line regex cost on unmatched lines. Consequence accepted:
+  a value that appears only on a continuation line (` dataQueue size : 22440`
+  inside a multi-line entry) stays uncounted; attributing it to the entry above
+  is a multi-line record feature, not this fix.
+
+## Acceptance criteria
+
+- [ ] When a metric's pattern matches a continuation line whose capture is not
+      a number, the run prints no runtime warning (assertable: the
+      runtime-warning check of `tests/lib/runtime-warnings.sh` on a fixture
+      carrying such a line).
+- [ ] When a continuation line carrying a numeric capture sits between two
+      timestamped lines, the `delta` sum equals the difference of the two
+      timestamped values (assertable: `produced:` in `-V udm-specs`; fixture
+      `size10`, continuation ` dataQueue size99`, `size30` gives 20).
+- [ ] With continuation lines present, `occurrences`, `sum`, `min` and `max`
+      of a `sum` metric equal those of the same fixture with the continuation
+      lines removed (assertable: `produced:` in `-V udm-specs`, two runs).
+- [ ] Hot path: the before/after benchmark on
+      `single-day-access-log-standard` shows no regression beyond 1%.
+
 ## Harness
 
 `tests/validate-udm-specs.sh` owns what a spec produced per line shape
