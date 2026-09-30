@@ -75,6 +75,49 @@ are unchanged.
   matched line prints no error or warning, and the file list shows that
   nothing matched in it.
 
+## Decisions
+
+- **D1 — A CSV row is a line like any other: no parsable timestamp, no match,
+  no message; metric messages are run-level.** A line is matched only once its
+  timestamp parses, and only a matched line goes on to metric extraction or any
+  other processing; every other line is read and not matched, silently.
+  Applied to CSV input:
+  - The `CSV timestamp '…' is neither epoch nor ISO` row warning and the
+    per-file skipped-row total are removed. Such a row counts in lines read and
+    not matched, and the file list shows the file's match status. Rows without
+    a parsable timestamp are still kept away from the date parse, so the crash
+    #328 (UDM unable to find its metric in CSV headers) fixed cannot return.
+  - `UDM metric '<name>' not found in CSV headers`, today printed per file as
+    soon as a header is read, becomes one run-level note per `-udm` spec after
+    the read, in the existing shape `Note: -udm '<spec>': …`. It prints only
+    when CSV rows matched and the metric's column was missing from their
+    header, and gives a count of such files, never their names.
+  Rationale (architect): the tool's informational messages are run-level, one
+  per option or spec, after the read; ltl exists to handle long lists of files,
+  so a message never lists file names, and per-file match and highlight status
+  already has its own surfaces. Consequence: `ltl-index.csv`, or any CSV
+  without a parsable timestamp, read as input produces no message and shows as
+  nothing matched in the file list.
+
+## Acceptance criteria
+
+- [ ] A CSV file with no parsable timestamp in any row (the index is the
+      reference case) produces no stderr output and shows as nothing matched
+      in the file list; `-V filter-summary` counts its rows as read and not
+      matched (assertable: `tests/validate-csv-input.sh`).
+- [ ] A CSV mixing parsable and unparsable rows places the parsable rows on
+      the timeline and prints no per-row or per-file timestamp message
+      (assertable: same harness).
+- [ ] With `-udm` naming a column absent from a CSV whose rows matched, stderr
+      carries exactly one `Note: -udm '<spec>': …` line for that spec across
+      any number of such files, giving their count and no file name
+      (assertable: two such files in one run).
+- [ ] With the same `-udm` over a CSV whose rows never matched, no such note
+      prints (assertable: the index as input).
+- [ ] No row without a parsable timestamp reaches the date parse: no runtime
+      warning, no fatal error (assertable: `tests/lib/runtime-warnings.sh`
+      on a quoted-timestamp CSV, the #328 reproduction shape).
+
 ## Overlapping specifications on release 0.19.0
 
 - **#615 (CSV input as a header-instantiated registry entry)**, specification
