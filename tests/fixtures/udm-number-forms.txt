@@ -1,0 +1,12 @@
+2026-01-26 10:00:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size : 42 end
+2026-01-26 10:01:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size=-5 end
+2026-01-26 10:02:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size : +5 end
+2026-01-26 10:03:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size1.5 end
+2026-01-26 10:04:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size.5 end
+2026-01-26 10:05:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size=5. end
+2026-01-26 10:06:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size 1e3 end
+2026-01-26 10:07:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size : 1.5E-2 end
+2026-01-26 10:08:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size : 1,000 end
+2026-01-26 10:09:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size=0x10 end
+2026-01-26 10:10:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size Inf end
+2026-01-26 10:11:00,000 DEBUG [pool-2-thread-1] com.example.metrics.QueueProbe  - queue size NaN end

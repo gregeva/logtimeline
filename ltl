@@ -464,6 +464,14 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
+my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
+my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
+# The UDM value vocabulary. The default name and token-key patterns extract
+# $udm_number_re; a numeric aggregation records a capture only when the whole
+# capture is a number in one of the written forms 42, -5, +5, 1.5, .5, 5.,
+# 1e3, 1.5E-2 (no thousands separator, hexadecimal, Inf or NaN).
+my $udm_number_re       = qr/-?\d+(?:\.\d+)?/;
+my $udm_number_whole_re = qr/\A[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\z/;
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -6050,16 +6058,10 @@ sub udm_read_as {
     my ($config, $config_idx) = @_;
     my $unit = defined $config->{unit} ? $config->{unit} : 'none';
     my $key  = $config->{extraction} eq 'regex' ? '-' : ($config->{token_key} // $config->{base_name});
-    my $source = 'line';
-    if ($csv_detected && defined $config_idx) {
-        my $col = $csv_udm_col_indices[$config_idx];
-        if (defined $col && $col >= 0) {
-            my ($col_name) = grep { $csv_col_index{$_} == $col } keys %csv_col_index;
-            $source = 'csv:' . ($col_name // $col);
-        } else {
-            $source = 'csv:unbound';
-        }
-    }
+    my $sources = defined $config_idx ? $udm_sources[$config_idx] : undef;
+    my $source  = $sources
+        ? join(',', sort { ($b eq 'line') <=> ($a eq 'line') || $a cmp $b } keys %$sources)
+        : 'line';
     return join('  ',
         "unit=$unit($config->{unit_type})",
         "aggregation=$config->{aggregation}",
@@ -6068,6 +6070,41 @@ sub udm_read_as {
         "key='$key'",
         "source=$source",
     );
+}
+
+# Where each metric is read from, noted as a file binds its first matched
+# line: log lines, or the CSV column the file's header bound the metric to.
+# The run-wide union is what udm_read_as() reports, whichever file came last.
+sub udm_note_sources {
+    my ($is_csv) = @_;
+    for my $idx (0 .. $#udm_configs) {
+        my $source = 'line';
+        if ($is_csv) {
+            my $col = $csv_udm_col_indices[$idx];
+            if (defined $col && $col >= 0) {
+                my ($col_name) = grep { $csv_col_index{$_} == $col } keys %csv_col_index;
+                $source = 'csv:' . ($col_name // $col);
+            } else {
+                $source = 'csv:unbound';
+            }
+        }
+        $udm_sources[$idx]{$source} = 1;
+    }
+}
+
+# Issue #638: one notice per /regex/ metric some of whose retained lines were
+# skipped because the capture is not a number its aggregation can use, with
+# the recorded and skipped counts and the skipped share. Spoken after the
+# read loop, beside the zero-match notice.
+sub emit_udm_skipped_capture_notices {
+    return unless %udm_skipped_lines;
+    my $production = derive_udm_production();
+    for my $config (@udm_configs) {
+        my $skipped = $udm_skipped_lines{$config->{name}} or next;
+        my $recorded = $production->{$config->{name}}{occurrences};
+        printf STDERR "Note: -udm '%s': %d line(s) recorded, %d skipped (%.1f%%): the captured text is not a number\n",
+            $config->{raw_arg}, $recorded, $skipped, $skipped / ($recorded + $skipped) * 100;
+    }
 }
 
 # Issue #443: one notice per metric whose derived occurrences are zero, spoken
@@ -6181,6 +6218,7 @@ sub emit_udm_specs_verbose {
                 ? " distinct_max=" . ($p->{distinct_max} // 0)
                 : " sum=$p->{sum} min=$p->{min} max=$p->{max}";
         }
+        $produced .= " skipped=$udm_skipped_lines{$config->{name}}" if exists $udm_skipped_lines{$config->{name}};
         push @verbose_output, "  produced: $produced";
         push @verbose_output, "  hint: $config->{hint}" if defined $config->{hint};
     }
@@ -9982,7 +10020,7 @@ sub print_help {
     $out .= help_opt("      unit",                   "Time: ns, us, ms, s, m, h, d, w, month, year. Bytes: B, kB, KB, MB, GB, TB, KiB, MiB, GiB, TiB. SI: k/K, M, G, T. Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
-    $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
+    $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. For sum, min, max, mean, delta and idelta the value must be a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2; any other value (12abc, 1,000, an empty capture) is skipped, and the lines skipped are reported. Capture the whole value, e.g. (\\S+), and let it be checked: (\\d+) reads 1 from 1.5 or 1e3, and \\D* before the capture drops a minus sign, with no notice. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
@@ -10031,7 +10069,7 @@ sub print_help {
     $out .= $ex->("ltl -n 50 -so duration access.log",                             "Top 50 messages by total duration");
     $out .= $ex->("ltl -hm duration -bs 5 access.log",                             "Duration heatmap, 5-minute buckets");
     $out .= $ex->("ltl -hg duration,bytes access.log",                             "Duration and bytes histograms");
-    $out .= $ex->("ltl -udm \"rows:/(\\d+) rows processed/\" app.log",             "Custom metric extraction by regex");
+    $out .= $ex->("ltl -udm \"queue::max:/queue size[\\s:=]*(\\S+)/\" app.log",   "Custom metric by regex, capturing the whole value");
     $out .= $ex->("ltl -tpa \"http-\" access.log",                                 "Track HTTP thread pool activity");
     $out .= $ex->("ltl -o access.log",                                             "Export full analysis to CSV");
     $out .= $ex->("ltl logs/2025-05-*.txt",                                        "Glob multiple files");
@@ -10345,7 +10383,7 @@ sub counting_token_pattern {
 }
 
 sub parse_udm_configs {
-    my $number = qr/-?\d+(?:\.\d+)?/;
+    my $number = $udm_number_re;
     my %byte_units = map { $_ => 1 } qw( B b kB KB MB GB TB KiB MiB GiB TiB );
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
@@ -15323,6 +15361,7 @@ sub read_and_process_logs {
             # place, and is never recorded, so trying it could only coerce its
             # text and move the delta state (features/637-udm-continuation-lines.md D1).
             my %udm_values;
+            my $udm_skipped;    # names of /regex/ metrics whose capture this line's numeric aggregation could not use
             if (@udm_configs && $is_line_match && defined $message) {
                 foreach my $config_idx (0 .. $#udm_configs) {
                     my $config = $udm_configs[$config_idx];
@@ -15351,14 +15390,25 @@ sub read_and_process_logs {
                     next unless defined $matched_value;
 
                     # Counting aggregations keep the raw extracted string:
-                    # numeric coercion, transforms, and unit conversion do not apply
+                    # numeric coercion, transforms, and unit conversion do not apply.
+                    # An empty capture is counted but masks nothing: an empty
+                    # pattern would re-run whichever regex last matched.
                     if ($config->{agg_kind} eq 'counting') {
                         $udm_values{$name} = $matched_value;
-                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose} || $matched_value eq '';
                         next;
                     }
 
-                    my $raw_value = $matched_value + 0;  # Ensure numeric
+                    # A numeric aggregation records only a capture that is
+                    # entirely a number; anything else is not observed for this
+                    # metric: no value, no delta state, no mask. A /regex/
+                    # metric's skip is counted once the line is retained.
+                    unless ($matched_value =~ $udm_number_whole_re) {
+                        push @$udm_skipped, $name unless $match_type == 13;
+                        next;
+                    }
+
+                    my $raw_value = $matched_value + 0;
 
                     # Apply delta/idelta transform on raw value before conversion
                     if (defined $config->{transform}) {
@@ -15407,6 +15457,7 @@ sub read_and_process_logs {
                     # file's property (#453 R8/D19).
                     $fdd->{event_ledger}     = $line_entry ? $line_entry->[FR_EVENT_LEDGER] : 0;
                     $fdd->{cls_both}         = $line_entry ? $line_entry->[FR_CLS_BOTH] : 0;
+                    udm_note_sources($match_type == 13) if @udm_configs;
                     # The levels the bound format declares join the run's
                     # category vocabulary here, once per file rather than for
                     # every format at startup.
@@ -15616,6 +15667,10 @@ sub read_and_process_logs {
                     if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
                     if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
                 }
+
+                # A skipped /regex/ capture is counted here, past every filter,
+                # so it describes the same lines as the recorded figure.
+                if ($udm_skipped) { $udm_skipped_lines{$_}++ for @$udm_skipped; }
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
@@ -21973,6 +22028,7 @@ sub pipeline_finalize {
     print "Calculate statistics..." unless $disable_progress;
     calculate_all_statistics();
     emit_udm_zero_match_notices();
+    emit_udm_skipped_capture_notices();
     emit_classification_percentage_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);

@@ -430,9 +430,9 @@ Emitted after the read loop (it reads the D7 walk). One block per `-udm` argumen
 ```
 === udm-specs ===
 udm: name=<name> spec='<raw argument>'
-  read_as: unit=<unit|none>(<time|bytes|number|raw>) aggregation=<agg> transform=<delta|idelta|none> extraction=<name|token_key|regex> key='<key>' source=<line|csv:<column>>
+  read_as: unit=<unit|none>(<time|bytes|number|raw>) aggregation=<agg> transform=<delta|idelta|none> extraction=<name|token_key|regex> key='<key>' source=<line|csv:<column>|csv:unbound>[,…]
   pattern[<i>]: <compiled pattern source, one line per pattern>
-  produced: occurrences=<N> buckets=<N> sum=<v> min=<v> max=<v>           # numeric metrics
+  produced: occurrences=<N> buckets=<N> sum=<v> min=<v> max=<v> [skipped=<N>]   # numeric metrics; skipped only once a line was skipped (#638 D4)
   produced: occurrences=<N> buckets=<N> distinct_max=<N>                  # counting metrics
   hint: token_key_has_regex_chars                                         # only when D6 fires
 udm: spec='<raw argument>' rejected=<reason-token>                        # parse-time skip (D5 and the existing checks)
@@ -443,9 +443,9 @@ udm: spec='<raw argument>' rejected=<reason-token>                        # pars
 |---|---|
 | `name` | the resolved metric name; on a duplicate-name collision it carries the fields that differ within the colliding group, the function field then the unit field, each as the spec carries it (the naming rule of #482 — two `-udm` specs with the same name and aggregation but different transforms collapse into one column) |
 | `spec` | the argument as given, unmodified |
-| `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source (`line`, or `csv:<column>` when the file is columnar and the metric is bound to a column) |
+| `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source: every source the run read the metric from, noted as each file binds and listed `line` first, comma-separated: `line` (log lines), `csv:<column>` (a columnar file whose header binds the metric to that column), `csv:unbound` (a columnar file with no column for it). The same whichever file is read last; `line` when no file bound at all (#638 D5) |
 | `pattern[i]` | the source of each compiled pattern, in scan order — as compiled, not as typed |
-| `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice |
+| `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice. `skipped` (numeric metrics only, and only once one line was skipped): retained lines where a `/regex/` metric's pattern matched but the capture is not entirely a number, so its aggregation could not use it (#638 D1, D3, D4) |
 | `hint` | the token of the D6 rule that fired; absent otherwise |
 | `rejected` | the parse-time check that skipped the spec: `invalid_regex`, `missing_name`, `key_and_regex`, `counting_with_transform`, `unknown_function`, `unit_slot_holds_function`, `literal_pattern_under_distinct`, `duplicate_metric_identity` (the spec's resolved name is already claimed — it differs from an earlier spec only in what it extracts, or repeats it byte for byte) |
 
@@ -456,6 +456,7 @@ Stability: keys above are the contract; additions are non-breaking, renames and 
 | producer (`ltl`) | when | text shape |
 |---|---|---|
 | `emit_udm_zero_match_notices()` (post-walk) | after the read loop, one per metric with derived occurrences 0 | `Note: -udm '<spec>': no metrics produced from matching lines` + `read as:` + `pattern:` (+ `hint:` per D6) |
+| `emit_udm_skipped_capture_notices()` (post-walk) | after the read loop, beside the zero-match notice, one per `/regex/` metric with at least one skipped line (#638 D3) | `Note: -udm '<spec>': <N> line(s) recorded, <N> skipped (<pct>%): the captured text is not a number` |
 | `parse_udm_configs()` | option parsing — D5 (i) and (ii) | `Warning: … in -udm '<spec>' … skipping` (existing warn-and-skip shape) |
 
 ### Implementation plan (approved 2026-08-28)

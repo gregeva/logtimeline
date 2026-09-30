@@ -176,6 +176,90 @@ path, which share the coercion line.
   the section contract in `features/user-defined-metrics.md` in the same
   commit.
 
+- **D6 — The written forms of a number that are accepted (architect,
+  2026-09-30).** For a numeric aggregation a capture is a number when the
+  whole capture is written as `42`, `-5`, `+5`, `1.5`, `.5`, `5.`, `1e3` or
+  `1.5E-2` (an optional sign, digits with an optional decimal point on either
+  side, an optional exponent). A thousands separator (`1,000`), hexadecimal
+  (`0x10`), `Inf` and `NaN` are not numbers and are skipped per D1. Rationale:
+  the unchanged code recorded the first five forms correctly and without a
+  warning; a capture written in a standard spelling of a number is the value
+  the user declared (#443 D2). The documentation teaches the pattern that
+  catches these forms and names the ones a habitual pattern silently cuts
+  short: `--help` and `docs/usage.md` show `/queue size[\s:=]*(\S+)/`, which
+  skips the separator and captures the whole value so the tool checks it, and
+  state that `(\d+)` reads `1` from `1.5` or `1e3` and that `\D*` before the
+  capture drops a minus sign, with no notice. Measured on the twelve-line
+  fixture below: the documented pattern records the eight numbers at their
+  full value (sum 1049.015, min -5, max 1000) and reports four skipped; the
+  earlier example `/queue size\D*(\d+)/` records ten lines with sum 66 and
+  no notice (`-5` read as 5, `1.5E-2` as 1, `1,000` as 1, `0x10` as 0).
+  This refines D2's example: the capture is the whole value rather than the
+  digits.
+
+## Implementation
+
+Branch `638-udm-non-numeric-capture` from `release/0.18.5`.
+
+- **Number shape (D1, D6).** `$udm_number_whole_re` is the one definition of
+  a capture a numeric aggregation records: the whole capture is
+  `[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`. `$udm_number_re` beside it
+  stays the shape the default name and token-key patterns extract. The check
+  sits before the delta transform, the unit converter and the mask, so a
+  skipped capture touches none of them. The CSV column path goes through the
+  same check.
+- **Masking.** The counting branch no longer masks an empty capture (an empty
+  pattern re-runs whichever regex last matched). On the fixture below, the
+  unchanged code's empty pattern reused a regex that does not match the
+  message, so the hazard does not show there: the assertion that an empty
+  capture masks nothing passes on the unchanged code too, and guards the
+  outcome rather than proving the fix.
+- **Skip count (D3, D4).** A skipped `/regex/` capture adds the metric's name
+  to a per-line list, created only on a skip; past the include/exclude,
+  outcome, time-window and numeric filters, the list increments
+  `%udm_skipped_lines{<name>}`, a key that exists only once a line of that
+  metric was skipped. A CSV column skip is not counted (D3 scope).
+- **Notice (D3).** `emit_udm_skipped_capture_notices()`, after the read,
+  beside the zero-match notice: `Note: -udm '<spec>': <N> line(s) recorded,
+  <N> skipped (<pct>%): the captured text is not a number`. The recorded
+  figure is the derived `produced` occurrences (D4); the share is skipped over
+  recorded plus skipped. A metric whose every retained line was skipped
+  prints both the zero-match notice and this one.
+- **`-V udm-specs` (D4, D5).** `produced:` gains `skipped=<N>` only for a
+  metric that has one. `source=` is the union of what each file bound, noted
+  once per file at its first matched line by `udm_note_sources()`: `line`
+  first, then `csv:<column>` or `csv:unbound`, comma-separated, e.g.
+  `source=line,csv:v`. Section contract updated in
+  `features/user-defined-metrics.md`.
+- **Documentation (D2, D6).** The `-udm` regex example in `--help` is
+  `ltl -udm "queue::max:/queue size[\s:=]*(\S+)/" app.log`; `docs/usage.md`
+  adds it beside the existing regex example. Both `/regex/` rows list the
+  accepted forms, the values that are skipped, and the two capture shapes
+  that cut a value short without a notice.
+- **Tests.** Fixture `tests/fixtures/udm-non-numeric-capture.txt` (a log4j
+  application log, seven lines one minute apart, `probe reading v=<value> end`
+  with `42`, `12abc`, `abc12`, `abc`, empty, `_:_100`, `7`). Seven scenarios in
+  `tests/validate-udm-specs.sh`: `non-numeric-capture`,
+  `non-numeric-not-masked`, `all-numeric-capture`, `non-numeric-filtered`,
+  `non-numeric-counting`, `non-numeric-csv-column`, `source-mixed-inputs`,
+  and `number-forms` on `tests/fixtures/udm-number-forms.txt` (twelve lines,
+  the D6 forms and the four non-numbers, behind the separators ` : `, `=`, a
+  space or none), which fails on the unchanged code and on the narrower
+  `-?\d+(?:\.\d+)?` shape.
+  Against the unchanged `ltl` every new assertion fails except the empty-capture
+  mask assertions (above) and the two guards for behaviour that was already
+  right: no skipped figure or notice on an all-numeric log, and
+  `distinct` counting non-numeric text. Those two guards fail when the notice and the
+  `skipped=` figure are made unconditional.
+
+## Hand-forward
+
+- #642 (a metric without a `/regex/` records `1e3` as 1 and `1,000` as 1, and
+  misses `+5` and `.5`): the default name and token-key patterns still extract
+  `$udm_number_re` (`-?\d+(?:\.\d+)?`), so a value written in another D6
+  form is cut short or the line is not matched, with no notice. Filed by the
+  architect's direction as its own issue, blocked by this one.
+
 ## Acceptance criteria
 
 - [ ] When a numeric-aggregation metric captures `12abc`, `abc12`, `abc`,
@@ -212,8 +296,14 @@ path, which share the coercion line.
       `produced:` and `tests/validate-udm-counting.sh`).
 - [ ] Counting aggregations still record non-numeric captures as today
       (assertable: `tests/validate-udm-counting.sh` unchanged and passing).
-- [ ] `--help` examples and `docs/usage.md` carry the narrowed-capture example
-      and agree (assertable: `tests/validate-help-content.sh`).
+- [ ] A capture written as `42`, `-5`, `+5`, `1.5`, `.5`, `5.`, `1e3` or
+      `1.5E-2` is recorded at its full value under a numeric aggregation;
+      `1,000`, `0x10`, `Inf` and `NaN` are skipped and reported (D6;
+      assertable: scenario `number-forms` of `tests/validate-udm-specs.sh`,
+      with the pattern the documentation teaches).
+- [ ] `--help` examples and `docs/usage.md` carry the whole-value capture
+      example, list the accepted forms and name the capture shapes that cut a
+      value short, and agree (assertable: `tests/validate-help-content.sh`).
 - [ ] Hot path: the before/after benchmark on
       `single-day-access-log-standard` shows no regression beyond 1%.
 
