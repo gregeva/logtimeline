@@ -336,7 +336,8 @@ his decisions of the same day on the follow-up questions the review of this
 specification left open, and D26 his decision of the same day given on #619's
 turn (one per-run key cut). D27 is his decision of 2026-09-29 on how the CSV
 harness checks impact. D28 is his decision of 2026-09-30 on the D12 prototype's
-table, and D29 his decision of the same day at the start of drop 2. Nothing else in this document is numbered Dxx.
+table, D29 his decision of the same day at the start of drop 2, and D30 his
+decision of the same day on drop 2's measured cost. Nothing else in this document is numbered Dxx.
 
 - **D1:** "**Every accumulator keeps its observation count unconditionally**,
   one integer per store entry, for the time-bucket store and the message store
@@ -559,6 +560,26 @@ table, and D29 his decision of the same day at the start of drop 2. Nothing else
   The counts are owned by the accumulation beside the totals: the running-mean
   update reads the count and never writes it, running before the loop's
   increment and before the merge sums the two counts. *Locked by the architect
+  2026-09-30.*
+- **D30: Bytes are processed only when a line produces them and a surface
+  demands them, at both stores.** In the architect's words: bytes values "come
+  from a message. If they are not in that message, then there's nothing to do.
+  There is no producer. And hence, all of the consumers reading bytes should be
+  skipped using the gates"; and "If there is no demand for bytes, then you
+  can't be receiving and processing them. They stay empty." It is the
+  application's standing rule that branches are gated and a surface not needed
+  is not used. Two gates in series, at the time-bucket store and the message
+  store alike: a line carrying no bytes value produces nothing (no total, no
+  count, and no zero in their place: neither store is initialised with a bytes
+  total), and a run in which no surface demands a store's bytes processes none
+  of them, total, count and extrema alike, so every reader finds nothing and its
+  cell stays empty. The time-bucket store's bytes are demanded by the
+  timeline's bytes column unless it is hidden (`-hb`, `-hi bytes`) and by `-o`
+  (the STATS CSV and the YAML export); the message store's by the MESSAGES CSV
+  (`-o`) and the bytes sorts, `-so bytes` included, while a message is retained.
+  `-ob` switches both off. This supersedes D1's "unconditionally" for bytes:
+  D1 was worded by Claude, and the measurement of drop 2 showed a count kept on
+  every line that no surface of the run read. *Locked by the architect
   2026-09-30.*
 
 ---
@@ -1460,20 +1481,28 @@ The pattern entry *Observation counts and gated means* is added to
 needing refinement until the issue completes (section 5.5).
 
 
-**Drop 2 (2026-09-30): observation counts kept unconditionally, totals projected
-only when counted.**
+**Drop 2 (2026-09-30): observation counts kept beside their totals, totals
+projected only when counted, bytes processed only when produced and demanded.**
 
 *Counts.* The per-message and per-bucket loops increment `duration_count` beside
 the duration total on every timed line, in both models, after the running-mean
 update, which reads the count as the count before the observation and no longer
 writes it (D29). The time-bucket constructor initialises it in both models; the
-message entry creates it on the first increment (D29). `bytes_occurrences` is
-incremented on every line that carried a bytes value, outside
-`$bytes_aggregate_demand`, which governs only `bytes_min` and `bytes_max`. The
-single-line source that streaming consolidation merges carries
-`duration_count => 1` in both models and, for a line carrying bytes,
-`bytes_occurrences => 1` with its extrema, so the merge, which now gates each
-family on its count, never drops a line's total for want of a count; on the
+message entry creates it on the first increment (D29). Each duration block
+takes its entry reference once and adds the total and increments the count
+through it. Bytes follow D30: `$bucket_bytes_demand` (the timeline's bytes
+column unless hidden, or `-o`) and `$message_bytes_demand` (a retained message
+and the MESSAGES CSV or a bytes sort, `-so bytes` included) are resolved in
+`adapt_to_command_line_options`, `-ob` switching both off; under its store's
+demand a line carrying a bytes value adds to the total, a zero-byte response
+included, and increments `bytes_occurrences`, with `$bytes_aggregate_demand`
+governing `bytes_min` and `bytes_max`; neither store is initialised with a
+bytes total, and the per-bucket statistics pass no longer adds up a bytes total
+nothing read. The single-line source that streaming consolidation merges
+carries `duration_count => 1` in both models and, for a line carrying bytes
+under the message store's demand, `bytes_occurrences => 1` with its extrema, so
+the merge, which now gates each family on its count, never drops a line's
+total for want of a count; on the
 access log that path is not reached (`-V message-grouping`: no inline match),
 and the consolidated rows' bytes counts were checked against the log itself:
 the gap between `occurrences` and `bytes_occurrences` on the two largest rows
@@ -1562,8 +1591,84 @@ the message and bucket entry references once in their duration blocks, so the
 count increment reuses the reference the total's addition looked up, measured
 the same in a second ten-round run (+0.248 s against drop 2's +0.249 s, both
 against drop 1), so the cost is the increments themselves, not the lookups; the
-variant was not kept. The cost is D1's and D18's (every accumulator keeps its
-observation count unconditionally), reported as D18 asks. Drop 4 removes the
-per-line impact derivation (a division, a power and a logarithm on every
-duration-bearing line), measured in its own A/B.
+variant was not then kept. These ten-round runs were taken while drop 1 itself
+spread by about 11 percent on the access log; the constants measured
+afterwards and the twenty-round runs below supersede their reading. Drop 4
+removes the per-line impact derivation (a division, a power and a logarithm on
+every duration-bearing line), measured in its own A/B.
 
+
+*Observation-count candidates* (2026-09-30, after D30; prototype
+`prototype/616-observation-count-arms/`, results
+`tests/profile/results/616-observation-count-arms/`). The per-line cost of the
+counts was measured first as constants on this host: an increment of a message
+entry's field through the full key (`$log_messages{$category}{$log_key}{...}`,
+a key of about 120 characters) costs 98 ns net per line, through an entry
+reference taken once 19 ns; a bucket entry's field through `$log_analysis{$bucket}`
+36 ns, through a reference 19 ns. Four forms were then built from the tree by
+asserted edits and proved byte-identical to each other (STATS, MESSAGES, YAML
+and terminal output, 123 comparisons over 14 option shapes: both fixtures,
+access and script-log slices, raw and bin models, consolidated, `-od`,
+`-so bytes`, `-hm`, `-hb`): `full` (the counts reached by full-key lookups),
+`cached` (one entry reference per duration block), `nocount` (no count
+increment: a total is not pre-set to zero, so its existence is the observation
+test, the divisors come from the statistics stores, and the bytes count is kept
+only under the bytes aggregate demand) and `oneref` (every message-entry and
+bucket-entry lookup of the loop's message and bucket sections through one
+reference: 29 and 36 lookups, most of them predating this issue). Twenty
+interleaved order-balanced rounds on full files, per-round delta against the
+same round's drop 1 run, median, and the rounds in which the form was slower:
+
+| Selection (drop 1 median, range) | `full` | `cached` | `nocount` | `oneref` |
+|---|---|---|---|---|
+| day of web-server access log, raw models (8.878 s, 8.756 to 9.149) | +0.014 s, 11/20 | +0.027 s, 14/20 | −0.041 s, 8/20 | −0.546 s (−6.2%), 0/20 |
+| the same, `-mdm bin -bdm bin` (11.033 s, 10.950 to 11.261) | −0.157 s, 1/20 | −0.135 s, 5/20 | −0.165 s, 2/20 | −0.678 s (−6.2%), 0/20 |
+| day of application script log carrying `durationMS=`, raw (2.264 s, 2.237 to 2.398) | +0.021 s, 13/20 | +0.015 s, 14/20 | +0.025 s, 14/20 | +0.029 s, 15/20 |
+
+Peak memory is within 0.3 MB of drop 1 for every form.
+
+Reading. On the access log the counts in any form are within the noise of drop
+1 (under 0.3 percent), where the constants predict about 0.12 s for `full` and
+0.04 s for `cached`: D30 removed the per-message bytes work of the standard
+invocation (a full-key lookup and an addition on every line), which offsets
+them. The earlier ten-round runs of this drop (+2.2 percent, then +1.4 percent)
+were taken while drop 1 itself spread by about 11 percent; these supersede
+them. `nocount` against `cached` is −0.048 s on the raw access log, slower in
+7 of 20 rounds: not separable from noise at this resolution. `oneref` is the
+one form clearly apart: 6.2 percent faster on the access log in both models, in
+every round, from the loop's pre-existing full-key lookups, which it replaces;
+on the script log, whose lines mostly carry no metric, it makes no difference.
+
+*The peak memory the run reports.* `validate-byte-units.sh` scenario
+`one-notation-reach` failed intermittently on this drop (3 of 6 runs; 0 of 6 on
+the release tip): the summary's MAXIMUM MEMORY USED row and the aggregate
+export's `max_memory_used` read the running peak at two moments, before and
+after the summary renders, and a render that raised the peak across a 0.1 MB
+rounding step made them differ (`41 MB` against `41.1 MB`). Pre-existing in the
+order of the end-of-run sequence, exposed by this drop's memory profile, and
+fixed here at the architect's direction: `$reported_max_memory_usage` is taken
+once after the measurement that precedes the summary, and the summary row, its
+memory shares and the export read it; the index row and `-V benchmark-data`
+keep the lifetime peak. The scenario then passed 8 of 8 runs.
+
+
+*Harnesses on the amended tree* (D30, the cached entry references, the reported
+peak): `validate-csv-output.sh` (27 scenarios, 32 pass), `validate-statistics.sh`
+(22 scenarios, every drift cell in the tightest tier), `validate-statistics-demand.sh`,
+`validate-aggregate-export.sh`, `validate-duration-display.sh`,
+`validate-regression.sh` (74 of 74), `validate-byte-units.sh`,
+`validate-message-grouping.sh`, `validate-message-grouping-notices.sh`,
+`validate-heatmap-palette.sh`, `validate-histogram-bin-counters.sh`,
+`validate-section-layout.sh`, `validate-summary-contribution-bar.sh`,
+`validate-filter-summary.sh`, `validate-numeric-criteria-notices.sh`,
+`validate-csv-input.sh`, `validate-profile-render.sh`,
+`validate-bucket-size-units.sh`, `validate-index-read-back.sh`,
+`validate-udm-specs.sh` and `validate-udm-counting.sh` pass, with no runtime
+warning.
+
+*Hand-forward to #620* (hoisting the read loop's per-line work): the `oneref`
+form above, every message-entry and bucket-entry lookup of the loop's message
+and bucket sections made through one reference, measured 6.2 percent faster on
+a day of web-server access log in both models, in every one of twenty rounds,
+with byte-identical output. It changes lines that predate this issue and is
+left to #620.

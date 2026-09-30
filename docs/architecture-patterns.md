@@ -275,10 +275,16 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 **Consumption sites.**
 - `adapt_to_command_line_options` :: `$bytes_aggregate_demand = ( !$omit_bytes && (`
 - `read_and_process_logs` :: `if( $bytes_aggregate_demand ) {`
+- `adapt_to_command_line_options` :: `$bucket_bytes_demand = ( !$omit_bytes && ( !$hide_bytes || $write_messages_to_csv ) ) ? 1 : 0;`
+- `adapt_to_command_line_options` :: `$message_bytes_demand = ( !$omit_bytes && $capture_messages && (`
+- `read_and_process_logs` :: `if( defined $bytes && $message_bytes_demand ) {`
+- `read_and_process_logs` :: `if( $bytes_observed_line && $bucket_bytes_demand ) {`
 - `read_and_process_logs` :: `$log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;`
 - `read_and_process_logs` :: `if( $message_duration_stats_demand ) {`
 
 **Owning record.** `features/516-bytes-aggregate-demand-gate.md` D1 and D2;
+`features/616-gated-mean-derivation.md` D30 (a metric is processed only when a
+line produces it and a surface demands it, at each store);
 `features/517-message-outcomes-demand-gate.md` D1;
 `features/305-shape-moment-extended-percentile-demand.md` § Store-level demand;
 the CLAUDE.md checkpoint on observation counts.
@@ -292,15 +298,19 @@ while its total is not (F4.11); the impact mean divides by the wrong count
 
 ## Observation counts and gated means
 
-**Definition.** Every accumulator carries its observation count, and every
-mean is derived by one helper, `mean_of($sum, $count)`, from a sum and that
-count, with the gate inside: the mean is `undef` unless the count holds an
-observation. A total is projected only when its count is positive. The helper
-runs after the read loop, never per line.
+**Definition.** Every accumulator carries its observation count beside its
+total, kept under the same demand gate as the total, and every mean is derived
+by one helper, `mean_of($sum, $count)`, from a sum and that count, with the
+gate inside: the mean is `undef` unless the count holds an observation. A total
+is projected only when its count is positive, and is never pre-set to zero
+before a line produces it. The helper runs after the read loop, never per line.
 
 **Intended uses.** Any new mean, at any store or surface: call `mean_of` with
 the accumulator's sum and count rather than dividing inline. Any new
-accumulator keeps its count beside its sum.
+accumulator keeps its count beside its sum, incremented through the entry
+reference the sum's addition already holds (a lookup by the full message key
+costs about 100 ns per line on the development host, an increment through a
+reference about 20 ns).
 
 **Reasoning.** The audit of redundant logic found eleven inline derivations of
 a mean with three gate shapes, the per-bucket user-defined mean computed twice,
@@ -325,10 +335,8 @@ formatting at the output boundary*, to which the same issue adds the
 per-message bytes mean and the run index's means as sites.
 
 **Status.** Needs refinement until #616 (one gated derivation of means and
-totals) completes: the observation counts are not yet unconditional, the
-projected totals are not yet gated on them, and impact, the per-message bytes
-mean, the duration mean and the run index's six means do not yet call the
-helper.
+totals) completes: impact, the per-message bytes mean, the duration mean and
+the run index's six means do not yet call the helper.
 
 ---
 

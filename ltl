@@ -106,6 +106,9 @@ my ( $summary_bar_off, $summary_bar_absolute, $summary_bar_log, $summary_bar_rev
 # the colour away from the table as a whole, every row of it, whether or not
 # a bar is drawn over that row.
 my $summary_mono = 0;
+# The peak the run summary reports, taken once before the summary renders, so
+# the summary's memory row and the aggregate export carry the same value.
+my $reported_max_memory_usage = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 # Statistics-phase sub-stage timing (#417): accumulated wall-clock per block,
 # start/stop pairs at block boundaries only — never inside a per-key loop.
@@ -979,7 +982,9 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 # the consumer half of that conjunction. One boolean per statistics store.
 my $bucket_duration_stats_demand   = 0;       # per-time-bucket statistics (%log_analysis): timeline latency column, STATS CSV
 my $message_duration_stats_demand  = 0;       # per-message-key statistics (%log_messages): messages-table statistics variant, MESSAGES CSV
-my $bytes_aggregate_demand         = 0;       # bytes_occurrences/bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
+my $bytes_aggregate_demand         = 0;       # bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
+my $bucket_bytes_demand            = 0;       # per-time-bucket bytes (%log_analysis total, count, extrema): timeline bytes column, STATS CSV, YAML export (#616 D30)
+my $message_bytes_demand           = 0;       # per-message bytes (%log_messages total, count, extrema): MESSAGES CSV, bytes sorts (#616 D30)
 my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
 
 # Statistics-group demand registry (#305): extends the store-level demand
@@ -6614,7 +6619,7 @@ sub write_aggregate_export {
     }
     $measurements->{categories}      = $categories;
     $measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");
-    $measurements->{max_memory_used} = format_bytes($max_memory_usage);
+    $measurements->{max_memory_used} = format_bytes($reported_max_memory_usage);
 
     my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
         (qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);
@@ -14815,17 +14820,26 @@ sub adapt_to_command_line_options {
     # MESSAGES CSV statistics columns - exist only for retained messages, so
     # retention is the single condition on this store's demand.
     $message_duration_stats_demand = ( !$omit_durations && $capture_messages ) ? 1 : 0;
-    # Bytes aggregate-family demand (#516): bytes_occurrences/bytes_min/bytes_max
-    # (and the bytes_mean derived from them) reach the user only through the two
-    # CSV surfaces and the bytes-family sort operands — nothing is rendered from
-    # them (the rendered bytes columns read total_bytes, which stays ungated).
-    # A run with no such consumer skips the per-line capture at both scopes.
+    # Bytes aggregate-family demand (#516): bytes_min/bytes_max reach the user
+    # only through the two CSV surfaces and the bytes-family sort operands.
+    # It governs the extrema inside each store's own bytes demand below.
     # The sort operand only ranks the top-messages table, so it is a consumer only
     # while a message is retained: under -n 0 the sort is inert (#458 D3) and holds
     # no demand, while the CSV term stands on its own.
     $bytes_aggregate_demand = ( !$omit_bytes && (
            $write_messages_to_csv
         || ( $capture_messages && $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/ )
+    ) ) ? 1 : 0;
+    # Bytes demand per store (#616 D30): a store receives and processes bytes,
+    # total, count and extrema alike, only when a surface reads them; otherwise
+    # nothing is accumulated and every bytes cell stays empty. The time-bucket
+    # store is read by the timeline's bytes column unless it is hidden, and by
+    # -o (STATS CSV, YAML export); the message store by the MESSAGES CSV and
+    # the bytes sorts, the total's included, while a message is retained.
+    $bucket_bytes_demand = ( !$omit_bytes && ( !$hide_bytes || $write_messages_to_csv ) ) ? 1 : 0;
+    $message_bytes_demand = ( !$omit_bytes && $capture_messages && (
+           $write_messages_to_csv
+        || $sort_key =~ /^(?:total_bytes|bytes_(?:occurrences|min|mean|max))$/
     ) ) ? 1 : 0;
     # Per-message outcome-counter demand (#517 D1, #456): the per-message
     # outcome counters reach the user through the MESSAGES CSV outcome columns
@@ -15889,7 +15903,7 @@ sub read_and_process_logs {
                             my $stats_source = { occurrences => 1 };
                             $stats_source->{outcomes}[$line_outcome] = 1 if $message_outcomes_demand && $line_outcome;
                             if ($metrics_observed) {
-                                if (defined $bytes && !$omit_bytes) {
+                                if (defined $bytes && $message_bytes_demand) {
                                     $stats_source->{total_bytes}       = $bytes;
                                     $stats_source->{bytes_occurrences} = 1;
                                     $stats_source->{bytes_min}         = $bytes;
@@ -15967,7 +15981,6 @@ sub read_and_process_logs {
                         # key cardinality this is the dominant per-key allocation today.
                         $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
                             occurrences    => 0,
-                            total_bytes    => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
                             duration_count => 0,
@@ -15979,7 +15992,6 @@ sub read_and_process_logs {
                             ($message_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                         } : {
                             occurrences    => 0,
-                            total_bytes    => 0,
                             total_duration => 0,
                             # count_occurrences => 0,
                             # count_min => undef,
@@ -16016,11 +16028,12 @@ sub read_and_process_logs {
                         # discards a metric has nothing to rank on either, and -so
                         # bytes falls back the same way any operand with no values
                         # does.
-                        if( defined $bytes && !$omit_bytes ) {
+                        if( defined $bytes && $message_bytes_demand ) {
                             my $e = $log_messages{$category}{$log_key};
                             $e->{total_bytes} += $bytes;
-                            # The count is kept whatever the demand (#616 D1); the
-                            # demand gate governs only the extrema.
+                            # The count is kept on every line the store's demand
+                            # admits (#616 D30); the aggregate demand governs the
+                            # extrema.
                             if( $bytes_aggregate_demand ) {
                                 if( $e->{bytes_occurrences}++ ) {
                                     $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -16057,7 +16070,11 @@ sub read_and_process_logs {
                         }
 
                         if( defined $duration && !$omit_durations ) {
-                            $log_messages{$category}{$log_key}{total_duration} += $duration;
+                            # The entry is found once for the total and its count: a
+                            # lookup by the full message key costs ~100 ns per line, an
+                            # increment through the reference ~20 ns (#616).
+                            my $me = $log_messages{$category}{$log_key};
+                            $me->{total_duration} += $duration;
 
                             # Statistics machinery (sum of squares, raw samples or bin
                             # counters + moment sidecars) is captured only when a surface
@@ -16153,7 +16170,7 @@ sub read_and_process_logs {
                             # timed line whatever the statistics demand (#616 D1, D18).
                             # It is incremented after the running-mean update above,
                             # which reads it as the count before this observation.
-                            $log_messages{$category}{$log_key}{duration_count}++;
+                            $me->{duration_count}++;
 
                             # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
                             if( $duration > 0 ) {
@@ -16197,7 +16214,6 @@ sub read_and_process_logs {
                     # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
                     $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
                         occurrences => 0,
-                        total_bytes => 0,
                         duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
@@ -16212,7 +16228,6 @@ sub read_and_process_logs {
                         ($bucket_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                     } : {
                         occurrences => 0,
-                        total_bytes => 0,
                         duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
@@ -16229,7 +16244,8 @@ sub read_and_process_logs {
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        $log_analysis{$bucket}{duration_sum} += $duration;
+                        my $be = $log_analysis{$bucket};
+                        $be->{duration_sum} += $duration;
 
                         $log_analysis{$bucket}{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
@@ -16297,15 +16313,14 @@ sub read_and_process_logs {
                         # timed line whatever the statistics demand (#616 D1, D18),
                         # after the running-mean update, which reads it as the count
                         # before this observation.
-                        $log_analysis{$bucket}{duration_count}++;
+                        $be->{duration_count}++;
                     }
 
                     # Nothing about the bytes metric is captured under -ob (#432).
                     #
                     # The family is gated on the pre-coercion observation rather than
                     # on the sum's truth test: a zero-byte response is a real
-                    # observation and belongs in the count and the extrema, though not
-                    # in the running total's `&& $bytes` guard, which is pre-existing.
+                    # observation and belongs in the total, the count and the extrema.
                     # Both scopes gate on the same condition, which is what makes the
                     # two CSV surfaces count the same lines.
                     #
@@ -16313,15 +16328,16 @@ sub read_and_process_logs {
                     # rather than once per line: a package-global read-compare-write
                     # on every line measured ~1.5% of total runtime, for a flag that
                     # only needs to know whether ANY line carried bytes.
-                    if( $bytes_observed_line && !$omit_bytes ) {
+                    if( $bytes_observed_line && $bucket_bytes_demand ) {
                         $bytes_observed = 1;
                         my $e = $log_analysis{$bucket};
-                        if( $bytes ) {
-                            $e->{total_bytes} += $bytes;
-                            $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
-                        }
-                        # The count is kept whatever the demand (#616 D1); the
-                        # demand gate governs only the extrema.
+                        # A zero-byte response is a measured zero: it defines the
+                        # total as it counts (#616 D30).
+                        $e->{total_bytes} += $bytes;
+                        $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
+                        # The count is kept on every line the store's demand
+                        # admits (#616 D30); the aggregate demand governs the
+                        # extrema.
                         if( $bytes_aggregate_demand ) {
                             if( $e->{bytes_occurrences}++ ) {
                                 $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -17442,8 +17458,6 @@ sub calculate_all_statistics {
         my $aggregated_data = {
             occurrences         => 0,
             total_duration      => 0,
-            total_bytes         => 0,
-            'total_bytes-HL'    => 0,
             count_sum           => 0,
             'count_sum-HL'      => 0,
             count_occurrences   => 0,
@@ -17459,7 +17473,6 @@ sub calculate_all_statistics {
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
         $aggregated_data->{total_duration} += $log_analysis{$bucket}{duration_sum};
-        $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
         # partition + sidecars carry the data). Skip the aggregation; the bin consumer
@@ -21201,7 +21214,7 @@ sub print_summary_table {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
     }
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $reported_max_memory_usage ) );
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
@@ -21220,7 +21233,7 @@ sub print_summary_table {
             # structures are not misreported as unattributed memory.
             my $total_hwm = 0;
             $total_hwm += $_ for values %memory_high_water_marks;
-            my $unattributed = $max_memory_usage - $total_hwm;
+            my $unattributed = $reported_max_memory_usage - $total_hwm;
             $unattributed = 0 if $unattributed < 0;
 
             # Sort by size descending, skip empty structures
@@ -21232,7 +21245,7 @@ sub print_summary_table {
                 my ($label, $size) = @_;
                 my $category_width = $category_column_width + 2;
                 my $occurrences_width = $occurrences_column_width - 2;
-                my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;
+                my $pct = $reported_max_memory_usage > 0 ? ($size / $reported_max_memory_usage) * 100 : 0;
                 # Whole percent in a fixed five-character parenthesised field;
                 # a structure holding less than one percent of the peak says so
                 # rather than rounding down to a flat 0%.
@@ -22179,6 +22192,7 @@ sub pipeline_render {
     # summary render's own residual is covered by the post-output measurement
     # below and visible under -mem debug.
     measure_memory_structures();
+    $reported_max_memory_usage = $max_memory_usage;
 
     # The summary reports on the run itself -- the span analysed, the files read,
     # the totals, timing and memory -- so it closes the output, leaving the
@@ -22191,8 +22205,8 @@ sub pipeline_render {
     measure_memory_structures();
     memory_debug_decomposition("end");
 
-    # The aggregate export reads the run's peak memory and total time, so it
-    # follows the summary and the post-output measurement (Issue #503).
+    # The aggregate export reads the run's peak memory as the summary reported
+    # it, and its total time, so it follows the summary (Issue #503).
     write_aggregate_export();
 
     write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)

@@ -7,11 +7,13 @@
 # the drift the rounds share). The base's own spread is the noise band.
 #
 #   usage: summarise.pl <runs tsv> [<runs tsv>...]
+#   env: CANDIDATES (display order), REF (the reference candidate, default base)
 use strict;
 use warnings;
 use List::Util qw(min max);
 
 my @order = split ' ', ($ENV{CANDIDATES} // 'base b c hoist b-hoist c-hoist');
+my $ref = $ENV{REF} // 'base';
 my (%t, %m);
 for my $tsv (@ARGV) {
     open my $fh, '<', $tsv or die "$tsv: $!";
@@ -30,9 +32,9 @@ sub fmt { defined $_[0] ? sprintf('%.3f', $_[0]) : '-' }
 sub pct { my ($v, $b) = @_; return '-' unless defined $v && $b; sprintf('%+.2f%%', 100 * ($v - $b) / $b) }
 
 for my $sel (sort keys %t) {
-    my $base = $t{$sel}{base} or next;
+    my $base = $t{$sel}{$ref} or next;
     my $bmed = median(values %$base);
-    printf "## %s (base median %s s, range %s to %s, n=%d)\n\n", $sel, fmt($bmed), fmt(min values %$base), fmt(max values %$base), scalar keys %$base;
+    printf "## %s ($ref median %s s, range %s to %s, n=%d)\n\n", $sel, fmt($bmed), fmt(min values %$base), fmt(max values %$base), scalar keys %$base;
     print "| candidate | n | median s | range s | vs base median | per-round delta median (range) s | per-round delta median % | rss median MB |\n|---|---|---|---|---|---|---|---|\n";
     for my $c (grep { exists $t{$sel}{$_} } @order) {
         my $r = $t{$sel}{$c};
