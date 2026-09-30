@@ -112,6 +112,13 @@ are unchanged.
   accepted until 0.19.x: a STATS CSV fed back to ltl shows nothing matched, and
   a CSV whose column 0 holds a numeric id is placed on wrong dates.
 
+- **D3 — The same rule holds for an epoch-timestamp CSV (architect, locked
+  2026-09-30).** In a CSV whose first data row carried epoch seconds, a row
+  whose timestamp is not a number is read and not matched, silently, like any
+  other unplaceable row. Before this, it reached the epoch conversion with a
+  Perl runtime warning and was placed at epoch 0 (1 January 1970). Asserted by
+  the `unplaced-rows` scenario of `tests/validate-csv-input.sh`.
+
 ## Acceptance criteria
 
 - [ ] A CSV file with no parsable timestamp in any row (the index is the
@@ -149,7 +156,7 @@ are unchanged.
   row counts as a match; a refused row goes to `note_unmatched_line()` like
   the CSV header. The later check in the timestamp parse arm, its per-row
   warning and the per-file total are removed.
-- The epoch arm is new: an epoch CSV row whose timestamp is not a number
+- The epoch arm is new (D3): an epoch CSV row whose timestamp is not a number
   previously reached `int()` with a Perl runtime warning
   (`Argument "abc" isn't numeric in int`) and was placed at epoch 0.
 - `detect_and_parse_csv_header()` no longer prints; `udm_note_sources()`,
