@@ -106,6 +106,18 @@ the routine (D10).
 | F3.7 | the last-seen memo present on scanned arms and absent on both CSV arms |
 | F8.3 | the whole CSV data-line sequence (timestamp trim, epoch test, message from `-ucm`, the `DATA` category, record reset, classification) written twice |
 
+**Added from #640 (CSV input takes the wrong timestamp column), deferred here
+by the architect on 2026-09-30.** Which column carries a CSV file's timestamp
+is in scope. Today `detect_and_parse_csv_header()` takes a column named
+`timestamp` (case-insensitive) and otherwise column 0, with no check of what
+column 0 holds. Measured on release/0.18.5: a header whose time column is named
+`created_at` has its numeric id column read as epoch seconds, placing every row
+on a wrong date with no indication; `ltl-index.csv`, whose own time column is
+`entry_date` (column 2), has `entry_type` read as its time. The template's
+declaration of which column carries the timestamp (D1) is where the rule is
+settled. Record: `features/640-csv-input-timestamp-column.md` on
+release/0.18.5.
+
 **Done when** (issue body): a CSV file is read through a generated block and
 gives the same timeline, statistics and index as before; there is one parse text
 for a timestamp in the tool; the benchmark shows no regression on scanned formats
