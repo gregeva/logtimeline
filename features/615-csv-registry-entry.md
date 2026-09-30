@@ -115,7 +115,7 @@ column 0 holds. Measured on release/0.18.5: a header whose time column is named
 on a wrong date with no indication; `ltl-index.csv`, whose own time column is
 `entry_date` (column 2), has `entry_type` read as its time. The template's
 declaration of which column carries the timestamp (D1) is where the rule is
-settled. Record: `features/640-csv-input-timestamp-column.md` on
+settled. Record: `features/640-csv-unplaced-rows-silent.md` on
 release/0.18.5.
 
 **Done when** (issue body): a CSV file is read through a generated block and
