@@ -11,8 +11,8 @@ landing order holds and no blocking edge remains. On that commit every site of
 section 5.1 was re-resolved inside its sub (section 3, *Re-audit at the start of
 implementation*), the version is stamped `0.19.0-616`, and the `before`
 benchmarks of section 8 are captured (`616-before`, `616-before-bin`). The D12
-prototype ran before drop 1 (section 8, *Prototype findings*); the arm that
-lands awaits the architect's decision on its table.
+prototype ran before drop 1 (section 8, *Prototype findings*), and the arm that
+lands is locked (D28). Drop 1 is in progress.
 
 This issue is one of the refactoring issues the #342 review (the audit of
 redundant logic surfaces across `ltl`) dispatched under #622 (the parent
@@ -335,7 +335,8 @@ decisions of 2026-09-28, in reply to this specification's draft; D20 to D25 are
 his decisions of the same day on the follow-up questions the review of this
 specification left open, and D26 his decision of the same day given on #619's
 turn (one per-run key cut). D27 is his decision of 2026-09-29 on how the CSV
-harness checks impact. Nothing else in this document is numbered Dxx.
+harness checks impact. D28 is his decision of 2026-09-30 on the D12 prototype's
+table. Nothing else in this document is numbered Dxx.
 
 - **D1:** "**Every accumulator keeps its observation count unconditionally**,
   one integer per store entry, for the time-bucket store and the message store
@@ -532,6 +533,21 @@ harness checks impact. Nothing else in this document is numbered Dxx.
   away by `-od` or `-d duration` (D21). The other conditional duration columns
   keep the all-or-nothing check among themselves.
   *Locked by the architect 2026-09-29.*
+- **D28: The running-mean update lands as arm (c).** One sub, called from the
+  per-message and per-bucket loop sites and from the consolidation merge, with
+  the source state (count, mean, the three moment sums) and the store's shape
+  flag as parameters; it adopts the source into an empty target, evaluates
+  today's one-observation arithmetic when the source holds one observation,
+  and the parallel combine otherwise. Chosen on the prototype's table (section
+  8, *Prototype findings*): byte-identical to today's output on every run of
+  the proof, plain and consolidated, where the combine-only arm (b) moves
+  shape-statistic cells in the last bits and costs about 10.8 percent under
+  shape demand; its cost, about 2.8 percent of a bin-model run on the access
+  log (about 215 ns per call, the call itself), is accepted, and runs on the
+  default raw model never call it. The capture-mode hoist is not part of this
+  issue: it recovered nothing measurable on top of (c) and is left to #620
+  (hoisting the read loop's per-line option handling). *Locked by the
+  architect 2026-09-30.*
 
 ---
 
@@ -911,8 +927,11 @@ count and the means keep two decimals whatever `-cp` is.
   per-column declaration carries that presence rule for impact, under D11
   above.
 - **#620 (hoisting the loop's per-line option handling).** Blocked by this issue.
-  If arm (d) lands, converting the two capture-mode compares to booleans, #620's
-  record is trued up in the same change so the step is not done twice.
+  Arm (d) did not land (D28): converting the two capture-mode compares to
+  booleans stays #620's step. The prototype measured it on the bin model: alone
+  it saved about 0.1 to 0.2 s on a day of access log (−1.7 percent standard,
+  −1.0 percent with shape demand), and on top of the one update sub nothing
+  measurable (section 8, *Prototype findings*).
 - **#514 (count metric capture explicit and off by default), #426 (the
   per-message statistics store's representation), #469 (consolidated message
   histograms on a shared bucket grid)** read the helper, the counts, the statistics sub and the
@@ -1280,7 +1299,7 @@ is added).
 | 4 | impact derived once after the loop, occurrences part without a mean (D5, D11), the duration term floored (D20), undefined when the duration is thrown away (D21); the CSV-output harness's exemption of `impact` from the per-row family check and its every-row presence rule, in the validator and the rules row (D27); the `impact` topic of `--explain` (D25) | the impact criteria and the new L2 invariant; the presence rule executed and seen to assert on every MESSAGES scenario of `validate-csv-output.sh`; the 129 moved and 2 empty impact cells re-blessed; #273's `-od` scenario passing unchanged; the explain topic rendered; loop A/B |
 | 5 | the bytes mean stored precise (D6) | the one-value criterion; the 97 cells re-blessed; rules row retyped |
 | 6 | the index: means (D8, D15, D16), bytes population (D17), the heatmap's bytes pre-seed (D24) | the index criteria, the `-cp` scenario, the pre-seed scenario |
-| 7 | the one Welford formula (D10, D12), in the arm the prototype's table supports | the prototype's table recorded first; the bin-model pair; the drift run's moved-cell list |
+| 7 | the one Welford formula (D10, D12), in arm (c) (D28) | the prototype's table recorded first; the bin-model pair; the drift run's moved-cell list |
 
 **Merge gate:** the full harness suite on the final commit (CSV output first,
 then statistics, sharing the cache, then the rest), the `616-before`/`616-after`
