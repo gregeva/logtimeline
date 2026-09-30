@@ -1810,3 +1810,28 @@ warning. By the architect's direction of the same day, drops from here run
 targeted checks only, and the per-drop loop A/B is left to the completion
 gate's before/after benchmark: this drop removes per-line work (a division, a
 power and a logarithm on every duration-bearing line) and adds none.
+
+**Drop 5 (2026-09-30): the per-message bytes mean stored precise (D6).** The
+group calculation stores `bytes_mean` through `mean_of(total_bytes,
+bytes_occurrences)` for the retained keys (the sort pre-pass has already done so
+for every key under `-so bytes_mean`); `print_message_summary` reads the stored
+value, where it rounded half up to an integer, and the MESSAGES CSV rounds it
+through `format_csv_value` like the STATS CSV. The MESSAGES rules row for
+`bytes_mean` takes the STATS row's type, `float` with 5 decimals. The drift
+engine's `bytes_deriv` check drops its one-byte integer tolerance for 1e-9
+relative, and names the sub that stores the mean.
+
+*Assertions:* `validate-csv-output.sh` scenarios `gated-means-bytes-mean-default`
+and `gated-means-bytes-mean-full` (the access fixture's path with sizes 512 and
+513 alone in its minute, at `-bs 1`): the MESSAGES row and the STATS row both
+write `512` at the default precision and both `512.5` under `-cp full`. On the
+drop 4 tree the full-precision scenario failed: MESSAGES wrote `513`.
+
+*Baselines re-blessed*, 19 scenarios re-captured, each change attributed against
+the committed version: 99 MESSAGES `bytes_mean` cells moved (the 97 of section 7
+and the `/gm/sizes` row of each new access-fixture scenario) and no other cell
+or row order; all 414 MESSAGES `bytes_mean` cells now equal `bytes /
+bytes_occurrences`. The drift engine's Layer 2 checks pass on all 50 baseline
+files. Targeted checks only (the architect's direction): the four CSV-output
+scenarios above and their neighbours (`access-bytes-duration`,
+`gated-means-access`) pass.

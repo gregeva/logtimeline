@@ -7,7 +7,7 @@ failures	5	int	yes	0	meta
 conflicts	6	int	yes	0	meta
 bytes_occurrences	7	int	conditional:bytes	0	meta
 bytes_min	8	int	conditional:bytes	0	bytes
-bytes_mean	9	int	conditional:bytes	0	bytes
+bytes_mean	9	float	conditional:bytes	5	bytes
 bytes_max	10	int	conditional:bytes	0	bytes
 bytes	11	int	conditional:bytes	0	bytes
 bytes_nice	12	nice	conditional:bytes	n/a	bytes

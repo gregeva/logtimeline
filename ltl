@@ -17995,6 +17995,11 @@ sub calculate_all_statistics {
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
 
                 $log_messages{$category}{$log_key}{count_mean} = mean_of( $log_messages{$category}{$log_key}{count_sum}, $log_messages{$category}{$log_key}{count_occurrences} );
+                # The bytes mean is stored precise and rounded only by the CSV
+                # formatter (#616 D6); under -so bytes_mean the sort pre-pass has
+                # already derived it for every key.
+                $log_messages{$category}{$log_key}{bytes_mean} = mean_of( $log_messages{$category}{$log_key}{total_bytes}, $log_messages{$category}{$log_key}{bytes_occurrences} )
+                    unless $sort_key eq 'bytes_mean';
                 # Impact for the retained rows, from the mean they report; under
                 # -so impact the sort pre-pass has already derived it for every key.
                 $log_messages{$category}{$log_key}{impact} = impact_of( $log_messages{$category}{$log_key} )
@@ -21550,13 +21555,10 @@ sub print_message_summary {
                     my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
                     my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
                     my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
-                    # Divide by the lines that carried a bytes value, not by every
-                    # matched line: total_bytes is 0-initialised, so occurrences as
-                    # the divisor understates the mean wherever a message key mixes
-                    # lines with and without a bytes field (#432).
-                    my $bytes_mean = $bytes_occurrences
-                        ? int( $total_bytes_num / $bytes_occurrences + 0.5 )
-                        : undef;
+                    # Stored precise by the group calculation, divided by the lines
+                    # that carried a bytes value (#432); rounded here only by
+                    # format_csv_value, as the STATS CSV rounds its own (#616 D6).
+                    my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $mean = $log_messages{$grouping}{$key}{mean};
                     my $max = $log_messages{$grouping}{$key}{max};

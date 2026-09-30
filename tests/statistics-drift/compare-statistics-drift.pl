@@ -346,18 +346,10 @@ my %L1_FIELDS_BY_FAMILY = (
 # than the human-facing default rounding. For those columns the
 # harness validates against full precision; tolerance only needs to
 # absorb float-arithmetic quantization (last few ulps).
-#
-# BYTES_INTEGER_EPS is a separate, looser tolerance for the bytes_deriv
-# invariant. The rules TSV declares mean_bytes and bytes as `int`
-# (max_decimals=0), so ltl integer-rounds mean_bytes at emission. The
-# mathematical relation `mean_bytes == bytes / occurrences` can be
-# breached by up to 0.5 units of rounding error per side, which is
-# inherent to the column's contracted type — not an algorithmic bug.
 #-------------------------------------------------------------------------
 
 use constant DERIVATION_EPS     => 1e-9;
 use constant ORDERING_EPS       => 1e-9;
-use constant BYTES_INTEGER_EPS  => 1.0;
 
 #-------------------------------------------------------------------------
 # Helpers: numeric parsing and tier classification.
@@ -681,7 +673,7 @@ my %L2_INVARIANTS = (
     },
     bytes_deriv => {
         asserts     => 'bytes_mean equals bytes divided by bytes_occurrences — the lines that carried a bytes value, not every matched line',
-        produced_by => 'print_message_summary() in ltl — the bytes_mean display derivation',
+        produced_by => 'mean_of() in calculate_all_statistics() in ltl — the per-message bytes mean, stored precise',
         contract    => 'features/432-metric-aggregate-naming-parity.md § F1 — the shipped mean divided by the wrong denominator',
     },
     bytes_occurrences_bound => {
@@ -884,8 +876,8 @@ sub check_layer2_row {
     # matched line understates the mean wherever a key mixes the two.
     if (defined $mb && defined $bt && defined $bocc && $bocc > 0) {
         my $expected = $bt / $bocc;
-        # Bytes are integer; tolerate <= 1.0 absolute diff (truncation/rounding).
-        if (abs($expected - $mb) > BYTES_INTEGER_EPS) {
+        # Stored precise and written at full precision (#616 D6).
+        if (abs($expected - $mb) > DERIVATION_EPS * (abs($expected) > 1 ? abs($expected) : 1)) {
             $stats->{T4}++;
             my $inv = $L2_INVARIANTS{bytes_deriv};
             emit_l2_failure(
@@ -895,7 +887,7 @@ sub check_layer2_row {
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'bytes_mean == bytes / bytes_occurrences (tolerance 1 byte; bytes_mean is integer-typed per the rules TSV)',
+                rule => 'bytes_mean == bytes / bytes_occurrences (tolerance 1e-9 relative, float precision)',
             );
         }
     }
