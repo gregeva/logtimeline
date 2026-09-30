@@ -11700,6 +11700,73 @@ sub collapse_bin_counter_entry {
     return $projections;
 }
 
+# The one running-mean update (#616 D10, D12, D28): folds a source state of
+# $n_b observations (mean $mean_b, central-moment sums $M2_b, $M3_b, $M4_b)
+# into $t, whose count before the fold is $n_a. A target with no observation
+# adopts the source; a source of one observation takes the one-observation
+# form of the Welford-Pébay update (Pébay 2008, SAND2008-6212), which the
+# read loop feeds; any larger source takes the Chan-Pébay parallel combine,
+# which the consolidation merge feeds. The moment sums are kept only when
+# $shape (shape-group demand, #305). The count is not written here: it is
+# kept beside the total by the caller (#616 D29). Order matters in both
+# forms: M4 reads the old M2 and M3, M3 the old M2, M2 is updated last.
+sub welford_update {
+    my ($t, $n_a, $n_b, $mean_b, $M2_b, $M3_b, $M4_b, $shape) = @_;
+    if ($n_a == 0) {
+        $t->{_running_mean} = $mean_b;
+        if ($shape) {
+            $t->{m2_sum} = $M2_b;
+            $t->{m3_sum} = $M3_b;
+            $t->{m4_sum} = $M4_b;
+        }
+        return;
+    }
+    if ($n_b == 1) {
+        my $n_old    = $n_a;
+        my $n        = $n_old + 1;
+        my $mean     = $t->{_running_mean};
+        my $delta    = $mean_b - $mean;
+        my $delta_n  = $delta / $n;
+        $t->{_running_mean} = $mean + $delta_n;
+        if ($shape) {
+            my $delta_n2 = $delta_n * $delta_n;
+            my $term1    = $delta * $delta_n * $n_old;
+            $t->{m4_sum} +=
+                  $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                + 6 * $delta_n2 * $t->{m2_sum}
+                - 4 * $delta_n  * $t->{m3_sum};
+            $t->{m3_sum} +=
+                  $term1 * $delta_n * ($n - 2)
+                - 3 * $delta_n * $t->{m2_sum};
+            $t->{m2_sum} += $term1;
+        }
+        return;
+    }
+    my $n_ab    = $n_a + $n_b;
+    my $mean_a  = $t->{_running_mean};
+    my $delta   = $mean_b - $mean_a;
+    if ($shape) {
+        my $M2_a    = $t->{m2_sum} // 0;
+        my $M3_a    = $t->{m3_sum} // 0;
+        my $M4_a    = $t->{m4_sum} // 0;
+        my $d2      = $delta * $delta;
+        my $d3      = $d2 * $delta;
+        my $d4      = $d2 * $d2;
+        my $M4_ab = $M4_a + $M4_b
+                  + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
+                  + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
+                  + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
+        my $M3_ab = $M3_a + $M3_b
+                  + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
+                  + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
+        my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+        $t->{m2_sum} = $M2_ab;
+        $t->{m3_sum} = $M3_ab;
+        $t->{m4_sum} = $M4_ab;
+    }
+    $t->{_running_mean} = $mean_a + $delta * $n_b / $n_ab;
+}
+
 # Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
 # entry) of $source into $target. $source carries its bin-counter entry on
 # $source->{bin_entry}; callers at the %log_messages-source merge sites
@@ -11716,49 +11783,9 @@ sub merge_bin_state {
     my $n_b = $source->{duration_count} // 0;
     return if $n_b == 0;
 
-    if ($n_a == 0) {
-        # Target empty — adopt source sidecars wholesale. The moment sidecars
-        # exist on entries only under shape-group demand (#305): the capture
-        # sites never update them otherwise, so the merge skips them
-        # symmetrically rather than writing zero-valued fields.
-        $target->{_running_mean}  = $source->{_running_mean};
-        if ($message_stats_demand_shape) {
-            $target->{m2_sum}         = $source->{m2_sum} // 0;
-            $target->{m3_sum}         = $source->{m3_sum} // 0;
-            $target->{m4_sum}         = $source->{m4_sum} // 0;
-        }
-    } else {
-        my $n_ab    = $n_a + $n_b;
-        my $mean_a  = $target->{_running_mean};
-        my $mean_b  = $source->{_running_mean};
-        my $delta   = $mean_b - $mean_a;
-        if ($message_stats_demand_shape) {
-            my $M2_a    = $target->{m2_sum} // 0;
-            my $M2_b    = $source->{m2_sum} // 0;
-            my $M3_a    = $target->{m3_sum} // 0;
-            my $M3_b    = $source->{m3_sum} // 0;
-            my $M4_a    = $target->{m4_sum} // 0;
-            my $M4_b    = $source->{m4_sum} // 0;
-            my $d2      = $delta * $delta;
-            my $d3      = $d2 * $delta;
-            my $d4      = $d2 * $d2;
-            # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
-            # state before any field is overwritten.
-            my $M4_ab = $M4_a + $M4_b
-                      + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
-                      + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
-                      + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
-            my $M3_ab = $M3_a + $M3_b
-                      + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
-                      + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
-            my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
-            $target->{m2_sum}         = $M2_ab;
-            $target->{m3_sum}         = $M3_ab;
-            $target->{m4_sum}         = $M4_ab;
-        }
-        my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
-        $target->{_running_mean}  = $mean_ab;
-    }
+    welford_update($target, $n_a, $n_b, $source->{_running_mean},
+                   $source->{m2_sum} // 0, $source->{m3_sum} // 0, $source->{m4_sum} // 0,
+                   $message_stats_demand_shape);
 
     # Bin-counter merge (only meaningful when source observed at least one
     # positive duration — the bin producer is gated on $duration > 0).
@@ -16166,28 +16193,7 @@ sub read_and_process_logs {
                                     # this block (#616 D29). The M2/M3/M4 moment accumulation runs
                                     # only under shape-group demand (#305) — the moments feed
                                     # nothing else.
-                                    my $n_old = $entry->{duration_count};
-                                    my $n     = $n_old + 1;
-                                    if ($n_old == 0) {
-                                        $entry->{_running_mean} = $duration;
-                                    } else {
-                                        my $mean     = $entry->{_running_mean};
-                                        my $delta    = $duration - $mean;
-                                        my $delta_n  = $delta / $n;
-                                        $entry->{_running_mean} = $mean + $delta_n;
-                                        if ($message_stats_demand_shape) {
-                                            my $delta_n2 = $delta_n * $delta_n;
-                                            my $term1    = $delta * $delta_n * $n_old;
-                                            $entry->{m4_sum} +=
-                                                  $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                                + 6 * $delta_n2 * $entry->{m2_sum}
-                                                - 4 * $delta_n  * $entry->{m3_sum};
-                                            $entry->{m3_sum} +=
-                                                  $term1 * $delta_n * ($n - 2)
-                                                - 3 * $delta_n * $entry->{m2_sum};
-                                            $entry->{m2_sum} += $term1;
-                                        }
-                                    }
+                                    welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
                                 }
                             }  # end: if ($message_duration_stats_demand)
 
@@ -16304,28 +16310,7 @@ sub read_and_process_logs {
                                 # observation; the count is incremented beside the total, after
                                 # this block (#616 D29). The M2/M3/M4 accumulation runs only
                                 # under shape-group demand (#305).
-                                my $n_old = $entry->{duration_count};
-                                my $n     = $n_old + 1;
-                                if ($n_old == 0) {
-                                    $entry->{_running_mean} = $duration;
-                                } else {
-                                    my $mean     = $entry->{_running_mean};
-                                    my $delta    = $duration - $mean;
-                                    my $delta_n  = $delta / $n;
-                                    $entry->{_running_mean} = $mean + $delta_n;
-                                    if ($bucket_stats_demand_shape) {
-                                        my $delta_n2 = $delta_n * $delta_n;
-                                        my $term1    = $delta * $delta_n * $n_old;
-                                        $entry->{m4_sum} +=
-                                              $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                            + 6 * $delta_n2 * $entry->{m2_sum}
-                                            - 4 * $delta_n  * $entry->{m3_sum};
-                                        $entry->{m3_sum} +=
-                                              $term1 * $delta_n * ($n - 2)
-                                            - 3 * $delta_n * $entry->{m2_sum};
-                                        $entry->{m2_sum} += $term1;
-                                    }
-                                }
+                                welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
                             }
                         }
 

@@ -1872,3 +1872,21 @@ The 59 existing assertions of the harness pass on this tree with the prebuilt
 index fixture unchanged. `docs/usage.md` carries no description of the index
 file's contents; `features/index-file.md` and `features/179-index-read-back.md`
 are brought up to date at delivery (section 10).
+
+**Drop 7 (2026-09-30): one running-mean update, arm (c) (D10, D12, D28, D29).**
+`welford_update($t, $n_a, $n_b, $mean_b, $M2_b, $M3_b, $M4_b, $shape)` adopts
+the source into a target with no observation, applies the one-observation
+Welford-Pébay update when the source holds one observation, and the Chan-Pébay
+parallel combine otherwise; it keeps the moment sums only under shape demand
+and never writes a count (D29). The per-message and per-bucket loop sites call
+it with a one-observation source and their store's shape flag, before the count
+is incremented; `merge_bin_state` calls it with the source's state and the
+target's count taken before the merge, in place of its own adoption and
+combine. No inline copy of the update remains.
+
+*Proof:* the tree before and after this drop, run by the prototype's
+`prove.sh` on the 100k-line slices of the access log and the application script
+log at `-mdm bin -bdm bin -o -cp full` (the shape statistics demanded), plain
+and consolidated (`-g -m uuid`): every MESSAGES and STATS cell of all eight
+comparisons byte-identical, as the prototype measured for arm (c); no runtime
+warning. The bin-model benchmark pair of section 8 runs at the completion gate.
