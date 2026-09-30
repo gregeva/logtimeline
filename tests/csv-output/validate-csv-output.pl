@@ -28,6 +28,14 @@
 # `-so`); `@zero_duration_nice<TAB><value>` asserts every row whose `duration`
 # is zero carries that `duration_nice` (a zero total in the source's unit).
 #
+# `@cell<TAB><kind><TAB><key_column>=<key_value><TAB><column><TAB><value><TAB><contract>`
+# reads one cell of either file: the one row of <kind> (`messages` or `stats`)
+# whose <key_column> equals <key_value> exactly must carry <value> in <column>,
+# `(empty)` meaning an empty cell. The row and the column must both exist; the
+# last field is the contract the reader judges a failure by. The same file is
+# handed to both kinds: a `stats` cell directive is asserted against the STATS
+# file only, and every other assertion against the MESSAGES file only.
+#
 # A family prefixed '-' in --expected-families (`-duration`) declares the metric
 # switched off for the scenario (`-od` switches off durations). Every column
 # the rules make conditional on it (`required = conditional:<family>`) must
@@ -103,7 +111,7 @@ my @rules = load_rules($opt{rules});
 # A switched-off family no rule is conditional on would assert nothing.
 my @off_rules;
 for my $family (sort keys %off_family) {
-    my @conditional = grep { $_->{required} eq "conditional:$family" } @rules;
+    my @conditional = grep { $_->{required} eq "conditional:$family" || $_->{required} eq "every-row:$family" } @rules;
     die "switched-off family '$family': no rules column is conditional:$family in $opt{rules}\n"
         unless @conditional;
     push @off_rules, @conditional;
@@ -111,11 +119,14 @@ for my $family (sort keys %off_family) {
 
 my @expected_categories;
 if (defined $opt{expected_categories}) {
-    die "expected-categories is only valid for --file-kind messages\n"
-        unless $opt{file_kind} eq 'messages';
     @expected_categories = load_expected_categories($opt{expected_categories});
     die "expected-categories file has no assertions: $opt{expected_categories}\n"
         unless @expected_categories;
+    # A stats cell directive reads the STATS file; everything else the MESSAGES file.
+    @expected_categories = grep {
+        my $for = ($_->{directive} // '') eq 'cell' ? $_->{kind} : 'messages';
+        $for eq $opt{file_kind};
+    } @expected_categories;
 }
 
 my $csv = Text::CSV->new({ binary => 1 });
@@ -150,12 +161,11 @@ while (my $row = $csv->getline($fh)) {
     $row_num++;
 
     if (@expected_categories
-        && exists $col_index{category} && exists $col_index{message}
         && scalar(@$row) == scalar(@$header_row)) {
         push @message_rows, {
             row      => $row_num,
-            category => $row->[$col_index{category}] // '',
-            message  => $row->[$col_index{message}] // '',
+            category => exists $col_index{category} ? $row->[$col_index{category}] // '' : '',
+            message  => exists $col_index{message}  ? $row->[$col_index{message}]  // '' : '',
             cells    => { map { $_ => $row->[$col_index{$_}] // '' } keys %col_index },
         };
     }
@@ -186,6 +196,22 @@ while (my $row = $csv->getline($fh)) {
 
         # population check
         if ($val eq '') {
+            # every-row:<family> (impact, #616 D27): populated on every row
+            # while the family is active, whatever the row's other cells in
+            # the family hold; exempt from the per-row family check below.
+            if ($rule->{required} =~ /^every-row:(.+)$/ && $active_family{$1}) {
+                emit_fail({
+                    scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
+                    column => $col_name,
+                    asserts => "column '$col_name' must be populated on every row while family '$1' is active",
+                    produced_by => producer($opt{file_kind}),
+                    contract => 'features/616-gated-mean-derivation.md D27 (impact is populated on every row whenever durations are read, empty on every row when they are thrown away)',
+                    expected => 'non-empty',
+                    actual => 'empty',
+                    rule => "required=$rule->{required}",
+                });
+                $fails++;
+            }
             if ($rule->{required} eq 'yes') {
                 emit_fail({
                     scenario => $opt{scenario}, file => $opt{file_kind}, row => $row_num,
@@ -382,7 +408,7 @@ sub check_column_structure {
             # For dynamic-position with conditional:<other-family>, the column
             # is optional unless the *other* family is active.
             my $cond_family = $family;
-            if ($r->{required} =~ /^conditional:(.+)$/) {
+            if ($r->{required} =~ /^(?:conditional|every-row):(.+)$/) {
                 $cond_family = $1;
             }
             next unless $active_family{$cond_family};
@@ -632,6 +658,11 @@ sub load_expected_categories {
             push @exps, { directive => 'zero_duration_nice', value => $1 };
             next;
         }
+        if ($line =~ /^\@cell\t(messages|stats)\t([^\t=]+)=([^\t]*)\t([^\t]+)\t([^\t]*)\t(.+)$/) {
+            push @exps, { directive => 'cell', kind => $1, key_column => $2, key_value => $3,
+                          column => $4, value => ($5 eq '(empty)' ? '' : $5), contract => $6 };
+            next;
+        }
         die "unknown expected-categories directive: $line\n" if $line =~ /^\@/;
         my ($match, $expected) = split /\t/, $line, -1;
         die "bad expected-categories row (need message_match<TAB>expected): $line\n"
@@ -649,6 +680,7 @@ sub check_expected_category {
     my $directive = $exp->{directive} // '';
     return check_non_increasing($exp->{column}, $rows)      if $directive eq 'non_increasing';
     return check_zero_duration_nice($exp->{value}, $rows)   if $directive eq 'zero_duration_nice';
+    return check_cell($exp, $rows)                           if $directive eq 'cell';
 
     if (($exp->{directive} // '') eq 'no_highlight_rows') {
         my @hl = grep { $_->{category} eq 'highlight' } @$rows;
@@ -778,6 +810,37 @@ sub check_zero_duration_nice {
         return 1;
     }
     return 0;
+}
+
+# One cell of the row whose key column holds the key value. A key that matches
+# no row, or more than one, and a column the header lacks, are failures: the
+# assertion reads nothing otherwise.
+sub check_cell {
+    my ($exp, $rows) = @_;
+    my $want = $exp->{value} eq '' ? 'an empty cell' : "'$exp->{value}'";
+    my %fail = (
+        scenario => $opt{scenario}, file => $opt{file_kind},
+        column => $exp->{column},
+        asserts => "the $exp->{kind} row whose $exp->{key_column} is '$exp->{key_value}' carries $want in $exp->{column}",
+        produced_by => producer($opt{file_kind}),
+        contract => $exp->{contract},
+        rule => "\@cell $exp->{kind} $exp->{key_column}=$exp->{key_value} $exp->{column}",
+    );
+    my @hit = grep { ($_->{cells}{ $exp->{key_column} } // "\0") eq $exp->{key_value} } @$rows;
+    if (@hit != 1) {
+        emit_fail({ %fail, row => '-', expected => "exactly one row with $exp->{key_column} = '$exp->{key_value}'",
+                    actual => scalar(@hit) . ' rows' });
+        return 1;
+    }
+    if (!exists $hit[0]{cells}{ $exp->{column} }) {
+        emit_fail({ %fail, row => $hit[0]{row}, expected => "column '$exp->{column}' in the header",
+                    actual => 'absent' });
+        return 1;
+    }
+    my $got = $hit[0]{cells}{ $exp->{column} };
+    return 0 if $got eq $exp->{value};
+    emit_fail({ %fail, row => $hit[0]{row}, expected => qquote($exp->{value}), actual => qquote($got) });
+    return 1;
 }
 
 sub emit_fail {

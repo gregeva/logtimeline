@@ -25,3 +25,12 @@ profile-weekends	@PROFILE_LOG@	-bs 1440 -oe -n 25 -pr weekends	duration,percenti
 # -bs 1440 -oe -n 12: the assertions read the MESSAGES rows and, under -od, which STATS columns exist; twelve keys, one request each, four with a zero duration, so every key is a row
 messages-sort-duration	tests/fixtures/tomcat-access-single-sample-keys.txt	-bs 1440 -oe -n 12 -so duration	bytes,level	expected/messages-sort-duration.tsv
 messages-omit-durations	tests/fixtures/tomcat-access-single-sample-keys.txt	-bs 1440 -oe -n 12 -od	-duration,bytes,level
+# -bs 1 -oe -n 1: the assertions read one-minute STATS cells; one-minute buckets separate the lines carrying one metric from those carrying the other, and no MESSAGES row is read
+gated-means-application	tests/fixtures/gated-means-application.txt	-bs 1 -oe -n 1	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-application.tsv
+gated-means-access	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 1	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-access.tsv
+# -bs 1440 -oe -n 20: the assertions read every MESSAGES row's impact; one day bucket, every key a row
+gated-means-impact	tests/fixtures/gated-means-application.txt	-bs 1440 -oe -n 20	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-impact.tsv
+gated-means-impact-discard	tests/fixtures/gated-means-application.txt	-bs 1440 -oe -n 20 -d duration	-duration,bytes,level
+# -bs 1 -oe -n 20: one path's two sizes sit alone in the first minute, so its MESSAGES row and that minute's STATS row hold one bytes mean
+gated-means-bytes-mean-default	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-default.tsv
+gated-means-bytes-mean-full	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20 -cp full	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-full.tsv

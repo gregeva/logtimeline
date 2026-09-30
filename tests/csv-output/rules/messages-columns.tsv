@@ -7,7 +7,7 @@ failures	5	int	yes	0	meta
 conflicts	6	int	yes	0	meta
 bytes_occurrences	7	int	conditional:bytes	0	meta
 bytes_min	8	int	conditional:bytes	0	bytes
-bytes_mean	9	int	conditional:bytes	0	bytes
+bytes_mean	9	float	conditional:bytes	5	bytes
 bytes_max	10	int	conditional:bytes	0	bytes
 bytes	11	int	conditional:bytes	0	bytes
 bytes_nice	12	nice	conditional:bytes	n/a	bytes
@@ -39,7 +39,7 @@ duration_kurtosis	37	float	conditional:duration	5	shape
 duration_bimodality_coef	38	float	conditional:duration	5	shape
 duration	39	float	conditional:duration	9	duration
 duration_nice	40	nice	conditional:duration	n/a	duration
-impact	41	float	conditional:duration	5	duration
+impact	41	float	every-row:duration	5	duration
 users_distinct	*	int	no	0	udm-counting
 actions_count	*	int	conditional:udm-counting	0	udm-counting
 repeat_ratio	*	float	no	5	udm-counting

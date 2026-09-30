@@ -82,7 +82,7 @@ When pre-seed activates, the following values populate in-memory state at start 
 |---|---|---|
 | Duration bound (min) | `duration_min` | `min` across files |
 | Duration bound (max) | `duration_max` | `max` across files |
-| Bytes bound (min/max) | `bytes_min` / `bytes_max` | `min` / `max` |
+| Bytes bound (min/max) | `file_bytes_min` / `file_bytes_max` (a zero-byte response counts, so the minimum can be `0`; the bytes heatmap pre-seeds from these keys, features/616-gated-mean-derivation.md D17, D24) | `min` / `max` |
 | Count bound (min/max) | `count_min` / `count_max` | `min` / `max` |
 | First timestamp | `first_timestamp` | earliest |
 | Last timestamp | `last_timestamp` | latest |

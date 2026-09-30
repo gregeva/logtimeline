@@ -275,18 +275,71 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 **Consumption sites.**
 - `adapt_to_command_line_options` :: `$bytes_aggregate_demand = ( !$omit_bytes && (`
 - `read_and_process_logs` :: `if( $bytes_aggregate_demand ) {`
+- `adapt_to_command_line_options` :: `$bucket_bytes_demand = ( !$omit_bytes && ( !$hide_bytes || $write_messages_to_csv ) ) ? 1 : 0;`
+- `adapt_to_command_line_options` :: `$message_bytes_demand = ( !$omit_bytes && $capture_messages && (`
+- `read_and_process_logs` :: `if( defined $bytes && $message_bytes_demand ) {`
+- `read_and_process_logs` :: `if( $bytes_observed_line && $bucket_bytes_demand ) {`
 - `read_and_process_logs` :: `$log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;`
 - `read_and_process_logs` :: `if( $message_duration_stats_demand ) {`
 
 **Owning record.** `features/516-bytes-aggregate-demand-gate.md` D1 and D2;
+`features/616-gated-mean-derivation.md` D30 (a metric is processed only when a
+line produces it and a surface demands it, at each store);
 `features/517-message-outcomes-demand-gate.md` D1;
 `features/305-shape-moment-extended-percentile-demand.md` § Store-level demand;
 the CLAUDE.md checkpoint on observation counts.
 
-**Status.** Needs refinement: the observation-count rule is violated at the
-projection of zeroed totals (item 4, F4.10) and the bytes count is demand-gated
-while its total is not (F4.11); the impact mean divides by the wrong count
-(F4.5). Refined by #616 (unconditional observation counts, one gated derivation) and #620 (demand flags for session, user and index capture).
+**Status.** Established for the observation-count rule by #616 (counts kept
+beside their totals under the same gate, a total projected only when counted,
+bytes processed only when produced and demanded at each store). Needs
+refinement for the per-line captures #620 gates (session, user and index
+capture).
+
+---
+
+## Observation counts and gated means
+
+**Definition.** Every accumulator carries its observation count beside its
+total, kept under the same demand gate as the total, and every mean is derived
+by one helper, `mean_of($sum, $count)`, from a sum and that count, with the
+gate inside: the mean is `undef` unless the count holds an observation. A total
+is projected only when its count is positive, and is never pre-set to zero
+before a line produces it. The helper runs after the read loop, never per line.
+
+**Intended uses.** Any new mean, at any store or surface: call `mean_of` with
+the accumulator's sum and count rather than dividing inline. Any new
+accumulator keeps its count beside its sum, incremented through the entry
+reference the sum's addition already holds (a lookup by the full message key
+costs about 100 ns per line on the development host, an increment through a
+reference about 20 ns).
+
+**Reasoning.** The audit of redundant logic found eleven inline derivations of
+a mean with three gate shapes, the per-bucket user-defined mean computed twice,
+and a total projected as zero beside an empty mean for a bucket in which no
+line carried the metric
+(`features/342-redundant-logic-surfaces-audit-report.md` § Item 4). One helper
+makes the count gate hold by construction, and the next change to a store's
+representation retargets one site per quantity.
+
+**Consumption sites.**
+- `calculate_all_statistics` :: `count_mean    => mean_of( $log_analysis{$bucket}{count_sum}, $log_analysis{$bucket}{count_occurrences} ),`
+- `calculate_all_statistics` :: `bytes_mean    => mean_of( $log_analysis{$bucket}{total_bytes}, $log_analysis{$bucket}{bytes_occurrences} ),`
+- `calculate_all_statistics` :: `$log_stats{$bucket}{"udm_${name}_mean"} = mean_of( $log_analysis{$bucket}{"udm_${name}_sum"}, $occ );`
+- `calculate_all_statistics` :: `$entry->{bytes_mean} = mean_of( $entry->{total_bytes}, $entry->{bytes_occurrences} );` (the sort pre-pass)
+- `calculate_all_statistics` :: `$entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );` (the sort pre-pass)
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_mean} = mean_of(`
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );`
+- `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{bytes_mean} = mean_of(` (the per-message bytes mean, stored precise)
+- `write_index_file` :: `my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';` and its five siblings
+- `derive_moment_statistics` :: `my $mean = mean_of($total, $n);` (the duration mean, both data models)
+- `impact_of` :: `my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;` (impact from the reported mean)
+
+**Owning record.** `features/616-gated-mean-derivation.md` D1 to D4; the
+CLAUDE.md checkpoint on observation counts. Cross-reference: *Precise storage,
+formatting at the output boundary*, to which the same issue adds the
+per-message bytes mean and the run index's means as sites.
+
+**Status.** Established.
 
 ---
 
@@ -451,9 +504,11 @@ the sort and the CSV's raw cell.
 **Owning record.** `features/273-store-precise-duration-totals.md`, with
 #268's completion record and `releases/v0.15.0.md`.
 
-**Status.** Established. #616 (one gated derivation of means and totals) adds
-the per-message bytes mean as a site; its entry (observation counts and gated
-means) cross-references this one.
+**Status.** Established. The per-message bytes mean (`print_message_summary` ::
+`my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};`) and the run
+index's six means (`write_index_file`, through `format_csv_value` at a fixed two
+decimals) are sites; the entry *Observation counts and gated means*
+cross-references this one.
 
 ---
 

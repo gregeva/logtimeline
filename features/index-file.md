@@ -126,7 +126,7 @@ selection,2026-02-03T10:15:00,access.log,-,-,-,51843,2026-02-01T00:00:01,2026-02
 selection,2026-02-03T10:16:00,access.log,-,-,-,5765,2026-02-01T08:00:03,2026-02-01T08:59:57,-,5765,45,2341,312.00,0,-,-,-,0,-,-,-,-,8470000,1.300,-dmin=40;-et=09%3A00%3A00;-st=08%3A00%3A00
 ```
 
-Empty or not-applicable fields use `-` as placeholder to ensure correct column alignment when viewed with tools like `column -s, -t`.
+The six means (`duration_mean`, `file_bytes_mean`, `count_mean`, on the file and the selection rows) are written through the CSV formatter at two decimals whatever `-cp` says, trailing zeros stripped (`100`, not `100.00`), and write the empty cell for no data, as every CSV surface does. The bounds and the not-applicable fields write `-`, so a row with an empty mean prints one column short under macOS `column -s, -t`. A line whose bytes field parsed is a bytes observation, a zero-byte response included, as in both statistics stores, so the bytes minimum can be `0` (features/616-gated-mean-derivation.md D8, D15, D16, D17).
 
 
 ## Cache Behavior

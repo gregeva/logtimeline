@@ -33,6 +33,16 @@ total-bytes accumulation and `$bytes_observed` behave exactly as today.
 consolidation merge copies family fields only when defined; the CSV writers run
 only under `-o`, where the flag is true. No consumer changes.
 
+**Amended by #616 D30.** Each store now has a bytes demand of its own,
+`$bucket_bytes_demand` (the timeline's bytes column unless hidden, or `-o`) and
+`$message_bytes_demand` (a retained message and the MESSAGES CSV or a bytes
+sort, `-so bytes` included), which governs the total and `bytes_occurrences`
+together; `$bytes_aggregate_demand` governs only `bytes_min` and `bytes_max`
+inside it. Neither store pre-sets a bytes total, and the per-bucket projection
+writes a bytes total only when its count holds an observation, so the
+absence-tolerance of D2 now reads a count rather than a demand
+(features/616-gated-mean-derivation.md D30).
+
 ## Acceptance criteria
 
 1. **Default run skips the capture** (assertable): on a bytes-carrying input

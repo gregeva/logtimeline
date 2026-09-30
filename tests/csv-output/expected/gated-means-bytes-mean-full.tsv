@@ -1,0 +1,4 @@
+message_match	expected
+# One path, sizes 512 and 513 in one minute: the MESSAGES and STATS bytes means are one value
+@cell	messages	message=[200] GET /gm/sizes	bytes_mean	512.5	features/616-gated-mean-derivation.md D6 (the per-message bytes mean is stored precise and rounded only by the CSV formatter, so both CSVs print one value for one mean)
+@cell	stats	timestamp=2025-05-07 00:00	bytes_mean	512.5	features/616-gated-mean-derivation.md D6 (the per-message bytes mean is stored precise and rounded only by the CSV formatter, so both CSVs print one value for one mean)

@@ -272,6 +272,9 @@ that drift.
   no-ops; the `count_mean` line between them is a real derivation. Two commented-out
   `undef`/`delete` lines for `durations` carry a 2026-01-04 TO DO. A rewrite removes the
   no-ops; they are noted so their disappearance is not mistaken for a behaviour change.
+  #616 removed the four self-assignments; the #330 test that distinguishes "no duration
+  observed" from a measured zero is now the entry's `duration_count`, kept in both models
+  (features/616-gated-mean-derivation.md D1, D18).
 
 ## Field census (mechanically derived, `09262f7`)
 

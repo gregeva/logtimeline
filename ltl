@@ -106,6 +106,9 @@ my ( $summary_bar_off, $summary_bar_absolute, $summary_bar_log, $summary_bar_rev
 # the colour away from the table as a whole, every row of it, whether or not
 # a bar is drawn over that row.
 my $summary_mono = 0;
+# The peak the run summary reports, taken once before the summary renders, so
+# the summary's memory row and the aggregate export carry the same value.
+my $reported_max_memory_usage = 0;
 my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elapsed_detect_registry_build, $elapsed_parse_read_files, $elapsed_accumulate_initialize_buckets, $elapsed_finalize_calculate_statistics, $elapsed_render_normalize_data, $elapsed_finalize_group_similar, $elapsed_finalize_heatmap_statistics, $elapsed_finalize_histogram_statistics ) = ( 0,0,0,0,0,0,0,0,0,0,0,0 );
 # Statistics-phase sub-stage timing (#417): accumulated wall-clock per block,
 # start/stop pairs at block boundaries only — never inside a per-key loop.
@@ -979,7 +982,9 @@ my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsi
 # the consumer half of that conjunction. One boolean per statistics store.
 my $bucket_duration_stats_demand   = 0;       # per-time-bucket statistics (%log_analysis): timeline latency column, STATS CSV
 my $message_duration_stats_demand  = 0;       # per-message-key statistics (%log_messages): messages-table statistics variant, MESSAGES CSV
-my $bytes_aggregate_demand         = 0;       # bytes_occurrences/bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
+my $bytes_aggregate_demand         = 0;       # bytes_min/bytes_max at both scopes: CSV surfaces and bytes-family sorts (#516)
+my $bucket_bytes_demand            = 0;       # per-time-bucket bytes (%log_analysis total, count, extrema): timeline bytes column, STATS CSV, YAML export (#616 D30)
+my $message_bytes_demand           = 0;       # per-message bytes (%log_messages total, count, extrema): MESSAGES CSV, bytes sorts (#616 D30)
 my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
 
 # Statistics-group demand registry (#305): extends the store-level demand
@@ -2109,7 +2114,7 @@ sub read_index_file {
     my $hm_metric_col;
     if ($heatmap_enabled) {
         if    ($heatmap_metric eq 'duration') { $hm_metric_col = 'duration'; }
-        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'bytes';    }
+        elsif ($heatmap_metric eq 'bytes')    { $hm_metric_col = 'file_bytes'; }   # the index writes file_bytes_min/_max (#616 D24)
         elsif ($heatmap_metric eq 'count')    { $hm_metric_col = 'count';    }
         # UDM heatmap metrics are not in the index schema; skip.
     }
@@ -6614,7 +6619,7 @@ sub write_aggregate_export {
     }
     $measurements->{categories}      = $categories;
     $measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");
-    $measurements->{max_memory_used} = format_bytes($max_memory_usage);
+    $measurements->{max_memory_used} = format_bytes($reported_max_memory_usage);
 
     my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
         (qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);
@@ -6899,9 +6904,11 @@ sub write_index_file {
                 my $first_ts  = format_epoch_iso($fd->{first_timestamp});
                 my $last_ts   = format_epoch_iso($fd->{last_timestamp});
 
-                my $dur_avg   = $fd->{duration_occurrences} > 0 ? sprintf("%.2f", $fd->{duration_sum} / $fd->{duration_occurrences}) : '-';
-                my $file_bytes_mean = $fd->{file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{bytes_sum}    / $fd->{file_bytes_occurrences})    : '-';
-                my $count_mean = $fd->{count_occurrences}    > 0 ? sprintf("%.2f", $fd->{count_sum}    / $fd->{count_occurrences})    : '-';
+                # The means through the one helper and the CSV formatter at two
+                # decimals whatever -cp says, empty for no data (#616 D8, D15, D16).
+                my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';
+                my $file_bytes_mean = format_csv_value( mean_of( $fd->{bytes_sum},    $fd->{file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
+                my $count_mean      = format_csv_value( mean_of( $fd->{count_sum},    $fd->{count_occurrences} ),      'count_mean',    2 ) // '';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
                 my @file_row = (
@@ -6918,9 +6925,9 @@ sub write_index_file {
             {
                 my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
                 my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
-                my $sel_dur_avg   = $fd->{sel_duration_occurrences} > 0 ? sprintf("%.2f", $fd->{sel_duration_sum} / $fd->{sel_duration_occurrences}) : '-';
-                my $sel_file_bytes_mean = $fd->{sel_file_bytes_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_bytes_sum}    / $fd->{sel_file_bytes_occurrences})    : '-';
-                my $sel_count_mean = $fd->{sel_count_occurrences}    > 0 ? sprintf("%.2f", $fd->{sel_count_sum}    / $fd->{sel_count_occurrences})    : '-';
+                my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration_mean', 2 ) // '';
+                my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
+                my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count_mean',    2 ) // '';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
@@ -7487,6 +7494,7 @@ my @explain_groups = (
     { category => 'statistics',     name => 'Spread',             topics => [qw(std_dev cv iqr)] },
     { category => 'statistics',     name => 'Percentiles',        topics => [qw(percentiles)] },
     { category => 'statistics',     name => 'Distribution shape', topics => [qw(skewness kurtosis bimodality_coef)] },
+    { category => 'statistics',     name => 'Ranking',            topics => [qw(impact)] },
     # Visualizations: each chart gets its own group so each appears as an
     # underlined subheading under the VISUALIZATIONS category. Mirrors the
     # Percentiles group (one topic per group) and leaves room for future
@@ -7520,7 +7528,9 @@ my %explain_category_heading = (
 # Number of leading groups tagged 'statistics'. --help statistics slices
 # @explain_groups[0..$_explain_stats_group_count-1] so that the stats
 # index stays narrow even as Visualizations and future categories grow.
-my $_explain_stats_group_count = 5;
+my $_explain_stats_group_count = 0;
+$_explain_stats_group_count++ while $_explain_stats_group_count < @explain_groups
+    && $explain_groups[$_explain_stats_group_count]{category} eq 'statistics';
 
 # One-line summary per topic, used by the grouped index views. Long-form
 # content lives in %explain_topics below.
@@ -7535,6 +7545,7 @@ my %explain_summary = (
     skewness        => 'Distribution asymmetry (>0 = right-tail-heavy)',
     kurtosis        => 'Tail-heaviness (>3 = heavy outliers; >10 = pathological)',
     bimodality_coef => 'Sarle\'s bimodality coefficient (>0.555 = suspect multimodal)',
+    impact          => 'Ranking figure weighing occurrences against mean duration (ln of occurrences x mean^7)',
     heatmap         => 'Color-intensity time-vs-value visualization (-hm)',
     histogram       => 'Bin-counter distribution chart with percentile ticks (-hg)',
     classification  => 'Success/failure classification, the event-ledger property, and what a log can legitimately tell you',
@@ -8097,6 +8108,9 @@ my $explain_max_compute = q{The largest duration observed for the bucket or mess
 # --- mean ---
 my $explain_mean_intuition = q{The arithmetic average of all observed values: sum of values divided by count. For latency, `mean` answers "on average, how long does this operation take?" -- the typical experience weighted equally across every request.};
 my $explain_mean_operational = q{The `mean` is highly sensitive to tail behavior: a single 10-second request mixed into 10,000 fast requests pulls the mean up significantly. This makes `mean` *misleading* for skewed distributions (which is most production latency data). Prefer `p50` (the median) when you want a "typical" value robust to outliers. Use `mean` when you specifically want a measure of *total work performed* -- mean × count = total duration, which is the right signal for capacity-planning and impact-ranking analysis. ltl's `-so mean` ranks messages by average latency; `-so duration` ranks by total duration (= mean × count). The two answer different operational questions.};
+my $explain_impact_intuition = q{A ranking figure that weighs how often a message occurs against how long it takes: the natural logarithm of occurrences times the mean duration to the seventh power. The seventh power lets a slow operation outrank a far more frequent fast one; the logarithm keeps the figure small enough to read and compare across messages.};
+my $explain_impact_operational = q{Rank with `-so impact` to find the messages whose combined cost -- frequency and slowness together -- is greatest, which neither `-so occurrences` nor `-so mean` shows on its own. A message with no duration, or with a mean of one unit or below, ranks by its occurrences alone: its impact is ln(occurrences), 0 for a single line. A duration never ranks a message below the same message without one; only a mean above one unit raises it.};
+my $explain_impact_compute = q{impact = ln(max(mean, 1)^7 x occurrences), where mean is the message's mean duration in the source unit, as the MESSAGES CSV reports it: the total duration divided by the lines that carried a duration. A mean of one unit or below, zero, or no duration at all counts as 1, so the duration term contributes nothing. Computed once per message after the log is read, so the order of its lines does not matter. When durations are discarded with -od or -d duration, impact is not computed and its column is empty.};
 my $explain_mean_compute = q{Computed as `total_duration / count` per time bucket (or per message key when consolidating). One pass through the data; exact.};
 
 # --- std_dev ---
@@ -9274,6 +9288,19 @@ sub populate_explain_topics {
         ],
 
         # ---- mean ----
+        impact => [
+            { type => 'heading',   text => 'IMPACT' },
+            { type => 'paragraph', text => $explain_impact_intuition },
+            { type => 'subheading', text => 'Operational use' },
+            { type => 'paragraph', text => $explain_impact_operational },
+            { type => 'subheading', text => 'Example' },
+            { type => 'pre',       text => "    ltl -so impact -n 20 access.log       # rank by frequency and slowness together\n" },
+            { type => 'subheading', text => 'How ltl computes this' },
+            { type => 'paragraph', text => $explain_impact_compute },
+            { type => 'subheading', text => 'See also' },
+            { type => 'paragraph', text => 'mean, occurrences (-so occurrences), total duration (-so duration).' },
+        ],
+
         mean => [
             { type => 'heading',   text => 'MEAN' },
             { type => 'paragraph', text => $explain_mean_intuition },
@@ -11074,8 +11101,9 @@ sub group_similar_messages {
                     "    member: $_" for sort @{ $cluster->{member_keys} };
             }
 
-            # Copy duration stats
-            if (defined $cluster->{total_duration}) {
+            # Copy duration stats, gated on the observation count (#616 D4)
+            if ($cluster->{duration_count}) {
+                $entry->{duration_count}     = $cluster->{duration_count};
                 $entry->{total_duration}     = $cluster->{total_duration};
                 $entry->{sum_of_squares}     = $cluster->{sum_of_squares};
                 $entry->{durations}          = $cluster->{durations} // [];
@@ -11090,7 +11118,6 @@ sub group_similar_messages {
                 # side dispatch at calculate_all_statistics sees a single keyed
                 # entry, indistinguishable from a non-consolidated key.
                 if ($message_stats_capture_mode eq 'bin') {
-                    $entry->{duration_count} = $cluster->{duration_count} if defined $cluster->{duration_count};
                     $entry->{_running_mean}  = $cluster->{_running_mean}  if defined $cluster->{_running_mean};
                     $entry->{m2_sum}         = $cluster->{m2_sum}         if defined $cluster->{m2_sum};
                     $entry->{m3_sum}         = $cluster->{m3_sum}         if defined $cluster->{m3_sum};
@@ -11111,8 +11138,8 @@ sub group_similar_messages {
             }
 
             # Copy bytes stats — the whole family, as count does below (#432)
-            $entry->{total_bytes} = $cluster->{total_bytes} if defined $cluster->{total_bytes};
-            if (defined $cluster->{bytes_occurrences}) {
+            if ($cluster->{bytes_occurrences}) {
+                $entry->{total_bytes}       = $cluster->{total_bytes};
                 $entry->{bytes_occurrences} = $cluster->{bytes_occurrences};
                 $entry->{bytes_min}         = $cluster->{bytes_min};
                 $entry->{bytes_max}         = $cluster->{bytes_max};
@@ -11143,11 +11170,6 @@ sub group_similar_messages {
                 $entry->{"udm_${name}_max"} = $cluster->{"udm_${name}_max"};
             }
 
-            # Recompute impact
-            if (defined $entry->{total_duration} && $entry->{occurrences} > 0 && $entry->{total_duration} > 0) {
-                my $mean = $entry->{total_duration} / $entry->{occurrences};
-                $entry->{impact} = log($mean ** $impact_time_exponent * $entry->{occurrences});
-            }
         }
     }
 
@@ -11678,6 +11700,73 @@ sub collapse_bin_counter_entry {
     return $projections;
 }
 
+# The one running-mean update (#616 D10, D12, D28): folds a source state of
+# $n_b observations (mean $mean_b, central-moment sums $M2_b, $M3_b, $M4_b)
+# into $t, whose count before the fold is $n_a. A target with no observation
+# adopts the source; a source of one observation takes the one-observation
+# form of the Welford-Pébay update (Pébay 2008, SAND2008-6212), which the
+# read loop feeds; any larger source takes the Chan-Pébay parallel combine,
+# which the consolidation merge feeds. The moment sums are kept only when
+# $shape (shape-group demand, #305). The count is not written here: it is
+# kept beside the total by the caller (#616 D29). Order matters in both
+# forms: M4 reads the old M2 and M3, M3 the old M2, M2 is updated last.
+sub welford_update {
+    my ($t, $n_a, $n_b, $mean_b, $M2_b, $M3_b, $M4_b, $shape) = @_;
+    if ($n_a == 0) {
+        $t->{_running_mean} = $mean_b;
+        if ($shape) {
+            $t->{m2_sum} = $M2_b;
+            $t->{m3_sum} = $M3_b;
+            $t->{m4_sum} = $M4_b;
+        }
+        return;
+    }
+    if ($n_b == 1) {
+        my $n_old    = $n_a;
+        my $n        = $n_old + 1;
+        my $mean     = $t->{_running_mean};
+        my $delta    = $mean_b - $mean;
+        my $delta_n  = $delta / $n;
+        $t->{_running_mean} = $mean + $delta_n;
+        if ($shape) {
+            my $delta_n2 = $delta_n * $delta_n;
+            my $term1    = $delta * $delta_n * $n_old;
+            $t->{m4_sum} +=
+                  $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
+                + 6 * $delta_n2 * $t->{m2_sum}
+                - 4 * $delta_n  * $t->{m3_sum};
+            $t->{m3_sum} +=
+                  $term1 * $delta_n * ($n - 2)
+                - 3 * $delta_n * $t->{m2_sum};
+            $t->{m2_sum} += $term1;
+        }
+        return;
+    }
+    my $n_ab    = $n_a + $n_b;
+    my $mean_a  = $t->{_running_mean};
+    my $delta   = $mean_b - $mean_a;
+    if ($shape) {
+        my $M2_a    = $t->{m2_sum} // 0;
+        my $M3_a    = $t->{m3_sum} // 0;
+        my $M4_a    = $t->{m4_sum} // 0;
+        my $d2      = $delta * $delta;
+        my $d3      = $d2 * $delta;
+        my $d4      = $d2 * $d2;
+        my $M4_ab = $M4_a + $M4_b
+                  + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
+                  + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
+                  + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
+        my $M3_ab = $M3_a + $M3_b
+                  + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
+                  + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
+        my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
+        $t->{m2_sum} = $M2_ab;
+        $t->{m3_sum} = $M3_ab;
+        $t->{m4_sum} = $M4_ab;
+    }
+    $t->{_running_mean} = $mean_a + $delta * $n_b / $n_ab;
+}
+
 # Issue #287: merge the bin-path state (Welford-Pébay sidecars + bin-counter
 # entry) of $source into $target. $source carries its bin-counter entry on
 # $source->{bin_entry}; callers at the %log_messages-source merge sites
@@ -11690,56 +11779,13 @@ sub collapse_bin_counter_entry {
 # M3 uses M2 from both sides, M2 uses only n/mean. See feature file
 # § Algorithm appendix for the formulas.
 sub merge_bin_state {
-    my ($target, $source) = @_;
-    my $n_a = $target->{duration_count} // 0;
+    my ($target, $source, $n_a) = @_;
     my $n_b = $source->{duration_count} // 0;
     return if $n_b == 0;
 
-    if ($n_a == 0) {
-        # Target empty — adopt source sidecars wholesale. The moment sidecars
-        # exist on entries only under shape-group demand (#305): the capture
-        # sites never update them otherwise, so the merge skips them
-        # symmetrically rather than writing zero-valued fields.
-        $target->{duration_count} = $n_b;
-        $target->{_running_mean}  = $source->{_running_mean};
-        if ($message_stats_demand_shape) {
-            $target->{m2_sum}         = $source->{m2_sum} // 0;
-            $target->{m3_sum}         = $source->{m3_sum} // 0;
-            $target->{m4_sum}         = $source->{m4_sum} // 0;
-        }
-    } else {
-        my $n_ab    = $n_a + $n_b;
-        my $mean_a  = $target->{_running_mean};
-        my $mean_b  = $source->{_running_mean};
-        my $delta   = $mean_b - $mean_a;
-        if ($message_stats_demand_shape) {
-            my $M2_a    = $target->{m2_sum} // 0;
-            my $M2_b    = $source->{m2_sum} // 0;
-            my $M3_a    = $target->{m3_sum} // 0;
-            my $M3_b    = $source->{m3_sum} // 0;
-            my $M4_a    = $target->{m4_sum} // 0;
-            my $M4_b    = $source->{m4_sum} // 0;
-            my $d2      = $delta * $delta;
-            my $d3      = $d2 * $delta;
-            my $d4      = $d2 * $d2;
-            # Order: M4 (reads M2 and M3), M3 (reads M2), M2, mean. All read OLD
-            # state before any field is overwritten.
-            my $M4_ab = $M4_a + $M4_b
-                      + $d4 * $n_a * $n_b * ($n_a*$n_a - $n_a*$n_b + $n_b*$n_b) / ($n_ab * $n_ab * $n_ab)
-                      + 6 * $d2 * ($n_a*$n_a * $M2_b + $n_b*$n_b * $M2_a) / ($n_ab * $n_ab)
-                      + 4 * $delta * ($n_a * $M3_b - $n_b * $M3_a) / $n_ab;
-            my $M3_ab = $M3_a + $M3_b
-                      + $d3 * $n_a * $n_b * ($n_a - $n_b) / ($n_ab * $n_ab)
-                      + 3 * $delta * ($n_a * $M2_b - $n_b * $M2_a) / $n_ab;
-            my $M2_ab = $M2_a + $M2_b + $d2 * $n_a * $n_b / $n_ab;
-            $target->{m2_sum}         = $M2_ab;
-            $target->{m3_sum}         = $M3_ab;
-            $target->{m4_sum}         = $M4_ab;
-        }
-        my $mean_ab = $mean_a + $delta * $n_b / $n_ab;
-        $target->{duration_count} = $n_ab;
-        $target->{_running_mean}  = $mean_ab;
-    }
+    welford_update($target, $n_a, $n_b, $source->{_running_mean},
+                   $source->{m2_sum} // 0, $source->{m3_sum} // 0, $source->{m4_sum} // 0,
+                   $message_stats_demand_shape);
 
     # Bin-counter merge (only meaningful when source observed at least one
     # positive duration — the bin producer is gated on $duration > 0).
@@ -11768,8 +11814,12 @@ sub merge_consolidation_stats {
         $target->{outcomes}[$_] += $so->[$_] for grep { $so->[$_] } 1, 2, 4;
     }
 
-    # Duration stats
-    if (defined $source->{total_duration}) {
+    # The target's duration count before this merge, for the running-mean
+    # update, which reads it and never writes a count (#616 D29).
+    my $n_a = $target->{duration_count} // 0;
+
+    # Duration stats, gated on the observation count (#616 D4)
+    if ($source->{duration_count}) {
         $target->{total_duration} = ($target->{total_duration} // 0) + $source->{total_duration};
         $target->{sum_of_squares} = ($target->{sum_of_squares} // 0) + ($source->{sum_of_squares} // 0);
         $target->{min} = $source->{min} if defined $source->{min} && (!defined $target->{min} || $source->{min} < $target->{min});
@@ -11780,8 +11830,8 @@ sub merge_consolidation_stats {
     # Bytes stats. The whole family merges, not just the sum (#432): a
     # consolidated row that carried the total without its observation count
     # would report a total no aggregate could be derived from.
-    $target->{total_bytes} = ($target->{total_bytes} // 0) + $source->{total_bytes} if defined $source->{total_bytes};
-    if (defined $source->{bytes_occurrences}) {
+    if ($source->{bytes_occurrences}) {
+        $target->{total_bytes} = ($target->{total_bytes} // 0) + ($source->{total_bytes} // 0);
         $target->{bytes_occurrences} = ($target->{bytes_occurrences} // 0) + $source->{bytes_occurrences};
         $target->{bytes_min} = $source->{bytes_min} if defined $source->{bytes_min} && (!defined $target->{bytes_min} || $source->{bytes_min} < $target->{bytes_min});
         $target->{bytes_max} = $source->{bytes_max} if defined $source->{bytes_max} && (!defined $target->{bytes_max} || $source->{bytes_max} > $target->{bytes_max});
@@ -11824,8 +11874,9 @@ sub merge_consolidation_stats {
     # only updates the duration_count, _running_mean, m2/m3/m4 sidecars
     # and the bin counter.
     if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
-        merge_bin_state($target, $source);
+        merge_bin_state($target, $source, $n_a);
     }
+    $target->{duration_count} = $n_a + $source->{duration_count} if $source->{duration_count};
 }
 
 # Issue #287: wrapper for the seven consolidation sites that merge a
@@ -13321,21 +13372,29 @@ sub resolve_csv_column_family {
 #                       like 'duration_nice', rate strings, etc. pass through)
 #   - sprintf("%.<N>f") otherwise, where N is the resolved decimals for the
 #                       column's family (or 0 if family is unknown)
+# An optional third argument fixes the decimals, bypassing -cp and its full
+# mode: the run index writes its means at two decimals whatever the run's
+# precision, since it is compared across runs (#616 D8, D16).
 sub format_csv_value {
-    my ($value, $column) = @_;
+    my ($value, $column, $fixed_decimals) = @_;
     return undef unless defined $value;
-    return $value if $csv_precision eq 'full';
+    return $value if $csv_precision eq 'full' && !defined $fixed_decimals;
     # Non-numeric values (pre-formatted strings) pass through unchanged.
     return $value unless $value =~ /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
-    my $family = resolve_csv_column_family($column);
-    my $decimals = defined $family && exists $csv_family_decimals{$family}
-        ? $csv_family_decimals{$family}
-        : 0;
-    # Per-column override: rate columns within the level family always use
-    # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
-    # In N mode, N wins.
-    if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
-        $decimals = 1;
+    my $decimals;
+    if (defined $fixed_decimals) {
+        $decimals = $fixed_decimals;
+    } else {
+        my $family = resolve_csv_column_family($column);
+        $decimals = defined $family && exists $csv_family_decimals{$family}
+            ? $csv_family_decimals{$family}
+            : 0;
+        # Per-column override: rate columns within the level family always use
+        # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
+        # In N mode, N wins.
+        if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
+            $decimals = 1;
+        }
     }
     return $value if $decimals eq 'n/a';  # defensive — should not occur outside full mode
     # Round to the resolved decimal count, then strip trailing zeros (and a
@@ -14813,17 +14872,26 @@ sub adapt_to_command_line_options {
     # MESSAGES CSV statistics columns - exist only for retained messages, so
     # retention is the single condition on this store's demand.
     $message_duration_stats_demand = ( !$omit_durations && $capture_messages ) ? 1 : 0;
-    # Bytes aggregate-family demand (#516): bytes_occurrences/bytes_min/bytes_max
-    # (and the bytes_mean derived from them) reach the user only through the two
-    # CSV surfaces and the bytes-family sort operands — nothing is rendered from
-    # them (the rendered bytes columns read total_bytes, which stays ungated).
-    # A run with no such consumer skips the per-line capture at both scopes.
+    # Bytes aggregate-family demand (#516): bytes_min/bytes_max reach the user
+    # only through the two CSV surfaces and the bytes-family sort operands.
+    # It governs the extrema inside each store's own bytes demand below.
     # The sort operand only ranks the top-messages table, so it is a consumer only
     # while a message is retained: under -n 0 the sort is inert (#458 D3) and holds
     # no demand, while the CSV term stands on its own.
     $bytes_aggregate_demand = ( !$omit_bytes && (
            $write_messages_to_csv
         || ( $capture_messages && $sort_key =~ /^bytes_(?:occurrences|min|mean|max)$/ )
+    ) ) ? 1 : 0;
+    # Bytes demand per store (#616 D30): a store receives and processes bytes,
+    # total, count and extrema alike, only when a surface reads them; otherwise
+    # nothing is accumulated and every bytes cell stays empty. The time-bucket
+    # store is read by the timeline's bytes column unless it is hidden, and by
+    # -o (STATS CSV, YAML export); the message store by the MESSAGES CSV and
+    # the bytes sorts, the total's included, while a message is retained.
+    $bucket_bytes_demand = ( !$omit_bytes && ( !$hide_bytes || $write_messages_to_csv ) ) ? 1 : 0;
+    $message_bytes_demand = ( !$omit_bytes && $capture_messages && (
+           $write_messages_to_csv
+        || $sort_key =~ /^(?:total_bytes|bytes_(?:occurrences|min|mean|max))$/
     ) ) ? 1 : 0;
     # Per-message outcome-counter demand (#517 D1, #456): the per-message
     # outcome counters reach the user through the MESSAGES CSV outcome columns
@@ -15587,7 +15655,7 @@ sub read_and_process_logs {
                         $fd->{duration_min} = $duration if !defined $fd->{duration_min} || $duration < $fd->{duration_min};
                         $fd->{duration_max} = $duration if !defined $fd->{duration_max} || $duration > $fd->{duration_max};
                     }
-                    if (defined $bytes && $bytes > 0) {
+                    if (defined $bytes) {   # a zero-byte response is an observation, as the stores count it (#616 D17)
                         $fd->{file_bytes_occurrences}++;
                         $fd->{bytes_sum} += $bytes;
                         $fd->{file_bytes_min} = $bytes if !defined $fd->{file_bytes_min} || $bytes < $fd->{file_bytes_min};
@@ -15693,7 +15761,7 @@ sub read_and_process_logs {
                         $fd->{sel_duration_min} = $duration if !defined $fd->{sel_duration_min} || $duration < $fd->{sel_duration_min};
                         $fd->{sel_duration_max} = $duration if !defined $fd->{sel_duration_max} || $duration > $fd->{sel_duration_max};
                     }
-                    if (defined $bytes && $bytes > 0) {
+                    if (defined $bytes) {   # a zero-byte response is an observation, as the stores count it (#616 D17)
                         $fd->{sel_file_bytes_occurrences}++;
                         $fd->{sel_bytes_sum} += $bytes;
                         $fd->{sel_file_bytes_min} = $bytes if !defined $fd->{sel_file_bytes_min} || $bytes < $fd->{sel_file_bytes_min};
@@ -15887,7 +15955,12 @@ sub read_and_process_logs {
                             my $stats_source = { occurrences => 1 };
                             $stats_source->{outcomes}[$line_outcome] = 1 if $message_outcomes_demand && $line_outcome;
                             if ($metrics_observed) {
-                                $stats_source->{total_bytes} = $bytes if defined $bytes;
+                                if (defined $bytes && $message_bytes_demand) {
+                                    $stats_source->{total_bytes}       = $bytes;
+                                    $stats_source->{bytes_occurrences} = 1;
+                                    $stats_source->{bytes_min}         = $bytes;
+                                    $stats_source->{bytes_max}         = $bytes;
+                                }
                                 if (defined $count) {
                                     $stats_source->{count_sum} = $count;
                                     $stats_source->{count_occurrences} = 1;
@@ -15917,6 +15990,7 @@ sub read_and_process_logs {
                                     # per-file index block's duration_sum read out of it, so a plain
                                     # copy retains a string buffer no consumer of this array reads.
                                     $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
+                                    $stats_source->{duration_count} = 1;
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
                                     # sample stats_source. merge_consolidation_stats's
@@ -15924,7 +15998,6 @@ sub read_and_process_logs {
                                     # the cluster. min/max from $stats_source->{min,max}
                                     # already populated above via raw producer fields.
                                     if ($message_stats_capture_mode eq 'bin') {
-                                        $stats_source->{duration_count} = 1;
                                         $stats_source->{_running_mean}  = $duration;
                                         $stats_source->{m2_sum}         = 0;
                                         $stats_source->{m3_sum}         = 0;
@@ -15960,7 +16033,6 @@ sub read_and_process_logs {
                         # key cardinality this is the dominant per-key allocation today.
                         $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
                             occurrences    => 0,
-                            total_bytes    => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
                             duration_count => 0,
@@ -15972,7 +16044,6 @@ sub read_and_process_logs {
                             ($message_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                         } : {
                             occurrences    => 0,
-                            total_bytes    => 0,
                             total_duration => 0,
                             # count_occurrences => 0,
                             # count_min => undef,
@@ -16009,9 +16080,12 @@ sub read_and_process_logs {
                         # discards a metric has nothing to rank on either, and -so
                         # bytes falls back the same way any operand with no values
                         # does.
-                        if( defined $bytes && !$omit_bytes ) {
+                        if( defined $bytes && $message_bytes_demand ) {
                             my $e = $log_messages{$category}{$log_key};
                             $e->{total_bytes} += $bytes;
+                            # The count is kept on every line the store's demand
+                            # admits (#616 D30); the aggregate demand governs the
+                            # extrema.
                             if( $bytes_aggregate_demand ) {
                                 if( $e->{bytes_occurrences}++ ) {
                                     $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -16019,6 +16093,8 @@ sub read_and_process_logs {
                                 } else {
                                     $e->{bytes_min} = $e->{bytes_max} = $bytes;
                                 }
+                            } else {
+                                $e->{bytes_occurrences}++;
                             }
                         }
 
@@ -16046,7 +16122,11 @@ sub read_and_process_logs {
                         }
 
                         if( defined $duration && !$omit_durations ) {
-                            $log_messages{$category}{$log_key}{total_duration} += $duration;
+                            # The entry is found once for the total and its count: a
+                            # lookup by the full message key costs ~100 ns per line, an
+                            # increment through the reference ~20 ns (#616).
+                            my $me = $log_messages{$category}{$log_key};
+                            $me->{total_duration} += $duration;
 
                             # Statistics machinery (sum of squares, raw samples or bin
                             # counters + moment sidecars) is captured only when a surface
@@ -16108,41 +16188,21 @@ sub read_and_process_logs {
                                     # distinct from {occurrences}, which counts all matched lines
                                     # for this (category, log_key) regardless of duration presence,
                                     # and matches the raw path's `scalar @{$bucket_data->{durations}}`.
-                                    # duration_count and _running_mean stay unconditional (consumed
-                                    # by core derivation and merge_bin_state); the M2/M3/M4 moment
-                                    # accumulation runs only under shape-group demand (#305) — the
-                                    # moments feed nothing else.
-                                    my $n_old = $entry->{duration_count};
-                                    my $n     = $n_old + 1;
-                                    if ($n_old == 0) {
-                                        $entry->{_running_mean} = $duration;
-                                    } else {
-                                        my $mean     = $entry->{_running_mean};
-                                        my $delta    = $duration - $mean;
-                                        my $delta_n  = $delta / $n;
-                                        $entry->{_running_mean} = $mean + $delta_n;
-                                        if ($message_stats_demand_shape) {
-                                            my $delta_n2 = $delta_n * $delta_n;
-                                            my $term1    = $delta * $delta_n * $n_old;
-                                            $entry->{m4_sum} +=
-                                                  $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                                + 6 * $delta_n2 * $entry->{m2_sum}
-                                                - 4 * $delta_n  * $entry->{m3_sum};
-                                            $entry->{m3_sum} +=
-                                                  $term1 * $delta_n * ($n - 2)
-                                                - 3 * $delta_n * $entry->{m2_sum};
-                                            $entry->{m2_sum} += $term1;
-                                        }
-                                    }
-                                    $entry->{duration_count} = $n;
+                                    # The update reads duration_count as the count before this
+                                    # observation; the count is incremented beside the total, after
+                                    # this block (#616 D29). The M2/M3/M4 moment accumulation runs
+                                    # only under shape-group demand (#305) — the moments feed
+                                    # nothing else.
+                                    welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
                                 }
                             }  # end: if ($message_duration_stats_demand)
 
-                            # by calculating impact as the numbers build, it will be ready to use for sorting without having to go through the whole dataset
-                            if( $duration > 0 ) {
-                                my $mean = $log_messages{$category}{$log_key}{total_duration} / $log_messages{$category}{$log_key}{occurrences};
-                                $log_messages{$category}{$log_key}{impact} = log( $mean ** $impact_time_exponent * $log_messages{$category}{$log_key}{occurrences} );
-                            }
+                            # The observation count of the duration total, kept on every
+                            # timed line whatever the statistics demand (#616 D1, D18).
+                            # It is incremented after the running-mean update above,
+                            # which reads it as the count before this observation.
+                            $me->{duration_count}++;
+
                         }
                     } else {
                         $log_messages{$category}{$log_key}{occurrences}++;
@@ -16180,7 +16240,6 @@ sub read_and_process_logs {
                     # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
                     $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
                         occurrences => 0,
-                        total_bytes => 0,
                         duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
@@ -16195,13 +16254,13 @@ sub read_and_process_logs {
                         ($bucket_stats_demand_shape ? (m2_sum => 0, m3_sum => 0, m4_sum => 0) : ()),
                     } : {
                         occurrences => 0,
-                        total_bytes => 0,
                         duration_sum => 0,
                         # count_sum => 0,
                         # count_occurrences => 0,
                         # count_min => undef,
                         # count_max => undef,
                         sum_of_squares => 0,
+                        duration_count => 0,
                         durations => [],
                     });
 
@@ -16211,7 +16270,8 @@ sub read_and_process_logs {
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        $log_analysis{$bucket}{duration_sum} += $duration;
+                        my $be = $log_analysis{$bucket};
+                        $be->{duration_sum} += $duration;
 
                         $log_analysis{$bucket}{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
@@ -16246,42 +16306,26 @@ sub read_and_process_logs {
 
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
                                 # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
-                                # duration_count and _running_mean stay unconditional (core
-                                # derivation consumes them); the M2/M3/M4 accumulation runs only
+                                # The update reads duration_count as the count before this
+                                # observation; the count is incremented beside the total, after
+                                # this block (#616 D29). The M2/M3/M4 accumulation runs only
                                 # under shape-group demand (#305).
-                                my $n_old = $entry->{duration_count};
-                                my $n     = $n_old + 1;
-                                if ($n_old == 0) {
-                                    $entry->{_running_mean} = $duration;
-                                } else {
-                                    my $mean     = $entry->{_running_mean};
-                                    my $delta    = $duration - $mean;
-                                    my $delta_n  = $delta / $n;
-                                    $entry->{_running_mean} = $mean + $delta_n;
-                                    if ($bucket_stats_demand_shape) {
-                                        my $delta_n2 = $delta_n * $delta_n;
-                                        my $term1    = $delta * $delta_n * $n_old;
-                                        $entry->{m4_sum} +=
-                                              $term1 * $delta_n2 * ($n*$n - 3*$n + 3)
-                                            + 6 * $delta_n2 * $entry->{m2_sum}
-                                            - 4 * $delta_n  * $entry->{m3_sum};
-                                        $entry->{m3_sum} +=
-                                              $term1 * $delta_n * ($n - 2)
-                                            - 3 * $delta_n * $entry->{m2_sum};
-                                        $entry->{m2_sum} += $term1;
-                                    }
-                                }
-                                $entry->{duration_count} = $n;
+                                welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
                             }
                         }
+
+                        # The observation count of the duration total, kept on every
+                        # timed line whatever the statistics demand (#616 D1, D18),
+                        # after the running-mean update, which reads it as the count
+                        # before this observation.
+                        $be->{duration_count}++;
                     }
 
                     # Nothing about the bytes metric is captured under -ob (#432).
                     #
                     # The family is gated on the pre-coercion observation rather than
                     # on the sum's truth test: a zero-byte response is a real
-                    # observation and belongs in the count and the extrema, though not
-                    # in the running total's `&& $bytes` guard, which is pre-existing.
+                    # observation and belongs in the total, the count and the extrema.
                     # Both scopes gate on the same condition, which is what makes the
                     # two CSV surfaces count the same lines.
                     #
@@ -16289,13 +16333,16 @@ sub read_and_process_logs {
                     # rather than once per line: a package-global read-compare-write
                     # on every line measured ~1.5% of total runtime, for a flag that
                     # only needs to know whether ANY line carried bytes.
-                    if( $bytes_observed_line && !$omit_bytes ) {
+                    if( $bytes_observed_line && $bucket_bytes_demand ) {
                         $bytes_observed = 1;
                         my $e = $log_analysis{$bucket};
-                        if( $bytes ) {
-                            $e->{total_bytes} += $bytes;
-                            $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
-                        }
+                        # A zero-byte response is a measured zero: it defines the
+                        # total as it counts (#616 D30).
+                        $e->{total_bytes} += $bytes;
+                        $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
+                        # The count is kept on every line the store's demand
+                        # admits (#616 D30); the aggregate demand governs the
+                        # extrema.
                         if( $bytes_aggregate_demand ) {
                             if( $e->{bytes_occurrences}++ ) {
                                 $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
@@ -16303,6 +16350,8 @@ sub read_and_process_logs {
                             } else {
                                 $e->{bytes_min} = $e->{bytes_max} = $bytes;
                             }
+                        } else {
+                            $e->{bytes_occurrences}++;
                         }
                     }
 
@@ -17414,8 +17463,6 @@ sub calculate_all_statistics {
         my $aggregated_data = {
             occurrences         => 0,
             total_duration      => 0,
-            total_bytes         => 0,
-            'total_bytes-HL'    => 0,
             count_sum           => 0,
             'count_sum-HL'      => 0,
             count_occurrences   => 0,
@@ -17430,8 +17477,8 @@ sub calculate_all_statistics {
 
 # TO DO: I think that I can get rid of aggregate_data now that I've simplified the data model
         $aggregated_data->{occurrences} += $log_analysis{$bucket}{occurrences};
+        $aggregated_data->{duration_count} = $log_analysis{$bucket}{duration_count};
         $aggregated_data->{total_duration} += $log_analysis{$bucket}{duration_sum};
-        $aggregated_data->{total_bytes} += $log_analysis{$bucket}{total_bytes};
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
         # partition + sidecars carry the data). Skip the aggregation; the bin consumer
@@ -17447,9 +17494,12 @@ sub calculate_all_statistics {
         undef $log_analysis{$bucket}{durations};
         delete $log_analysis{$bucket}{durations};
     
-        # The duration based statistics won't catch the counts if there are no durations (see else condition below).
-        # Demand (≥1 active consumer of per-bucket statistics) and observation
-        # (≥1 duration value seen in the data) must both hold.
+        # The duration statistics are merged into the bucket's projection only
+        # when there are durations to describe: demand (≥1 active consumer of
+        # per-bucket statistics) and observation (≥1 duration value seen in
+        # the data) must both hold. The totals, counts and the other metrics'
+        # means are projected either way.
+        my $stats = {};
         if( $bucket_duration_stats_demand && $durations_observed ) {
             # Issue #266/#289: caller-side data-model dispatch. Surface 4
             # (per-time-bucket statistics). Under 'bin' the statistics are
@@ -17468,7 +17518,6 @@ sub calculate_all_statistics {
                 extended => $bucket_stats_demand_extended,
                 shape    => $bucket_stats_demand_shape,
             };
-            my $stats;
             if ($dm eq 'bin') {
                 $stats = calculate_statistics_bin(
                     $log_analysis{$bucket},              # sidecar entry (min/max/duration_count/m*_sum/sum_of_squares/occurrences)
@@ -17481,48 +17530,34 @@ sub calculate_all_statistics {
                 $stats = calculate_statistics($aggregated_data, $bucket_demand);
             }
             $stats //= {};
-
-            $log_stats{$bucket} = {
-                occurrences   => $aggregated_data->{occurrences},
-                bytes         => $log_analysis{$bucket}{total_bytes},
-                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration_sum  => $log_analysis{$bucket}{duration_sum},
-                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
-                count         => $log_analysis{$bucket}{count_sum},
-                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
-                count_occurrences => $log_analysis{$bucket}{count_occurrences},
-                count_min     => $log_analysis{$bucket}{count_min},
-                count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
-                count_sum     => $log_analysis{$bucket}{count_sum},
-                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
-                bytes_min     => $log_analysis{$bucket}{bytes_min},
-                bytes_max     => $log_analysis{$bucket}{bytes_max},
-                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef,
-                %$stats,
-            };
-
-        } else {
-            # This will catch the situation where there are no durations, printing them has been disabled, or they were not captured.
-            $log_stats{$bucket} = {
-                occurrences   => $aggregated_data->{occurrences},
-                bytes         => $log_analysis{$bucket}{total_bytes},
-                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
-                duration_sum  => $log_analysis{$bucket}{duration_sum},
-                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
-                count         => $log_analysis{$bucket}{count_sum},
-                'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
-                count_occurrences => $log_analysis{$bucket}{count_occurrences},
-                count_min     => $log_analysis{$bucket}{count_min},
-                count_max     => $log_analysis{$bucket}{count_max},
-                count_mean    => ( defined $log_analysis{$bucket}{count_sum} && defined $log_analysis{$bucket}{count_occurrences} && $log_analysis{$bucket}{count_occurrences} > 0 ) ? ($log_analysis{$bucket}{count_sum} / $log_analysis{$bucket}{count_occurrences}) : undef,
-                count_sum     => $log_analysis{$bucket}{count_sum},
-                bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
-                bytes_min     => $log_analysis{$bucket}{bytes_min},
-                bytes_max     => $log_analysis{$bucket}{bytes_max},
-                bytes_mean    => $log_analysis{$bucket}{bytes_occurrences} ? ($log_analysis{$bucket}{total_bytes} / $log_analysis{$bucket}{bytes_occurrences}) : undef
-            }
         }
+
+        $log_stats{$bucket} = {
+            occurrences   => $aggregated_data->{occurrences},
+            # A total is projected only when its count holds an observation
+            # (#616 D4): a bucket in which no line carried the metric has no
+            # total, and every surface reading the projection shows it empty.
+            ( $log_analysis{$bucket}{bytes_occurrences} ? (
+                bytes         => $log_analysis{$bucket}{total_bytes},
+                'bytes-HL'    => $log_analysis{$bucket}{'total_bytes-HL'},
+            ) : () ),
+            ( $log_analysis{$bucket}{duration_count} ? (
+                duration_sum  => $log_analysis{$bucket}{duration_sum},
+                'duration_sum-HL' => $log_analysis{$bucket}{'duration_sum-HL'},
+            ) : () ),
+            count         => $log_analysis{$bucket}{count_sum},
+            'count-HL'    => $log_analysis{$bucket}{'count_sum-HL'},
+            count_occurrences => $log_analysis{$bucket}{count_occurrences},
+            count_min     => $log_analysis{$bucket}{count_min},
+            count_max     => $log_analysis{$bucket}{count_max},
+            count_mean    => mean_of( $log_analysis{$bucket}{count_sum}, $log_analysis{$bucket}{count_occurrences} ),
+            count_sum     => $log_analysis{$bucket}{count_sum},
+            bytes_occurrences => $log_analysis{$bucket}{bytes_occurrences},
+            bytes_min     => $log_analysis{$bucket}{bytes_min},
+            bytes_max     => $log_analysis{$bucket}{bytes_max},
+            bytes_mean    => mean_of( $log_analysis{$bucket}{total_bytes}, $log_analysis{$bucket}{bytes_occurrences} ),
+            %$stats,
+        };
 
         # Populate UDM stats for this bucket (Issue #22)
         foreach my $config (@udm_configs) {
@@ -17573,7 +17608,7 @@ sub calculate_all_statistics {
             $log_stats{$bucket}{"udm_${name}_occurrences"} = $occ;
             $log_stats{$bucket}{"udm_${name}_min"}  = $log_analysis{$bucket}{"udm_${name}_min"};
             $log_stats{$bucket}{"udm_${name}_max"}  = $log_analysis{$bucket}{"udm_${name}_max"};
-            $log_stats{$bucket}{"udm_${name}_mean"} = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef;
+            $log_stats{$bucket}{"udm_${name}_mean"} = mean_of( $log_analysis{$bucket}{"udm_${name}_sum"}, $occ );
             $log_stats{$bucket}{"udm_${name}_sum"}  = $log_analysis{$bucket}{"udm_${name}_sum"};
 
             # Select display value based on aggregation function
@@ -17581,7 +17616,7 @@ sub calculate_all_statistics {
             if    ($agg eq 'sum') { $display_value = $log_analysis{$bucket}{"udm_${name}_sum"}; }
             elsif ($agg eq 'min') { $display_value = $log_analysis{$bucket}{"udm_${name}_min"}; }
             elsif ($agg eq 'max') { $display_value = $log_analysis{$bucket}{"udm_${name}_max"}; }
-            elsif ($agg eq 'mean') { $display_value = (defined $occ && $occ > 0) ? $log_analysis{$bucket}{"udm_${name}_sum"} / $occ : undef; }
+            elsif ($agg eq 'mean') { $display_value = $log_stats{$bucket}{"udm_${name}_mean"}; }
             $log_stats{$bucket}{"udm_$name"} = $display_value;
 
             # Aggregation-aware highlight value
@@ -17632,15 +17667,15 @@ sub calculate_all_statistics {
             # undef, which the comparator's // 0 handles.
             if( $sort_key eq 'bytes_mean' ) {
                 foreach my $entry (values %{$log_messages{$category}}) {
-                    $entry->{bytes_mean} = $entry->{bytes_occurrences}
-                        ? ( $entry->{total_bytes} / $entry->{bytes_occurrences} )
-                        : undef;
+                    $entry->{bytes_mean} = mean_of( $entry->{total_bytes}, $entry->{bytes_occurrences} );
                 }
             } elsif( $sort_key eq 'count_mean' ) {
                 foreach my $entry (values %{$log_messages{$category}}) {
-                    $entry->{count_mean} = ( defined $entry->{count_sum} && $entry->{count_occurrences} )
-                        ? ( $entry->{count_sum} / $entry->{count_occurrences} )
-                        : undef;
+                    $entry->{count_mean} = mean_of( $entry->{count_sum}, $entry->{count_occurrences} );
+                }
+            } elsif( $sort_key eq 'impact' ) {
+                foreach my $entry (values %{$log_messages{$category}}) {
+                    $entry->{impact} = impact_of($entry);
                 }
             }
 
@@ -17786,6 +17821,7 @@ sub calculate_all_statistics {
                         # never mutates its input.
                         $stats = calculate_statistics({
                             occurrences    => $entry->{occurrences},
+                            duration_count => $entry->{duration_count},
                             total_duration => $entry->{total_duration},
                             sum_of_squares => $entry->{sum_of_squares},
                             durations      => $entry->{durations},
@@ -17883,21 +17919,18 @@ sub calculate_all_statistics {
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
                 $aggregated_data->{occurrences} += $log_messages{$category}{$log_key}{occurrences};
-                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if defined $log_messages{$category}{$log_key}{total_bytes};
+                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if $log_messages{$category}{$log_key}{bytes_occurrences};
 
                 # total_duration is initialized to 0 for every message key, so
                 # "defined" cannot distinguish "no duration ever observed" from
                 # "durations observed summing to zero" — a consumer of the
                 # MESSAGES CSV must be able to tell them apart (Issue #330).
-                # Gate on actual observations: the raw durations list or the
-                # bin-mode observation counter, with a positive total as a
-                # fallback for any path that accumulated without either.
-                my $duration_observed = $message_stats_capture_mode eq 'bin'
-                    ? ( ($log_messages{$category}{$log_key}{duration_count} // 0) > 0 )
-                    : ( scalar @{ $log_messages{$category}{$log_key}{durations} // [] } > 0 );
-                $duration_observed ||= ( ($log_messages{$category}{$log_key}{total_duration} // 0) > 0 );
+                # The gate is the observation count, kept on every timed line in
+                # both data models (#616 D1, D18); absent means none (D29).
+                my $duration_observed = $log_messages{$category}{$log_key}{duration_count};
 
                 if( $duration_observed && $message_duration_stats_demand ) {
+                    $aggregated_data->{duration_count} = $log_messages{$category}{$log_key}{duration_count};
                     $aggregated_data->{total_duration} += $log_messages{$category}{$log_key}{total_duration};
                     $aggregated_data->{sum_of_squares} += $log_messages{$category}{$log_key}{sum_of_squares};
                     # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
@@ -17956,11 +17989,16 @@ sub calculate_all_statistics {
 
                 $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
 
-                $log_messages{$category}{$log_key}{count_occurrences} = $log_messages{$category}{$log_key}{count_occurrences} if defined $log_messages{$category}{$log_key}{count_occurrences};
-                $log_messages{$category}{$log_key}{count_min} = $log_messages{$category}{$log_key}{count_min} if defined $log_messages{$category}{$log_key}{count_min};
-                $log_messages{$category}{$log_key}{count_mean} = ( defined $log_messages{$category}{$log_key}{count_sum} && defined $log_messages{$category}{$log_key}{count_occurrences} && $log_messages{$category}{$log_key}{count_occurrences} > 0 ) ? ($log_messages{$category}{$log_key}{count_sum} / $log_messages{$category}{$log_key}{count_occurrences}) : undef if defined $log_messages{$category}{$log_key}{count_occurrences};
-                $log_messages{$category}{$log_key}{count_max} = $log_messages{$category}{$log_key}{count_max} if defined $log_messages{$category}{$log_key}{count_max};
-                $log_messages{$category}{$log_key}{count_sum} = $log_messages{$category}{$log_key}{count_sum} if defined $log_messages{$category}{$log_key}{count_sum};
+                $log_messages{$category}{$log_key}{count_mean} = mean_of( $log_messages{$category}{$log_key}{count_sum}, $log_messages{$category}{$log_key}{count_occurrences} );
+                # The bytes mean is stored precise and rounded only by the CSV
+                # formatter (#616 D6); under -so bytes_mean the sort pre-pass has
+                # already derived it for every key.
+                $log_messages{$category}{$log_key}{bytes_mean} = mean_of( $log_messages{$category}{$log_key}{total_bytes}, $log_messages{$category}{$log_key}{bytes_occurrences} )
+                    unless $sort_key eq 'bytes_mean';
+                # Impact for the retained rows, from the mean they report; under
+                # -so impact the sort pre-pass has already derived it for every key.
+                $log_messages{$category}{$log_key}{impact} = impact_of( $log_messages{$category}{$log_key} )
+                    unless $sort_key eq 'impact';
 
                 # Calculate UDM per-message mean (Issue #22)
                 foreach my $config (@udm_configs) {
@@ -17968,7 +18006,7 @@ sub calculate_all_statistics {
                     my $name = $config->{name};
                     my $occ = $log_messages{$category}{$log_key}{"udm_${name}_occurrences"};
                     my $sum = $log_messages{$category}{$log_key}{"udm_${name}_sum"};
-                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = (defined $sum && defined $occ && $occ > 0) ? $sum / $occ : undef;
+                    $log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );
                 }
 
                 # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
@@ -18069,11 +18107,85 @@ sub calculate_all_statistics {
     return;
 }
 
+# The one derivation of a mean from an accumulated sum and its observation
+# count: undef unless the count holds an observation, so a mean is never
+# derived from, or shown for, a metric nothing observed.
+sub mean_of {
+    my ($sum, $count) = @_;
+    return ( defined $count && $count > 0 ) ? $sum / $count : undef;
+}
+
+# Impact ranks a message by occurrences and mean duration together:
+# ln(max(mean, 1) ** $impact_time_exponent * occurrences), the mean being the
+# one the row reports (#616 D5). A mean of one unit or below, zero or
+# unobserved contributes nothing, so the row ranks by its occurrences alone
+# (D11, D20); when durations are thrown away (-od, -d duration) impact is
+# undefined (D21). Derived once, after the read loop.
+sub impact_of {
+    my ($entry) = @_;
+    return undef if $omit_durations;
+    my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;
+    $mean = 1 if $mean < 1;
+    return log( $mean ** $impact_time_exponent * $entry->{occurrences} );
+}
+
 # Function to calculate the log scale bucket
 sub log_bucket {
     my ($value, $base) = @_;
     $value = 0 if !defined( $value );
     return $value > 0 ? floor(log($value) / log($base)) : 0;
+}
+
+# The statistics both data models derive the same way, from the observation
+# count, the total, the sum of squares and, under shape demand, the three
+# central-moment sums (#616 D9): the raw model computes the moment sums with
+# a pass over its samples, the bin model keeps them as running sums. Returns
+# (mean, std_dev, cv, skewness, kurtosis, bimodality_coef); std_dev and cv
+# need n >= 2, the shape statistics n >= 4 and a positive second moment, and
+# are undef otherwise. Records the shape group's -V statistics-demand outcome.
+# Percentiles stay with each model's own sub.
+sub derive_moment_statistics {
+    my ($n, $total, $sum_of_squares, $moments, $demand, $t) = @_;
+    my $mean = mean_of($total, $n);
+    my ($std_dev, $cv);
+    if ($n >= 2) {
+        my $sum_sq_dev = $sum_of_squares - $n * ($mean ** 2);
+        $sum_sq_dev = 0 if $sum_sq_dev < 0;  # guard floating-point underflow on near-constant data
+        my $variance = $sum_sq_dev / ($n - 1);
+        $std_dev = sqrt($variance);
+        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    }
+
+    # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
+    # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
+    # suspect multimodal; threshold is the canonical cutoff from the bimodality
+    # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
+    # non-degenerate distribution (positive second moment); derived only under
+    # shape-group demand (#305).
+    my ($skewness, $kurtosis, $bimodality_coef);
+    if ($demand->{shape}) {
+        if ($n >= 4) {
+            $t->{shape_moments}{computed}++ if $t;
+            my ($m2_sum, $m3_sum, $m4_sum) = @$moments;
+            my $m2 = $m2_sum / $n;
+            my $m3 = $m3_sum / $n;
+            my $m4 = $m4_sum / $n;
+            if ($m2 > 0) {
+                my $g1 = $m3 / ($m2 ** 1.5);
+                my $g2 = $m4 / ($m2 ** 2) - 3;
+                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
+                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
+                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
+                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
+            }
+        } elsif ($t) {
+            $t->{shape_moments}{ineligible}++;
+        }
+    } elsif ($t) {
+        if ($n >= 4) { $t->{shape_moments}{skipped_demand}++ }
+        else         { $t->{shape_moments}{ineligible}++ }
+    }
+    return ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef);
 }
 
 # Function to calculate statistical metrics for the raw data model.
@@ -18096,27 +18208,32 @@ sub calculate_statistics {
         ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
         : undef;
     $t->{stats_calls}++ if $t;
-    my $occurrences = $bucket_data->{occurrences};
-    return unless $occurrences > 0;
-
-    # Guard against empty durations array - not all entries may have duration data
-    return unless defined $bucket_data->{durations} && @{$bucket_data->{durations}};
+    # The observation count is the gate (#616 D9): no timed line, no statistic.
+    return unless ($bucket_data->{duration_count} // 0) > 0;
 
     my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
     my $duration_count = scalar @sorted;
 
-    # Use duration_count (entries with duration data) for statistics, not occurrences (total entries)
     my $min = min(@sorted);
-    my $mean = $bucket_data->{total_duration} / $duration_count;
     my $max = max(@sorted);
-    my ($std_dev, $cv);
-    if ($duration_count >= 2) {
-        my $sum_sq_dev = $bucket_data->{sum_of_squares} - $duration_count * ($mean ** 2);
-        $sum_sq_dev = 0 if $sum_sq_dev < 0;  # guard floating-point underflow on near-constant data
-        my $variance = $sum_sq_dev / ($duration_count - 1);
-        $std_dev = sqrt($variance);
-        $cv = $mean != 0 ? $std_dev / $mean : undef;
+    # The shape group's moment sums come from one pass over the samples about
+    # the mean: the dominant per-key cost of this function, run only under
+    # shape demand at n >= 4 (#305).
+    my $moments;
+    if ($demand->{shape} && $duration_count >= 4) {
+        my $mu = mean_of($bucket_data->{total_duration}, $duration_count);
+        my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
+        for my $x (@sorted) {
+            my $d = $x - $mu;
+            my $d2 = $d * $d;
+            $m2_sum += $d2;
+            $m3_sum += $d2 * $d;
+            $m4_sum += $d2 * $d2;
+        }
+        $moments = [ $m2_sum, $m3_sum, $m4_sum ];
     }
+    my ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef) = derive_moment_statistics(
+        $duration_count, $bucket_data->{total_duration}, $bucket_data->{sum_of_squares}, $moments, $demand, $t);
 
     # Percentile calculations must use duration_count, not occurrences
     # to correctly index into the sorted durations array
@@ -18152,46 +18269,8 @@ sub calculate_statistics {
         $t->{extended_percentiles}{skipped_demand}++;
     }
 
-    # Distribution-shape moments — sample-corrected skewness and excess kurtosis,
-    # plus Sarle's bimodality coefficient screening. Sarle BC > 5/9 (~0.555) flags
-    # suspect multimodal; threshold is the canonical cutoff from the bimodality
-    # literature. Requires n >= 4 (denominator of BC has (n-2)(n-3) factor) and a
-    # non-degenerate distribution (positive second moment). The O(n) moment pass
-    # is the dominant per-key cost of this function and runs only under
-    # shape-group demand (#305).
-    if ($demand->{shape}) {
-        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-        if ($duration_count < 4 && $t) {
-            $t->{shape_moments}{ineligible}++;
-        }
-        if ($duration_count >= 4) {
-            $t->{shape_moments}{computed}++ if $t;
-            my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
-            for my $x (@sorted) {
-                my $d = $x - $mean;
-                my $d2 = $d * $d;
-                $m2_sum += $d2;
-                $m3_sum += $d2 * $d;
-                $m4_sum += $d2 * $d2;
-            }
-            my $n  = $duration_count;
-            my $m2 = $m2_sum / $n;
-            my $m3 = $m3_sum / $n;
-            my $m4 = $m4_sum / $n;
-            if ($m2 > 0) {
-                my $g1 = $m3 / ($m2 ** 1.5);
-                my $g2 = $m4 / ($m2 ** 2) - 3;
-                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
-            }
-        }
-        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
-    } elsif ($t) {
-        if ($duration_count >= 4) { $t->{shape_moments}{skipped_demand}++ }
-        else                      { $t->{shape_moments}{ineligible}++ }
-    }
+    @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef)
+        if $demand->{shape};
 
     return \%stats;
 }
@@ -18263,22 +18342,17 @@ sub calculate_statistics_bin {
         ? ($stats_demand_telemetry{ $demand->{store} // 'unattributed' } //= {})
         : undef;
     $t->{stats_calls}++ if $t;
-    return unless $sidecar_entry && ($sidecar_entry->{occurrences} // 0) > 0;
-    my $n = $sidecar_entry->{duration_count} // 0;
+    # The observation count is the gate (#616 D9): no timed line, no statistic.
+    my $n = $sidecar_entry ? ($sidecar_entry->{duration_count} // 0) : 0;
     return unless $n > 0;
 
     my $min  = $sidecar_entry->{min};
     my $max  = $sidecar_entry->{max};
-    my $mean = $aggregated_data->{total_duration} / $n;
-
-    my ($std_dev, $cv);
-    if ($n >= 2) {
-        my $sum_sq_dev = $sidecar_entry->{sum_of_squares} - $n * ($mean ** 2);
-        $sum_sq_dev = 0 if $sum_sq_dev < 0;   # guard floating-point underflow on near-constant data
-        my $variance = $sum_sq_dev / ($n - 1);
-        $std_dev = sqrt($variance);
-        $cv = $mean != 0 ? $std_dev / $mean : undef;
-    }
+    # The moment sums are the running sums the Welford-Pébay update keeps
+    # (M_k_sum / n = m_k), present under shape demand.
+    my ($mean, $std_dev, $cv, $skewness, $kurtosis, $bimodality_coef) = derive_moment_statistics(
+        $n, $aggregated_data->{total_duration}, $sidecar_entry->{sum_of_squares},
+        ( $demand->{shape} ? [ @$sidecar_entry{qw(m2_sum m3_sum m4_sum)} ] : undef ), $demand, $t);
 
     # Quantiles to derive, by demand: terminal_core always; csv_body and
     # extended_percentiles when demanded. p75 is additionally needed as an
@@ -18355,34 +18429,8 @@ sub calculate_statistics_bin {
         $t->{extended_percentiles}{skipped_demand}++;
     }
 
-    # Distribution-shape moments — same downstream formulas as calculate_statistics,
-    # with m2/m3/m4 sourced from the Welford-Pébay sidecar accumulators
-    # (M_k_sum / n = m_k central moment). O(1) here; gated on demand so the
-    # fields are neither derived nor stored when no consumer reads them.
-    if ($demand->{shape}) {
-        my ($skewness, $kurtosis, $bimodality_coef) = (undef, undef, undef);
-        if ($t) {
-            if ($n >= 4) { $t->{shape_moments}{computed}++ }
-            else         { $t->{shape_moments}{ineligible}++ }
-        }
-        if ($n >= 4) {
-            my $m2 = $sidecar_entry->{m2_sum} / $n;
-            my $m3 = $sidecar_entry->{m3_sum} / $n;
-            my $m4 = $sidecar_entry->{m4_sum} / $n;
-            if ($m2 > 0) {
-                my $g1 = $m3 / ($m2 ** 1.5);
-                my $g2 = $m4 / ($m2 ** 2) - 3;
-                $skewness = sqrt($n * ($n - 1)) / ($n - 2) * $g1;
-                $kurtosis = ($n - 1) / (($n - 2) * ($n - 3)) * (($n + 1) * $g2 + 6);
-                my $bc_denom = $kurtosis + 3 * (($n - 1) ** 2) / (($n - 2) * ($n - 3));
-                $bimodality_coef = ($skewness * $skewness + 1) / $bc_denom if $bc_denom > 0;
-            }
-        }
-        @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef);
-    } elsif ($t) {
-        if ($n >= 4) { $t->{shape_moments}{skipped_demand}++ }
-        else         { $t->{shape_moments}{ineligible}++ }
-    }
+    @stats{qw(skewness kurtosis bimodality_coef)} = ($skewness, $kurtosis, $bimodality_coef)
+        if $demand->{shape};
 
     return \%stats;
 }
@@ -21189,7 +21237,7 @@ sub print_summary_table {
         push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
     }
     push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $max_memory_usage ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $reported_max_memory_usage ) );
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
@@ -21208,7 +21256,7 @@ sub print_summary_table {
             # structures are not misreported as unattributed memory.
             my $total_hwm = 0;
             $total_hwm += $_ for values %memory_high_water_marks;
-            my $unattributed = $max_memory_usage - $total_hwm;
+            my $unattributed = $reported_max_memory_usage - $total_hwm;
             $unattributed = 0 if $unattributed < 0;
 
             # Sort by size descending, skip empty structures
@@ -21220,7 +21268,7 @@ sub print_summary_table {
                 my ($label, $size) = @_;
                 my $category_width = $category_column_width + 2;
                 my $occurrences_width = $occurrences_column_width - 2;
-                my $pct = $max_memory_usage > 0 ? ($size / $max_memory_usage) * 100 : 0;
+                my $pct = $reported_max_memory_usage > 0 ? ($size / $reported_max_memory_usage) * 100 : 0;
                 # Whole percent in a fixed five-character parenthesised field;
                 # a structure holding less than one percent of the peak says so
                 # rather than rounding down to a flat 0%.
@@ -21502,13 +21550,10 @@ sub print_message_summary {
                     my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
                     my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
                     my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
-                    # Divide by the lines that carried a bytes value, not by every
-                    # matched line: total_bytes is 0-initialised, so occurrences as
-                    # the divisor understates the mean wherever a message key mixes
-                    # lines with and without a bytes field (#432).
-                    my $bytes_mean = $bytes_occurrences
-                        ? int( $total_bytes_num / $bytes_occurrences + 0.5 )
-                        : undef;
+                    # Stored precise by the group calculation, divided by the lines
+                    # that carried a bytes value (#432); rounded here only by
+                    # format_csv_value, as the STATS CSV rounds its own (#616 D6).
+                    my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $mean = $log_messages{$grouping}{$key}{mean};
                     my $max = $log_messages{$grouping}{$key}{max};
@@ -21986,12 +22031,12 @@ sub pipeline_finalize {
                     $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
                     push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                         $keys_seen, $final_remaining,
-                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 } else {
                     $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
                     push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
                         $keys_seen, $final_remaining,
-                        (1 - $final_remaining / ($keys_seen || 1)) * 100);
+                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 }
             }
 
@@ -22167,6 +22212,7 @@ sub pipeline_render {
     # summary render's own residual is covered by the post-output measurement
     # below and visible under -mem debug.
     measure_memory_structures();
+    $reported_max_memory_usage = $max_memory_usage;
 
     # The summary reports on the run itself -- the span analysed, the files read,
     # the totals, timing and memory -- so it closes the output, leaving the
@@ -22179,8 +22225,8 @@ sub pipeline_render {
     measure_memory_structures();
     memory_debug_decomposition("end");
 
-    # The aggregate export reads the run's peak memory and total time, so it
-    # follows the summary and the post-output measurement (Issue #503).
+    # The aggregate export reads the run's peak memory as the summary reported
+    # it, and its total time, so it follows the summary (Issue #503).
     write_aggregate_export();
 
     write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)

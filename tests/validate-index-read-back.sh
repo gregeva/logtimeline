@@ -1190,6 +1190,106 @@ scenario_filtered_tier2_no_leak() {
 }
 
 # ---------------------------------------------------------------------------
+# #616: the index's means, its bytes population and the bytes heatmap pre-seed.
+# Committed fixtures, one-day bucket: the twelve-line access fixture (one
+# request per endpoint, one zero-byte response, no count lines) and the
+# gated-means access fixture (one path whose two durations average to 50).
+# ---------------------------------------------------------------------------
+SINGLE_SAMPLE_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+GATED_ACCESS_FIXTURE="$REPO_DIR/tests/fixtures/gated-means-access.txt"
+IDX616_CONTRACT='features/616-gated-mean-derivation.md D8, D15 and D16 (the index means are written through the CSV formatter at two decimals whatever -cp says, trailing zeros stripped, empty for no data; the bounds keep -)'
+IDX616_PRODUCER='write_index_file() in ltl (the six means through mean_of() and format_csv_value() at a fixed two decimals)'
+
+scenario_index_means_fixed_precision() {
+    current_scenario="index-means-fixed-precision"
+    echo "[$current_scenario]"
+    local cp out v row
+    for cp in default 0 4 full; do
+        rm -f ltl-index.csv
+        if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
+        else out=$(run_ltl $COMMON -cp "$cp" "$SINGLE_SAMPLE_FIXTURE"); fi
+        check_capture_warnings "$out"
+        v=$(read_index_column duration_mean 'entry_type=file')
+        assert_command \
+            command     "[ \"$v\" = 128.75 ]" \
+            label       "-cp $cp: the file row's duration_mean is 128.75 ('$v')" \
+            asserts     'The index writes its means at two decimals whatever -cp the run was given: the index is a durable file compared across runs, so a per-run precision must not change what it holds for the same file' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+    done
+    for row in file selection; do
+        v=$(read_index_column entry_type "entry_type=$row")
+        assert_command command "[ \"$v\" = $row ]" label "the index holds a $row row" \
+            asserts 'The rows the cell reads below address exist, so an empty read is the cell and not a missing row' \
+            produced_by 'write_index_file() in ltl' contract "$IDX616_CONTRACT"
+        v=$(read_index_column count_mean "entry_type=$row")
+        assert_command command "[ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
+            asserts 'A mean with no observation writes the empty cell every CSV surface writes for no data, not a placeholder' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+        v=$(read_index_column count_min "entry_type=$row")
+        assert_command command "[ \"$v\" = - ]" label "$row row: the count_min bound keeps '-' ('$v')" \
+            asserts 'A missing bound keeps the - the read-back side reads as no bound' \
+            produced_by 'write_index_file() in ltl' contract 'features/179-index-read-back.md (a missing bound is -); features/616-gated-mean-derivation.md D15'
+    done
+}
+
+scenario_index_means_integral() {
+    current_scenario="index-means-integral"
+    echo "[$current_scenario]"
+    local cp out v
+    for cp in default full; do
+        rm -f ltl-index.csv
+        if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON -i /gm/order "$GATED_ACCESS_FIXTURE")
+        else out=$(run_ltl $COMMON -cp "$cp" -i /gm/order "$GATED_ACCESS_FIXTURE"); fi
+        check_capture_warnings "$out"
+        v=$(read_index_column duration_mean 'entry_type=selection')
+        assert_command command "[ \"$v\" = 50 ]" label "-cp $cp: a whole-number selection mean writes 50, not 50.00 ('$v')" \
+            asserts 'The formatter strips trailing zeros, so a mean that is a whole number carries no decimals' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+    done
+}
+
+scenario_index_bytes_counted() {
+    current_scenario="index-bytes-counted"
+    echo "[$current_scenario]"
+    local out occ bmin bmean stats smean
+    out=$(run_ltl $COMMON -o -cp 2 "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    occ=$(read_index_column file_bytes_occurrences 'entry_type=file')
+    bmin=$(read_index_column file_bytes_min 'entry_type=file')
+    bmean=$(read_index_column file_bytes_mean 'entry_type=file')
+    stats=$(ls ./*-LTL-STATS-*.csv 2>/dev/null | head -1)
+    smean=$([[ -n "$stats" ]] && perl -MText::CSV -e 'my $c=Text::CSV->new({binary=>1}); open my $f,"<",$ARGV[0] or die; my $h=$c->getline($f); my %i; @i{@$h}=0..$#$h; my $r=$c->getline($f); print $r->[$i{bytes_mean}] // ""' "$stats")
+    assert_command command "[ \"$occ\" = 12 ] && [ \"$bmin\" = 0 ] && [ \"$bmean\" = 18683.33 ]" \
+        label "the index counts the zero-byte response: occurrences $occ, min $bmin, mean $bmean" \
+        asserts 'A zero-byte response is a bytes observation in the index as it is in both statistics stores: the count, the minimum and the mean include it' \
+        produced_by 'read_and_process_logs() in ltl (the per-file index bytes accumulation) and write_index_file()' \
+        contract 'features/616-gated-mean-derivation.md D17 (the index bytes population is the stores)'
+    assert_command command "[ \"$smean\" = \"$bmean\" ]" \
+        label "the STATS CSV under -cp 2 writes the same bytes mean ('$smean')" \
+        asserts 'The index and the STATS CSV hold one bytes mean for one file' \
+        produced_by 'write_index_file() and print_bar_graph() in ltl' \
+        contract 'features/616-gated-mean-derivation.md D17'
+}
+
+scenario_index_heatmap_bytes_preseed() {
+    current_scenario="index-heatmap-bytes-preseed"
+    echo "[$current_scenario]"
+    local out v
+    out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    edit_index_row 'entry_type=file' 'file_bytes_max=999999'
+    edit_index_row 'entry_type=selection' 'file_bytes_max=999999'
+    out=$(run_ltl_v -hm bytes "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    v=$(extract_v_value "$out" heatmap_preseed_max)
+    assert_command command "[ \"$v\" = 999999 ]" \
+        label "-hm bytes is pre-seeded from the index's bytes bound ($v)" \
+        asserts 'The bytes heatmap takes its starting range from the bytes bounds the index writes (file_bytes_min, file_bytes_max), as the duration heatmap does from its duration bounds' \
+        produced_by 'read_index_file() in ltl (heatmap pre-seed) + emit_index_readback_verbose() (heatmap_preseed_max)' \
+        contract 'features/616-gated-mean-derivation.md D24'
+}
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1212,7 +1312,11 @@ scenario_register cold-no-index \
                   missing-bound-column \
                   expired-selection-entry \
                   signature-canonicalization \
-                  filtered-tier2-no-leak
+                  filtered-tier2-no-leak \
+                  index-means-fixed-precision \
+                  index-means-integral \
+                  index-bytes-counted \
+                  index-heatmap-bytes-preseed
 scenario_parse_args "$@"
 
 echo "Validating index read-back against ltl at $LTL"
@@ -1244,6 +1348,10 @@ while read -r _scenario; do
         expired-selection-entry              ) _fn=scenario_expired_selection_entry ;;
         signature-canonicalization           ) _fn=scenario_signature_canonicalization ;;
         filtered-tier2-no-leak               ) _fn=scenario_filtered_tier2_no_leak ;;
+        index-means-fixed-precision          ) _fn=scenario_index_means_fixed_precision ;;
+        index-means-integral                 ) _fn=scenario_index_means_integral ;;
+        index-bytes-counted                  ) _fn=scenario_index_bytes_counted ;;
+        index-heatmap-bytes-preseed          ) _fn=scenario_index_heatmap_bytes_preseed ;;
     esac
     echo ""
     in_scenario_dir "$_fn"
