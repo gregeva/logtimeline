@@ -1,4 +1,4 @@
-# #640 — CSV input takes the wrong timestamp column and cannot read the timestamps ltl writes
+# #640 — CSV input reports rows it cannot place on the timeline, per row and per file
 
 Sub-issue of #629 (defects with a user-defined metric using a custom regex and
 capture group); umbrella record `features/629-udm-custom-regex-defects.md`.
@@ -6,8 +6,11 @@ Owning area: `features/user-defined-metrics.md` § CSV Columnar Input.
 
 ## Requirement
 
-CSV input reads its time from the column that carries it, and a STATS CSV that
-`ltl` wrote can be read back as input.
+A CSV row is placed on the timeline only when its timestamp parses; a row
+that cannot be placed is read and not matched, silently, as any other line.
+Informational messages about user-defined metrics on CSV input are run-level,
+never per row or per file (D1). The column-choice and accepted-form defects
+found in the investigation are deferred to release 0.19.0 (D2).
 
 ## Findings
 
@@ -98,6 +101,16 @@ are unchanged.
   already has its own surfaces. Consequence: `ltl-index.csv`, or any CSV
   without a parsable timestamp, read as input produces no message and shows as
   nothing matched in the file list.
+
+- **D2 — Release 0.18.5 delivers D1 only; column choice and accepted forms
+  are deferred to release 0.19.0.** Which column carries the timestamp is added
+  to #615 (CSV input as a header-instantiated registry entry; its § 2 on
+  release/0.19.0); the quoted STATS CSV timestamp, a timestamp without seconds
+  and epoch milliseconds are added to #611 (one application-wide rule for
+  accepting timestamps; its issue body), whose CSV contract is corrected to
+  D1. Offsets stay with #155. Neither issue covered these before. Consequence
+  accepted until 0.19.x: a STATS CSV fed back to ltl shows nothing matched, and
+  a CSV whose column 0 holds a numeric id is placed on wrong dates.
 
 ## Acceptance criteria
 
