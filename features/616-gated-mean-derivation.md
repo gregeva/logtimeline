@@ -1728,3 +1728,28 @@ reused them. All three passed. A fresh capture costs about 8.5 minutes on this
 host, paid on the first statistics-harness run after an edit.
 `tests/HARNESS-DESIGN.md` § Cached capture artifacts expire and the
 cache-validity assertions of `validate-csv-output.sh` state the rule.
+
+**Drift harness: the duration row checks read the CSV's own column names**
+(architect's direction, 2026-09-30, found while preparing drop 4). Since #432
+prefixed the duration statistic columns with `duration_`, five Layer 2 checks of
+`tests/statistics-drift/compare-statistics-drift.pl` read bare names (`min`,
+`mean`, `max`, `p1` … `p99999`, `iqr`) that no MESSAGES or STATS row carries,
+and passed without checking anything: duration order, duration derivation,
+percentile monotonicity, percentile bounds and IQR. Measured on a copy of the
+committed `tomcat-default` MESSAGES baseline with a percentile ladder broken, an
+IQR shifted and a mean altered: the engine as it stood failed it on Layer 1
+drift alone, with no Layer 2 finding; with the lookups renamed, the
+percentile-order, IQR and derivation checks each fired; over every committed
+baseline (44 files) the renamed checks report nothing. The lookups now read the
+`duration_` columns. The derivation check, which asserted `mean == duration /
+occurrences`, the divisor D5 and D11 remove (the mean divides by the lines that
+carried a duration), now asserts `duration_mean >= duration / occurrences`,
+equal when every line carried a duration; the CSV carries no timed-line count,
+so the exact relation is not checkable from the file. A mean set below
+`duration / occurrences` was shown to fail it. The engine now refuses to start
+when a column a Layer 2 check reads is unknown to the rules TSV (shown with a
+renamed column: exit 2, the column named), so a future rename cannot silence the
+checks again. The L1 and L2 `produced_by` strings that named subs no longer in
+`ltl` (`accumulate_log_record`, `finalize_buckets`,
+`calculate_percentiles_for_bucket`, `calculate_shape_statistics`) name the subs
+that produce those values today.

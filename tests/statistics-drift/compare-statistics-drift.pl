@@ -187,6 +187,26 @@ my $RULES        = load_rules($RULES_TSV);
 my $NUMERIC_COLS = numeric_columns_from_rules($RULES);
 my $ALL_RULES_COLS = all_columns_from_rules($RULES);
 my %COL_FAMILY   = map { $_->{column} => $_->{family} } @$RULES;
+
+# Anchor for Layer 2: every column the row checks read must be a column the
+# rules know, so a renamed CSV column stops the engine instead of leaving the
+# checks that read it silently comparing nothing (after the duration_ prefix
+# of #432, five duration checks read bare names and asserted nothing until
+# #616 found them).
+{
+    my @l2_columns = ( qw(occurrences duration duration_min duration_mean duration_max
+                          duration_iqr bytes bytes_min bytes_mean bytes_max bytes_occurrences
+                          count_min count_mean count_max count_sum count_occurrences),
+                       map { "duration_$_" } qw(p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999) );
+    my @unknown = grep { !$ALL_RULES_COLS->{$_} } @l2_columns;
+    if (@unknown) {
+        print STDERR "compare-statistics-drift.pl: refuse to start — Layer 2 reads columns the rules TSV does not know: @unknown\n";
+        print STDERR "  asserts: every column a Layer 2 invariant reads is a column the CSV can carry\n";
+        print STDERR "  produced_by: the Layer 2 checks of this engine (check_layer2_row)\n";
+        print STDERR "  contract: tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors\n";
+        exit 2;
+    }
+}
 my %COL_TYPE     = map { $_->{column} => $_->{type}   } @$RULES;
 
 #-------------------------------------------------------------------------
@@ -283,7 +303,7 @@ sub row_key {
 my %L1_FIELDS_BY_FAMILY = (
     meta => {
         asserts     => 'aggregate metadata (row count or category meta) is stable under unchanged accumulation',
-        produced_by => 'accumulate_log_record() and finalize_buckets() in ltl',
+        produced_by => 'read_and_process_logs() and calculate_all_statistics() in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift',
     },
     duration => {
@@ -293,7 +313,7 @@ my %L1_FIELDS_BY_FAMILY = (
     },
     bytes => {
         asserts     => 'bytes aggregate is stable under unchanged accumulation',
-        produced_by => 'accumulate_log_record() in ltl',
+        produced_by => 'read_and_process_logs() in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift',
     },
     count => {
@@ -303,17 +323,17 @@ my %L1_FIELDS_BY_FAMILY = (
     },
     percentile => {
         asserts     => 'percentile value is stable under unchanged percentile algorithm',
-        produced_by => 'calculate_percentiles_for_bucket() in ltl',
+        produced_by => 'calculate_statistics() (raw) and calculate_statistics_bin() (bin) in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift',
     },
     shape => {
         asserts     => 'distribution-shape statistic is stable under unchanged shape formula',
-        produced_by => 'calculate_shape_statistics() in ltl',
+        produced_by => 'derive_moment_statistics() in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift',
     },
     level => {
         asserts     => 'per-level count or rate is stable under unchanged classification',
-        produced_by => 'accumulate_log_record() and finalize_buckets() in ltl',
+        produced_by => 'read_and_process_logs() and calculate_all_statistics() in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 1 — Layer 1 drift',
     },
 );
@@ -645,14 +665,14 @@ sub emit_row_key_mismatch {
 
 my %L2_INVARIANTS = (
     duration_order => {
-        asserts     => 'duration row ordering invariant: min <= mean <= max',
-        produced_by => 'calculate_statistics() in ltl',
+        asserts     => 'duration row ordering invariant: duration_min <= duration_mean <= duration_max',
+        produced_by => 'calculate_statistics() and calculate_statistics_bin() in ltl (min, max), derive_moment_statistics() (mean)',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — duration ordering',
     },
     duration_deriv => {
-        asserts     => 'mean equals duration divided by occurrences',
-        produced_by => 'calculate_statistics() in ltl',
-        contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — duration derivation',
+        asserts     => 'duration_mean is at least duration divided by occurrences: the mean divides the total by the lines that carried a duration, which are at most every matched line, so the two are equal when every line carried one',
+        produced_by => 'derive_moment_statistics() in ltl, through mean_of()',
+        contract    => 'features/616-gated-mean-derivation.md D5 and D11 (the mean divides by the lines that carried a duration); the CSV carries no timed-line count, so the exact relation is not checkable from the file',
     },
     bytes_order => {
         asserts     => 'bytes row ordering invariant: bytes_min <= bytes_mean <= bytes_max <= bytes',
@@ -681,17 +701,17 @@ my %L2_INVARIANTS = (
     },
     percentile_monotonic => {
         asserts     => 'percentile ladder is non-decreasing: p1 <= p5 <= p10 <= p25 <= p50 <= p75 <= p90 <= p95 <= p99 <= p999 <= p9999 <= p99999',
-        produced_by => 'calculate_percentiles_for_bucket() in ltl',
+        produced_by => 'calculate_statistics() (raw) and calculate_statistics_bin() (bin) in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — percentile monotonicity',
     },
     percentile_bounded => {
         asserts     => 'percentiles bounded by min and max: min <= p1 and p99999 <= max',
-        produced_by => 'calculate_percentiles_for_bucket() in ltl',
+        produced_by => 'calculate_statistics() (raw) and calculate_statistics_bin() (bin) in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — percentile bounds',
     },
     iqr_deriv => {
         asserts     => 'iqr equals p75 minus p25',
-        produced_by => 'calculate_percentiles_for_bucket() in ltl',
+        produced_by => 'calculate_statistics() (raw) and calculate_statistics_bin() (bin) in ltl',
         contract    => 'features/224-validate-statistics-test-harness.md § Decision 4 — IQR derivation',
     },
     level_partition => {
@@ -742,9 +762,9 @@ sub check_layer2_row {
     my $k = row_key($row, $file_kind);
 
     # Duration ordering: min <= mean <= max (when all three present)
-    my $dmin  = as_num($row->{min});
-    my $dmean = as_num($row->{mean});
-    my $dmax  = as_num($row->{max});
+    my $dmin  = as_num($row->{duration_min});
+    my $dmean = as_num($row->{duration_mean});
+    my $dmax  = as_num($row->{duration_max});
     if (defined $dmin && defined $dmean && defined $dmax) {
         unless ($dmin <= $dmean + ORDERING_EPS && $dmean <= $dmax + ORDERING_EPS) {
             $stats->{T4}++;
@@ -761,22 +781,23 @@ sub check_layer2_row {
         }
     }
 
-    # Duration derivation: mean == duration / occurrences
+    # Duration derivation: mean >= duration / occurrences (the mean's divisor
+    # is the timed lines, at most every matched line)
     my $occ      = as_num($row->{occurrences});
     my $duration = as_num($row->{duration});
     if (defined $dmean && defined $duration && defined $occ && $occ > 0) {
         my $expected = $duration / $occ;
-        if (abs($expected - $dmean) > DERIVATION_EPS) {
+        if ($dmean < $expected - DERIVATION_EPS * (abs($expected) > 1 ? abs($expected) : 1)) {
             $stats->{T4}++;
             my $inv = $L2_INVARIANTS{duration_deriv};
             emit_l2_failure(
                 scenario => $scenario, file => $file_kind, key => $k,
                 invariant => "duration_deriv ($side)",
-                observed => sprintf("mean=%s duration=%s occurrences=%s expected_mean=%.5f", $dmean, $duration, $occ, $expected),
+                observed => sprintf("duration_mean=%s duration=%s occurrences=%s duration/occurrences=%.5f", $dmean, $duration, $occ, $expected),
                 asserts => $inv->{asserts},
                 produced_by => $inv->{produced_by},
                 contract => $inv->{contract},
-                rule => 'mean == duration / occurrences (tolerance 1e-9, float precision)',
+                rule => 'duration_mean >= duration / occurrences (tolerance 1e-9 relative, float precision)',
             );
         }
     }
@@ -890,7 +911,7 @@ sub check_layer2_row {
     my @pvals;
     my $any_p = 0;
     for my $p (@PERCENTILE_LADDER) {
-        my $v = as_num($row->{$p});
+        my $v = as_num($row->{"duration_$p"});
         push @pvals, $v;
         $any_p = 1 if defined $v;
     }
@@ -921,8 +942,8 @@ sub check_layer2_row {
     }
 
     # Percentile bounded by min/max
-    my $p1     = as_num($row->{p1});
-    my $p99999 = as_num($row->{p99999});
+    my $p1     = as_num($row->{duration_p1});
+    my $p99999 = as_num($row->{duration_p99999});
     if (defined $dmin && defined $p1 && $dmin > $p1 + ORDERING_EPS) {
         $stats->{T4}++;
         my $inv = $L2_INVARIANTS{percentile_bounded};
@@ -951,9 +972,9 @@ sub check_layer2_row {
     }
 
     # IQR derivation
-    my $iqr = as_num($row->{iqr});
-    my $p25 = as_num($row->{p25});
-    my $p75 = as_num($row->{p75});
+    my $iqr = as_num($row->{duration_iqr});
+    my $p25 = as_num($row->{duration_p25});
+    my $p75 = as_num($row->{duration_p75});
     if (defined $iqr && defined $p25 && defined $p75) {
         my $expected = $p75 - $p25;
         if (abs($expected - $iqr) > DERIVATION_EPS) {
