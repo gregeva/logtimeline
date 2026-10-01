@@ -3,11 +3,17 @@
 ## Status
 
 Specification agreed with the architect 2026-09-28 on branch
-`619-per-run-key-cut` off `release/0.19.0`; implementation not started. Nothing
-in `ltl` has changed on the branch, and `$version_number` has not been stamped.
-The inert re-scan partition is removed as dead code in implementation drop 1,
-because consolidation across log levels is the design and supersedes the level
-pre-filter it was meant to be (D8, locked 2026-09-29; § 5.5, § 9).
+`619-per-run-key-cut` off `release/0.19.0`. Implementation started 2026-10-01:
+drop 1 (the per-run cut, named cut lengths, redundant cuts and the inert re-scan
+partition removed) is pushed (§ 11).
+
+**Amended 2026-10-01 (§ 4.4).** The scope widens to the final pass grouping
+strictly by category and grouping key (D10, § 5.9) and to correcting the master
+specification for message consolidation, `features/fuzzy-message-consolidation.md`,
+where it is out of date or inconsistent (D11, § 5.10). D1 is restated: the
+message key is one contiguous string, and the grouping key separates messages
+in both passes. The design of § 5.9 and the criteria AC15 and AC16 are
+proposed for the architect's agreement before drop 3.
 
 The issue comes from stage 13 (the key cut and the cap) of the #342 review of
 duplicated logic, decided by the architect on 2026-09-27. It is a sub-issue of
@@ -62,7 +68,7 @@ is held to the same standard: the equivalence matrix proves it changes no output
 ## 2. Requirement
 
 The architect's terms, from the issue body, the review's stage rows and the
-decisions of 2026-09-28 and 2026-09-29 (§ 4), arranged by topic:
+decisions of 2026-09-28, 2026-09-29 and 2026-10-01 (§ 4), arranged by topic:
 
 - **One per-run cut.** The length at which a message key is cut is resolved
   once per run into one named value. Everything that cuts, compares or reports
@@ -75,20 +81,27 @@ decisions of 2026-09-28 and 2026-09-29 (§ 4), arranged by topic:
   the key.
 - **Every cut length is a named constant with its reason.** Where no reason is
   on record, the constant says so.
-- **The consolidation record is trued up to the code**, including the fact that
-  consolidation across log levels is the design.
+- **The grouping key is a data-consistency contract in both passes.** A key is
+  compared and grouped only with keys of its own category and grouping key, in
+  the streaming checkpoints and the final pass; the final pass, which breaks
+  the contract today, is fixed (D1 restated, D10).
+- **The master specification is the reference.** The code is held to
+  `features/fuzzy-message-consolidation.md`; where it is out of date or
+  inconsistent it is corrected here (D11, § 5.10).
 - **The unread counter of the observed maximum key length goes.**
-- **The inert re-scan partition is removed as dead code.** Consolidation
-  across log levels is the design, so the level pre-filter the partition was
-  meant to be is superseded. Its code, its constants, its callers' use of the
+- **The inert re-scan partition is removed as dead code.** Within a group every
+  key shares its level, so the level pre-filter the partition was meant to be
+  divides nothing. Its code, its constants, its callers' use of the
   buckets and its uncalled third copy go, and the removal is proven
   behaviour-neutral (D8).
 - **Done when:** the benchmark data reports the cut the run used; the re-scan
-  partition's code is gone; the MESSAGES CSV keys and consolidation output are
-  byte-identical to today's on the fixtures and the equivalence matrix; the
-  before/after benchmark shows the moved CONFIG line on `-o` and `-g` runs and
-  nothing else, with the final-pass time not rising; the record describes the
-  code.
+  partition's code is gone; no row groups keys of two grouping keys, and every
+  final-pass batch holds one grouping key; the MESSAGES CSV keys and
+  consolidation output are byte-identical to today's on the fixtures and the
+  equivalence matrix except where a final-pass batch held two levels, each such
+  difference attributed; the before/after benchmark shows the moved CONFIG line
+  on `-o` and `-g` runs and, on the `-g` cases, only movement attributed to the
+  final-pass fix; the master specification describes the code.
 
 ---
 
@@ -108,7 +121,7 @@ options.
 | 6 | The batch path parses the level four times and strips it with a fifth regex | **Holds.** `group_similar_messages` has `my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;` at three sites and `my ($gk) = $log_key =~ /^\[([^\]]+)\]/;` at one. The sort comparator strips the prefix with `/^\[[^\]]+\]\s*(.*)/s`, and when that fails it falls back to the whole key. |
 | 7 | The audit's target for the grouping key says the consolidation store "already keeps" it in `%consolidation_key_message_cat_gk` | **Does not hold as a carrier; the map is written and never read.** `consolidation_process_key` writes it, `run_consolidation_checkpoint` deletes from it on eviction and consumption, and `group_similar_messages` empties it when the final pass starts. No site reads it. It costs memory for every key in the streaming working set and has no reader. |
 | 8 | The bucket-key cut takes the first word to 30 characters, else the message to 20, and its comment says 20 | **Holds; the cut changes no key, and the split it makes is by level.** `extract_consolidation_bucket_key` receives the capped whole key, or a canonical form, not the message body. The first word of every key is its bracketed level, which every key of one group shares. So within one group the re-scan split is a single bucket. The 20-character branch cannot run, because every key starts with `[`, which is not whitespace. The 30-character cut acts only on a level longer than 29 characters. A probe on a scratch copy of `ltl` printed each final-pass window's buckets on five committed fixtures (two application logs carrying thread and logger, one holding a line at each of six levels and one holding INFO and WARN lines that carry control characters; and three access logs whose level is the HTTP status, two answering only 200 and one answering 200 and 500): a window holding keys of one level held one bucket; a window holding keys of two levels (item 9) held two. The partition that `docs/staged-processing-pipeline.md` credits with a 21 % speed-up (`[LEVEL][class]` in the prototype) does not divide a group in `ltl`. How this relates to the plain and highlighted split is § 5.5. The partition is removed as dead code (D8), consolidation across levels being the design. |
-| 9 | (not in the issue) `features/fuzzy-message-consolidation.md` § Grouping Key Design says an ERROR message is never compared with a WARN message | **The record does not describe the code; the code is the design (D1 below).** In the final pass of `group_similar_messages`, a window with fewer than two keys is not processed and is carried on, so a lone key of one level joins the window of the next level. Two application-log lines with the same thread, logger and body, one at ERROR and one at WARN, print under `-g` as one row with the level shown as `[*]` and 2 occurrences. The probe of item 8 found windows holding two levels on three of the five fixtures: both application logs (the six-level log and the INFO and WARN log) and the access log answering 200 and 500. Nothing in the key text is exempt from consolidation, the level included; the record is trued up to say so. |
+| 9 | (not in the issue) `features/fuzzy-message-consolidation.md` § Grouping Key Design says an ERROR message is never compared with a WARN message | **Corrected 2026-10-01: the record states the contract and the final pass breaks it; the final pass is fixed in this issue (D10, the final pass grouped strictly by category and grouping key).** The text first written here read the code as the design; that reading is withdrawn (§ 4.4). The measurement below stands. In the final pass of `group_similar_messages`, a window with fewer than two keys is not processed and is carried on, so a lone key of one level joins the window of the next level. Two application-log lines with the same thread, logger and body, one at ERROR and one at WARN, print under `-g` as one row with the level shown as `[*]` and 2 occurrences. The probe of item 8 found windows holding two levels on three of the five fixtures: both application logs (the six-level log and the INFO and WARN log) and the access log answering 200 and 500. Nothing in the key text is exempt from consolidation, the level included; the record is trued up to say so. |
 | 10 | IQ-01 names `--consolidate-full-key`, and treats session as a grouping field under `--include-session` | **Neither option exists in `ltl`.** |
 | 11 | The cap's reason is DD-06 | **DD-06 gives the reason for grouping only.** The value 350 came first from the CSV option: the commit that added MESSAGES CSV output used `$write_messages_to_csv == 1 ? 350 : $max_log_message_length`. The grouping change adopted it "same as CSV output". No record gives a reason for the CSV's 350; its reason is now that it shares the grouping cap, so `-o` and `-o -g` produce the same keys (D5). |
 | 12 | The thread cut is 20 and the object cut is 25, with no reason on record | **Holds.** Both came in one commit ("Truncate message object and thread names in message stats") with no stated reason. The thread keeps its first 20 characters and the object keeps its last 25. `my $max_object_length = 25;` is re-declared for every retained message. They are recorded as having no reason on record (D5). |
@@ -177,6 +190,12 @@ govern.
   nothing changes in the final-pass window, and consolidation output stays
   byte-identical. The consolidation record is trued up in this issue so that the
   condition is never raised as a defect again (§ 10).
+  **Restated by the architect on 2026-10-01 (§ 4.4):** what holds is that the
+  message key is one contiguous string with no part exempt from similarity
+  scoring and wildcarding. The rest of this entry (an ERROR and a WARN line
+  with the same body consolidating into one row; the grouping key not being a
+  barrier; no bug; byte-identical consolidation output; the record trued up to
+  cross-level consolidation) is withdrawn.
 - **D2. No carrier prototype and no amendment to the done-when for the grouping
   key.** Locked by the architect 2026-09-28, who ruled the question not
   relevant. The grouping key travels with the entry as locked on 2026-09-27. The
@@ -259,6 +278,55 @@ have to state that tension:
   trued up so that no entry claims a level pre-filter or a re-scan bucket
   speed-up, stating that cross-level consolidation is the design and that the
   pre-filter was removed as dead code under this issue (§ 10).
+  *The words "stating that cross-level consolidation is the design" are
+  withdrawn by the restatement of D1 (§ 4.4); the removal itself stands.*
+
+### 4.4 Locked by the architect on 2026-10-01
+
+Given after the drop 1 equivalence matrix (§ 11.3) found final-pass batches
+holding two levels, and after the consolidation record
+(`features/fuzzy-message-consolidation.md`, the master specification for
+message consolidation) was set beside this specification.
+
+- **D1 restated: the message key is one contiguous string, and category plus
+  grouping key separate messages for every message in both passes.** The
+  architect's words: "The message itself is to be treated as a contiguous
+  string", and "The grouping key concept … is a data consistency contract
+  which should hold for all messages being grouped." No part of the key text
+  is exempt from similarity scoring or wildcarding (thread and object
+  included). A message is compared and grouped only with messages of its own
+  category (plain or highlighted) and grouping key (the log level, or the HTTP
+  status on an access log), in the streaming checkpoints and in the final pass
+  alike, as `features/fuzzy-message-consolidation.md` § Grouping Key Design
+  states. An ERROR line and a WARN line never consolidate into one row.
+- **D9 withdrawn (the counter movement on a final-pass batch spanning two
+  levels).** Its case is the defect D10 fixes; once no batch holds two levels,
+  the removal of the re-scan partition (D8) is expected to change nothing, and
+  the equivalence matrix proves it on the fixed code.
+- **D10. The final pass grouping across grouping keys is a defect, fixed in
+  this issue.** The final pass sorts keys by body with the grouping key
+  stripped, so keys of different levels interleave; a batch is cut at each
+  change of grouping key, and a batch holding one key is carried into the next
+  grouping key's batch and compared there (§ 11.7 measures how often). Every
+  key the final pass handles is compared and grouped only within its own
+  category and grouping key; a lone key is handled expressly so that it never
+  groups across grouping keys. Consolidation output changes wherever a final
+  pass batch held two levels.
+- **D11. The master specification is the reference, and this issue corrects
+  it where it is out of date or inconsistent.** The architect's words: "Your
+  focus should be on that master specification and ensuring that 619 has as a
+  goal to fix the code to fit the spec, or if there are issues within the spec
+  … to raise them." Corrected in this issue (§ 5.10): § Process Flow (the final
+  pass described as running through the streaming pipeline), § Grouping Key
+  Design (the contract stated for both passes), PF-09 (similarity on the full
+  message key, which credits the level prefix with what the grouping key
+  does), IQ-01 (category model: metadata as an exact-match grouping key, the
+  message body alone scored) and DD-08 (similarity on the message body), the
+  final-pass redesign record's § Sort Order (sorting "regardless of status
+  code"), and `docs/similarity-engine-best-practices.md` § Separate Similarity
+  Scope from Storage Scope (the same body-only model). #616's record entries (one gated derivation of means)
+  that state cross-level consolidation as the design (its D26 and finding 15)
+  are marked superseded.
 
 ---
 
@@ -338,27 +406,30 @@ implementation removes it if the carried key makes it redundant (D2).
 The field is added after #616 has given the same entry its observation counts,
 so the entry's shape is read on that tree, not on this document's base commit.
 
-### 5.4 What the grouping key is, and consolidation across levels (D1)
+### 5.4 What the grouping key is: the contract for both passes (D1 restated, D10)
 
 Consolidation works in groups. A group is a category (plain or highlighted, § 5.5)
 plus a grouping key (the log level, or the HTTP status on an access log). Each
-group has its own patterns, clusters, unmatched keys and stage counters, and the
-streaming checkpoints process one group at a time. The grouping key therefore
-orders the work. It is not a barrier to consolidation.
+group has its own patterns, clusters, unmatched keys and stage counters. The
+grouping key is a data-consistency contract: a key is compared and grouped only
+with keys of its own group, in the streaming checkpoints and in the final pass
+(`features/fuzzy-message-consolidation.md` § Grouping Key Design). Within a
+group, similarity is scored on the whole key as one contiguous string, and no
+part of the key text is exempt from wildcarding.
 
-Similarity is scored on the whole key, level included, and no part of the key
-text is exempt from being wildcarded. The final pass sorts each category's keys
-by body and flushes a window when the grouping key changes; a window of fewer
-than two keys is carried into the next, so a lone key of one level is compared
-with keys of the next level and can consolidate with them. The resulting row
-shows the level as a wildcard. This is the design (D1).
+The streaming checkpoints keep the contract: every structure they read is held
+per group. The final pass breaks it today (D10): it sorts each category's keys
+by body with the grouping key stripped, so keys of different levels interleave;
+it cuts a batch when the grouping key changes, and a batch of one key is carried
+into the next grouping key's batch, where it is compared and can consolidate
+with keys of another level, the row showing the level as a wildcard. § 5.9 fixes
+it.
 
-This issue keeps the window exactly as it is. The carried grouping key is the
-level itself, the value the inline path already uses. Today's parse returns the
-text between the leading `[` and the first `]`, or the empty string when the
-brackets are empty. The two are equal for every level that holds no `]`. The
-implementation checks every format spec's level capture and records here that
-none can hold `]`, so every window forms as today.
+The carried grouping key (§ 5.3) is the level itself, the value the inline path
+already uses. Today's parse returns the text between the leading `[` and the
+first `]`, or the empty string when the brackets are empty; the two are equal
+for every level that holds no `]`. Five format specs admit `]` in their level
+capture and no corpus line carries one (§ 11.2).
 
 ### 5.5 The two splits on the consolidation path (D8)
 
@@ -373,8 +444,8 @@ specification was written against.
 | **Re-scan bucket (`extract_consolidation_bucket_key`).** Inside one group, after a new pattern is found, only the keys whose bucket matches the pattern's bucket are re-scanned against it. The bucket is the key's first word cut to 30 characters, else its first 20 characters. | Keys by their first word, which is the bracketed level. | Inert within a group whether or not highlighting is active, because every key of a group shares its level. It separates keys only in a final-pass window that holds keys of two levels (§ 5.4). The 20-character branch never runs. |
 
 The category split stays as it is; this issue does not touch it. The re-scan
-bucket is removed as dead code (D8): consolidation across log levels is the
-design (D1), so the level pre-filter it was meant to be is superseded. The
+bucket is removed as dead code (D8): within a group every key shares its
+level, so the level pre-filter it was meant to be divides nothing. The
 bucket-key sub, its 30 and 20, the bucket building and bucket lookup in
 `run_consolidation_pass` and `process_final_pass_window`, and the uncalled
 `partition_consolidation_keys` go. A new pattern then re-scans every unconsumed
@@ -401,6 +472,10 @@ key of its group, or of its final-pass window.
   proof finds output or a `-V message-grouping` counter moved there, or the
   final-pass time rising beyond 1 %, the measured difference is brought to the
   architect before the drop is pushed; this specification does not accept it.
+  *Outcome (§ 11.3):* the output was identical and four counters moved in that
+  window. The window itself is the defect D10 fixes; with the final pass
+  grouped strictly by grouping key, no window holds two levels, and the
+  removal's proof is re-run on the fixed code (AC14).
 
 ### 5.6 User surfaces
 
@@ -408,13 +483,14 @@ key of its group, or of its final-pass window.
 |---|---|
 | Options, `--help`, `docs/usage.md` | none. No option changes, and no row states a key length. |
 | Notices | none |
-| Rendered output (bar graph, messages table, summary) | none (byte-identical) |
-| MESSAGES CSV, STATS CSV | none (byte-identical) |
+| Rendered output (bar graph, messages table, summary) | none, except under `-g` where a final-pass batch held two levels: no row merges two levels (D10) |
+| MESSAGES CSV, STATS CSV | none, except the MESSAGES rows under `-g` as above |
 | `-V benchmark-data` | `CONFIG max_log_message_length` reads the per-run cut: the cap on `-o` or `-g` runs, the terminal width otherwise. The key name is unchanged. |
-| `-V message-grouping` (and `/ cluster-membership`) | none (byte-identical) |
+| `-V message-grouping` (and `/ cluster-membership`) | the final-pass counters and memberships move where a batch held two levels (D10); no cluster holds members of two grouping keys |
 
 Every "none" above holds with the re-scan partition removed (D8); AC3 and AC14
-prove it.
+prove it. The exceptions come only from the final-pass fix (D10); AC3 attributes
+each one.
 
 ### 5.7 Patterns file
 
@@ -435,9 +511,9 @@ Edits to `docs/architecture-patterns.md`:
 ### 5.8 Relationship to other open issues
 
 - **#616 (one gated derivation of means and totals):** lands first; this issue
-  is blocked by it (Status). #616's record, item 15 of its findings, had noted the
-  cross-level consolidation as a known condition; #616's delivery rewrites that
-  note as the design, per D1, and cross-references § 5.4 here.
+  is blocked by it (Status). #616's record states the final pass carrying a lone
+  key across levels as the design (its D26 and finding 15); this issue marks
+  both superseded (D1 restated, D10).
 - **#615 (CSV as a header-instantiated registry entry):** two seams.
   `tests/baseline/README.md`: #615 adds a named CSV selection and this issue adds
   the boundary note; both go in one boundary-notes section, and whichever lands
@@ -458,6 +534,52 @@ Edits to `docs/architecture-patterns.md`:
   key's length is one per-run value resolved at one site.
 - **#465 (stack-trace continuation lines):** adds a class of line that never
   becomes a key. There is no interaction beyond the shared path.
+
+### 5.9 The final pass grouped strictly by grouping key (D10)
+
+**Proposed**, for the architect's agreement before code. Pass 1 of the final
+pass in `group_similar_messages` sorts each category's keys by grouping key
+first and body second, the grouping key read from the entry (§ 5.3) and the
+body being the key after `"[$gk]"` with leading whitespace stripped. Each
+grouping key's keys are then contiguous, in the same body order they have
+today among themselves. A batch is cut when the grouping key changes, as
+today, and is then cleared whatever its size: a batch of one key is not
+carried into the next grouping key's batch. That key stays in the message
+store as an unconsolidated row; it has already been tested against its own
+group's patterns (S3) before it entered the batch, and Pass 2's sweep tests it
+again against any pattern its group gains later. Pass 2 is unchanged: it
+already tests each key against its own group's patterns only.
+
+What changes in output, and only where a final-pass batch held two levels
+(§ 11.7):
+
+- no row consolidates keys of two grouping keys, and no row shows a wildcarded
+  level;
+- a group whose keys were split into several batches by keys of other levels
+  interleaving in body order now meets them in one batch (up to the batch
+  capacity of 1,000), so pairs that were never in one batch can now be found.
+
+The streaming checkpoints do not change.
+
+### 5.10 Master specification corrections (D11)
+
+`features/fuzzy-message-consolidation.md` is the reference for message
+consolidation. Where it is out of date or contradicts itself it is corrected
+here, and the code is held to it.
+
+| Where | Today it says | Corrected to |
+|---|---|---|
+| § Process Flow, the parsing-loop diagram, and Outstanding Decision 6 (final pass redesigned to reuse the streaming pipeline) | the final pass sends every remaining key "through the same `consolidation_process_key()` pipeline" | the final pass as built by the final-pass redesign (`features/150-final-pass-scalability.md`): Pass 1 over each group's keys in body order in batches of up to 1,000 with the S3 match and ceiling ahead of discovery, Pass 2 the S3 sweep; the same discovery, matching and merging functions as the streaming checkpoints |
+| § Grouping Key Design | the group is category plus level and an ERROR message is never compared against a WARN message (holds), with the reason that short messages would wrongly merge across levels (holds) | unchanged in substance; states that the contract holds for every key in both passes and that a lone key never crosses into another group |
+| PF-09 (similarity on the full message key) | "The `[level]` prefix naturally prevents cross-level merges" | the whole key is scored as one contiguous string; cross-level merges are prevented by the grouping key, not by the prefix, which on short messages does not prevent them (§ Grouping Key Design's reason) |
+| IQ-01 (category model, resolved) and its implementation note | metadata fields are an exact-match grouping key; only the message body is scored; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` | the grouping key is category plus level; level, thread and object are part of the scored string; neither option exists |
+| IQ-02 (key construction and message capping, resolved) | the engine receives the message body; the adaptive cap and `$max_observed_message_length` | the engine receives the whole key cut at the per-run cut; the adaptive cap was closed as not planned (its premise does not hold) and the counter is removed |
+| DD-08 (similarity on the message body) | the metadata prefix is not part of the comparison | superseded by PF-09 as corrected |
+| PF-07 (level partitioning deferred) | consolidation operates on the whole plain pool and the prefix keeps levels apart | historical: the grouping key partitions by level, and no re-scan bucket exists (D8) |
+| PF-16 and PF-17 (the re-scan partition by level plus class) and the Process Flow's "in same partition bucket" | a re-scan bucket by level | removed as dead code under this issue (D8): within a group every key shares its level |
+| `features/150-final-pass-scalability.md` § Sort Order | sort by body with the grouping key stripped, "regardless of status code" | sort by grouping key, then body (§ 5.9) |
+| `docs/similarity-engine-best-practices.md` § Separate Similarity Scope from Storage Scope | score the message body only; metadata fields as exact-match grouping keys | score the whole key; the grouping key (level) separates groups, for the short-message reason |
+| `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 |
 
 ---
 
@@ -480,18 +602,24 @@ Edits to `docs/architecture-patterns.md`:
       object; level, thread and object) runs under plain, `-o`, `-g` and `-o -g`,
       at terminal widths 80, 120 and 200, on inputs with a message longer than 350
       characters, one between the width and 350, `-g -m uuid`, the pair of
-      same-body ERROR and WARN lines that consolidates into one row (D1), and the
-      two-level window of § 5.5, in which a pattern forms across the levels while
-      further matching keys of both levels remain (D8). Between
-      the base commit and the branch head, the MESSAGES CSV, the rendered messages
-      table and `-V message-grouping` with `/ cluster-membership` are identical;
-      the ERROR and WARN pair prints one row on both sides. *Assertable:* a
+      same-body ERROR and WARN lines, and the two-level window of § 5.5, in
+      which a pattern forms across the levels while further matching keys of
+      both levels remain (D8). Between the base commit and drops 1 and 2, the
+      MESSAGES CSV, the rendered messages table and `-V message-grouping` with
+      `/ cluster-membership` are identical, except on the two-level window,
+      where drop 1 moved four final-pass counters (§ 11.3). For the final-pass
+      fix (D10) the matrix compares drop 2 against the fix, and every
+      difference is attributed to a final-pass batch that held two levels
+      (§ 5.9). *Assertable:* a
       one-off before/after diff over the matrix, the method the audit's hoist
       probe used to prove itself behaviour-neutral
       (`features/342-redundant-logic-surfaces-audit-report.md` § Item 8, Part 2:
       forty identical before/after comparisons before any timing run); the count
       of identical comparisons is recorded in this document.
-- [ ] **AC4. No assertion or golden changes.** `validate-regression.sh` (74
+- [ ] **AC4. No assertion or golden changes, except through the final-pass
+      fix.** A saved output or expectation may change only where a final-pass
+      batch held two levels (D10, § 5.9); each re-capture states which rows
+      changed and why. `validate-regression.sh` (74
       terminal-width baselines), `validate-message-expose.sh`,
       `validate-message-mask.sh`, `validate-message-discard.sh`,
       `validate-message-control-characters.sh` and `validate-message-grouping.sh`
@@ -536,17 +664,14 @@ Edits to `docs/architecture-patterns.md`:
       removed unread key-to-group map) for the architect's disposition (D2).
       *Assertable:* `compare-results.sh detailed` on each before/after pair of
       TSVs.
-- [ ] **AC11. The consolidation record describes the code.** The sections
-      of § 10 state that a group is category plus grouping key (the level, or the
-      status code on an access log), and that the grouping key is the batching
-      key the code uses to order its work, not a barrier to consolidation; that
-      similarity is scored on the whole key cut at the cap, level included, and
-      that no part of the key is exempt from consolidation, so keys of different
-      levels can consolidate (D1); that no level pre-filter or re-scan bucket
-      exists, the pre-filter having been removed as dead code under this issue,
-      and no re-scan bucket speed-up is claimed (D8); that no observed-length
-      counter exists; and they name no option `ltl` lacks. *Unassertable* by a
-      harness, because this is prose; checked by reading it at review.
+- [ ] **AC11. The master specification and the records it points to describe
+      the code, and agree with each other.** Every row of § 5.10 reads as its
+      "corrected to" column: the grouping key separates groups in both passes;
+      the whole key is scored as one contiguous string; the final pass is
+      described as built; no level pre-filter or re-scan bucket is claimed; no
+      option `ltl` lacks is named; #616's record marks its cross-level entries
+      superseded. *Unassertable* by a harness, because this is prose; checked by
+      reading it at review.
 - [ ] **AC12. No runtime warnings.** Every run in the AC3 matrix and the new
       scenarios leaves no ` at <file> line <N>` on stderr. *Assertable:*
       `tests/lib/runtime-warnings.sh` in the new scenarios, and a grep over the
@@ -568,6 +693,18 @@ Edits to `docs/architecture-patterns.md`:
       the final-pass time on the `-g` cases of § 8 does not rise beyond the 1 %
       threshold, medians of three with ranges. *Assertable:* a source check,
       AC3's diff, and `compare-results.sh detailed` on each before/after pair.
+- [ ] **AC15. No row groups keys of two grouping keys (D10).** Under `-g`, the
+      same-body ERROR and WARN pair prints two rows, one per level, and no row
+      shows a wildcarded level; on the two-level window the ERROR key is its
+      own row and the WARN keys group among themselves. *Assertable:* two
+      scenarios in `validate-message-grouping.sh` on committed fixtures, reading
+      `-V message-grouping / cluster-membership`: every cluster's members carry
+      one grouping key.
+- [ ] **AC16. Every final-pass batch holds one grouping key (D10).** On the
+      AC3 matrix inputs and the corpus logs of § 11.7, an instrumented copy of
+      the fixed code finds no batch holding two grouping keys, where the base
+      found them on all five corpus logs. *Assertable* as a one-off probe,
+      recorded here; the harness assertion is AC15.
 
 ---
 
@@ -661,13 +798,14 @@ Each drop is a commit and a push on the issue branch. There is one PR, at the en
 | Drop | Content | What it proves |
 |---|---|---|
 | 1 | Named constants with their reasons (lock 3, D5); the per-run cut resolved once and read by the key sites, the trigram guard and the CONFIG line (lock 1, lock 7); the dead branch and every redundant consolidation cut removed (D3); the unread counter removed (lock 6); the inert re-scan partition removed: the bucket-key sub, its 30 and 20, its two callers' bucket building and lookup, and the uncalled third copy (D8, § 5.5); the AC1 and AC2 scenarios and fixture; `docs/architecture-patterns.md` § Hot-loop discipline gains the key-site consumption and this issue's token on the status line (§ 5.7); the boundary note in `tests/baseline/README.md` (§ 8) | AC1, AC2, AC5, AC6, AC8, AC9, AC13, AC14; AC3 matrix identical, the two-level window of § 5.5 included; before/after on the four cases |
-| 2 | The grouping key carried on the entry and read by the final pass and the sort (lock 2); the unread key-to-group map removed if the carried key makes it redundant (D2) | AC7; AC3 matrix identical again; before/after with the memory figure |
-| 3 | Records: the consolidation record trued up (lock 4, D1), stating that no level pre-filter or re-scan bucket exists (D8); `features/150-final-pass-scalability.md`, `docs/staged-processing-pipeline.md` and `docs/fuzzy-consolidation-lessons-learned.md` (§ 10) | AC11 |
+| 2 | The grouping key carried on the entry and read by the final pass and the sort (lock 2); the unread key-to-group map removed if the carried key makes it redundant (D2) | AC7; AC3 matrix identical to drop 1 |
+| 3 | The final pass grouped strictly by grouping key (D10, § 5.9); the AC15 scenarios and fixtures; saved outputs re-captured where a final-pass batch held two levels, each with its attribution (AC4) | AC15, AC16; AC3 matrix against drop 2 with every difference attributed; AC14 re-proved (no batch holds two levels, so the removed partition could divide nothing); before/after on the four cases |
+| 4 | Records: the master specification and the records it points to corrected (D11, § 5.10); `docs/staged-processing-pipeline.md` and `docs/fuzzy-consolidation-lessons-learned.md` (§ 10) | AC11 |
 
-Drops 1 and 2 prove byte-identity (AC3). Drop 1's proof includes the two-level
-window of § 5.5, where the removal of the re-scan partition is tested hardest
-(D8); a difference found there is brought to the architect before the drop is
-pushed.
+Drops 1 and 2 prove byte-identity (AC3). Drop 1's proof included the two-level
+window of § 5.5, where the removal of the re-scan partition was tested hardest
+(D8); the difference found there (§ 11.3) led to D10. Drop 3 changes output by
+design, only where a final-pass batch held two levels.
 
 **Merge gate:** `$version_number` restored to `0.19.0`; the full harness suite
 (`CI=1 validate-csv-output.sh`, then `CI=1 validate-statistics.sh`, then the
@@ -680,19 +818,21 @@ rest) on the head commit; the before/after of § 8 on the head commit;
 
 | Record | Change |
 |---|---|
-| `features/fuzzy-message-consolidation.md` | Trued up to the code (lock 4, D1). § Grouping Key Design: the group is category plus grouping key, the grouping key is the batching key the code uses to order its work and is not a barrier to consolidation, and keys of different levels can consolidate, as the final pass does when a lone key joins the next level's window; the sentence saying an ERROR message is never compared with a WARN message, and the "why not coarser grouping" paragraph's claim that level grouping prevents cross-level merges, are replaced. Also replaced: PF-09's 'The `[level]` prefix naturally prevents cross-level merges (see PF-07)'; PF-07's 'cross-level candidates that will never match'; IQ-01's implementation note 'ensures keys are only compared within the same level, so the prefix doesn't cause cross-level false matches', and the '(incorrect merge)' labels on the same-body WARN/ERROR examples under 'Reasoning — prefix domination'; IQ-02's resolved sub-question 'Per IQ-01, thread is an exact-match grouping field' (thread takes part in similarity and wildcarding). IQ-01 and IQ-02: the similarity input is the whole key cut at the cap, level included; no part of the key is exempt from consolidation; no observed-length counter exists; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` do not exist. DD-08 (similarity on the message body) points at PF-09 (similarity on the full key), which governs. PF-07 and lesson 7 (level prefixes separate levels naturally) state that they do not prevent consolidation across levels. DD-06 and lesson 35: the references to an adaptive cap "not yet implemented" point at #174's closure (its premise does not hold). No entry claims a level pre-filter or a re-scan bucket speed-up (D8): PF-07 (level partitioning deferred) no longer offers partitioning by the extracted level as a later optimisation, and states that cross-level consolidation is the design; PF-16 (the re-scan research that chose partitioning by level plus class) and PF-17 (the partitioned interleaved re-scan) record that the partition does not divide a group in `ltl`, because its bucket is the key's first word, the level every key of a group shares, and that the pre-filter was removed as dead code under this issue; lesson 7 (natural separation substitutes for explicit partitioning) and lesson 15 (partitioning composes with the interleaved re-scan) say the same; the Process Flow's interleaved re-scan scans the remaining unmatched keys, with no partition bucket; § Grouping Key Design states that cross-level consolidation is the design and that no level pre-filter exists. |
-| `docs/staged-processing-pipeline.md` | § Partitioning Composes with Interleaving: the 21 % speed-up was measured on the prototype's level-plus-class key; in `ltl` the partition never divided a group and was removed as dead code under this issue, because cross-level consolidation is the design (D8) |
+| `features/fuzzy-message-consolidation.md` | Corrected per § 5.10 (D11): § Process Flow and Outstanding Decision 6 describe the final pass as built; § Grouping Key Design states the contract for both passes; PF-09, IQ-01, IQ-02, DD-08, PF-07, PF-16 and PF-17 as § 5.10 sets out; DD-06 and lesson 35 point at the closure of the adaptive cap (its premise does not hold). |
+| `docs/staged-processing-pipeline.md` | § Partitioning Composes with Interleaving: the 21 % speed-up was measured on the prototype's level-plus-class key; in `ltl` every key of a group shares its level, so the partition never divided a group and was removed as dead code under this issue (D8) |
 | `docs/fuzzy-consolidation-lessons-learned.md` | the "What replaced it" line names interleaved discovery and re-scan without key partitioning (D8) |
 | `docs/architecture-patterns.md` | § 5.7 |
 | `tests/baseline/README.md` | the boundary note of § 8, in the one boundary-notes section shared with #615's named CSV selection (whichever lands second merges) |
 | `tests/HARNESS-DESIGN.md` | none; the CONFIG row's contract lives in § 7 here |
-| `features/150-final-pass-scalability.md` | § Sort Order states that the body follows the grouping key the entry carries (**proposed** wording, following the sort of § 5.1); the growth list in the problem statement names no bucket partitioning (D8) |
+| `features/150-final-pass-scalability.md` | § Sort Order: keys sorted by grouping key, then body, the grouping key read from the entry, and a lone key never carried into another group's batch (D10, § 5.9); the growth list in the problem statement names no bucket partitioning (D8) |
+| `docs/similarity-engine-best-practices.md` | § Separate Similarity Scope from Storage Scope: the whole key is scored as one contiguous string, and the grouping key (level) separates groups, for the short-message reason (D11) |
+| `features/616-gated-mean-derivation.md` | D26 (the final pass carrying a lone key across levels is the design) and finding 15 marked superseded by D1 as restated and D10 of this issue |
 | `features/342-redundant-logic-surfaces-audit-report.md` | § Review progress, stage 13 status set to *done* at close-out |
 | `docs/usage.md`, `--help` | none |
-| Release notes | **proposed: no bullet**, because the only moved value is a diagnostic row of `-V benchmark-data`; the decision is taken at close-out (`docs/process/workflow.md` § 4) |
+| Release notes | a Bug Fixes bullet: grouping with `-g` no longer merges messages of different log levels in its final pass; the decision is taken at close-out (`docs/process/workflow.md` § 4) |
 | Issue #619 | a comment pointing at this document as the agreed specification, naming D1 to D8 by what they decide |
 | Issue #564 (choose where a long message is truncated) | a comment carrying the hand-forward of § 5.8: without `-o` or `-g` the stored key is already cut to the terminal width, so a left or middle display cut cannot show the message's tail; how a run that chooses a left or middle cut keeps the tail is #564's to decide, and after this issue the stored key's length is one per-run value resolved at one site |
-| Issue #616 (one gated derivation of means) | none from this issue; #616's delivery rewrites its note on cross-level consolidation as the design and cross-references § 5.4 |
+| Issue #616 (one gated derivation of means) | a comment: its D26 and finding 15 (cross-level consolidation as the design) are superseded by this issue's D1 as restated and D10, and its record is marked so |
 | Native edge: this issue blocked by #616 (the message-store entry gains its counts first) | exists |
 | Native edge: #620 (hoisting per-line option handling) blocked by this issue | exists |
 
@@ -762,6 +902,8 @@ from run to run on the base alone (six runs of the base, two renderings).
 ### 11.4 Locked by the architect on 2026-10-01
 
 - **D9. The counter movement on a window spanning two levels is accepted.**
+  *Withdrawn by the architect on 2026-10-01 (§ 4.4): the window is the defect
+  D10 fixes.*
   Locked by the architect 2026-10-01. Removing the re-scan partition (D8) moves
   the final-pass counters S4 Pairwise discovery, S4 Re-scan absorbed, New
   patterns created and find_candidates calls of `-V message-grouping` on a
@@ -826,3 +968,22 @@ the read path is the hoisted key-length expression, whose measured cost (§ 8,
 about 53 ns per retained line) is under 0.5 % of this run. The two sides were
 captured about an hour apart, not interleaved, so the read-time fall is not
 attributed to drop 1; the completion gate's before/after decides it.
+
+### 11.7 Final-pass batches holding two levels (D10)
+
+Measured 2026-10-01 on drop 1 (`f1a62c3`), `-ni -bs 1440 -oe -n 20 -g`, with a
+scratch copy of `ltl` that counts, at each final-pass batch processed (two keys
+or more), the distinct levels among its keys:
+
+| Log (family) | Batches processed | Batches holding two levels | Keys in those batches |
+|---|---|---|---|
+| Tomcat access log, 5,000 lines | 6 | 6 | 154 |
+| Edge C SDK log | 86 | 39 | 145 |
+| Apache access log with long request paths | 7 | 4 | 32 |
+| Windchill method-server log | 10 | 3 | 11 |
+| ThingWorx application log | 18 | 1 | 2 |
+
+A batch holds at most one key of the previous level: the one carried when its
+level's run, in body order, held a single key. On an access log, where the same
+path is answered with several status codes, levels interleave in body order
+throughout, and every batch on the Tomcat log held two levels.
