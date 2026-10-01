@@ -799,3 +799,30 @@ drop 1 that report the cap on every run or cut the keys at the terminal width.
 One finding beside the carried key (§ 3 item 7, D2): with the inline re-cut gone,
 `%consolidation_key_message` maps every key to the key itself, in both the
 streaming and final-pass paths.
+
+### 11.6 Drop 1 benchmark (§ 8, AC10, AC14)
+
+The single-day access-log selection, the four cases of D6, three captures per
+side: `619-before-1..3` on `af91a69` and `619-drop1-1..3` on drop 1. Medians with
+ranges:
+
+| Case | Metric | before | drop 1 | change |
+|---|---|---|---|---|
+| top25-consolidate | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| top25-consolidate | `finalize/group_similar` (s) | 2.400 [2.293..2.430] | 2.199 [2.176..2.270] | -8.4 % |
+| top25-consolidate | `parse/read_files` (s) | 10.001 [9.829..10.085] | 9.311 [9.303..9.376] | -6.9 % |
+| top25-consolidate | `rss_peak` (bytes) | 136,855,552 | 137,003,008 | +0.1 % |
+| heatmap-histogram-consolidate | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| heatmap-histogram-consolidate | `finalize/group_similar` (s) | 1.787 [1.708..1.858] | 1.650 [1.631..1.666] | -7.7 % |
+| heatmap-histogram-consolidate | `parse/read_files` (s) | 12.623 [12.520..12.772] | 11.821 [11.676..11.838] | -6.4 % |
+| heatmap-histogram-export | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| heatmap-histogram-export | `parse/read_files` (s) | 10.341 [10.250..10.557] | 9.801 [9.759..9.817] | -5.2 % |
+| standard | `CONFIG max_log_message_length` | 200 | 200 | unchanged |
+| standard | `parse/read_files` (s) | 8.953 [8.775..9.012] | 8.567 [8.471..8.582] | -4.3 % |
+
+The final-pass time does not rise (AC14). Memory moves by at most 0.1 %. The read
+time falls 4 to 7 % on every case, `standard` included, where the only change on
+the read path is the hoisted key-length expression, whose measured cost (§ 8,
+about 53 ns per retained line) is under 0.5 % of this run. The two sides were
+captured about an hour apart, not interleaved, so the read-time fall is not
+attributed to drop 1; the completion gate's before/after decides it.
