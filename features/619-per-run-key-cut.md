@@ -1319,3 +1319,53 @@ covers was removed by D569-1), `features/567-discard-named-values-from-message.m
 The two benchmarks that need `Algorithm::Diff` and Inline::C compile against
 stand-in modules; this machine has neither, as before. The re-scan benchmark ran
 end to end with a Perl stand-in for its C loop.
+
+### 11.15 Completion gate (`cc410e6`, version 0.19.0)
+
+**Full harness suite:** all 44 `tests/validate-*.sh` exit 0, each with
+assertions run and none failing, run in the order of `docs/process/workflow.md`
+§ 3 (a) with `CI=1`; the statistics-drift suite passes 25 of 25 scenarios, the
+regression goldens pass unchanged, `validate-message-grouping.sh` passes 34
+assertions. AC4 (no expectation changed except through the final-pass fix)
+holds: the only expectations changed on the branch are those of § 11.10.
+
+**Before/after benchmark (§ 8, D6):** `619-before-1..3` on `af91a69` against
+`619-after-1..3` on `cc410e6`, the single-day access-log selection, medians of
+three with ranges; each pair also compared with `compare-results.sh detailed`.
+
+| Case | Metric | before | after | change |
+|---|---|---|---|---|
+| top25-consolidate | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| top25-consolidate | `finalize/group_similar` (s) | 2.400 [2.293..2.430] | 0.593 [0.591..0.637] | -75.3 % |
+| top25-consolidate | message rows kept | 656 | 747 | +91 |
+| top25-consolidate | `rss_peak` (bytes) | 136,855,552 [136,806,400..137,592,832] | 138,969,088 [138,903,552..139,902,976] | +1.5 % |
+| top25-consolidate | `total` (s) | 12.554 [12.432..12.581] | 10.367 [10.208..10.375] | -17.4 % |
+| heatmap-histogram-consolidate | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| heatmap-histogram-consolidate | `finalize/group_similar` (s) | 1.787 [1.708..1.858] | 0.555 [0.549..0.564] | -68.9 % |
+| heatmap-histogram-consolidate | message rows kept | 656 | 747 | +91 |
+| heatmap-histogram-consolidate | `rss_peak` (bytes) | 118,292,480 [118,194,176..118,718,464] | 111,820,800 [111,755,264..112,214,016] | -5.5 % |
+| heatmap-histogram-export | `CONFIG max_log_message_length` | 200 | 350 | expected (lock 7) |
+| heatmap-histogram-export | `total` (s) | 10.671 [10.574..10.873] | 10.353 [10.296..10.372] | -3.0 % |
+| standard | `CONFIG max_log_message_length` | 200 | 200 | unchanged |
+| standard | `total` (s) | 9.070 [8.896..9.134] | 8.781 [8.654..8.977] | -3.2 % |
+
+Flagged in all three `detailed` pairs on both grouping cases, beyond the CONFIG
+step: the final pass's index and trigram peaks (`consolidation_id_index` 8.5 to
+9.3 MB, `consolidation_key_trigrams` 4.1 to 4.6 MB, about +10 %), the patterns
+kept (+8.3 %), the message store (+0.6 % to +2.0 %, the 91 extra rows), and on
+`top25-consolidate` alone `rss_peak` (+1.0 % to +2.2 %) and its unattributed
+share (+12 % to +15 %). On the two cases that do not group, no flag recurs
+across the pairs.
+
+**Attribution.** The structure peaks follow the window composition of D10: a
+final-pass window now holds up to 1,000 keys of one grouping key, where on the
+base commit the 200 keys arrived in windows cut short by other status codes, so
+each window's index and trigram sets are larger at their peak. The 91 rows and
+the shorter final pass are the search limit of § 11.9 (at most 500 keys of a
+full window start a search), under question in #648. The `rss_peak` rise on
+`top25-consolidate` against the fall on `heatmap-histogram-consolidate`, which
+groups the same keys the same way, is not attributed: the process peak depends
+on what else is allocated when the final pass peaks. The read-time fall of 3 to
+4 % on every case, including the two that run none of the changed code beyond
+the hoisted key cut (§ 8: under 0.5 %), is the session drift of § 11.8 and is
+not attributed to this issue.
