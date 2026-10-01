@@ -1369,3 +1369,11 @@ on what else is allocated when the final pass peaks. The read-time fall of 3 to
 4 % on every case, including the two that run none of the changed code beyond
 the hoisted key cut (§ 8: under 0.5 %), is the session drift of § 11.8 and is
 not attributed to this issue.
+
+**Locked by the architect on 2026-10-01 (D14): the gate's movements are
+accepted.** The `rss_peak` rise of 1.5 % on `top25-consolidate`, the larger
+final-pass index and trigram peaks that follow from D10's one-group windows,
+and the 91 extra message rows left by the final pass's search limit (#648) are
+accepted. The PR is opened and merged into `release/0.19.0`. The commit adding
+this record touches only `features/`, so the gate's scope test skips it; the
+gate ran on `cc410e6`, whose code this merge carries.
