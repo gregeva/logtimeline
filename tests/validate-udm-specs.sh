@@ -43,6 +43,29 @@ COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
 MS_IR_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-integration-runtime.txt"
 MS_CS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-connection-server.txt"
 MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
+# A Windchill MethodServer log4j log carrying a multi-line entry between two
+# timestamped lines: the timestamped lines carry dataQueue size10 and size30,
+# the entry's continuation lines (no timestamp) carry " dataQueue size : 22440"
+# (a non-numeric capture) and " dataQueue size99" (a numeric one). Only the
+# timestamped lines count: sum 40 over 2 (10..30), delta 20 over 1.
+CONT_FIXTURE="$REPO_DIR/tests/fixtures/udm-continuation-lines.txt"
+CONTRACT_637='features/637-udm-continuation-lines.md section Decisions D1 (a metric pattern is tried only on lines that matched a log format) and section Acceptance criteria'
+# A log4j application log, seven lines one minute apart, each carrying
+# "probe reading v=<value> end" with the values 42, 12abc, abc12, abc, an empty
+# value, _:_100, 7. Captured with /v=(\S*)/, two captures are numbers: under
+# sum, 2 recorded (sum 49, min 7, max 42) and 5 skipped (71.4%); under delta,
+# the one delta 7 - 42 = -35.
+NN_FIXTURE="$REPO_DIR/tests/fixtures/udm-non-numeric-capture.txt"
+NN_SPEC='v::sum:/v=(\S*)/'
+# A log4j application log, twelve lines one minute apart, each carrying
+# "queue size<separator><value> end" with the separators " : ", "=", " " or
+# none. Eight values are numbers in the accepted written forms (42 -5 +5 1.5
+# .5 5. 1e3 1.5E-2 -> sum 1049.015, min -5, max 1000); four are not (1,000
+# 0x10 Inf NaN -> skipped 4, 33.3%). FORMS_SPEC is the pattern --help and
+# docs/usage.md teach.
+FORMS_FIXTURE="$REPO_DIR/tests/fixtures/udm-number-forms.txt"
+FORMS_SPEC='q::sum:/queue size[\s:=]*(\S+)/'
+CONTRACT_638='features/638-udm-non-numeric-capture.md section Decisions D1 (a capture that is not entirely a number is skipped for a numeric aggregation), D6 (the written forms of a number that are accepted), D3 (a partly skipped /regex/ metric is reported with its share), D4 (the skipped figure exists only once something is skipped), D5 (-V udm-specs reports what the run did) and section Acceptance criteria'
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -56,7 +79,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$CONT_FIXTURE" "$NN_FIXTURE" "$FORMS_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -1036,6 +1059,324 @@ scenario_milliseconds_replacement() {
     done
 }
 
+# ---------------------------------------------------------------------------
+# Scenario: continuation-lines — a metric's pattern matches continuation lines
+# of a multi-line entry, one with a non-numeric capture and one with a numeric
+# one. Neither is tried: no runtime warning, the delta state is untouched, and
+# the figures equal those of the same log without its continuation lines.
+# -bs 1440 -oe: production is run-wide, the same at any bucket size.
+# ---------------------------------------------------------------------------
+scenario_continuation_lines() {
+    current_scenario="continuation-lines"
+    echo "[$current_scenario]"
+    local specs=(-udm 'queue::sum:/dataQueue size(.+)/' -udm 'queuedelta::delta:/dataQueue size(.+)/')
+    local out stripped_fixture stripped
+    out="$TMP_DIR/continuation.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "${specs[@]}" "$CONT_FIXTURE" > "$out" 2>"$out.stderr" || true
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+
+    # The same log with the multi-line entry's continuation lines removed.
+    stripped_fixture="$TMP_DIR/continuation-stripped.txt"
+    grep -E '^[0-9]{4}-' "$CONT_FIXTURE" > "$stripped_fixture"
+    stripped="$TMP_DIR/continuation-stripped.out"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "${specs[@]}" "$stripped_fixture" > "$stripped" 2>"$stripped.stderr" || true
+    check_capture_warnings "$stripped"
+
+    assert_line "$out" \
+        pattern     "udm: name=queuedelta spec='queuedelta::delta:/dataQueue size(.+)/'" \
+        asserts     'The delta metric is listed, so the produced line below it is its own' \
+        produced_by 'emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "sed -n '/^udm: name=queuedelta /,/^  produced: /p' '$out' | grep -qxF '  produced: occurrences=1 buckets=1 sum=20 min=20 max=20'" \
+        label       'delta over size10 and size30 is 20, the continuation line between them untouched' \
+        asserts     'D1: a continuation line carrying a numeric capture does not overwrite the delta state, so delta is the difference of the two timestamped values' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "sed -n '/^udm: name=queue /,/^  produced: /p' '$out' | grep -qxF '  produced: occurrences=2 buckets=1 sum=40 min=10 max=30'" \
+        label       'sum metric counts the two timestamped lines only' \
+        asserts     'D1: only lines that matched a log format feed a metric - occurrences 2, sum 40, min 10, max 30' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    assert_command \
+        command     "[ -n \"\$(grep '^  produced: ' '$out')\" ] && [ \"\$(grep '^  produced: ' '$out')\" = \"\$(grep '^  produced: ' '$stripped')\" ]" \
+        label       'every metric produces the same with and without the continuation lines' \
+        asserts     'D1: continuation lines change nothing any metric reports' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE gate + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_637"
+    rm -f "$out" "$out.stderr" "$stripped" "$stripped.stderr" "$stripped_fixture"
+}
+
+# Run ltl on the given inputs with -V udm-specs; stdout to the named file,
+# stderr beside it. -bs 1440 -oe: production and the skip count are run-wide,
+# the same at any bucket size.
+run_nn() {
+    local out="$1"
+    shift
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" > "$out" 2>"$out.stderr" || true
+}
+
+# The produced: line of one metric's block, matched whole.
+produced_is() {
+    local out="$1" name="$2" expected="$3"
+    sed -n "/^udm: name=$name /,/^  produced: /p" "$out" | grep -qxF -- "$expected"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: non-numeric-capture — captures that are not numbers are skipped
+# under sum and delta: no runtime warning, figures from the two numbers alone,
+# the skipped count on -V udm-specs and one notice per metric with its share.
+# ---------------------------------------------------------------------------
+scenario_non_numeric_capture() {
+    current_scenario="non-numeric-capture"
+    echo "[$current_scenario]"
+    local out="$TMP_DIR/nn.out"
+    run_nn "$out" -udm "$NN_SPEC" -udm 'vd::delta:/v=(\S*)/' "$NN_FIXTURE"
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+    assert_command \
+        command     "produced_is '$out' v '  produced: occurrences=2 buckets=1 sum=49 min=7 max=42 skipped=5'" \
+        label       'sum over 42 and 7 only; the five non-numeric captures skipped' \
+        asserts     'D1: under sum, only the captures that are entirely a number are recorded (2 of 7: sum 49, min 7, max 42); D4: the skipped figure (5) is shown for a metric that has one' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE + derive_udm_production() + emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_638"
+    assert_command \
+        command     "produced_is '$out' vd '  produced: occurrences=1 buckets=1 sum=-35 min=-35 max=-35 skipped=5'" \
+        label       'delta is 7 - 42 = -35, the skipped captures between them untouched' \
+        asserts     'D1: a skipped capture leaves the delta state alone, so the one delta is the difference of the two numbers' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (delta transform) in ltl' \
+        contract    "$CONTRACT_638"
+    assert_line "$out.stderr" \
+        pattern     "Note: -udm '$NN_SPEC': 2 line(s) recorded, 5 skipped (71.4%): the captured text is not a number" \
+        asserts     'D3: a partly skipped /regex/ metric is reported once, with the recorded count, the skipped count and the skipped share' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    assert_command \
+        command     "[ \"\$(grep -c 'skipped (' '$out.stderr')\" = 2 ]" \
+        label       'one skip notice per metric, two metrics' \
+        asserts     'D3: one notice per metric that skipped a line' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr"
+}
+
+# Run ltl with -o in a fresh directory; echoes the MESSAGES CSV path.
+nn_messages_csv() {
+    local work="$1"
+    shift
+    rm -rf "$work"
+    mkdir -p "$work"
+    ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -o "$@" "$NN_FIXTURE" ) \
+        > "$work.out" 2>"$work.out.stderr" || true
+    ls "$work"/*MESSAGES*.csv 2>/dev/null | head -1
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: non-numeric-not-masked — a skipped capture is not masked in the
+# message, and an empty capture masks nothing, read from the MESSAGES CSV.
+# ---------------------------------------------------------------------------
+scenario_non_numeric_not_masked() {
+    current_scenario="non-numeric-not-masked"
+    echo "[$current_scenario]"
+    local work="$TMP_DIR/nn-masks" messages text spec
+    messages=$(nn_messages_csv "$work" -udm "$NN_SPEC")
+    check_capture_warnings "$work.out"
+    assert_command \
+        command     "[ -n '$messages' ] && grep -qF 'probe reading v=? end\",2' '$messages'" \
+        label       'the two numeric captures are masked into one message' \
+        asserts     'Numeric captures are still masked for grouping: 42 and 7 group as v=?' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (mask) in ltl' \
+        contract    "$CONTRACT_638"
+    for text in 12abc abc12 abc _:_100 ''; do
+        assert_command \
+            command     "[ -n '$messages' ] && grep -qF 'probe reading v=$text end\",1' '$messages'" \
+            label       "the skipped capture '$text' stays in its message" \
+            asserts     'D1: a capture skipped under a numeric aggregation, the empty one included, is not masked' \
+            produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (skip before mask) in ltl' \
+            contract    "$CONTRACT_638"
+    done
+    spec='vc::distinct:/v=(\S*)/'
+    messages=$(nn_messages_csv "$work" -udm "$spec")
+    check_capture_warnings "$work.out"
+    assert_command \
+        command     "[ -n '$messages' ] && grep -qF 'probe reading v= end\",1' '$messages'" \
+        label       'under distinct an empty capture is counted and masks nothing' \
+        asserts     'D1: an empty capture never masks anything in the message, also where a counting aggregation records it' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (counting branch mask) in ltl' \
+        contract    "$CONTRACT_638"
+    rm -rf "$work" "$work.out" "$work.out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: all-numeric-capture — the same log without its non-numeric lines:
+# no skipped figure and no skip notice.
+# ---------------------------------------------------------------------------
+scenario_all_numeric_capture() {
+    current_scenario="all-numeric-capture"
+    echo "[$current_scenario]"
+    local numeric="$TMP_DIR/nn-numeric.txt" out="$TMP_DIR/nn-numeric.out"
+    grep -E 'v=[0-9]+ end$' "$NN_FIXTURE" > "$numeric"
+    run_nn "$out" -udm "$NN_SPEC" "$numeric"
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+    assert_command \
+        command     "produced_is '$out' v '  produced: occurrences=2 buckets=1 sum=49 min=7 max=42'" \
+        label       'every matched line recorded, no skipped figure' \
+        asserts     'D4: a metric that skipped nothing carries no skipped figure on -V udm-specs' \
+        produced_by 'emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_638"
+    assert_absent "$out.stderr" \
+        pattern     'skipped (' \
+        asserts     'D3: a metric whose every matched line was recorded prints no skip notice' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr" "$numeric"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: non-numeric-filtered — lines removed by an exclude or the time
+# window count toward neither the recorded nor the skipped figure.
+# ---------------------------------------------------------------------------
+scenario_non_numeric_filtered() {
+    current_scenario="non-numeric-filtered"
+    echo "[$current_scenario]"
+    local out="$TMP_DIR/nn-filtered.out"
+    run_nn "$out" -udm "$NN_SPEC" -e 'v=abc end' "$NN_FIXTURE"
+    check_capture_warnings "$out"
+    assert_command \
+        command     "produced_is '$out' v '  produced: occurrences=2 buckets=1 sum=49 min=7 max=42 skipped=4'" \
+        label       'an excluded skipped line is not counted: skipped 4' \
+        asserts     'D3: the skip is counted only once the line is retained, so a line removed by -e is not in the skipped figure' \
+        produced_by 'read_and_process_logs() skip count past the filters in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr"
+    # 10:01 to 10:04: the four non-numeric lines 12abc, abc12, abc and the empty one.
+    run_nn "$out" -udm "$NN_SPEC" -st '2026-01-26 10:01:00' -et '2026-01-26 10:05:00' "$NN_FIXTURE"
+    check_capture_warnings "$out"
+    assert_command \
+        command     "produced_is '$out' v '  produced: occurrences=0 buckets=0 skipped=4'" \
+        label       'outside the window neither figure counts: recorded 0, skipped 4' \
+        asserts     'D3: lines outside the time window count toward neither figure' \
+        produced_by 'read_and_process_logs() skip count past the filters in ltl' \
+        contract    "$CONTRACT_638"
+    assert_line "$out.stderr" \
+        pattern     "Note: -udm '$NN_SPEC': 0 line(s) recorded, 4 skipped (100.0%): the captured text is not a number" \
+        asserts     'D3: a metric whose every retained line was skipped still reports its share, beside the zero-match notice' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: non-numeric-counting — under a counting aggregation a capture that
+# is not a number is a value like any other, and nothing is skipped.
+# ---------------------------------------------------------------------------
+scenario_non_numeric_counting() {
+    current_scenario="non-numeric-counting"
+    echo "[$current_scenario]"
+    local out="$TMP_DIR/nn-counting.out"
+    run_nn "$out" -udm 'vc::distinct:/v=(\S*)/' "$NN_FIXTURE"
+    check_capture_warnings "$out"
+    assert_command \
+        command     "produced_is '$out' vc '  produced: occurrences=7 buckets=1 distinct_max=7'" \
+        label       'distinct counts all seven captures, abc12 among them' \
+        asserts     'D1: whether a capture is usable depends on the aggregation; under distinct, text such as abc12 is counted' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (counting branch) in ltl' \
+        contract    "$CONTRACT_638"
+    assert_absent "$out.stderr" \
+        pattern     'skipped (' \
+        asserts     'D1: a counting aggregation skips nothing, so no skip notice' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: non-numeric-csv-column — a CSV column holding n/a or 5ms is
+# skipped the same way: no warning, figures from the numeric cells alone.
+# ---------------------------------------------------------------------------
+NN_COLUMNAR_BODY='timestamp,job,v
+2026-01-26 10:00:01,alpha,10
+2026-01-26 10:00:05,alpha,n/a
+2026-01-26 10:00:12,beta,5ms
+2026-01-26 10:00:20,beta,30'
+scenario_non_numeric_csv_column() {
+    current_scenario="non-numeric-csv-column"
+    echo "[$current_scenario]"
+    local columnar="$TMP_DIR/nn-columnar.txt" out="$TMP_DIR/nn-columnar.out"
+    printf '%s\n' "$NN_COLUMNAR_BODY" > "$columnar"
+    run_nn "$out" -ucm job -udm 'v::sum' "$columnar"
+    check_capture_warnings "$out"
+    assert_command \
+        command     "produced_is '$out' v '  produced: occurrences=2 buckets=1 sum=40 min=10 max=30'" \
+        label       'n/a and 5ms skipped: sum 40 over 10 and 30' \
+        asserts     'D1: a CSV cell that is not entirely a number is not recorded under a numeric aggregation' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (CSV column path) in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr" "$columnar"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: source-mixed-inputs — a log file and a CSV file read in both
+# orders: each metric's source= names everything it was read from, the same
+# whichever file comes last.
+# ---------------------------------------------------------------------------
+scenario_source_mixed_inputs() {
+    current_scenario="source-mixed-inputs"
+    echo "[$current_scenario]"
+    local columnar="$TMP_DIR/nn-mixed.txt" first="$TMP_DIR/nn-mixed-1.out" second="$TMP_DIR/nn-mixed-2.out"
+    printf '%s\n' "$NN_COLUMNAR_BODY" > "$columnar"
+    local specs=(-udm 'v::sum' -udm 'q::sum:/v=(\d+) end/')
+    run_nn "$first"  -ucm job "${specs[@]}" "$NN_FIXTURE" "$columnar"
+    run_nn "$second" -ucm job "${specs[@]}" "$columnar" "$NN_FIXTURE"
+    check_capture_warnings "$first"
+    check_capture_warnings "$second"
+    local out
+    for out in "$first" "$second"; do
+        assert_command \
+            command     "sed -n '/^udm: name=v /,/^  read_as: /p' '$out' | grep -qE '  source=line,csv:v\$'" \
+            label       "v was read from log lines and the CSV column v ($(basename "$out"))" \
+            asserts     'D5: source= names every source the metric was read from, not the last file read' \
+            produced_by 'udm_note_sources() + udm_read_as() in ltl' \
+            contract    "$CONTRACT_638"
+        assert_command \
+            command     "sed -n '/^udm: name=q /,/^  read_as: /p' '$out' | grep -qE '  source=line,csv:unbound\$'" \
+            label       "q was read from log lines, and the CSV file has no column for it ($(basename "$out"))" \
+            asserts     'D5: a metric the CSV file cannot bind shows csv:unbound beside line, in either file order' \
+            produced_by 'udm_note_sources() + udm_read_as() in ltl' \
+            contract    "$CONTRACT_638"
+    done
+    rm -f "$first" "$first.stderr" "$second" "$second.stderr" "$columnar"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: number-forms — the documented pattern over every accepted written
+# form of a number and four values that are not numbers: the eight are
+# recorded at their full value, the four skipped and reported.
+# ---------------------------------------------------------------------------
+scenario_number_forms() {
+    current_scenario="number-forms"
+    echo "[$current_scenario]"
+    local out="$TMP_DIR/forms.out"
+    run_nn "$out" -udm "$FORMS_SPEC" "$FORMS_FIXTURE"
+    check_capture_warnings "$out"
+    assert_section_present "$out"
+    assert_command \
+        command     "produced_is '$out' q '  produced: occurrences=8 buckets=1 sum=1049.015 min=-5 max=1000 skipped=4'" \
+        label       '42 -5 +5 1.5 .5 5. 1e3 1.5E-2 recorded; 1,000 0x10 Inf NaN skipped' \
+        asserts     'D6: a capture written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2 is a number and is recorded at its full value; a thousands separator, hexadecimal, Inf and NaN are not' \
+        produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (number check) + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_638"
+    assert_line "$out.stderr" \
+        pattern     "Note: -udm '$FORMS_SPEC': 8 line(s) recorded, 4 skipped (33.3%): the captured text is not a number" \
+        asserts     'D3: the documented pattern reports the values it could not record' \
+        produced_by 'emit_udm_skipped_capture_notices() in ltl' \
+        contract    "$CONTRACT_638"
+    rm -f "$out" "$out.stderr"
+}
+
 scenario_register milliseconds-replacement \
                   undelimited-regex \
                   whole-match \
@@ -1054,7 +1395,16 @@ scenario_register milliseconds-replacement \
                   delta-shorthand-canonical \
                   collision-csv-and-export \
                   collision-operands \
-                  collision-columnar
+                  collision-columnar \
+                  continuation-lines \
+                  non-numeric-capture \
+                  non-numeric-not-masked \
+                  all-numeric-capture \
+                  non-numeric-filtered \
+                  non-numeric-counting \
+                  non-numeric-csv-column \
+                  source-mixed-inputs \
+                  number-forms
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -1078,6 +1428,15 @@ while read -r _scenario; do
         collision-csv-and-export   ) scenario_collision_csv_and_export ;;
         collision-operands         ) scenario_collision_operands ;;
         collision-columnar         ) scenario_collision_columnar ;;
+        continuation-lines         ) scenario_continuation_lines ;;
+        non-numeric-capture        ) scenario_non_numeric_capture ;;
+        non-numeric-not-masked     ) scenario_non_numeric_not_masked ;;
+        all-numeric-capture        ) scenario_all_numeric_capture ;;
+        non-numeric-filtered       ) scenario_non_numeric_filtered ;;
+        non-numeric-counting       ) scenario_non_numeric_counting ;;
+        non-numeric-csv-column     ) scenario_non_numeric_csv_column ;;
+        source-mixed-inputs        ) scenario_source_mixed_inputs ;;
+        number-forms               ) scenario_number_forms ;;
     esac
 done < <(scenario_selected)
 
