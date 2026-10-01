@@ -1106,3 +1106,60 @@ similarity 80), and records the final pass on the PLM access log making about
 37,400 candidate searches over about 75,500 keys in 42 to 44 s: half its keys,
 the share a 500-of-1,000 cap allows. Removing the cap would roughly double that
 work. No option for the cap is proposed until it is measured on that case.
+
+**Locked by the architect on 2026-10-01: the batch sizes and search limits
+are their own issue, and drop 3 lands with today's sizes.** Whether the final
+pass's 1,000-key window, the streaming checkpoint's 5,000-key batch and the
+500 keys that may start a search in either should change is filed as #648
+(question and measure the batch sizes and search limits of message grouping's
+streaming and final passes), blocked by this issue. Drop 3 is committed with
+the sizes unchanged.
+
+### 11.10 Drop 3 results (D10, AC3, AC4, AC15, AC16)
+
+- **AC15:** `levels-same-body-pair` and `levels-lone-key-not-carried` in
+  `tests/validate-message-grouping.sh`, on the committed fixtures
+  `tests/fixtures/grouping-level-pair.txt` and
+  `tests/fixtures/grouping-two-level-window.txt`: all four assertions pass on
+  drop 3 and fail on drop 2, which groups an ERROR with a WARN key on each.
+- **AC16:** an instrumented copy counted, at each final-pass window processed,
+  the grouping keys among its keys, over the eleven AC3 inputs: no window held
+  two on drop 3; on drop 2 every input whose output changed had such windows
+  (the Edge C SDK log 39 of 86, the Tomcat access log 6 of 6). AC14 follows: no
+  window holds two levels, so the removed re-scan partition could divide
+  nothing.
+- **AC3, drop 2 against drop 3:** 165 comparisons, no runtime warning, every run
+  exiting 0. The 33 plain and 33 `-o` runs are identical. The 99 `-g` runs
+  differ: 48 in the final-pass counters only (window counts and sizes), 51 in
+  group membership. Every input whose membership changed had mixed windows on
+  drop 2. The groups removed that held two grouping keys: 1 on the Apache access
+  log, 1 on the same-body pair, 1 on the two-level window, 2 on the level-only
+  synthetic input; drop 3 has none on any input. Within one level, groups
+  re-form on the ThingWorx application log (2 gone, 2 new) and the Edge C SDK log
+  (2 gone, 1 new), from the window composition (§ 11.9).
+- **AC4, saved expectations changed:**
+  - `tests/statistics-drift/baselines/{tomcat-consolidated,thingworx-consolidated,thingworx-bin-consolidated}/messages.csv`
+    re-captured: on the Tomcat access log 13 of drop 2's 206 groups held two
+    status codes and 90 of its 113 final-pass windows mixed them; on the
+    ThingWorx script log one of 7 windows was mixed and the window boundaries
+    moved (§ 11.9). The STATS baselines do not change.
+  - `tests/statistics-drift/known-failures.tsv`: the
+    `thingworx-bin-consolidated` p999 entry (registered against #469, hold
+    consolidated message histograms on a shared bucket geometry) no longer
+    reproduces, because the merged rows it was measured on changed composition;
+    #469 is not fixed, and its other entries still reproduce.
+  - `tests/validate-message-grouping-notices.sh`: its grouped scenarios ran on a
+    fixture whose keys group only across status codes (`[200]` with `[302]`,
+    `[304]` or `[404]` on the same path), so under the fix nothing groups there
+    and the bin-model notice correctly does not print. The two grouped
+    scenarios move to `tests/fixtures/grouping-signed-downloads.txt`
+    (`-du us -xqs -g 75`), which groups within one status code on both drop 2
+    and drop 3; the notice assertion was shown to fail on a copy of `ltl` with
+    the notice disabled. The ungrouped scenario keeps its fixture.
+- **Harnesses run on drop 3:** `validate-message-grouping.sh` 34 passed;
+  `validate-message-grouping-notices.sh` 4 passed; the eight consolidated
+  statistics-drift scenarios pass; `validate-message-control-characters.sh`,
+  `validate-classification-states.sh`, `validate-statistics-demand.sh`,
+  `validate-udm-counting.sh`, `validate-runtime-config.sh`,
+  `validate-section-layout.sh`, `validate-format-detection.sh` and
+  `validate-csv-output.sh` pass with no failure.

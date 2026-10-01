@@ -39,16 +39,23 @@ source "$SCRIPT_DIR/lib/scenario-select.sh"
 # never inherited).
 neutralize_colour_env
 
-# Access log carrying repeated request paths that differ only in their
-# parameters — the shape fuzzy grouping consolidates.
+# Access log carrying repeated request paths with timed lines; it holds no two
+# keys of one status code that group, so a run over it consolidates nothing.
 FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-duration-spread.txt"
+# Signed direct-download requests whose keys, under -xqs, group within their
+# status code at -g 75, each line timed in microseconds (-du us): the grouped
+# scenarios combine histograms here.
+FIXTURE_GROUPED="$REPO_DIR/tests/fixtures/grouping-signed-downloads.txt"
+GROUPED_SHAPE="-du us -xqs -g 75"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-if [[ ! -f "$FIXTURE" ]]; then
-    echo "ERROR: fixture not found: $FIXTURE"; exit 1
-fi
+for f in "$FIXTURE" "$FIXTURE_GROUPED"; do
+    if [[ ! -f "$f" ]]; then
+        echo "ERROR: fixture not found: $f"; exit 1
+    fi
+done
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -145,7 +152,7 @@ if scenario_wanted grouped-bin-model-notice; then
 current_scenario="grouped-bin-model-notice"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/grouped-bin.stderr"
-if capture_stderr "$errfile" $SHAPE -g 85 -mdm bin "$FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE $GROUPED_SHAPE -mdm bin "$FIXTURE_GROUPED"; then
     assert_command \
         command     "grep -aq 'Note: consolidation combined [0-9,]* message histograms onto shared bucket geometries, so their percentiles are approximate - use -mdm raw for exact percentiles' '$errfile'" \
         label       'notice names the combination and the exact alternative' \
@@ -167,7 +174,7 @@ if scenario_wanted grouped-raw-model-silent; then
 current_scenario="grouped-raw-model-silent"
 echo "[$current_scenario]"
 errfile="$TMP_DIR/grouped-raw.stderr"
-if capture_stderr "$errfile" $SHAPE -g 85 -mdm raw "$FIXTURE"; then
+if capture_stderr "$errfile" $SHAPE $GROUPED_SHAPE -mdm raw "$FIXTURE_GROUPED"; then
     assert_command \
         command     "! grep -aq 'percentiles are approximate' '$errfile'" \
         label       'no notice when the run already answers exactly' \

@@ -11044,10 +11044,12 @@ sub group_similar_messages {
 
         # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
-            # Collect and sort keys by message body: the key after its
-            # "[$grouping_key]" prefix and the whitespace that follows, computed
-            # once per key; the whole key when the grouping key is empty
-            my %sort_body;
+            # Collect and sort keys by grouping key, then message body, so each
+            # group's keys are contiguous and a window never spans two groups.
+            # The body is the key after its "[$grouping_key]" prefix and the
+            # whitespace that follows, computed once per key; the whole key when
+            # the grouping key is empty
+            my (%sort_gk, %sort_body);
             for my $log_key (keys %{$log_messages{$category}}) {
                 my $gk = $log_messages{$category}{$log_key}{grouping_key} // "";
                 my $body = $log_key;
@@ -11055,17 +11057,26 @@ sub group_similar_messages {
                     $body = substr($log_key, length($gk) + 2);
                     $body =~ s/^\s+//;
                 }
+                $sort_gk{$log_key}   = $gk;
                 $sort_body{$log_key} = $body;
             }
-            my @sorted_keys = sort { ($sort_body{$a} cmp $sort_body{$b}) || ($a cmp $b) } keys %sort_body;
+            my @sorted_keys = sort {
+                ($sort_gk{$a} cmp $sort_gk{$b}) || ($sort_body{$a} cmp $sort_body{$b}) || ($a cmp $b)
+            } keys %sort_body;
+            undef %sort_gk;
             undef %sort_body;
 
             my @window;
             my $window_cat_gk = "";
 
-            # Helper to flush the current window through S4
+            # Helper to flush the current window through S4. The window is
+            # cleared whatever its size: a lone key is never carried into the
+            # next group's window, so it is compared only within its own group
             my $flush_window = sub {
-                return if scalar @window < 2 || $window_cat_gk eq "";
+                if (scalar @window < 2 || $window_cat_gk eq "") {
+                    @window = ();
+                    return;
+                }
                 my ($discovered, $s4_pair, $s4_rescan, $fc, $absorbed, $cross_merges) =
                     process_final_pass_window($window_cat_gk, \@window);
                 $consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} // 0) + 1;

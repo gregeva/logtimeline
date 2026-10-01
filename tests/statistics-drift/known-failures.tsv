@@ -80,5 +80,4 @@ thingworx-bin-consolidated	messages	p50	merged	469	one projection onto the share
 thingworx-bin-consolidated	messages	p75	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	p90	merged	469	one projection onto the shared geometry, up to 3.6%
 thingworx-bin-consolidated	messages	p95	merged	469	one projection onto the shared geometry
-thingworx-bin-consolidated	messages	p999	merged	469	one projection onto the shared geometry
 thingworx-bin-consolidated	messages	iqr	merged	469	difference of two projected percentiles, carries both

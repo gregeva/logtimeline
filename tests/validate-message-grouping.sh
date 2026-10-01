@@ -30,6 +30,13 @@
 #    cut falls back to the width. -V benchmark-data reports the cut the run
 #    used. The fixture holds one request line longer than the cap and one short.
 #
+# 4. The grouping key separates messages. A message is compared and grouped
+#    only with messages of its own category and level, in the streaming
+#    checkpoints and the final pass. One fixture holds an ERROR and a WARN line
+#    with the same body, beside two INFO lines that do group; the other holds a
+#    lone ERROR key that sorts first by body ahead of five similar WARN keys,
+#    each line three times so every key reaches the final pass.
+#
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the invariant being tested
 #   - produced_by: where in ltl it is produced (function name)
@@ -60,11 +67,13 @@ FIXTURE="$REPO_DIR/tests/fixtures/grouping-final-pass-threshold.txt"
 FIXTURE_DOWNLOADS="$REPO_DIR/tests/fixtures/grouping-signed-downloads.txt"
 FIXTURE_UUID="$REPO_DIR/tests/fixtures/grouping-uuid-pair.txt"
 FIXTURE_KEY_CUT="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
+FIXTURE_LEVEL_PAIR="$REPO_DIR/tests/fixtures/grouping-level-pair.txt"
+FIXTURE_TWO_LEVEL_WINDOW="$REPO_DIR/tests/fixtures/grouping-two-level-window.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT"; do
+for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT" "$FIXTURE_LEVEL_PAIR" "$FIXTURE_TWO_LEVEL_WINDOW"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"; exit 1
     fi
@@ -302,7 +311,9 @@ scenario_register sensitivity-70 \
                   skip-final-pass-absorbing-data \
                   key-cut-grouping \
                   key-cut-no-retention \
-                  key-cut-terminal-width
+                  key-cut-terminal-width \
+                  levels-same-body-pair \
+                  levels-lone-key-not-carried
 scenario_parse_args "$@"
 
 if scenario_wanted sensitivity-70; then
@@ -610,6 +621,70 @@ if capture_key_cut "$out" $KEY_CUT_SHAPE -V benchmark-data "$FIXTURE_KEY_CUT"; t
         asserts     "Without -g or -o a message key is cut at the terminal width, the most the messages table can print without wrapping, and -V benchmark-data reports it" \
         produced_by "$KEY_CUT_PRODUCER" \
         contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+
+# The grouping key separates messages (system 4). Every run is
+# -bs 1440 -oe -n 20 -g -V message-grouping: the assertions read only the
+# cluster membership, and -n 20 keeps every row of the small fixtures.
+LEVELS_SHAPE="-bs 1440 -oe -n 20 -g -V message-grouping"
+LEVELS_PRODUCER='group_similar_messages() in ltl (the final pass: keys sorted by grouping key then body, a window cleared at each grouping-key change), membership emitted by pipeline_finalize()'
+LEVELS_CONTRACT='features/fuzzy-message-consolidation.md § Grouping Key Design; features/619-per-run-key-cut.md § 4.4 (D1 restated, D10) and AC15'
+
+# Passes when every cluster in the membership lists members of one grouping
+# key (the bracketed level each member key starts with); prints each cluster
+# that mixes levels. Fails when the membership lists no cluster.
+# Usage: check_members_one_level <capture>
+check_members_one_level() {
+    membership_section "$1" "$1.membership" || return 1
+    awk '
+        function close_cluster() { if (cl != "" && n > 1) { print "mixed levels in: " cl; bad = 1 } }
+        /^  cluster: / { close_cluster(); cl = $0; n = 0; delete seen; next }
+        /^    member: \[/ { lv = $2; if (!(lv in seen)) { seen[lv] = 1; n++ } }
+        END { close_cluster(); exit bad ? 1 : 0 }
+    ' "$1.membership"
+}
+
+if scenario_wanted levels-same-body-pair; then
+current_scenario="levels-same-body-pair"
+echo "[$current_scenario]"
+out="$TMP_DIR/levels-pair.out"
+if capture_section "$out" $LEVELS_SHAPE "$FIXTURE_LEVEL_PAIR"; then
+    assert_command \
+        command     "check_members_one_level '$out'" \
+        label       'every group holds members of one level' \
+        asserts     "A message is grouped only with messages of its own category and level: no cluster lists members of two levels" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+
+    assert_command \
+        command     "membership_section '$out' '$out.membership' && ! grep -q '^    member: \\[ERROR\\] .*Job purge completed' '$out.membership' && ! grep -q '^    member: \\[WARN\\] .*Job purge completed' '$out.membership'" \
+        label       'an ERROR and a WARN line with the same body stay two rows' \
+        asserts     "Two lines with the same thread, logger and body, one at ERROR and one at WARN, are each the only key of their level: neither is grouped, so each prints as its own row" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+fi
+fi
+
+if scenario_wanted levels-lone-key-not-carried; then
+current_scenario="levels-lone-key-not-carried"
+echo "[$current_scenario]"
+out="$TMP_DIR/levels-lone.out"
+if capture_section "$out" $LEVELS_SHAPE "$FIXTURE_TWO_LEVEL_WINDOW"; then
+    assert_command \
+        command     "check_members_one_level '$out'" \
+        label       'every group holds members of one level' \
+        asserts     "The final pass compares a key only within its own level: no cluster lists members of two levels" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+
+    assert_command \
+        command     "membership_section '$out' '$out.membership' && ! grep -q '^    member: \\[ERROR\\] ' '$out.membership' && [[ \$(grep -c '^    member: \\[WARN\\] .*Batch 100[2-6] failed' '$out.membership') -eq 5 ]]" \
+        label       'the lone ERROR key stays its own row; the five WARN keys group' \
+        asserts     "A level whose only key reaches the final pass on its own (the ERROR key, sorted first by body) is not carried into the next level's window: it stays its own row, and the five similar WARN keys group among themselves" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
 fi
 fi
 
