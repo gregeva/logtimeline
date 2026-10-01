@@ -240,7 +240,7 @@ my %bucket_outcomes;
 # and reused by print_message_summary() so the same keys are not sorted twice
 # (Issue #302). Keyed by category ('plain'/'highlight').
 my %message_key_order;
-my $max_log_message_length = 0;				    # used to define the maximum key length of the log message bucket counts
+my $max_log_message_length = 0;				    # the per-run message-key cut: resolved in adapt_to_terminal_settings()
 # -m / --mask: the names given on the command line (@mask_raw, a value
 # may be a comma-separated list), the resolved names in that same order for
 # the runtime-config surface (@mask_names), and the substitutions the run
@@ -791,7 +791,6 @@ my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_messag
 my ( %consolidation_unmatched, %consolidation_id_index );
 my %consolidation_key_trigrams;
 my %consolidation_cat_stats;
-my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
 my %consolidation_category_unmatched_count;  # {category} => total unmatched keys across all cat_gk groups in this category
 my %consolidation_pattern_generation;  # {cat_gk} => increments on each pattern discovery; used to skip S3 for keys that already tested against all current patterns
@@ -802,10 +801,25 @@ my %consolidation_streaming_absorbed; # {cat_gk} => keys absorbed during the str
 my %consolidation_final_pass_skipped; # {cat_gk} => 1 when the final pass was skipped for this group
 my %consolidation_cliff_edge;         # {cat_gk} => the similarity the data clusters at, when computed
 
+# Message-key cut lengths. The per-run cut, $max_log_message_length, is resolved
+# once in adapt_to_terminal_settings(): MESSAGE_KEY_CAP under -o or -g, the
+# terminal width otherwise. Every key site, the trigram entry guard and the
+# benchmark data read it.
+use constant {
+    # Grouping: similarity is scored on a key cut to a few hundred characters,
+    # since text past the meaningful prefix costs trigram memory and CPU
+    # without improving the score (features/fuzzy-message-consolidation.md
+    # DD-06). CSV: shares the grouping cap, so -o and -o -g produce the same keys.
+    MESSAGE_KEY_CAP           => 350,
+    # Characters of the thread name kept in a key (its first): no reason on record.
+    MESSAGE_KEY_THREAD_LENGTH => 20,
+    # Characters of the object name kept in a key (its last): no reason on record.
+    MESSAGE_KEY_OBJECT_LENGTH => 25,
+};
+
 # Consolidation configuration
 my $consolidation_threshold          = 85;
 my $consolidation_trigger            = 5000;
-my $consolidation_message_length_cap = 350;
 my $consolidation_occurrence_ceiling = 3;
 my $consolidation_max_patterns       = 0;  # 0 = unlimited (adaptive eviction bounds the working set)
 my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorption rate (higher = faster response)
@@ -818,7 +832,6 @@ my $consolidation_final_ceiling      = 1_000_000;
 my $consolidation_skip_absorption    = 0.05;   # absorbed share of keys seen, at or below which streaming counts as having absorbed nothing
 my $consolidation_skip_min_keys      = 20_000; # keys handed forward, at or above which the final pass counts as expensive
 my $consolidation_cliff_sample       = 300;    # keys sampled to locate the similarity cliff edge
-my $max_observed_message_length      = 0;
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
 
 my ( @in_files, @output_columns );
@@ -10965,7 +10978,6 @@ sub group_similar_messages {
         # Reset transient working structures (final pass uses sliding window, not streaming buffers)
         %consolidation_unmatched = ();
         %consolidation_key_message = ();
-        %consolidation_key_message_cat_gk = ();
         %consolidation_key_generation = ();
         %consolidation_key_checkpoint_count = ();
         %consolidation_id_index = ();
@@ -11003,8 +11015,7 @@ sub group_similar_messages {
             my %forward_count;
             for my $category (keys %log_messages) {
                 for my $log_key (keys %{$log_messages{$category}}) {
-                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                    $grouping_key //= "";
+                    my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                     $forward_count{"$category|$grouping_key"}++;
                 }
             }
@@ -11021,8 +11032,7 @@ sub group_similar_messages {
                     my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
                     my @keys;
                     for my $log_key (keys %{$log_messages{$category}}) {
-                        my ($gk) = $log_key =~ /^\[([^\]]+)\]/;
-                        $gk //= "";
+                        my $gk = $log_messages{$category}{$log_key}{grouping_key} // "";
                         push @keys, $log_key if $gk eq $grouping_key;
                     }
                     my $edge = consolidation_cliff_edge(\@keys, $consolidation_threshold);
@@ -11034,19 +11044,39 @@ sub group_similar_messages {
 
         # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
-            # Collect and sort keys by message body (strip [$grouping_key] prefix)
+            # Collect and sort keys by grouping key, then message body, so each
+            # group's keys are contiguous and a window never spans two groups.
+            # The body is the key after its "[$grouping_key]" prefix and the
+            # whitespace that follows, computed once per key; the whole key when
+            # the grouping key is empty
+            my (%sort_gk, %sort_body);
+            for my $log_key (keys %{$log_messages{$category}}) {
+                my $gk = $log_messages{$category}{$log_key}{grouping_key} // "";
+                my $body = $log_key;
+                if ($gk ne "" && substr($log_key, 0, length($gk) + 2) eq "[$gk]") {
+                    $body = substr($log_key, length($gk) + 2);
+                    $body =~ s/^\s+//;
+                }
+                $sort_gk{$log_key}   = $gk;
+                $sort_body{$log_key} = $body;
+            }
             my @sorted_keys = sort {
-                my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;
-                my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/s;
-                (($msg_a // $a) cmp ($msg_b // $b)) || ($a cmp $b)
-            } keys %{$log_messages{$category}};
+                ($sort_gk{$a} cmp $sort_gk{$b}) || ($sort_body{$a} cmp $sort_body{$b}) || ($a cmp $b)
+            } keys %sort_body;
+            undef %sort_gk;
+            undef %sort_body;
 
             my @window;
             my $window_cat_gk = "";
 
-            # Helper to flush the current window through S4
+            # Helper to flush the current window through S4. The window is
+            # cleared whatever its size: a lone key is never carried into the
+            # next group's window, so it is compared only within its own group
             my $flush_window = sub {
-                return if scalar @window < 2 || $window_cat_gk eq "";
+                if (scalar @window < 2 || $window_cat_gk eq "") {
+                    @window = ();
+                    return;
+                }
                 my ($discovered, $s4_pair, $s4_rescan, $fc, $absorbed, $cross_merges) =
                     process_final_pass_window($window_cat_gk, \@window);
                 $consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} = ($consolidation_cat_stats{$window_cat_gk}{fp_p1_windows} // 0) + 1;
@@ -11061,10 +11091,7 @@ sub group_similar_messages {
 
             for my $log_key (@sorted_keys) {
                 next unless exists $log_messages{$category}{$log_key};  # may have been deleted by window processing
-
-                my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
-                my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                $grouping_key //= "";
+                my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                 my $cat_gk = "$category|$grouping_key";
 
                 next if $consolidation_final_pass_skipped{$cat_gk};   # #584
@@ -11078,7 +11105,7 @@ sub group_similar_messages {
                 $window_cat_gk = $cat_gk;
 
                 # S3: test against existing compiled patterns
-                my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
+                my $entry = match_consolidation_patterns($category, $grouping_key, $log_key);
                 if ($entry) {
                     my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                     if ($cluster) {
@@ -11097,7 +11124,7 @@ sub group_similar_messages {
                 }
 
                 # S3 miss, below ceiling → add to sliding window
-                push @window, [$log_key, $capped_msg];
+                push @window, [$log_key, $log_key];
 
                 # Window full → run S4 pairwise discovery
                 if (scalar @window >= $fp_window_capacity) {
@@ -11113,13 +11140,11 @@ sub group_similar_messages {
         if ($fp_total_new_patterns > 0) {
             for my $category (sort keys %log_messages) {
                 for my $log_key (sort keys %{$log_messages{$category}}) {
-                    my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
-                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                    $grouping_key //= "";
+                    my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                     my $cat_gk = "$category|$grouping_key";
                     next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
-                    my $entry = match_consolidation_patterns($category, $grouping_key, $capped_msg);
+                    my $entry = match_consolidation_patterns($category, $grouping_key, $log_key);
                     if ($entry) {
                         my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
                         if ($cluster) {
@@ -11145,8 +11170,9 @@ sub group_similar_messages {
             my $cluster = $consolidation_clusters{$cat_gk}{$canonical};
             next unless $cluster->{occurrences} > 0;
 
-            # Canonical form is already the full log_key (includes [level] [thread] [object] prefix)
-            my $canonical_log_key = substr($canonical, 0, (($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length));
+            # The canonical form is the full log_key (includes [level] [thread] [object]
+            # prefix), built from keys already cut, and derive_canonical never lengthens it
+            my $canonical_log_key = $canonical;
 
             # Create the %log_messages entry with all merged stats
             $log_messages{$category}{$canonical_log_key} = {
@@ -11245,10 +11271,12 @@ sub group_similar_messages {
     }
 }
 
-# Returns hashref of all 3-character substrings from capped message
+# Returns hashref of all 3-character substrings of a message key. The one cut of
+# consolidation input: text enters the trigram index at the per-run key cut, so a
+# source of keys that bypasses the key sites is still cut.
 sub get_consolidation_trigrams {
     my ($str) = @_;
-    my $capped = substr($str, 0, $consolidation_message_length_cap);
+    my $capped = substr($str, 0, $max_log_message_length);
     my %trigrams;
     for my $i (0 .. length($capped) - 3) {
         $trigrams{substr($capped, $i, 3)} = 1;
@@ -11998,7 +12026,6 @@ sub consolidation_process_key {
 
     # Not matched by S1 — store for checkpoint processing
     $consolidation_key_message{$log_key} = $capped_msg;
-    $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
     $consolidation_unmatched{$cat_gk}{$log_key} = 1;
     $consolidation_key_generation{$log_key} = $consolidation_pattern_generation{$cat_gk} // 0;
     $consolidation_key_checkpoint_count{$log_key} = 0;
@@ -12063,27 +12090,6 @@ sub try_consolidation_merge_into_existing {
         }
     }
     return ();
-}
-
-# Extract partitioning key from a message for re-scan bucketing
-# Simplified for IQ-01: operates on $message only, uses first word or first 20 chars
-sub extract_consolidation_bucket_key {
-    my ($msg) = @_;
-    if ($msg =~ /^(\S+)/) {
-        return substr($1, 0, 30);
-    }
-    return substr($msg, 0, 20);
-}
-
-# Partition an array of keys into buckets by their bucket key
-sub partition_consolidation_keys {
-    my ($keys_ref) = @_;
-    my %buckets;
-    for my $key (@$keys_ref) {
-        my $bk = extract_consolidation_bucket_key($consolidation_key_message{$key} // $key);
-        push @{$buckets{$bk}}, $key;
-    }
-    return \%buckets;
 }
 
 # Core pairwise discovery engine for one consolidation category
@@ -12171,12 +12177,8 @@ sub run_consolidation_pass {
 
     my $current_pattern_count = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
 
-    # Build partitioned buckets for fast re-scan
-    my %buckets;
-    for my $key (@unmatched_keys) {
-        my $bk = extract_consolidation_bucket_key($consolidation_key_message{$key} // $key);
-        push @{$buckets{$bk}}, $key;
-    }
+    # The keys a newly found pattern re-scans: every unconsumed key of the group
+    my $rescan_keys = [@unmatched_keys];
 
     for my $key (@index_batch) {
         last if $keys_searched >= $max_search;
@@ -12189,8 +12191,8 @@ sub run_consolidation_pass {
         for my $match (@matches) {
             next if $consumed{$match->{key}};
 
-            my $msg_a = substr($consolidation_key_message{$key} // '', 0, $consolidation_message_length_cap);
-            my $msg_b = substr($consolidation_key_message{$match->{key}} // '', 0, $consolidation_message_length_cap);
+            my $msg_a = $consolidation_key_message{$key} // '';
+            my $msg_b = $consolidation_key_message{$match->{key}} // '';
 
             my $raw_mask = compute_mask($msg_a, $msg_b);
             my $mask = coalesce_mask($raw_mask);
@@ -12248,12 +12250,10 @@ sub run_consolidation_pass {
                 $patterns_discovered++;
             }
 
-            # Interleaved re-scan with partitioning
-            my $pattern_bk = extract_consolidation_bucket_key($scan_entry ? $scan_entry->{canonical} : $canonical);
-            my $bucket_keys = $buckets{$pattern_bk};
-            if ($bucket_keys) {
+            # Interleaved re-scan
+            {
                 my @surviving;
-                for my $ukey (@$bucket_keys) {
+                for my $ukey (@$rescan_keys) {
                     if ($consumed{$ukey}) { next; }
                     my $umsg = $consolidation_key_message{$ukey};
                     unless (defined $umsg) { push @surviving, $ukey; next; }
@@ -12270,7 +12270,7 @@ sub run_consolidation_pass {
                         push @surviving, $ukey;
                     }
                 }
-                $buckets{$pattern_bk} = \@surviving;
+                $rescan_keys = \@surviving;
             }
 
             last;
@@ -12306,12 +12306,8 @@ sub process_final_pass_window {
     delete $consolidation_id_index{$cat_gk};
     build_consolidation_ngram_index($cat_gk, \@key_list);
 
-    # Build window-local partition buckets for re-scan
-    my %buckets;
-    for my $log_key (@key_list) {
-        my $bk = extract_consolidation_bucket_key($consolidation_key_message{$log_key} // $log_key);
-        push @{$buckets{$bk}}, $log_key;
-    }
+    # The keys a newly found pattern re-scans: every unconsumed key of the window
+    my $rescan_keys = [@key_list];
 
     my %consumed;
     my $patterns_discovered = 0;
@@ -12333,8 +12329,8 @@ sub process_final_pass_window {
         for my $match (@matches) {
             next if $consumed{$match->{key}};
 
-            my $msg_a = substr($consolidation_key_message{$log_key} // '', 0, $consolidation_message_length_cap);
-            my $msg_b = substr($consolidation_key_message{$match->{key}} // '', 0, $consolidation_message_length_cap);
+            my $msg_a = $consolidation_key_message{$log_key} // '';
+            my $msg_b = $consolidation_key_message{$match->{key}} // '';
 
             my $raw_mask = compute_mask($msg_a, $msg_b);
             my $mask = coalesce_mask($raw_mask);
@@ -12390,12 +12386,10 @@ sub process_final_pass_window {
                 $patterns_discovered++;
             }
 
-            # Interleaved re-scan within window partition buckets
-            my $pattern_bk = extract_consolidation_bucket_key($scan_entry ? $scan_entry->{canonical} : $canonical);
-            my $bucket_keys = $buckets{$pattern_bk};
-            if ($bucket_keys) {
+            # Interleaved re-scan
+            {
                 my @surviving;
-                for my $ukey (@$bucket_keys) {
+                for my $ukey (@$rescan_keys) {
                     if ($consumed{$ukey}) { next; }
                     my $umsg = $consolidation_key_message{$ukey};
                     unless (defined $umsg) { push @surviving, $ukey; next; }
@@ -12412,7 +12406,7 @@ sub process_final_pass_window {
                         push @surviving, $ukey;
                     }
                 }
-                $buckets{$pattern_bk} = \@surviving;
+                $rescan_keys = \@surviving;
             }
 
             last;
@@ -12547,7 +12541,7 @@ sub consolidation_cliff_edge {
         my $stride = scalar(@keys) / $consolidation_cliff_sample;
         @keys = map { $keys[int($_ * $stride)] } 0 .. $consolidation_cliff_sample - 1;
     }
-    my @trigrams = map { get_consolidation_trigrams(substr($_, 0, $consolidation_message_length_cap)) } @keys;
+    my @trigrams = map { get_consolidation_trigrams($_) } @keys;
     my $n = scalar @keys;
 
     my @best;
@@ -12640,7 +12634,6 @@ sub run_consolidation_checkpoint {
                 $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
                 # Evict: remove from consolidation working set, keep in %log_messages
                 delete $consolidation_key_message{$key};
-                delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
@@ -12678,7 +12671,6 @@ sub run_consolidation_checkpoint {
     for my $key (keys %$consumed_ref) {
         delete $log_messages{$category}{$key};
         delete $consolidation_key_message{$key};
-        delete $consolidation_key_message_cat_gk{$key};
         delete $consolidation_key_trigrams{$key};
         delete $consolidation_key_generation{$key};
         delete $consolidation_key_checkpoint_count{$key};
@@ -12732,7 +12724,6 @@ sub run_consolidation_checkpoint {
             if ($consolidation_key_checkpoint_count{$key} > $max_survivals) {
                 # Evict: remove from consolidation working set, keep in %log_messages
                 delete $consolidation_key_message{$key};
-                delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
@@ -15089,7 +15080,11 @@ sub adapt_to_terminal_settings {
     # Convert time_bucket_size, in the run's unit, to seconds
     $bucket_size_seconds = convert_duration_to_ms($time_bucket_size, $bucket_size_unit) / 1000;
 
-    $max_log_message_length = $terminal_width;		# this is the max that we can print without wrapping, depends on the summary table width, and terminal width
+    # The per-run message-key cut, read by every key site, the trigram entry guard
+    # and the benchmark data. Under -o or -g the key is cut at the cap; otherwise
+    # at the terminal width, the most the messages table can print without
+    # wrapping. -g is already switched off here when -n 0 retains no message.
+    $max_log_message_length = ( $write_messages_to_csv || $group_similar_sensitivity ne "none" ) ? MESSAGE_KEY_CAP : $terminal_width;
     return;
 }
 
@@ -15948,7 +15943,6 @@ sub read_and_process_logs {
                 # retaining run pays that one boolean and nothing else.
                 if( $capture_messages && defined( $message ) ) {
                     my $log_key = "";
-                    my $max_object_length = 25;
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
                     $log_level =~ s/-HL$//;
 
@@ -16006,32 +16000,29 @@ sub read_and_process_logs {
                     }
 
                     # Hoist truncated metadata for consolidation grouping key (Issue #96)
-                    my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;
-                    my $truncated_object = defined($object) ? substr($object, length($object) > $max_object_length ? length($object)-$max_object_length : 0, $max_object_length) : undef;
+                    my $truncated_thread = defined($threadname) ? substr($threadname, 0, MESSAGE_KEY_THREAD_LENGTH) : undef;
+                    my $truncated_object = defined($object) ? substr($object, length($object) > MESSAGE_KEY_OBJECT_LENGTH ? length($object)-MESSAGE_KEY_OBJECT_LENGTH : 0, MESSAGE_KEY_OBJECT_LENGTH) : undef;
 
                     if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
-                        # truncate the log message key to either the screen width or hardcoded value if writing to output to CSV file
-                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
+                        # the key is cut at the per-run cut (MESSAGE_KEY_CAP under -o or -g, else the terminal width)
+                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, $max_log_message_length);
                     } elsif( defined( $object ) ) {
-                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, $max_log_message_length);
                     } elsif( defined( $threadname ) ) {
-                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, $max_log_message_length);
                     } else {
-                        $log_key = substr("[$log_level] $message", 0, ( ($write_messages_to_csv == 1 || $group_similar_sensitivity ne "none") ? 350 : $max_log_message_length ) );
+                        $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
                     my $consolidation_s1_matched = 0;
+                    my $new_key_grouping_key;
                     if ($group_similar_sensitivity ne "none") {
                         my $grouping_key = $log_level // "";
-                        my $capped_msg = substr($log_key, 0, $consolidation_message_length_cap);
                         my $cat_gk = "$category|$grouping_key";
 
-                        # Track max observed message length for adaptive cap
-                        my $msg_len = length($log_key);
-                        $max_observed_message_length = $msg_len if $msg_len > $max_observed_message_length;
-
                         my $is_new_key = !exists $log_messages{$category}{$log_key};
+                        $new_key_grouping_key = $grouping_key if $is_new_key;
 
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
@@ -16097,7 +16088,7 @@ sub read_and_process_logs {
                                 }
                             }
 
-                            $consolidation_s1_matched = consolidation_process_key($log_key, $category, $cat_gk, $capped_msg, $stats_source);
+                            $consolidation_s1_matched = consolidation_process_key($log_key, $category, $cat_gk, $log_key, $stats_source);
                         }
                     }
 
@@ -16291,6 +16282,9 @@ sub read_and_process_logs {
                         $log_messages{$category}{$log_key}{occurrences}++;
                         $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
+                    # Under -g a new key's entry carries its grouping key, so the final
+                    # pass groups the key by the value the streaming checkpoints used.
+                    $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key if defined $new_key_grouping_key;
                     }  # end: if (!$consolidation_s1_matched)
                 }
 

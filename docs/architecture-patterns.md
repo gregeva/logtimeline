@@ -703,6 +703,7 @@ before it was moved (the comment at the bytes-observed latch).
 - `read_and_process_logs` :: `&& ( !$numeric_highlight_active || (`
 - `format_entry_block_src` :: `my $miss_src = $layout =~ /^iso_/`
 - `read_and_process_logs` :: `if( $bytes_observed_line && !$omit_bytes ) {`
+- `read_and_process_logs` :: `$log_key = substr("[$log_level] $message", 0, $max_log_message_length);`
 
 **Owning record.** `features/312-numeric-criteria-highlight-selection.md` §
 Core mechanism; `features/478-highlight-decision-read-back.md`;
@@ -711,4 +712,4 @@ Core mechanism; `features/478-highlight-decision-read-back.md`;
 
 **Status.** Needs refinement: the loop carries about 107 tests of run constants
 per line and recomputes the millisecond bucket size and the key length per
-line (audit, item 8, measured in drop 2). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.
+line (audit, item 8, measured in drop 2). The key length is #619 (one per-run key cut). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.

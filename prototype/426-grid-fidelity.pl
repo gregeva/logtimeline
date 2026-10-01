@@ -212,6 +212,8 @@ while (<$fh>) {
     $message =~ s/ count\s*=\s*\d+/ count=?/g;
     my $threadname = $thread;
     if (defined $thread && $thread ne "") { my ($pool) = $thread =~ /(.*)-\d+$/; $threadname = $pool if defined $pool }
+    # Restated from ltl's read_and_process_logs as of 2d8d327; ltl now names these
+    # lengths MESSAGE_KEY_THREAD_LENGTH and MESSAGE_KEY_OBJECT_LENGTH (#619).
     my $truncated_thread = defined($threadname) ? substr($threadname, 0, 20) : undef;
     my $truncated_object = defined($object) ? substr($object, length($object) > 25 ? length($object) - 25 : 0, 25) : undef;
     my $log_key = substr("[$category_bucket] [$truncated_thread] [$truncated_object] $message", 0, 200);

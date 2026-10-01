@@ -8,7 +8,7 @@
 
 The current final pass simulates streaming processing on a static dataset — it feeds all remaining `%log_messages` keys through `consolidation_process_key()` one by one, triggering checkpoints at the same 5000-key cadence as streaming. This causes:
 
-1. **Unbounded working set accumulation** — without eviction, `%consolidation_unmatched` grows linearly with each checkpoint. S3 testing cost, bucket partitioning, and trigram memory all grow without bound.
+1. **Unbounded working set accumulation** — without eviction, `%consolidation_unmatched` grows linearly with each checkpoint. S3 testing cost and trigram memory grow without bound.
 2. **Data duplication** — every key is copied into `%consolidation_key_message`, `%consolidation_unmatched`, and related tracking structures, duplicating data already in `%log_messages`.
 3. **Inefficient S4 discovery** — the large accumulated working set means S4 builds trigram indices over thousands of keys that will never match, wasting memory and CPU.
 
@@ -107,17 +107,9 @@ No S4 in Pass 2. No trigrams. Just regex matching against the new patterns. This
 
 ### Sort Order
 
-Sort by message body, stripping the `[$grouping_key]` prefix:
+Sort by grouping key, then message body. The grouping key is read from the message-store entry, and the body is the key after its `[$grouping_key]` prefix. Each group's keys are contiguous, a window is cleared whenever the grouping key changes, and a lone key is never carried into the next group's window. A key is compared only within its own category and grouping key, as § Grouping Key Design of `features/fuzzy-message-consolidation.md` requires.
 
-```perl
-my @sorted_keys = sort {
-    my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/;
-    my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/;
-    ($msg_a // $a) cmp ($msg_b // $b)
-} keys %{$log_messages{$category}};
-```
-
-This clusters similar API paths together regardless of status code, maximizing S4 yield within each sliding window.
+*Corrected 2026-10-01 under #619 (one per-run message-key cut, its D10). This section used to sort by body alone, "regardless of status code". That interleaved the levels, and a window could hold keys of two levels.*
 
 ### No Data Duplication
 

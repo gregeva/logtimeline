@@ -90,6 +90,21 @@ corpus the mask takes the same run from 37,597 surviving rows to 286,
 `finalize/group_similar` from 1.14 s to 0.43 s and `rss_peak` from 166 MB to 119 MB. That
 is the scenario being fixed, not the tool improving.
 
+## Boundary notes
+
+A value that moves at a known change, and that a comparison across the change would
+otherwise read as a regression or an improvement.
+
+**`CONFIG max_log_message_length` reads the cut each run used, from release 0.19.0
+(#619).** The row reports the length message keys are cut to. A run that writes CSV or
+groups messages cuts every key at the message-key cap, 350 characters, and always did;
+the row used to report the terminal width there. From 0.19.0 it reads `350` on
+`top25-consolidate` and `heatmap-histogram-consolidate` (`-g`) and on
+`heatmap-histogram-export` (`-o`), and stays at the terminal width (`200` under
+`run-benchmark.sh`) on every other scenario. **Expect `compare-results.sh detailed` to
+print `200 → 350` labelled as a regression on those three scenarios** across that
+boundary: the keys are the same length on both sides, and only the report changed.
+
 ## Results naming
 
 | kind | naming | what it is |

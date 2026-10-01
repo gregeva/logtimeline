@@ -78,7 +78,7 @@ After parsing completes, run a final checkpoint on all remaining unmatched keys 
 
 ### Final Pass
 
-An optional separate pass after the main processing that operates on ceiling-excluded keys (the ones S2 filtered out). Uses the same discovery pipeline but with different parameters — typically a higher ceiling to include previously-excluded high-occurrence entries.
+A pass after the streaming checkpoints over every key still ungrouped, ceiling-excluded keys included, with no eviction: the last chance to group. It runs the same discovery, matching and merging functions in sorted windows, each holding one group's keys, with its own, much higher occurrence ceiling (`features/fuzzy-message-consolidation.md` § Process Flow).
 
 ## Interleaved Re-scan: Why Order Matters
 
@@ -104,7 +104,9 @@ Without pattern 1's re-scan happening immediately, patterns 2-10 each discover a
 
 ### Partitioning Composes with Interleaving
 
-To reduce re-scan cost without destroying interleaving, partition keys by a cheap grouping key (e.g., `[LEVEL][class]`). Each pattern's re-scan only touches its matching partition instead of all keys. This gave 21% speedup while preserving cascading reduction.
+To reduce re-scan cost without destroying interleaving, partition keys by a cheap key that actually divides the set (in the prototype, `[LEVEL][class]`). Each pattern's re-scan then touches only its matching partition. The prototype measured a 21% speedup while preserving cascading reduction.
+
+A partition only pays when it divides the keys being scanned. In `ltl` the work is already grouped by level (category plus level is the grouping key), so a partition by level divides nothing within a group. `ltl`'s re-scan partition was removed as dead code under #619 (one per-run message-key cut).
 
 ## Key Architectural Lessons
 
@@ -116,9 +118,9 @@ Switching from load-all to checkpoint-based processing delivered 6× speedup on 
 
 S1 inline match prevents 98% of keys from ever being allocated. This avoids ~105 MB of hash allocation on a 288K-line file. But this savings never shows up in memory measurements because those keys were never allocated. The cumulative deleted bytes (~6 MB) massively understate the true savings vs a no-consolidation baseline.
 
-### Stall Detection as Natural Bound
+### Adaptive Eviction as Natural Bound
 
-With no hard pattern cap, pattern count plateaus naturally when the data's diversity is exhausted. Stall detection (2 consecutive unproductive checkpoints) prevents wasted work. This replaced a hard cap of 50 that caused 3+ hour runtimes at production scale because it couldn't cover URL diversity in access logs.
+With no hard pattern cap, pattern count plateaus naturally when the data's diversity is exhausted. Adaptive per-key eviction bounds the working set: an unmatched key survives a number of checkpoints set by its group's rolling absorption rate. It replaced stall detection (2 consecutive unproductive checkpoints), which had replaced a hard cap of 50 that caused 3+ hour runtimes at production scale because it couldn't cover URL diversity in access logs.
 
 ### Fixed Trigger Is Fine
 

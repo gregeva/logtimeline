@@ -172,7 +172,9 @@ This separation means that `*` or `#` appearing in the original message text cau
 
 **Rationale:** Log lines can be arbitrarily long (stack traces, serialized objects, large payloads). Indexing beyond the meaningful prefix wastes memory and CPU without improving similarity detection. The existing `$log_key` truncation provides a natural model — similarity detection operates on the same truncated form used for display.
 
-**WARNING — Truncation breaks UUID normalization (#158):** The cap must be large enough to preserve variable content (UUIDs, session IDs, query strings) that appears at the end of long messages. UUID-normalized Dice scoring (`$uuid_re`) requires the full 8-4-4-4-12 UUID pattern (36 chars). If the log key is truncated mid-UUID, normalization silently fails and the consolidation engine treats each key as unique — causing catastrophic performance regression (14s → 0.14s on 10K lines when fixed). The current cap is 350 chars when `-g` is active. If log formats with variable content beyond 350 chars are encountered, this cap will need to increase or the adaptive cap from IQ-02 must be implemented.
+**The cap today:** the key is cut once per run, at 350 characters under `-g` or CSV output and at the terminal width otherwise, and the same cut bounds the text that enters the trigram index (IQ-02). Keys are scored as written: no UUID or other value is normalised before scoring (§ Design: candidate search that finds every partner (#569), D569-2), so a cut that falls inside a variable value leaves a shorter variable value, not a failed match. The adaptive cap once proposed was closed as not planned (IQ-02).
+
+*Corrected 2026-10-01 under #619 (one per-run message-key cut). This decision used to warn that a cut inside a UUID broke UUID-normalised scoring. That scoring was removed by D569-2.*
 
 ### DD-07: Stats Merging at Consolidation Time
 
@@ -368,9 +370,24 @@ read_and_process_logs()
 │    unmatched groups with >= 2 keys
 │
 └─ group_similar_messages()
-     Final pass (if enabled): iterate all remaining %log_messages keys
-     through the same consolidation_process_key() pipeline
-     (see #150 for scalability concerns with this approach)
+     Final pass (on by default; scores at the -g similarity unless the
+     hidden --final-threshold overrides it; -gc sets its occurrence
+     ceiling). A group whose streaming absorbed almost nothing
+     and which hands many keys forward is skipped, and the run says so (#584).
+     Pass 1, each category in turn: the remaining keys sorted by grouping
+       key, then body. Per key: S3 against its own group's patterns, then
+       the -gc ceiling, else into the window. A window holds keys of one
+       group only: it is processed when full (1,000 keys) or when the
+       grouping key changes, and cleared either way, so a lone key never
+       crosses into another group's window. Processing a window: a trigram
+       index over the window; S4 with at most 500 keys starting a search,
+       the rest absorbed as partners or by re-scan; a re-scan of the window
+       after each new pattern; the cross-cluster merge. No eviction: the
+       final pass is the last chance a key has to be grouped.
+     Pass 2, if Pass 1 formed patterns: an S3 sweep of the remaining keys
+       against their own group's patterns.
+     (features/150-final-pass-scalability.md; the window and search sizes
+     are under question in #648)
 ```
 
 **Key insight:** S1 inline matching runs for every new key during parsing, but can only match against patterns that already exist in `%consolidation_patterns`. Patterns are created during checkpoint processing (S4). Therefore, S1 provides zero benefit until the first checkpoint completes. All keys in the first batch (up to the trigger threshold) get no S1 matching.
@@ -411,9 +428,10 @@ run_consolidation_checkpoint($category, $grouping_key)
      │    For each source key:
      │    │
      │    ├─ find_consolidation_candidates()             ──► verbose: "find_candidates calls"
-     │    │    Phase 1: discriminative trigram pre-filter (raw trigrams)
-     │    │    Phase 2: Dice verification (UUID-normalized trigrams)
-     │    │    → returns candidate pairs scoring above threshold
+     │    │    the search that finds every partner at the threshold
+     │    │    (§ Design: candidate search that finds every partner (#569)),
+     │    │    scoring keys as written, no value normalised
+     │    │    → returns candidates scoring at or above the threshold
      │    │
      │    ├─ For best candidate match:
      │    │    compute_mask() → coalesce_mask()
@@ -431,10 +449,10 @@ run_consolidation_checkpoint($category, $grouping_key)
      │    │                                               ──► verbose: "N patterns" in header
      │    │
      │    └─ Interleaved re-scan:
-     │         Match new regex against remaining unmatched keys
-     │         in same partition bucket (cheap regex match)
+     │         Match new regex against every remaining unconsumed key
+     │         of the group (cheap regex match)
      │         → MATCH: consumed, stats merged            ──► verbose: "S4 Re-scan absorbed"
-     │         → NO MATCH: stays in bucket
+     │         → NO MATCH: stays unmatched
      │
      ├─ Return: ($discovered, $absorbed, ..., $rescan_absorbed)
      │
@@ -535,6 +553,8 @@ The following log files should be used throughout prototyping, development, and 
 
 ### PF-01: Default Threshold Lowered to 75% (was 85%)
 
+*Superseded: the default sensitivity is 85 % (Goals, item 3; `ltl`'s `$consolidation_threshold`), after PF-08 had raised this 75 % to 80 %.*
+
 **Finding:** UUID-varying ErrorCode messages — the dominant pattern in the primary test file (286K of 288K lines) — score 80–82% Dice similarity. A single UUID (36 chars) in a ~180-char message generates ~34 unique trigrams per message, dragging the score well below 85%.
 
 **Decision:** Default threshold lowered to 75%. At 75%, the ErrorCode messages consistently pass the filter while still excluding genuinely dissimilar messages. The 85% default was based on the worked example in DD-01 which used short messages with small variable parts — real-world messages with UUIDs, session tokens, and entity names have proportionally larger variable regions.
@@ -585,6 +605,8 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 ### PF-05: Pattern Management — Merge-First + Hard Cap
 
+*Superseded in part: merge-first stands; the hard cap does not. `ltl` has no pattern cap (`$consolidation_max_patterns` is 0, unlimited), and adaptive per-key eviction bounds the working set (Outstanding Decision 5; § Performance Optimization History).*
+
 **Decisions from Phase 4 review:**
 
 **Merge-first policy:** Before adding a new pattern, check existing patterns for similarity. If a similar pattern exists, merge the new pattern into it (generalizing the existing pattern further). This keeps count bounded while improving coverage. Patterns are never removed — only replaced by merging — because aggregated statistics are already accumulated against them.
@@ -616,7 +638,11 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Decision:** Defer level partitioning to a future enhancement. The current `%log_messages` data model does not need to change. Consolidation operates on `%log_messages{'plain'}` as a single pool. The hard cap accommodates this by being set higher. Partitioning by extracting `[LEVEL]` from `$log_key` can be added later as an optimization.
 
+*Historical; corrected 2026-10-01 under #619 (one per-run message-key cut).* The finding that keys of different levels never score above the threshold does not hold: on short messages the shared prefix dominates and they do (IQ-01). The integrated engine groups by category plus level (§ Grouping Key Design), and the level is a grouping key, not a later optimisation.
+
 ### PF-08: Default Threshold Raised to 80%
+
+*Superseded: the default sensitivity is 85 % (Goals, item 3). The final pass scores at the `-g` sensitivity, not at a 95 % of its own (D569-5).*
 
 **Finding:** After implementing merge-first pattern generalization and the `*`-aware canonical/regex derivation, threshold 75% was too aggressive — merging canonicals that shouldn't merge. Threshold 80% provides a good balance: strict enough to avoid false merges, loose enough to catch genuine patterns.
 
@@ -711,6 +737,8 @@ The `[level]` prefix does not by itself keep levels apart. On short messages the
 **Remaining hotspot:** `find_candidates` at 37.3% is now the top cost. Its time is spent iterating posting lists in `%ngram_index` to accumulate candidate hit counts. This is inherent to the inverted-index approach. Further optimization would require a fundamentally different algorithm (e.g., locality-sensitive hashing). For the ltl integration, this cost is amortized: consolidation runs infrequently (only when unmatched count exceeds the trigger), not per-line.
 
 ### PF-15: Alignment Algorithm — Inline::C Banded Edit Distance (100× speedup)
+
+*Superseded for `ltl`: the banded edit distance is used in pure Perl only; Inline::C is not a production dependency (PF-26, IQ-05).*
 
 **Problem:** `compute_mask` remained the dominant cost even after PF-14 optimizations (10.8s, 36.3% of total). The pure-Perl LCS DP is bottlenecked by Perl interpreter overhead (array creation via `split //`, per-element hash/array access, `vec()` calls), not algorithmic complexity. After prefix/suffix stripping, the differing middles average only ~38 chars — the 40×40 DP matrix is tiny, but Perl's per-operation cost makes it expensive.
 
@@ -820,7 +848,11 @@ Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/
 
 **Decision:** Batched discovery rejected for this data profile. Partitioned interleaved re-scan is the correct approach. The `batched_rescan()` function was removed as dead code.
 
+*Historical; corrected 2026-10-01 under #619 (one per-run message-key cut).* In the prototype the bucket was level plus class. In `ltl` it was the key's first word, the bracketed level, which every key of a group shares because the grouping key is the level, so the partition divided no group. It was removed from `ltl` as dead code under #619 (its D8), and a new pattern re-scans every unconsumed key of its group or final-pass window. The interleaved re-scan itself is unchanged. PF-16's partitioning option and its 21 % figure were measured on the prototype's level-plus-class buckets only.
+
 ### PF-18: Discriminative Trigram Pre-filter for find_candidates
+
+*Superseded by D569-1 (§ Design: candidate search that finds every partner (#569)): the fixed 50-trigram, 30 % pre-filter and its constants are removed. It passed over partners that scored at the threshold (§ Finding: no groupings on keys whose rarest trigrams are per-request values (#569)).*
 
 **Problem:** NYTProf profiling (PF-14) revealed `find_candidates` consumes 88.1% of runtime (29.9s out of 34s) on diverse log files. The inner loop iterates all posting lists for every source trigram — common trigrams like `[WA`, `ARN`, `] [` appear in nearly every WARN key, creating posting lists of 1000-5000 entries. Each call visits ~300K posting entries across 1152 calls.
 
@@ -844,6 +876,8 @@ Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/
 **Also cleaned up:** Removed dead `batch_match_one_c()` from Inline::C block (unused after reverting batch match integration from PF-16).
 
 ### PF-19: UUID Normalization for Dice Scoring
+
+*Superseded by D569-2: consolidation scores keys as written and replaces no UUID; the UUID-normalised trigrams and scoring are removed. Where a log carries many UUIDs, the analyst masks them (`-m uuid`), as D569-6 advises.*
 
 **Problem:** After rebuilding with checkpoint-based architecture (PF-20), NYTProf profiling on the diverse ApplicationLog revealed `dice_coefficient` consuming 49% of runtime (6.32s, 414K calls). Root cause: 1,709 DEBUG keys all share the same 80-char prefix (`Nonce key retrieved. Resulting key is <UUID>`) but differ only in the UUID tail. Full Dice scores 74-76% (below 80% threshold) because ~34 unique UUID trigrams per message drag the score down. This caused 500 fruitless `find_candidates` calls discovering zero patterns.
 
@@ -871,6 +905,8 @@ Partitioning keeps the problem tractable up to ~5M keys. Beyond that, Hyperscan/
 **Key insight:** UUID normalization is not just an optimization — it fixes a correctness gap. Without it, UUID-varying messages that represent the same pattern cannot be consolidated because Dice scores are below threshold. The normalization lets the similarity engine see through random hex noise to the structural similarity underneath.
 
 ### PF-20: Checkpoint-Based Architecture Rebuild
+
+*The checkpoint architecture stands. The UUID-normalised trigram structure listed below was removed by D569-2.*
 
 **Problem:** The prototype loaded all log lines into memory, then ran consolidation over the entire key set at once. This made performance numbers meaningless — there were no batch boundaries where new keys arrive against existing patterns, so the S1 inline match and S3 checkpoint match stages never had any work to do.
 
@@ -933,6 +969,8 @@ Parse line-by-line:
 - Tracking invariant catches any accounting errors immediately
 
 ### PF-21: Memory Instrumentation and ltl Baseline Comparison
+
+*Measured with the UUID-normalised trigram structure (`key_trigrams_norm`), which D569-2 removed; the peaks below include it.*
 
 **Problem:** The checkpoint architecture frees memory at each checkpoint (deleting absorbed keys from `%log_messages`/`%key_message`, freeing trigram data). But we'd never measured whether this actually works, or how the prototype's memory footprint compares to ltl baseline.
 
@@ -998,6 +1036,8 @@ Parse line-by-line:
 
 ### PF-22: Ceiling Comparison and Final Pass Validation
 
+*The streaming ceiling of 3 stands. The final pass validated here was the PF-12 design, replaced by #137 and then by the final-pass redesign (§ Process Flow).*
+
 **Ceiling comparison:** Tested ceiling values 2, 3, 4, and 5 on both test files.
 
 | Ceiling | S2 filtered (power-law) | S5 unmatched | WARN remaining | S2 filtered (diverse) | S5 unmatched | WARN remaining |
@@ -1017,6 +1057,8 @@ Parse line-by-line:
 The final pass correctly discovers patterns among ceiling-excluded stragglers and composes cleanly with checkpoint processing. No issues found.
 
 ### PF-23: Determinism Fix and Final Pass Default Changes
+
+*Superseded in part: the determinism fix stands. Final-pass defaults today: on; scoring at the `-g` sensitivity (D569-5) unless the hidden `--final-threshold` overrides it; occurrence ceiling 1,000,000 (`-gc`).*
 
 **Non-determinism:** Consecutive runs of the prototype on the same file produced different results (e.g., S4=1806 vs S4=1628, clusters=170 vs 172). Root cause: Perl hash iteration order is randomized per process. The pairwise discovery loop in `run_checkpoint()` iterated `keys %{$unmatched_keys{$cat}}` in random order, so which key pairs were compared first — and which patterns were discovered — varied per run.
 
@@ -1210,11 +1252,11 @@ See PF-21 for detailed analysis. On small files, the prototype uses more RSS tha
 
 1. **S1 inline match is the primary performance mechanism.** On power-law data, 98.4% of keys are absorbed during parsing by matching against compiled patterns. They never enter `%log_messages`, eliminating hash allocation and all downstream processing. This is why the checkpoint prototype is faster than ltl baseline.
 
-2. **UUID normalization fixes a correctness gap, not just a performance issue.** Without it, UUID-varying messages score 74-76% Dice (below 80% threshold) and cannot be consolidated. DEBUG messages went from 0% to 99.9% reduction after normalization (PF-19).
+2. *(Superseded by D569-2: scoring is on keys as written; masking UUIDs is the analyst's step, D569-6.)* **UUID normalization fixes a correctness gap, not just a performance issue.** Without it, UUID-varying messages score 74-76% Dice (below 80% threshold) and cannot be consolidated. DEBUG messages went from 0% to 99.9% reduction after normalization (PF-19).
 
 3. **`match_against_patterns` is now the dominant cost.** On power-law data, S1 inline matching 287K keys against compiled patterns takes 0.68s (36% of total). This is the correct cost profile — cheap regex matching, not expensive pairwise similarity.
 
-4. **Power-law data benefits most from checkpoints; diverse data benefits from UUID normalization.** On power-law data, checkpoint 1 discovers the dominant pattern, and S1 absorbs everything thereafter. On diverse data, UUID normalization reduces `dice_coefficient` calls from 414K to 7.5K.
+4. *(The UUID normalisation named here was removed by D569-2.)* **Power-law data benefits most from checkpoints; diverse data benefits from UUID normalization.** On power-law data, checkpoint 1 discovers the dominant pattern, and S1 absorbs everything thereafter. On diverse data, UUID normalization reduces `dice_coefficient` calls from 414K to 7.5K.
 
 5. **Trigram data lifecycle is correct.** Building and freeing per checkpoint prevents memory accumulation. Only compiled patterns and clusters persist.
 
@@ -1234,9 +1276,9 @@ The core algorithms are sound and proven:
 - **Regex derivation from masks** produces correct patterns that match source messages
 - **Pattern compilation and matching** absorbs messages reliably (100% ERROR reduction on power-law data, 99.9% DEBUG on diverse data)
 - **Cross-cluster merging** correctly identifies and combines overlapping patterns
-- **Interleaved re-scan with partitioning** is essential for power-law distributions
+- **Interleaved re-scan** is essential for power-law distributions *(the partitioning was the prototype's; `ltl`'s divided nothing and was removed, PF-17)*
 - **Checkpoint-based processing** with S1 inline match is the correct architecture — absorbs 98%+ of keys during parsing on power-law data
-- **UUID normalization** enables consolidation of UUID-varying messages that were previously below threshold
+- **UUID normalization** enabled consolidation of UUID-varying messages that were previously below threshold *(removed by D569-2; masking with `-m uuid` is the analyst's step, D569-6)*
 
 ### Lessons Learned
 
@@ -1248,13 +1290,13 @@ The core algorithms are sound and proven:
 
 3. **Coincidental matches in variable regions require coalescing.** LCS alignment finds spurious single-character matches inside UUIDs and hex strings. Two-pass coalescing (remove short keeps, then collapse variable-dominated spans) handles this reliably. The parameters (min keep=3, ratio=40%, boundary=10) proved stable across all test data. (PF-03)
 
-4. **Pattern count is a critical control lever.** Matching cost is O(lines × patterns). Unbounded pattern discovery created 103 redundant patterns where 5 sufficed. Merge-first + hard cap keeps patterns bounded while merge-first improves coverage by generalizing. (PF-04, PF-05)
+4. *(The hard cap named here was removed; adaptive eviction bounds the working set, Outstanding Decision 5.)* **Pattern count is a critical control lever.** Matching cost is O(lines × patterns). Unbounded pattern discovery created 103 redundant patterns where 5 sufficed. Merge-first + hard cap keeps patterns bounded while merge-first improves coverage by generalizing. (PF-04, PF-05)
 
-5. **Ceiling filters and final passes are complementary, not alternative.** The ceiling focuses discovery on the long tail (single-occurrence variants). The final pass cleans up ceiling-excluded stragglers that share obvious patterns (e.g., same message across 16 thread pools). Two-tier design: aggressive discovery on the tail, conservative cleanup on high-occurrence groups. (PF-06, PF-12)
+5. *(The final pass now covers every key still ungrouped, ceiling-excluded keys included, § Process Flow.)* **Ceiling filters and final passes are complementary, not alternative.** The ceiling focuses discovery on the long tail (single-occurrence variants). The final pass cleans up ceiling-excluded stragglers that share obvious patterns (e.g., same message across 16 thread pools). Two-tier design: aggressive discovery on the tail, conservative cleanup on high-occurrence groups. (PF-06, PF-12)
 
 6. **Too-low ceiling hurts more than too-high.** Ceiling=2 shielded too many keys from discovery, causing WARN remaining to balloon from 58 to 217 on diverse data. Ceiling 3-5 produced nearly identical results. A ceiling that's too aggressive excludes keys that could have been consolidated; a ceiling that's too permissive just adds slightly more work to discovery with no quality loss. Err on the side of letting more keys through. (PF-22)
 
-7. **Natural separation can substitute for explicit partitioning.** Log level prefixes in `$log_key` create natural trigram separation — cross-level Dice scores never exceed threshold. This deferred the need for explicit level partitioning, simplifying the data model. (PF-07)
+7. **Natural separation does not substitute for explicit partitioning.** Log level prefixes in `$log_key` were expected to keep levels apart by trigram separation; on short messages they do not, because the shared prefix dominates (IQ-01). The level is a grouping key in both passes (§ Grouping Key Design). (PF-07, corrected 2026-10-01 under #619)
 
 **Iterative refinement:**
 
@@ -1274,15 +1316,15 @@ The core algorithms are sound and proven:
 
 14. **Interleaved re-scan is essential for power-law distributions.** Batching 10 patterns before re-scanning caused 22× regression because pattern 1 absorbs 99%+ of keys — without immediate re-scan, patterns 2-10 each discover against the full set. The cascading reduction from immediate absorption is the core performance mechanism. (PF-17)
 
-15. **Partitioning composes with interleaved re-scan; batching does not.** Partitioning keys by `[LEVEL][class]` reduced re-scan scope without destroying cascading reduction. Batching traded correctness of scan cost for fewer passes — catastrophic when one pattern dominates. (PF-16, PF-17)
+15. **Interleaved re-scan is essential; batching it is not.** Batching traded correctness of scan cost for fewer passes — catastrophic when one pattern dominates. Partitioning keys by `[LEVEL][class]` reduced re-scan scope in the prototype; `ltl`'s partition, by level alone, divided no group and was removed (PF-17, corrected 2026-10-01 under #619). (PF-16, PF-17)
 
 **Architecture:**
 
 16. **Architecture matters more than micro-optimization.** Switching from load-all to checkpoint-based processing delivered 6× speedup on diverse data (12.3s → 2.06s), far more than any algorithmic optimization within the old architecture. The right processing model makes micro-optimizations less necessary. (PF-20)
 
-17. **Correctness gaps masquerade as performance problems.** The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance and correctness simultaneously. (PF-19)
+17. *(Its UUID example predates D569-2, which removed UUID normalisation; the lesson stands.)* **Correctness gaps masquerade as performance problems.** The DEBUG "performance problem" (414K fruitless Dice calls) was actually a correctness problem — UUIDs prevented Dice from seeing structural similarity. UUID normalization fixed both performance and correctness simultaneously. (PF-19)
 
-18. **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
+18. *(Superseded by D569-2: consolidation scores keys as written and normalises nothing; replacing variable values is the analyst's step, by masking, D569-6.)* **Normalize known variable patterns before similarity scoring.** UUIDs are structurally random noise that drags Dice scores below threshold for messages that are structurally identical. Normalizing to `<UUID>` in the scoring pipeline (not in the alignment pipeline) lets similarity see through the noise while preserving original text for pattern derivation. (PF-19)
 
 **Memory:**
 
@@ -1292,7 +1334,7 @@ The core algorithms are sound and proven:
 
 21. **The biggest savings are invisible.** S1 inline match prevents 98% of keys from ever entering `%log_messages` — this avoids ~105 MB of hash allocation on the power-law file. But this savings never shows up in memory measurements because those keys were never allocated. The cumulative deleted bytes (~6 MB) massively understate the true savings vs a no-consolidation baseline. (PF-21)
 
-22. **Trigram overhead dominates and is bounded by batch size.** `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB for a 5000-key batch. This is the price of similarity search — fixed per checkpoint, not cumulative. The `$trigger` parameter directly controls this: lower trigger = less peak memory but more frequent checkpoints. (PF-21)
+22. *(The `key_trigrams_norm` share of these peaks went with D569-2.)* **Trigram overhead dominates and is bounded by batch size.** `key_trigrams` + `ngram_index` + `key_trigrams_norm` peak at ~206 MB for a 5000-key batch. This is the price of similarity search — fixed per checkpoint, not cumulative. The `$trigger` parameter directly controls this: lower trigger = less peak memory but more frequent checkpoints. (PF-21)
 
 **Perl-specific:**
 
@@ -1324,7 +1366,7 @@ The core algorithms are sound and proven:
 
 34. **The final pass must use the same pipeline architecture as streaming.** The original final pass (PF-12) was a separate mini-pipeline with its own inline pairwise discovery — it bypassed S1 matching, skipped checkpoint batching, and missed all keys not in `%consolidation_unmatched`. The fix (#137) extracts `consolidation_process_key()` as a shared subroutine and has the final pass iterate sorted `%log_messages` keys through the same S1→checkpoint pipeline. Sorting groups similar messages together for better S3/S4 checkpoint yield. Eviction is disabled during the final pass (bounded set, last opportunity to consolidate). Separate `fp_*` counters track final pass work independently from streaming. (#137)
 
-35. **Log key truncation silently breaks UUID normalization.** When `$log_key` is truncated before the consolidation engine sees it, UUIDs at the end of long messages get cut mid-pattern. `$uuid_re` requires the full 8-4-4-4-12 format (36 chars) — a partial UUID doesn't match, so UUID-normalized Dice scoring silently falls back to raw trigrams, and the UUID variation drags scores below threshold. The failure is invisible: no error, no warning, just thousands of keys that should consolidate but don't, causing 100× performance regression. The fix (#158) uses a 350-char cap when `-g` is active instead of terminal width. **This remains a latent risk:** any log format with variable content beyond 350 chars will hit the same problem. The adaptive cap designed in IQ-02 would address this fully but is not yet implemented.
+35. *Historical: UUID normalisation was removed (D569-2), and the adaptive cap closed as not planned (IQ-02); corrected 2026-10-01 under #619.* **Log key truncation silently breaks UUID normalization.** When `$log_key` is truncated before the consolidation engine sees it, UUIDs at the end of long messages get cut mid-pattern. `$uuid_re` requires the full 8-4-4-4-12 format (36 chars) — a partial UUID doesn't match, so UUID-normalized Dice scoring silently falls back to raw trigrams, and the UUID variation drags scores below threshold. The failure is invisible: no error, no warning, just thousands of keys that should consolidate but don't, causing 100× performance regression. The fix (#158) uses a 350-char cap when `-g` is active instead of terminal width. **This remains a latent risk:** any log format with variable content beyond 350 chars will hit the same problem. The adaptive cap designed in IQ-02 would address this fully but is not yet implemented.
 
 ### Outstanding Decisions
 
@@ -1333,14 +1375,14 @@ The core algorithms are sound and proven:
 3. ~~**Should Inline::C be a production dependency?**~~ Resolved — NO. Pure Perl is fast enough. See PF-26.
 4. ~~**Final pass integration**~~ Resolved — validated with checkpoint architecture (PF-22).
 5. ~~**Unmatched key eviction (#135)**~~ Resolved — adaptive per-key eviction implemented with EMA-based absorption rate tracking. Survival count scales exponentially with rolling average absorption: <5%→0, 5-50%→1, 50-90%→2, 90-95%→3, 95-99%→4, ≥99%→5. Fast-path eviction skips `run_consolidation_pass` entirely when max_survivals=0 and cp_num>2. Replaces stall detection. XL benchmark: 3.4× faster (55s vs 185s), 47.7% less memory (238 MiB vs 455 MiB). Curve thresholds may need tuning over time (see lesson 32).
-6. ~~**Final pass does not re-scan `%log_messages` (#137)**~~ Resolved — Final pass redesigned (#137) to iterate all `%log_messages` keys through the same S1→checkpoint pipeline used during streaming. Extracted `consolidation_process_key()` subroutine shared by both streaming and final pass paths. Eviction disabled during final pass (bounded set, last chance). Sorted key iteration groups similar messages for better checkpoint yield. Separate `fp_*` observability counters. Evicted keys (S6) from streaming are now picked up by the final pass.
+6. ~~**Final pass does not re-scan `%log_messages` (#137)**~~ Resolved; *the pipeline described here was replaced by the final-pass redesign (`features/150-final-pass-scalability.md`): sorted windows over the remaining keys, see § Process Flow.* — Final pass redesigned (#137) to iterate all `%log_messages` keys through the same S1→checkpoint pipeline used during streaming. Extracted `consolidation_process_key()` subroutine shared by both streaming and final pass paths. Eviction disabled during final pass (bounded set, last chance). Sorted key iteration groups similar messages for better checkpoint yield. Separate `fp_*` observability counters. Evicted keys (S6) from streaming are now picked up by the final pass.
 
 ### Next Steps
 
 **Integration readiness:**
 
 1. ~~**Rebuild the consolidation loop** with checkpoint-based processing~~ — DONE (PF-20)
-2. ~~**UUID normalization**~~ — DONE (PF-19)
+2. ~~**UUID normalization**~~ — DONE (PF-19); later removed by D569-2
 3. ~~**Add `Devel::Size` memory instrumentation**~~ — DONE (PF-21). Prototype uses more memory than ltl baseline due to trigram overhead. Memory is bounded per checkpoint batch.
 4. ~~**Test ceiling values**~~ — DONE (PF-22). Ceiling=3 confirmed as default.
 5. ~~**Re-validate final pass**~~ — DONE (PF-22). Works correctly with checkpoint architecture.
@@ -1351,10 +1393,10 @@ The core algorithms are sound and proven:
 ## Open Questions
 
 1. ~~**Character-level alignment algorithm**~~: Resolved — LCS with two-pass coalescing (PF-03)
-2. ~~**CLI option naming**~~: Resolved — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`
+2. ~~**CLI option naming**~~: Resolved for the prototype — `--ceiling`, `--max-patterns`, `--final-pass`, `--final-threshold`, `--final-ceiling`. *`ltl`'s options are `-g` and `-gc` (`docs/usage.md`), with `--no-final-pass` and `--final-threshold` hidden.*
 3. ~~**Performance benchmarks**~~: Resolved — NYTProf profiling (PF-14), alignment algorithm benchmark (PF-15)
 4. ~~**Minimum cluster count**~~: Resolved — no separate floor needed. The EOF checkpoint runs on all remaining unmatched keys regardless of count, so files with fewer unique keys than the trigger threshold (5000) still get one consolidation pass.
-5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels
+5. ~~**Hard cap value**~~: Resolved — default 50, accommodates shared pool across log levels. *Superseded: `ltl` has no pattern cap; adaptive eviction bounds the working set (Outstanding Decision 5).*
 6. ~~**Scalability**~~: Resolved — validated at production scale (PF-24). 50 files, 3.3 GB, 16.4M lines: 81s, 151 MB, 99.9% S1 absorption. 1.9× faster and 40% less memory than ltl -od.
 
 ## Integration Open Questions
@@ -1428,7 +1470,7 @@ Stats merging validated in prototype. All fields match ltl's MESSAGES CSV output
 
 2. **Checkpoint trigger (after line ~2453):** After per-line stats accumulation, check if unmatched count for the grouping key exceeds the trigger. If so, call `run_checkpoint()` which runs S2→S3→S4, discovers new patterns, and deletes absorbed keys from `%log_messages`.
 
-3. **Final pass (after line ~2460):** After all files are closed and before `return`, run the final consolidation pass on ceiling-excluded keys.
+3. **Final pass (after line ~2460):** After all files are closed and before `return`, run the final consolidation pass on ceiling-excluded keys. *Superseded: the final pass runs in `group_similar_messages()` over every key still ungrouped (§ Process Flow).*
 
 **Consolidation logic lives in dedicated subroutines** called from `read_and_process_logs()` — not inline. Key functions: `try_inline_match()`, `run_checkpoint()`, `run_consolidation_pass()`, `build_ngram_index()`, `find_candidates()`, `compute_mask()`, `derive_canonical()`, `derive_regex()`, `merge_stats()`.
 
@@ -1470,7 +1512,7 @@ Fields computed downstream in `calculate_all_statistics()` — **not merged**, r
 
 ### ~~IQ-10: Final Pass Stats Merging~~ — RESOLVED (non-issue)
 
-**Answer:** Same `merge_stats()` operation as checkpoint-time S4 merging — no special handling needed. The final pass absorbs ceiling-excluded keys from `%log_messages`, merging their full stats (per IQ-08 field inventory) into new clusters and deleting the absorbed entries. The prototype already does this correctly (PF-23). Per IQ-04, `%log_analysis` has no `$log_key` dimension and is unaffected. The only difference from checkpoint-time merging is that entries have larger `durations` arrays (accumulated across the entire file), but the merge rules are identical.
+**Answer:** Same `merge_stats()` operation as checkpoint-time S4 merging — no special handling needed. The final pass absorbs keys still ungrouped in `%log_messages` (all of them since #137, not only ceiling-excluded ones), merging their full stats (per IQ-08 field inventory) into new clusters and deleting the absorbed entries. The prototype already does this correctly (PF-23). Per IQ-04, `%log_analysis` has no `$log_key` dimension and is unaffected. The only difference from checkpoint-time merging is that entries have larger `durations` arrays (accumulated across the entire file), but the merge rules are identical.
 
 ---
 
@@ -1679,7 +1721,7 @@ The `cat_gk` (category + grouping key) partitions consolidation into independent
 - `$category` = `plain` or `highlight` (matches `%log_messages` structure)
 - `$grouping_key` = `$log_level` (ERROR, WARN, INFO, or HTTP status code)
 
-Cross-level merges are prevented by the grouping key partition — an ERROR message is never compared against a WARN message. Thread names and object names are part of the `$log_key` string and participate in similarity scoring and wildcarding within a level group.
+Cross-level merges are prevented by the grouping key partition — an ERROR message is never compared against a WARN message. This is a data-consistency contract for every key in both passes: the streaming checkpoints hold every structure per group, and the final pass sorts each category's keys by grouping key and never lets a window hold keys of two groups, so a lone key is never carried into another group's window. Thread names and object names are part of the `$log_key` string and participate in similarity scoring and wildcarding within a level group (PF-09).
 
 **Why not finer grouping (thread, object)?** Thread names can be unique per-instance identifiers (e.g., `WC_0K011012_ProcessPTCAutomationEventsForWorkUnitAsync`), creating hundreds of tiny groups. This defeats the checkpoint trigger mechanism (per-category, not per-group) and generates hundreds of unproductive checkpoint calls. Grouping by level only produces 3-6 groups, allowing checkpoints to fire during parsing and S1 inline matching to absorb the majority of keys.
 

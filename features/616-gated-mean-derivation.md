@@ -288,7 +288,11 @@ base commit and pass once the projection is gated.
     (`heatmap_preseed_min: 0` on the same fixture, whose index counts zero
     durations), and both boundary calculations floor the log axis explicitly:
     `my $effective_min = $heatmap_min > 0 ? $heatmap_min : 1;`.
-15. **The consolidation final pass carries a lone key into the next level's
+15. *Superseded 2026-10-01 by #619 (one per-run message-key cut), its D1 as
+    restated and D10: the grouping key separates messages in both passes, and
+    the final pass carrying a lone key into another level's batch is a defect
+    fixed there (`features/619-per-run-key-cut.md` § 4.4, § 5.9).*
+    **The consolidation final pass carries a lone key into the next level's
     window by design (D26).** #619's record (one per-run key cut; its § 3
     finding on the final pass) measured that the final pass of
     `group_similar_messages` keeps a lone key of one group in the window of the
@@ -513,7 +517,11 @@ decision of the same day on drop 2's measured cost. Nothing else in this documen
 - **D25: An `impact` topic is added to `--explain`**, stating the formula, the
   floor (D20), the occurrences-only case (D11) and the undefined case (D21),
   with its row in `docs/usage.md`. *Locked by the architect 2026-09-28.*
-- **D26: The consolidation final pass is the design, not a defect.** In the
+- **D26: The consolidation final pass is the design, not a defect.**
+  *Superseded 2026-10-01 by #619 (one per-run message-key cut), its D1 as
+  restated (the grouping key separates messages for every message in both
+  passes) and D10 (the final pass grouping across grouping keys is a defect,
+  fixed in #619); `features/619-per-run-key-cut.md` § 4.4.* In the
   architect's words, given on #619's turn: "text contained with the log mesage
   key does not have specific parts which are allowed or not to consolidate". A
   lone key carried into the next level's window, so that an ERROR line and a

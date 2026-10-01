@@ -46,7 +46,7 @@ This catches bugs in mask construction or pattern derivation early.
 ## Performance
 
 ### Pattern Count Is the Key Scaling Factor
-Matching cost is `O(lines × patterns)`. For a 300K line file with 50 patterns, that's 15M regex evaluations. Bound pattern count with a hard cap.
+Matching cost is `O(lines × patterns)`. For a 300K line file with 50 patterns, that's 15M regex evaluations. Keep pattern count low by merging a new pattern into a similar existing one. Do not rely on a fixed cap: it fails on data more diverse than the data it was tuned on. `ltl` has no pattern cap and bounds its working set by adaptive eviction.
 
 ### Hot-Sort by Match Frequency
 In power-law distributions, the top pattern matches 99%+ of messages. Bubbling frequently-matched patterns to the front of the scan list reduces average scan depth:
@@ -137,7 +137,7 @@ If you need to inspect, combine, or reconstruct patterns later, always save the 
 For finding similar log messages, character trigram indexing with Dice coefficient is orders of magnitude faster than regex-based approaches. Regex is for matching against known patterns; trigrams are for discovering unknown similar pairs.
 
 ### Cap Message Length Before Indexing
-Log messages can be arbitrarily long. Cap at a reasonable length (e.g., 300 chars) before computing trigrams or building patterns. This bounds both memory and comparison cost without losing discriminative power — the structural part of log messages is almost always in the first 200-300 characters.
+Log messages can be arbitrarily long. Cap at a reasonable length (`ltl` uses 350 characters under `-g`) before computing trigrams or building patterns. This bounds both memory and comparison cost without losing discriminative power — the structural part of log messages is almost always in the first 200-300 characters.
 
 ### Size Filter Before Expensive Comparison
 Before computing Dice coefficient or running regex matches, filter candidates by trigram set size. If source has S trigrams and threshold is T%, candidates must have between `S * T / (200 - T)` and `S * (200 - T) / T` trigrams. This rejects impossible matches cheaply.
