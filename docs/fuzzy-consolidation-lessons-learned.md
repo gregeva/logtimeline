@@ -27,7 +27,7 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **Result:** Phase 4 regressed from 2.9s to 64.25s — a **22× regression**.
 
-**What replaced it:** Interleaved discovery + re-scan, with key partitioning to reduce per-scan scope. Discover one pattern, immediately scan remaining keys, absorb matches, then discover the next pattern from the reduced set.
+**What replaced it:** Interleaved discovery + re-scan within each group (category plus level). Discover one pattern, immediately scan remaining keys, absorb matches, then discover the next pattern from the reduced set.
 
 **Lesson:** For power-law distributions, the cascading reduction from immediate absorption IS the core performance mechanism. Any optimization that defers absorption to batch it up will destroy this mechanism. The "fewer passes" savings from batching was negligible compared to the expanded discovery cost.
 

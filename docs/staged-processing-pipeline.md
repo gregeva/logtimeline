@@ -104,7 +104,9 @@ Without pattern 1's re-scan happening immediately, patterns 2-10 each discover a
 
 ### Partitioning Composes with Interleaving
 
-To reduce re-scan cost without destroying interleaving, partition keys by a cheap grouping key (e.g., `[LEVEL][class]`). Each pattern's re-scan only touches its matching partition instead of all keys. This gave 21% speedup while preserving cascading reduction.
+To reduce re-scan cost without destroying interleaving, partition keys by a cheap key that actually divides the set (in the prototype, `[LEVEL][class]`). Each pattern's re-scan then touches only its matching partition. The prototype measured a 21% speedup while preserving cascading reduction.
+
+A partition only pays when it divides the keys being scanned. In `ltl` the work is already grouped by level (category plus level is the grouping key), so a partition by level divides nothing within a group. `ltl`'s re-scan partition was removed as dead code under #619 (one per-run message-key cut).
 
 ## Key Architectural Lessons
 

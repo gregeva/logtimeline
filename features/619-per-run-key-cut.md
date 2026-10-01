@@ -380,7 +380,7 @@ run.
 
 | Constant (proposed name) | Value | Reason written beside it |
 |---|---|---|
-| `MESSAGE_KEY_CAP` | 350 | Grouping: DD-06, so that a UUID or other variable tail near the end of a long message is never cut part-way. CSV: it shares the grouping cap, so that `-o` and `-o -g` produce the same keys. |
+| `MESSAGE_KEY_CAP` | 350 | Grouping: DD-06, text past the meaningful prefix costs trigram memory and CPU without improving the score. CSV: it shares the grouping cap, so that `-o` and `-o -g` produce the same keys. *(Corrected in drop 4: the reason first written here, that a UUID cut part-way fails consolidation, held only while UUIDs were normalised before scoring, which D569-2 removed.)* |
 | `MESSAGE_KEY_THREAD_LENGTH` | 20 (first characters) | No reason on record. |
 | `MESSAGE_KEY_OBJECT_LENGTH` | 25 (last characters) | No reason on record. |
 
@@ -577,17 +577,17 @@ here, and the code is held to it.
 
 | Where | Today it says | Corrected to |
 |---|---|---|
-| § Process Flow, the parsing-loop diagram, and Outstanding Decision 6 (final pass redesigned to reuse the streaming pipeline) | the final pass sends every remaining key "through the same `consolidation_process_key()` pipeline" | the final pass as built by the final-pass redesign (`features/150-final-pass-scalability.md`): Pass 1 over each group's keys in body order in batches of up to 1,000 with the S3 match and ceiling ahead of discovery, Pass 2 the S3 sweep; the same discovery, matching and merging functions as the streaming checkpoints |
-| § Grouping Key Design | the group is category plus level and an ERROR message is never compared against a WARN message (holds), with the reason that short messages would wrongly merge across levels (holds) | unchanged in substance; states that the contract holds for every key in both passes and that a lone key never crosses into another group |
+| § Process Flow, the parsing-loop diagram, and Outstanding Decision 6 (final pass redesigned to reuse the streaming pipeline) | the final pass sends every remaining key "through the same `consolidation_process_key()` pipeline" | the final pass as built by the final-pass redesign (`features/150-final-pass-scalability.md`): Pass 1 over each group's keys in body order in batches of up to 1,000 with the S3 match and ceiling ahead of discovery, Pass 2 the S3 sweep; the same discovery, matching and merging functions as the streaming checkpoints **Done 2026-10-01** (drop 4). |
+| § Grouping Key Design | the group is category plus level and an ERROR message is never compared against a WARN message (holds), with the reason that short messages would wrongly merge across levels (holds) | unchanged in substance; states that the contract holds for every key in both passes and that a lone key never crosses into another group **Done 2026-10-01** (drop 4). |
 | PF-09 (similarity on the full message key) | "The `[level]` prefix naturally prevents cross-level merges" | the whole key is scored as one contiguous string; cross-level merges are prevented by the grouping key, not by the prefix, which on short messages does not prevent them (§ Grouping Key Design's reason) **Done 2026-10-01**, on `release/0.19.0` (`1e0694a`). |
 | IQ-01 (category model, resolved) and its implementation note | metadata fields are an exact-match grouping key; only the message body is scored; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` | the grouping key is category plus level; level, thread and object are part of the scored string; neither option exists **Done 2026-10-01**, on `release/0.19.0` (`1e0694a`). |
 | IQ-02 (key construction and message capping, resolved) | the engine receives the message body; the adaptive cap and `$max_observed_message_length` | the engine receives the whole key cut at the per-run cut; the adaptive cap was closed as not planned (its premise does not hold) and the counter is removed **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
 | DD-08 (similarity on the message body) | the metadata prefix is not part of the comparison | superseded by PF-09 as corrected **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
-| PF-07 (level partitioning deferred) | consolidation operates on the whole plain pool and the prefix keeps levels apart | historical: the grouping key partitions by level, and no re-scan bucket exists (D8) |
-| PF-16 and PF-17 (the re-scan partition by level plus class) and the Process Flow's "in same partition bucket" | a re-scan bucket by level | removed as dead code under this issue (D8): within a group every key shares its level |
-| `features/150-final-pass-scalability.md` § Sort Order | sort by body with the grouping key stripped, "regardless of status code" | sort by grouping key, then body (§ 5.9) |
+| PF-07 (level partitioning deferred) | consolidation operates on the whole plain pool and the prefix keeps levels apart | historical: the grouping key partitions by level, and no re-scan bucket exists (D8) **Done 2026-10-01** (drop 4). |
+| PF-16 and PF-17 (the re-scan partition by level plus class) and the Process Flow's "in same partition bucket" | a re-scan bucket by level | removed as dead code under this issue (D8): within a group every key shares its level **Done 2026-10-01** (drop 4). |
+| `features/150-final-pass-scalability.md` § Sort Order | sort by body with the grouping key stripped, "regardless of status code" | sort by grouping key, then body (§ 5.9) **Done 2026-10-01** (drop 4). |
 | `docs/similarity-engine-best-practices.md` § Separate Similarity Scope from Storage Scope | score the message body only; metadata fields as exact-match grouping keys | score the whole key; the grouping key (level) separates groups, for the short-message reason **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
-| `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 |
+| `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 **Done 2026-10-01** (`4811a78`). |
 | `prototype/96-fuzzy-consolidation.pl` (the consolidation prototype) | groups an access log by status family (`2xx`) while its keys carry the exact status; re-scans within a bucket of level plus object class (PF-16); scores UUID-normalised trigrams; searches candidates with the 50 rarest trigrams and a 30 % pre-filter; caps patterns at 50 with no eviction; runs its final pass on ceiling-excluded keys only, at its own 80 % threshold (PF-12) | the engine of the master specification as `ltl` implements it after drop 3 (D12): exact-status grouping key; no re-scan bucket; scoring as written (the decision that consolidation does not replace UUIDs); the candidate search that finds every partner; adaptive eviction with no pattern cap; the final pass over every remaining key, grouped strictly by grouping key, scoring at the `-g` similarity |
 
 ---
@@ -1189,3 +1189,30 @@ many small windows, each searched in full; on drop 3 they arrive in windows of
 keys are grouped. The speed is the cost of the search limit, not a gain in the
 search; whether the limits should change is #648. `MEMORY_FINAL log_messages`
 rises 0.6 % with the extra rows.
+
+### 11.12 Drop 4: the master specification and its records corrected (D11, AC11)
+
+On the issue branch, because most corrections describe the code this issue
+delivers; the corrections already made on `release/0.19.0` (PF-09, IQ-01 in
+`1e0694a`; DD-08, IQ-02 and the best-practices section in `5c99cea`) were
+cherry-picked first so the branch carries them.
+
+- `features/fuzzy-message-consolidation.md`: § Process Flow describes the final
+  pass as built (the sorted windows of one group each, the 1,000-key window and
+  500 keys starting a search, no eviction, Pass 2's sweep, the skip of #584),
+  the candidate search of #569 scoring keys as written, and a re-scan over the
+  group's unconsumed keys with no partition bucket; Outstanding Decision 6
+  points at the redesign; § Grouping Key Design states the contract for both
+  passes; PF-07, PF-17 and lessons 7 and 15 are corrected, and PF-16's 21 %
+  is attributed to the prototype's buckets; DD-06 and lesson 35 no longer warn
+  of UUID-normalisation failure, which D569-2 removed.
+- `features/150-final-pass-scalability.md`: § Sort Order sorts by grouping
+  key, then body; the problem statement names no bucket partitioning.
+- `docs/staged-processing-pipeline.md` § Partitioning Composes with
+  Interleaving and `docs/fuzzy-consolidation-lessons-learned.md`'s "What
+  replaced it" line: no level partition is claimed for `ltl`.
+- **Found while correcting, and corrected:** the comment beside
+  `MESSAGE_KEY_CAP` in `ltl` and § 5.2 here gave as the cap's reason that a
+  UUID cut part-way fails consolidation; that held only while UUIDs were
+  normalised before scoring (removed by D569-2). Both now give DD-06's
+  rationale. `perl -c ltl` passes; the change is to a comment only.

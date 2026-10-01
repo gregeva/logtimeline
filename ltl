@@ -806,10 +806,10 @@ my %consolidation_cliff_edge;         # {cat_gk} => the similarity the data clus
 # terminal width otherwise. Every key site, the trigram entry guard and the
 # benchmark data read it.
 use constant {
-    # Grouping: a long message keeps enough of its tail that a UUID or other
-    # variable part near the end is never cut part-way, which would fail
-    # consolidation silently (features/fuzzy-message-consolidation.md DD-06).
-    # CSV: shares the grouping cap, so -o and -o -g produce the same keys.
+    # Grouping: similarity is scored on a key cut to a few hundred characters,
+    # since text past the meaningful prefix costs trigram memory and CPU
+    # without improving the score (features/fuzzy-message-consolidation.md
+    # DD-06). CSV: shares the grouping cap, so -o and -o -g produce the same keys.
     MESSAGE_KEY_CAP           => 350,
     # Characters of the thread name kept in a key (its first): no reason on record.
     MESSAGE_KEY_THREAD_LENGTH => 20,
