@@ -1,6 +1,23 @@
 #!/usr/bin/env perl
+# ============================================================================
+# Alignment benchmark for #96: ltl's compute_mask against alternative aligners.
+#
+# ltl's arm is ltl's own compute_mask (the banded edit distance, pure Perl),
+# compiled from ltl's source by prototype/96-ltl-engine.pl; it is the reference
+# every other arm's masks are checked against. The test pairs are message keys
+# read and built as ltl builds them. The other arms are the alternatives the
+# benchmark compares, recorded in features/fuzzy-message-consolidation.md PF-03
+# (the LCS DP ltl first used) and PF-15 (the alignment algorithm). None of them
+# is ltl's code.
+#
+# Usage: prototype/96-alignment-bench.pl [--file <ThingWorx application log>] [--ltl <path>]
+# ============================================================================
 use strict;
 use warnings;
+use Getopt::Long;
+use File::Basename qw(dirname);
+use File::Spec;
+require File::Spec->catfile(dirname(File::Spec->rel2abs($0)), '96-ltl-engine.pl');
 use Time::HiRes qw(time);
 use Algorithm::Diff qw(sdiff traverse_sequences);
 use List::Util qw(min max);
@@ -129,43 +146,32 @@ END_C
 # Benchmark: all alignment approaches for compute_mask
 # ============================================================================
 
-my $twx_regex = qr/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)/;
+my $file     = 'logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log';
+my $ltl_path = default_ltl_path();
+GetOptions('file=s' => \$file, 'ltl=s' => \$ltl_path) or die "Usage: $0 [--file <log>] [--ltl <path>]\n";
 
-my %log_messages;
-my %key_message;
-my $cap = 300;
-
+# Keys read and built as ltl builds them, not grouped
+load_ltl_engine($ltl_path);
+proto_configure(group => 0);
 print "Parsing log...\n";
-open(my $fh, "<", "logs/ThingworxLogs/HundredsOfThousandsOfUniqueErrors.log") or die $!;
-while (<$fh>) {
-    chomp;
-    if (my ($ts, $cat, $obj, $inst, $user, $sess, $plat, $thr, $msg) = $_ =~ $twx_regex) {
-        my $to = substr($obj, length($obj) > 25 ? length($obj) - 25 : 0, 25);
-        my $tt = substr($thr, 0, 20);
-        my $lk = substr("[$cat] [$tt] [$to] $msg", 0, 350);
-        $log_messages{$cat}{$lk}{occurrences}++;
-        $key_message{$lk} //= $lk;
-    }
-}
-close($fh);
+proto_read_file($file);
+my %level_keys;
+push @{ $level_keys{ $_->[1] =~ /^\[([^\]]*)\]/ ? $1 : '' } }, $_->[1] for proto_store();
 
 # Build test pairs
-my @keys = keys %{$log_messages{ERROR}};
+my @keys = sort @{ $level_keys{ERROR} // [] };
 my @pairs;
 
 my %by_prefix;
 for my $k (@keys) {
-    my $p = substr($key_message{$k}, 0, 40);
+    my $p = substr($k, 0, 40);
     push @{$by_prefix{$p}}, $k;
 }
-for my $p (keys %by_prefix) {
+for my $p (sort keys %by_prefix) {
     my @group = @{$by_prefix{$p}};
     next unless @group >= 2;
     for my $i (0 .. min($#group - 1, 2)) {
-        push @pairs, [
-            substr($key_message{$group[$i]}, 0, $cap),
-            substr($key_message{$group[$i+1]}, 0, $cap),
-        ];
+        push @pairs, [ $group[$i], $group[$i+1] ];
     }
 }
 
@@ -174,7 +180,7 @@ printf "Test pairs: %d\n\n", scalar @pairs;
 my $repeats = 5;
 
 # ============================================================================
-# Approach 1: Current LCS DP (pure Perl)
+# Alternative: LCS DP (pure Perl), the aligner ltl used before PF-15
 # ============================================================================
 
 sub compute_mask_current {
@@ -237,97 +243,6 @@ sub compute_mask_current {
         my $d = vec($dir_rows[$i], $j, 2);
         if ($d == 0) { $mask[$prefix_len + $i - 1] = 1; $i--; $j--; }
         elsif ($d == 1) { $i--; }
-        else { $j--; }
-    }
-    return \@mask;
-}
-
-# ============================================================================
-# Approach 2: Banded edit distance — pure Perl
-# ============================================================================
-
-sub compute_mask_banded {
-    my ($str_a, $str_b) = @_;
-    my $len_a = length $str_a;
-    my $len_b = length $str_b;
-
-    my $prefix_len = 0;
-    my $min_len = $len_a < $len_b ? $len_a : $len_b;
-    while ($prefix_len < $min_len &&
-           substr($str_a, $prefix_len, 1) eq substr($str_b, $prefix_len, 1)) {
-        $prefix_len++;
-    }
-
-    my $suffix_len = 0;
-    while ($suffix_len < ($min_len - $prefix_len) &&
-           substr($str_a, $len_a - 1 - $suffix_len, 1) eq substr($str_b, $len_b - 1 - $suffix_len, 1)) {
-        $suffix_len++;
-    }
-
-    my @mask = (0) x $len_a;
-    for my $i (0 .. $prefix_len - 1) { $mask[$i] = 1; }
-    for my $i (0 .. $suffix_len - 1) { $mask[$len_a - 1 - $i] = 1; }
-
-    my $mid_a_len = $len_a - $prefix_len - $suffix_len;
-    my $mid_b_len = $len_b - $prefix_len - $suffix_len;
-    return \@mask if $mid_a_len <= 0 || $mid_b_len <= 0;
-
-    my $mid_a_start = $prefix_len;
-    my $mid_b_start = $prefix_len;
-    my $m = $mid_a_len;
-    my $n = $mid_b_len;
-    my $k = int(max($m, $n) * 0.6) + 2;
-
-    my $row_bytes = int(($n + 1 + 3) / 4);
-    my @dir_rows;
-    my $zero_row = "\0" x $row_bytes;
-    for my $i (0 .. $m) { $dir_rows[$i] = $zero_row; }
-
-    my @prev = map { $_ } (0 .. $n);
-    for my $j (1 .. min($k, $n)) { vec($dir_rows[0], $j, 2) = 2; }
-
-    my $big = $m + $n;
-    for my $i (1 .. $m) {
-        my @curr = (0) x ($n + 1);
-        $curr[0] = $i;
-
-        my $j_min = max(1, $i - $k);
-        my $j_max = min($n, $i + $k);
-
-        for my $j (1 .. $j_min - 1) { $curr[$j] = $big; }
-
-        for my $j ($j_min .. $j_max) {
-            if (substr($str_a, $mid_a_start + $i - 1, 1) eq substr($str_b, $mid_b_start + $j - 1, 1)) {
-                $curr[$j] = $prev[$j-1];
-            } else {
-                my $sub_cost = $prev[$j-1] + 1;
-                my $del_cost = $prev[$j] + 1;
-                my $ins_cost = $curr[$j-1] + 1;
-                if ($sub_cost <= $del_cost && $sub_cost <= $ins_cost) {
-                    $curr[$j] = $sub_cost;
-                } elsif ($del_cost <= $ins_cost) {
-                    $curr[$j] = $del_cost;
-                    vec($dir_rows[$i], $j, 2) = 1;
-                } else {
-                    $curr[$j] = $ins_cost;
-                    vec($dir_rows[$i], $j, 2) = 2;
-                }
-            }
-        }
-
-        for my $j ($j_max + 1 .. $n) { $curr[$j] = $big; }
-        @prev = @curr;
-    }
-
-    my ($i, $j) = ($m, $n);
-    while ($i > 0 && $j > 0) {
-        my $d = vec($dir_rows[$i], $j, 2);
-        if ($d == 0) {
-            if (substr($str_a, $mid_a_start + $i - 1, 1) eq substr($str_b, $mid_b_start + $j - 1, 1)) {
-                $mask[$prefix_len + $i - 1] = 1;
-            }
-            $i--; $j--;
-        } elsif ($d == 1) { $i--; }
         else { $j--; }
     }
     return \@mask;
@@ -474,8 +389,8 @@ sub compute_mask_c_wrapper {
 # ============================================================================
 
 my @approaches = (
-    ['1. Current LCS DP',       \&compute_mask_current,      'Pure Perl, LCS O(mn)'],
-    ['2. Banded ED (Perl)',      \&compute_mask_banded,       'Pure Perl, banded O(nk)'],
+    ['1. ltl compute_mask',     \&main::compute_mask,        'ltl: banded edit distance, pure Perl'],
+    ['2. LCS DP (pre-PF-15)',    \&compute_mask_current,      'Pure Perl, LCS O(mn)'],
     ['3. Alg::Diff sdiff',      \&compute_mask_sdiff,         'Pure Perl, Myers O(ND)'],
     ['4. Alg::Diff traverse',   \&compute_mask_traverse,      'Pure Perl, Myers O(ND)'],
 );
@@ -497,7 +412,7 @@ my %diff_pairs;
 
 for my $pi (0 .. $check_count - 1) {
     my $pair = $pairs[$pi];
-    my $ref_mask = compute_mask_current($pair->[0], $pair->[1]);
+    my $ref_mask = main::compute_mask($pair->[0], $pair->[1]);
 
     for my $ai (1 .. $#approaches) {
         my $test_mask = $approaches[$ai][1]->($pair->[0], $pair->[1]);

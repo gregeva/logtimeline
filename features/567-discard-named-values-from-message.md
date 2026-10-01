@@ -108,7 +108,7 @@ Agreed 2026-09-16 (architect). Every run of `ltl` in a harness is shaped to its 
 |---|---|---|---|
 | `thread` | the format spec's `field_map` (`thread`, 8 formats) | `[pool]` in the message key: the thread with a trailing `-<digits>` removed (the thread-pool block in `read_and_process_logs()`, `$threadname = defined $threadpool ? $threadpool : $thread`), cut to 20 characters at key construction | the thread-pool accumulators (`%log_threadpools`, `-tpas`, `-tpa`); `-x thread` |
 | `object` | `field_map` (`object`, 6 formats); the `hoist_cpp_object` transform | `[object]` in the message key, its last 25 characters | consolidation grouping metadata (`$truncated_object`) |
-| `uuid` | not captured | in the message text; `-uuid` replaces it with `########-####-####-####-############` just before the exposed values are appended | consolidation's UUID-normalised similarity scoring |
+| `uuid` | not captured | in the message text; `-uuid` replaces it with `########-####-####-####-############` just before the exposed values are appended | consolidation's UUID-normalised similarity scoring *(removed by D569-2: consolidation scores keys as written)* |
 | `duration`, `bytes` | `field_map`, and the ThingWorx `message_metrics` probes, which also mask ` durationMs=N` / ` bytes=N` to `?` | as the mask only | every metric column, statistics, heatmap, histogram; suppressed today by `-od` / `-ob` |
 | `count` | the count capture in `read_and_process_logs()` (` count=N`) | as ` count=?` | count columns and statistics; suppressed today by `-oc` |
 | a key written in the line | not captured | in the message text, when the format keeps that part of the line (a query string only with `-xqs`) | `-udm <key>::<counting function>`, `-x <key>` |

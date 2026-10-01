@@ -125,7 +125,7 @@ The S1-S5 staged pipeline shipped in #96 (v0.13.0, fuzzy message consolidation) 
 - **Deterministic ordering via `sort keys %hash`.** Perl's hash iteration is randomized per process. Any ordering-sensitive loop must use `sort keys` to produce reproducible results. Violated → PF-23 in #96 produced different consolidations per run. Phase 4's per-message-identity state tracking has the same risk.
 - **Hot-sort for hot-path lookups.** Frequently-matched entries bubble up by one position per hit (`match_consolidation_patterns()` in #96). Phase 1's format-detection cache and Phase 4's per-identity state cache should adopt this.
 - **Profile-ready counter contract.** Every staged function emits a per-run counter visible in `-V` output (e.g., `S1=282081, S4=4416, S5=24`). The tracking invariant `S1 + S2 + S3 + S4 + S5 = keys_seen` is a built-in sanity check. Phase 2's per-bucket lifecycle and Phase 4's derived-metric calculations must emit equivalent counters.
-- **Per-checkpoint memory release.** `%key_trigrams`, `%ngram_index`, `%key_trigrams_norm` are freed at each checkpoint boundary (`run_checkpoint()` in #96). Phase 2's sliding window does the same for raw bucket data once stats are computed.
+- **Per-checkpoint memory release.** `%key_trigrams`, `%ngram_index`, `%key_trigrams_norm` are freed at each checkpoint boundary (`run_checkpoint()` in #96; the normalised set was later removed, D569-2). Phase 2's sliding window does the same for raw bucket data once stats are computed.
 
 ### Specific subroutines from #96 that Phase 4 will reuse
 

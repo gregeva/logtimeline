@@ -335,6 +335,16 @@ message consolidation) was set beside this specification.
   departure of `prototype/96-fuzzy-consolidation.pl` from the master
   specification is removed (§ 5.10); its engine is rebuilt from `ltl`'s after
   the final-pass fix (drop 3), so the fix is not ported twice.
+- **D13. Every resource related to message grouping is made consistent with
+  the master specification in this issue.** The architect's words: "you have a
+  habit of taking something that you say is not a reference and then using it
+  as a source of truth later on. So as we are on this issue, I want you to
+  ensure that we have consistency and coherence across all of the related
+  resources." Living guidance is corrected; records of earlier stages carry a
+  marker naming the decision that superseded them; prototypes and benchmarks
+  take `ltl`'s arm from `ltl`'s source, or are pinned to the `ltl` commit they
+  measured; copies of `ltl` code name the commit they were copied from
+  (§ 11.14).
 
 ---
 
@@ -1251,3 +1261,61 @@ regex copied into `prototype/189-bin-counter-primitives.pl` and
 `prototype/426-revalidate-lib.pm`, and the parser lineage in
 `tests/statistics-drift/oracle/calculate-reference.py`) are pinned to `d0bc49a`,
 the last commit of the old prototype.
+
+### 11.14 The consistency sweep (D13)
+
+**Inventory.** 177 tracked documents, prototypes and test records mention
+message grouping. They were searched for statements contradicting a decision of
+the master specification, by claim: levels kept apart by the prefix, or scoring
+the body only with metadata as exact-match fields; UUID-normalised scoring
+(removed by D569-2); the 50-trigram pre-filter (replaced by D569-1); the
+re-scan partition (removed by D8); the old final pass (the streaming pipeline
+reused, ceiling-excluded keys only, its own 95 % or 80 % threshold, off by
+default); a pattern cap of 50 or 500; the adaptive message cap. 44 files held a
+match; release notes and dated measurement outputs are left as the history
+they are.
+
+**Living guidance, corrected** (on this branch):
+
+- `docs/similarity-engine-best-practices.md`: pattern growth is bounded by
+  adaptive per-key eviction, not stall detection; the final pass covers every
+  key still ungrouped; the message cap is the per-run cut, the adaptive cap
+  closed.
+- `docs/staged-processing-pipeline.md`: the final pass and the eviction bound,
+  as above.
+- `docs/fuzzy-consolidation-lessons-learned.md`: stall detection was itself
+  replaced by eviction.
+- `docs/regex-best-practices.md`: no fixed pattern cap; the cap `ltl` uses is
+  350 characters under `-g`.
+- `docs/usage.md` § Message Grouping: messages are grouped only with others of
+  the same log level or HTTP status (the user-visible rule this issue makes
+  hold in both passes).
+
+**Records, marked where a later decision superseded them** (`features/fuzzy-
+message-consolidation.md`): PF-01 and PF-08 (the default is 85 %), PF-05 (no
+pattern cap), PF-15 (pure Perl only), PF-18 (D569-1), PF-19 (D569-2), PF-20 and
+PF-21 (the normalised trigram set removed), PF-22 and PF-23 (the final pass and
+its defaults today), Key Findings 2 and 4, What the Prototype Validated, lessons
+4, 5, 17, 18 and 22, Next Steps 2, Open Questions 2 and 5, IQ-07 and IQ-10.
+Elsewhere: `features/137-final-pass-redesign.md` (status: replaced by the
+final-pass redesign), `features/269-output-ordering-audit.md` F7 (the code it
+covers was removed by D569-1), `features/567-discard-named-values-from-message.md`
+(the UUID row) and `features/log-format-registry.md` (the normalised set).
+
+**Prototypes and benchmarks:**
+
+| Resource | Now |
+|---|---|
+| `prototype/96-ltl-engine.pl` (new) | The one loader: compiles everything before `ltl`'s `## MAIN ##` from `ltl`'s source with the driver of § 11.13, and gives callers the message store, the run totals and the compiled patterns as plain data |
+| `prototype/96-fuzzy-consolidation.pl` | Runs on the loader; AC17 re-run on it, 12 of 12 identical |
+| `prototype/96-alignment-bench.pl` | `ltl`'s `compute_mask` is the reference arm, on pairs of keys read as `ltl` builds them; the copied banded aligner is gone; the alternatives (the pre-PF-15 LCS DP, `Algorithm::Diff`, Inline::C) remain as the alternatives compared |
+| `prototype/96-ngram-tuning.pl` | `ltl`'s grouping per configuration in a child process, only the gram size and step swapped into `get_consolidation_trigrams()`; size 3, step 1 matches `ltl -g` (19 groups, 76 rows on the 5,000-line Tomcat access log) |
+| `prototype/96-phase4-profile.pl` | Times `ltl`'s own consolidation subs, inclusive and exclusive, on `ltl`'s grouping run |
+| `prototype/96-rescan-bench.pl` | `ltl`'s `match_consolidation_patterns()` as the reference arm, on patterns `ltl`'s grouping discovers and keys read as `ltl` builds them; the alternation regex and the Inline::C loop remain as the alternatives, and agreed with `ltl` on all 212 keys of that log |
+| `prototype/569-gate-sizing/extract-subs.sh`, `make-ltl-variant.sh` | Read `ltl` at `85dd318`, the `ltl` the #569 experiment measured: the working `ltl` no longer has the pre-filter, UUID normalisation or the named cap they slice, so they no longer ran |
+| `prototype/569-gate-sizing/probe-implemented.pl` | Slices the implemented search from the current `ltl`, with the per-run cut taken from `MESSAGE_KEY_CAP` in place of the removed cap variable; on 100 sources of the Tomcat 200 group it misses no partner at any threshold |
+| `prototype/426-bin-store-mini.pl`, `426-grid-fidelity.pl`, `426-revalidate-lib.pm` | Their copies of `ltl`'s key construction name the commit they were copied from and what `ltl` does now; the keys they build are unchanged |
+
+The two benchmarks that need `Algorithm::Diff` and Inline::C compile against
+stand-in modules; this machine has neither, as before. The re-scan benchmark ran
+end to end with a Perl stand-in for its C loop.

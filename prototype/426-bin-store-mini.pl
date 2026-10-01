@@ -349,6 +349,10 @@ my $PARSE = <<'PERL';
         $log_occurrences{substr($timestamp_str, 0, 16)}{$category_bucket}{occurrences}++;
         my $category = 'plain';
 PERL
+# Key construction restated from ltl's read_and_process_logs as of 2d8d327.
+# ltl now cuts every key at the per-run cut, $max_log_message_length, and names
+# the thread and object lengths MESSAGE_KEY_THREAD_LENGTH and
+# MESSAGE_KEY_OBJECT_LENGTH (#619); the keys come out the same.
 my $KEY = <<'PERL';
         my $log_key = "";
         my $max_object_length = 25;
