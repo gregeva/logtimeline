@@ -7,7 +7,7 @@ release. Written for the agent doing the work. Specification and decisions:
 
 **Every screenshot in the documentation is generated.** It is an entry in
 `build/screenshots.yaml`, rendered by `build/capture-screenshots.pl` into
-`images/screenshots/`. Nothing is captured from a terminal window by hand, and no
+`images/screenshots/` as an SVG with a PNG of the same size beside it. Nothing is captured from a terminal window by hand, and no
 image under `images/screenshots/` is edited: a change is a change to its entry,
 then a regeneration. A request for a new screenshot is a new entry.
 
@@ -16,9 +16,14 @@ then a regeneration. A request for a new screenshot is a new entry.
 `ltl` is run with a fixed terminal size (211 columns by 53 rows unless told
 otherwise), and its output is a grid of cells: rows counted from 1 at the top,
 columns counted from 0 at the left. An image is a rectangle of that grid drawn as
-SVG in the Terminal.app colours, with a margin around it.
+SVG in the Terminal.app colours, with a margin around it, and drawn again by WebKit
+as a PNG of exactly the SVG's width and height, for documents where SVG does not
+render reliably (a PDF built with Typst). The PNG needs the Swift compiler, part of
+the Xcode command line tools on macOS: without it the tool stops before running
+`ltl`.
 
-The tool runs `ltl` twice, in the repository root:
+The tool runs `ltl` twice, in the repository root or in the folder the entry names
+(*Documentation in another repository*):
 
 1. a **probe run** with `-V section-layout`, which reports the first row and the
    row count of every section `ltl` printed;
@@ -133,7 +138,8 @@ one metric (`-hg duration,bytes`).
 Find the options that produce what the description asks for in `docs/usage.md` or
 `./ltl --help` (its EXAMPLES block is a good start), and a log whose content shows
 it in `docs/test-logs.md`. Input paths are written relative to the repository root
-(`logs/...`), so the entry resolves on every development machine.
+(`logs/...`), or to the folder the entry names, so the entry resolves on every
+development machine.
 
 Keep the run to what the picture needs: bound the time range (`-st`, `-et`) or the
 bucket size (`-bs`) so the timeline is not taller than the story needs, and remove
@@ -151,7 +157,7 @@ Run the tool with no crop and `--trace`, into a scratch directory:
 build/capture-screenshots.pl --name look --trace --out-dir <scratch> -- <ltl options> <log>
 ```
 
-`look.svg` is the whole output; the trace prints both `ltl` command lines and the
+`look.svg` (and `look.png`) is the whole output; the trace prints both `ltl` command lines and the
 rows covered. To see the rows each section occupies, and to measure columns, run
 the capture command the tool printed yourself, with `-V section-layout`, and keep
 its output in a file:
@@ -360,8 +366,8 @@ width (a positive `R` is a width), each with a label so the two names differ:
 **6. Run it and look.** `--manifest build/screenshots.yaml --only access` printed
 
 ```
-<repository>/images/screenshots/access-histogram-duration.svg  rows 35-48 (histogram)  cols 12-101
-<repository>/images/screenshots/access-histogram-bytes.svg  rows 35-48 (histogram)  cols 109-198
+<repository>/images/screenshots/access-histogram-duration.svg + .png  rows 35-48 (histogram)  cols 12-101
+<repository>/images/screenshots/access-histogram-bytes.svg + .png  rows 35-48 (histogram)  cols 109-198
 ```
 
 and each image, looked at (next section), holds one whole panel: its title, both
@@ -371,26 +377,10 @@ of the other panel.
 ## Looking at an image
 
 An image is checked by eye before it is committed. A person opens the SVG in a
-browser. An agent turns it into a PNG and reads that, with Quick Look, which is part
-of macOS and draws with the same engine as Safari:
-
-```bash
-qlmanage -t -s 1600 -o <scratch> <image>.svg      # writes <scratch>/<image>.svg.png
-```
-
-Quick Look lays an SVG out 768 units wide and cuts off the rest, and an image of
-the whole 211-column width is 1,548 units wide. Scale a copy to 768 first, keeping
-its proportions:
-
-```bash
-perl -pe 's/<svg ([^>]*)width="([\d.]+)" height="([\d.]+)"/($2 > 768) ? sprintf("<svg %swidth=\"768\" height=\"%.1f\"", $1, 768 * $3 \/ $2) : $&/e' \
-    <image>.svg > <scratch>/view.svg
-qlmanage -t -s 1600 -o <scratch> <scratch>/view.svg
-```
-
-The PNG is square, with the image at the top and white below it. For detail at the
-right-hand end of a wide image, cut its columns in the recipe itself (a crop with
-`cols`) rather than zooming.
+browser. An agent reads the PNG the tool wrote beside it: the same picture, drawn by
+WebKit, the engine Safari uses, one pixel per unit. For detail at the right-hand end
+of a wide image, cut its columns in the recipe itself (a crop with `cols`) rather
+than zooming.
 
 ## The manifest
 
@@ -401,6 +391,7 @@ entries. The comment above each entry says what the screenshot is for.
 |---|---|---|
 | `name` | yes | the first layer of every image name; unique in the manifest |
 | `ltl` | yes | the `ltl` options and input files, as one string, split as a shell splits it: `-h "POST /api"` is one argument |
+| `dir` | no | the folder `ltl` runs in, relative to the manifest file's own folder; input paths in `ltl` are then relative to it (*Documentation in another repository*). The repository root when not given |
 | `background` | no | `dark` (default) or `light`; stating it is good practice. The tool runs `ltl` with `-dbg` or `-lbg` and draws the image on that background |
 | `width`, `height` | no | the terminal size: the picture's resolution (*Resolution: the terminal size*). 211 and 53 by default; 237 by 62 for a busy chart |
 | `pad` | no | the margin around each image, as CSS writes it: `1` all round, `1,2` (default) one row top and bottom and two columns left and right, `1,2,3` top, sides, bottom, `1,4,1,2` top, right, bottom, left |
@@ -413,7 +404,7 @@ build/capture-screenshots.pl --manifest build/screenshots.yaml             # eve
 build/capture-screenshots.pl --manifest build/screenshots.yaml --only NAME # one entry
 ```
 
-Images are written to `images/screenshots/`. A failing entry is reported and the
+Images are written to `images/screenshots/`, or to `--out-dir`. A failing entry is reported and the
 others still run; the run exits non-zero naming the failures.
 
 ## What the tool does with `ltl`
@@ -423,12 +414,46 @@ others still run; the run exits non-zero naming the failures.
   the tool refuses them.
 - `ltl`'s options row leaves out those options, so an image showing it shows the
   command a reader would type.
-- `-o` is allowed. The files it writes are deleted after each run: at the top of
-  the repository root, the files matching `*LTL-*STATS*.csv`,
-  `*LTL-*MESSAGES*.csv` and `*LTL-*AGGREGATE.yaml`. That includes an earlier
-  `ltl -o` export of your own left there, so keep exports elsewhere.
+- `-o` is allowed. The files it writes are deleted after each run, at the top of
+  the folder `ltl` ran in, among the files matching `*LTL-*STATS*.csv`,
+  `*LTL-*MESSAGES*.csv` and `*LTL-*AGGREGATE.yaml`. In the repository root every
+  such file is deleted, including an earlier `ltl -o` export of your own left
+  there, so keep exports elsewhere. In a folder the entry names, only the files
+  the run wrote are deleted; an export already there is left alone.
+- `ltl` writes its index file, `ltl-index.csv`, in the folder it runs in. In the
+  repository root it is ignored by git and left. In a folder the entry names it
+  is deleted after the entry's runs when they created it; one already there is
+  left, with `ltl`'s rows added to it.
 - `LTL_CONFIG` is ignored, so settings on the machine running the tool never change
   an image.
+
+## Documentation in another repository
+
+Documentation kept in another repository can use the tool from its own manifest,
+against logs held in that repository. An entry names the folder `ltl` runs in with
+`dir`, relative to the manifest file's own folder; input paths in its `ltl` string
+are then relative to that folder, so the paths `ltl` prints in the summary's file
+list, and records in an `-o` export, read as a reader of that documentation would
+type them:
+
+```yaml
+# <other repository>/screenshots.yaml
+screenshots:
+  # A day of one server's web traffic: the duration histogram.
+  - name: day-histogram
+    dir: logs/production
+    ltl: -n 0 -hg -bs 1d -du us server-1/access.log_2026-05-19
+    crops:
+      - sections: histogram
+```
+
+```bash
+build/capture-screenshots.pl --manifest <other repository>/screenshots.yaml --out-dir <other repository>/images
+```
+
+`--out-dir` is needed: a manifest's images otherwise go to this repository's
+`images/screenshots/`. An ad hoc run names the folder with `--dir`, relative to the
+current directory. Without either, `ltl` runs in this repository's root.
 
 ## Sensitive content
 
@@ -459,3 +484,5 @@ documentation that references them. Images showing the summary's `TOTAL TIME` or
 | `both write NAME.svg; a label tells them apart` | two crops compose the same image name |
 | `the capture run printed N rows and the probe run M` | the two runs printed different output, so the positions do not apply: report it, it is a defect in `ltl` |
 | `'-X' is not accepted on the ltl command line` | an option the tool sets itself; remove it from the entry |
+| `dir 'X' is not a folder` | the entry's `dir`, or `--dir`, names no folder: a manifest's `dir` is relative to the manifest file's folder |
+| `swiftc is not found` | the PNG needs the Swift compiler: install the Xcode command line tools (`xcode-select --install`) |
