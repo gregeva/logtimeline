@@ -327,6 +327,12 @@ message consolidation) was set beside this specification.
   Scope from Storage Scope (the same body-only model). #616's record entries (one gated derivation of means)
   that state cross-level consolidation as the design (its D26 and finding 15)
   are marked superseded.
+- **D12. The consolidation prototype is brought into line with the master
+  specification in this issue.** The architect's words: "the prototype will
+  need to be fixed so that this sort of poisoning doesn't occur again." Every
+  departure of `prototype/96-fuzzy-consolidation.pl` from the master
+  specification is removed (§ 5.10); its engine is rebuilt from `ltl`'s after
+  the final-pass fix (drop 3), so the fix is not ported twice.
 
 ---
 
@@ -573,13 +579,14 @@ here, and the code is held to it.
 | § Grouping Key Design | the group is category plus level and an ERROR message is never compared against a WARN message (holds), with the reason that short messages would wrongly merge across levels (holds) | unchanged in substance; states that the contract holds for every key in both passes and that a lone key never crosses into another group |
 | PF-09 (similarity on the full message key) | "The `[level]` prefix naturally prevents cross-level merges" | the whole key is scored as one contiguous string; cross-level merges are prevented by the grouping key, not by the prefix, which on short messages does not prevent them (§ Grouping Key Design's reason) **Done 2026-10-01**, on `release/0.19.0` (`1e0694a`). |
 | IQ-01 (category model, resolved) and its implementation note | metadata fields are an exact-match grouping key; only the message body is scored; the options `--consolidate-full-key` and session-as-grouping-field under `--include-session` | the grouping key is category plus level; level, thread and object are part of the scored string; neither option exists **Done 2026-10-01**, on `release/0.19.0` (`1e0694a`). |
-| IQ-02 (key construction and message capping, resolved) | the engine receives the message body; the adaptive cap and `$max_observed_message_length` | the engine receives the whole key cut at the per-run cut; the adaptive cap was closed as not planned (its premise does not hold) and the counter is removed |
-| DD-08 (similarity on the message body) | the metadata prefix is not part of the comparison | superseded by PF-09 as corrected |
+| IQ-02 (key construction and message capping, resolved) | the engine receives the message body; the adaptive cap and `$max_observed_message_length` | the engine receives the whole key cut at the per-run cut; the adaptive cap was closed as not planned (its premise does not hold) and the counter is removed **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
+| DD-08 (similarity on the message body) | the metadata prefix is not part of the comparison | superseded by PF-09 as corrected **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
 | PF-07 (level partitioning deferred) | consolidation operates on the whole plain pool and the prefix keeps levels apart | historical: the grouping key partitions by level, and no re-scan bucket exists (D8) |
 | PF-16 and PF-17 (the re-scan partition by level plus class) and the Process Flow's "in same partition bucket" | a re-scan bucket by level | removed as dead code under this issue (D8): within a group every key shares its level |
 | `features/150-final-pass-scalability.md` § Sort Order | sort by body with the grouping key stripped, "regardless of status code" | sort by grouping key, then body (§ 5.9) |
-| `docs/similarity-engine-best-practices.md` § Separate Similarity Scope from Storage Scope | score the message body only; metadata fields as exact-match grouping keys | score the whole key; the grouping key (level) separates groups, for the short-message reason |
+| `docs/similarity-engine-best-practices.md` § Separate Similarity Scope from Storage Scope | score the message body only; metadata fields as exact-match grouping keys | score the whole key; the grouping key (level) separates groups, for the short-message reason **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
 | `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 |
+| `prototype/96-fuzzy-consolidation.pl` (the consolidation prototype) | groups an access log by status family (`2xx`) while its keys carry the exact status; re-scans within a bucket of level plus object class (PF-16); scores UUID-normalised trigrams; searches candidates with the 50 rarest trigrams and a 30 % pre-filter; caps patterns at 50 with no eviction; runs its final pass on ceiling-excluded keys only, at its own 80 % threshold (PF-12) | the engine of the master specification as `ltl` implements it after drop 3 (D12): exact-status grouping key; no re-scan bucket; scoring as written (the decision that consolidation does not replace UUIDs); the candidate search that finds every partner; adaptive eviction with no pattern cap; the final pass over every remaining key, grouped strictly by grouping key, scoring at the `-g` similarity |
 
 ---
 
@@ -705,6 +712,11 @@ here, and the code is held to it.
       the fixed code finds no batch holding two grouping keys, where the base
       found them on all five corpus logs. *Assertable* as a one-off probe,
       recorded here; the harness assertion is AC15.
+- [ ] **AC17. The consolidation prototype follows the master specification
+      (D12).** Every departure in § 5.10's prototype row is gone; on the AC15
+      fixtures and the corpus logs of § 11.7 the prototype groups exactly the
+      keys `ltl -g` groups. *Assertable* as a one-off comparison of cluster
+      memberships, recorded here.
 
 ---
 
@@ -800,7 +812,8 @@ Each drop is a commit and a push on the issue branch. There is one PR, at the en
 | 1 | Named constants with their reasons (lock 3, D5); the per-run cut resolved once and read by the key sites, the trigram guard and the CONFIG line (lock 1, lock 7); the dead branch and every redundant consolidation cut removed (D3); the unread counter removed (lock 6); the inert re-scan partition removed: the bucket-key sub, its 30 and 20, its two callers' bucket building and lookup, and the uncalled third copy (D8, § 5.5); the AC1 and AC2 scenarios and fixture; `docs/architecture-patterns.md` § Hot-loop discipline gains the key-site consumption and this issue's token on the status line (§ 5.7); the boundary note in `tests/baseline/README.md` (§ 8) | AC1, AC2, AC5, AC6, AC8, AC9, AC13, AC14; AC3 matrix identical, the two-level window of § 5.5 included; before/after on the four cases |
 | 2 | The grouping key carried on the entry and read by the final pass and the sort (lock 2); the unread key-to-group map removed if the carried key makes it redundant (D2) | AC7; AC3 matrix identical to drop 1 |
 | 3 | The final pass grouped strictly by grouping key (D10, § 5.9); the AC15 scenarios and fixtures; saved outputs re-captured where a final-pass batch held two levels, each with its attribution (AC4) | AC15, AC16; AC3 matrix against drop 2 with every difference attributed; AC14 re-proved (no batch holds two levels, so the removed partition could divide nothing); before/after on the four cases |
-| 4 | Records: the master specification and the records it points to corrected (D11, § 5.10); `docs/staged-processing-pipeline.md` and `docs/fuzzy-consolidation-lessons-learned.md` (§ 10) | AC11 |
+| 4 | Records: the master specification and the records it points to corrected (D11, § 5.10); `docs/staged-processing-pipeline.md` and `docs/fuzzy-consolidation-lessons-learned.md` (§ 10). PF-09, IQ-01, IQ-02, DD-08 and the best-practices section are already done on the release branch | AC11 |
+| 5 | The consolidation prototype's engine rebuilt from `ltl`'s (D12) | AC17 |
 
 Drops 1 and 2 prove byte-identity (AC3). Drop 1's proof included the two-level
 window of § 5.5, where the removal of the re-scan partition was tested hardest
