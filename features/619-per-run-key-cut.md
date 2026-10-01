@@ -588,7 +588,7 @@ here, and the code is held to it.
 | `features/150-final-pass-scalability.md` § Sort Order | sort by body with the grouping key stripped, "regardless of status code" | sort by grouping key, then body (§ 5.9) **Done 2026-10-01** (drop 4). |
 | `docs/similarity-engine-best-practices.md` § Separate Similarity Scope from Storage Scope | score the message body only; metadata fields as exact-match grouping keys | score the whole key; the grouping key (level) separates groups, for the short-message reason **Done 2026-10-01**, on `release/0.19.0` (`5c99cea`). |
 | `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 **Done 2026-10-01** (`4811a78`). |
-| `prototype/96-fuzzy-consolidation.pl` (the consolidation prototype) | groups an access log by status family (`2xx`) while its keys carry the exact status; re-scans within a bucket of level plus object class (PF-16); scores UUID-normalised trigrams; searches candidates with the 50 rarest trigrams and a 30 % pre-filter; caps patterns at 50 with no eviction; runs its final pass on ceiling-excluded keys only, at its own 80 % threshold (PF-12) | the engine of the master specification as `ltl` implements it after drop 3 (D12): exact-status grouping key; no re-scan bucket; scoring as written (the decision that consolidation does not replace UUIDs); the candidate search that finds every partner; adaptive eviction with no pattern cap; the final pass over every remaining key, grouped strictly by grouping key, scoring at the `-g` similarity |
+| `prototype/96-fuzzy-consolidation.pl` (the consolidation prototype) | groups an access log by status family (`2xx`) while its keys carry the exact status; re-scans within a bucket of level plus object class (PF-16); scores UUID-normalised trigrams; searches candidates with the 50 rarest trigrams and a 30 % pre-filter; caps patterns at 50 with no eviction; runs its final pass on ceiling-excluded keys only, at its own 80 % threshold (PF-12) | the engine of the master specification as `ltl` implements it after drop 3 (D12): exact-status grouping key; no re-scan bucket; scoring as written (the decision that consolidation does not replace UUIDs); the candidate search that finds every partner; adaptive eviction with no pattern cap; the final pass over every remaining key, grouped strictly by grouping key, scoring at the `-g` similarity **Done 2026-10-01** (drop 5). |
 
 ---
 
@@ -1216,3 +1216,38 @@ cherry-picked first so the branch carries them.
   UUID cut part-way fails consolidation; that held only while UUIDs were
   normalised before scoring (removed by D569-2). Both now give DD-06's
   rationale. `perl -c ltl` passes; the change is to a comment only.
+
+### 11.13 Drop 5: the consolidation prototype runs ltl's engine (D12, AC17)
+
+`prototype/96-fuzzy-consolidation.pl` no longer carries an engine of its own.
+At start-up it compiles everything before `ltl`'s `## MAIN ##` marker from
+`ltl`'s source (the imports, the globals and every sub) in one scope with a
+small driver, so its consolidation is `ltl`'s and cannot drift from the code
+the master specification describes. The driver supplies what `ltl`'s main code
+does around the engine, restated from `read_and_process_logs` and
+`pipeline_finalize` with each restated part naming its source: reading lines of
+the three formats it handles (format-registry entries `mt1std`, `mt3ts` and
+`mt3`, their patterns and field maps taken from `format_registry_specs()`, their
+message transforms compiled from `%format_transform_code`, the metric mask from
+the entry's `message_metrics`), the thread-pool and count steps, the key
+construction at the per-run cut, the consolidation step and message-store
+entry with its grouping key, the end-of-file checkpoints and the final pass.
+Its defaults (sensitivity 85, group ceiling 1,000,000) are `ltl`'s globals. Gone
+with the old engine: grouping access logs by status family, the
+level-plus-class re-scan buckets, UUID-normalised scoring, the old candidate
+search, the 50-pattern cap without eviction, the final pass over
+ceiling-excluded keys at its own threshold, the 300-character cap and the
+Inline::C alignment (IQ-05: pure Perl only).
+
+**AC17:** cluster membership printed by the prototype (`--membership`) and by
+`ltl --disable-progress -ni -bs 1440 -oe -n 20 -g N -V message-grouping` is
+byte-identical on all twelve comparisons: the two AC15 fixtures, a ThingWorx
+script log carrying metrics, a ThingWorx application log, a 5,000-line and a
+full-day Tomcat access log, each at `-g 85` and `-g 90` (1 to 200 groups); no
+runtime warning on either side.
+
+Three provenance comments that cited the old prototype by line (the Tomcat
+regex copied into `prototype/189-bin-counter-primitives.pl` and
+`prototype/426-revalidate-lib.pm`, and the parser lineage in
+`tests/statistics-drift/oracle/calculate-reference.py`) are pinned to `d0bc49a`,
+the last commit of the old prototype.
