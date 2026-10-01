@@ -3,8 +3,9 @@
 #
 # Removes the shared scratch directory tests/.artifacts/ used by the test
 # harnesses for cross-harness artifact sharing (e.g., the CSV cache used
-# by validate-csv-output.sh and validate-statistics.sh), and the run index
-# ltl-index.csv that ltl writes into the repository root when run from it.
+# by validate-csv-output.sh and validate-statistics.sh), the run index
+# ltl-index.csv that ltl writes into the repository root when run from it,
+# and the profiler output nytprof.out left there by a profiling run.
 #
 # Per-harness traps that delete the cache are forbidden because they would
 # defeat cross-harness reuse. This is the only script in the test suite
@@ -24,6 +25,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/.artifacts"
 RUN_INDEX="$SCRIPT_DIR/../ltl-index.csv"
+PROFILE_OUTPUT="$SCRIPT_DIR/../nytprof.out"
 
 if [[ -d "$ARTIFACTS_DIR" ]]; then
     rm -rf "$ARTIFACTS_DIR"
@@ -31,6 +33,10 @@ fi
 
 if [[ -f "$RUN_INDEX" ]]; then
     rm -f "$RUN_INDEX"
+fi
+
+if [[ -f "$PROFILE_OUTPUT" ]]; then
+    rm -f "$PROFILE_OUTPUT"
 fi
 
 exit 0
