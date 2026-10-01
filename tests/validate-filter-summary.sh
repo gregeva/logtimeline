@@ -353,7 +353,7 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
     excluded_other 1 \
     'A matched line whose level is not in the log-level vocabulary is dropped at the category gate and counted as other'
 
-# --- other: an unparseable CSV timestamp row; the CSV metadata line is unmatched (D22) ---
+# --- unmatched: a CSV row whose timestamp cannot be placed, beside the CSV metadata line (D22) ---
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 scenario_register csv-unparseable-row \
                   summary-table-unchanged
@@ -364,13 +364,14 @@ current_scenario="csv-unparseable-row"
 if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
     printf 'timestamp,latency\n2026-06-01 10:00:05,12\nnot-a-timestamp,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/bad-row.csv"
     out=$(run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean)
-    assert_line "$out" pattern '^excluded_other: 1$' \
-        asserts 'The row whose timestamp is neither epoch nor ISO is skipped and counted as other' \
-        produced_by "$PRODUCER" contract "$CONTRACT"
-    assert_line "$out" pattern '^lines_unmatched: 1$' \
-        asserts 'The CSV header line is metadata matched to no format and counts as unmatched' \
-        produced_by 'note_unmatched_line() in ltl, called at the CSV header stash in read_and_process_logs()' \
-        contract 'features/503-yaml-aggregate-export.md D22 (a CSV file first line is metadata and counts as unmatched)'
+    assert_line "$out" pattern '^excluded_other: 0$' \
+        asserts 'A CSV row whose timestamp is neither epoch nor ISO is never matched, so no exclusion cause counts it' \
+        produced_by 'csv_timestamp_placeable() in ltl, tested before the csv row counts as a match in read_and_process_logs()' \
+        contract 'features/640-csv-unplaced-rows-silent.md D1 (a CSV row without a parsable timestamp is read and not matched)'
+    assert_line "$out" pattern '^lines_unmatched: 2$' \
+        asserts 'The CSV header line (metadata, D22) and the row whose timestamp cannot be placed (640 D1) both count as unmatched' \
+        produced_by 'note_unmatched_line() in ltl, called at the CSV header stash and for a csv row csv_timestamp_placeable() refuses' \
+        contract 'features/503-yaml-aggregate-export.md D22 (a CSV file first line is metadata and counts as unmatched); features/640-csv-unplaced-rows-silent.md D1'
     assert_line "$out" pattern '^lines_included: 2$' \
         asserts 'The two well-formed rows are included' \
         produced_by "$PRODUCER" contract "$CONTRACT"

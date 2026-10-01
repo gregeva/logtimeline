@@ -45,6 +45,7 @@ use Devel::Size qw(total_size);
 # Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
 # On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
 use List::Util qw(min max);
+use Scalar::Util qw(looks_like_number);
 use File::Glob qw(bsd_glob);
 use File::Spec;
 use Text::CSV;
@@ -471,6 +472,16 @@ my ( @udm_configs, @udm_raw_args, %udm_last_value );
 my %udm_distinct;                           # Per-bucket distinct value sets for counting aggregations (Issue #313), freed after counting like %log_sessions
 my @udm_rejected_specs;                     # -udm arguments skipped at parse time: { spec, reason } (Issue #443), reported on -V udm-specs
 my %udm_production;                         # Run-wide per-metric production derived from the bucket accumulators after the read loop (Issue #443)
+my %udm_skipped_lines;                      # Per /regex/ metric: retained lines whose capture its numeric aggregation could not use; a key exists only once one is skipped (Issue #638)
+my @udm_sources;                            # Per config index: the sources the metric was read from ('line', 'csv:<column>', 'csv:unbound'), noted once per file as it binds (Issue #638)
+my @udm_csv_unbound_files;                  # Per config index: CSV files whose rows matched and whose header has no column for the metric (Issue #640)
+# The UDM value vocabulary. The default name and token-key patterns extract
+# $udm_number_re. A numeric aggregation records a capture only when the whole
+# capture is a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2 (no
+# thousands separator, hexadecimal, Inf, NaN or non-ASCII digit): the shape
+# [-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)? over ASCII digits, tested in the
+# USER DEFINED METRICS CAPTURE block of read_and_process_logs().
+my $udm_number_re = qr/-?\d+(?:\.\d+)?/;
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
@@ -6113,16 +6124,10 @@ sub udm_read_as {
     my ($config, $config_idx) = @_;
     my $unit = defined $config->{unit} ? $config->{unit} : 'none';
     my $key  = $config->{extraction} eq 'regex' ? '-' : ($config->{token_key} // $config->{base_name});
-    my $source = 'line';
-    if ($csv_detected && defined $config_idx) {
-        my $col = $csv_udm_col_indices[$config_idx];
-        if (defined $col && $col >= 0) {
-            my ($col_name) = grep { $csv_col_index{$_} == $col } keys %csv_col_index;
-            $source = 'csv:' . ($col_name // $col);
-        } else {
-            $source = 'csv:unbound';
-        }
-    }
+    my $sources = defined $config_idx ? $udm_sources[$config_idx] : undef;
+    my $source  = $sources
+        ? join(',', sort { ($b eq 'line') <=> ($a eq 'line') || $a cmp $b } keys %$sources)
+        : 'line';
     return join('  ',
         "unit=$unit($config->{unit_type})",
         "aggregation=$config->{aggregation}",
@@ -6131,6 +6136,53 @@ sub udm_read_as {
         "key='$key'",
         "source=$source",
     );
+}
+
+# Where each metric is read from, noted as a file binds its first matched
+# line: log lines, or the CSV column the file's header bound the metric to.
+# The run-wide union is what udm_read_as() reports, whichever file came last.
+sub udm_note_sources {
+    my ($is_csv) = @_;
+    for my $idx (0 .. $#udm_configs) {
+        my $source = 'line';
+        if ($is_csv) {
+            my $col = $csv_udm_col_indices[$idx];
+            if (defined $col && $col >= 0) {
+                my ($col_name) = grep { $csv_col_index{$_} == $col } keys %csv_col_index;
+                $source = 'csv:' . ($col_name // $col);
+            } else {
+                $source = 'csv:unbound';
+                $udm_csv_unbound_files[$idx]++;
+            }
+        }
+        $udm_sources[$idx]{$source} = 1;
+    }
+}
+
+# Issue #640: one notice per metric whose column was missing from the header
+# of CSV files whose rows matched, with their count and never their names.
+# Spoken after the read loop, beside the other -udm notices.
+sub emit_udm_csv_unbound_notices {
+    for my $idx (0 .. $#udm_configs) {
+        my $files = $udm_csv_unbound_files[$idx] or next;
+        my $config = $udm_configs[$idx];
+        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of $files CSV file(s)\n";
+    }
+}
+
+# Issue #638: one notice per /regex/ metric some of whose retained lines were
+# skipped because the capture is not a number its aggregation can use, with
+# the recorded and skipped counts and the skipped share. Spoken after the
+# read loop, beside the zero-match notice.
+sub emit_udm_skipped_capture_notices {
+    return unless %udm_skipped_lines;
+    my $production = derive_udm_production();
+    for my $config (@udm_configs) {
+        my $skipped = $udm_skipped_lines{$config->{name}} or next;
+        my $recorded = $production->{$config->{name}}{occurrences};
+        printf STDERR "Note: -udm '%s': %d line(s) recorded, %d skipped (%.1f%%): the captured text is not a number\n",
+            $config->{raw_arg}, $recorded, $skipped, $skipped / ($recorded + $skipped) * 100;
+    }
 }
 
 # Issue #443: one notice per metric whose derived occurrences are zero, spoken
@@ -6244,6 +6296,7 @@ sub emit_udm_specs_verbose {
                 ? " distinct_max=" . ($p->{distinct_max} // 0)
                 : " sum=$p->{sum} min=$p->{min} max=$p->{max}";
         }
+        $produced .= " skipped=$udm_skipped_lines{$config->{name}}" if exists $udm_skipped_lines{$config->{name}};
         push @verbose_output, "  produced: $produced";
         push @verbose_output, "  hint: $config->{hint}" if defined $config->{hint};
     }
@@ -10068,7 +10121,7 @@ sub print_help {
     $out .= help_opt("      unit",                   "Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000). Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
     $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
-    $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. Overrides default name/key matching.");
+    $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. For sum, min, max, mean, delta and idelta the value must be a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2; any other value (12abc, 1,000, an empty capture) is skipped, and the lines skipped are reported. Capture the whole value, e.g. (\\S+), and let it be checked: (\\d+) reads 1 from 1.5 or 1e3, and \\D* before the capture drops a minus sign, with no notice. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
     $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
@@ -10117,7 +10170,7 @@ sub print_help {
     $out .= $ex->("ltl -n 50 -so duration access.log",                             "Top 50 messages by total duration");
     $out .= $ex->("ltl -hm duration -bs 5 access.log",                             "Duration heatmap, 5-minute buckets");
     $out .= $ex->("ltl -hg duration,bytes access.log",                             "Duration and bytes histograms");
-    $out .= $ex->("ltl -udm \"rows:/(\\d+) rows processed/\" app.log",             "Custom metric extraction by regex");
+    $out .= $ex->("ltl -udm \"queue::max:/queue size[\\s:=]*(\\S+)/\" app.log",   "Custom metric by regex, capturing the whole value");
     $out .= $ex->("ltl -tpa \"http-\" access.log",                                 "Track HTTP thread pool activity");
     $out .= $ex->("ltl -o access.log",                                             "Export full analysis to CSV");
     $out .= $ex->("ltl logs/2025-05-*.txt",                                        "Glob multiple files");
@@ -10431,7 +10484,7 @@ sub counting_token_pattern {
 }
 
 sub parse_udm_configs {
-    my $number = qr/-?\d+(?:\.\d+)?/;
+    my $number = $udm_number_re;
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
     my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
@@ -10635,6 +10688,19 @@ sub parse_udm_configs {
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
 }
 
+# A CSV row is placed on the timeline only when its timestamp column holds
+# epoch seconds (when the file's first data row did) or an ISO date and time;
+# any other row is a line no format matched, read silently (Issue #640 D1).
+# Checked before the row counts as a match, so it never reaches the metric
+# capture or the date parse (Issue #328).
+sub csv_timestamp_placeable {
+    my ($timestamp_str) = @_;
+    return 0 unless defined $timestamp_str;
+    return $csv_epoch_timestamp
+        ? $timestamp_str =~ /^\d+(?:\.\d+)?$/
+        : $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;
+}
+
 # CSV header detection and column mapping for UDM (Issue #22)
 sub detect_and_parse_csv_header {
     my ($header_line) = @_;
@@ -10679,8 +10745,7 @@ sub detect_and_parse_csv_header {
         if (exists $csv_col_index{$col_name}) {
             $csv_udm_col_indices[$i] = $csv_col_index{$col_name};
         } else {
-            $csv_udm_col_indices[$i] = -1;
-            print STDERR "Warning: UDM metric '$udm_configs[$i]->{base_name}' not found in CSV headers\n";
+            $csv_udm_col_indices[$i] = -1;  # reported once per run by emit_udm_csv_unbound_notices()
         }
     }
 
@@ -15120,7 +15185,6 @@ sub read_and_process_logs {
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
         my $potential_csv_header;
-        my $csv_skipped_timestamp_rows = 0;
 
         # Detection evidence (D53, dual process). Primary: the read-only
         # sample of the file, taken before its first line is processed;
@@ -15281,6 +15345,11 @@ sub read_and_process_logs {
                     $csv_epoch_timestamp = 1;
                 }
 
+                unless (csv_timestamp_placeable($timestamp_str)) {
+                    note_unmatched_line($in_file);
+                    next;
+                }
+
                 # Build message from -ucm columns or default label
                 if (@csv_message_col_indices) {
                     $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
@@ -15372,6 +15441,11 @@ sub read_and_process_logs {
                                 $csv_epoch_timestamp = 1;
                             }
 
+                            unless (csv_timestamp_placeable($timestamp_str)) {
+                                note_unmatched_line($in_file);
+                                next;
+                            }
+
                             if (@csv_message_col_indices) {
                                 $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
                             } else {
@@ -15448,8 +15522,13 @@ sub read_and_process_logs {
             }
 
             ## USER DEFINED METRICS CAPTURE (Issue #22) ##
+            # Only a line that matched a format is tried: a continuation line
+            # of a multi-line entry leaves the previous record's $message in
+            # place, and is never recorded, so trying it could only coerce its
+            # text and move the delta state (features/637-udm-continuation-lines.md D1).
             my %udm_values;
-            if (@udm_configs && defined $message) {
+            my $udm_skipped;    # names of /regex/ metrics whose capture this line's numeric aggregation could not use
+            if (@udm_configs && $is_line_match && defined $message) {
                 foreach my $config_idx (0 .. $#udm_configs) {
                     my $config = $udm_configs[$config_idx];
                     my $name = $config->{name};
@@ -15477,14 +15556,28 @@ sub read_and_process_logs {
                     next unless defined $matched_value;
 
                     # Counting aggregations keep the raw extracted string:
-                    # numeric coercion, transforms, and unit conversion do not apply
+                    # numeric coercion, transforms, and unit conversion do not apply.
+                    # An empty capture is counted but masks nothing: an empty
+                    # pattern would re-run whichever regex last matched.
                     if ($config->{agg_kind} eq 'counting') {
                         $udm_values{$name} = $matched_value;
-                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
+                        $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose} || $matched_value eq '';
                         next;
                     }
 
-                    my $raw_value = $matched_value + 0;  # Ensure numeric
+                    # A numeric aggregation records only a capture that is
+                    # entirely a number; anything else is not observed for this
+                    # metric: no value, no delta state, no mask. A /regex/
+                    # metric's skip is counted once the line is retained.
+                    # Only the characters of the written forms, then Perl's own
+                    # number test: the pair accepts exactly the shape above the
+                    # UDM globals, at a fraction of an anchored regex's cost.
+                    unless (($matched_value =~ tr/0-9.eE+\-//c) == 0 && looks_like_number($matched_value)) {
+                        push @$udm_skipped, $name unless $match_type == 13;
+                        next;
+                    }
+
+                    my $raw_value = $matched_value + 0;
 
                     # Apply delta/idelta transform on raw value before conversion
                     if (defined $config->{transform}) {
@@ -15536,6 +15629,7 @@ sub read_and_process_logs {
                     # The byte notation the bound format declares, read once
                     # after the read by resolve_byte_notation().
                     $fdd->{byte_notation}    = $line_entry ? $line_entry->[FR_BYTE_NOTATION] : undef;
+                    udm_note_sources($match_type == 13) if @udm_configs;
                     # The levels the bound format declares join the run's
                     # category vocabulary here, once per file rather than for
                     # every format at startup.
@@ -15601,9 +15695,7 @@ sub read_and_process_logs {
                     # The reject branch, and only the reject branch: keep the
                     # token, the format that produced it and the count of lines
                     # that carried it, so the end of the run can say what was
-                    # dropped. The elsif below handles an unparseable CSV row
-                    # and increments the same counter, which is why the
-                    # collection attaches here rather than after the chain.
+                    # dropped.
                     my $slug = $format_detection{$in_file}{slug} // 'unknown';
                     $unregistered_levels{$slug}{$category_bucket}++;
                     $unregistered_levels_by_file{$in_file}{$category_bucket}++;
@@ -15617,19 +15709,6 @@ sub read_and_process_logs {
                         $fractional_ms = $2 * (10 ** (3 - length($2)));
                     } else {
                         $fractional_ms = 0;
-                    }
-                    # CSV rows carry arbitrary column text where the
-                    # regex-matched formats guarantee timestamp shape. A value that is
-                    # neither epoch (handled above) nor ISO would feed garbage into the
-                    # fixed-offset substr extraction and die inside timegm(), so skip
-                    # the row instead (Issue #328).
-                    if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {
-                        $csv_skipped_timestamp_rows++;
-                        $excluded_other++;
-                        if ($csv_skipped_timestamp_rows == 1) {
-                            print STDERR "Warning: $in_file line $line_number: CSV timestamp '" . (defined $timestamp_str ? $timestamp_str : '') . "' is neither epoch nor ISO (YYYY-MM-DD HH:MM:SS) - skipping row (further rows in this file skipped silently)\n";
-                        }
-                        next;
                     }
                     # Declarative time contract (D31): the csv entry's
                     # compiled layout parser, sharing %timestamp_date_cache
@@ -15745,6 +15824,10 @@ sub read_and_process_logs {
                     if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
                     if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
                 }
+
+                # A skipped /regex/ capture is counted here, past every filter,
+                # so it describes the same lines as the recorded figure.
+                if ($udm_skipped) { $udm_skipped_lines{$_}++ for @$udm_skipped; }
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
@@ -16579,10 +16662,6 @@ sub read_and_process_logs {
                 push @format_legend_order, $slug;
                 $format_legend{$slug} = scalar @format_legend_order;
             }
-        }
-
-        if ($csv_skipped_timestamp_rows > 1) {
-            print STDERR "Warning: $in_file: skipped $csv_skipped_timestamp_rows CSV rows with unparseable timestamps\n";
         }
 
         # Index file: finalize per-file counters (Issue #46)
@@ -22078,6 +22157,8 @@ sub pipeline_finalize {
     print "Calculate statistics..." unless $disable_progress;
     calculate_all_statistics();
     emit_udm_zero_match_notices();
+    emit_udm_skipped_capture_notices();
+    emit_udm_csv_unbound_notices();
     emit_classification_percentage_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);
