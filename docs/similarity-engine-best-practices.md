@@ -46,14 +46,18 @@ These parameters (min keep=3, ratio=40%, boundary=10) proved stable across all t
 
 ## Similarity Scoring
 
-### Separate Similarity Scope from Storage Scope
+### Score the Whole Key; Separate Groups by a Grouping Key
 
-Similarity scoring should operate on the **message content only**, not the full storage key. Metadata fields (log level, thread, object) should serve as exact-match grouping keys — two messages are only consolidation candidates if all their metadata fields match.
+Similarity is scored on the **whole message key as one contiguous string**: level, thread, object and message alike. Every part of it may vary and be wildcarded, so keys whose thread names differ (`[http-thread-1]`, `[http-thread-2]`) consolidate into `[http-thread-*]`. Do not hold metadata fields out as exact-match fields.
 
-**Why:** When the full key (including `[ERROR] [http-thread-1] [ClassName]` prefix) is used for Dice scoring, the ~50-char metadata prefix dominates the trigram set. On messages with short bodies (< ~20 chars), cross-level pairs score above 80% and would be incorrectly merged:
-- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5% (incorrect merge)
+Keys that must never consolidate are kept apart by a **grouping key**, not by the scoring. In `ltl` the grouping key is the category (plain or highlighted) plus the log level, or the HTTP status on an access log. A key is compared and grouped only with keys of its own group, in every pass that groups.
 
-**Grouping key pattern:** `"$log_level|$thread|$object"` — only messages sharing the same grouping key enter pairwise comparison.
+**Why the level is a grouping key and not left to the scoring:** the metadata prefix dominates the trigram set of a short message, so keys of different levels score above the threshold:
+- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5 %
+
+**Why the thread and object are not grouping keys:** thread names can be unique per instance, which creates hundreds of tiny groups that never reach a batch size worth processing.
+
+Record: `features/fuzzy-message-consolidation.md` § Grouping Key Design, PF-09 (similarity on the full message key) and IQ-01 (category model).
 
 ### Score the Message as Written; Masking Is the Analyst's Step
 

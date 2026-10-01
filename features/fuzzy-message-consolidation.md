@@ -191,9 +191,9 @@ This separation means that `*` or `#` appearing in the original message text cau
 
 ### DD-08: Similarity Operates on $message Content
 
-**Decision:** Similarity detection and consolidation operate on the `$message` string and all of its contents. The metadata prefix in `$log_key` (log level, thread name, object) is not part of the similarity comparison — it is part of the category/grouping structure that already exists.
+**Superseded by PF-09 (similarity on the full message key).** Similarity is scored on the whole `$log_key` as one contiguous string, its level, thread and object included, and any part may be wildcarded. Varying thread names (`http-thread-1`, `http-thread-2`) consolidate into a wildcard (`[http-thread-*]`) rather than being kept apart. The grouping key (category plus level, § Grouping Key Design) is the only separation.
 
-**Rationale:** Thread names vary naturally (`http-thread-1` vs `http-thread-2`) and would introduce noise into similarity scoring. The `$message` string contains the semantically meaningful content where variable parameters appear. The metadata prefix serves as pre-existing categorization, not as content to be deduplicated.
+*Corrected 2026-10-01 under #619 (one per-run message-key cut). This entry used to say that only the message body was scored and that the metadata prefix was part of the grouping structure. The integrated engine has never worked that way.*
 
 ### DD-09: Hash Key Management During Consolidation
 
@@ -1384,24 +1384,17 @@ The level grouping key keeps such keys apart at no per-line cost. Grouping by th
 
 ### ~~IQ-02: `$log_key` Construction and Message Capping~~ — RESOLVED
 
-**Decision:** The consolidation engine receives `$message` directly (per IQ-01), not the full `$log_key`. This eliminates the prototype's key construction differences and shortens the indexed text by ~50 chars (the metadata prefix).
+**Decision:** The consolidation engine receives the whole `$log_key` (level, thread and object where the format supplies them, then the message), cut at the run's message-key cut. Under `-g` and under CSV output that cut is the message-key cap, 350 characters (DD-06 gives its reason for grouping). The key sites cut every key once, and the only cut inside consolidation is the guard where text enters the trigram index.
 
-**Implementation note (v0.14.4):** The implementation passes `$capped_msg = substr($log_key, 0, 350)` — using the full `$log_key` (including metadata prefix), not `$message` alone. See IQ-01 implementation note. The 350-char cap is applied when `-g` is active (#158), decoupled from terminal width.
+**Adaptive cap: not planned.** An adaptive cap (the smaller of the longest key observed and the cap) was proposed. Every use of the cap is a first-N-characters cut and nothing is sized by it, so the smaller value changes no key and no trigram; the proposal was closed as not planned. No observed-length counter exists.
 
-**Adaptive consolidation cap (design — not yet implemented):** The cap on `$message` length for trigram indexing could adapt to both the output context and the observed data:
-
-- Track `$max_observed_message_length` during parsing (on `$message` body, not full `$log_key`)
-- Define upper bounds as global variables (not hardcoded): `$consolidation_cap_csv` for CSV mode, `$terminal_width` for terminal mode
-- Effective cap at each checkpoint: `min($max_observed_message_length, $upper_bound)`
-- By the first checkpoint (5000 keys), the observed max is representative
-
-**Current implementation:** Fixed 350-char cap when `-g` is active, `$max_log_message_length` (terminal width) otherwise. See DD-06 warning about truncation breaking UUID normalization.
-
-**Rationale — memory matters:** Trigram structures (`key_trigrams`, `ngram_index`, `key_trigrams_norm`) are the dominant memory cost (~206 MB peak on power-law data, PF-21). Longer messages generate proportionally more trigrams. Benchmarking showed cap 200→300 adds 46 MB RSS; 300→500 adds zero on files with ~300-char messages but would add proportionally on files with longer messages. The adaptive cap avoids wasting memory when messages are short while allowing full context when messages are long.
+**Rationale — memory matters:** Trigram structures are the dominant memory cost of consolidation (PF-21). Longer keys generate proportionally more trigrams; benchmarking showed a cap of 200 to 300 adding 46 MB RSS, and 300 to 500 adding nothing on files with messages of about 300 characters.
 
 **Resolved sub-questions:**
-- **Metric value masking:** Not a consolidation concern. ltl masks `$message` before the consolidation engine sees it (e.g., `durationMS=167` → `durationMS=?`). The engine receives pre-masked messages — fewer false unique keys, less work for the similarity engine.
-- **Thread name stripping:** Not a consolidation concern. Per IQ-01, thread is an exact-match grouping field. ltl already strips trailing thread numbers before key construction.
+- **Metric value masking:** not a consolidation concern. `ltl` masks the message before the key is built (for example `durationMS=167` becomes `durationMS=?`), so the engine receives masked keys.
+- **Thread names:** the thread is part of the scored string (PF-09), not an exact-match field: keys whose threads differ can consolidate, the thread becoming a wildcard.
+
+*Corrected 2026-10-01 under #619 (one per-run message-key cut). This entry used to say that the engine received the message body only, and described the adaptive cap and an observed-length counter as designs pending. The engine has always received the whole key, the adaptive cap is closed, and the counter is removed.*
 
 ### ~~IQ-03: Stats Merging~~ — Resolved (PF-25)
 
