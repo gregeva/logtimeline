@@ -24,6 +24,12 @@
 #    differ only in a hex UUID sharing its first 18 characters: Dice 73 on the
 #    keys as written, 100 with the UUIDs replaced by one placeholder.
 #
+# 3. The message-key cut a run uses. Message grouping cuts every key at the
+#    message-key cap whatever the terminal width; a run that neither groups nor
+#    writes CSV cuts at the terminal width; -n 0 switches grouping off, so the
+#    cut falls back to the width. -V benchmark-data reports the cut the run
+#    used. The fixture holds one request line longer than the cap and one short.
+#
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the invariant being tested
 #   - produced_by: where in ltl it is produced (function name)
@@ -53,11 +59,12 @@ neutralize_colour_env
 FIXTURE="$REPO_DIR/tests/fixtures/grouping-final-pass-threshold.txt"
 FIXTURE_DOWNLOADS="$REPO_DIR/tests/fixtures/grouping-signed-downloads.txt"
 FIXTURE_UUID="$REPO_DIR/tests/fixtures/grouping-uuid-pair.txt"
+FIXTURE_KEY_CUT="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID"; do
+for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"; exit 1
     fi
@@ -292,7 +299,10 @@ scenario_register sensitivity-70 \
                   signed-downloads-75-repeat \
                   skip-final-pass-fires \
                   skip-final-pass-population-below-floor \
-                  skip-final-pass-absorbing-data
+                  skip-final-pass-absorbing-data \
+                  key-cut-grouping \
+                  key-cut-no-retention \
+                  key-cut-terminal-width
 scenario_parse_args "$@"
 
 if scenario_wanted sensitivity-70; then
@@ -524,6 +534,82 @@ if capture_section "$out" $SHAPE -du us -xqs -g 75 --skip-final-min-keys 100 "$F
         asserts     "At a sensitivity whose partners the data does have, streaming absorbs and the final pass runs: the skip is governed by absorption, not by population size alone" \
         produced_by "$SKIP_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 2, criterion 3)"
+fi
+fi
+
+
+# The message-key cut (system 3). Every run is -ni -bs 1440 -oe -n 3
+# --terminal-width 120: the assertions read only the CONFIG row of
+# -V benchmark-data, and the width is the value a run that cuts at the
+# terminal width must report.
+KEY_CUT_SHAPE="-bs 1440 -oe -n 3 --terminal-width 120"
+KEY_CUT_PRODUCER='adapt_to_terminal_settings() in ltl (the per-run cut $max_log_message_length), reported by print_verbose_output()'
+KEY_CUT_CONTRACT='features/619-per-run-key-cut.md § 7 (the CONFIG max_log_message_length row), AC2'
+
+# Run ltl for a key-cut scenario; fail hard on a failed run, a runtime warning
+# or a missing CONFIG row (HARNESS-DESIGN.md Trap 1 and Runtime-warning
+# cleanliness).
+# Usage: capture_key_cut <outfile> <ltl-args...>
+capture_key_cut() {
+    local outfile="$1"; shift
+    local errfile="$outfile.stderr"
+    set +e
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$outfile" 2>"$errfile"
+    local rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc" >&2
+        sed 's/^/        /' "$errfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl run failed"); return 1
+    fi
+    if ! grep -qE $'^CONFIG\tmax_log_message_length\t[0-9]+$' "$outfile"; then
+        echo "  FAIL  $current_scenario :: CONFIG max_log_message_length row missing from $outfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: CONFIG row missing"); return 1
+    fi
+    if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
+    fi
+}
+
+if scenario_wanted key-cut-grouping; then
+current_scenario="key-cut-grouping"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-grouping.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -g -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t350\$' '$out'" \
+        label       'a grouping run reports the message-key cap as its cut' \
+        asserts     "Under -g every message key is cut at the message-key cap (350) whatever the terminal width, and -V benchmark-data reports that cut, not the terminal width" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+if scenario_wanted key-cut-no-retention; then
+current_scenario="key-cut-no-retention"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-no-retention.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -n 0 -g -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t120\$' '$out'" \
+        label       'grouping switched off by -n 0 leaves the cut at the terminal width' \
+        asserts     "-n 0 retains no message and switches -g off at option settlement, so the cut is resolved after it: the terminal width, not the cap" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+if scenario_wanted key-cut-terminal-width; then
+current_scenario="key-cut-terminal-width"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-terminal-width.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t120\$' '$out'" \
+        label       'a run that neither groups nor writes CSV cuts at the terminal width' \
+        asserts     "Without -g or -o a message key is cut at the terminal width, the most the messages table can print without wrapping, and -V benchmark-data reports it" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
 fi
 fi
 

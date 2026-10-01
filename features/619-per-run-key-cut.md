@@ -695,3 +695,107 @@ rest) on the head commit; the before/after of § 8 on the head commit;
 | Issue #616 (one gated derivation of means) | none from this issue; #616's delivery rewrites its note on cross-level consolidation as the design and cross-references § 5.4 |
 | Native edge: this issue blocked by #616 (the message-store entry gains its counts first) | exists |
 | Native edge: #620 (hoisting per-line option handling) blocked by this issue | exists |
+
+---
+
+## 11. Implementation findings
+
+### 11.1 Start of implementation (2026-10-01)
+
+The issue branch was fast-forwarded to the release tip `af91a69` (#616 and the
+v0.18.5 fixes merged). The `before` captures of § 8 were taken on `af91a69`,
+labels `619-before-1` to `619-before-3`, each holding the four cases. Captures 1
+and 2 were retaken whole, because a read-only scan of the corpus ran beside them
+and could have disturbed their timings; capture 3 ran alone.
+
+### 11.2 Level captures that admit `]` (§ 5.4, AC7)
+
+§ 5.4 expected every format spec's level capture to exclude `]`. Five do not:
+`connection_server_standard` and `integration_runtime_standard` (`([^ ]*)`),
+`connection_server_json` (`([^"]*)`), `tw_analytics_v2` and `tw_edge_c_sdk`
+(`([^ ]+)`). A level holding `]` would make today's parse (the text up to the
+first `]`) differ from the carried level. A scan of every uncompressed file in
+the corpus (19 GB) for a level token holding `]` in any of the five line shapes
+found none. The inline streaming path already groups by the whole level
+(`$cat_gk = "$category|$grouping_key"` with `$grouping_key = $log_level`), so
+today such a key would be grouped under one value while streaming and another in
+the final pass.
+
+### 11.3 Drop 1 equivalence matrix (AC3, AC14)
+
+The base `ltl` (`af91a69`) against drop 1, 165 comparisons: eleven inputs, five
+option shapes (`-n 20`; `-o`; `-g`; `-o -g`; `-g -m uuid`) and terminal widths
+80, 120 and 200. Inputs: one synthetic file per key variant (level only; level
+and thread; level and object; level, thread and object), each holding messages
+longer than 350 characters, between 200 and 350, and short, at two levels; the
+same-body ERROR and WARN pair; the two-level window of § 5.5; and five corpus
+logs (a ThingWorx application log, an Edge C SDK log, a Tomcat access log, an
+Apache access log with long request paths, a Windchill method-server log). Each
+comparison covers the exit code, the rendered output with `-V message-grouping`
+(cluster membership included), the MESSAGES CSV and stderr. The run summary's
+time and memory lines are excluded, and so is the bar glyph run (its counts are
+kept): with two levels at equal counts, the split of a bar between them varies
+from run to run on the base alone (six runs of the base, two renderings).
+
+- **156 identical**, no runtime warning, every run exiting 0.
+- **9 differ, all on the two-level window under `-g`** (every width, with `-o`
+  and with `-m uuid`). The MESSAGES CSV, the rendered table and the cluster
+  membership are identical (one cluster `[*] … Batch 100* …`, six members, one
+  ERROR and five WARN). Four `-V message-grouping` counters of the WARN group's
+  final pass move:
+
+  | Counter | base | drop 1 |
+  |---|---|---|
+  | S4 Pairwise discovery | 6 | 2 |
+  | S4 Re-scan absorbed | 0 | 4 |
+  | New patterns created | 3 | 1 |
+  | find_candidates calls | 4 | 2 |
+
+  Mechanism, as § 5.5 predicted: the pattern formed across the two levels has its
+  level wildcarded, a first word no re-scan bucket carries. Today it re-scans
+  nothing, so the remaining WARN keys go through pairwise discovery, which
+  creates two more patterns; every key still ends in the one cluster (the
+  cross-cluster merge count is 0 on both sides). With the partition removed, the
+  pattern re-scans the window and absorbs the four WARN keys at once. No corpus
+  input moved a counter.
+
+### 11.4 Locked by the architect on 2026-10-01
+
+- **D9. The counter movement on a window spanning two levels is accepted.**
+  Locked by the architect 2026-10-01. Removing the re-scan partition (D8) moves
+  the final-pass counters S4 Pairwise discovery, S4 Re-scan absorbed, New
+  patterns created and find_candidates calls of `-V message-grouping` on a
+  final-pass window holding keys of two levels in which a pattern forms across
+  the levels: the pattern re-scans the window instead of leaving the remaining
+  keys to pairwise discovery. Output (the MESSAGES CSV, the rendered table and
+  the cluster membership) is unchanged. No re-scan restriction is kept to
+  reproduce the old counts. AC3 and AC14 read with this exception: the
+  equivalence matrix is identical except these four counters on such a window.
+
+### 11.5 Drop 1 source checks (AC5, AC6, AC8, AC9, AC14)
+
+- **AC5:** the literal `350` appears once in `ltl`, at `MESSAGE_KEY_CAP`; no
+  `? 350 :` remains; `$consolidation_message_length_cap` is gone. The four key
+  sites, the trigram guard and the CONFIG line read `$max_log_message_length`,
+  resolved once in `adapt_to_terminal_settings`.
+- **AC6:** the one remaining cut of consolidation input is
+  `get_consolidation_trigrams` :: `my $capped = substr($str, 0, $max_log_message_length);`.
+- **AC8:** `MESSAGE_KEY_CAP`, `MESSAGE_KEY_THREAD_LENGTH` and
+  `MESSAGE_KEY_OBJECT_LENGTH` are file-scope constants with their reasons; the
+  display cuts `substr( $key, 0, $col_width{1} )` in `print_message_summary` and
+  `print_threadpool_summary` are unchanged.
+- **AC9:** `$max_observed_message_length` and its per-key length are gone.
+- **AC14:** `extract_consolidation_bucket_key`, `partition_consolidation_keys`
+  and the bucket maps are gone; a new pattern re-scans every unconsumed key of
+  its group or window (`$rescan_keys`).
+
+AC1 and AC2 are asserted by `key-cut-csv`, `key-cut-csv-grouping` and
+`key-cut-csv-no-retention` in `tests/validate-csv-output.sh`, and `key-cut-grouping`,
+`key-cut-no-retention` and `key-cut-terminal-width` in
+`tests/validate-message-grouping.sh`. Each assertion was shown to fail: against
+the release tip (which reports 120 under `-o` and `-g`), and against copies of
+drop 1 that report the cap on every run or cut the keys at the terminal width.
+
+One finding beside the carried key (§ 3 item 7, D2): with the inline re-cut gone,
+`%consolidation_key_message` maps every key to the key itself, in both the
+streaming and final-pass paths.

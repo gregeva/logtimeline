@@ -63,7 +63,8 @@ neutralize_colour_env
 
 # End-of-run cleanup runs only when standalone (CI unset). Trap covers
 # both clean exit and error paths.
-trap csv_cache_maybe_cleanup EXIT
+KEY_CUT_DIR=""
+trap 'csv_cache_maybe_cleanup; [[ -n "$KEY_CUT_DIR" ]] && rm -rf "$KEY_CUT_DIR"; true' EXIT
 
 # Sanity: required files exist. A missing file would silently skip work and
 # falsely pass, so fail loudly here.
@@ -82,6 +83,8 @@ while IFS=$'\t' read -r scenario _rest; do
     [[ -z "$scenario" || "$scenario" =~ ^# || "$scenario" == "scenario" ]] && continue
     scenario_register "$scenario"
 done < "$SCENARIOS_TSV"
+# The message-key cut scenarios (#619) run outside the TSV loop.
+scenario_register key-cut-csv key-cut-csv-grouping key-cut-csv-no-retention
 scenario_parse_args "$@"
 
 # Profile scenarios reference @PROFILE_LOG@ in scenarios.tsv. Generate the
@@ -239,6 +242,81 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         total_fail=$((total_fail + 1))
     fi
 done < <(tail -n +2 "$SCENARIOS_TSV")
+
+# ---------------------------------------------------------------------------
+# The message-key cut a CSV run uses (#619).
+#
+# A run writing CSV cuts every message key at the message-key cap (350) whatever
+# the terminal width, and -V benchmark-data reports that cut; with -n 0 no
+# message is kept, but the cut reported is still the cap. The fixture holds one
+# request line longer than the cap and one short. Every run is -ni -bs 1440 -oe
+# -n 3 --terminal-width 120: the assertions read only the CONFIG row and the
+# MESSAGES keys, and the width is below the cap so the two cuts differ.
+# ---------------------------------------------------------------------------
+KEY_CUT_FIXTURE="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
+KEY_CUT_SHAPE="-bs 1440 -oe -n 3 --terminal-width 120"
+KEY_CUT_PRODUCED_BY='adapt_to_terminal_settings() in ltl (the per-run cut $max_log_message_length), read by the key sites in read_and_process_logs() and reported by print_verbose_output()'
+KEY_CUT_CONTRACT='features/619-per-run-key-cut.md § 7 (the CONFIG max_log_message_length row), AC1, AC2'
+
+key_cut_assert() {
+    local label="$1" rc="$2" detail="$3" asserts="$4"
+    if [[ "$rc" -eq 0 ]]; then
+        echo "PASS  scenario=$current_scenario :: $label"
+        total_pass=$((total_pass + 1))
+    else
+        echo "FAIL  scenario=$current_scenario :: $label"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $KEY_CUT_PRODUCED_BY"
+        echo "        contract:    $KEY_CUT_CONTRACT"
+        echo "$detail" | sed 's/^/        | /'
+        total_fail=$((total_fail + 1))
+    fi
+}
+
+# Usage: key_cut_scenario <name> <expect-longest-key: 350 or none> <ltl-args...>
+key_cut_scenario() {
+    local name="$1" longest_expected="$2"; shift 2
+    scenario_wanted "$name" || return 0
+    current_scenario="$name"
+    scenarios_run=$((scenarios_run + 1))
+    rm -rf "$KEY_CUT_DIR"; mkdir -p "$KEY_CUT_DIR"
+    set +e
+    ( cd "$KEY_CUT_DIR" && "$LTL" --disable-progress -ni $KEY_CUT_SHAPE "$@" -V benchmark-data "$KEY_CUT_FIXTURE" ) \
+        > "$KEY_CUT_DIR/ltl.stdout" 2> "$KEY_CUT_DIR/ltl.stderr"
+    local rc=$?
+    set -e
+    if [[ $rc -ne 0 ]]; then
+        key_cut_assert 'ltl runs' 1 "ltl exited $rc: $(cat "$KEY_CUT_DIR/ltl.stderr")" 'The key-cut run completes'
+        return 0
+    fi
+    if grep -qE ' at .+ line [0-9]+' "$KEY_CUT_DIR/ltl.stderr"; then
+        key_cut_assert 'no runtime warnings' 1 "$(grep -E ' at .+ line [0-9]+' "$KEY_CUT_DIR/ltl.stderr" | sort | uniq -c)" \
+            'A Perl runtime warning on stderr is an unguarded data path (tests/HARNESS-DESIGN.md § Runtime-warning cleanliness)'
+        return 0
+    fi
+    local cut
+    cut="$(perl -ne 'print $1 if /^CONFIG\tmax_log_message_length\t(\d+)$/' "$KEY_CUT_DIR/ltl.stdout")"
+    key_cut_assert 'the reported cut is the message-key cap' \
+        "$([[ "$cut" == 350 ]] && echo 0 || echo 1)" \
+        "CONFIG max_log_message_length=${cut:-<row missing>}" \
+        'A run writing CSV cuts message keys at the message-key cap (350), not the terminal width (120 here), and -V benchmark-data reports the cut the run used'
+    [[ "$longest_expected" == none ]] && return 0
+    local messages longest
+    messages="$(find "$KEY_CUT_DIR" -maxdepth 1 -name '*-LTL-MESSAGES-*.csv' | head -1)"
+    longest=""
+    if [[ -n "$messages" ]]; then
+        longest="$(perl -MText::ParseWords -ne 'next if $. == 1; my @f = parse_line(",", 0, $_); $m = length $f[1] if defined $f[1] && length $f[1] > ($m // 0); END { print $m // "" }' "$messages")"
+    fi
+    key_cut_assert "the longest message key is $longest_expected characters" \
+        "$([[ "$longest" == "$longest_expected" ]] && echo 0 || echo 1)" \
+        "messages_csv=${messages:-<none written>} longest_key=${longest:-<none>}" \
+        'The request line longer than the cap is kept as a key of exactly the cap: the key sites cut at the cut the run reports'
+}
+
+KEY_CUT_DIR="$(mktemp -d)"
+key_cut_scenario key-cut-csv 350 -o
+key_cut_scenario key-cut-csv-grouping 350 -o -g
+key_cut_scenario key-cut-csv-no-retention none -n 0 -o
 
 # ---------------------------------------------------------------------------
 # Cache validity (#448).
