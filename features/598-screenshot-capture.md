@@ -5,6 +5,10 @@
 [#598](https://github.com/gregeva/logtimeline/issues/598): Enhancement: programmatic
 console screenshot capture for documentation (development tooling).
 
+Extended by [#650](https://github.com/gregeva/logtimeline/issues/650): a recipe
+names the folder `ltl` runs in, and a PNG is written beside every SVG (D21 to D26,
+criteria 13 to 19).
+
 Builds on [#597](https://github.com/gregeva/logtimeline/issues/597) (section
 visibility and the `-V section-layout` report), shipped in 0.18.4 and specified in
 `features/597-section-visibility.md`.
@@ -255,12 +259,61 @@ pixels at 2.1 per unit (4 cells of the synthetic Tomcat fixture's histogram,
 found by the criterion 11 pixel check). Runs of full blocks are drawn after all
 other text, so the bar covers the overhang.
 
+**D21: a recipe names the folder `ltl` runs in** (architect, 2026-10-01;
+[#650](https://github.com/gregeva/logtimeline/issues/650)), so documentation kept in
+another repository captures `ltl` output from its own logs, with the paths `ltl`
+prints and records reading as a reader would type them. A manifest entry gives
+`dir: <folder>`, a relative folder resolved against the manifest file's own folder;
+an ad hoc run gives `--dir <folder>`, a relative folder resolved against the current
+directory. Input paths in the `ltl` string are then relative to that folder. Without
+either, `ltl` runs in the repository root as D10 and D16 state.
+
+**D22: in a named folder, only the output files the run created are removed**
+(architect, 2026-10-01; #650). `ltl` starts each `-o` output name with the run's
+timestamp to the second (`run_file_stamp()`), so a run's files are new names. The
+tool lists the files at the top of the named folder matching D16's three patterns
+before each run, and afterwards removes the matching files that were not there
+before. A file already there, such as an export kept beside the logs, is never
+touched. In the repository root, D16 stands unchanged.
+
+**D23: the PNG is drawn by WebKit, on macOS** (architect, 2026-10-01; #650), the
+engine the SVGs were judged on (criterion 12), with the same font, so the PNG looks
+as the SVG does where it was approved. macOS only, as D15 makes Linux a
+nice-to-have. Which route reaches WebKit, Quick Look with `sips` or a Swift
+snapshot helper, is chosen by a prototype (`prototype/650-png/`).
+
+**D24: the PNG is a Swift WebKit snapshot** (architect, 2026-10-01; #650), chosen on
+the prototype's measurements (`prototype/650-png/findings.md`). The helper,
+`build/capture-png.swift`, loads the SVG in an off-screen `WKWebView` sized to it,
+snapshots it and writes a PNG of the SVG's width and height, which D25 makes whole
+numbers (in the prototype, rounded to the nearest pixel: 1548 x 450, 677 x 240 and
+403 x 450 for the committed images, wide and tall alike), on the tool's exact background colours, byte-identical across runs, 0.52 s
+per image. Quick Look writes a square to be cropped, cut the bottom 47 pixel rows of
+an image taller than wide, and the `sips` crop that would handle every shape
+misplaced the image. The tool compiles the helper once per run into its temporary
+folder (about 0.75 s) and writes the PNG beside each SVG; without `swiftc` it stops
+with an error rather than writing SVGs alone.
+
+**D25: an image is a whole number of units wide** (architect, 2026-10-01; #650). A
+cell is 7.2 units wide, so a crop's width can end in .2, .4, .6 or .8 (676.8,
+403.2). The tool rounds the image's width up to a whole unit by widening its right
+margin with background, at most 0.8 units, so the PNG is exactly the SVG's width and
+height and is drawn 1:1, nothing stretched. Heights are whole already (15 units a
+row).
+
+**D26: in a named folder, an index file the run created is removed** (architect,
+2026-10-01; #650). `ltl` writes `ltl-index.csv` in the folder it runs in. In the
+repository root it is ignored by git and left (D16, D17); a named folder may belong
+to another repository that does not ignore it. When `ltl-index.csv` was not in the
+named folder before a recipe's probe run, the tool removes it after the capture
+run; one already there is left in place, with the rows `ltl` added to it.
+
 ## Capture tool design (agreed with the architect, 2026-09-24)
 
 **Command line.** One ad hoc run mirrors one manifest entry, in the same words:
 
 ```
-build/capture-screenshots.pl --name BASE [--background dark|light]
+build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
                              [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR]
                              [--crop 'sections=A[,B] start=±N end=±N cols=L,R label=LABEL'] ...
                              -- <ltl options and input files>
@@ -283,6 +336,9 @@ build/capture-screenshots.pl --name BASE [--background dark|light]
 - `--background`: D7, `dark` when not given.
 - `--out-dir`: the current directory by default. Ad hoc runs never write to
   `images/screenshots/` (D10).
+- `--dir`: the folder `ltl` runs in, relative to the current directory (D21);
+  in a manifest, the entry's `dir`, relative to the manifest file's folder. A
+  folder that does not exist is an error with nothing run.
 
 **Running `ltl`.**
 
@@ -290,12 +346,15 @@ build/capture-screenshots.pl --name BASE [--background dark|light]
 - `LTL_CONFIG`, `FORCE_COLOR` and `NO_COLOR` are removed from its environment.
 - Both runs get `--terminal-width W --terminal-height H`, `-dbg` or `-lbg` and
   `--disable-progress`; the probe run also gets `-V section-layout`. The index file
-  `ltl` writes, `ltl-index.csv`, is ignored by git and left where it is (D16, D17).
+  `ltl` writes, `ltl-index.csv`, is ignored by git and left where it is (D16, D17);
+  in a named folder, one the recipe's runs created is removed (D26).
 - Refused on the passed command line, an error with nothing run: `-tw`, `-th`,
   `-lbg`, `-dbg` (the tool sets them), `-V` (diagnostic output) and `-p` (waits for
   a key).
+- `ltl` runs in the repository root, or in the folder the recipe names (D21).
 - `-o` is allowed: output files are part of what a screenshot may show. The files
-  it writes are removed after each run (D16).
+  it writes are removed after each run (D16); in a named folder, only those the
+  run created (D22).
 - Standard output and standard error are each redirected to a file.
 - A non-zero exit, or a Perl warning on standard error (` at <file> line <N>`),
   stops the tool with standard error shown and no image written; other standard
@@ -338,16 +397,21 @@ build/capture-screenshots.pl --name BASE [--background dark|light]
 
 **Output and reporting.**
 
-- Each image is `<out-dir>/BASE[-sections][-label].svg`; `BASE` and labels use
-  letters, digits, `.`, `_` and `-` only. An existing file is overwritten.
-- Every crop is resolved and checked before any image is written: one bad crop, no
-  images from that execution.
+- Each image is `<out-dir>/BASE[-sections][-label].svg`, a whole number of units
+  wide and high (D25), with `BASE[-sections][-label].png` beside it of the same
+  size in pixels (D24); `BASE` and labels use letters, digits, `.`, `_` and `-`
+  only. An existing file is overwritten.
+- The PNG helper is compiled once per run before `ltl` first runs; without
+  `swiftc` the tool stops with nothing run (D24).
+- Every crop is resolved and checked, and every SVG and PNG drawn in a scratch
+  folder, before any image is moved to the output folder: one bad crop or a failed
+  drawing, no images from that execution.
 - Standard output: the `ltl` command line once, then one line per image with its
   path, rows, columns and sections. `ltl`'s standard error passes through.
 - A crop whose rows overlap the messages or the summary's file list gets a notice to
   check it for sensitive content before committing (D9).
-- Each SVG carries a comment with its crop and the `ltl` command line, without the
-  version, so an image is regenerated from what it says and stays byte-identical
+- Each SVG carries a comment with its crop and the `ltl` command line, and the
+  folder as the recipe gave it when it names one, without the version, so an image is regenerated from what it says and stays byte-identical
   across releases unless its rendering changes.
 - Exit status 0 when every image is written, non-zero on any error.
 
@@ -501,3 +565,32 @@ input); 10 is the documents' existence; 12 is verified by eye; 9 is not required
 - [x] 12. *(by eye; judged by the architect on the examples, 2026-09-24)* The rendered image matches Terminal.app's look on real data,
       block heights and the gap between rows included, which follow the viewer's
       font (D14).
+
+### #650: run folder and PNG
+
+Criteria 13 to 19 are asserted by new scenarios of
+`tests/validate-screenshot-capture.sh`, on the committed synthetic fixture copied
+into a folder the harness creates. The PNG scenarios run on macOS only, as the
+edges check does (D15, D23).
+
+- [x] 13. An ad hoc run with `--dir D` runs `ltl` in D: an input named relative to
+      D is read, and the summary's file list in the image shows it as written,
+      not as a path from the repository root (D21).
+- [x] 14. A manifest entry with `dir: D` runs `ltl` in D resolved against the
+      manifest file's folder, wherever the tool is run from; a `--dir` or `dir`
+      that is not a folder is an error naming it, with nothing run (D21).
+- [x] 15. In a named folder, a run with `-o` leaves no output file of its own
+      behind, and a file matching the output names that was there before the run
+      is still there, unchanged (D22).
+- [x] 16. Every SVG the tool writes, ad hoc and from a manifest, has a PNG of the
+      same name beside it whose width and height in pixels equal the SVG's width
+      and height, a whole number of units; a crop 90 cells wide with the default
+      padding is 677 units wide, not 676.8, the extra in its right margin (D24, D25).
+- [x] 17. The PNG is the SVG drawn 1:1 by WebKit: its corner pixels are the
+      image's background colour, and every full block, sampled at its cell's
+      centre, is its colour, so the drawing is neither shifted nor scaled. Shown
+      to fail on the prototype's misplaced Quick Look crop (D24).
+- [x] 18. Without `swiftc`, the tool stops with an error naming it and writes no
+      image (D24).
+- [x] 19. In a named folder without `ltl-index.csv`, none is left after a recipe;
+      in one that has it, it is still there after the recipe (D26).

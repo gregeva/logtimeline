@@ -1,29 +1,34 @@
 #!/usr/bin/env perl
-# capture-screenshots.pl: run ltl and write SVG screenshots of its output.
+# capture-screenshots.pl: run ltl and write SVG and PNG screenshots of its output.
 #
-#   build/capture-screenshots.pl --name BASE [--background dark|light]
+#   build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #       [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
 #       -- <ltl options and input files>
 #   build/capture-screenshots.pl --manifest FILE [--only NAME]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #
-# ltl runs twice in the repository root: a probe run with -V section-layout for
-# the rows each section printed, then the capture run whose output is drawn.
-# Each crop is one image, BASE[-sections][-label].svg. A manifest lists one
-# recipe per entry, in the same words. Specification and guidance:
+# ltl runs twice, in the repository root or in the folder the recipe names: a
+# probe run with -V section-layout for the rows each section printed, then the
+# capture run whose output is drawn. Each crop is one image,
+# BASE[-sections][-label].svg, with a PNG of the same size beside it drawn by
+# WebKit (build/capture-png.swift). A manifest lists one recipe per entry, in
+# the same words. Specification and guidance:
 # features/598-screenshot-capture.md, docs/process/screenshots.md.
 use strict;
 use warnings;
 use Cwd qw(abs_path getcwd);
 use File::Basename qw(dirname);
+use File::Copy qw(move);
 use File::Spec;
 use File::Temp qw(tempdir);
+use POSIX qw(ceil);
 use Getopt::Long qw(GetOptionsFromArray :config no_ignore_case no_auto_abbrev);
 use Text::ParseWords qw(shellwords);
 
 my $repo_root = abs_path( File::Spec->catdir( dirname( abs_path(__FILE__) ), '..' ) );
 my $ltl       = File::Spec->catfile( $repo_root, 'ltl' );
+my $png_source = File::Spec->catfile( $repo_root, 'build', 'capture-png.swift' );
 
 # Default terminal size (D11), padding (D18), manifest output (D10) and image
 # cell geometry.
@@ -103,21 +108,23 @@ sub fail { die "$_[0]\n" }
 
 sub usage {
     return <<'END';
-usage: build/capture-screenshots.pl --name BASE [--background dark|light]
+usage: build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
            [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
            -- <ltl options and input files>
        build/capture-screenshots.pl --manifest FILE [--only NAME]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 
-Runs ltl in the repository root and writes one SVG per crop, named
-BASE[-sections][-label].svg: to DIR (default: the current directory), or for a
-manifest to images/screenshots/. Without --crop, or for a crop without
-sections, the image is the whole output. Input paths are relative to the
-repository root. --pad sets the blank margin around every image, as CSS does:
-rows top and bottom, cells left and right (default 1,2). A manifest lists one
-run per entry: name, ltl, and optionally background, width, height, pad and
-crops. Guidance: docs/process/screenshots.md.
+Runs ltl in the repository root, or in --dir DIR, and writes one SVG per crop,
+named BASE[-sections][-label].svg, with a PNG of the same name and size beside
+it: to --out-dir (default: the current directory), or for a manifest to
+images/screenshots/. Without --crop, or for a crop without sections, the image
+is the whole output. Input paths are relative to the folder ltl runs in.
+--pad sets the blank margin around every image, as CSS does: rows top and
+bottom, cells left and right (default 1,2). A manifest lists one run per
+entry: name, ltl, and optionally dir (relative to the manifest's folder),
+background, width, height, pad and crops. The PNGs need swiftc (macOS).
+Guidance: docs/process/screenshots.md.
 END
 }
 
@@ -127,6 +134,14 @@ sub check_name {
     my ( $what, $value ) = @_;
     fail("$what '$value': letters, digits, '.', '_' and '-' only") unless $value =~ /^[A-Za-z0-9._-]+$/;
     return $value;
+}
+
+# The folder ltl runs in (D21), as given, resolved against BASE when relative.
+sub resolve_dir {
+    my ( $what, $given, $base ) = @_;
+    my $dir = File::Spec->rel2abs( $given, $base );
+    fail("$what '$given' is not a folder ($dir)") unless -d $dir;
+    return abs_path($dir);
 }
 
 sub check_size {
@@ -190,24 +205,21 @@ sub crop_from_words {
 
 # ---- Running ltl -----------------------------------------------------------
 
-# Run ltl in the repository root with standard output and standard error each
-# redirected to a file. Returns standard output; stops on a non-zero exit or a
-# Perl warning on standard error. Files -o wrote are removed (D16).
+# Run ltl in the recipe's folder, the repository root unless it names one
+# (D21), with standard output and standard error each redirected to a file.
+# Returns standard output; stops on a non-zero exit or a Perl warning on
+# standard error. Files -o wrote are removed (D16, D22).
 sub run_ltl {
-    my ( $scratch, $label, @argv ) = @_;
+    my ( $r, $scratch, $label, @argv ) = @_;
+    my $dir = $r->{dir} // $repo_root;
     my ( $out_file, $err_file ) = map { File::Spec->catfile( $scratch, "$label.$_" ) } qw(out err);
     local %ENV = %ENV;
     delete @ENV{qw( LTL_CONFIG FORCE_COLOR NO_COLOR )};
+    my %before = map { $_ => 1 } output_files($dir);
     my $cwd = getcwd();
-    chdir $repo_root or fail("cannot enter $repo_root: $!");
-    open my $saved_out, '>&', \*STDOUT or fail("cannot save standard output: $!");
-    open my $saved_err, '>&', \*STDERR or fail("cannot save standard error: $!");
-    open STDOUT, '>', $out_file or die "cannot write $out_file: $!\n";
-    open STDERR, '>', $err_file or die "cannot write $err_file: $!\n";
-    my $status = system { $^X } $^X, $ltl, @argv;
-    open STDOUT, '>&', $saved_out or die "cannot restore standard output: $!\n";
-    open STDERR, '>&', $saved_err or die "cannot restore standard error: $!\n";
-    remove_output_files();
+    chdir $dir or fail("cannot enter $dir: $!");
+    my $status = run_redirected( $out_file, $err_file, $^X, $ltl, @argv );
+    remove_output_files( $dir, defined $r->{dir} ? \%before : undef );
     chdir $cwd or fail("cannot return to $cwd: $!");
     my $err = slurp($err_file);
     print STDERR $err if length $err;
@@ -216,16 +228,41 @@ sub run_ltl {
     return slurp($out_file);
 }
 
-# The files -o writes, named as ltl names them, at the top of the repository
-# root (D16). Nothing else is deleted; the index file is ignored by git.
-sub remove_output_files {
-    opendir my $dh, $repo_root or fail("cannot read $repo_root: $!");
-    for my $entry ( readdir $dh ) {
-        next unless $entry =~ /LTL-.*(?:STATS.*|MESSAGES.*)\.csv$/ || $entry =~ /LTL-.*AGGREGATE\.yaml$/;
-        my $path = File::Spec->catfile( $repo_root, $entry );
-        unlink $path or fail("cannot remove $path: $!") if -f $path;
-    }
+# Run a command with standard output and standard error each redirected to a
+# file; returns its wait status.
+sub run_redirected {
+    my ( $out_file, $err_file, @command ) = @_;
+    open my $saved_out, '>&', \*STDOUT or fail("cannot save standard output: $!");
+    open my $saved_err, '>&', \*STDERR or fail("cannot save standard error: $!");
+    open STDOUT, '>', $out_file or die "cannot write $out_file: $!\n";
+    open STDERR, '>', $err_file or die "cannot write $err_file: $!\n";
+    my $status = system { $command[0] } @command;
+    open STDOUT, '>&', $saved_out or die "cannot restore standard output: $!\n";
+    open STDERR, '>&', $saved_err or die "cannot restore standard error: $!\n";
+    return $status;
+}
+
+# The files at the top of a folder named as ltl names the files -o writes.
+sub output_files {
+    my ($dir) = @_;
+    opendir my $dh, $dir or fail("cannot read $dir: $!");
+    my @files = grep { ( /LTL-.*(?:STATS.*|MESSAGES.*)\.csv$/ || /LTL-.*AGGREGATE\.yaml$/ ) && -f File::Spec->catfile( $dir, $_ ) } readdir $dh;
     closedir $dh;
+    return @files;
+}
+
+# Remove the files -o wrote. In the repository root, every file named as ltl
+# names them (D16); in a folder the recipe names, only those that were not
+# there before the run (D22). Nothing else is deleted; the index file is
+# ignored by git.
+sub remove_output_files {
+    my ( $dir, $before ) = @_;
+    for my $entry ( output_files($dir) ) {
+        next if $before && $before->{$entry};
+        my $path = File::Spec->catfile( $dir, $entry );
+        unlink $path or fail("cannot remove $path: $!");
+        print "trace: removed $path\n" if $opt{trace};
+    }
 }
 
 sub slurp {
@@ -238,8 +275,10 @@ sub slurp {
 # ---- One recipe ------------------------------------------------------------
 
 # A recipe: name, background, width, height, pad (top, right, bottom, left),
-# out_dir, ltl (argument list), crops. Runs ltl twice, resolves every crop,
-# then writes every image; any error before the first image writes none.
+# out_dir, dir (the folder ltl runs in, absolute, and dir_given as written;
+# both absent for the repository root), ltl (argument list), crops. Runs ltl
+# twice, resolves every crop, draws every SVG and its PNG, then moves them all
+# to out_dir; any error before the move writes no image.
 sub run_recipe {
     my ($r) = @_;
     for my $arg ( @{ $r->{ltl} } ) {
@@ -259,8 +298,18 @@ sub run_recipe {
     my @probe_args   = ( @common, '-V', 'section-layout', @{ $r->{ltl} } );
     my @capture_args = ( @common, @{ $r->{ltl} } );
     print "ltl @capture_args\n";
-    my $probe   = run_ltl( $scratch, 'probe', @probe_args );
-    my $capture = run_ltl( $scratch, 'capture', @capture_args );
+    print "trace: folder: " . ( $r->{dir} // $repo_root ) . "\n" if $opt{trace};
+    # In a named folder, the index file ltl writes is removed when this
+    # recipe's runs created it (D26); in the repository root it is ignored by
+    # git and left (D16).
+    my $index = defined $r->{dir} && !-e File::Spec->catfile( $r->{dir}, 'ltl-index.csv' ) ? File::Spec->catfile( $r->{dir}, 'ltl-index.csv' ) : undef;
+    my ( $probe, $capture );
+    my $ran = eval { $probe = run_ltl( $r, $scratch, 'probe', @probe_args ); $capture = run_ltl( $r, $scratch, 'capture', @capture_args ); 1 };
+    if ( $index && -e $index ) {
+        unlink $index or fail("cannot remove $index: $!");
+        print "trace: removed $index\n" if $opt{trace};
+    }
+    die $@ unless $ran;
     if ( $opt{trace} ) {
         print "trace: probe run: ltl @probe_args\n";
         print "trace: capture run: ltl @capture_args\n";
@@ -293,19 +342,68 @@ sub run_recipe {
 
     resolve_crop( $_, \%section, \@report_order, $total_rows, $r->{width} ) for @{ $r->{crops} };
 
+    # Every SVG and its PNG are drawn in the scratch folder, then moved.
     my $palette = palette_for( $r->{background} );
     my $grid    = build_grid( $capture, $palette, $r->{width} );
+    my $command = "ltl @capture_args" . ( defined $r->{dir_given} ? " (in $r->{dir_given})" : '' );
+    my $drawn   = File::Spec->catdir( $scratch, 'images' );
+    mkdir $drawn or fail("cannot create $drawn: $!");
+    my @pairs;
+    for my $crop ( @{ $r->{crops} } ) {
+        my $svg_path = File::Spec->catfile( $drawn, $crop->{file} );
+        ( my $png_path = $svg_path ) =~ s/\.svg$/.png/;
+        open my $fh, '>:encoding(UTF-8)', $svg_path or fail("cannot write $svg_path: $!");
+        print {$fh} render_svg( $crop, $grid, $palette, $r->{pad}, "crop '$crop->{spec}' of: $command" );
+        close $fh or fail("cannot write $svg_path: $!");
+        push @pairs, $svg_path, $png_path;
+    }
+    draw_pngs(@pairs);
+    for my $crop ( @{ $r->{crops} } ) {
+        ( my $png = $crop->{file} ) =~ s/\.svg$/.png/;
+        for my $file ( $crop->{file}, $png ) {
+            my $to = File::Spec->catfile( $r->{out_dir}, $file );
+            move( File::Spec->catfile( $drawn, $file ), $to ) or fail("cannot write $to: $!");
+        }
+    }
     for my $crop ( @{ $r->{crops} } ) {
         my $path = File::Spec->catfile( $r->{out_dir}, $crop->{file} );
-        my $svg  = render_svg( $crop, $grid, $palette, $r->{pad}, "crop '$crop->{spec}' of: ltl @capture_args" );
-        open my $fh, '>:encoding(UTF-8)', $path or fail("cannot write $path: $!");
-        print {$fh} $svg;
-        close $fh or fail("cannot write $path: $!");
         my $sections = @{ $crop->{sections} } ? join( ',', @{ $crop->{sections} } ) : 'whole output';
-        my $line = sprintf '%s  rows %d-%d (%s)  cols %d-%d', $path, $crop->{first}, $crop->{last}, $sections, $crop->{col_first}, $crop->{col_stop} - 1;
+        my $line = sprintf '%s + .png  rows %d-%d (%s)  cols %d-%d', $path, $crop->{first}, $crop->{last}, $sections, $crop->{col_first}, $crop->{col_stop} - 1;
         $line .= '  check for sensitive content before committing: shows ' . join( ', ', @{ $crop->{sensitive} } ) if @{ $crop->{sensitive} };
         print "$line\n";
         print "trace: crop '$crop->{spec}': rows $crop->{first}-$crop->{last} cols $crop->{col_first}-" . ( $crop->{col_stop} - 1 ) . "\n" if $opt{trace};
+    }
+    return;
+}
+
+# ---- PNG (D23 to D25) ------------------------------------------------------
+
+# The PNG helper, build/capture-png.swift, compiled once per run before ltl
+# first runs, so a machine without swiftc stops with nothing run.
+my $png_helper;
+sub prepare_png_helper {
+    return if defined $png_helper;
+    my ($swiftc) = grep { -f && -x } map { File::Spec->catfile( $_, 'swiftc' ) } File::Spec->path;
+    fail('swiftc is not found: the PNG beside each SVG is drawn by WebKit through build/capture-png.swift, which needs the Swift compiler (macOS, Xcode command line tools)')
+        unless $swiftc;
+    my $dir = tempdir( CLEANUP => 1 );
+    my $binary = File::Spec->catfile( $dir, 'capture-png' );
+    my ( $out_file, $err_file ) = map { File::Spec->catfile( $dir, "swiftc.$_" ) } qw(out err);
+    my $status = run_redirected( $out_file, $err_file, $swiftc, '-O', '-o', $binary, $png_source );
+    fail( "swiftc could not compile $png_source:\n" . slurp($err_file) ) if $status != 0;
+    $png_helper = $binary;
+    return;
+}
+
+# Draw each SVG's PNG beside it: pairs of SVG and PNG paths, one helper run.
+sub draw_pngs {
+    my @pairs = @_;
+    my $dir = tempdir( CLEANUP => 1 );
+    my ( $out_file, $err_file ) = map { File::Spec->catfile( $dir, "png.$_" ) } qw(out err);
+    my $status = run_redirected( $out_file, $err_file, $png_helper, @pairs );
+    fail( "the PNG could not be drawn:\n" . slurp($err_file) ) if $status != 0;
+    for ( my $i = 1; $i < @pairs; $i += 2 ) {
+        fail("the PNG helper wrote no $pairs[$i]") unless -s $pairs[$i];
     }
     return;
 }
@@ -441,7 +539,9 @@ sub render_svg {
     my $cols = $crop->{col_stop} - $crop->{col_first};
     my @rows = map { my $cells = $grid->[ $_ - 1 ] || []; [ map { $cells->[$_] } $crop->{col_first} .. $crop->{col_stop} - 1 ] } $crop->{first} .. $crop->{last};
     my ( $ox, $oy ) = ( $pad_left * $cw, $pad_top * $ch );
-    my ( $W, $H ) = ( ( $pad_left + $cols + $pad_right ) * $cw, ( $pad_top + @rows + $pad_bottom ) * $ch );
+    # A whole number of units each way, so the PNG is the same size drawn 1:1
+    # (D25): a fractional width is rounded up, widening the right margin.
+    my ( $W, $H ) = map { ceil( sprintf '%.6f', $_ ) } ( $pad_left + $cols + $pad_right ) * $cw, ( $pad_top + @rows + $pad_bottom ) * $ch;
     my $blank = sub { !$_[0] || $_[0]{ch} eq ' ' };
 
     my @out;
@@ -515,7 +615,7 @@ sub main {
     my @ltl_args  = defined $separator ? @args[ $separator + 1 .. $#args ] : ();
     my @crop_words;
     GetOptionsFromArray( \@tool_args, \%opt, 'name=s', 'background=s', 'width=s', 'height=s', 'pad=s',
-        'out-dir=s', 'trace', 'crop=s' => \@crop_words, 'manifest=s', 'only=s', 'help' => sub { print usage(); exit 0 } )
+        'out-dir=s', 'dir=s', 'trace', 'crop=s' => \@crop_words, 'manifest=s', 'only=s', 'help' => sub { print usage(); exit 0 } )
         or fail( "invalid options\n" . usage() );
     fail("unexpected argument: @tool_args") if @tool_args;
     check_size( '--width', $opt{width} )   if defined $opt{width};
@@ -535,32 +635,38 @@ sub main {
     my $base = check_name( '--name', $opt{name} );
     my $background = $opt{background} // 'dark';
     fail("--background is dark or light, not '$background'") unless $background =~ /^(dark|light)$/;
+    my $dir = defined $opt{dir} ? resolve_dir( '--dir', $opt{dir}, getcwd() ) : undef;
+    my @crops = map { crop_from_words( $base, $_ ) } ( @crop_words ? @crop_words : ('') );
+    prepare_png_helper();
     run_recipe( {
         name       => $base,
         background => $background,
+        dir        => $dir,
+        dir_given  => $opt{dir},
         width      => $opt{width} // DEFAULT_WIDTH,
         height     => $opt{height} // DEFAULT_HEIGHT,
         pad        => parse_pad( $opt{pad} // DEFAULT_PAD ),
         out_dir    => $out_dir // getcwd(),
         ltl        => \@ltl_args,
-        crops      => [ map { crop_from_words( $base, $_ ) } ( @crop_words ? @crop_words : ('') ) ],
+        crops      => \@crops,
     } );
     return 0;
 }
 
 # ---- Manifest (D19) --------------------------------------------------------
 
-my @entry_keys = qw( name ltl background width height pad crops );
+my @entry_keys = qw( name ltl dir background width height pad crops );
 
 sub run_manifest {
     my ( $out_dir, $crop_words, $ltl_args ) = @_;
-    for my $flag (qw( name background )) {
+    for my $flag (qw( name background dir )) {
         fail("--$flag is set in the manifest entry, not on the command line") if defined $opt{$flag};
     }
     fail('--crop is set in the manifest entry, not on the command line') if @$crop_words;
     fail('the ltl command line is set in the manifest entry, not after --') if @$ltl_args;
     require YAML::PP;
     my $file = $opt{manifest};
+    my $manifest_dir = dirname( File::Spec->rel2abs($file) );
     my $doc = eval { YAML::PP->new->load_file($file) } or fail( "cannot read the manifest $file: " . ( $@ =~ /^(.*?)(?: at \S+ line \d+.*)?$/m )[0] );
     fail("$file: a mapping with a 'screenshots' list is expected") unless ref $doc eq 'HASH' && ref $doc->{screenshots} eq 'ARRAY';
 
@@ -580,6 +686,8 @@ sub run_manifest {
             fail("$where: unknown key '$key' (" . join( ', ', @entry_keys ) . ')') unless grep { $_ eq $key } @entry_keys;
         }
         fail("$where: 'ltl' is required, as one command-line string") unless defined $entry->{ltl} && !ref $entry->{ltl} && $entry->{ltl} =~ /\S/;
+        fail("$where: 'dir' is a folder name") if defined $entry->{dir} && ( ref $entry->{dir} || $entry->{dir} !~ /\S/ );
+        my $dir = defined $entry->{dir} ? resolve_dir( "$where: dir", $entry->{dir}, $manifest_dir ) : undef;
         my $background = $entry->{background} // 'dark';
         fail("$where: background is dark or light, not '$background'") unless $background =~ /^(dark|light)$/;
         my $crops = $entry->{crops} // [];
@@ -596,6 +704,8 @@ sub run_manifest {
         push @recipes, {
             name       => $name,
             background => $background,
+            dir        => $dir,
+            dir_given  => $entry->{dir},
             width      => check_size( "$where: width", $opt{width} // $entry->{width} // DEFAULT_WIDTH ),
             height     => check_size( "$where: height", $opt{height} // $entry->{height} // DEFAULT_HEIGHT ),
             pad        => eval { parse_pad( $opt{pad} // $entry->{pad} // DEFAULT_PAD ) } // fail("$where: $@"),
@@ -611,6 +721,7 @@ sub run_manifest {
         $out_dir = File::Spec->catdir( $repo_root, MANIFEST_OUT );
         mkdir $out_dir or fail("cannot create $out_dir: $!") unless -d $out_dir;
     }
+    prepare_png_helper();
 
     my @failed;
     for my $recipe (@recipes) {
