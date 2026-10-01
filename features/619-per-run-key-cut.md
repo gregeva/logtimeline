@@ -1033,3 +1033,64 @@ rises 0.5 % to 1.4 % on every case, including `heatmap-histogram-export`, which
 retains no message (`-n 0`) and so runs none of the changed code: the read-time
 movement between these sessions is drift of about 1 %, not attributable to the
 drop. It bounds what § 11.6's 4 to 7 % read-time fall can be read as.
+
+### 11.9 Drop 3: why the final-pass fix changes grouping within a level
+
+Drop 3 (keys sorted by grouping key, then body; a window cleared at each change
+of grouping key) is in the working tree, measured against drop 2 (`4775344`).
+AC15's two scenarios pass on it and fail on drop 2; AC16 holds: an instrumented
+copy finds no final-pass window holding two grouping keys on the eleven AC3
+inputs, where drop 2 had them on every input whose output changed. Three
+statistics-drift MESSAGES baselines change: the consolidated Tomcat access log,
+and the consolidated ThingWorx script log under both message data models. The
+debugging below explains them.
+
+**Two effects of the fix.** (1) The groups that held two grouping keys are gone:
+13 of 206 on the Tomcat access log (`-g 90`). (2) A grouping key's keys are no
+longer cut into small windows by keys of other levels interleaving in body
+order. On the Tomcat log drop 2 ran 113 final-pass windows, 90 of them mixed;
+the fix runs 9, none mixed. On the ThingWorx script log the window sizes go
+from 26, 2, 17, 1,000, 1,000, 685, 4 to 26, 7, 1,000, 1,000, 712: the 1,000-key
+window boundaries fall on different keys.
+
+**A pre-existing limit the fix exposes: a final-pass window searches from at
+most 500 of its keys.** `process_final_pass_window` sets
+`my $max_search = min(500, $window_size);` while a window holds up to 1,000
+keys (`$fp_window_capacity`). Keys at positions 500 to 999 of a full window
+never start a candidate search; they are grouped only as the partner of an
+earlier key or by a pattern's re-scan, and the final pass is their last chance.
+Traced on the Tomcat log: in the fix, the 67 `[200] POST …/Things/G…/Services/
+GetNamedProperties` keys sit at positions 841 to 947 of a full window, and none
+is consumed; in drop 2 the same keys sat in windows of 57, 13 and 91 keys, each
+searched in full, and 63 were grouped. Drop 2's broad
+`[200] POST /Thingworx/Things/*0*/Services/GetNamedProperties` group (313
+members) was built by merge-first from patterns found in those small windows
+(`G*011`, `G*01*`, `GU*0*`, then `*0*`); in the fix the G-prefixed keys form no
+pattern, and 15 narrower groups with 241 members between them remain. On the
+ThingWorx script log no window reaches the cap: its changes come from the
+window boundaries alone, keys meeting different partners in different
+windows.
+
+**Remedies measured** (median of three, `finalize/group_similar`, the drift
+scenarios' own options):
+
+| Log | Version | Groups | Rows after grouping | Candidate searches | Final-pass time |
+|---|---|---|---|---|---|
+| Tomcat access log | drop 2 | 206 | 1,137 | 1,849 | 1.600 s [1.541..1.698] |
+| | fix | 200 | 1,296 | 1,582 | 0.875 s [0.862..0.882] |
+| | fix, every key of a window searched | 206 | 1,093 | 1,813 | 0.978 s [0.977..1.136] |
+| | fix, windows of 500 keys | 221 | 1,119 | 1,832 | 1.106 s [1.051..1.139] |
+| ThingWorx script log | drop 2 | 29 | 53 | 112 | 0.332 s [0.321..0.411] |
+| | fix | 27 | 49 | 111 | 0.320 s [0.318..0.334] |
+| | fix, every key of a window searched | 27 | 49 | 111 | 0.320 s [0.310..0.324] |
+| | fix, windows of 500 keys | 29 | 53 | 112 | 0.283 s [0.282..0.293] |
+
+With every key of a window searched, the Tomcat log groups into fewer rows than
+drop 2 (1,093 against 1,137) in 61 % of drop 2's final-pass time, and the
+GetNamedProperties keys form one group of 313 members again; the ThingWorx
+script log is unchanged from the fix. The master specification gives the final
+pass as the last chance for every remaining key (Outstanding Decision 6: no
+eviction in the final pass), and the final-pass redesign record runs pairwise
+discovery on the window's contents with no cap; the 500 cap is the streaming
+checkpoint's (§ Process Flow, S4 "max 500 keys"), where unsearched keys survive
+to the next checkpoint.
