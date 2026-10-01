@@ -1094,3 +1094,15 @@ eviction in the final pass), and the final-pass redesign record runs pairwise
 discovery on the window's contents with no cap; the 500 cap is the streaming
 checkpoint's (§ Process Flow, S4 "max 500 keys"), where unsearched keys survive
 to the next checkpoint.
+
+**The recommendation to remove the final pass's 500-source cap is withdrawn
+(2026-10-01).** It rested on the two logs above, where a candidate search is
+cheap, and was made without tracing the cap. The cap entered the final pass with
+the final-pass redesign (`8fea3d0`, carried over from the streaming
+checkpoint's), with no reason recorded there; in the streaming checkpoints the
+master specification shows it bounding a search cost that can be large (about
+58 s per checkpoint of 500 sources on a batch of download requests at
+similarity 80), and records the final pass on the PLM access log making about
+37,400 candidate searches over about 75,500 keys in 42 to 44 s: half its keys,
+the share a 500-of-1,000 cap allows. Removing the cap would roughly double that
+work. No option for the cap is proposed until it is measured on that case.
