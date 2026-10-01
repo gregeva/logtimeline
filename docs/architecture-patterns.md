@@ -466,7 +466,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #613, #614, #615, #616, #617, #618, #619 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #613, #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
 
 ---
 
@@ -711,5 +711,6 @@ Core mechanism; `features/478-highlight-decision-read-back.md`;
 `docs/perl-performance-optimization.md`; `tests/baseline/README.md`.
 
 **Status.** Needs refinement: the loop carries about 107 tests of run constants
-per line and recomputes the millisecond bucket size and the key length per
-line (audit, item 8, measured in drop 2). The key length is #619 (one per-run key cut). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.
+per line and recomputes the millisecond bucket size per line (audit, item 8,
+measured in drop 2). The key length is resolved once per run since #619 (one
+per-run key cut). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.

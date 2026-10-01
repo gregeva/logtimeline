@@ -2,10 +2,11 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`619-per-run-key-cut` off `release/0.19.0`. Implementation started 2026-10-01:
-drop 1 (the per-run cut, named cut lengths, redundant cuts and the inert re-scan
-partition removed) is pushed (§ 11).
+**Delivered 2026-10-01:** PR #649 merged into `release/0.19.0` as `85bb50e`,
+after the completion gate on `cc410e6` (§ 11.15) and the architect's acceptance
+of its movements (D14). Specification agreed with the architect 2026-09-28 on
+branch `619-per-run-key-cut` off `release/0.19.0`; implemented in five drops and
+a consistency sweep (§ 11).
 
 **Amended 2026-10-01 (§ 4.4).** The scope widens to the final pass grouping
 strictly by category and grouping key (D10, § 5.9) and to correcting the master
