@@ -1163,3 +1163,29 @@ the sizes unchanged.
   `validate-udm-counting.sh`, `validate-runtime-config.sh`,
   `validate-section-layout.sh`, `validate-format-detection.sh` and
   `validate-csv-output.sh` pass with no failure.
+
+### 11.11 Drop 3 benchmark (§ 8, AC10, AC14)
+
+`619-drop3-1..3` on `fe42422` against `619-drop2-1..3`, medians with ranges.
+The single-day access-log selection is the Tomcat access log of the
+`tomcat-consolidated` drift scenario, here run with the benchmark's own options
+(`-g -m uuid`).
+
+| Case | Metric | drop 2 | drop 3 | change |
+|---|---|---|---|---|
+| top25-consolidate | `finalize/group_similar` (s) | 2.229 [2.149..2.301] | 0.588 [0.576..0.663] | -73.6 % |
+| top25-consolidate | message rows kept (`log_messages_entries`) | 656 | 747 | +91 rows |
+| top25-consolidate | `rss_peak` | 137,035,776 | 139,198,464 | +1.6 % |
+| top25-consolidate | `total` (s) | 11.850 [11.743..11.908] | 10.231 [10.200..10.310] | -13.7 % |
+| heatmap-histogram-consolidate | `finalize/group_similar` (s) | 1.637 [1.631..1.683] | 0.513 [0.513..0.524] | -68.7 % |
+| heatmap-histogram-consolidate | message rows kept | 656 | 747 | +91 rows |
+| heatmap-histogram-consolidate | `rss_peak` | 118,145,024 | 111,853,568 | -5.3 % |
+| standard, heatmap-histogram-export | every metric | | | within the session drift of § 11.8 (read time +0.9 % and +2.4 %; neither runs the final pass) |
+
+The final pass is three to four times faster and keeps 91 more rows. Both come
+from the same cause as § 11.9: on drop 2 the 200 keys reached the final pass in
+many small windows, each searched in full; on drop 3 they arrive in windows of
+1,000 of which at most 500 keys start a search, so fewer searches run and fewer
+keys are grouped. The speed is the cost of the search limit, not a gain in the
+search; whether the limits should change is #648. `MEMORY_FINAL log_messages`
+rises 0.6 % with the extra rows.
