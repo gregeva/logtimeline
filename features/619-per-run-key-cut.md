@@ -1022,3 +1022,14 @@ item 7), is removed.
 - **AC3 matrix, drop 1 against drop 2:** the 165 comparisons of § 11.3, all
   identical, no runtime warning, every run exiting 0.
 - `tests/validate-message-grouping.sh`: 30 passed, 0 failed.
+
+**Drop 2 benchmark (§ 8, D2).** `619-drop2-1..3` on `4775344` against
+`619-drop1-1..3`, medians with ranges. Memory: `MEMORY_FINAL log_messages` rises
+0.2 % on the two `-g` cases (`top25-consolidate` 25,649,001 to 25,695,703 bytes;
+`heatmap-histogram-consolidate` 25,639,801 to 25,695,207), the grouping key on
+each entry; `rss_peak` moves between -0.4 % and +0.0 % on every case, within its
+ranges. `finalize/group_similar`: -0.8 % and +1.4 %, ranges overlapping. Read time
+rises 0.5 % to 1.4 % on every case, including `heatmap-histogram-export`, which
+retains no message (`-n 0`) and so runs none of the changed code: the read-time
+movement between these sessions is drift of about 1 %, not attributable to the
+drop. It bounds what § 11.6's 4 to 7 % read-time fall can be read as.
