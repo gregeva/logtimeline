@@ -791,7 +791,6 @@ my ( %consolidation_clusters, %consolidation_patterns, %consolidation_key_messag
 my ( %consolidation_unmatched, %consolidation_id_index );
 my %consolidation_key_trigrams;
 my %consolidation_cat_stats;
-my %consolidation_key_message_cat_gk;  # maps log_key -> cat_gk for cleanup safety
 my $consolidation_total_keys_seen = 0;
 my %consolidation_category_unmatched_count;  # {category} => total unmatched keys across all cat_gk groups in this category
 my %consolidation_pattern_generation;  # {cat_gk} => increments on each pattern discovery; used to skip S3 for keys that already tested against all current patterns
@@ -10979,7 +10978,6 @@ sub group_similar_messages {
         # Reset transient working structures (final pass uses sliding window, not streaming buffers)
         %consolidation_unmatched = ();
         %consolidation_key_message = ();
-        %consolidation_key_message_cat_gk = ();
         %consolidation_key_generation = ();
         %consolidation_key_checkpoint_count = ();
         %consolidation_id_index = ();
@@ -11017,8 +11015,7 @@ sub group_similar_messages {
             my %forward_count;
             for my $category (keys %log_messages) {
                 for my $log_key (keys %{$log_messages{$category}}) {
-                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                    $grouping_key //= "";
+                    my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                     $forward_count{"$category|$grouping_key"}++;
                 }
             }
@@ -11035,8 +11032,7 @@ sub group_similar_messages {
                     my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
                     my @keys;
                     for my $log_key (keys %{$log_messages{$category}}) {
-                        my ($gk) = $log_key =~ /^\[([^\]]+)\]/;
-                        $gk //= "";
+                        my $gk = $log_messages{$category}{$log_key}{grouping_key} // "";
                         push @keys, $log_key if $gk eq $grouping_key;
                     }
                     my $edge = consolidation_cliff_edge(\@keys, $consolidation_threshold);
@@ -11048,12 +11044,21 @@ sub group_similar_messages {
 
         # Pass 1: sorted iteration with sliding window
         for my $category (sort keys %log_messages) {
-            # Collect and sort keys by message body (strip [$grouping_key] prefix)
-            my @sorted_keys = sort {
-                my ($msg_a) = $a =~ /^\[[^\]]+\]\s*(.*)/s;
-                my ($msg_b) = $b =~ /^\[[^\]]+\]\s*(.*)/s;
-                (($msg_a // $a) cmp ($msg_b // $b)) || ($a cmp $b)
-            } keys %{$log_messages{$category}};
+            # Collect and sort keys by message body: the key after its
+            # "[$grouping_key]" prefix and the whitespace that follows, computed
+            # once per key; the whole key when the grouping key is empty
+            my %sort_body;
+            for my $log_key (keys %{$log_messages{$category}}) {
+                my $gk = $log_messages{$category}{$log_key}{grouping_key} // "";
+                my $body = $log_key;
+                if ($gk ne "" && substr($log_key, 0, length($gk) + 2) eq "[$gk]") {
+                    $body = substr($log_key, length($gk) + 2);
+                    $body =~ s/^\s+//;
+                }
+                $sort_body{$log_key} = $body;
+            }
+            my @sorted_keys = sort { ($sort_body{$a} cmp $sort_body{$b}) || ($a cmp $b) } keys %sort_body;
+            undef %sort_body;
 
             my @window;
             my $window_cat_gk = "";
@@ -11075,8 +11080,7 @@ sub group_similar_messages {
 
             for my $log_key (@sorted_keys) {
                 next unless exists $log_messages{$category}{$log_key};  # may have been deleted by window processing
-                my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                $grouping_key //= "";
+                my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                 my $cat_gk = "$category|$grouping_key";
 
                 next if $consolidation_final_pass_skipped{$cat_gk};   # #584
@@ -11125,8 +11129,7 @@ sub group_similar_messages {
         if ($fp_total_new_patterns > 0) {
             for my $category (sort keys %log_messages) {
                 for my $log_key (sort keys %{$log_messages{$category}}) {
-                    my ($grouping_key) = $log_key =~ /^\[([^\]]+)\]/;
-                    $grouping_key //= "";
+                    my $grouping_key = $log_messages{$category}{$log_key}{grouping_key} // "";
                     my $cat_gk = "$category|$grouping_key";
                     next if $consolidation_final_pass_skipped{$cat_gk};   # #584
 
@@ -12012,7 +12015,6 @@ sub consolidation_process_key {
 
     # Not matched by S1 — store for checkpoint processing
     $consolidation_key_message{$log_key} = $capped_msg;
-    $consolidation_key_message_cat_gk{$log_key} = $cat_gk;
     $consolidation_unmatched{$cat_gk}{$log_key} = 1;
     $consolidation_key_generation{$log_key} = $consolidation_pattern_generation{$cat_gk} // 0;
     $consolidation_key_checkpoint_count{$log_key} = 0;
@@ -12621,7 +12623,6 @@ sub run_consolidation_checkpoint {
                 $consolidation_key_checkpoint_count{$key} = ($consolidation_key_checkpoint_count{$key} // 0) + 1;
                 # Evict: remove from consolidation working set, keep in %log_messages
                 delete $consolidation_key_message{$key};
-                delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
@@ -12659,7 +12660,6 @@ sub run_consolidation_checkpoint {
     for my $key (keys %$consumed_ref) {
         delete $log_messages{$category}{$key};
         delete $consolidation_key_message{$key};
-        delete $consolidation_key_message_cat_gk{$key};
         delete $consolidation_key_trigrams{$key};
         delete $consolidation_key_generation{$key};
         delete $consolidation_key_checkpoint_count{$key};
@@ -12713,7 +12713,6 @@ sub run_consolidation_checkpoint {
             if ($consolidation_key_checkpoint_count{$key} > $max_survivals) {
                 # Evict: remove from consolidation working set, keep in %log_messages
                 delete $consolidation_key_message{$key};
-                delete $consolidation_key_message_cat_gk{$key};
                 delete $consolidation_key_trigrams{$key};
                 delete $consolidation_key_generation{$key};
                 delete $consolidation_key_checkpoint_count{$key};
@@ -16006,11 +16005,13 @@ sub read_and_process_logs {
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
                     my $consolidation_s1_matched = 0;
+                    my $new_key_grouping_key;
                     if ($group_similar_sensitivity ne "none") {
                         my $grouping_key = $log_level // "";
                         my $cat_gk = "$category|$grouping_key";
 
                         my $is_new_key = !exists $log_messages{$category}{$log_key};
+                        $new_key_grouping_key = $grouping_key if $is_new_key;
 
                         if ($is_new_key) {
                             # Build stats source from parsed line values for merge_consolidation_stats()
@@ -16270,6 +16271,9 @@ sub read_and_process_logs {
                         $log_messages{$category}{$log_key}{occurrences}++;
                         $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
+                    # Under -g a new key's entry carries its grouping key, so the final
+                    # pass groups the key by the value the streaming checkpoints used.
+                    $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key if defined $new_key_grouping_key;
                     }  # end: if (!$consolidation_s1_matched)
                 }
 

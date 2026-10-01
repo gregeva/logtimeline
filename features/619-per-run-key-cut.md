@@ -12,8 +12,10 @@ strictly by category and grouping key (D10, § 5.9) and to correcting the master
 specification for message consolidation, `features/fuzzy-message-consolidation.md`,
 where it is out of date or inconsistent (D11, § 5.10). D1 is restated: the
 message key is one contiguous string, and the grouping key separates messages
-in both passes. The design of § 5.9 and the criteria AC15 and AC16 are
-proposed for the architect's agreement before drop 3.
+in both passes. The design of § 5.9 and the criteria AC15 and AC16 were agreed
+by the architect on 2026-10-01. The carried grouping key is the line's level as
+it is, the value the streaming checkpoints already group by, so both passes
+group by the same value (§ 5.4, § 11.2).
 
 The issue comes from stage 13 (the key cut and the cap) of the #342 review of
 duplicated logic, decided by the architect on 2026-09-27. It is a sub-issue of
@@ -543,7 +545,7 @@ Edits to `docs/architecture-patterns.md`:
 
 ### 5.9 The final pass grouped strictly by grouping key (D10)
 
-**Proposed**, for the architect's agreement before code. Pass 1 of the final
+**Agreed by the architect on 2026-10-01**, with AC15 and AC16. Pass 1 of the final
 pass in `group_similar_messages` sorts each category's keys by grouping key
 first and body second, the grouping key read from the entry (§ 5.3) and the
 body being the key after `"[$gk]"` with leading whitespace stripped. Each
@@ -1000,3 +1002,23 @@ A batch holds at most one key of the previous level: the one carried when its
 level's run, in body order, held a single key. On an access log, where the same
 path is answered with several status codes, levels interleave in body order
 throughout, and every batch on the Tomcat log held two levels.
+
+### 11.8 Drop 2: the grouping key carried on the entry (lock 2, D2, AC7)
+
+Under `-g`, a key new to the message store has `grouping_key` written on its
+entry once, after the entry is born in either branch of the capture block in
+`read_and_process_logs`, with the value the streaming checkpoints group it by
+(`$log_level // ""`). The final pass reads it at all five places it used to parse
+the key: the per-group key count of the skip decision, the key collection for the
+similarity cliff edge, the sort, and the two group lookups of Pass 1 and Pass 2.
+The sort computes each key's body once, before sorting (the key after
+`"[$gk]"` and the whitespace that follows; the whole key when the grouping key is
+empty), where it ran two regular expressions per comparison. The map
+`%consolidation_key_message_cat_gk`, written and deleted but never read (§ 3
+item 7), is removed.
+
+- **AC7 source check:** no regular expression reads a bracketed prefix off a key
+  anywhere in `ltl` (`grep` count 0).
+- **AC3 matrix, drop 1 against drop 2:** the 165 comparisons of § 11.3, all
+  identical, no runtime warning, every run exiting 0.
+- `tests/validate-message-grouping.sh`: 30 passed, 0 failed.
