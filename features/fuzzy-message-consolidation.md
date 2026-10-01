@@ -626,7 +626,11 @@ Matching 286K unique messages against 103 compiled regex patterns took 18.4s in 
 
 **Finding:** When consolidation operated on `$message` only (the text after `[level] [thread] [object]`), the canonical forms lost their prefix metadata. The CheckHeartbeat messages appeared as bare `Error Executing Event Handler 'CheckHeartbeat'...` without the `[ERROR] [TWEventProcessor-*] [c.t.s.s.e.EventInstance]` prefix.
 
-**Decision:** Index and compare the full `$log_key`. The `[level]` prefix naturally prevents cross-level merges (see PF-07). The thread and object portions participate in similarity/alignment, producing correct wildcards like `[TWEventProcessor-*]`.
+**Decision:** Index and compare the full `$log_key` as one contiguous string. Every part of it (level, thread, object and message) is scored, and any part may be wildcarded: the thread and object portions produce wildcards like `[TWEventProcessor-*]`. No part of the key is an exact-match field.
+
+The `[level]` prefix does not by itself keep levels apart. On short messages the shared prefix dominates the trigram set, so keys of different levels score above the threshold (`[WARN] ... Done` against `[ERROR] ... Done` scores 91.5 %). Levels are kept apart by the grouping key (§ Grouping Key Design): a key is compared and grouped only with keys of its own category and level, in the streaming checkpoints and in the final pass.
+
+*Corrected 2026-10-01 under #619 (one per-run message-key cut): this decision credited the level prefix with preventing cross-level merges, which the grouping key does.*
 
 ### PF-10: Canonical and Regex Derivation Must Handle Pre-Existing `*` Characters
 
@@ -1359,26 +1363,24 @@ The following questions must be addressed before integrating the prototype into 
 
 ### ~~IQ-01: Category Model Mismatch~~ — RESOLVED
 
-**Decision:** Do not change ltl's data model. The consolidation engine operates within ltl's existing `$category` (`plain`/`highlight`), not by log level.
+**Decision:** Do not change ltl's data model. The consolidation engine operates within ltl's existing `$category` (`plain`/`highlight`), and within each category groups keys by log level (the HTTP status on an access log).
 
-**Key insight:** Consolidation should operate on `$message` only, not the full `$log_key`. The metadata fields (`$log_level`, `$truncated_thread`, `$truncated_object`, and `$session` when `--include-session` is active) serve as an **exact-match grouping key** — two messages are only consolidation candidates if all their metadata fields match. Similarity scoring (trigrams, Dice, alignment) applies only to the `$message` portion.
+**The grouping key is category plus level** (§ Grouping Key Design). Two keys are consolidation candidates only when they share both. This holds for every key in both passes: the streaming checkpoints and the final pass compare and group a key only with keys of its own group.
 
-**Implementation note (v0.14.4):** The current implementation passes `$capped_msg = substr($log_key, 0, 350)` to the consolidation engine, which includes the `[$log_level]` prefix. The grouping key (`$cat_gk = "$category|$log_level"`) ensures keys are only compared within the same level, so the prefix doesn't cause cross-level false matches. However, the prefix does consume ~6 chars of the 350-char cap and adds prefix trigrams to the index. For access logs where the grouping key is short (`[200]`), this is negligible. For ThingWorx logs with longer metadata prefixes, this could reduce the effective message content available for similarity scoring.
+**Similarity is scored on the whole `$log_key` as one contiguous string** (PF-09). Level, thread, object and message are all part of the scored string, and any part may be wildcarded. Thread and object are not exact-match fields: two keys whose threads differ can consolidate, the thread becoming a wildcard (`[TWEventProcessor-*]`). The engine receives the key cut at the run's message-key cut.
 
-**Reasoning — prefix domination on short messages:** When the full `$log_key` is used for Dice scoring, the ~50-char metadata prefix dominates the trigram set. On messages with short bodies (< ~20 chars), cross-level pairs score above 80% and would be incorrectly merged. Tested examples:
-- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5% (incorrect merge)
-- `[WARN] ... Done` vs `[ERROR] ... Done` → Dice 89.7% (incorrect merge)
-- On longer messages (70+ char bodies), cross-level Dice drops to 54% — safe, but the short-message vulnerability makes message-only scoring the correct default.
+**Why the level is a grouping key and not left to the scoring:** when the full `$log_key` is scored, the metadata prefix dominates the trigram set of a short message, and keys of different levels score above the threshold. Tested examples:
+- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5 %
+- `[WARN] ... Done` vs `[ERROR] ... Done` → Dice 89.7 %
+- On longer messages (70+ character bodies) cross-level Dice drops to 54 %.
 
-**How it maps to ltl's data flow:**
-- `$message` is already available as a separate variable before `$log_key` construction (ltl lines 2235-2248)
-- The metadata fields used in `$log_key` (`$log_level`, `$truncated_thread`, `$truncated_object`) are also available at that point
-- Session (`$session`) is prepended to `$message` at lines 1902/1916 when `--include-session` is active — for consolidation purposes, it should be treated as a metadata grouping field, not part of the similarity-scored message
-- The consolidation grouping key is the concatenation of available metadata fields: `"$log_level|$truncated_thread|$truncated_object|$session"` (with absent fields omitted). Only messages sharing the same grouping key enter pairwise comparison.
+The level grouping key keeps such keys apart at no per-line cost. Grouping by thread or object as well was rejected: thread names can be unique per instance, which creates hundreds of tiny groups and defeats the checkpoint trigger (§ Grouping Key Design).
 
-**`--consolidate-full-key` option:** Overrides the default to score similarity on the entire `$log_key` including metadata. For edge cases where metadata itself is variable noise (e.g., `pool-2437346-thread-1`, `pool-243999-thread-1` — infinite dynamically-created thread pools).
+**How it maps to ltl's data flow:** `$log_key` is built from the level, the truncated thread and object where the format supplies them, and the message, already masked. The inline path takes the grouping key from the line's level; `$cat_gk = "$category|$grouping_key"` names the group whose patterns, clusters and unmatched keys the key belongs to. A session or user exposed into the message (`-xs`, `-xu`) is part of the message text, and so part of the scored string.
 
-**Prototype impact:** The prototype's per-level `$cat` partitioning (`%clusters{$cat}`, `%unmatched_keys{$cat}`) maps naturally to the grouping key concept — just replace the log-level category with the full metadata grouping key. The `%canonical_patterns{$cat}` structure already supports this: patterns are only matched within their category.
+**Prototype impact:** the prototype's per-level `$cat` partitioning (`%clusters{$cat}`, `%unmatched_keys{$cat}`, `%canonical_patterns{$cat}`) is the grouping key: patterns are only matched within their group.
+
+*Corrected 2026-10-01 under #619 (one per-run message-key cut). This entry used to say that the metadata fields (level, thread, object, session) were an exact-match grouping key and that only the message body was scored. It named a `--consolidate-full-key` option and session as a grouping field under `--include-session`. The code has never worked that way, and neither option exists.*
 
 ### ~~IQ-02: `$log_key` Construction and Message Capping~~ — RESOLVED
 
