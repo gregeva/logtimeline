@@ -1965,18 +1965,29 @@ sub parse_iso_date_to_epoch {
     return defined $epoch ? $epoch + $fraction : undef;
 }
 
+# The precision a timestamp carries: the ladder step of the unit its field
+# states, descended one step for every three fractional digits, so a clock
+# time (which states the second) with three digits is a millisecond and with
+# six a microsecond. A fraction whose length is not a multiple of three covers
+# only the steps its digits complete.
+sub fraction_precision {
+    my ($stated, $digits) = @_;
+    my $steps = int(($digits // 0) / 3);
+    return $stated unless $steps;
+    my @finer = map { $_->{token} } grep { $_->{ms} < $time_unit_step{$stated}{ms} } reverse @time_unit_ladder;
+    return $finer[ $steps > @finer ? $#finer : $steps - 1 ];
+}
+
 # The precision an index row's timestamps were written at: its ts_precision
 # column when that names a precision step, otherwise (a row written before the
-# column was filled, carrying -) the steps its stored fraction's digits
-# complete: none the whole second, three the millisecond, six the microsecond.
+# column was filled, carrying -) the precision its stored fraction's digits
+# carry.
 sub index_row_precision {
     my ($row) = @_;
     my $stated = $row->{ts_precision} // '';
     return $stated if exists $time_unit_step{$stated} && $time_unit_step{$stated}{ms} <= $time_unit_step{m}{ms};
     my ($fraction) = ($row->{first_timestamp} // '') =~ /\.(\d+)$/;
-    my $steps = int(length($fraction // '') / 3);
-    my @finer = map { $_->{token} } grep { $_->{ms} <= 1 } reverse @time_unit_ladder;   # ms, us, ns
-    return $steps ? $finer[ ($steps > @finer ? scalar(@finer) : $steps) - 1 ] : 's';
+    return fraction_precision('s', length($fraction // ''));
 }
 
 sub locate_index_file {
@@ -5127,6 +5138,8 @@ sub format_registry_classify {
 #                         formats => { entry name => count },
 #                         first_ts, last_ts }, ... ]
 #   formats        => { entry name => count } across all parts
+#   frac_digits    => { entry name => the most fractional digits among that
+#                       format's sampled timestamps, 0 when none carries one }
 #   elapsed_us     => wall time of the whole sample
 #
 # The sample also knows the file's size and observes its average line
@@ -5153,7 +5166,7 @@ sub sample_file_for_detection {
 
     my @offsets = $whole ? (0)
                 : map { $_ == $parts - 1 ? $size - $bytes : int($_ * ($size - $bytes) / ($parts - 1)) } 0 .. $parts - 1;
-    my (@lines, @part_obs, %formats);
+    my (@lines, @part_obs, %formats, %frac_digits);
     for my $offset (@offsets) {
         seek $sfh, $offset, 0;
         my $buf = '';
@@ -5181,6 +5194,9 @@ sub sample_file_for_detection {
                 if (defined $o && defined $c[$o]) {
                     $obs->{first_ts} //= $c[$o];
                     $obs->{last_ts}    = $c[$o];
+                    my $digits = $c[$o] =~ /:\d{2}:\d{2}[.,](\d+)/ ? length $1 : 0;
+                    $frac_digits{ $e->[FR_NAME] } = $digits
+                        if !defined $frac_digits{ $e->[FR_NAME] } || $digits > $frac_digits{ $e->[FR_NAME] };
                 }
             }
         }
@@ -5190,7 +5206,7 @@ sub sample_file_for_detection {
     close $sfh;
     return {
         size => $size, parts => scalar(@offsets), bytes_per_part => $bytes, whole => $whole,
-        lines => \@lines, part_obs => \@part_obs, formats => \%formats,
+        lines => \@lines, part_obs => \@part_obs, formats => \%formats, frac_digits => \%frac_digits,
         elapsed_us => tv_interval($t0) * 1e6,
     };
 }
@@ -12889,6 +12905,67 @@ sub gc_heap_size_bytes {
     return $value * $bytes;
 }
 
+# The run's timestamp precision, once, after the read: the precision asked for,
+# never finer than the log's timestamps carry. A file's precision is the
+# coarsest of its sampled formats': a format without a fraction, or with a
+# fixed one, gives its declared precision; a variable-length one gives the
+# precision of the most fractional digits among the detection sample's
+# timestamps. A file whose precision cannot be read (not sampled, CSV input,
+# no format recognised in the sample) sets no limit. The run takes the
+# coarsest file's, so no file's timestamps print a digit they never carried;
+# a behavioural notice says what was shown and why, and the runtime-config
+# row carries the request in its clamp annotation.
+sub resolve_timestamp_precision {
+    my $coarsest = sub { (sort { $time_unit_step{$b}{ms} <=> $time_unit_step{$a}{ms} } @_)[0] };
+    my $name     = sub { (my $n = $time_unit_step{ $_[0] }{long}) =~ s/s$//; $n };
+    my $asked    = $option_overrides{'timestamp-precision'}{clamped_from} // $timestamp_precision;
+    my %file_precision;
+    for my $file (@in_files) {
+        my $sample = $format_detection_sample{$file} or next;
+        my @found;
+        for my $name (keys %{ $sample->{formats} // {} }) {
+            my $time = $format_registry_spec{$name} && $format_registry_spec{$name}{time} or next;
+            if (($time->{frac} // 'generic') eq 'generic') {
+                push @found, fraction_precision('s', $sample->{frac_digits}{$name}) if defined $sample->{frac_digits}{$name};
+            } elsif (defined $time->{precision}) {
+                push @found, $time->{precision};
+            }
+        }
+        $file_precision{$file} = $coarsest->(@found) if @found;
+    }
+    my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;
+    if (!defined $limit || $time_unit_step{$timestamp_precision}{ms} >= $time_unit_step{$limit}{ms}) {
+        # Not clamped by the log; a request finer than the parse keeps was
+        # resolved at settlement and is told here.
+        if ($asked ne $timestamp_precision) {
+            my $digits = $time_unit_step{$timestamp_precision}{decimals} + 3;
+            print STDERR "Note: timestamps are shown to the " . $name->($timestamp_precision) . ": " . $name->($asked)
+                . " precision was asked for, and at most $digits fractional digits are read from a timestamp\n";
+        }
+        return;
+    }
+
+    my $carry = sub { $_[0] eq 's' ? 'whole seconds' : $time_unit_step{ $_[0] }{long} };
+    my %distinct = map { $_ => 1 } values %file_precision;
+    my $what = keys %distinct == 1
+        ? (keys %file_precision == 1 ? "the log's timestamps carry " : "the logs' timestamps carry ") . $carry->($limit)
+        : "the logs' timestamps carry " . join(', ', map { $carry->($file_precision{$_}) . " in $_" } grep { exists $file_precision{$_} } @in_files);
+    my $narrower = $bucket_size_seconds < $time_unit_step{$limit}{ms} / 1000
+        ? "; at a bucket width below a " . $name->($limit) . ", only the buckets that start on a whole " . $name->($limit) . " can hold a line"
+        : '';
+    print STDERR "Note: timestamps are shown to the " . $name->($limit) . ": " . $name->($asked)
+        . " precision was asked for, and $what$narrower\n";
+
+    $timestamp_precision = $limit;
+    $option_overrides{'timestamp-precision'}{clamped_from} = $asked;
+    # The runtime-config section was composed at option settlement, before any
+    # file was sampled: its row takes the resolution here.
+    for (@verbose_output) {
+        last if s/^timestamp-precision: \S+(?:; clamped from \S+)?$/timestamp-precision: $limit; clamped from $asked/;
+    }
+    return;
+}
+
 # The run's byte notation, once, after the read: -bn when given; else the
 # notation every file's format declares; else SI. A file no format
 # recognised declares nothing. When the declarations differ and -bn was not
@@ -14664,10 +14741,9 @@ sub adapt_to_command_line_options {
             do { print_usage("$switch_name and -tp $timestamp_precision_option ask for different timestamp precisions: give -tp alone"); exit 1; }
                 if defined $switch && $switch ne $canonical;
             $timestamp_precision = $canonical;
+            # Its notice waits for resolve_timestamp_precision(), which may
+            # clamp further to what the log carries and says so once.
             if ($time_unit_step{$canonical}{ms} < $time_unit_step{$timestamp_precision_finest}{ms}) {
-                my ($asked, $kept) = map { (my $n = $time_unit_step{$_}{long}) =~ s/s$//; $n } $canonical, $timestamp_precision_finest;
-                my $digits = $time_unit_step{$timestamp_precision_finest}{decimals} + 3;
-                print STDERR "Note: timestamps are shown to the $kept: $asked precision was asked for, and at most $digits fractional digits are read from a timestamp\n";
                 $option_overrides{'timestamp-precision'}{clamped_from} = $canonical;
                 $timestamp_precision = $timestamp_precision_finest;
             }
@@ -22056,6 +22132,7 @@ sub pipeline_parse {
     $end_time = [gettimeofday];
     $elapsed_parse_read_files = tv_interval($start_time, $end_time);
     resolve_byte_notation();
+    resolve_timestamp_precision();
     measure_memory_structures();
     memory_debug_decomposition("after_read");
 }

@@ -4,9 +4,10 @@
 
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
-progress: drops 1 (the one formatter), 2 (the long spellings) and 3 (the
-option, the key scale, the run index, the capture gate) delivered 2026-10-02,
-§ 10.
+progress: drops 1 (the one formatter), 2 (the long spellings), 3 (the
+option, the key scale, the run index, the capture gate) and 4 (the precision
+the log carries) delivered 2026-10-02, § 10; drop 5 (nanosecond carried
+exactly) is prototype-gated and not started.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -996,17 +997,17 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 4: the true precision of the file**
 
-- [ ] **Clamped, with the notice (D4).** `-tp ms` on the whole-second access-log
+- [x] **Clamped, with the notice (D4).** `-tp ms` on the whole-second access-log
   fixture renders labels and heading at second precision and prints one notice
   naming second and that the timestamps carry whole seconds; `-tp us` on the
   three-digit set renders milliseconds with the notice naming millisecond;
   `-tp ms` on the three-digit set prints no notice. The index follows the
   resolved precision (D13): the `-tp ms` run on the whole-second fixture writes
   whole-second index timestamps and `ts_precision` `s`. *Assertable.*
-- [ ] **Machine-readable (D9).** In those runs `-V runtime-config` reads
+- [x] **Machine-readable (D9).** In those runs `-V runtime-config` reads
   `timestamp-precision: s; clamped from ms` and `ms; clamped from us`, and no
   annotation when nothing is clamped. *Assertable:* `validate-runtime-config.sh`.
-- [ ] **Resolved through the ladder (D4).** The four-digit carry set resolves to
+- [x] **Resolved through the ladder (D4).** The four-digit carry set resolves to
   millisecond and the two-digit set to second (proposed rule, § 6.4); a
   fixed-three-digit format resolves to millisecond from its declared field.
   *Assertable* on the clock layouts; the stated-unit arithmetic for a field in
@@ -1016,10 +1017,10 @@ directory, and is shaped to the assertion that reads it.
   are accepted from this drop, in any case. `-tp ns` on the nine-digit set
   renders six fractional digits and the notice names microsecond and the
   six-digit limit. *Assertable.*
-- [ ] **Several files (proposed rule, § 6.4).** `-tp ms` over the three-digit
+- [x] **Several files (proposed rule, § 6.4).** `-tp ms` over the three-digit
   set and the whole-second fixture together renders at second precision, the
   notice naming each file's precision. *Assertable.*
-- [ ] **The deprecated switches follow the rule (D4).** `-ms` on the
+- [x] **The deprecated switches follow the rule (D4).** `-ms` on the
   whole-second fixture renders at second precision with the notice; the
   regression golden that runs `-ms` over a whole-second access log is
   re-captured in this drop, its diff limited to the dropped `.000`.
@@ -1344,6 +1345,64 @@ read, so nothing carries. `--help` and `docs/usage.md` name `ns`.
 spellings in `option/values` (65 passed); `validate-runtime-config.sh` gains the
 `clamped from ns` row (57 passed); both fail against the 3d build, which
 rejects `-tp ns`.
+
+**Step 4b, delivered 2026-10-02.** `resolve_timestamp_precision()` runs once
+after the read, beside `resolve_byte_notation()`, before anything renders, the
+index is written or drift is judged; nothing read during the parse depends on
+it. `sample_file_for_detection()` records, per format, the most fractional
+digits among the sampled timestamps (it already captured each matched line's
+raw timestamp field, so no per-line work is added). A file's precision is the
+coarsest of its sampled formats': a `none` or `fixed3` format gives its
+declared `precision`, a `generic` one the precision of its digits through
+`fraction_precision()`, the one digits-to-precision rule, which walks the
+ladder down from the second a clock time states and which
+`index_row_precision()` now calls too. The run takes the coarsest file's. When
+the precision asked for (by `-tp`, `-s` or `-ms`) is finer, it is clamped; one
+note prints, and the runtime-config row (composed at settlement, before any
+file is sampled) is rewritten to `timestamp-precision: <resolved>; clamped from
+<requested>`. 4a's parse-cap note moved here, so a run prints one note naming
+the precision actually shown: `-tp ns` on a millisecond log names the
+millisecond, not the microsecond.
+
+Proposed and implemented (§ 6.4): a fraction whose length is not a multiple
+of three covers the steps its digits complete (four digits, `.9996`, are the
+millisecond; two are the second); several files take the coarsest, the note
+naming each file's precision; a width finer than the resolved precision adds
+"at a bucket width below a second, only the buckets that start on a whole
+second can hold a line". Proposed in the plan, not settled by a decision: a
+file whose precision cannot be read sets no limit (CSV input, which detection
+does not sample; a file read through the fallback window; a sample in which no
+format matched), so `-tp us` over a CSV of millisecond timestamps renders six
+digits as before.
+
+Measured on generated logs and the committed whole-second access-log and
+fixed-three-digit application-log fixtures: `-tp ms` on whole seconds renders
+labels, heading and the index at the second (`ts_precision s`); `-tp us` on
+three digits, on four digits and on the fixed-three-digit format renders the
+millisecond; two digits resolve to the second; `-tp ms` over a millisecond and
+a whole-second file renders the second; `-ms -bs 1000` on whole seconds
+renders the second; each with one note, and none when nothing is clamped.
+`validate-timestamp-precision.sh` gains seven `truth/` scenarios (81 passed);
+`validate-runtime-config.sh` checks the spellings on a millisecond log and adds
+`s; clamped from ms` and `ms; clamped from us` (59 passed). Against the 4a
+build every new assertion fails except "no note when nothing is clamped",
+which pins unchanged behaviour; "a CSV file sets no limit" fails against a
+copy that clamps an unreadable file to the second. Two of this issue's earlier
+scenarios moved with the clamp: the 3a spelling rows ran on a whole-second
+log, and the 3b key-scale check asked `-tp us` of the millisecond log for six
+digits; they now run on a millisecond and on the six-digit log. Corpus logs
+looked at, at 80 and 160 columns: the clamped timelines render with their one
+note; the banner and the echoed options exceed 80 columns on the base build as
+on this one (#497).
+
+The regression golden running `-ms -bs 1000` over a whole-second access log,
+`tests/reference-output/ms-w160.txt`, was re-captured with the architect's
+approval. Its diff is not only the dropped `.000`: the header and all 299
+timeline rows change, because the four columns the timestamp no longer needs
+go back to the layout (bars two characters longer, wider spacing in the
+duration and bytes columns); with the `.000`, the bar characters and the
+spacing removed, the two files are identical, every count, duration, byte
+value and percentile unchanged. `validate-regression.sh` 74 passed.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and

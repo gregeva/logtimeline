@@ -49,7 +49,14 @@ scenario_register \
     keyscale/structure \
     capture/per-consumer \
     capture/generator \
-    nanosecond/parse-cap
+    nanosecond/parse-cap \
+    truth/clamped \
+    truth/ladder \
+    truth/several-files \
+    truth/deprecated-switch \
+    truth/narrower-width \
+    truth/unknown-precision \
+    truth/structure
 SCENARIO_USAGE_NOTE='Contract: features/525-timestamp-precision-option.md § 7 (Acceptance criteria)'
 scenario_parse_args "$@"
 
@@ -77,6 +84,12 @@ DAYEND="$TMP_DIR/dayend.log"
 SIX="$TMP_DIR/six.log"
 EDGE="$TMP_DIR/edge.log"
 NINE="$TMP_DIR/nine.log"
+TWO="$TMP_DIR/two.log"
+CSVMS="$TMP_DIR/millis.csv"
+# Committed fixtures: a web-server access log, whole-second timestamps; an
+# application log in a fixed three-digit-fraction format.
+ACCESS="$REPO_DIR/tests/fixtures/gated-means-access.txt"
+FIXED3="$REPO_DIR/tests/fixtures/gated-means-application.txt"
 printf '%s\n' \
     '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' \
@@ -104,6 +117,12 @@ printf '%s\n' \
 printf '%s\n' \
     '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > "$NINE"
+# TWO carries two-digit fractions, which complete no millisecond.
+printf '%s\n' \
+    '2026-01-26 10:00:01,12 [main] INFO  com.example.Service - first line' \
+    '2026-01-26 10:00:02,45 [main] INFO  com.example.Service - second line' > "$TWO"
+# CSVMS is CSV input with millisecond timestamps, a file detection does not sample.
+printf 'timestamp,latency\n2026-06-01 10:00:05.123,12\n2026-06-01 10:01:05.456,34\n' > "$CSVMS"
 
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the assertions read the timeline labels, the summary heading's bounds, the
@@ -638,14 +657,16 @@ fi
 
 if scenario_wanted keyscale/from-width; then
 current_scenario="keyscale/from-width"
-run_in fw-ms "${COMMON[@]}" -ni -bs 100ms -tp ms "$THREE"
-run_in fw-us "${COMMON[@]}" -ni -bs 100ms -tp us "$THREE"
+# The six-digit set: its timestamps carry microseconds, so -tp us is not
+# clamped to what the log carries (D4).
+run_in fw-ms "${COMMON[@]}" -ni -bs 100ms -tp ms "$SIX"
+run_in fw-us "${COMMON[@]}" -ni -bs 100ms -tp us "$SIX"
 ms_l=$(labels "$TMP_DIR/fw-ms" | sed 's/$/000/' | tr '\n' ' ')
 us_l=$(labels "$TMP_DIR/fw-us" | tr '\n' ' ')
 if [[ -n "$ms_l" && "$ms_l" == "$us_l" ]]; then
-    pass_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .100 and .100000"
+    pass_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .900 and .900000"
 else
-    fail_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .100 and .100000" \
+    fail_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .900 and .900000" \
         "the key's scale follows -bs alone: -tp changes how a key is rendered, not how it is formed" \
         'adapt_to_terminal_settings() ($bucket_key_scale) and read_and_process_logs() in ltl' "$CONTRACT_D14" \
         "-tp ms (+000): $ms_l" "-tp us: $us_l"
@@ -769,6 +790,130 @@ for v in ns nanosecond; do
             "heading: $b" "notice lines: $n" "stderr: $(head -2 "$TMP_DIR/nine-$v/err.txt" | tr '\n' '~')"
     fi
 done
+fi
+
+# ---------------------------------------------------------------------------
+# The precision the log carries (D4, D10)
+# ---------------------------------------------------------------------------
+CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; several files take the coarsest; a file whose precision cannot be read sets no limit)'
+
+# note_lines DIR — the precision notices on the run's stderr.
+note_lines() {
+    grep -E '^Note: timestamps are shown to the ' "$1/err.txt" || true
+}
+
+# expect_note LABEL DIR WANT — exactly one precision notice, equal to WANT
+# (empty WANT: none).
+expect_note() {
+    local label="$1" dir="$2" want="$3" got n
+    got=$(note_lines "$dir"); n=$(printf '%s' "$got" | grep -c . || true)
+    if [[ ( -z "$want" && "$n" == 0 ) || ( -n "$want" && "$n" == 1 && "$got" == "$want" ) ]]; then
+        pass_with "$label"
+    else
+        fail_with "$label" "the precision shown is the one asked for unless the log's timestamps carry less; then one behavioural notice says what was shown and why" \
+            'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "want: ${want:-(no notice)}" "got ($n): $got"
+    fi
+}
+
+if scenario_wanted truth/clamped; then
+current_scenario="truth/clamped"
+run_in tc-access "${COMMON[@]}" -bs 1 -tp ms "$ACCESS"
+b=$(heading_bounds "$TMP_DIR/tc-access")
+frac_labels=$(labels "$TMP_DIR/tc-access" | grep -c '\.' || true)
+idx_first=$(index_cell "$TMP_DIR/tc-access" file first_timestamp)
+idx_tp=$(index_cell "$TMP_DIR/tc-access" file ts_precision)
+if [[ "$b" =~ ^[0-9-]+\ [0-9:]{8}\|[0-9-]+\ [0-9:]{8}$ && "$frac_labels" == 0 && "$idx_first" =~ T[0-9:]{8}$ && "$idx_tp" == s ]]; then
+    pass_with "-tp ms on a whole-second log renders, and indexes, at the second"
+else
+    fail_with "-tp ms on a whole-second log renders, and indexes, at the second" \
+        "the precision is clamped to what the log carries: labels, heading and the run index all at the second, ts_precision s" \
+        'resolve_timestamp_precision() in ltl; format_timestamp(), write_index_file()' "$CONTRACT_D4_CLAMP; features/525-timestamp-precision-option.md D13" \
+        "heading: $b" "labels with a fraction: $frac_labels" "index first_timestamp: $idx_first" "index ts_precision: $idx_tp"
+fi
+expect_note "-tp ms on a whole-second log: one notice naming the second and whole seconds" "$TMP_DIR/tc-access" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+run_in tc-three-us "${COMMON[@]}" -ni -bs 1 -tp us "$THREE"
+b=$(heading_bounds "$TMP_DIR/tc-three-us")
+if [[ "$b" == "2026-01-26 10:00:01.123|2026-01-26 10:00:03.789" ]]; then
+    pass_with "-tp us on a millisecond log renders milliseconds"
+else
+    fail_with "-tp us on a millisecond log renders milliseconds" "a request finer than the log's timestamps is shown at the log's precision" \
+        'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
+fi
+expect_note "-tp us on a millisecond log: one notice naming the millisecond" "$TMP_DIR/tc-three-us" \
+    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+run_in tc-three-ms "${COMMON[@]}" -ni -bs 1 -tp ms "$THREE"
+expect_note "-tp ms on a millisecond log: no notice" "$TMP_DIR/tc-three-ms" ""
+run_in tc-three-ns "${COMMON[@]}" -ni -bs 1 -tp ns "$THREE"
+expect_note "-tp ns on a millisecond log: one notice, naming the millisecond the log carries" "$TMP_DIR/tc-three-ns" \
+    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+fi
+
+if scenario_wanted truth/ladder; then
+current_scenario="truth/ladder"
+run_in tl-carry "${COMMON[@]}" -ni -bs 1 -tp us "$CARRY"
+expect_note "a four-digit fraction resolves to the millisecond" "$TMP_DIR/tl-carry" \
+    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+run_in tl-two "${COMMON[@]}" -ni -bs 1 -tp ms "$TWO"
+expect_note "a two-digit fraction resolves to the second" "$TMP_DIR/tl-two" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+run_in tl-fixed3 "${COMMON[@]}" -ni -bs 1 -tp us "$FIXED3"
+expect_note "a fixed three-digit format resolves to the millisecond it declares" "$TMP_DIR/tl-fixed3" \
+    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+fi
+
+if scenario_wanted truth/several-files; then
+current_scenario="truth/several-files"
+run_in tsf "${COMMON[@]}" -ni -bs 1440 -tp ms "$THREE" "$ACCESS"
+b=$(heading_bounds "$TMP_DIR/tsf")
+if [[ "$b" =~ ^[0-9-]+\ [0-9:]{8}\|[0-9-]+\ [0-9:]{8}$ ]]; then
+    pass_with "a millisecond log beside a whole-second one renders at the second"
+else
+    fail_with "a millisecond log beside a whole-second one renders at the second" "the run takes the coarsest precision its files carry" \
+        'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
+fi
+expect_note "the notice names each file's precision" "$TMP_DIR/tsf" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
+fi
+
+if scenario_wanted truth/deprecated-switch; then
+current_scenario="truth/deprecated-switch"
+run_in tds "${COMMON[@]}" -ni -ms -bs 1000 "$ACCESS"
+frac_labels=$(labels "$TMP_DIR/tds" | grep -c '\.' || true)
+if [[ "$frac_labels" == 0 && -n "$(labels "$TMP_DIR/tds")" ]]; then
+    pass_with "-ms on a whole-second log renders at the second"
+else
+    fail_with "-ms on a whole-second log renders at the second" "the clamp applies however the precision was asked for, the deprecated switches included" \
+        'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "labels with a fraction: $frac_labels"
+fi
+expect_note "-ms on a whole-second log: the notice" "$TMP_DIR/tds" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+fi
+
+if scenario_wanted truth/narrower-width; then
+current_scenario="truth/narrower-width"
+run_in tnw "${COMMON[@]}" -ni -bs 100ms -tp ms "$ACCESS"
+expect_note "a width finer than the log's precision: the notice says which buckets can hold a line" "$TMP_DIR/tnw" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds; at a bucket width below a second, only the buckets that start on a whole second can hold a line"
+fi
+
+if scenario_wanted truth/unknown-precision; then
+current_scenario="truth/unknown-precision"
+run_in tup "${COMMON[@]}" -ni -bs 1440 -tp us "$CSVMS"
+expect_note "CSV input, whose precision detection does not read, sets no limit" "$TMP_DIR/tup" ""
+fi
+
+if scenario_wanted truth/structure; then
+current_scenario="truth/structure"
+defs=$(grep -cE '^sub fraction_precision\b' "$LTL" || true)
+callers=$(perl -ne '$s = $1 if /^sub (\w+)/; print "$s\n" if /fraction_precision\(/ && $s ne "fraction_precision"' "$LTL" | sort -u | tr '\n' ' ')
+if [[ "$defs" == 1 && "$callers" == "index_row_precision resolve_timestamp_precision " ]]; then
+    pass_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index"
+else
+    fail_with "one digits-to-precision rule, read from the ladder, serves the clamp and the index" \
+        "the precision a fraction's digits carry is resolved by one sub that walks the time-unit ladder from the field's stated unit; no other sub keeps a digit table" \
+        'fraction_precision() in ltl' "$CONTRACT_D4_CLAMP" "definitions: $defs" "callers: $callers"
+fi
 fi
 
 # ---------------------------------------------------------------------------

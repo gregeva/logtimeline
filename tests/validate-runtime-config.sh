@@ -509,28 +509,40 @@ scenario_runtime_config_timestamp_precision() {
     current_scenario="runtime-config-timestamp-precision"
     echo "[$current_scenario]"
 
-    local spelling
-    for spelling in Millisecond MSEC microseconds second; do
-        local want
-        case "$spelling" in
-            Millisecond|MSEC) want=ms ;;
-            microseconds)     want=us ;;
-            second)           want=s ;;
-        esac
-        run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$TEST_LOG"
+    # Application logs whose timestamps carry milliseconds and microseconds,
+    # so a request at or above the log's precision is reported unclamped.
+    local ms_log="$TMP_DIR/tp-millis.log" us_log="$TMP_DIR/tp-micros.log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' > "$ms_log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456789 [main] INFO  com.example.Service - second line' > "$us_log"
+
+    local row spelling log want
+    for row in "Millisecond|$ms_log|ms" "MSEC|$ms_log|ms" "microseconds|$us_log|us" "second|$ms_log|s"; do
+        IFS='|' read -r spelling log want <<< "$row"
+        run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$log"
         assert_line "$RUN_STDOUT" \
             pattern     "^timestamp-precision: $want\$" \
-            asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation." \
+            asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation when the log carries that precision." \
             produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for timestamp-precision, resolved by adapt_to_command_line_options()' \
             contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
     done
 
-    run_ltl "rc-tp-ns" -V runtime-config -tp nanosecond "$TEST_LOG"
-    assert_line "$RUN_STDOUT" \
-        pattern     '^timestamp-precision: us; clamped from ns$' \
-        asserts     '-tp nanosecond resolves to the microsecond, the finest the parse keeps, and the row says what was asked for in the clamp annotation.' \
-        produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from, set by the -tp resolution in adapt_to_command_line_options()' \
-        contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
+    # Clamped: the resolved precision, and the request in the annotation.
+    for row in "nanosecond|$us_log|us; clamped from ns|the finest the parse keeps" \
+               "ms|$TEST_LOG|s; clamped from ms|the whole seconds the access log carries" \
+               "us|$ms_log|ms; clamped from us|the milliseconds the log carries"; do
+        local why
+        IFS='|' read -r spelling log want why <<< "$row"
+        run_ltl "rc-tp-clamp-$spelling" -V runtime-config -tp "$spelling" "$log"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp-precision: $want\$" \
+            asserts     "-tp $spelling resolves to $why; the row names the resolved precision and the request in the clamp annotation." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from; the row is resolved by resolve_timestamp_precision() after the read' \
+            contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
+    done
 
     run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
     assert_no_line "$RUN_STDOUT" \
