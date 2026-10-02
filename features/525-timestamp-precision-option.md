@@ -1483,6 +1483,28 @@ other affected harnesses pass. Looked at, at 80 and 160 columns, on the
 nine-digit log: the nanosecond labels and the heading render; only the banner
 and the echoed options exceed 80 columns, as on the base build (#497).
 
+**Completion gate, run 2026-10-02 on a5b4d84** (`$version_number` restored to
+`0.19.0`; `release/0.19.0` had not moved past the branch point). Full suite:
+all 45 `tests/validate-*.sh` exit 0, each with assertions run
+(`validate-csv-output.sh` 41 and `validate-statistics.sh` 25 scenarios with
+`CI=1`, the statistics oracle L3=OK on all 44 corpus cells and N/A on the six
+cells of the three committed gated-means fixtures, which no oracle parser
+maps). Before/after benchmark on this machine against 3b673ee:
+`single-day-access-log-standard` total 9.1 s to 9.1 s (−0.2 %), peak RSS
+99.8 MB to 100.0 MB (+0.3 %); `single-day-application-log-standard` total
+3.9 s to 3.9 s (−1.1 %), peak RSS 42.4 MB to 42.9 MB (+1.1 %); lines read and
+included identical. Repeated three times each outside the harness, the
+application log's peak RSS is 41.206 MB [41.206–41.255] before and 41.665 MB
+[41.632–41.681] after (+459 KB), the access log's +164 KB (+0.16 %); on a
+three-line log the two builds peak alike (about 40.4 MB), so the program's
+size is not the cause, and no measured structure grows (`log_messages`
+27 683 738 bytes on both builds on the access log; `format_scan_subs` within
+±60 KB). Bisected over every step's build, the application log's peak RSS moves
+up and down by about 400 KB from step to step with no trend, and copies of the
+base build differing only by a block of comment lines spread over 40 336 to
+40 784 KB; the final build's 40 768 to 41 104 KB sits 144 KB above the widest of
+them, all of it in the unattributed remainder.
+
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
 `525-after`), with `single-day-application-log-standard` (`525-app-before`,
