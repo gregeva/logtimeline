@@ -503,6 +503,36 @@ scenario_error_unknown_so() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; Issue #308 routes the error block to stderr'
 }
 
+# Issue #525 D9: -tp is reported by its canonical token whatever spelling
+# was given; a run that does not supply it emits no row.
+scenario_runtime_config_timestamp_precision() {
+    current_scenario="runtime-config-timestamp-precision"
+    echo "[$current_scenario]"
+
+    local spelling
+    for spelling in Millisecond MSEC microseconds second; do
+        local want
+        case "$spelling" in
+            Millisecond|MSEC) want=ms ;;
+            microseconds)     want=us ;;
+            second)           want=s ;;
+        esac
+        run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$TEST_LOG"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp-precision: $want\$" \
+            asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for timestamp-precision, resolved by adapt_to_command_line_options()' \
+            contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
+    done
+
+    run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
+    assert_no_line "$RUN_STDOUT" \
+        pattern     '^timestamp-precision:' \
+        asserts     'A run that does not supply -tp emits no timestamp-precision row: defaults are documented, not duplicated in the section.' \
+        produced_by 'emit_runtime_config_verbose() in ltl (provenance partitioning)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
+}
+
 scenario_error_unknown_du() {
     current_scenario="error-unknown-du"
     echo "[$current_scenario]"
@@ -641,6 +671,7 @@ scenario_register runtime-config-command-line \
                   error-unknown-exact-percentiles \
                   runtime-config-data-model-selectors \
                   runtime-config-numeric-highlight \
+                  runtime-config-timestamp-precision \
                   runtime-config-expose \
                   runtime-config-mask \
                   runtime-config-discard \
@@ -664,6 +695,7 @@ while read -r _scenario; do
         error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
         runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
         runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
+        runtime-config-timestamp-precision ) scenario_runtime_config_timestamp_precision ;;
         runtime-config-expose              ) scenario_runtime_config_expose ;;
         runtime-config-mask                ) scenario_runtime_config_mask ;;
         runtime-config-discard             ) scenario_runtime_config_discard ;;

@@ -422,9 +422,14 @@ my %filter_range;
 my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
 # The precision the run renders timestamps at, a canonical time-unit token
-# (m, s, ms, us), settled once in adapt_to_command_line_options() and passed
-# to format_timestamp() by every site that renders at the run's precision.
+# (m, s, ms, us), settled once from -tp (or the deprecated -s and -ms) in
+# adapt_to_command_line_options() and passed to format_timestamp() by every
+# site that renders at the run's precision.
 my $timestamp_precision = 'm';
+my $timestamp_precision_option;   # -tp as given, resolved into $timestamp_precision
+# The finest timestamp precision the parse keeps (six fractional digits): -tp
+# names a step of the time-unit ladder from the minute down to this one.
+my $timestamp_precision_finest = 'us';
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 
@@ -2493,6 +2498,7 @@ sub _classify_argv_provenance {
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
+                'timestamp-precision|tp',
                 'version|v', 'duration-min|dmin', 'duration-max|dmax',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
                 'bytes-min|bmin', 'bytes-max|bmax',
@@ -2636,6 +2642,7 @@ sub emit_runtime_config_verbose {
         'duration-min'                      => $filter_duration_min,
         'duration-max'                      => $filter_duration_max,
         'duration-unit'                     => $duration_unit_override,
+        'timestamp-precision'               => $timestamp_precision,
         'rate-unit'                         => $rate_unit,
         'byte-notation'                     => $byte_notation_option,
         'bytes-min'                         => $filter_bytes_min,
@@ -8770,7 +8777,7 @@ my $explain_resolution_zoom_command = <<'END';
                                                    # the hour, five minutes a row
     ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" -bs 1 access.log
                                                    # the quarter hour, a minute a row
-    ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -s access.log
+    ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -tp s access.log
                                                    # the minute, five seconds a row
 END
 
@@ -9743,7 +9750,7 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'Command' },
             { type => 'pre',       text => $explain_resolution_zoom_command },
             { type => 'subheading', text => 'See also' },
-            { type => 'paragraph', text => 'time (the grouping this belongs to), window-narrowing, traffic-load-profiling. Options: -st, -et, -bs, -s, -ms, -ru.' },
+            { type => 'paragraph', text => 'time (the grouping this belongs to), window-narrowing, traffic-load-profiling. Options: -st, -et, -bs, -tp, -ru.' },
         ],
 
         'traffic-load-profiling' => [
@@ -10002,9 +10009,10 @@ sub print_help {
 
     # Time & Buckets
     $out .= help_subheading("Time & Buckets");
-    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: $time_unit_list; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with -s and -ms.");
-    $out .= help_opt("-s,   --seconds",               "Read a bare -bs number as seconds, and render timestamps with seconds precision");
-    $out .= help_opt("-ms,  --milliseconds",          "Read a bare -bs number as milliseconds, and render timestamps with .fff precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
+    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: $time_unit_list; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision is set by -tp.");
+    $out .= help_opt("-tp,  --timestamp-precision <precision>", "Set the precision timestamps are shown at: m (the minute, the default), s, ms or us, also spelled minute, second, millisecond or microsecond. The bucket width is set by -bs alone, so -bs 100ms -tp ms draws ten buckets a second, each labelled to the millisecond.");
+    $out .= help_opt("-s,   --seconds",               "Deprecated: use -tp s for the timestamp precision and a unit on -bs (-bs 30s) for the width. Reads a bare -bs number as seconds, and renders timestamps with seconds precision.");
+    $out .= help_opt("-ms,  --milliseconds",          "Deprecated: use -tp ms for the timestamp precision and a unit on -bs (-bs 100ms) for the width. Reads a bare -bs number as milliseconds, and renders timestamps with .fff precision.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
@@ -10172,7 +10180,7 @@ sub print_help {
     $out .= "\n";
     $out .= $ex->("ltl access.log",                                                "Basic analysis");
     $out .= $ex->("ltl -bs 5 access.log",                                          "5-minute time buckets");
-    $out .= $ex->("ltl -ms -bs 100 -st \"08:15:00\" -et \"08:16:00\" app.log",     "Millisecond zoom into one minute");
+    $out .= $ex->("ltl -bs 100ms -tp ms -st \"08:15:00\" -et \"08:16:00\" app.log", "Millisecond zoom into one minute");
     $out .= $ex->("ltl -i \"POST\" -e healthcheck access.log",                     "Include POST, exclude health checks");
     $out .= $ex->("ltl -h \"/api/v2/orders\" access.log",                          "Highlight a pattern against all traffic");
     $out .= $ex->("ltl -dmin 5000 access.log",                                     "Only requests slower than 5 seconds");
@@ -14292,6 +14300,7 @@ sub adapt_to_command_line_options {
         'hide-stats|hst' => sub { push @section_visibility_ops, [ 'hide', 'stats' ] },
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
+        'timestamp-precision|tp=s' => \$timestamp_precision_option,
         'version|v' => \$print_version,
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
@@ -14589,6 +14598,28 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list"); exit 1; }
             unless defined $canonical;
         $rate_unit = $canonical;
+    }
+
+    # Timestamp precision: -tp names a ladder step from the minute down to the
+    # finest the parse keeps, in any spelling. The deprecated -s and -ms name
+    # the second and the millisecond; either beside a -tp of another precision
+    # is a usage error, since the two would ask for different renderings.
+    {
+        my @steps = reverse map { $_->{token} }
+            grep { $_->{ms} <= $time_unit_step{m}{ms} && $_->{ms} >= $time_unit_step{$timestamp_precision_finest}{ms} } @time_unit_ladder;
+        my ($switch, $switch_name) = $print_milliseconds ? ('ms', '-ms/--milliseconds')
+                                   : $print_seconds      ? ('s',  '-s/--seconds')
+                                   :                       ();
+        if (defined $timestamp_precision_option) {
+            my $canonical = time_unit_canonical($timestamp_precision_option);
+            do { print_usage("Invalid timestamp precision '$timestamp_precision_option'. Valid values: " . join(', ', @steps)); exit 1; }
+                unless defined $canonical && grep { $_ eq $canonical } @steps;
+            do { print_usage("$switch_name and -tp $timestamp_precision_option ask for different timestamp precisions: give -tp alone"); exit 1; }
+                if defined $switch && $switch ne $canonical;
+            $timestamp_precision = $canonical;
+        } else {
+            $timestamp_precision = $switch // 'm';
+        }
     }
 
     # Bucket size (Issue #524). A bare number keeps the run's unit: the
@@ -14900,6 +14931,15 @@ sub adapt_to_command_line_options {
         print STDERR "Warning: -uuid/--mask-uuid is deprecated: use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6\n";
     }
 
+    # -s/--seconds and -ms/--milliseconds are deprecated: -tp sets the
+    # timestamp precision and a unit on -bs sets the bucket width. Both keep
+    # their jobs (the precision, and the unit of a bare -bs number and of the
+    # default width) while they exist.
+    print STDERR "Warning: -s/--seconds is deprecated: use -tp s for the timestamp precision, and give -bs a unit (-bs 30s) for the bucket width\n"
+        if $print_seconds;
+    print STDERR "Warning: -ms/--milliseconds is deprecated: use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width\n"
+        if $print_milliseconds;
+
     # With no message retained, the options that only configure the per-message
     # store have nothing left to configure. They are not an error - the retention
     # setting simply wins - but the user is told, because the tool is discarding
@@ -14991,7 +15031,6 @@ sub adapt_to_command_line_options {
         $output_timestamp_format = $profile_modes{$profile_mode}{format};
     }
 
-    $timestamp_precision = $print_milliseconds ? 'ms' : $print_seconds ? 's' : 'm';
     $output_timestamp_format .= ":%S" if $timestamp_precision ne 'm';
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;

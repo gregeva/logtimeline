@@ -162,10 +162,10 @@ Continuing down: tighten the aperture again, drop below the minute with a sub-mi
 ltl access.log                                                       # the day at the 60-minute default
 ltl -st "2026-05-07 10:00" -et "2026-05-07 11:00" -bs 5 access.log   # the hour, five minutes a row
 ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" -bs 1 access.log   # the quarter hour, a minute a row
-ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -s access.log  # the minute, five seconds a row
+ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -tp s access.log  # the minute, five seconds a row
 ```
 
-**See also.** [Time](#time-time) (the grouping this belongs to), `window-narrowing`, `traffic-load-profiling`. Options: `-st`, `-et`, `-bs`, `-s`, `-ms`, `-ru`.
+**See also.** [Time](#time-time) (the grouping this belongs to), `window-narrowing`, `traffic-load-profiling`. Options: `-st`, `-et`, `-bs`, `-tp`, `-ru`.
 
 ---
 

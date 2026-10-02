@@ -161,6 +161,13 @@ A single option that names the timestamp precision outright (minute, second,
 millisecond, nanosecond), instead of the two switches, is a separate
 enhancement request, filed as issue #525.
 
+That option is `-tp, --timestamp-precision`. Under
+`features/525-timestamp-precision-option.md` D5 (`-s` and `-ms` deprecated
+with a notice for one release, keeping their jobs) and D11 (precision and
+width separate; a bare `-bs` number is minutes), `-s` and `-ms` print a
+deprecation notice pointing at `-tp` and at a unit on `-bs`; their removal is
+#630.
+
 ### D5 — Documentation (locked)
 
 `--help` row for `-bs` describes the two forms in one sentence and names the

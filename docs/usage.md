@@ -28,9 +28,10 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 
 | Option | Description |
 |--------|-------------|
-| `-bs, --bucket-size <width>` | Set the width of each time bucket on the timeline: a bare number in minutes (seconds under `-s`, milliseconds under `-ms`), or a number with a unit such as `90s`, `1.5h`, `1d` or `1w` (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; `m` is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with `-s` and `-ms`. |
-| `-s, --seconds` | Read a bare `-bs` number as seconds, and render timestamps with seconds precision |
-| `-ms, --milliseconds` | Read a bare `-bs` number as milliseconds, and render timestamps with `.fff` precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured. |
+| `-bs, --bucket-size <width>` | Set the width of each time bucket on the timeline: a bare number in minutes (seconds under `-s`, milliseconds under `-ms`), or a number with a unit such as `90s`, `1.5h`, `1d` or `1w` (units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`; `m` is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision is set by `-tp`. |
+| `-tp, --timestamp-precision <precision>` | Set the precision timestamps are shown at: `m` (the minute, the default), `s`, `ms` or `us`, also spelled `minute`, `second`, `millisecond` or `microsecond`. The bucket width is set by `-bs` alone, so `-bs 100ms -tp ms` draws ten buckets a second, each labelled to the millisecond. |
+| `-s, --seconds` | Deprecated: use `-tp s` for the timestamp precision and a unit on `-bs` (`-bs 30s`) for the width. Reads a bare `-bs` number as seconds, and renders timestamps with seconds precision. |
+| `-ms, --milliseconds` | Deprecated: use `-tp ms` for the timestamp precision and a unit on `-bs` (`-bs 100ms`) for the width. Reads a bare `-bs` number as milliseconds, and renders timestamps with `.fff` precision. |
 | `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Each mode has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A full date (`YYYY-MM-DD HH:MM:SS[.mmm]`) is an absolute cutoff; a bare time (`HH:MM[:SS[.mmm]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a full date is an absolute cutoff; a bare time applies to every day. |
@@ -44,10 +45,10 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 ltl -bs 5 access.log
 # Daily buckets: a unit on -bs sets the width, the timestamps keep minute precision
 ltl -bs 1d access.log
-# 30-second buckets
-ltl -s -bs 30 access.log
-# 100ms-wide buckets, zoomed into a 5-minute window (sub-second timestamp rendering enabled)
-ltl -ms -bs 100 -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.log
+# 30-second buckets, timestamps to the second
+ltl -bs 30s -tp s access.log
+# 100ms-wide buckets, zoomed into a 5-minute window, timestamps to the millisecond
+ltl -bs 100ms -tp ms -st "2025-05-05 08:15:00.000" -et "2025-05-05 08:20:00.000" app.log
 # Weekly profile: overlay every date onto a single Mon–Sun week, hourly buckets
 ltl -bs 60 -pr week access.log
 # Workday-morning profile: only the 09:00–11:00 window, work days, folded onto one 24h axis

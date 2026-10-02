@@ -4,8 +4,8 @@
 
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
-progress: drops 1 (the one formatter) and 2 (the long spellings) delivered
-2026-10-02, § 10.
+progress: drops 1 (the one formatter) and 2 (the long spellings) and step
+3a of drop 3 (the option) delivered 2026-10-02, § 10.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -886,7 +886,7 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 3: the option and the deprecation**
 
-- [ ] **Values (D3).** `-tp` accepts `m`, `minute`, `s`, `second`, `ms`,
+- [x] **Values (D3).** `-tp` accepts `m`, `minute`, `s`, `second`, `ms`,
   `millisecond`, `us`, `microsecond` and the ladder's other spellings of those
   four steps, in any case; every spelling of a step gives the same run.
   *Assertable.*
@@ -898,7 +898,7 @@ directory, and is shaped to the assertion that reads it.
 - [ ] **Equivalence with the switches (D5, D11).** `-tp m` renders as the
   default; `-tp s -bs 30s` as `-s -bs 30`; `-bs 100ms -tp ms` as `-ms -bs 100`
   (the architect's pair, above). *Assertable.*
-- [ ] **Width and precision separate (D11).** `-tp ms` alone reports the same
+- [x] **Width and precision separate (D11).** `-tp ms` alone reports the same
   `bucket_size_seconds` in `-V benchmark-data` as the run without any switch,
   with its labels at millisecond precision; `-tp ms -bs 60` gives 60-minute
   buckets; `-tp s -bs 90s` renders like `-s -bs 90s`; `-bs 1d` alone keeps
@@ -948,18 +948,18 @@ directory, and is shaped to the assertion that reads it.
   against `.100`); `-tp us` alone gives the same `bucket_size_seconds` and
   bucket count as the run without any switch. *Assertable:* labels from
   stdout, `-V benchmark-data`.
-- [ ] **Deprecation (D5, D12).** `-s` and `-ms` each print exactly one stderr
+- [x] **Deprecation (D5, D12).** `-s` and `-ms` each print exactly one stderr
   line naming `-tp` and a unit on `-bs`, with and without `--disable-progress`;
   a bare `-bs` number and the default width keep their meaning under each
   switch; `-ms -tp ms` and `-s -tp s` run with the notice. *Assertable.*
-- [ ] **Rejections (D12).** An unknown value and a ladder step outside the five
+- [x] **Rejections (D12).** An unknown value and a ladder step outside the five
   (`-tp h`) exit non-zero with a usage line listing the accepted values; `-s` or
   `-ms` with a different `-tp` exits non-zero with a usage error naming both;
   each having run nothing, with no runtime warning. *Assertable.*
-- [ ] **Reported (D9).** `-V runtime-config` shows `timestamp-precision:` with
+- [x] **Reported (D9).** `-V runtime-config` shows `timestamp-precision:` with
   the canonical token for `-tp` given in any spelling. *Assertable:*
   `validate-runtime-config.sh`.
-- [ ] **Documented (D9).** `validate-help-content.sh` passes with the new and
+- [x] **Documented (D9).** `validate-help-content.sh` passes with the new and
   edited rows; the new `docs/usage.md` example runs under
   `validate-doc-examples.sh`. *Assertable.*
 
@@ -1133,6 +1133,39 @@ the spelling list was defined inside the preceding scenario's block, so
 The equivalences are now scenarios named from the table that drives them,
 the list is at file scope, and the spelling scenario fails unless it checked
 every spelling. Each of the harness's 27 scenarios passes when run alone.
+
+**Drop 3, in four steps.** Drop 3 is delivered as four commits on the issue
+branch, each verified before the next: 3a the option, rendering only (D3, D5,
+D9, D12); 3b the bucket key's scale from `-bs` (D14, D20); 3c the run index at
+the run's precision with drift compared as numbers (D13, D15 to D19); 3d the
+capture gate in the generated scan block (D11). 3b and 3d change the per-line
+path and are benchmarked against `525-before` and `525-app-before`.
+
+**Step 3a, delivered 2026-10-02.** `-tp, --timestamp-precision` takes `m`,
+`s`, `ms` or `us` in any ladder spelling and case, resolved once with `-du` and
+`-ru` into `$timestamp_precision`; the steps it accepts are read from the
+ladder, from the minute down to `$timestamp_precision_finest` (`us` until drop
+4). `-tp ns` is rejected with the accepted values until drop 4's clamp. `-s`
+and `-ms` resolve to `s` and `ms`; either beside a `-tp` of another precision
+is a usage error naming both, and each prints one deprecation line on stderr.
+`-V runtime-config` reports `timestamp-precision: <token>` when `-tp` is
+supplied. `--help`, `docs/usage.md`, the `resolution-zoom` explain topic and
+`docs/explain/techniques.md` carry the `-tp` row and the edited `-bs`, `-s` and
+`-ms` rows, and the examples are written with `-tp` and a unit on `-bs`. The
+"width and precision separate" criterion is asserted in
+`validate-timestamp-precision.sh` (`option/width-separate`) rather than by
+extending `validate-bucket-size-units.sh`, beside the other `-tp` scenarios.
+The criteria "the architect's pair", "equivalence with the switches" (its
+`-bs 100ms` row), "microsecond" and "key scale from `-bs` alone" need 3b's key
+scale and are asserted there. Against the base build every new 3a assertion
+fails; the two that pin unchanged behaviour (the deprecated switches' widths,
+the heading at millisecond precision) fail against a deliberately broken copy.
+`validate-timestamp-precision.sh` 38 passed; `validate-runtime-config.sh` 56,
+`validate-help-content.sh` 35, `validate-doc-examples.sh` 51 (the edited
+examples run), `validate-explain.sh` 695, `validate-regression.sh` 74 (the
+`-ms` golden unchanged: the notice is on stderr), `validate-udm-counting.sh`
+44, `validate-bucket-size-units.sh` 64, `validate-aggregate-export.sh` 161, all
+passing.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
