@@ -46,7 +46,9 @@ scenario_register \
     keyscale/bucket-edge \
     keyscale/from-width \
     keyscale/whole-second-floor \
-    keyscale/structure
+    keyscale/structure \
+    capture/per-consumer \
+    capture/generator
 SCENARIO_USAGE_NOTE='Contract: features/525-timestamp-precision-option.md § 7 (Acceptance criteria)'
 scenario_parse_args "$@"
 
@@ -111,6 +113,7 @@ CONTRACT_D3='features/525-timestamp-precision-option.md D3 (-tp covers minute, s
 CONTRACT_D5='features/525-timestamp-precision-option.md D5 (-s and -ms deprecated with a notice for one release, keeping their jobs) and D12 (-s or -ms beside a -tp of another precision is a usage error)'
 CONTRACT_D11='features/525-timestamp-precision-option.md D11 (timestamp precision and bucket width are separate: -tp sets no width; a bare -bs number is minutes)'
 CONTRACT_D14='features/525-timestamp-precision-option.md D14 (the bucket key scale follows -bs alone: integer milliseconds for a width with a millisecond part, integer microseconds for one with a microsecond part, otherwise seconds) and D20 (at a whole-second width a line counts in the second it was written in)'
+CONTRACT_D11_GATE='features/525-timestamp-precision-option.md D11 (a run that needs no sub-second part need not read or store it) and D21 (the gate is decided per consumer: a precision finer than the second, a sub-second width, a sub-second -st/-et bound, or the aggregate export (-o) reads the fraction); D22 (the decision is reported only under -V benchmark-data, as CONFIG timestamp_fraction_capture)'
 CONTRACT_INDEX='features/525-timestamp-precision-option.md § 7 drop 1 (older index rows stay fresh) and features/179-index-read-back.md § freshness (file_mtime compared by string equality)'
 
 pass=0
@@ -687,6 +690,57 @@ else
     fail_with "no bucket-key site reads -s or -ms" \
         "the key's scale is read from \$bucket_key_scale wherever a key is formed or rendered; the deprecated switches set the precision and the bare -bs unit only" \
         'read_and_process_logs(), initialize_empty_time_windows(), print_bar_graph(), write_aggregate_export() in ltl' "$CONTRACT_D14" "readers: $readers"
+fi
+fi
+
+# ---------------------------------------------------------------------------
+# The capture gate (D11, D21, D22)
+# ---------------------------------------------------------------------------
+if scenario_wanted capture/per-consumer; then
+current_scenario="capture/per-consumer"
+# Each row: tag | expected decision | the consumer | ltl arguments
+for row in "none|0|no consumer of the fraction|" \
+           "tps|0|second precision|-tp s" \
+           "wholebound|0|a whole-second -st bound|-st 2026-01-26 10:00:01" \
+           "tpms|1|millisecond precision|-tp ms" \
+           "bs100ms|1|a sub-second width|-bs 100ms" \
+           "bs1500ms|1|a width that is not a whole number of seconds|-bs 1500ms" \
+           "msswitch|1|the deprecated -ms|-ms" \
+           "fracbound|1|a -st bound with a fraction|-st 2026-01-26 10:00:01.500" \
+           "export|1|the aggregate export|-o"; do
+    IFS='|' read -r tag want consumer args <<< "$row"
+    if [[ "$args" == -st* ]]; then
+        run_in "cap-$tag" "${COMMON[@]}" -ni -V benchmark-data -st "${args#-st }" "$THREE"
+    else
+        # shellcheck disable=SC2086
+        run_in "cap-$tag" "${COMMON[@]}" -ni -V benchmark-data $args "$THREE"
+    fi
+    got=$(benchmark_row "$TMP_DIR/cap-$tag" timestamp_fraction_capture)
+    if [[ "$got" == "$want" ]]; then
+        pass_with "${args:-(no option)}: timestamp_fraction_capture $want ($consumer)"
+    else
+        fail_with "${args:-(no option)}: timestamp_fraction_capture $want ($consumer)" \
+            "the parse reads a line's sub-second part exactly when a consumer uses it: a precision finer than the second, a width that is not a whole number of seconds, a -st/-et bound with a non-zero fraction, or the aggregate export" \
+            'adapt_to_terminal_settings() in ltl ($timestamp_capture_fraction), reported by print_verbose_output()' "$CONTRACT_D11_GATE" \
+            "timestamp_fraction_capture: $got"
+    fi
+done
+fi
+
+if scenario_wanted capture/generator; then
+current_scenario="capture/generator"
+gen=$(perl -ne '$in = 1 if /^sub format_entry_block_src\b/; $in = 0 if $in && /^}/; print if $in' "$LTL")
+fixed=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{\$fractional_ms = substr\(\$timestamp_str, 20, 3\);' || true)
+generic=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{if \(\$timestamp_str =~ s/.*10 \*\* \(3 - length' || true)
+ungated=$(printf '%s' "$gen" | grep -E 'fractional_ms = substr|10 \*\* \(3 - length' | grep -cvE '\$capture \? q\{' || true)
+opts=$(grep -cE 'capture_fraction => \$timestamp_capture_fraction' "$LTL" || true)
+if [[ "$fixed" == 1 && "$generic" == 1 && "$ungated" == 0 && "$opts" == 1 ]]; then
+    pass_with "the scan block carries the fraction arithmetic only when the gate is open"
+else
+    fail_with "the scan block carries the fraction arithmetic only when the gate is open" \
+        "format_entry_block_src emits the fixed-three-digit read and the variable-length conversion only under the compile option the run's gate sets; a closed gate strips the fraction without reading or converting it" \
+        'format_entry_block_src() and build_format_registry() in ltl' "$CONTRACT_D11_GATE" \
+        "gated fixed3: $fixed" "gated generic: $generic" "ungated arithmetic lines: $ungated" "compile option set from the gate: $opts"
 fi
 fi
 

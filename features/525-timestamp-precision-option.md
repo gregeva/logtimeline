@@ -4,9 +4,9 @@
 
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
-progress: drops 1 (the one formatter) and 2 (the long spellings) and step
-3a, 3b and 3c of drop 3 (the option, the key scale, the run index)
-delivered 2026-10-02, § 10.
+progress: drops 1 (the one formatter), 2 (the long spellings) and 3 (the
+option, the key scale, the run index, the capture gate) delivered 2026-10-02,
+§ 10.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -18,12 +18,13 @@ column as the file rows do) and D18 (drift compares timestamps as numbers
 rounded to the comparison precision, never as strings); amended again
 2026-09-29 with D19 (an index row written before this change, whose precision
 column carries `-`, is read at the precision its stored timestamps' digits
-carry, and no old row is rewritten); D20 (2026-10-02: at a whole-second
-width a line counts in the second it was written in); D21 (2026-10-02: the
-aggregate export needs the sub-second part, so the capture gate opens for it).
-The architect's decisions are § 4 (D1 to D21); no element of the run index's design remains **proposed**. A design
-element that no decision settles is implementation detail and is marked
-**proposed**.
+carry, and no old row is rewritten); and 2026-10-02 with D20 (at a
+whole-second width a line counts in the second it was written in), D21 (the
+aggregate export needs the sub-second part, so the capture gate opens for it)
+and D22 (the capture decision is reported only under `-V benchmark-data`).
+The architect's decisions are § 4 (D1 to D22); no element of the run index's
+design remains **proposed**. A design element that no decision settles is
+implementation detail and is marked **proposed**.
 
 ---
 
@@ -477,6 +478,19 @@ Only the architect's decisions are numbered here.
   sub-second width and a sub-second `-st`/`-et` bound. Locked by the architect
   2026-10-02.
 
+- **D22. The capture decision is reported only under `-V benchmark-data`.**
+  The agreed criterion asserts the gate on the generated scan block, which no
+  surface exposes, and by design the gate changes no output. Put to the
+  architect: a `CONFIG timestamp_fraction_capture` row in `-V benchmark-data`
+  reporting the run's decision, asserted per consumer, with a structural check
+  that the block generator emits the fraction arithmetic only when the gate is
+  open. The architect: "I'm OK for option A as long as it is only activated
+  (ie its gated) if -V benchmark-data is enabled. There is no need to have this
+  code added to the generated function for normal runs." The row is one line
+  of the `-V benchmark-data` emitter, which runs only when that section is
+  requested, reading the decision settled before the parse; the generated
+  scan block carries nothing for it. Locked by the architect 2026-10-02.
+
 ---
 
 ## 5. Surfaces this work reaches
@@ -922,7 +936,7 @@ directory, and is shaped to the assertion that reads it.
   minute labels. *Assertable:* extends `validate-bucket-size-units.sh`'s
   `precision/90s-on-minute-run` scenario (a unit on `-bs` leaves the label
   precision untouched).
-- [ ] **Read and stored at the precision (D11).** On the three-digit set,
+- [x] **Read and stored at the precision (D11).** On the three-digit set,
   `-tp ms` renders the heading's bounds as `01.123` and `03.789` from the stored
   timestamps. The scan block generated for a run that asks for no sub-second
   digit, sets no sub-second width and gives no sub-second bound carries no
@@ -1035,7 +1049,7 @@ directory, and is shaped to the assertion that reads it.
 | Item | Detail |
 |---|---|
 | `-V` sections read | `runtime-config`, `index-read-back`, `benchmark-data` (`bucket_size_seconds`), `aggregate-export` |
-| `-V` sections changed | `runtime-config` gains `timestamp-precision:` with the clamp annotation (contract owner `features/225-test-harness-coverage-gaps.md`, updated in the same commit; #613 (one name vocabulary) edits the same section and cites the same owner) |
+| `-V` sections changed | `benchmark-data` gains `CONFIG timestamp_fraction_capture` (0 or 1, the run's capture decision, D22; the row's contract is this document, its assertions `validate-timestamp-precision.sh` `capture/per-consumer`); `runtime-config` gains `timestamp-precision:` with the clamp annotation (contract owner `features/225-test-harness-coverage-gaps.md`, updated in the same commit; #613 (one name vocabulary) edits the same section and cites the same owner) |
 | New harness | `tests/validate-timestamp-precision.sh`, with `--list` and `--scenario` |
 | Harnesses extended | `validate-bucket-size-units.sh` (long spellings on `-bs`, `-du`, `-ru`; precision untouched with `-tp`), `validate-udm-specs.sh` (long spellings in the unit slot), `validate-index-read-back.sh` (the index at the run's precision, with a precision column on every row, and the drift check at the runtime precision as numbers, an old row with `-` read at its digits' precision, D13, D16, D17, D18, D19), `validate-runtime-config.sh`, `validate-help-content.sh`, `validate-doc-examples.sh` |
 | Goldens that move | drops 1 to 3: none (bucket labels are byte-identical by the rounding argument of § 6.1). Drop 4: the golden running `-ms -bs 1000` over a whole-second access log loses its `.000` (D4 applies to the deprecated switches, § 6.4) |
@@ -1259,6 +1273,57 @@ at millisecond precision reports `last_timestamp` drift (measured: `live=
 2025-02-20T10:06:14.000 preseed=2025-02-20T10:06:13.1000 drifted=yes`), and
 its end-of-run write replaces the row. Drift is observation only; the row is
 corrected once, by the run that reports it.
+
+**Step 3d, delivered 2026-10-02.** `$timestamp_capture_fraction` is settled once
+in `adapt_to_terminal_settings` and passed to `format_entry_block_src` as the
+`capture_fraction` compile option. The gate is decided per consumer (D21): it
+is open for a precision finer than the second, a width that is not a whole
+number of seconds, a `-st`/`-et` bound with a non-zero fraction, and the
+aggregate export (`-o`). Closed, the fixed-three-digit block clears the
+fraction without reading it, and the variable-length block strips it with a
+lookbehind instead of capturing and converting it; the `none` block is
+unchanged. The CSV input path in `read_and_process_logs` is outside the
+generated blocks and reads its fraction as before, until CSV input becomes a
+registry entry (#615). `-V benchmark-data` reports the decision as `CONFIG
+timestamp_fraction_capture` (D22).
+
+The gate first had no export condition. Against step 3c's build on the drop 1
+capture set, that version changed one value: the aggregate export's
+`observation.duration_seconds` was measured between whole seconds on every run
+not at millisecond precision (`2.66600012779236` to `2` on the three-line log,
+`3.8996000289917` to `3` on the carry log), the rest byte-identical. D21 adds
+the export as a consumer; with it, every product of the eleven runs is
+byte-identical to 3c's.
+
+Measured by alternating the 3c and 3d builds on one machine, medians with
+ranges, `-ni -n 0 -oe -V benchmark-data`, `parse/read_files`:
+
+| Log (its fraction) | Runs per build | 3c | 3d | Change |
+|---|---|---|---|---|
+| Corpus application log, 85 MB (fixed three digits) | 5 | 3.201 s [3.110–3.341] | 3.197 s [3.112–3.241] | −0.1 % |
+| Corpus access log, 148 MB (none: the gate cannot apply) | 3 | 7.171 s [7.125–7.300] | 7.263 s [7.239–7.368] | +1.3 % |
+| Generated application log, 500 000 lines, 41 MB (variable length) | 5 | 3.147 s [3.015–3.285] | 3.021 s [2.946–3.137] | −4.0 % |
+
+On a fixed-three-digit format the gate saves one short string read per line,
+below the noise; on a variable-length format it saves a capture and an
+exponent per line, the −4.0 % the generated log shows, which is the ceiling
+of this gate; a format without a fraction is untouched, and the access log's
++1.3 % is the variation of three runs. The single `run-benchmark.sh` runs
+against the before runs on 3b673ee (labels `525-3d-after`, `525-app-3d-after`)
+read 9.1 s to 9.5 s (+4.3 %) and 3.9 s to 3.8 s (−3.5 %), within the ±4 % of
+single runs on this machine.
+
+`validate-timestamp-precision.sh` gains `capture/per-consumer` (nine runs,
+each consumer's decision read from the row) and `capture/generator` (the
+generator emits the fraction arithmetic only under the gate); every one fails
+against 3c's build, which has neither, and against deliberately broken copies:
+without the export condition the `-o` row fails, a gate always open fails the
+three closed rows, and an ungated variable-length conversion fails the
+structural check. 60 passed; `validate-regression.sh` 74,
+`validate-format-registry.sh` 24, `validate-format-detection.sh` 283,
+`validate-csv-input.sh` 15, `validate-aggregate-export.sh` 161,
+`validate-statistics-demand.sh` 102 and the other readers of
+`-V benchmark-data` pass.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and

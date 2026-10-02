@@ -437,6 +437,9 @@ my $timestamp_precision_finest = 'us';
 # when the scale is above 1.
 my $bucket_key_scale = 1;
 my $bucket_size_ticks;
+# Whether the parse reads a line's sub-second part: settled once in
+# adapt_to_terminal_settings() and compiled into the generated scan blocks.
+my $timestamp_capture_fraction = 1;
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 
@@ -4473,19 +4476,26 @@ sub format_entry_block_src {
     #             reads, no regex, no exponent math
     #   none    — layout never carries a fraction: constant zero, no scan
     #   generic — variable/unguaranteed shape: the original s/// strip
+    # A run that reads no sub-second part ($opts->{capture_fraction} false)
+    # still strips the fraction for the date key and the layout parse, but
+    # neither reads nor converts it.
     # Then the layout parse, fronted by the last-seen memo: the date's
     # midnight epoch from %timestamp_date_cache (one timegm() per distinct
     # day) plus the time of day as arithmetic, as compile_format_time_parser.
     my $frac = $spec->{time}{frac} // 'generic';
+    my $capture = $opts->{capture_fraction} // 1;
     if ($frac eq 'fixed3') {
         die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
             unless $spec->{pattern_src} =~ /\\\.\\d\{3\}|\[\.,\]\\d\{3\}/;
-        push @body, q{$fractional_ms = substr($timestamp_str, 20, 3);
+        push @body, $capture ? q{$fractional_ms = substr($timestamp_str, 20, 3);
+substr($timestamp_str, 19) = '';}
+                             : q{$fractional_ms = 0;
 substr($timestamp_str, 19) = '';};
     } elsif ($frac eq 'none') {
         push @body, q{$fractional_ms = 0;};
     } else {
-        push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }};
+        push @body, $capture ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }}
+                             : q{$timestamp_str =~ s/(?<=:\d{2}:\d{2})[.,]\d{1,6}//; $fractional_ms = 0;};
     }
     my $layout = $spec->{time}{layout} // '';
     # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
@@ -4970,7 +4980,8 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric };
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric,
+                 capture_fraction => $timestamp_capture_fraction };
     @format_registry = ();
     @format_registry_members = ();
     @format_registry_pin_only = ();
@@ -15179,6 +15190,20 @@ sub adapt_to_terminal_settings {
         $bucket_size_ticks = int($bucket_size_seconds * $bucket_key_scale + 0.5) if $bucket_key_scale > 1;
     }
 
+    # The parse reads a line's sub-second part only when a consumer uses it: a
+    # precision finer than the second, a width that is not a whole number of
+    # seconds, a -st/-et bound with a non-zero fraction, or the aggregate
+    # export (-o), whose population duration is measured from the full
+    # timestamps. Otherwise a line's instant is its whole second, which every
+    # surface at the second or the minute truncates to, and which a
+    # whole-second bound cannot tell apart.
+    $timestamp_capture_fraction =
+           $time_unit_step{$timestamp_precision}{ms} < 1000
+        || $bucket_size_seconds != int($bucket_size_seconds)
+        || scalar(grep { defined && /\d{2}:\d{2}:\d{2}[.,]\d*[1-9]/ } $filter_range_start, $filter_range_end)
+        || $write_messages_to_csv
+        ? 1 : 0;
+
     # The per-run message-key cut, read by every key site, the trigram entry guard
     # and the benchmark data. Under -o or -g the key is cut at the cap; otherwise
     # at the terminal width, the most the messages table can print without
@@ -19886,6 +19911,7 @@ sub print_verbose_output {
     printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;
     printf "CONFIG\ttime_bucket_size\t%s\n", $time_bucket_size;
     printf "CONFIG\tbucket_size_seconds\t%.2f\n", $bucket_size_seconds;
+    printf "CONFIG\ttimestamp_fraction_capture\t%d\n", $timestamp_capture_fraction;
 
     print "=== END benchmark-data ===\n";
 }
