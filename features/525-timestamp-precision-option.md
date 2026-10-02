@@ -22,8 +22,9 @@ column carries `-`, is read at the precision its stored timestamps' digits
 carry, and no old row is rewritten); and 2026-10-02 with D20 (at a
 whole-second width a line counts in the second it was written in), D21 (the
 aggregate export needs the sub-second part, so the capture gate opens for it)
-and D22 (the capture decision is reported only under `-V benchmark-data`).
-The architect's decisions are § 4 (D1 to D22); no element of the run index's
+D22 (the capture decision is reported only under `-V benchmark-data`) and
+D23 (nanosecond carried by exact bounds, today's per-line updates untouched).
+The architect's decisions are § 4 (D1 to D23); no element of the run index's
 design remains **proposed**. A design element that no decision settles is
 implementation detail and is marked **proposed**.
 
@@ -491,6 +492,24 @@ Only the architect's decisions are numbered here.
   of the `-V benchmark-data` emitter, which runs only when that section is
   requested, reading the decision settled before the parse; the generated
   scan block carries nothing for it. Locked by the architect 2026-10-02.
+
+- **D23. Nanosecond carried by exact bounds, today's per-line updates
+  untouched.** The prototype of § 9 (`prototype/525-nanosecond-timestamps/
+  FINDINGS.md`) measured six designs over today's per-line code sliced from
+  `ltl`. Put to the architect: design H, "today's floating bound updates
+  unchanged, the digit string kept by the variable-length block only when the
+  run asks for nanosecond (a compile option, as for the capture gate), and two
+  flag tests per line taking the exact value when a bound moves or ties";
+  with `-tp ns` on a log carrying nine digits, the heading, the export's
+  observation and the run index show all nine as written, `.999999999`
+  without carrying, drift compared exactly; `-st`/`-et` keep accepting six
+  fractional digits and a width with a nanosecond part keeps keying in
+  seconds (D14); a run without `-tp ns` executes today's code plus the flag
+  tests. Measured: not asking −32 to +28 ns/line against the baseline (within
+  the rounds' spread), asking +219 to +348 ns/line (about 4 to 6 % of the
+  tool's per-line time), nine digits exact at every bound on a million lines
+  and on crafted ties. The architect: "yes, go ahead". Locked by the architect
+  2026-10-02.
 
 ---
 
