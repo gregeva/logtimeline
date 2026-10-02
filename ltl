@@ -703,16 +703,16 @@ my $format_current_line_ref = \0;      # ref to the read loop's line counter (di
 # and the views derived below; no sub keeps a token list, a unit regex or a
 # multiplier of its own.
 my @time_unit_ladder = (
-    { token => 'ns',    spellings => [qw( ns nsec )],              ms => 0.000001,       per_ms => 1_000_000, short => 'ns', medium => 'nsec', long => 'nanoseconds'  },
-    { token => 'us',    spellings => [qw( us usec )],              ms => 0.001,          per_ms => 1_000,     short => 'us', medium => 'usec', long => 'microseconds' },
-    { token => 'ms',    spellings => [qw( ms msec )],              ms => 1,                                   short => 'ms', medium => 'msec', long => 'milliseconds' },
-    { token => 's',     spellings => [qw( s sec second seconds )], ms => 1_000,                               short => 's',  medium => 'sec',  long => 'seconds'      },
-    { token => 'm',     spellings => [qw( m min minute minutes )], ms => 60_000,                              short => 'm',  medium => 'min',  long => 'minutes'      },
-    { token => 'h',     spellings => [qw( h hr hour hours )],      ms => 3_600_000,                           short => 'h',  medium => 'hr',   long => 'hours'        },
-    { token => 'd',     spellings => [qw( d day days )],           ms => 86_400_000,                          short => 'd',  medium => 'day',  long => 'days'         },
-    { token => 'w',     spellings => [qw( w wk week weeks )],      ms => 604_800_000,                         short => 'w',  medium => 'wk',   long => 'weeks'        },
-    { token => 'month', spellings => [qw( month mo mon months )],  ms => 2_592_000_000,                       short => 'mo', medium => 'mon',  long => 'months'       },
-    { token => 'year',  spellings => [qw( year y yr years )],      ms => 31_536_000_000,                      short => 'y',  medium => 'yr',   long => 'years'        },
+    { token => 'ns',    spellings => [qw( ns nsec nanosecond nanoseconds )],   ms => 0.000001,       per_ms => 1_000_000, short => 'ns', medium => 'nsec', long => 'nanoseconds'  },
+    { token => 'us',    spellings => [qw( us usec microsecond microseconds )], ms => 0.001,          per_ms => 1_000,     short => 'us', medium => 'usec', long => 'microseconds' },
+    { token => 'ms',    spellings => [qw( ms msec millisecond milliseconds )], ms => 1,                                   short => 'ms', medium => 'msec', long => 'milliseconds' },
+    { token => 's',     spellings => [qw( s sec second seconds )],             ms => 1_000,                               short => 's',  medium => 'sec',  long => 'seconds'      },
+    { token => 'm',     spellings => [qw( m min minute minutes )],             ms => 60_000,                              short => 'm',  medium => 'min',  long => 'minutes'      },
+    { token => 'h',     spellings => [qw( h hr hour hours )],                  ms => 3_600_000,                           short => 'h',  medium => 'hr',   long => 'hours'        },
+    { token => 'd',     spellings => [qw( d day days )],                       ms => 86_400_000,                          short => 'd',  medium => 'day',  long => 'days'         },
+    { token => 'w',     spellings => [qw( w wk week weeks )],                  ms => 604_800_000,                         short => 'w',  medium => 'wk',   long => 'weeks'        },
+    { token => 'month', spellings => [qw( month mo mon months )],              ms => 2_592_000_000,                       short => 'mo', medium => 'mon',  long => 'months'       },
+    { token => 'year',  spellings => [qw( year y yr years )],                  ms => 31_536_000_000,                      short => 'y',  medium => 'yr',   long => 'years'        },
 );
 # Each step's decimals: the rounding precision relative to the millisecond
 # storage unit, the decimal places a millisecond value needs to carry one unit

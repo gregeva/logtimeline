@@ -91,9 +91,9 @@ class and are not part of the time ladder.
 
 | step | canonical | also accepted | length |
 |---|---|---|---|
-| nanosecond | `ns` | `nsec` | 10⁻⁶ ms |
-| microsecond | `us` | `usec` | 10⁻³ ms |
-| millisecond | `ms` | `msec` | 1 ms |
+| nanosecond | `ns` | `nsec`, `nanosecond`, `nanoseconds` | 10⁻⁶ ms |
+| microsecond | `us` | `usec`, `microsecond`, `microseconds` | 10⁻³ ms |
+| millisecond | `ms` | `msec`, `millisecond`, `milliseconds` | 1 ms |
 | second | `s` | `sec`, `second`, `seconds` | 1 000 ms |
 | minute | `m` | `min`, `minute`, `minutes` | 60 s |
 | hour | `h` | `hr`, `hour`, `hours` | 60 min |
@@ -101,6 +101,11 @@ class and are not part of the time ladder.
 | week | `w` | `wk`, `week`, `weeks` | 7 d |
 | month | `month` | `mo`, `mon`, `months` | 30 d |
 | year | `year` | `y`, `yr`, `years` | 365 d |
+
+The long sub-second spellings (`millisecond(s)`, `microsecond(s)`,
+`nanosecond(s)`) are the amendment of `features/525-timestamp-precision-option.md`
+D6 (the precision values resolve through this ladder, which carries them for
+every time-unit option).
 
 Matching is case-insensitive on this table (`1D`, `1H`, `1M` read as day, hour,
 minute). `m` is minute on every time-unit surface; no spelling that could be read

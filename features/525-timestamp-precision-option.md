@@ -4,7 +4,8 @@
 
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
-progress: drop 1 (the one formatter) delivered 2026-10-02, § 10.
+progress: drops 1 (the one formatter) and 2 (the long spellings) delivered
+2026-10-02, § 10.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -858,13 +859,13 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 2: the long spellings on the ladder**
 
-- [ ] **Every time-unit option accepts them (D6).** `-bs 100ms`,
+- [x] **Every time-unit option accepts them (D6).** `-bs 100ms`,
   `-bs 100millisecond` and `-bs 100milliseconds` give the same
   `bucket_size_seconds`; `microsecond(s)` and `nanosecond(s)` likewise; `-du`,
   `-ru` and the `-udm` unit slot resolve the long spellings to the same token as
   the short ones, in any case. *Assertable:* `validate-bucket-size-units.sh`
   (its `-bs`, `-du`, `-ru` scenarios) and `validate-udm-specs.sh`.
-- [ ] **One spelling table (names the mechanism, D6).** The long spellings
+- [x] **One spelling table (names the mechanism, D6).** The long spellings
   appear only in the ladder's table; no other sub lists a time-unit spelling.
   *Assertable:* the existing one-ladder structural check.
 
@@ -1091,6 +1092,32 @@ base build with the values above, and the truncation and freshness ones fail
 against a deliberately broken copy). `validate-regression.sh` (74),
 `validate-aggregate-export.sh` (161) and `validate-index-read-back.sh` (74)
 pass unchanged.
+
+**Drop 2, delivered 2026-10-02.** The ladder's `ns`, `us` and `ms` rows carry
+`nanosecond(s)`, `microsecond(s)` and `millisecond(s)`; `time_unit_canonical`
+resolves them for `-bs`, `-du`, `-ru` and the `-udm` unit slot, in any case.
+The canonical-token list in help rows and rejections is unchanged.
+`validate-bucket-size-units.sh` runs every ladder spelling (44, the six long
+ones and `MilliSeconds` among them) through the four surfaces; checks that
+`-du` and `-ru` report the step's token in `-V runtime-config`; compares
+`bucket_size_seconds` and the timeline of each long spelling with its short
+form at a one-hour width (`-bs 3600000milliseconds` against `-bs 3600000ms`,
+and the microsecond and nanosecond twins), an hour rather than the
+criterion's 100 ms because its fixture spans five days; and flags a long
+spelling in any `qw()` list outside the ladder. `validate-udm-specs.sh`
+`time-unit-long-spellings` reads `unit=ms(time)`, `us` and `ns` from
+`-V udm-specs`. Against the base build every new assertion fails (the long
+spellings are rejected as unknown units).
+
+Two pre-existing defects in `validate-bucket-size-units.sh` were fixed in
+this drop, at the architect's direction: its twelve bucket-width
+equivalences ran before the scenario selector was parsed and were never
+registered, so `--list` ran them and `--scenario` could not select them; and
+the spelling list was defined inside the preceding scenario's block, so
+`--scenario one-mechanism/spellings` alone looped over nothing and passed.
+The equivalences are now scenarios named from the table that drives them,
+the list is at file scope, and the spelling scenario fails unless it checked
+every spelling. Each of the harness's 27 scenarios passes when run alone.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
