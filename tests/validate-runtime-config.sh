@@ -525,6 +525,13 @@ scenario_runtime_config_timestamp_precision() {
             contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
     done
 
+    run_ltl "rc-tp-ns" -V runtime-config -tp nanosecond "$TEST_LOG"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^timestamp-precision: us; clamped from ns$' \
+        asserts     '-tp nanosecond resolves to the microsecond, the finest the parse keeps, and the row says what was asked for in the clamp annotation.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from, set by the -tp resolution in adapt_to_command_line_options()' \
+        contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
+
     run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
     assert_no_line "$RUN_STDOUT" \
         pattern     '^timestamp-precision:' \

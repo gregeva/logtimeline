@@ -285,7 +285,7 @@ Semicolon-separated form matches the `histogram-bin-counters` (#189) precedent.
 
 **2026-09-13:** the `--exact-percentiles` deprecation warning (site 4, scenario 7) no longer exists. The flag was removed in #287 (message-stats bin-counter data model) as a declared breaking change; `tests/validate-runtime-config.sh` now asserts that `ltl` rejects the flag as an unknown option. The three remaining silent-override warnings are unaffected.
 
-**2026-10-02:** `-tp, --timestamp-precision` (#525) joins the per-flag rows as `timestamp-precision: <token>`, the canonical time-unit token (`m`, `s`, `ms`, `us`) whatever spelling was given; scenario `runtime-config-timestamp-precision` asserts it and that no row is emitted when `-tp` is not supplied. The `; clamped from <orig>` form is reserved for the clamp to the file's true precision (`features/525-timestamp-precision-option.md` § 6.4, D4).
+**2026-10-02:** `-tp, --timestamp-precision` (#525) joins the per-flag rows as `timestamp-precision: <token>`, the canonical time-unit token (`m`, `s`, `ms`, `us`) whatever spelling was given; scenario `runtime-config-timestamp-precision` asserts it and that no row is emitted when `-tp` is not supplied. Its first emitter is the `-tp` resolution: `-tp ns` reads `timestamp-precision: us; clamped from ns`, the microsecond being the finest the parse keeps; the clamp to the precision the log's timestamps carry uses the same form (`features/525-timestamp-precision-option.md` § 6.4, D4).
 
 Self-test result on landing: **23 passed, 0 failed.**
 

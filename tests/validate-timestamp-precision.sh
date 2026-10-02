@@ -48,7 +48,8 @@ scenario_register \
     keyscale/whole-second-floor \
     keyscale/structure \
     capture/per-consumer \
-    capture/generator
+    capture/generator \
+    nanosecond/parse-cap
 SCENARIO_USAGE_NOTE='Contract: features/525-timestamp-precision-option.md § 7 (Acceptance criteria)'
 scenario_parse_args "$@"
 
@@ -75,6 +76,7 @@ CARRY="$TMP_DIR/carry.log"
 DAYEND="$TMP_DIR/dayend.log"
 SIX="$TMP_DIR/six.log"
 EDGE="$TMP_DIR/edge.log"
+NINE="$TMP_DIR/nine.log"
 printf '%s\n' \
     '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' \
@@ -98,6 +100,10 @@ printf '%s\n' \
 printf '%s\n' \
     '2026-01-26 10:00:01,100000 [main] INFO  com.example.Service - on a 100 ms edge' \
     '2026-01-26 10:00:02,008000 [main] ERROR com.example.Service - on a 500 us edge' > "$EDGE"
+# NINE carries nine-digit fractions; the parse keeps six of them.
+printf '%s\n' \
+    '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
+    '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > "$NINE"
 
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the assertions read the timeline labels, the summary heading's bounds, the
@@ -374,7 +380,7 @@ fi
 # ---------------------------------------------------------------------------
 if scenario_wanted option/values; then
 current_scenario="option/values"
-for group in "m minute Minutes" "s second SECONDS sec" "ms millisecond msec MilliSeconds" "us microsecond usec Microseconds"; do
+for group in "m minute Minutes" "s second SECONDS sec" "ms millisecond msec MilliSeconds" "us microsecond usec Microseconds" "ns nanosecond nsec Nanoseconds"; do
     read -r token rest <<< "$group"
     run_in "val-$token" "${COMMON[@]}" -ni -bs 1 -tp "$token" "$THREE"
     for spelling in $rest; do
@@ -532,10 +538,10 @@ run_rejected() {
 
 if scenario_wanted rejection/values; then
 current_scenario="rejection/values"
-for v in bogus h ns; do
-    run_rejected "rej-$v" "Invalid timestamp precision '$v'\. Valid values: m, s, ms, us\$" \
+for v in bogus h d; do
+    run_rejected "rej-$v" "Invalid timestamp precision '$v'\. Valid values: m, s, ms, us, ns\$" \
         "-tp $v exits non-zero listing the accepted values" \
-        "a value that is not one of the four precision steps is a usage error naming the accepted values, and the run does nothing" \
+        "a value that is not one of the five precision steps is a usage error naming the accepted values, and the run does nothing" \
         "$CONTRACT_D3" "${COMMON[@]}" -ni -tp "$v" "$THREE"
 done
 fi
@@ -742,6 +748,27 @@ else
         'format_entry_block_src() and build_format_registry() in ltl' "$CONTRACT_D11_GATE" \
         "gated fixed3: $fixed" "gated generic: $generic" "ungated arithmetic lines: $ungated" "compile option set from the gate: $opts"
 fi
+fi
+
+# ---------------------------------------------------------------------------
+# Nanosecond before the exact data model (D4): read to the microsecond
+# ---------------------------------------------------------------------------
+if scenario_wanted nanosecond/parse-cap; then
+current_scenario="nanosecond/parse-cap"
+CONTRACT_D4='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains; nanosecond resolves to microsecond, with a notice, until the parse carries nine digits) and D3 (-tp covers nanosecond)'
+for v in ns nanosecond; do
+    run_in "nine-$v" "${COMMON[@]}" -ni -bs 1 -tp "$v" "$NINE"
+    b=$(heading_bounds "$TMP_DIR/nine-$v")
+    n=$(grep -cxF 'Note: timestamps are shown to the microsecond: nanosecond precision was asked for, and at most 6 fractional digits are read from a timestamp' "$TMP_DIR/nine-$v/err.txt" || true)
+    if [[ "$b" == "2026-01-26 10:00:01.123456|2026-01-26 10:00:02.999999" && "$n" == 1 ]]; then
+        pass_with "-tp $v renders six digits, .999999 without carrying, with one notice naming the microsecond"
+    else
+        fail_with "-tp $v renders six digits, .999999 without carrying, with one notice naming the microsecond" \
+            "nanosecond is accepted and shown to the microsecond, the six digits the parse keeps; the stderr notice names the microsecond and the six-digit limit" \
+            'adapt_to_command_line_options() in ltl (-tp resolution, the parse cap)' "$CONTRACT_D4" \
+            "heading: $b" "notice lines: $n" "stderr: $(head -2 "$TMP_DIR/nine-$v/err.txt" | tr '\n' '~')"
+    fi
+done
 fi
 
 # ---------------------------------------------------------------------------

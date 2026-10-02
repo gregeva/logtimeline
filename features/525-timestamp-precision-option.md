@@ -1012,7 +1012,7 @@ directory, and is shaped to the assertion that reads it.
   *Assertable* on the clock layouts; the stated-unit arithmetic for a field in
   milliseconds or microseconds has no registered format today and is asserted
   structurally (the step is read from the ladder, no digit table exists).
-- [ ] **Nanosecond before the final drop (D4).** `-tp ns` and `-tp nanosecond`
+- [x] **Nanosecond before the final drop (D4).** `-tp ns` and `-tp nanosecond`
   are accepted from this drop, in any case. `-tp ns` on the nine-digit set
   renders six fractional digits and the notice names microsecond and the
   six-digit limit. *Assertable.*
@@ -1324,6 +1324,26 @@ structural check. 60 passed; `validate-regression.sh` 74,
 `validate-csv-input.sh` 15, `validate-aggregate-export.sh` 161,
 `validate-statistics-demand.sh` 102 and the other readers of
 `-V benchmark-data` pass.
+
+**Drop 4, in two steps.** 4a accepts `-tp ns` and resolves it to the finest
+precision the parse keeps; 4b clamps the precision to what the log's
+timestamps carry. Neither changes the per-line path.
+
+**Step 4a, delivered 2026-10-02.** `-tp` accepts every ladder step from the
+minute down, `ns` and `nanosecond` included. A step finer than
+`$timestamp_precision_finest` (the microsecond: the parse keeps six fractional
+digits) resolves to it at settlement, prints "Note: timestamps are shown to the
+microsecond: nanosecond precision was asked for, and at most 6 fractional
+digits are read from a timestamp" (the step names and the digit count read
+from the ladder), and records the request in the `clamped from` annotation, so
+`-V runtime-config` reads `timestamp-precision: us; clamped from ns`. On a log
+with nine-digit fractions `-tp ns` renders `.123456` and `.999999` for lines
+written at `.123456789` and `.999999999`: the digits past the sixth are not
+read, so nothing carries. `--help` and `docs/usage.md` name `ns`.
+`validate-timestamp-precision.sh` gains `nanosecond/parse-cap` and the `ns`
+spellings in `option/values` (65 passed); `validate-runtime-config.sh` gains the
+`clamped from ns` row (57 passed); both fail against the 3d build, which
+rejects `-tp ns`.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
