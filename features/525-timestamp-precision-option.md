@@ -3,8 +3,9 @@
 ## Status
 
 Specification agreed with the architect 2026-09-29 on branch
-`525-timestamp-precision-option` off `release/0.19.0`; implementation not
-started. Amended 2026-09-29, after the agreed specification merged, with D13
+`525-timestamp-precision-option` off `release/0.19.0`. Implementation in
+progress: drop 1 (the one formatter) delivered 2026-10-02, § 10.
+Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
 and D15 (the drift check compares at the run's precision, or at the stored
@@ -827,7 +828,7 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 1: the one formatter**
 
-- [ ] **One formatter (names the mechanism, D1, D8).** Outside
+- [x] **One formatter (names the mechanism, D1, D8).** Outside
   `format_timestamp`, no `strftime` call with a date or time pattern, no
   `sprintf(".%03d"` and no string built from `localtime` or `gmtime` fields
   remains in `ltl`; the field readers that render nothing (`fold_epoch`,
@@ -835,23 +836,23 @@ directory, and is shaped to the assertion that reads it.
   `print_bar_graph`) are exempt by name; the three former subs are gone and `run_file_stamp` calls
   the formatter. *Assertable:* structural scenario over `ltl` (the shape of
   `features/524-bucket-size-unit.md`'s "exactly one ladder" check).
-- [ ] **One rounding (D7).** On the three-digit set under `-ms -bs 1000`: the
+- [x] **One rounding (D7).** On the three-digit set under `-ms -bs 1000`: the
   heading's first bound, the export's `observation.start` and the index's
   `first_timestamp` all end in `01.123`. *Assertable:* heading from stdout,
   `-V aggregate-export`, the index file.
-- [ ] **Carry (D7).** On the carry set under `-ms -bs 100`: the heading's last bound, the
+- [x] **Carry (D7).** On the carry set under `-ms -bs 100`: the heading's last bound, the
   index's `last_timestamp` and the line's bucket label name the following second
   at `.000`; the `23:59:59.9996` line names the next day's `00:00:00.000`; no
   four-digit fraction appears in any output. *Assertable.*
-- [ ] **Minute and second truncate (D7).** On the carry set under `-s -bs 1s`, the
+- [x] **Minute and second truncate (D7).** On the carry set under `-s -bs 1s`, the
   `10:06:13.9996` line's label and heading bound read `10:06:13`. *Assertable.*
-- [ ] **Unchanged where the copies agreed.** The regression goldens pass
+- [x] **Unchanged where the copies agreed.** The regression goldens pass
   unchanged; on integer-second sources the index's timestamp and clock columns
   (the mean cells being those of #616, one gated derivation of means) and the export are byte-identical before and
   after; `generated_at` keeps `%Y-%m-%dT%H:%M:%SZ`; the output file names keep
   the `YYYY-MM-DD_HHMMSS` local-time stamp; `validate-aggregate-export.sh` and
   `validate-index-read-back.sh` pass unchanged. *Assertable.*
-- [ ] **Older index rows stay fresh.** An index written by the base commit is
+- [x] **Older index rows stay fresh.** An index written by the base commit is
   read by the new build as `freshness: fresh` in `-V index-read-back` (the
   string-equality check on `file_mtime`). *Assertable.*
 
@@ -1053,9 +1054,49 @@ Each drop is a commit and push on the issue branch; one PR at the end.
    microsecond. § 6.4.
 5. **Nanosecond carried exactly,** after the prototype. § 6.5.
 
+**Drop 1, delivered 2026-10-02.** `format_timestamp($epoch, precision, shape, z)`
+replaces `format_epoch_iso`, `format_observation_timestamp` and
+`format_bucket_timestamp`; the five inline ISO sites, `run_file_stamp` and the
+timestamp column width call it. Its fractional digits come from the time-unit
+ladder's `decimals` (ms 3, us 6), so it keeps no unit table of its own.
+`$timestamp_precision` (`m`, `s` or `ms`) is settled once from `-s`/`-ms`
+and keys the label format's `:%S`; the bucket key's scale still follows
+`-ms` until drop 3 (D14). The index's first and last timestamps stay at the
+millisecond and the drift comparison is still by string until drop 3 (D13,
+D18).
+
+Measured against the base commit (3b673ee) with captures of the summary heading,
+the timeline, the STATS and MESSAGES CSVs, the aggregate export and the run
+index, on three generated application logs (fractions `.123`/`.456`/`.789`; a
+line at `10:06:13.9996`; a line at `23:59:59.9996`) and the committed
+whole-second access-log fixture `tests/fixtures/gated-means-access.txt`, under
+the default, `-s`, `-ms` and `-pr week`. Per-run clock values were masked and
+their shapes compared. Every product is byte-identical except these strings:
+
+| Run | Surface | Base | Drop 1 |
+|---|---|---|---|
+| `.123` line, `-ms` | heading first bound, export `observation.start` | `10:00:01.122` | `10:00:01.123` |
+| `.100` line, `-ms` | heading first bound, export `observation.start` | `10:06:10.099` | `10:06:10.100` |
+| `.789` line, `-pr week -ms` | heading last bound, export `observation.end` | `Mon 10:00:03.788` | `Mon 10:00:03.789` |
+| `10:06:13.9996` line, `-ms` | heading last bound, export `observation.end` | `10:06:13.999` | `10:06:14.000` |
+| `10:06:13.9996` line, `-ms` and `-s` | index `last_timestamp`, file and selection rows | `10:06:13.1000` | `10:06:14.000` |
+| `23:59:59.9996` line, `-ms` | heading, export, index | `2025-02-20 23:59:59.999`, index `23:59:59.1000` | `2025-02-21 00:00:00.000` |
+
+The line's bucket label was already `10:06:14.000` (and `2025-02-21
+00:00:00.000`), so heading, index and bucket now agree. An index written by the
+base build is read by the new one as `freshness: fresh`, `lookup:
+tier_1_selection`. `tests/validate-timestamp-precision.sh` holds drop 1's
+criteria (7 assertions; the five covering changed behaviour fail against the
+base build with the values above, and the truncation and freshness ones fail
+against a deliberately broken copy). `validate-regression.sh` (74),
+`validate-aggregate-export.sh` (161) and `validate-index-read-back.sh` (74)
+pass unchanged.
+
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
-`525-after`), `$version_number` restored before the gate, `--help` and
+`525-after`), with `single-day-application-log-standard` (`525-app-before`,
+`525-app-after`) for drop 3's capture gate; both before runs taken
+2026-10-02 on 3b673ee, `$version_number` restored before the gate, `--help` and
 `docs/usage.md` agreeing.
 
 ---

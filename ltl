@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-525";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -421,6 +421,10 @@ my %filter_range;
 # 'start'/'end' present only for the bounds given in time-only form.
 my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
+# The precision the run renders timestamps at, a canonical time-unit token
+# (m, s, ms, us), settled once in adapt_to_command_line_options() and passed
+# to format_timestamp() by every site that renders at the run's precision.
+my $timestamp_precision = 'm';
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 
@@ -1938,14 +1942,6 @@ sub serialize_filters {
     return join(';', @parts);
 }
 
-sub format_epoch_iso {
-    my ($epoch) = @_;
-    return '-' unless defined $epoch && $epoch > 0;
-    my $int_part = int($epoch);
-    my $ms = int(($epoch - $int_part) * 1000 + 0.5);
-    return sprintf("%s.%03d", strftime("%Y-%m-%dT%H:%M:%S", gmtime($int_part)), $ms);
-}
-
 sub parse_iso_date_to_epoch {
     my ($iso_str) = @_;
     return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
@@ -2059,7 +2055,7 @@ sub read_index_file {
             next;
         }
         my $on_disk_size  = $stat[7];
-        my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));
+        my $on_disk_mtime = format_timestamp($stat[9], precision => 's', shape => 'iso');
 
         my $file_row = $file_entries{$in_file};
         my $file_fresh = 0;
@@ -2246,8 +2242,8 @@ sub detect_index_drift {
             # Format timestamps to match preseed ISO representation.
             my $live_v_fmt = $live_v;
             if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
-                $live_v_fmt = format_epoch_iso($live_v);
-                next if !defined $live_v_fmt || $live_v_fmt eq '-';
+                next unless $live_v > 0;
+                $live_v_fmt = format_timestamp($live_v, precision => 'ms', shape => 'iso');
             }
 
             my $drifted = 0;
@@ -6582,7 +6578,7 @@ sub write_aggregate_export {
     ## PROVENANCE ##
     my $determining = aggregate_mapping();
     $determining->{version}      = $version_number;
-    $determining->{generated_at} = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());
+    $determining->{generated_at} = format_timestamp(time(), precision => 's', shape => 'iso', z => 1);
     my $options = aggregate_mapping();
     my $cli_options = build_run_options_string();
     $options->{'command-line'} = $cli_options if $cli_options ne '';
@@ -6624,8 +6620,8 @@ sub write_aggregate_export {
 
     if (defined $output_timestamp_min && defined $output_timestamp_max) {
         my $observation = aggregate_mapping();
-        $observation->{start} = format_observation_timestamp($output_timestamp_min);
-        $observation->{end}   = format_observation_timestamp($output_timestamp_max);
+        $observation->{start} = format_timestamp($output_timestamp_min, precision => $timestamp_precision, shape => 'run');
+        $observation->{end}   = format_timestamp($output_timestamp_max, precision => $timestamp_precision, shape => 'run');
         my $span = $output_timestamp_max - $output_timestamp_min;
         $observation->{duration_seconds} = aggregate_number($span);
         $observation->{duration}         = format_time($span, 's', 'long', ' ', 3);
@@ -6735,7 +6731,7 @@ sub write_aggregate_export {
     my @buckets;
     for my $bucket (sort { $a <=> $b } keys %log_occurrences) {
         my $b = aggregate_mapping();
-        $b->{timestamp} = format_bucket_timestamp($bucket);
+        $b->{timestamp} = format_timestamp($print_milliseconds ? $bucket / 1000 : $bucket, precision => $timestamp_precision, shape => 'run');
         my $occurrences = 0;
         my $bucket_categories = aggregate_mapping();
         my ($err_rate, $msg_rate);
@@ -6931,7 +6927,7 @@ sub write_index_file {
                         my $existing_mtime = $row->[$col_idx{file_mtime}] // '';
                         my $fd = $index_file_data{$epath};
                         if ($fd && $existing_mtime ne '') {
-                            my $current_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
+                            my $current_mtime = format_timestamp($fd->{file_mtime}, precision => 's', shape => 'iso');
                             if ($existing_mtime eq $current_mtime) {
                                 $files_unchanged{$epath} = 1;
                                 push @preserved_rows, $row;
@@ -6959,16 +6955,18 @@ sub write_index_file {
             $index_csv->print($ofh, $row);
         }
 
-        my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());
+        my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');
+        # A first or last timestamp at the millisecond, or - where none was seen.
+        my $index_timestamp = sub { my ($epoch) = @_; defined $epoch && $epoch > 0 ? format_timestamp($epoch, precision => 'ms', shape => 'iso') : '-' };
 
         for my $file (@files_processed) {
             my $fd = $index_file_data{$file} or next;
             my $path = $use_absolute_paths ? File::Spec->rel2abs($file) : $file;
 
             unless ($files_unchanged{$file}) {
-                my $mtime_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
-                my $first_ts  = format_epoch_iso($fd->{first_timestamp});
-                my $last_ts   = format_epoch_iso($fd->{last_timestamp});
+                my $mtime_iso = format_timestamp($fd->{file_mtime}, precision => 's', shape => 'iso');
+                my $first_ts  = $index_timestamp->($fd->{first_timestamp});
+                my $last_ts   = $index_timestamp->($fd->{last_timestamp});
 
                 # The means through the one helper and the CSV formatter at two
                 # decimals whatever -cp says, empty for no data (#616 D8, D15, D16).
@@ -6989,8 +6987,8 @@ sub write_index_file {
             }
 
             {
-                my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
-                my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
+                my $sel_first = $index_timestamp->($fd->{sel_first_timestamp});
+                my $sel_last  = $index_timestamp->($fd->{sel_last_timestamp});
                 my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration_mean', 2 ) // '';
                 my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
                 my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count_mean',    2 ) // '';
@@ -12913,29 +12911,40 @@ sub format_bytes {
 # The stamp that names every output file of a run, read once so the STATS
 # and MESSAGES CSVs and the aggregate export share it.
 sub run_file_stamp {
-    return $run_file_stamp if defined $run_file_stamp;
-    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
-    $run_file_stamp = sprintf("%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec);
+    $run_file_stamp //= format_timestamp(time(), precision => 's', shape => 'file');
     return $run_file_stamp;
 }
 
-# A bucket key rendered as the timeline and the STATS CSV print it: the run's
-# timestamp format, and the millisecond part under -ms, where the key is an
-# integer millisecond count.
-sub format_bucket_timestamp {
-    my ($bucket) = @_;
-    return strftime($output_timestamp_format, gmtime($bucket / 1000)) . sprintf(".%03d", $bucket % 1000)
-        if $print_milliseconds;
-    return strftime($output_timestamp_format, gmtime($bucket));
-}
-
-# An included-line epoch (fractional seconds) rendered as the run summary
-# heading prints the observation window's bounds.
-sub format_observation_timestamp {
-    my ($epoch) = @_;
-    my $str = strftime($output_timestamp_format, gmtime($epoch));
-    $str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;
-    return $str;
+# The one timestamp formatter: every site that renders or writes a timestamp
+# calls it. $epoch is in seconds; a bucket key held in integer sub-second
+# units is passed divided by its scale.
+#   precision  a time-unit token. m and s show no sub-second digit and take
+#              the whole second by truncation, as clocks and bucket labels do;
+#              a finer step shows the digits its ladder decimals give (ms 3,
+#              us 6), rounded half-up once at the last one shown, the carry
+#              reaching the second, the minute and the date.
+#   shape      run:  the run's label format ($output_timestamp_format), UTC;
+#              iso:  %Y-%m-%dT%H:%M:%S, UTC, the run index's and the
+#                    aggregate export's date-time;
+#              file: %Y-%m-%d_%H%M%S in local time, the output file-name stamp.
+#   z          appends the UTC designator Z.
+sub format_timestamp {
+    my ($epoch, %opt) = @_;
+    my $step   = $time_unit_step{ $opt{precision} };
+    my $digits = $step->{ms} <= 1 ? $step->{decimals} + 3 : 0;
+    my ($whole, $fraction) = (int($epoch), '');
+    if ($digits) {
+        my $scale = 10 ** $digits;
+        my $ticks = int($epoch * $scale + 0.5);
+        my $part  = $ticks % $scale;
+        $whole    = ($ticks - $part) / $scale;
+        $fraction = sprintf('.%0*d', $digits, $part);
+    }
+    my $shape = $opt{shape};
+    my $str = $shape eq 'file'
+        ? strftime('%Y-%m-%d_%H%M%S', localtime($whole))
+        : strftime($shape eq 'iso' ? '%Y-%m-%dT%H:%M:%S' : $output_timestamp_format, gmtime($whole));
+    return $str . $fraction . ($opt{z} ? 'Z' : '');
 }
 
 sub build_csv_filename {
@@ -14976,12 +14985,14 @@ sub adapt_to_command_line_options {
     # Under --profile the calendar date is folded away: day/workday render
     # time-of-day only (%H:%M), week/workweek prefix the weekday (%a %H:%M).
     # The format ends at the minute here; the :%S append below adds second
-    # precision within the folded period when -s/-ms is set, same as normal mode.
+    # precision within the folded period when the run's precision is finer
+    # than the minute, same as normal mode.
     if ($profile_mode) {
         $output_timestamp_format = $profile_modes{$profile_mode}{format};
     }
 
-    $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
+    $timestamp_precision = $print_milliseconds ? 'ms' : $print_seconds ? 's' : 'm';
+    $output_timestamp_format .= ":%S" if $timestamp_precision ne 'm';
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -18552,7 +18563,7 @@ sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
     my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;
     my $show_heatmap = $heatmap_enabled;
-    my $timestamp_w  = length(strftime($output_timestamp_format, gmtime(0))) + ($print_milliseconds ? 4 : 0);
+    my $timestamp_w  = length(format_timestamp(0, precision => $timestamp_precision, shape => 'run'));
     my $latency_w    = $show_heatmap ? $heatmap_width : 52;
 
     my @cols;
@@ -19846,7 +19857,7 @@ sub print_bar_graph {
         my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
         my $prev_fold_wday;
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
-            my $bucket_time_str = format_bucket_timestamp($bucket);
+            my $bucket_time_str = format_timestamp($print_milliseconds ? $bucket / 1000 : $bucket, precision => $timestamp_precision, shape => 'run');
             # Blanking the repeated weekday is a terminal-display affordance only.
             # The CSV must keep the full folded timestamp on every row so each
             # row is self-describing (a blanked "    10:00" would be ambiguous to
@@ -21210,8 +21221,8 @@ sub print_summary_table {
     my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
 
     ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
-    my $min_timestamp_str = format_observation_timestamp($output_timestamp_min);
-    my $max_timestamp_str = format_observation_timestamp($output_timestamp_max);
+    my $min_timestamp_str = format_timestamp($output_timestamp_min, precision => $timestamp_precision, shape => 'run');
+    my $max_timestamp_str = format_timestamp($output_timestamp_max, precision => $timestamp_precision, shape => 'run');
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
