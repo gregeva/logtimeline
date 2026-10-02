@@ -19,8 +19,9 @@ rounded to the comparison precision, never as strings); amended again
 2026-09-29 with D19 (an index row written before this change, whose precision
 column carries `-`, is read at the precision its stored timestamps' digits
 carry, and no old row is rewritten); D20 (2026-10-02: at a whole-second
-width a line counts in the second it was written in). The architect's decisions
-are § 4 (D1 to D20); no element of the run index's design remains **proposed**. A design
+width a line counts in the second it was written in); D21 (2026-10-02: the
+aggregate export needs the sub-second part, so the capture gate opens for it).
+The architect's decisions are § 4 (D1 to D21); no element of the run index's design remains **proposed**. A design
 element that no decision settles is implementation detail and is marked
 **proposed**.
 
@@ -460,6 +461,21 @@ Only the architect's decisions are numbered here.
   (after first answering B). A width with a millisecond or microsecond part is
   unaffected: its key rounds at that unit, as D7 and D14 have it, so `-bs
   100ms` keeps ten buckets per second. Locked by the architect 2026-10-02.
+
+- **D21. The aggregate export needs the sub-second part.** Found while
+  building the capture gate (step 3d): with the fraction not read, the
+  export's population duration (`observation.duration_seconds`, last line
+  minus first) was measured between whole seconds, `2.666` becoming `2` on a
+  run at minute precision. The architect: "when I said we typically don't
+  care [about] anything subsecond, that's true. But sometimes we also do. This
+  YAML export is exactly one of those situations. [...] you're framing this as
+  if all consumers are the same consumers, whereas they're not. So no, you
+  can't truncate the precision away from the current output to the aggregate
+  summary YAML file." The gate is decided per consumer: the parse reads the
+  fraction whenever a consumer that measures with it is active, the aggregate
+  export (`-o`) among them, beside a precision finer than the second, a
+  sub-second width and a sub-second `-st`/`-et` bound. Locked by the architect
+  2026-10-02.
 
 ---
 
