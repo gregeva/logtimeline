@@ -49,7 +49,9 @@ scenario_register \
     keyscale/structure \
     capture/per-consumer \
     capture/generator \
-    nanosecond/parse-cap \
+    nanosecond/exact \
+    nanosecond/index-and-export \
+    nanosecond/rounding-below \
     truth/clamped \
     truth/ladder \
     truth/several-files \
@@ -759,7 +761,7 @@ current_scenario="capture/generator"
 gen=$(perl -ne '$in = 1 if /^sub format_entry_block_src\b/; $in = 0 if $in && /^}/; print if $in' "$LTL")
 fixed=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{\$fractional_ms = substr\(\$timestamp_str, 20, 3\);' || true)
 generic=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{if \(\$timestamp_str =~ s/.*10 \*\* \(3 - length' || true)
-ungated=$(printf '%s' "$gen" | grep -E 'fractional_ms = substr|10 \*\* \(3 - length' | grep -cvE '\$capture \? q\{' || true)
+ungated=$(printf '%s' "$gen" | grep -E 'fractional_ms = substr|fractional_ms = \$fraction_digits = substr|10 \*\* \(3 - length' | grep -cvE '(\$capture|\$ns)[[:space:]]+\? q\{' || true)
 opts=$(grep -cE 'capture_fraction => \$timestamp_capture_fraction' "$LTL" || true)
 if [[ "$fixed" == 1 && "$generic" == 1 && "$ungated" == 0 && "$opts" == 1 ]]; then
     pass_with "the scan block carries the fraction arithmetic only when the gate is open"
@@ -772,24 +774,67 @@ fi
 fi
 
 # ---------------------------------------------------------------------------
-# Nanosecond before the exact data model (D4): read to the microsecond
+# Nanosecond carried exactly (D23)
 # ---------------------------------------------------------------------------
-if scenario_wanted nanosecond/parse-cap; then
-current_scenario="nanosecond/parse-cap"
-CONTRACT_D4='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains; nanosecond resolves to microsecond, with a notice, until the parse carries nine digits) and D3 (-tp covers nanosecond)'
+CONTRACT_D23='features/525-timestamp-precision-option.md D23 (nanosecond carried by exact bounds: with -tp ns on a log carrying nine digits, the heading, the export observation and the run index show all nine as written, .999999999 without carrying) and D7 (rounded once at the last digit shown)'
+
+if scenario_wanted nanosecond/exact; then
+current_scenario="nanosecond/exact"
 for v in ns nanosecond; do
     run_in "nine-$v" "${COMMON[@]}" -ni -bs 1 -tp "$v" "$NINE"
     b=$(heading_bounds "$TMP_DIR/nine-$v")
-    n=$(grep -cxF 'Note: timestamps are shown to the microsecond: nanosecond precision was asked for, and at most 6 fractional digits are read from a timestamp' "$TMP_DIR/nine-$v/err.txt" || true)
-    if [[ "$b" == "2026-01-26 10:00:01.123456|2026-01-26 10:00:02.999999" && "$n" == 1 ]]; then
-        pass_with "-tp $v renders six digits, .999999 without carrying, with one notice naming the microsecond"
+    n=$(grep -cE '^Note: timestamps are shown to the ' "$TMP_DIR/nine-$v/err.txt" || true)
+    if [[ "$b" == "2026-01-26 10:00:01.123456789|2026-01-26 10:00:02.999999999" && "$n" == 0 ]]; then
+        pass_with "-tp $v renders all nine digits, .999999999 without carrying, with no notice"
     else
-        fail_with "-tp $v renders six digits, .999999 without carrying, with one notice naming the microsecond" \
-            "nanosecond is accepted and shown to the microsecond, the six digits the parse keeps; the stderr notice names the microsecond and the six-digit limit" \
-            'adapt_to_command_line_options() in ltl (-tp resolution, the parse cap)' "$CONTRACT_D4" \
-            "heading: $b" "notice lines: $n" "stderr: $(head -2 "$TMP_DIR/nine-$v/err.txt" | tr '\n' '~')"
+        fail_with "-tp $v renders all nine digits, .999999999 without carrying, with no notice" \
+            "on a log whose timestamps carry nine digits, nanosecond precision shows the heading's bounds as written" \
+            'read_and_process_logs() (exact bounds) and format_timestamp() in ltl' "$CONTRACT_D23" \
+            "heading: $b" "precision notices: $n"
     fi
 done
+run_in nine-labels "${COMMON[@]}" -ni -bs 100ms -tp ns "$NINE"
+got=$(labels "$TMP_DIR/nine-labels" | head -1)
+if [[ "$got" == "2026-01-26 10:00:01.100000000" ]]; then
+    pass_with "a 100 ms bucket is labelled to the nanosecond, exactly (.100000000)"
+else
+    fail_with "a 100 ms bucket is labelled to the nanosecond, exactly (.100000000)" \
+        "a bucket key held in integer milliseconds is split exactly into seconds and nanoseconds for its label" \
+        'format_bucket_key() in ltl' "$CONTRACT_D23; features/525-timestamp-precision-option.md D14" "first label: $got"
+fi
+fi
+
+if scenario_wanted nanosecond/index-and-export; then
+current_scenario="nanosecond/index-and-export"
+run_in nine-out "${COMMON[@]}" -o -V aggregate-export -bs 1 -tp ns "$NINE"
+d="$TMP_DIR/nine-out"
+start=$(export_observation "$d" start); end=$(export_observation "$d" end)
+row=""
+for entry in file selection; do
+    row+="$(index_cell "$d" "$entry" first_timestamp),$(index_cell "$d" "$entry" last_timestamp),$(index_cell "$d" "$entry" ts_precision);"
+done
+want_row="2026-01-26T10:00:01.123456789,2026-01-26T10:00:02.999999999,ns;2026-01-26T10:00:01.123456789,2026-01-26T10:00:02.999999999,ns;"
+if [[ "$start" == "2026-01-26 10:00:01.123456789" && "$end" == "2026-01-26 10:00:02.999999999" && "$row" == "$want_row" ]]; then
+    pass_with "the export's observation and the index's file and selection rows carry all nine digits under ns"
+else
+    fail_with "the export's observation and the index's file and selection rows carry all nine digits under ns" \
+        "the aggregate export's observation bounds and the run index's first and last timestamps, file and selection rows, are written to the nanosecond as the log carries them" \
+        'write_aggregate_export() and write_index_file() in ltl, through format_timestamp() with the exact bounds' "$CONTRACT_D23; features/525-timestamp-precision-option.md D13" \
+        "export: $start .. $end" "index rows: $row"
+fi
+fi
+
+if scenario_wanted nanosecond/rounding-below; then
+current_scenario="nanosecond/rounding-below"
+run_in nine-us "${COMMON[@]}" -ni -bs 1 -tp us "$NINE"
+b=$(heading_bounds "$TMP_DIR/nine-us")
+if [[ "$b" == "2026-01-26 10:00:01.123457|2026-01-26 10:00:03.000000" ]]; then
+    pass_with "-tp us on nine digits rounds from all of them (.123457; .999999999 carries to 03.000000)"
+else
+    fail_with "-tp us on nine digits rounds from all of them (.123457; .999999999 carries to 03.000000)" \
+        "a precision coarser than the log's rounds half-up once at its last digit from every digit the log carries" \
+        'format_entry_block_src() (the strip reads nine digits) and format_timestamp() in ltl' "$CONTRACT_D23" "heading: $b"
+fi
 fi
 
 # ---------------------------------------------------------------------------

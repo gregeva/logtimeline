@@ -46,7 +46,7 @@ Stores whole-file metadata from a complete file read. Cache key is `file_path`.
 | match_count | Lines matching a parsing format (drives memory usage) |
 | first_timestamp | ISO 8601 - earliest timestamp found, at the precision the writing run resolved (whole seconds for a minute-precision run, the ISO form having nothing coarser) |
 | last_timestamp | ISO 8601 - latest timestamp found, at the same precision |
-| ts_precision | The precision the writing run resolved: `m`, `s`, `ms` or `us` (`features/525-timestamp-precision-option.md` D13, D16) |
+| ts_precision | The precision the writing run resolved: `m`, `s`, `ms`, `us` or `ns` (`features/525-timestamp-precision-option.md` D13, D16, D23) |
 | duration_count | Number of lines with duration values |
 | duration_min | Minimum duration value |
 | duration_max | Maximum duration value |

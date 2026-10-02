@@ -94,6 +94,16 @@ application log, 9.5 µs on the corpus access log.
   needs G's always-paid branching; C and B cost two to three times H1.
 - Scale is flat from 1 000 to 1 000 000 lines in every arm.
 
+## As built
+
+Locked as D23 and built as H. End to end against the build before it,
+alternating, `parse/read_files` medians: not asking, −0.2 % on the corpus
+application log (nine rounds; an A/A control moved −1.0 %), +0.5 % on a
+generated variable-length log, +0.3 % on the corpus access log; asking
+(`-tp ns`) on a generated nine-digit log, +8.3 %. The record is
+`features/525-timestamp-precision-option.md` § 10, drop 5. The script slices
+the six-digit strip of the build it measured; the strip now reads nine digits.
+
 ## Recommendation
 
 H: today's floating bound updates unchanged, the digit string kept by the

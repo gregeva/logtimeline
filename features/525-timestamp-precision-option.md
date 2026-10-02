@@ -5,9 +5,9 @@
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
 progress: drops 1 (the one formatter), 2 (the long spellings), 3 (the
-option, the key scale, the run index, the capture gate) and 4 (the precision
-the log carries) delivered 2026-10-02, § 10; drop 5 (nanosecond carried
-exactly) is prototype-gated and not started.
+option, the key scale, the run index, the capture gate), 4 (the precision
+the log carries) and 5 (nanosecond carried exactly) delivered 2026-10-02,
+§ 10; the completion gate and the PR remain.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -1047,7 +1047,7 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 5: nanosecond carried exactly (prototype-gated)**
 
-- [ ] On the nine-digit set, `-tp ns` renders all nine digits as written,
+- [x] On the nine-digit set, `-tp ns` renders all nine digits as written,
   `.999999999` included without carrying; on the three-digit set, `-tp ns` resolves to
   millisecond with the notice; the per-line cost with nanosecond not requested
   is within benchmark noise. *Assertable* once the data model exists; the model
@@ -1055,9 +1055,9 @@ directory, and is shaped to the assertion that reads it.
 
 **Every drop**
 
-- [ ] **No runtime warnings** on stderr across every run above. *Assertable:*
+- [x] **No runtime warnings** on stderr across every run above. *Assertable:*
   `tests/lib/runtime-warnings.sh`.
-- [ ] **Looked at.** The timeline at each precision, at 80 and 160 columns, on a
+- [x] **Looked at.** The timeline at each precision, at 80 and 160 columns, on a
   corpus log with sub-second timestamps and on one with whole seconds (the
   notice in place), inspected before the work is called done. *Unassertable by
   harness:* a visual surface, verified by eye.
@@ -1422,6 +1422,66 @@ go back to the layout (bars two characters longer, wider spacing in the
 duration and bytes columns); with the `.000`, the bar characters and the
 spacing removed, the two files are identical, every count, duration, byte
 value and percentile unchanged. `validate-regression.sh` 74 passed.
+
+**Drop 5, delivered 2026-10-02 (D23).** The prototype
+(`prototype/525-nanosecond-timestamps/FINDINGS.md`) chose design H. Under
+`-tp ns` (`$timestamp_capture_ns`, a compile option of the scan blocks) the
+variable-length block keeps the fraction's digits in `$fraction_digits` (the
+fixed-three-digit block its three, the CSV paths theirs); the read loop's
+floating bound updates are unchanged, and two `if ($timestamp_capture_ns)`
+tests per line, one after the file row's bounds and one after the heading's,
+give a bound that this line moved to or ties the line's exact whole seconds
+and nanoseconds when they are better. `format_timestamp` and
+`timestamp_ticks` take an exact `[ seconds, nanoseconds ]` and count in
+integers (`use integer`), since a count of nanoseconds exceeds a double's
+exact integers; the heading, the export's observation, the index rows and the
+drift check pass the exact bounds; `format_bucket_key` splits an integer
+bucket key exactly for the two label sites, which it now serves alike;
+`iso_timestamp_parts` reads an index date-time exactly and
+`parse_iso_date_to_epoch` goes through it. The parse cap of step 4a and its
+note are gone: nanosecond is no longer resolved to the microsecond at
+settlement, and a log carrying fewer digits is clamped by step 4b's rule
+(`-tp ns` on a microsecond log reads `us; clamped from ns`).
+
+Found and fixed on the way: the variable-length strip read at most six
+digits, so on a log carrying more a coarser precision truncated where D7
+rounds (`-tp us` showed `.123456` for `.123456789`), and the three unread
+digits stayed glued to the time string, defeating the last-seen timestamp
+memo on every line. The strip now reads up to nine digits whenever it reads
+the fraction: `-tp us` shows `.123457`, `.999999999` carries to the next
+second's `.000000`, and a microsecond run over a row a nanosecond run wrote
+reports no false drift. Observed, unchanged: with `-bs 100ms -tp ns`, the
+line at `.999999999` counts in the next second's bucket, its label
+`10:00:03.000000000` beside a heading bound of `10:00:02.999999999`, the
+millisecond key rounding half-up as D7 and D14 keep it.
+
+Measured on a log whose fractions carry nine digits: the heading, the
+export's observation and both index rows read `2026-01-26 10:00:01.123456789`
+to `10:00:02.999999999` with `ts_precision ns`; labels at `-bs 100ms` read
+`.100000000`; a row narrowed by one nanosecond drifts under `-tp ns` and not
+under `-tp us`. Cost against step 4b, alternating the two builds,
+`parse/read_files` medians with ranges: corpus application log (fixed three
+digits), default, nine rounds on a quiet machine, 3.224 s [3.167–3.355] to
+3.217 s [3.202–3.327] (−0.2 %), where an A/A control (step 4b against itself
+with a comment block added) moved −1.0 % [3.145–3.226]; generated 500 000-line
+variable-length log, default, +0.5 %; corpus access log, default, +0.3 %;
+generated 500 000-line nine-digit log, default −6.7 % and `-tp us` −5.9 % (the
+memo restored), `-tp ns` +8.3 % (3.223 s to 3.490 s), five rounds each. An
+earlier set measured the application log at +2.0 to +2.2 %, and a copy of the
+drop 5 build with every new per-line statement removed measured the same, so
+the difference was not this code; it did not reproduce on the quiet machine.
+
+`validate-timestamp-precision.sh` replaces 4a's parse-cap scenario with
+`nanosecond/exact`, `nanosecond/index-and-export` and
+`nanosecond/rounding-below`, and its structural capture check accepts the
+nanosecond form as gated (84 passed); `validate-index-read-back.sh` adds the
+nanosecond drift pair (93 passed). Against the 4b build every new assertion
+fails except "a row narrowed by 1 ns read by a -tp us run: no drift", which
+pins unchanged behaviour. `validate-regression.sh` 74,
+`validate-format-detection.sh` 283, `validate-runtime-config.sh` 59 and the
+other affected harnesses pass. Looked at, at 80 and 160 columns, on the
+nine-digit log: the nanosecond labels and the heading render; only the banner
+and the echoed options exceed 80 columns, as on the base build (#497).
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and

@@ -1311,6 +1311,9 @@ write_precision_fixtures() {
         '2026-01-26 10:00:00,000250 [main] INFO  com.example.Service - first line' \
         '2026-01-26 10:00:00,000750 [main] INFO  com.example.Service - second line' \
         '2026-01-26 10:00:00,999999 [main] INFO  com.example.Service - third line' > six.log
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > nine.log
 }
 
 scenario_index_run_precision() {
@@ -1367,6 +1370,24 @@ scenario_drift_runtime_precision() {
     drift_case "a row with - and three-digit timestamps, last narrowed by 1 ms: compared at the millisecond, drifted" ms "ts_precision=-,last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
     drift_case "a millisecond row narrowed by 1 ms read by a millisecond run: drifted" ms "last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
     drift_case "a millisecond row narrowed by 1 ms read by a whole-second run: no drift" ms "last_timestamp=2026-01-26T10:00:03.788" s '^drift_detected: no$'
+
+    # Nanosecond: a row narrowed by one nanosecond drifts under -tp ns and not
+    # under -tp us, where both round to the same microsecond.
+    local nine_out
+    for read_tp in ns us; do
+        rm -f ltl-index.csv
+        nine_out=$(run_ltl $COMMON -tp ns nine.log); check_capture_warnings "$nine_out"
+        edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:02.999999998'
+        nine_out=$(run_ltl_v -tp "$read_tp" nine.log); check_capture_warnings "$nine_out"
+        local want='^drift_detected: no$'
+        [[ "$read_tp" == ns ]] && want='^  last_timestamp: live=2026-01-26T10:00:02\.999999999 preseed=2026-01-26T10:00:02\.999999998 drifted=yes$'
+        assert_command \
+            command     "grep -q '^index_used: yes\$' '$nine_out' && grep -qE '$want' '$nine_out'" \
+            label       "a nanosecond row narrowed by 1 ns read by a -tp $read_tp run: $([[ $read_tp == ns ]] && echo drifted || echo no drift)" \
+            asserts     'At nanosecond precision the stored and live timestamps are compared exactly, as whole seconds and nanoseconds; at a coarser precision both round to it first' \
+            produced_by 'detect_index_drift(), timestamp_ticks() and iso_timestamp_parts() in ltl' \
+            contract    "$IDX525_CONTRACT; features/525-timestamp-precision-option.md D23"
+    done
 
     # A selection row written at another precision than the file row beside
     # it is judged at its own: run 1 writes both at s, run 2 (file unchanged,
