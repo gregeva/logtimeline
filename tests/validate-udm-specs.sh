@@ -110,6 +110,7 @@ CONTRACT_482='features/user-defined-metrics.md section Colliding metric names be
 # case-insensitively to one canonical ladder token, SI tokens powers of 1000
 # and IEC tokens powers of 1024, and the metric carries that token everywhere.
 CONTRACT_608='features/608-byte-unit-ladder.md D1 (case-insensitive lookup), D2 (SI and IEC meanings), D3 (no assumed base), D5 (one byte ladder), D14 (the canonical token everywhere)'
+CONTRACT_525_D6='features/525-timestamp-precision-option.md D6 (the long sub-second spellings join the time-unit ladder for every time-unit option, the -udm unit slot included) and features/524-bucket-size-unit.md D2 (the ladder and its spellings)'
 
 # Run ltl with the given args against the fixture; stdout to the echoed file,
 # stderr beside it as <capture>.stderr.
@@ -1203,6 +1204,34 @@ scenario_byte_unit_canonical_token() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario: time-unit-long-spellings — millisecond(s), microsecond(s) and
+# nanosecond(s) in the unit slot, in any case, read as their step's token.
+# ---------------------------------------------------------------------------
+scenario_time_unit_long_spellings() {
+    current_scenario="time-unit-long-spellings"
+    echo "[$current_scenario]"
+    local pair spelling want out
+    for pair in millisecond:ms Milliseconds:ms microsecond:us MICROSECONDS:us nanosecond:ns Nanoseconds:ns; do
+        spelling=${pair%%:*}; want=${pair##*:}
+        out="$TMP_DIR/long-spelling-$spelling.out"
+        "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-specs \
+            -udm "v:$spelling:max" "$BYTE_FIXTURE" > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$want(time)" \
+            asserts     "-udm v:$spelling reads the metric in the canonical time unit $want" \
+            produced_by 'parse_udm_configs() + time_unit_canonical() in ltl' \
+            contract    "$CONTRACT_525_D6"
+        assert_command \
+            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            label       "-udm v:$spelling prints no notice or warning" \
+            asserts     'A long spelling of a time unit is accepted silently' \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_525_D6"
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Scenario: number-multiplier-and-unknown-unit — k and K stay number
 # multipliers (x1000), not bytes; an unknown spelling warns, naming both
 # ladders' vocabularies, and reads the metric as a raw number (criterion 4).
@@ -1581,6 +1610,7 @@ scenario_register milliseconds-replacement \
                   byte-unit-one-meaning \
                   byte-unit-meanings \
                   byte-unit-canonical-token \
+                  time-unit-long-spellings \
                   number-multiplier-and-unknown-unit \
                   continuation-lines \
                   non-numeric-capture \
@@ -1617,6 +1647,7 @@ while read -r _scenario; do
         byte-unit-one-meaning      ) scenario_byte_unit_one_meaning ;;
         byte-unit-meanings         ) scenario_byte_unit_meanings ;;
         byte-unit-canonical-token  ) scenario_byte_unit_canonical_token ;;
+        time-unit-long-spellings   ) scenario_time_unit_long_spellings ;;
         number-multiplier-and-unknown-unit) scenario_number_multiplier_and_unknown_unit ;;
         continuation-lines         ) scenario_continuation_lines ;;
         non-numeric-capture        ) scenario_non_numeric_capture ;;

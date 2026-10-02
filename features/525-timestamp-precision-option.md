@@ -3,8 +3,12 @@
 ## Status
 
 Specification agreed with the architect 2026-09-29 on branch
-`525-timestamp-precision-option` off `release/0.19.0`; implementation not
-started. Amended 2026-09-29, after the agreed specification merged, with D13
+`525-timestamp-precision-option` off `release/0.19.0`. Implementation in
+progress: drops 1 (the one formatter), 2 (the long spellings), 3 (the
+option, the key scale, the run index, the capture gate), 4 (the precision
+the log carries) and 5 (nanosecond carried exactly) delivered 2026-10-02,
+§ 10; the completion gate and the PR remain.
+Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
 and D15 (the drift check compares at the run's precision, or at the stored
@@ -15,10 +19,14 @@ column as the file rows do) and D18 (drift compares timestamps as numbers
 rounded to the comparison precision, never as strings); amended again
 2026-09-29 with D19 (an index row written before this change, whose precision
 column carries `-`, is read at the precision its stored timestamps' digits
-carry, and no old row is rewritten). The architect's decisions are § 4 (D1 to
-D19); no element of the run index's design remains **proposed**. A design
-element that no decision settles is implementation detail and is marked
-**proposed**.
+carry, and no old row is rewritten); and 2026-10-02 with D20 (at a
+whole-second width a line counts in the second it was written in), D21 (the
+aggregate export needs the sub-second part, so the capture gate opens for it)
+D22 (the capture decision is reported only under `-V benchmark-data`) and
+D23 (nanosecond carried by exact bounds, today's per-line updates untouched).
+The architect's decisions are § 4 (D1 to D23); no element of the run index's
+design remains **proposed**. A design element that no decision settles is
+implementation detail and is marked **proposed**.
 
 ---
 
@@ -443,6 +451,66 @@ Only the architect's decisions are numbered here.
   no old row is rewritten to carry a precision. Locked by the architect
   2026-09-29.
 
+- **D20. At a whole-second width a line counts in the second it was written
+  in.** Found while planning drop 3: under D14 a whole-second width
+  (`-bs 1s`, or `-ms -bs 1000`) keys buckets in seconds, so a line at
+  `10:06:13.9996` counts in the `10:06:13` bucket while the heading and the
+  index, rounded at the millisecond (D7), name `10:06:14.000`; today's `-ms`
+  key rounds it into `10:06:14`. Put to the architect: A, at a whole-second
+  width a line counts in the second it was written in, bucket membership
+  being the floor of the timestamp as at every whole-second width without
+  `-ms`; or B, each line's timestamp rounded to the run's precision when it is
+  read, so key, heading and index always agree. The architect: "I lock A"
+  (after first answering B). A width with a millisecond or microsecond part is
+  unaffected: its key rounds at that unit, as D7 and D14 have it, so `-bs
+  100ms` keeps ten buckets per second. Locked by the architect 2026-10-02.
+
+- **D21. The aggregate export needs the sub-second part.** Found while
+  building the capture gate (step 3d): with the fraction not read, the
+  export's population duration (`observation.duration_seconds`, last line
+  minus first) was measured between whole seconds, `2.666` becoming `2` on a
+  run at minute precision. The architect: "when I said we typically don't
+  care [about] anything subsecond, that's true. But sometimes we also do. This
+  YAML export is exactly one of those situations. [...] you're framing this as
+  if all consumers are the same consumers, whereas they're not. So no, you
+  can't truncate the precision away from the current output to the aggregate
+  summary YAML file." The gate is decided per consumer: the parse reads the
+  fraction whenever a consumer that measures with it is active, the aggregate
+  export (`-o`) among them, beside a precision finer than the second, a
+  sub-second width and a sub-second `-st`/`-et` bound. Locked by the architect
+  2026-10-02.
+
+- **D22. The capture decision is reported only under `-V benchmark-data`.**
+  The agreed criterion asserts the gate on the generated scan block, which no
+  surface exposes, and by design the gate changes no output. Put to the
+  architect: a `CONFIG timestamp_fraction_capture` row in `-V benchmark-data`
+  reporting the run's decision, asserted per consumer, with a structural check
+  that the block generator emits the fraction arithmetic only when the gate is
+  open. The architect: "I'm OK for option A as long as it is only activated
+  (ie its gated) if -V benchmark-data is enabled. There is no need to have this
+  code added to the generated function for normal runs." The row is one line
+  of the `-V benchmark-data` emitter, which runs only when that section is
+  requested, reading the decision settled before the parse; the generated
+  scan block carries nothing for it. Locked by the architect 2026-10-02.
+
+- **D23. Nanosecond carried by exact bounds, today's per-line updates
+  untouched.** The prototype of § 9 (`prototype/525-nanosecond-timestamps/
+  FINDINGS.md`) measured six designs over today's per-line code sliced from
+  `ltl`. Put to the architect: design H, "today's floating bound updates
+  unchanged, the digit string kept by the variable-length block only when the
+  run asks for nanosecond (a compile option, as for the capture gate), and two
+  flag tests per line taking the exact value when a bound moves or ties";
+  with `-tp ns` on a log carrying nine digits, the heading, the export's
+  observation and the run index show all nine as written, `.999999999`
+  without carrying, drift compared exactly; `-st`/`-et` keep accepting six
+  fractional digits and a width with a nanosecond part keeps keying in
+  seconds (D14); a run without `-tp ns` executes today's code plus the flag
+  tests. Measured: not asking −32 to +28 ns/line against the baseline (within
+  the rounds' spread), asking +219 to +348 ns/line (about 4 to 6 % of the
+  tool's per-line time), nine digits exact at every bound on a million lines
+  and on crafted ties. The architect: "yes, go ahead". Locked by the architect
+  2026-10-02.
+
 ---
 
 ## 5. Surfaces this work reaches
@@ -827,7 +895,7 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 1: the one formatter**
 
-- [ ] **One formatter (names the mechanism, D1, D8).** Outside
+- [x] **One formatter (names the mechanism, D1, D8).** Outside
   `format_timestamp`, no `strftime` call with a date or time pattern, no
   `sprintf(".%03d"` and no string built from `localtime` or `gmtime` fields
   remains in `ltl`; the field readers that render nothing (`fold_epoch`,
@@ -835,60 +903,60 @@ directory, and is shaped to the assertion that reads it.
   `print_bar_graph`) are exempt by name; the three former subs are gone and `run_file_stamp` calls
   the formatter. *Assertable:* structural scenario over `ltl` (the shape of
   `features/524-bucket-size-unit.md`'s "exactly one ladder" check).
-- [ ] **One rounding (D7).** On the three-digit set under `-ms -bs 1000`: the
+- [x] **One rounding (D7).** On the three-digit set under `-ms -bs 1000`: the
   heading's first bound, the export's `observation.start` and the index's
   `first_timestamp` all end in `01.123`. *Assertable:* heading from stdout,
   `-V aggregate-export`, the index file.
-- [ ] **Carry (D7).** On the carry set under `-ms -bs 100`: the heading's last bound, the
+- [x] **Carry (D7).** On the carry set under `-ms -bs 100`: the heading's last bound, the
   index's `last_timestamp` and the line's bucket label name the following second
   at `.000`; the `23:59:59.9996` line names the next day's `00:00:00.000`; no
   four-digit fraction appears in any output. *Assertable.*
-- [ ] **Minute and second truncate (D7).** On the carry set under `-s -bs 1s`, the
+- [x] **Minute and second truncate (D7).** On the carry set under `-s -bs 1s`, the
   `10:06:13.9996` line's label and heading bound read `10:06:13`. *Assertable.*
-- [ ] **Unchanged where the copies agreed.** The regression goldens pass
+- [x] **Unchanged where the copies agreed.** The regression goldens pass
   unchanged; on integer-second sources the index's timestamp and clock columns
   (the mean cells being those of #616, one gated derivation of means) and the export are byte-identical before and
   after; `generated_at` keeps `%Y-%m-%dT%H:%M:%SZ`; the output file names keep
   the `YYYY-MM-DD_HHMMSS` local-time stamp; `validate-aggregate-export.sh` and
   `validate-index-read-back.sh` pass unchanged. *Assertable.*
-- [ ] **Older index rows stay fresh.** An index written by the base commit is
+- [x] **Older index rows stay fresh.** An index written by the base commit is
   read by the new build as `freshness: fresh` in `-V index-read-back` (the
   string-equality check on `file_mtime`). *Assertable.*
 
 **Drop 2: the long spellings on the ladder**
 
-- [ ] **Every time-unit option accepts them (D6).** `-bs 100ms`,
+- [x] **Every time-unit option accepts them (D6).** `-bs 100ms`,
   `-bs 100millisecond` and `-bs 100milliseconds` give the same
   `bucket_size_seconds`; `microsecond(s)` and `nanosecond(s)` likewise; `-du`,
   `-ru` and the `-udm` unit slot resolve the long spellings to the same token as
   the short ones, in any case. *Assertable:* `validate-bucket-size-units.sh`
   (its `-bs`, `-du`, `-ru` scenarios) and `validate-udm-specs.sh`.
-- [ ] **One spelling table (names the mechanism, D6).** The long spellings
+- [x] **One spelling table (names the mechanism, D6).** The long spellings
   appear only in the ladder's table; no other sub lists a time-unit spelling.
   *Assertable:* the existing one-ladder structural check.
 
 **Drop 3: the option and the deprecation**
 
-- [ ] **Values (D3).** `-tp` accepts `m`, `minute`, `s`, `second`, `ms`,
+- [x] **Values (D3).** `-tp` accepts `m`, `minute`, `s`, `second`, `ms`,
   `millisecond`, `us`, `microsecond` and the ladder's other spellings of those
   four steps, in any case; every spelling of a step gives the same run.
   *Assertable.*
-- [ ] **The architect's pair (D5).** On the three-digit set, `-bs 100ms -tp ms`
+- [x] **The architect's pair (D5).** On the three-digit set, `-bs 100ms -tp ms`
   prints ten buckets per second labelled `.000`, `.100` … `.900`, and its
   timeline, heading and STATS CSV timestamps are byte-identical to
   `-ms -bs 100`'s; the only difference is `-ms`'s deprecation line on stderr.
   *Assertable.*
-- [ ] **Equivalence with the switches (D5, D11).** `-tp m` renders as the
+- [x] **Equivalence with the switches (D5, D11).** `-tp m` renders as the
   default; `-tp s -bs 30s` as `-s -bs 30`; `-bs 100ms -tp ms` as `-ms -bs 100`
   (the architect's pair, above). *Assertable.*
-- [ ] **Width and precision separate (D11).** `-tp ms` alone reports the same
+- [x] **Width and precision separate (D11).** `-tp ms` alone reports the same
   `bucket_size_seconds` in `-V benchmark-data` as the run without any switch,
   with its labels at millisecond precision; `-tp ms -bs 60` gives 60-minute
   buckets; `-tp s -bs 90s` renders like `-s -bs 90s`; `-bs 1d` alone keeps
   minute labels. *Assertable:* extends `validate-bucket-size-units.sh`'s
   `precision/90s-on-minute-run` scenario (a unit on `-bs` leaves the label
   precision untouched).
-- [ ] **Read and stored at the precision (D11).** On the three-digit set,
+- [x] **Read and stored at the precision (D11).** On the three-digit set,
   `-tp ms` renders the heading's bounds as `01.123` and `03.789` from the stored
   timestamps. The scan block generated for a run that asks for no sub-second
   digit, sets no sub-second width and gives no sub-second bound carries no
@@ -896,14 +964,14 @@ directory, and is shaped to the assertion that reads it.
   generated for `-tp ms` does. *Assertable:* the heading from stdout; the two
   block variants by a structural check on `format_entry_block_src`'s output.
   The per-line effect is measured (§ 9).
-- [ ] **The index at the run's precision (D13, D16, D17).** In a scratch
+- [x] **The index at the run's precision (D13, D16, D17).** In a scratch
   directory, a `-tp ms` run on the three-digit set writes `first_timestamp`
   ending `T10:00:01.123` and `ts_precision` `ms` on its file and selection rows
   (D17: no selection row carries `-`); the same run without `-tp`, at minute
   precision, writes `T10:00:01` and `m` (D16); a `-tp s` run writes
   `T10:00:01` and `s`; a `-tp us` run on the six-digit set writes six digits
   and `us`. *Assertable:* the index file, `validate-index-read-back.sh`.
-- [ ] **Drift at the runtime precision (D13, D15, D16, D17, D18, D19).** A
+- [x] **Drift at the runtime precision (D13, D15, D16, D17, D18, D19).** A
   row written at millisecond precision read back by a whole-second run, a row
   written at whole seconds read back by a `-tp ms` run (compared at the row's
   coarser precision, D15), a row written by a minute run read back by a
@@ -922,56 +990,56 @@ directory, and is shaped to the assertion that reads it.
   timestamps (D18). *Assertable:* `validate-index-read-back.sh`, rows
   orchestrated by its `edit_index_row` helper, read from `-V index-read-back`;
   the last by a structural check on `detect_index_drift`.
-- [ ] **Microsecond (D3, D7, D14).** On the six-digit set under `-tp us -bs 500us`,
+- [x] **Microsecond (D3, D7, D14).** On the six-digit set under `-tp us -bs 500us`,
   labels carry six fractional digits (`.000500`); the heading's bounds reproduce
   the written six digits, `.999999` included, without carrying. *Assertable.*
-- [ ] **Key scale from `-bs` alone (D14).** On the three-digit set,
+- [x] **Key scale from `-bs` alone (D14).** On the three-digit set,
   `-bs 100ms -tp us` gives the same buckets as `-bs 100ms -tp ms`, each label
   carrying six fractional digits where the other carries three (`.100000`
   against `.100`); `-tp us` alone gives the same `bucket_size_seconds` and
   bucket count as the run without any switch. *Assertable:* labels from
   stdout, `-V benchmark-data`.
-- [ ] **Deprecation (D5, D12).** `-s` and `-ms` each print exactly one stderr
+- [x] **Deprecation (D5, D12).** `-s` and `-ms` each print exactly one stderr
   line naming `-tp` and a unit on `-bs`, with and without `--disable-progress`;
   a bare `-bs` number and the default width keep their meaning under each
   switch; `-ms -tp ms` and `-s -tp s` run with the notice. *Assertable.*
-- [ ] **Rejections (D12).** An unknown value and a ladder step outside the five
+- [x] **Rejections (D12).** An unknown value and a ladder step outside the five
   (`-tp h`) exit non-zero with a usage line listing the accepted values; `-s` or
   `-ms` with a different `-tp` exits non-zero with a usage error naming both;
   each having run nothing, with no runtime warning. *Assertable.*
-- [ ] **Reported (D9).** `-V runtime-config` shows `timestamp-precision:` with
+- [x] **Reported (D9).** `-V runtime-config` shows `timestamp-precision:` with
   the canonical token for `-tp` given in any spelling. *Assertable:*
   `validate-runtime-config.sh`.
-- [ ] **Documented (D9).** `validate-help-content.sh` passes with the new and
+- [x] **Documented (D9).** `validate-help-content.sh` passes with the new and
   edited rows; the new `docs/usage.md` example runs under
   `validate-doc-examples.sh`. *Assertable.*
 
 **Drop 4: the true precision of the file**
 
-- [ ] **Clamped, with the notice (D4).** `-tp ms` on the whole-second access-log
+- [x] **Clamped, with the notice (D4).** `-tp ms` on the whole-second access-log
   fixture renders labels and heading at second precision and prints one notice
   naming second and that the timestamps carry whole seconds; `-tp us` on the
   three-digit set renders milliseconds with the notice naming millisecond;
   `-tp ms` on the three-digit set prints no notice. The index follows the
   resolved precision (D13): the `-tp ms` run on the whole-second fixture writes
   whole-second index timestamps and `ts_precision` `s`. *Assertable.*
-- [ ] **Machine-readable (D9).** In those runs `-V runtime-config` reads
+- [x] **Machine-readable (D9).** In those runs `-V runtime-config` reads
   `timestamp-precision: s; clamped from ms` and `ms; clamped from us`, and no
   annotation when nothing is clamped. *Assertable:* `validate-runtime-config.sh`.
-- [ ] **Resolved through the ladder (D4).** The four-digit carry set resolves to
+- [x] **Resolved through the ladder (D4).** The four-digit carry set resolves to
   millisecond and the two-digit set to second (proposed rule, § 6.4); a
   fixed-three-digit format resolves to millisecond from its declared field.
   *Assertable* on the clock layouts; the stated-unit arithmetic for a field in
   milliseconds or microseconds has no registered format today and is asserted
   structurally (the step is read from the ladder, no digit table exists).
-- [ ] **Nanosecond before the final drop (D4).** `-tp ns` and `-tp nanosecond`
+- [x] **Nanosecond before the final drop (D4).** `-tp ns` and `-tp nanosecond`
   are accepted from this drop, in any case. `-tp ns` on the nine-digit set
   renders six fractional digits and the notice names microsecond and the
   six-digit limit. *Assertable.*
-- [ ] **Several files (proposed rule, § 6.4).** `-tp ms` over the three-digit
+- [x] **Several files (proposed rule, § 6.4).** `-tp ms` over the three-digit
   set and the whole-second fixture together renders at second precision, the
   notice naming each file's precision. *Assertable.*
-- [ ] **The deprecated switches follow the rule (D4).** `-ms` on the
+- [x] **The deprecated switches follow the rule (D4).** `-ms` on the
   whole-second fixture renders at second precision with the notice; the
   regression golden that runs `-ms` over a whole-second access log is
   re-captured in this drop, its diff limited to the dropped `.000`.
@@ -979,7 +1047,7 @@ directory, and is shaped to the assertion that reads it.
 
 **Drop 5: nanosecond carried exactly (prototype-gated)**
 
-- [ ] On the nine-digit set, `-tp ns` renders all nine digits as written,
+- [x] On the nine-digit set, `-tp ns` renders all nine digits as written,
   `.999999999` included without carrying; on the three-digit set, `-tp ns` resolves to
   millisecond with the notice; the per-line cost with nanosecond not requested
   is within benchmark noise. *Assertable* once the data model exists; the model
@@ -987,9 +1055,9 @@ directory, and is shaped to the assertion that reads it.
 
 **Every drop**
 
-- [ ] **No runtime warnings** on stderr across every run above. *Assertable:*
+- [x] **No runtime warnings** on stderr across every run above. *Assertable:*
   `tests/lib/runtime-warnings.sh`.
-- [ ] **Looked at.** The timeline at each precision, at 80 and 160 columns, on a
+- [x] **Looked at.** The timeline at each precision, at 80 and 160 columns, on a
   corpus log with sub-second timestamps and on one with whole seconds (the
   notice in place), inspected before the work is called done. *Unassertable by
   harness:* a visual surface, verified by eye.
@@ -1001,7 +1069,7 @@ directory, and is shaped to the assertion that reads it.
 | Item | Detail |
 |---|---|
 | `-V` sections read | `runtime-config`, `index-read-back`, `benchmark-data` (`bucket_size_seconds`), `aggregate-export` |
-| `-V` sections changed | `runtime-config` gains `timestamp-precision:` with the clamp annotation (contract owner `features/225-test-harness-coverage-gaps.md`, updated in the same commit; #613 (one name vocabulary) edits the same section and cites the same owner) |
+| `-V` sections changed | `benchmark-data` gains `CONFIG timestamp_fraction_capture` (0 or 1, the run's capture decision, D22; the row's contract is this document, its assertions `validate-timestamp-precision.sh` `capture/per-consumer`); `runtime-config` gains `timestamp-precision:` with the clamp annotation (contract owner `features/225-test-harness-coverage-gaps.md`, updated in the same commit; #613 (one name vocabulary) edits the same section and cites the same owner) |
 | New harness | `tests/validate-timestamp-precision.sh`, with `--list` and `--scenario` |
 | Harnesses extended | `validate-bucket-size-units.sh` (long spellings on `-bs`, `-du`, `-ru`; precision untouched with `-tp`), `validate-udm-specs.sh` (long spellings in the unit slot), `validate-index-read-back.sh` (the index at the run's precision, with a precision column on every row, and the drift check at the runtime precision as numbers, an old row with `-` read at its digits' precision, D13, D16, D17, D18, D19), `validate-runtime-config.sh`, `validate-help-content.sh`, `validate-doc-examples.sh` |
 | Goldens that move | drops 1 to 3: none (bucket labels are byte-identical by the rounding argument of § 6.1). Drop 4: the golden running `-ms -bs 1000` over a whole-second access log loses its `.000` (D4 applies to the deprecated switches, § 6.4) |
@@ -1053,9 +1121,395 @@ Each drop is a commit and push on the issue branch; one PR at the end.
    microsecond. § 6.4.
 5. **Nanosecond carried exactly,** after the prototype. § 6.5.
 
+**Drop 1, delivered 2026-10-02.** `format_timestamp($epoch, precision, shape, z)`
+replaces `format_epoch_iso`, `format_observation_timestamp` and
+`format_bucket_timestamp`; the five inline ISO sites, `run_file_stamp` and the
+timestamp column width call it. Its fractional digits come from the time-unit
+ladder's `decimals` (ms 3, us 6), so it keeps no unit table of its own.
+`$timestamp_precision` (`m`, `s` or `ms`) is settled once from `-s`/`-ms`
+and keys the label format's `:%S`; the bucket key's scale still follows
+`-ms` until drop 3 (D14). The index's first and last timestamps stay at the
+millisecond and the drift comparison is still by string until drop 3 (D13,
+D18).
+
+Measured against the base commit (3b673ee) with captures of the summary heading,
+the timeline, the STATS and MESSAGES CSVs, the aggregate export and the run
+index, on three generated application logs (fractions `.123`/`.456`/`.789`; a
+line at `10:06:13.9996`; a line at `23:59:59.9996`) and the committed
+whole-second access-log fixture `tests/fixtures/gated-means-access.txt`, under
+the default, `-s`, `-ms` and `-pr week`. Per-run clock values were masked and
+their shapes compared. Every product is byte-identical except these strings:
+
+| Run | Surface | Base | Drop 1 |
+|---|---|---|---|
+| `.123` line, `-ms` | heading first bound, export `observation.start` | `10:00:01.122` | `10:00:01.123` |
+| `.100` line, `-ms` | heading first bound, export `observation.start` | `10:06:10.099` | `10:06:10.100` |
+| `.789` line, `-pr week -ms` | heading last bound, export `observation.end` | `Mon 10:00:03.788` | `Mon 10:00:03.789` |
+| `10:06:13.9996` line, `-ms` | heading last bound, export `observation.end` | `10:06:13.999` | `10:06:14.000` |
+| `10:06:13.9996` line, `-ms` and `-s` | index `last_timestamp`, file and selection rows | `10:06:13.1000` | `10:06:14.000` |
+| `23:59:59.9996` line, `-ms` | heading, export, index | `2025-02-20 23:59:59.999`, index `23:59:59.1000` | `2025-02-21 00:00:00.000` |
+
+The line's bucket label was already `10:06:14.000` (and `2025-02-21
+00:00:00.000`), so heading, index and bucket now agree. An index written by the
+base build is read by the new one as `freshness: fresh`, `lookup:
+tier_1_selection`. `tests/validate-timestamp-precision.sh` holds drop 1's
+criteria (7 assertions; the five covering changed behaviour fail against the
+base build with the values above, and the truncation and freshness ones fail
+against a deliberately broken copy). `validate-regression.sh` (74),
+`validate-aggregate-export.sh` (161) and `validate-index-read-back.sh` (74)
+pass unchanged.
+
+**Drop 2, delivered 2026-10-02.** The ladder's `ns`, `us` and `ms` rows carry
+`nanosecond(s)`, `microsecond(s)` and `millisecond(s)`; `time_unit_canonical`
+resolves them for `-bs`, `-du`, `-ru` and the `-udm` unit slot, in any case.
+The canonical-token list in help rows and rejections is unchanged.
+`validate-bucket-size-units.sh` runs every ladder spelling (44, the six long
+ones and `MilliSeconds` among them) through the four surfaces; checks that
+`-du` and `-ru` report the step's token in `-V runtime-config`; compares
+`bucket_size_seconds` and the timeline of each long spelling with its short
+form at a one-hour width (`-bs 3600000milliseconds` against `-bs 3600000ms`,
+and the microsecond and nanosecond twins), an hour rather than the
+criterion's 100 ms because its fixture spans five days; and flags a long
+spelling in any `qw()` list outside the ladder. `validate-udm-specs.sh`
+`time-unit-long-spellings` reads `unit=ms(time)`, `us` and `ns` from
+`-V udm-specs`. Against the base build every new assertion fails (the long
+spellings are rejected as unknown units).
+
+Two pre-existing defects in `validate-bucket-size-units.sh` were fixed in
+this drop, at the architect's direction: its twelve bucket-width
+equivalences ran before the scenario selector was parsed and were never
+registered, so `--list` ran them and `--scenario` could not select them; and
+the spelling list was defined inside the preceding scenario's block, so
+`--scenario one-mechanism/spellings` alone looped over nothing and passed.
+The equivalences are now scenarios named from the table that drives them,
+the list is at file scope, and the spelling scenario fails unless it checked
+every spelling. Each of the harness's 27 scenarios passes when run alone.
+
+**Drop 3, in four steps.** Drop 3 is delivered as four commits on the issue
+branch, each verified before the next: 3a the option, rendering only (D3, D5,
+D9, D12); 3b the bucket key's scale from `-bs` (D14, D20); 3c the run index at
+the run's precision with drift compared as numbers (D13, D15 to D19); 3d the
+capture gate in the generated scan block (D11). 3b and 3d change the per-line
+path and are benchmarked against `525-before` and `525-app-before`.
+
+**Step 3a, delivered 2026-10-02.** `-tp, --timestamp-precision` takes `m`,
+`s`, `ms` or `us` in any ladder spelling and case, resolved once with `-du` and
+`-ru` into `$timestamp_precision`; the steps it accepts are read from the
+ladder, from the minute down to `$timestamp_precision_finest` (`us` until drop
+4). `-tp ns` is rejected with the accepted values until drop 4's clamp. `-s`
+and `-ms` resolve to `s` and `ms`; either beside a `-tp` of another precision
+is a usage error naming both, and each prints one deprecation line on stderr.
+`-V runtime-config` reports `timestamp-precision: <token>` when `-tp` is
+supplied. `--help`, `docs/usage.md`, the `resolution-zoom` explain topic and
+`docs/explain/techniques.md` carry the `-tp` row and the edited `-bs`, `-s` and
+`-ms` rows, and the examples are written with `-tp` and a unit on `-bs`. The
+"width and precision separate" criterion is asserted in
+`validate-timestamp-precision.sh` (`option/width-separate`) rather than by
+extending `validate-bucket-size-units.sh`, beside the other `-tp` scenarios.
+The criteria "the architect's pair", "equivalence with the switches" (its
+`-bs 100ms` row), "microsecond" and "key scale from `-bs` alone" need 3b's key
+scale and are asserted there. Against the base build every new 3a assertion
+fails; the two that pin unchanged behaviour (the deprecated switches' widths,
+the heading at millisecond precision) fail against a deliberately broken copy.
+`validate-timestamp-precision.sh` 38 passed; `validate-runtime-config.sh` 56,
+`validate-help-content.sh` 35, `validate-doc-examples.sh` 51 (the edited
+examples run), `validate-explain.sh` 695, `validate-regression.sh` 74 (the
+`-ms` golden unchanged: the notice is on stderr), `validate-udm-counting.sh`
+44, `validate-bucket-size-units.sh` 64, `validate-aggregate-export.sh` 161, all
+passing.
+
+**Step 3b, delivered 2026-10-02.** `$bucket_key_scale` (1, 1000 or 1 000 000)
+and `$bucket_size_ticks` are settled once in `adapt_to_terminal_settings` from
+the width alone: a width that is a whole number of microseconds but not of
+milliseconds keys in integer microseconds, one that is a whole number of
+milliseconds but not of seconds in integer milliseconds, any other in seconds
+(a width with a nanosecond part included, D14's "anything else"). The read
+loop, `initialize_empty_time_windows`, the two label sites and the fold
+weekday read the scale; no bucket-key site reads `-s` or `-ms`. The per-line
+recomputation of the millisecond width under `-ms` is gone. `-ms -bs 1000`
+now keys in seconds, so a line at `.9996` counts in its own second (D20).
+
+Measured against step 3a's build on the drop 1 capture set (eleven runs:
+default, `-s`, `-ms`, `-pr week`, the carry and day-end lines): the timeline,
+heading, STATS and MESSAGES CSVs, export and index are byte-identical; only the
+deprecation lines on stderr and the clock readings differ. What the key scale
+changes is shown by a line exactly on a sub-second edge: under 3a, `-bs 100ms
+-tp ms` counted a line written at `10:00:01.100` in the `.000` bucket and
+`-bs 500us -tp us` a line at `10:00:02.008000` in `.007500`, because the key
+was formed by dividing floating-point seconds; under 3b each counts in the
+bucket that starts at its timestamp. `validate-timestamp-precision.sh`
+`keyscale/bucket-edge` asserts this and fails against 3a's build; the
+architect's pair, microsecond and key-scale-from-width scenarios also pass on
+3a's build, since their lines sit off the edges, and pin the outcome rather
+than discriminate it. `keyscale/whole-second-floor` (D20) and
+`keyscale/structure` fail against 3a's build. 50 passed; `validate-regression.sh`
+74, `validate-bucket-size-units.sh` 64, `validate-aggregate-export.sh` 161,
+`validate-index-read-back.sh` 74, `validate-profile.sh` 106,
+`validate-profile-render.sh` 50, `validate-udm-counting.sh` 44, all passing.
+Benchmarked once each on this machine against the before runs on 3b673ee:
+`single-day-access-log-standard` 9.1 s to 8.8 s total (−3.3 %), RSS 99.8 MB
+to 99.4 MB; `single-day-application-log-standard` 3.9 s to 3.8 s (−2.3 %),
+RSS 42.4 MB to 42.5 MB; lines read and included identical. Neither run sets a
+sub-second width, so their per-line work is the same seconds-scale branch on
+another variable: the differences are single-run variation, not a gain. The
+rendered timeline of `-bs 100ms -tp ms` over a one-second window of the corpus
+application log is identical, row for row, to `-ms -bs 100`'s at 80 columns.
+
+**Step 3c, delivered 2026-10-02.** `write_index_file` writes `first_timestamp`
+and `last_timestamp`, file and selection rows alike, at the run's precision
+through `index_timestamp_precision` (whole seconds for a minute run), and
+`ts_precision` carries the run's precision on every row in place of the file
+row's per-line `s`/`ms` flag (removed from the read loop) and the selection
+row's `-`. The pre-seed takes each matched row's own precision through
+`index_row_precision`, which reads the column, or for a `-` row the steps its
+stored fraction's digits complete (a fraction whose length is not a multiple of
+three covers only the steps its digits complete). `detect_index_drift` brings
+both timestamps to whole numbers of the coarser of the run's and the row's
+precision through `timestamp_ticks`, the rounding `format_timestamp` uses, and
+compares them as numbers; `parse_iso_date_to_epoch` keeps the fraction; the
+cross-file aggregation compares instants; `_lt` and `_gt` are gone.
+
+Measured against step 3b on the drop 1 capture set: only the index rows
+change. A default run writes `2026-01-26T10:00:01` under `m` (was `.123`
+under `ms` on the file row and `-` on the selection row), `-s` writes whole
+seconds under `s`, `-ms` writes three digits under `ms`; the timeline, heading,
+CSVs and export are byte-identical. `validate-index-read-back.sh` gains
+`index-run-precision` (8 assertions), `drift-runtime-precision` (8) and
+`drift-numeric-structure` (1); 91 passed, the 74 existing unchanged. The 3b
+build writes every row at milliseconds whatever the run asks, so most drift
+cases cannot fail there; each was instead shown to fail against a deliberately
+broken copy of the new build: comparing only at the run's precision fails the
+whole-second, minute and `-`-with-whole-seconds rows read by a millisecond run;
+comparing only at the row's precision fails the narrowed millisecond row read
+by a whole-second run; reading a `-` row as whole seconds fails the
+`-`-with-three-digits row; ignoring the matched row's own precision fails it,
+the narrowed millisecond row and the selection row at `ms` beside a file row at
+`s`; comparing as strings fails both whole-second reads of a millisecond row.
+
+Finding: an index row written by a build before drop 1 in the carry case holds
+a four-digit fraction (`10:06:13.1000`, meaning `10:06:14.000`). Read as a
+number it is `10:06:13.100`, so the first run of this build over such a file
+at millisecond precision reports `last_timestamp` drift (measured: `live=
+2025-02-20T10:06:14.000 preseed=2025-02-20T10:06:13.1000 drifted=yes`), and
+its end-of-run write replaces the row. Drift is observation only; the row is
+corrected once, by the run that reports it.
+
+**Step 3d, delivered 2026-10-02.** `$timestamp_capture_fraction` is settled once
+in `adapt_to_terminal_settings` and passed to `format_entry_block_src` as the
+`capture_fraction` compile option. The gate is decided per consumer (D21): it
+is open for a precision finer than the second, a width that is not a whole
+number of seconds, a `-st`/`-et` bound with a non-zero fraction, and the
+aggregate export (`-o`). Closed, the fixed-three-digit block clears the
+fraction without reading it, and the variable-length block strips it with a
+lookbehind instead of capturing and converting it; the `none` block is
+unchanged. The CSV input path in `read_and_process_logs` is outside the
+generated blocks and reads its fraction as before, until CSV input becomes a
+registry entry (#615). `-V benchmark-data` reports the decision as `CONFIG
+timestamp_fraction_capture` (D22).
+
+The gate first had no export condition. Against step 3c's build on the drop 1
+capture set, that version changed one value: the aggregate export's
+`observation.duration_seconds` was measured between whole seconds on every run
+not at millisecond precision (`2.66600012779236` to `2` on the three-line log,
+`3.8996000289917` to `3` on the carry log), the rest byte-identical. D21 adds
+the export as a consumer; with it, every product of the eleven runs is
+byte-identical to 3c's.
+
+Measured by alternating the 3c and 3d builds on one machine, medians with
+ranges, `-ni -n 0 -oe -V benchmark-data`, `parse/read_files`:
+
+| Log (its fraction) | Runs per build | 3c | 3d | Change |
+|---|---|---|---|---|
+| Corpus application log, 85 MB (fixed three digits) | 5 | 3.201 s [3.110–3.341] | 3.197 s [3.112–3.241] | −0.1 % |
+| Corpus access log, 148 MB (none: the gate cannot apply) | 3 | 7.171 s [7.125–7.300] | 7.263 s [7.239–7.368] | +1.3 % |
+| Generated application log, 500 000 lines, 41 MB (variable length) | 5 | 3.147 s [3.015–3.285] | 3.021 s [2.946–3.137] | −4.0 % |
+
+On a fixed-three-digit format the gate saves one short string read per line,
+below the noise; on a variable-length format it saves a capture and an
+exponent per line, the −4.0 % the generated log shows, which is the ceiling
+of this gate; a format without a fraction is untouched, and the access log's
++1.3 % is the variation of three runs. The single `run-benchmark.sh` runs
+against the before runs on 3b673ee (labels `525-3d-after`, `525-app-3d-after`)
+read 9.1 s to 9.5 s (+4.3 %) and 3.9 s to 3.8 s (−3.5 %), within the ±4 % of
+single runs on this machine.
+
+`validate-timestamp-precision.sh` gains `capture/per-consumer` (nine runs,
+each consumer's decision read from the row) and `capture/generator` (the
+generator emits the fraction arithmetic only under the gate); every one fails
+against 3c's build, which has neither, and against deliberately broken copies:
+without the export condition the `-o` row fails, a gate always open fails the
+three closed rows, and an ungated variable-length conversion fails the
+structural check. 60 passed; `validate-regression.sh` 74,
+`validate-format-registry.sh` 24, `validate-format-detection.sh` 283,
+`validate-csv-input.sh` 15, `validate-aggregate-export.sh` 161,
+`validate-statistics-demand.sh` 102 and the other readers of
+`-V benchmark-data` pass.
+
+**Drop 4, in two steps.** 4a accepts `-tp ns` and resolves it to the finest
+precision the parse keeps; 4b clamps the precision to what the log's
+timestamps carry. Neither changes the per-line path.
+
+**Step 4a, delivered 2026-10-02.** `-tp` accepts every ladder step from the
+minute down, `ns` and `nanosecond` included. A step finer than
+`$timestamp_precision_finest` (the microsecond: the parse keeps six fractional
+digits) resolves to it at settlement, prints "Note: timestamps are shown to the
+microsecond: nanosecond precision was asked for, and at most 6 fractional
+digits are read from a timestamp" (the step names and the digit count read
+from the ladder), and records the request in the `clamped from` annotation, so
+`-V runtime-config` reads `timestamp-precision: us; clamped from ns`. On a log
+with nine-digit fractions `-tp ns` renders `.123456` and `.999999` for lines
+written at `.123456789` and `.999999999`: the digits past the sixth are not
+read, so nothing carries. `--help` and `docs/usage.md` name `ns`.
+`validate-timestamp-precision.sh` gains `nanosecond/parse-cap` and the `ns`
+spellings in `option/values` (65 passed); `validate-runtime-config.sh` gains the
+`clamped from ns` row (57 passed); both fail against the 3d build, which
+rejects `-tp ns`.
+
+**Step 4b, delivered 2026-10-02.** `resolve_timestamp_precision()` runs once
+after the read, beside `resolve_byte_notation()`, before anything renders, the
+index is written or drift is judged; nothing read during the parse depends on
+it. `sample_file_for_detection()` records, per format, the most fractional
+digits among the sampled timestamps (it already captured each matched line's
+raw timestamp field, so no per-line work is added). A file's precision is the
+coarsest of its sampled formats': a `none` or `fixed3` format gives its
+declared `precision`, a `generic` one the precision of its digits through
+`fraction_precision()`, the one digits-to-precision rule, which walks the
+ladder down from the second a clock time states and which
+`index_row_precision()` now calls too. The run takes the coarsest file's. When
+the precision asked for (by `-tp`, `-s` or `-ms`) is finer, it is clamped; one
+note prints, and the runtime-config row (composed at settlement, before any
+file is sampled) is rewritten to `timestamp-precision: <resolved>; clamped from
+<requested>`. 4a's parse-cap note moved here, so a run prints one note naming
+the precision actually shown: `-tp ns` on a millisecond log names the
+millisecond, not the microsecond.
+
+Proposed and implemented (§ 6.4): a fraction whose length is not a multiple
+of three covers the steps its digits complete (four digits, `.9996`, are the
+millisecond; two are the second); several files take the coarsest, the note
+naming each file's precision; a width finer than the resolved precision adds
+"at a bucket width below a second, only the buckets that start on a whole
+second can hold a line". Proposed in the plan, not settled by a decision: a
+file whose precision cannot be read sets no limit (CSV input, which detection
+does not sample; a file read through the fallback window; a sample in which no
+format matched), so `-tp us` over a CSV of millisecond timestamps renders six
+digits as before.
+
+Measured on generated logs and the committed whole-second access-log and
+fixed-three-digit application-log fixtures: `-tp ms` on whole seconds renders
+labels, heading and the index at the second (`ts_precision s`); `-tp us` on
+three digits, on four digits and on the fixed-three-digit format renders the
+millisecond; two digits resolve to the second; `-tp ms` over a millisecond and
+a whole-second file renders the second; `-ms -bs 1000` on whole seconds
+renders the second; each with one note, and none when nothing is clamped.
+`validate-timestamp-precision.sh` gains seven `truth/` scenarios (81 passed);
+`validate-runtime-config.sh` checks the spellings on a millisecond log and adds
+`s; clamped from ms` and `ms; clamped from us` (59 passed). Against the 4a
+build every new assertion fails except "no note when nothing is clamped",
+which pins unchanged behaviour; "a CSV file sets no limit" fails against a
+copy that clamps an unreadable file to the second. Two of this issue's earlier
+scenarios moved with the clamp: the 3a spelling rows ran on a whole-second
+log, and the 3b key-scale check asked `-tp us` of the millisecond log for six
+digits; they now run on a millisecond and on the six-digit log. Corpus logs
+looked at, at 80 and 160 columns: the clamped timelines render with their one
+note; the banner and the echoed options exceed 80 columns on the base build as
+on this one (#497).
+
+The regression golden running `-ms -bs 1000` over a whole-second access log,
+`tests/reference-output/ms-w160.txt`, was re-captured with the architect's
+approval. Its diff is not only the dropped `.000`: the header and all 299
+timeline rows change, because the four columns the timestamp no longer needs
+go back to the layout (bars two characters longer, wider spacing in the
+duration and bytes columns); with the `.000`, the bar characters and the
+spacing removed, the two files are identical, every count, duration, byte
+value and percentile unchanged. `validate-regression.sh` 74 passed.
+
+**Drop 5, delivered 2026-10-02 (D23).** The prototype
+(`prototype/525-nanosecond-timestamps/FINDINGS.md`) chose design H. Under
+`-tp ns` (`$timestamp_capture_ns`, a compile option of the scan blocks) the
+variable-length block keeps the fraction's digits in `$fraction_digits` (the
+fixed-three-digit block its three, the CSV paths theirs); the read loop's
+floating bound updates are unchanged, and two `if ($timestamp_capture_ns)`
+tests per line, one after the file row's bounds and one after the heading's,
+give a bound that this line moved to or ties the line's exact whole seconds
+and nanoseconds when they are better. `format_timestamp` and
+`timestamp_ticks` take an exact `[ seconds, nanoseconds ]` and count in
+integers (`use integer`), since a count of nanoseconds exceeds a double's
+exact integers; the heading, the export's observation, the index rows and the
+drift check pass the exact bounds; `format_bucket_key` splits an integer
+bucket key exactly for the two label sites, which it now serves alike;
+`iso_timestamp_parts` reads an index date-time exactly and
+`parse_iso_date_to_epoch` goes through it. The parse cap of step 4a and its
+note are gone: nanosecond is no longer resolved to the microsecond at
+settlement, and a log carrying fewer digits is clamped by step 4b's rule
+(`-tp ns` on a microsecond log reads `us; clamped from ns`).
+
+Found and fixed on the way: the variable-length strip read at most six
+digits, so on a log carrying more a coarser precision truncated where D7
+rounds (`-tp us` showed `.123456` for `.123456789`), and the three unread
+digits stayed glued to the time string, defeating the last-seen timestamp
+memo on every line. The strip now reads up to nine digits whenever it reads
+the fraction: `-tp us` shows `.123457`, `.999999999` carries to the next
+second's `.000000`, and a microsecond run over a row a nanosecond run wrote
+reports no false drift. Observed, unchanged: with `-bs 100ms -tp ns`, the
+line at `.999999999` counts in the next second's bucket, its label
+`10:00:03.000000000` beside a heading bound of `10:00:02.999999999`, the
+millisecond key rounding half-up as D7 and D14 keep it.
+
+Measured on a log whose fractions carry nine digits: the heading, the
+export's observation and both index rows read `2026-01-26 10:00:01.123456789`
+to `10:00:02.999999999` with `ts_precision ns`; labels at `-bs 100ms` read
+`.100000000`; a row narrowed by one nanosecond drifts under `-tp ns` and not
+under `-tp us`. Cost against step 4b, alternating the two builds,
+`parse/read_files` medians with ranges: corpus application log (fixed three
+digits), default, nine rounds on a quiet machine, 3.224 s [3.167–3.355] to
+3.217 s [3.202–3.327] (−0.2 %), where an A/A control (step 4b against itself
+with a comment block added) moved −1.0 % [3.145–3.226]; generated 500 000-line
+variable-length log, default, +0.5 %; corpus access log, default, +0.3 %;
+generated 500 000-line nine-digit log, default −6.7 % and `-tp us` −5.9 % (the
+memo restored), `-tp ns` +8.3 % (3.223 s to 3.490 s), five rounds each. An
+earlier set measured the application log at +2.0 to +2.2 %, and a copy of the
+drop 5 build with every new per-line statement removed measured the same, so
+the difference was not this code; it did not reproduce on the quiet machine.
+
+`validate-timestamp-precision.sh` replaces 4a's parse-cap scenario with
+`nanosecond/exact`, `nanosecond/index-and-export` and
+`nanosecond/rounding-below`, and its structural capture check accepts the
+nanosecond form as gated (84 passed); `validate-index-read-back.sh` adds the
+nanosecond drift pair (93 passed). Against the 4b build every new assertion
+fails except "a row narrowed by 1 ns read by a -tp us run: no drift", which
+pins unchanged behaviour. `validate-regression.sh` 74,
+`validate-format-detection.sh` 283, `validate-runtime-config.sh` 59 and the
+other affected harnesses pass. Looked at, at 80 and 160 columns, on the
+nine-digit log: the nanosecond labels and the heading render; only the banner
+and the echoed options exceed 80 columns, as on the base build (#497).
+
+**Completion gate, run 2026-10-02 on a5b4d84** (`$version_number` restored to
+`0.19.0`; `release/0.19.0` had not moved past the branch point). Full suite:
+all 45 `tests/validate-*.sh` exit 0, each with assertions run
+(`validate-csv-output.sh` 41 and `validate-statistics.sh` 25 scenarios with
+`CI=1`, the statistics oracle L3=OK on all 44 corpus cells and N/A on the six
+cells of the three committed gated-means fixtures, which no oracle parser
+maps). Before/after benchmark on this machine against 3b673ee:
+`single-day-access-log-standard` total 9.1 s to 9.1 s (−0.2 %), peak RSS
+99.8 MB to 100.0 MB (+0.3 %); `single-day-application-log-standard` total
+3.9 s to 3.9 s (−1.1 %), peak RSS 42.4 MB to 42.9 MB (+1.1 %); lines read and
+included identical. Repeated three times each outside the harness, the
+application log's peak RSS is 41.206 MB [41.206–41.255] before and 41.665 MB
+[41.632–41.681] after (+459 KB), the access log's +164 KB (+0.16 %); on a
+three-line log the two builds peak alike (about 40.4 MB), so the program's
+size is not the cause, and no measured structure grows (`log_messages`
+27 683 738 bytes on both builds on the access log; `format_scan_subs` within
+±60 KB). Bisected over every step's build, the application log's peak RSS moves
+up and down by about 400 KB from step to step with no trend, and copies of the
+base build differing only by a block of comment lines spread over 40 336 to
+40 784 KB; the final build's 40 768 to 41 104 KB sits 144 KB above the widest of
+them, all of it in the unattributed remainder.
+
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and
-`525-after`), `$version_number` restored before the gate, `--help` and
+`525-after`), with `single-day-application-log-standard` (`525-app-before`,
+`525-app-after`) for drop 3's capture gate; both before runs taken
+2026-10-02 on 3b673ee, `$version_number` restored before the gate, `--help` and
 `docs/usage.md` agreeing.
 
 ---

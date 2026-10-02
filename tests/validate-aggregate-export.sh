@@ -236,7 +236,7 @@ if want "$current_scenario"; then
         if perl "$CHECKER" compare --yaml "$YAML_FILE" --csv "$STATS_CSV" > "$cmp" 2>&1; then pass_with "file = STATS CSV under -cp full: $(grep PASS "$cmp" | sed 's/^ *PASS *//')"; else fail_with "file = STATS CSV under -cp full" 'Every per-bucket value both surfaces carry is equal to the last digit' "$PRODUCER; print_bar_graph() in ltl" "$CONTRACT (D14)" "$(grep -A1 FAIL "$cmp" | head -4 | tr '\n' ' ')"; fi
         # timestamps: file = CSV column 1
         stamps=""; i=0; while v="$(yget series.buckets.$i.timestamp)" && [[ -n "$v" ]]; do stamps="${stamps:+$stamps|}$v"; i=$((i+1)); done
-        assert_equal "bucket timestamps = CSV timestamps" "$stamps" "$(awk -F, 'NR>1{gsub(/"/,"",$1); print $1}' "$STATS_CSV" | paste -sd'|' -)" asserts 'Every bucket timestamp is the STATS CSV timestamp of the same row' produced_by "$PRODUCER; format_bucket_timestamp() in ltl" contract "$CONTRACT (D7/D14)"
+        assert_equal "bucket timestamps = CSV timestamps" "$stamps" "$(awk -F, 'NR>1{gsub(/"/,"",$1); print $1}' "$STATS_CSV" | paste -sd'|' -)" asserts 'Every bucket timestamp is the STATS CSV timestamp of the same row' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7/D14)"
         # options string
         opt_line="$(strip_colour < "$OUT" | grep -E '^command-line options: ' | head -1 | sed 's/^command-line options: //')"
         assert_equal "options.command-line = echoed line" "$(yget provenance.determining.options.command-line)" "$opt_line" asserts 'The option string is byte-identical to the terminal echo, colour stripped' produced_by "$PRODUCER; build_run_options_string() in ltl" contract "$CONTRACT (D5)"
@@ -286,12 +286,12 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         heading="$(strip_colour < "$OUT" | grep 'spanning' | head -1 | sed 's/.*spanning //' | sed 's/ *$//' || true)"
-        assert_equal "observation.start/end = heading" "$(yget population.observation.start) to $(yget population.observation.end)" "$heading" asserts 'The window is the two strings the run summary heading prints; under -pr the heading reads spanning <start> to <end> in the folded day/time form' produced_by "$PRODUCER; format_observation_timestamp() in ltl" contract "$CONTRACT (D7, D8)"
+        assert_equal "observation.start/end = heading" "$(yget population.observation.start) to $(yget population.observation.end)" "$heading" asserts 'The window is the two strings the run summary heading prints; under -pr the heading reads spanning <start> to <end> in the folded day/time form' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7, D8)"
         assert_equal "duration_seconds" "$(yget population.observation.duration_seconds)" 345600 asserts 'Wednesday 10:00 to Sunday 10:00 is four days' produced_by "$PRODUCER" contract "$CONTRACT (D13)"
         assert_equal "duration" "$(yget population.observation.duration)" "4 days" asserts 'The long form at three significant digits, plural' produced_by "$PRODUCER; format_time() in ltl" contract "$CONTRACT (D13)"
         assert_equal "profile" "$(yget provenance.determining.profile)" week asserts 'The fold mode is recorded' produced_by "$PRODUCER" contract "$CONTRACT (D8)"
         assert_equal "excluded.profile = samples_dropped" "$(yget population.lines.excluded.profile)" "$(section_value "$OUT" samples_dropped)" asserts 'The fold cause reads -V profile samples_dropped' produced_by "$PRODUCER; emit_profile_verbose() in ltl" contract "$CONTRACT (D12)"
-        assert_equal "bucket timestamp = CSV timestamp (folded)" "$(yget series.buckets.0.timestamp)" "$(awk -F, 'NR==2{gsub(/"/,"",$1); print $1}' "$STATS_CSV")" asserts 'Under -pr the bucket timestamp is the folded string the CSV writes' produced_by "$PRODUCER; format_bucket_timestamp() in ltl" contract "$CONTRACT (D8)"
+        assert_equal "bucket timestamp = CSV timestamp (folded)" "$(yget series.buckets.0.timestamp)" "$(awk -F, 'NR==2{gsub(/"/,"",$1); print $1}' "$STATS_CSV")" asserts 'Under -pr the bucket timestamp is the folded string the CSV writes' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D8)"
     fi
 fi
 
@@ -302,7 +302,7 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         heading="$(strip_colour < "$OUT" | grep -A1 'results between' | tail -1 | sed 's/[─ ]*//' | sed 's/^ *//;s/ *$//' || true)"
-        assert_equal "observation.start/end = heading (-s)" "$(yget population.observation.start) and $(yget population.observation.end)" "$heading" asserts 'Under -s the bounds carry seconds, as the heading does' produced_by "$PRODUCER; format_observation_timestamp() in ltl" contract "$CONTRACT (D7)"
+        assert_equal "observation.start/end = heading (-s)" "$(yget population.observation.start) and $(yget population.observation.end)" "$heading" asserts 'Under -s the bounds carry seconds, as the heading does' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7)"
         assert_equal "duration_seconds" "$(yget population.observation.duration_seconds)" 9 asserts 'Ten lines one second apart span nine seconds' produced_by "$PRODUCER" contract "$CONTRACT (D13)"
         assert_equal "duration" "$(yget population.observation.duration)" "9 seconds" asserts 'The long form' produced_by "$PRODUCER; format_time() in ltl" contract "$CONTRACT (D13)"
     fi

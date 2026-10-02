@@ -4,8 +4,10 @@
 #
 # Contract: features/524-bucket-size-unit.md (D1 one ladder, D2 the ladder
 # and its spellings, D3 the -bs grammar, D4 width and precision separate,
-# D5 documentation) and its Acceptance criteria. The surfaces read are the
-# existing `-V runtime-config` (`bucket-size:` row) and `-V benchmark-data`
+# D5 documentation) and its Acceptance criteria, with the long sub-second
+# spellings of features/525-timestamp-precision-option.md D6. The surfaces
+# read are the existing `-V runtime-config` (`bucket-size:`, `duration-unit:`
+# and `rate-unit:` rows) and `-V benchmark-data`
 # (`CONFIG time_bucket_size` / `CONFIG bucket_size_seconds` rows); the
 # harness file name tracks the surface under test rather than a section
 # because the criteria compare whole runs.
@@ -58,6 +60,15 @@ CONTRACT_D1='features/524-bucket-size-unit.md D1 (one time-unit ladder at file s
 CONTRACT_D2='features/524-bucket-size-unit.md D2 (the ladder and its spellings; m is minute; month 30 days, year 365 days)'
 CONTRACT_D3='features/524-bucket-size-unit.md D3 (-bs <number>[<unit>]; bare number unchanged; rejections)'
 CONTRACT_D4='features/524-bucket-size-unit.md D4 (bucket width and timestamp precision are separate)'
+CONTRACT_525_D6='features/525-timestamp-precision-option.md D6 (the long sub-second spellings millisecond(s), microsecond(s), nanosecond(s) join the ladder for every time-unit option)'
+
+# Every spelling the ladder accepts, read by one-mechanism/spellings, plus
+# mixed-case forms (features/524-bucket-size-unit.md D2: matching is
+# case-insensitive).
+LADDER_SPELLINGS=(ns nsec nanosecond nanoseconds us usec microsecond microseconds
+                  ms msec millisecond milliseconds s sec second seconds m min minute minutes
+                  h hr hour hours d day days w wk week weeks month mo mon months
+                  year y yr years D H MIN Sec MilliSeconds)
 
 pass=0
 fail=0
@@ -135,10 +146,39 @@ EQUIVALENCES=(
     "uppercase-m-is-minute|-bs 1M|-bs 1|full"
     "seconds-run-90s|-s -bs 90s|-s -bs 90|full"
     "ms-run-500ms|-ms -bs 500ms|-ms -bs 500|full"
+    # The long sub-second spellings (features/525-timestamp-precision-option.md
+    # D6): each is the same width as its short token, in any case. An hour
+    # keeps the five-day fixture to a handful of buckets.
+    "long-milliseconds|-bs 3600000milliseconds|-bs 3600000ms|full"
+    "long-millisecond|-bs 3600000MilliSecond|-bs 1h|full"
+    "long-microseconds|-bs 3600000000microseconds|-bs 3600000000us|full"
+    "long-microsecond|-bs 3600000000MICROSECOND|-bs 3600000000usec|full"
+    "long-nanoseconds|-bs 3600000000000nanoseconds|-bs 3600000000000ns|full"
+    "long-nanosecond|-bs 3600000000000Nanosecond|-bs 3600000000000nsec|full"
 )
+
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector):
+# parsed before any run; each equivalence row is a scenario named from the
+# table that drives it, so the names and the dispatch cannot drift.
+equivalence_scenarios=()
+for row in "${EQUIVALENCES[@]}"; do
+    equivalence_scenarios+=("equivalence/${row%%|*}")
+done
+scenario_register "${equivalence_scenarios[@]}" \
+                  precision/90s-on-minute-run \
+                  rejection/bare-number-control \
+                  one-mechanism/spellings \
+                  one-mechanism/long-spellings-canonical \
+                  one-mechanism/udm-day-matches-bs-day \
+                  one-mechanism/ru-week-matches-bs-week \
+                  one-mechanism/structure \
+                  display-ladder/above-a-day \
+                  display-ladder/below-a-microsecond
+scenario_parse_args "$@"
 
 for row in "${EQUIVALENCES[@]}"; do
     IFS='|' read -r name args_a args_b mode <<< "$row"
+    scenario_wanted "equivalence/$name" || continue
     current_scenario="equivalence/$name"
     # shellcheck disable=SC2086
     run_ltl a "${COMMON[@]}" $args_a "$SPAN_FIXTURE"
@@ -185,16 +225,6 @@ done
 # ---------------------------------------------------------------------------
 # Criterion 7 — a unit never changes the timestamp precision
 # ---------------------------------------------------------------------------
-# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
-scenario_register precision/90s-on-minute-run \
-                  rejection/bare-number-control \
-                  one-mechanism/spellings \
-                  one-mechanism/udm-day-matches-bs-day \
-                  one-mechanism/ru-week-matches-bs-week \
-                  one-mechanism/structure \
-                  display-ladder/above-a-day \
-                  display-ladder/below-a-microsecond
-scenario_parse_args "$@"
 
 if scenario_wanted precision/90s-on-minute-run; then
 current_scenario="precision/90s-on-minute-run"
@@ -279,19 +309,18 @@ else
         "-bs 5 keeps today's meaning and exit code" \
         'adapt_to_command_line_options() in ltl' "$CONTRACT_D3" "exit: $(cat "$TMP_DIR/c.rc")"
 fi
+fi
 
 # ---------------------------------------------------------------------------
 # Criterion 5 — one mechanism: every ladder spelling on every surface
 # ---------------------------------------------------------------------------
-LADDER_SPELLINGS=(ns nsec us usec ms msec s sec second seconds m min minute minutes
-                  h hr hour hours d day days w wk week weeks month mo mon months
-                  year y yr years D H MIN Sec)
-fi
 
 if scenario_wanted one-mechanism/spellings; then
 current_scenario="one-mechanism/spellings"
 spelling_failures=0
+spellings_checked=0
 for u in "${LADDER_SPELLINGS[@]}"; do
+    spellings_checked=$((spellings_checked + 1))
     # The four parsing surfaces. -udm names the value in the line's last field
     # so the unit slot is exercised on a real conversion.
     run_ltl s-bs  "${COMMON[@]}" -bs "1$u" "$SPAN_FIXTURE"
@@ -318,15 +347,37 @@ for u in "${LADDER_SPELLINGS[@]}"; do
         echo "        spelling '$u' not read as a time unit by -udm: $(grep -E '^  read_as:' "$TMP_DIR/s-udm.out" || echo '(no read_as row)')"
     fi
 done
-if [[ "$spelling_failures" -eq 0 ]]; then
-    pass_with "every ladder spelling is accepted by -bs, -du, -ru and the -udm unit slot"
+if [[ "$spelling_failures" -eq 0 && "$spellings_checked" -gt 0 && "$spellings_checked" -eq "${#LADDER_SPELLINGS[@]}" ]]; then
+    pass_with "every ladder spelling is accepted by -bs, -du, -ru and the -udm unit slot ($spellings_checked spellings)"
 else
     fail_with "every ladder spelling is accepted by -bs, -du, -ru and the -udm unit slot" \
         "the parsing surfaces are mutually sufficient: every spelling one accepts, all accept, case-insensitively" \
         'time_unit_canonical() in ltl, called by adapt_to_command_line_options() and parse_udm_configs()' \
-        "$CONTRACT_D1; $CONTRACT_D2" "spellings failing: $spelling_failures"
+        "$CONTRACT_D1; $CONTRACT_D2" "spellings failing: $spelling_failures" "spellings checked: $spellings_checked"
 fi
 
+fi
+
+# ---------------------------------------------------------------------------
+# The long sub-second spellings resolve to their step's token (#525 D6)
+# ---------------------------------------------------------------------------
+if scenario_wanted one-mechanism/long-spellings-canonical; then
+current_scenario="one-mechanism/long-spellings-canonical"
+for pair in millisecond:ms Milliseconds:ms microsecond:us MICROSECONDS:us nanosecond:ns Nanoseconds:ns; do
+    u=${pair%%:*}; want=${pair##*:}
+    run_ltl lc "${COMMON[@]}" -bs 1440 -du "$u" -ru "$u" -V runtime-config "$SPAN_FIXTURE"
+    du=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^duration-unit: / {print $2; exit}' "$TMP_DIR/lc.out")
+    ru=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^rate-unit: / {print $2; exit}' "$TMP_DIR/lc.out")
+    if [[ "$(cat "$TMP_DIR/lc.rc")" == 0 && "$du" == "$want" && "$ru" == "$want" ]]; then
+        pass_with "-du and -ru resolve '$u' to $want"
+    else
+        fail_with "-du and -ru resolve '$u' to $want" \
+            "a long spelling is the same unit as its step's token, in any case: -du and -ru report the canonical token in -V runtime-config" \
+            'time_unit_canonical() in ltl, called by adapt_to_command_line_options()' \
+            "$CONTRACT_D2; $CONTRACT_525_D6" "exit: $(cat "$TMP_DIR/lc.rc")" \
+            "duration-unit: ${du:-MISSING-ANCHOR}" "rate-unit: ${ru:-MISSING-ANCHOR}"
+    fi
+done
 fi
 
 if scenario_wanted one-mechanism/udm-day-matches-bs-day; then
@@ -392,7 +443,7 @@ ladder_defs=$(grep -cE '^my @time_unit_ladder\b' "$LTL" || true)
 # A format's recognition pattern describes a line shape (a bracketed duration
 # token carries its unit on the line); the value it captures is converted
 # through the ladder, so pattern_src lines are not unit tables either.
-stray_lists=$(grep -nE "qw\([^)]*\b(ns|us|ms|msec|usec)\b|\((ns|us|ms|s)\|(us|ms|s|m)|\(s\|m\|h\|d\)" "$LTL" | grep -vE '^\s*[0-9]+:\s*#' | grep -vE "token => '|pattern_src =>" || true)
+stray_lists=$(grep -nE "qw\([^)]*\b(ns|us|ms|msec|usec|(milli|micro|nano)seconds?)\b|\((ns|us|ms|s)\|(us|ms|s|m)|\(s\|m\|h\|d\)" "$LTL" | grep -vE '^\s*[0-9]+:\s*#' | grep -vE "token => '|pattern_src =>" || true)
 if [[ "$ladder_defs" == 1 && -z "$stray_lists" ]]; then
     pass_with "exactly one ladder definition; no stray time-unit token list or regex"
 else

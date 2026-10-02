@@ -460,13 +460,14 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 - `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;`
 - `print_bar_graph` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');`
 - `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,`
+- `write_index_file` :: `my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');`
 
 **Owning record.** This entry; worked contracts in
 `features/histogram-charts.md` § Command Line Interface (metric operands),
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #613, #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #613, #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
 
 ---
 

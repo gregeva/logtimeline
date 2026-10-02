@@ -1295,6 +1295,136 @@ scenario_index_heatmap_bytes_preseed() {
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 # Parsed before the helper self-tests, so a rejected argument runs no assertion.
+# ---------------------------------------------------------------------------
+# #525: the index at the run's precision; drift at the runtime precision
+# ---------------------------------------------------------------------------
+IDX525_CONTRACT='features/525-timestamp-precision-option.md D13 (the index at the run'"'"'s resolved precision; drift follows the runtime options), D15 (compared at the run'"'"'s precision, or the row'"'"'s when coarser), D16 (a minute run writes whole seconds under m), D17 (every row states its precision), D18 (numbers, never strings), D19 (a row with - is read at its digits'"'"' precision)'
+
+# Application-log fixtures in the scenario directory: three lines with
+# millisecond fractions (.123, .456, .789), and three with six-digit ones.
+write_precision_fixtures() {
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' \
+        '2026-01-26 10:00:03,789 [main] ERROR com.example.Service - third line' > three.log
+    printf '%s\n' \
+        '2026-01-26 10:00:00,000250 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:00,000750 [main] INFO  com.example.Service - second line' \
+        '2026-01-26 10:00:00,999999 [main] INFO  com.example.Service - third line' > six.log
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > nine.log
+}
+
+scenario_index_run_precision() {
+    current_scenario="index-run-precision"
+    echo "[$current_scenario]"
+    write_precision_fixtures
+    local row tp file first want_first want_tp out row_first row_tp
+    for row in "ms|three.log|2026-01-26T10:00:01.123|ms" "-|three.log|2026-01-26T10:00:01|m" "s|three.log|2026-01-26T10:00:01|s" "us|six.log|2026-01-26T10:00:00.000250|us"; do
+        IFS='|' read -r tp file want_first want_tp <<< "$row"
+        rm -f ltl-index.csv
+        if [[ "$tp" == - ]]; then out=$(run_ltl $COMMON "$file"); else out=$(run_ltl $COMMON -tp "$tp" "$file"); fi
+        check_capture_warnings "$out"
+        for entry in file selection; do
+            row_first=$(read_index_column first_timestamp "entry_type=$entry")
+            row_tp=$(read_index_column ts_precision "entry_type=$entry")
+            assert_command \
+                command     "[ \"$row_first\" = \"$want_first\" ] && [ \"$row_tp\" = \"$want_tp\" ]" \
+                label       "-tp $tp: the $entry row writes $want_first under $want_tp ('$row_first', '$row_tp')" \
+                asserts     'The index writes first and last timestamps at the precision the run resolved (whole seconds at minute precision, the date-time form having nothing coarser), and every row, selection rows included, states that precision' \
+                produced_by 'write_index_file() in ltl (index_timestamp_precision(), format_timestamp())' \
+                contract    "$IDX525_CONTRACT"
+        done
+    done
+}
+
+# drift_case LABEL WRITE_TP EDIT READ_TP WANT — write the index with a run at
+# WRITE_TP (- for none), apply EDIT to the selection row (empty for none),
+# read it back with a run at READ_TP and assert WANT, a regex over the
+# -V index-read-back capture.
+drift_case() {
+    local label="$1" write_tp="$2" edit="$3" read_tp="$4" want="$5" out
+    rm -f ltl-index.csv
+    if [[ "$write_tp" == - ]]; then out=$(run_ltl $COMMON three.log); else out=$(run_ltl $COMMON -tp "$write_tp" three.log); fi
+    check_capture_warnings "$out"
+    if [[ -n "$edit" ]]; then edit_index_row 'entry_type=selection' "$edit"; fi
+    out=$(run_ltl_v -tp "$read_tp" three.log)
+    check_capture_warnings "$out"
+    assert_command \
+        command     "grep -q '^index_used: yes\$' '$out' && grep -qE '$want' '$out'" \
+        label       "$label" \
+        asserts     'Drift is judged at the run'"'"'s precision, or at the stored row'"'"'s precision when that is coarser, with each row read at the precision it states (or its digits carry, for a row with -), comparing numbers' \
+        produced_by 'detect_index_drift() and index_row_precision() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
+scenario_drift_runtime_precision() {
+    current_scenario="drift-runtime-precision"
+    echo "[$current_scenario]"
+    write_precision_fixtures
+    drift_case "a millisecond row read by a whole-second run: no drift" ms "" s '^drift_detected: no$'
+    drift_case "a whole-second row read by a millisecond run: compared at the row's second, no drift" s "" ms '^drift_detected: no$'
+    drift_case "a minute run's row read by a millisecond run: compared at the minute, no drift" - "" ms '^drift_detected: no$'
+    drift_case "a row with - and whole-second timestamps read by a millisecond run: compared at the second, no drift" s "ts_precision=-" ms '^drift_detected: no$'
+    drift_case "a row with - and three-digit timestamps, last narrowed by 1 ms: compared at the millisecond, drifted" ms "ts_precision=-,last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
+    drift_case "a millisecond row narrowed by 1 ms read by a millisecond run: drifted" ms "last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
+    drift_case "a millisecond row narrowed by 1 ms read by a whole-second run: no drift" ms "last_timestamp=2026-01-26T10:00:03.788" s '^drift_detected: no$'
+
+    # Nanosecond: a row narrowed by one nanosecond drifts under -tp ns and not
+    # under -tp us, where both round to the same microsecond.
+    local nine_out
+    for read_tp in ns us; do
+        rm -f ltl-index.csv
+        nine_out=$(run_ltl $COMMON -tp ns nine.log); check_capture_warnings "$nine_out"
+        edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:02.999999998'
+        nine_out=$(run_ltl_v -tp "$read_tp" nine.log); check_capture_warnings "$nine_out"
+        local want='^drift_detected: no$'
+        [[ "$read_tp" == ns ]] && want='^  last_timestamp: live=2026-01-26T10:00:02\.999999999 preseed=2026-01-26T10:00:02\.999999998 drifted=yes$'
+        assert_command \
+            command     "grep -q '^index_used: yes\$' '$nine_out' && grep -qE '$want' '$nine_out'" \
+            label       "a nanosecond row narrowed by 1 ns read by a -tp $read_tp run: $([[ $read_tp == ns ]] && echo drifted || echo no drift)" \
+            asserts     'At nanosecond precision the stored and live timestamps are compared exactly, as whole seconds and nanoseconds; at a coarser precision both round to it first' \
+            produced_by 'detect_index_drift(), timestamp_ticks() and iso_timestamp_parts() in ltl' \
+            contract    "$IDX525_CONTRACT; features/525-timestamp-precision-option.md D23"
+    done
+
+    # A selection row written at another precision than the file row beside
+    # it is judged at its own: run 1 writes both at s, run 2 (file unchanged,
+    # so its row is kept) rewrites the selection row at ms.
+    local out file_tp sel_tp
+    rm -f ltl-index.csv
+    out=$(run_ltl $COMMON -tp s three.log); check_capture_warnings "$out"
+    out=$(run_ltl $COMMON -tp ms three.log); check_capture_warnings "$out"
+    file_tp=$(read_index_column ts_precision 'entry_type=file')
+    sel_tp=$(read_index_column ts_precision 'entry_type=selection')
+    edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:03.788'
+    out=$(run_ltl_v -tp ms three.log); check_capture_warnings "$out"
+    assert_command \
+        command     "[ \"$file_tp\" = s ] && [ \"$sel_tp\" = ms ] && grep -qE '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes\$' '$out'" \
+        label       "a selection row at ms beside a file row at s is judged at its own millisecond (file '$file_tp', selection '$sel_tp')" \
+        asserts     'A selection row states its own precision, so a later run that rewrote it at a finer precision than the preserved file row is judged at the selection row'"'"'s precision' \
+        produced_by '_preseed_from_row() and detect_index_drift() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
+scenario_drift_numeric_structure() {
+    current_scenario="drift-numeric-structure"
+    echo "[$current_scenario]"
+    perl -ne '
+        $sub = $1 if /^sub (\w+)/;
+        next if /^\s*#/;
+        print "$sub:$.: $_" if $sub =~ /^(read_index_file|detect_index_drift)$/ && /\b(lt|gt|le|ge|cmp)\b|\b_(lt|gt)\(/;
+        print "$sub:$.: $_" if /^sub _(lt|gt)\b/;
+    ' "$LTL" > stray-comparisons.txt
+    assert_command \
+        command     "[ ! -s stray-comparisons.txt ]" \
+        label       "read_index_file() and detect_index_drift() compare no timestamp as a string" \
+        asserts     'Timestamps read back from the index are compared as the instants they name, never by string order' \
+        produced_by 'read_index_file() and detect_index_drift() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
 scenario_register cold-no-index \
                   warm-unfiltered \
                   cold-filtered-tier2-fallback \
@@ -1316,7 +1446,10 @@ scenario_register cold-no-index \
                   index-means-fixed-precision \
                   index-means-integral \
                   index-bytes-counted \
-                  index-heatmap-bytes-preseed
+                  index-heatmap-bytes-preseed \
+                  index-run-precision \
+                  drift-runtime-precision \
+                  drift-numeric-structure
 scenario_parse_args "$@"
 
 echo "Validating index read-back against ltl at $LTL"
@@ -1352,6 +1485,9 @@ while read -r _scenario; do
         index-means-integral                 ) _fn=scenario_index_means_integral ;;
         index-bytes-counted                  ) _fn=scenario_index_bytes_counted ;;
         index-heatmap-bytes-preseed          ) _fn=scenario_index_heatmap_bytes_preseed ;;
+        index-run-precision                  ) _fn=scenario_index_run_precision ;;
+        drift-runtime-precision              ) _fn=scenario_drift_runtime_precision ;;
+        drift-numeric-structure              ) _fn=scenario_drift_numeric_structure ;;
     esac
     echo ""
     in_scenario_dir "$_fn"

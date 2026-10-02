@@ -421,6 +421,28 @@ my %filter_range;
 # 'start'/'end' present only for the bounds given in time-only form.
 my %filter_range_tod;
 my $output_timestamp_format = "%Y-%m-%d %H:%M";
+# The precision the run renders timestamps at, a canonical time-unit token
+# (m, s, ms, us), settled once from -tp (or the deprecated -s and -ms) in
+# adapt_to_command_line_options() and passed to format_timestamp() by every
+# site that renders at the run's precision.
+my $timestamp_precision = 'm';
+my $timestamp_precision_option;   # -tp as given, resolved into $timestamp_precision
+# Nanosecond precision: the parse keeps a timestamp's fraction digits and the
+# read loop takes the run's first and last timestamps exactly, as whole
+# seconds and nanoseconds beside the floating epoch (which resolves about
+# 238 ns). Settled once from -tp and compiled into the generated scan blocks.
+my $timestamp_capture_ns = 0;
+my ( $output_timestamp_min_s, $output_timestamp_min_ns, $output_timestamp_max_s, $output_timestamp_max_ns );
+# The bucket key's scale, chosen from the bucket width alone and never from the
+# timestamp precision: integer microseconds (1_000_000) for a width with a
+# microsecond part, integer milliseconds (1000) for one with a millisecond
+# part, otherwise seconds (1). $bucket_size_ticks is the width in key units
+# when the scale is above 1.
+my $bucket_key_scale = 1;
+my $bucket_size_ticks;
+# Whether the parse reads a line's sub-second part: settled once in
+# adapt_to_terminal_settings() and compiled into the generated scan blocks.
+my $timestamp_capture_fraction = 1;
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 
@@ -699,16 +721,16 @@ my $format_current_line_ref = \0;      # ref to the read loop's line counter (di
 # and the views derived below; no sub keeps a token list, a unit regex or a
 # multiplier of its own.
 my @time_unit_ladder = (
-    { token => 'ns',    spellings => [qw( ns nsec )],              ms => 0.000001,       per_ms => 1_000_000, short => 'ns', medium => 'nsec', long => 'nanoseconds'  },
-    { token => 'us',    spellings => [qw( us usec )],              ms => 0.001,          per_ms => 1_000,     short => 'us', medium => 'usec', long => 'microseconds' },
-    { token => 'ms',    spellings => [qw( ms msec )],              ms => 1,                                   short => 'ms', medium => 'msec', long => 'milliseconds' },
-    { token => 's',     spellings => [qw( s sec second seconds )], ms => 1_000,                               short => 's',  medium => 'sec',  long => 'seconds'      },
-    { token => 'm',     spellings => [qw( m min minute minutes )], ms => 60_000,                              short => 'm',  medium => 'min',  long => 'minutes'      },
-    { token => 'h',     spellings => [qw( h hr hour hours )],      ms => 3_600_000,                           short => 'h',  medium => 'hr',   long => 'hours'        },
-    { token => 'd',     spellings => [qw( d day days )],           ms => 86_400_000,                          short => 'd',  medium => 'day',  long => 'days'         },
-    { token => 'w',     spellings => [qw( w wk week weeks )],      ms => 604_800_000,                         short => 'w',  medium => 'wk',   long => 'weeks'        },
-    { token => 'month', spellings => [qw( month mo mon months )],  ms => 2_592_000_000,                       short => 'mo', medium => 'mon',  long => 'months'       },
-    { token => 'year',  spellings => [qw( year y yr years )],      ms => 31_536_000_000,                      short => 'y',  medium => 'yr',   long => 'years'        },
+    { token => 'ns',    spellings => [qw( ns nsec nanosecond nanoseconds )],   ms => 0.000001,       per_ms => 1_000_000, short => 'ns', medium => 'nsec', long => 'nanoseconds'  },
+    { token => 'us',    spellings => [qw( us usec microsecond microseconds )], ms => 0.001,          per_ms => 1_000,     short => 'us', medium => 'usec', long => 'microseconds' },
+    { token => 'ms',    spellings => [qw( ms msec millisecond milliseconds )], ms => 1,                                   short => 'ms', medium => 'msec', long => 'milliseconds' },
+    { token => 's',     spellings => [qw( s sec second seconds )],             ms => 1_000,                               short => 's',  medium => 'sec',  long => 'seconds'      },
+    { token => 'm',     spellings => [qw( m min minute minutes )],             ms => 60_000,                              short => 'm',  medium => 'min',  long => 'minutes'      },
+    { token => 'h',     spellings => [qw( h hr hour hours )],                  ms => 3_600_000,                           short => 'h',  medium => 'hr',   long => 'hours'        },
+    { token => 'd',     spellings => [qw( d day days )],                       ms => 86_400_000,                          short => 'd',  medium => 'day',  long => 'days'         },
+    { token => 'w',     spellings => [qw( w wk week weeks )],                  ms => 604_800_000,                         short => 'w',  medium => 'wk',   long => 'weeks'        },
+    { token => 'month', spellings => [qw( month mo mon months )],              ms => 2_592_000_000,                       short => 'mo', medium => 'mon',  long => 'months'       },
+    { token => 'year',  spellings => [qw( year y yr years )],                  ms => 31_536_000_000,                      short => 'y',  medium => 'yr',   long => 'years'        },
 );
 # Each step's decimals: the rounding precision relative to the millisecond
 # storage unit, the decimal places a millisecond value needs to carry one unit
@@ -1938,18 +1960,34 @@ sub serialize_filters {
     return join(';', @parts);
 }
 
-sub format_epoch_iso {
-    my ($epoch) = @_;
-    return '-' unless defined $epoch && $epoch > 0;
-    my $int_part = int($epoch);
-    my $ms = int(($epoch - $int_part) * 1000 + 0.5);
-    return sprintf("%s.%03d", strftime("%Y-%m-%dT%H:%M:%S", gmtime($int_part)), $ms);
+sub parse_iso_date_to_epoch {
+    my $parts = iso_timestamp_parts($_[0]) or return undef;
+    return $parts->[0] + $parts->[1] / 1_000_000_000;
 }
 
-sub parse_iso_date_to_epoch {
-    my ($iso_str) = @_;
-    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
-    return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
+# The precision a timestamp carries: the ladder step of the unit its field
+# states, descended one step for every three fractional digits, so a clock
+# time (which states the second) with three digits is a millisecond and with
+# six a microsecond. A fraction whose length is not a multiple of three covers
+# only the steps its digits complete.
+sub fraction_precision {
+    my ($stated, $digits) = @_;
+    my $steps = int(($digits // 0) / 3);
+    return $stated unless $steps;
+    my @finer = map { $_->{token} } grep { $_->{ms} < $time_unit_step{$stated}{ms} } reverse @time_unit_ladder;
+    return $finer[ $steps > @finer ? $#finer : $steps - 1 ];
+}
+
+# The precision an index row's timestamps were written at: its ts_precision
+# column when that names a precision step, otherwise (a row written before the
+# column was filled, carrying -) the precision its stored fraction's digits
+# carry.
+sub index_row_precision {
+    my ($row) = @_;
+    my $stated = $row->{ts_precision} // '';
+    return $stated if exists $time_unit_step{$stated} && $time_unit_step{$stated}{ms} <= $time_unit_step{m}{ms};
+    my ($fraction) = ($row->{first_timestamp} // '') =~ /\.(\d+)$/;
+    return fraction_precision('s', length($fraction // ''));
 }
 
 sub locate_index_file {
@@ -2059,7 +2097,7 @@ sub read_index_file {
             next;
         }
         my $on_disk_size  = $stat[7];
-        my $on_disk_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($stat[9]));
+        my $on_disk_mtime = format_timestamp($stat[9], precision => 's', shape => 'iso');
 
         my $file_row = $file_entries{$in_file};
         my $file_fresh = 0;
@@ -2073,14 +2111,14 @@ sub read_index_file {
         my $sel_key = $in_file . "\0" . $index_filter_sig;
         my $sel_row = $selection_entries{$sel_key};
         if ($sel_row && $file_fresh) {
-            $index_preseed{$in_file} = _preseed_from_row($sel_row, $file_row, 'tier_1_selection');
+            $index_preseed{$in_file} = _preseed_from_row($sel_row, 'tier_1_selection');
             $tier_seen{tier_1_selection} = 1;
             next;
         }
 
         # Tier 2: file row, fresh.
         if ($file_row && $file_fresh) {
-            $index_preseed{$in_file} = _preseed_from_row($file_row, $file_row, 'tier_2_file');
+            $index_preseed{$in_file} = _preseed_from_row($file_row, 'tier_2_file');
             $tier_seen{tier_2_file} = 1;
             next;
         }
@@ -2111,18 +2149,15 @@ sub read_index_file {
     # Build aggregated bounds with provenance.
     for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                        first_timestamp last_timestamp)) {
-        my $best;
-        my $best_from;
+        # Timestamps are compared as the instants they name, never as strings.
+        my ($best, $best_n, $best_from);
         for my $file (@in_files) {
             my $v = $index_preseed{$file}{$metric};
             next unless defined $v && $v ne '-' && $v ne '';
-            if (!defined $best) {
-                $best = $v; $best_from = $file; next;
-            }
-            if ($metric =~ /_min$|^first_/) {
-                if (_lt($v, $best)) { $best = $v; $best_from = $file; }
-            } else {
-                if (_gt($v, $best)) { $best = $v; $best_from = $file; }
+            my $n = $metric =~ /timestamp/ ? parse_iso_date_to_epoch($v) : $v;
+            next unless defined $n;
+            if (!defined $best || ($metric =~ /_min$|^first_/ ? $n < $best_n : $n > $best_n)) {
+                ($best, $best_n, $best_from) = ($v, $n, $file);
             }
         }
         if (defined $best) {
@@ -2165,11 +2200,12 @@ sub read_index_file {
     return;
 }
 
-# Helper: build a per-file pre-seed record from a matched row (selection or file).
-# $bound_row is the row whose bounds we use. $file_row is always the companion
-# file row (used for ts_precision since selection rows have '-' there).
+# Helper: build a per-file pre-seed record from a matched row (selection or
+# file). $bound_row is the row whose bounds, and whose timestamp precision, we
+# use: a selection row can be written by a later run, at another precision,
+# than the file row beside it.
 sub _preseed_from_row {
-    my ($bound_row, $file_row, $tier_name) = @_;
+    my ($bound_row, $tier_name) = @_;
     my %p = (
         lookup             => $tier_name,
         matched_entry_date => $bound_row->{entry_date} // '-',
@@ -2180,22 +2216,8 @@ sub _preseed_from_row {
         my $v = $bound_row->{$col};
         $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
     }
-    # ts_precision lives only on the file row.
-    my $tp = $file_row->{ts_precision};
-    $p{ts_precision} = (defined $tp && $tp ne '' && $tp ne '-') ? $tp : undef;
+    $p{ts_precision} = index_row_precision($bound_row);
     return \%p;
-}
-
-# Numeric/timestamp comparators that handle ISO timestamps and bare numbers.
-sub _lt {
-    my ($a, $b) = @_;
-    return ($a lt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
-    return ($a + 0) < ($b + 0);
-}
-sub _gt {
-    my ($a, $b) = @_;
-    return ($a gt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
-    return ($a + 0) > ($b + 0);
 }
 
 # Issue #179: After parse pass completes, compare live captured values
@@ -2243,18 +2265,29 @@ sub detect_index_drift {
             my $live_v = $live->{$live_key};
             next unless defined $live_v;
 
-            # Format timestamps to match preseed ISO representation.
-            my $live_v_fmt = $live_v;
+            # A timestamp is compared as a number at the run's precision, or
+            # at the precision the stored row was written at when that is
+            # coarser: a row carries no digit finer than it was written with.
+            my ($live_n, $preseed_n, $live_v_fmt) = ($live_v, $preseed_v, $live_v);
             if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
-                $live_v_fmt = format_epoch_iso($live_v);
-                next if !defined $live_v_fmt || $live_v_fmt eq '-';
+                next unless $live_v > 0;
+                my $stored = iso_timestamp_parts($preseed_v);
+                next unless defined $stored;
+                (my $base = $live_key) =~ s/_timestamp$//;
+                my $live_exact = exact_bound(@$live{ "${base}_s", "${base}_ns" });
+                my $row_precision = $pre->{ts_precision} // 's';
+                my $precision = $time_unit_step{$row_precision}{ms} > $time_unit_step{$timestamp_precision}{ms}
+                    ? $row_precision : $timestamp_precision;
+                $live_n    = timestamp_ticks($live_v, $precision, $live_exact);
+                $preseed_n = timestamp_ticks(undef, $precision, $stored);
+                $live_v_fmt = format_timestamp($live_v, precision => index_timestamp_precision($precision), shape => 'iso', exact => $live_exact);
             }
 
             my $drifted = 0;
             if ($direction eq 'min') {
-                $drifted = 1 if _lt($live_v_fmt, $preseed_v);
+                $drifted = 1 if $live_n < $preseed_n;
             } else {
-                $drifted = 1 if _gt($live_v_fmt, $preseed_v);
+                $drifted = 1 if $live_n > $preseed_n;
             }
 
             $index_drift{$file}{$metric} = {
@@ -2497,6 +2530,7 @@ sub _classify_argv_provenance {
                 'hide-duration|hd', 'hide-bytes|hb', 'hide-count|hc',
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
+                'timestamp-precision|tp',
                 'version|v', 'duration-min|dmin', 'duration-max|dmax',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
                 'bytes-min|bmin', 'bytes-max|bmax',
@@ -2640,6 +2674,7 @@ sub emit_runtime_config_verbose {
         'duration-min'                      => $filter_duration_min,
         'duration-max'                      => $filter_duration_max,
         'duration-unit'                     => $duration_unit_override,
+        'timestamp-precision'               => $timestamp_precision,
         'rate-unit'                         => $rate_unit,
         'byte-notation'                     => $byte_notation_option,
         'bytes-min'                         => $filter_bytes_min,
@@ -2864,7 +2899,7 @@ my %format_record_ref = (
 # these directly. The last-seen memo fronts the parse: consecutive lines
 # overwhelmingly share a timestamp second, and a string eq is cheaper
 # than the date lookup plus arithmetic.
-my ( $timestamp, $fractional_ms );
+my ( $timestamp, $fractional_ms, $fraction_digits );
 my ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
 
 # Success/failure classification (#453). The global default is failure-only
@@ -4455,19 +4490,32 @@ sub format_entry_block_src {
     #             reads, no regex, no exponent math
     #   none    — layout never carries a fraction: constant zero, no scan
     #   generic — variable/unguaranteed shape: the original s/// strip
+    # A run that reads no sub-second part ($opts->{capture_fraction} false)
+    # still strips the fraction for the date key and the layout parse, but
+    # neither reads nor converts it.
     # Then the layout parse, fronted by the last-seen memo: the date's
     # midnight epoch from %timestamp_date_cache (one timegm() per distinct
     # day) plus the time of day as arithmetic, as compile_format_time_parser.
     my $frac = $spec->{time}{frac} // 'generic';
+    my $capture = $opts->{capture_fraction} // 1;
+    my $ns      = $opts->{capture_ns};
     if ($frac eq 'fixed3') {
         die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
             unless $spec->{pattern_src} =~ /\\\.\\d\{3\}|\[\.,\]\\d\{3\}/;
-        push @body, q{$fractional_ms = substr($timestamp_str, 20, 3);
+        push @body, $ns      ? q{$fractional_ms = $fraction_digits = substr($timestamp_str, 20, 3);
+substr($timestamp_str, 19) = '';}
+                  : $capture ? q{$fractional_ms = substr($timestamp_str, 20, 3);
+substr($timestamp_str, 19) = '';}
+                             : q{$fractional_ms = 0;
 substr($timestamp_str, 19) = '';};
     } elsif ($frac eq 'none') {
-        push @body, q{$fractional_ms = 0;};
+        push @body, $ns ? q{$fractional_ms = 0; $fraction_digits = '';} : q{$fractional_ms = 0;};
     } else {
-        push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }};
+        # The strip reads up to nine digits, so a precision coarser than the
+        # log's rounds from all of them; under nanosecond it keeps them too.
+        push @body, $ns      ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); $fraction_digits = $2; } else { $fractional_ms = 0; $fraction_digits = ''; }}
+                  : $capture ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }}
+                             : q{$timestamp_str =~ s/(?<=:\d{2}:\d{2})[.,]\d{1,9}//; $fractional_ms = 0;};
     }
     my $layout = $spec->{time}{layout} // '';
     # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
@@ -4639,7 +4687,7 @@ sub format_validate_scan_sub {
     $format_scan_validating = 1;
     my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
                          $session, $platform, $thread, $message, $bytes, $duration,
-                         $status_code, $metrics_observed, $timestamp, $fractional_ms,
+                         $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
                          $line_outcome, $line_cls_sig,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
@@ -4657,7 +4705,7 @@ sub format_validate_scan_sub {
     $format_scan_validating = $was_validating;
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
-      $status_code, $metrics_observed, $timestamp, $fractional_ms,
+      $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
       $line_outcome, $line_cls_sig,
       $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
     timestamp_date_cache_restore($saved_cache);
@@ -4952,7 +5000,8 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric };
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric,
+                 capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns };
     @format_registry = ();
     @format_registry_members = ();
     @format_registry_pin_only = ();
@@ -5098,6 +5147,8 @@ sub format_registry_classify {
 #                         formats => { entry name => count },
 #                         first_ts, last_ts }, ... ]
 #   formats        => { entry name => count } across all parts
+#   frac_digits    => { entry name => the most fractional digits among that
+#                       format's sampled timestamps, 0 when none carries one }
 #   elapsed_us     => wall time of the whole sample
 #
 # The sample also knows the file's size and observes its average line
@@ -5124,7 +5175,7 @@ sub sample_file_for_detection {
 
     my @offsets = $whole ? (0)
                 : map { $_ == $parts - 1 ? $size - $bytes : int($_ * ($size - $bytes) / ($parts - 1)) } 0 .. $parts - 1;
-    my (@lines, @part_obs, %formats);
+    my (@lines, @part_obs, %formats, %frac_digits);
     for my $offset (@offsets) {
         seek $sfh, $offset, 0;
         my $buf = '';
@@ -5152,6 +5203,9 @@ sub sample_file_for_detection {
                 if (defined $o && defined $c[$o]) {
                     $obs->{first_ts} //= $c[$o];
                     $obs->{last_ts}    = $c[$o];
+                    my $digits = $c[$o] =~ /:\d{2}:\d{2}[.,](\d+)/ ? length $1 : 0;
+                    $frac_digits{ $e->[FR_NAME] } = $digits
+                        if !defined $frac_digits{ $e->[FR_NAME] } || $digits > $frac_digits{ $e->[FR_NAME] };
                 }
             }
         }
@@ -5161,7 +5215,7 @@ sub sample_file_for_detection {
     close $sfh;
     return {
         size => $size, parts => scalar(@offsets), bytes_per_part => $bytes, whole => $whole,
-        lines => \@lines, part_obs => \@part_obs, formats => \%formats,
+        lines => \@lines, part_obs => \@part_obs, formats => \%formats, frac_digits => \%frac_digits,
         elapsed_us => tv_interval($t0) * 1e6,
     };
 }
@@ -6582,7 +6636,7 @@ sub write_aggregate_export {
     ## PROVENANCE ##
     my $determining = aggregate_mapping();
     $determining->{version}      = $version_number;
-    $determining->{generated_at} = strftime("%Y-%m-%dT%H:%M:%SZ", gmtime());
+    $determining->{generated_at} = format_timestamp(time(), precision => 's', shape => 'iso', z => 1);
     my $options = aggregate_mapping();
     my $cli_options = build_run_options_string();
     $options->{'command-line'} = $cli_options if $cli_options ne '';
@@ -6624,8 +6678,8 @@ sub write_aggregate_export {
 
     if (defined $output_timestamp_min && defined $output_timestamp_max) {
         my $observation = aggregate_mapping();
-        $observation->{start} = format_observation_timestamp($output_timestamp_min);
-        $observation->{end}   = format_observation_timestamp($output_timestamp_max);
+        $observation->{start} = format_timestamp($output_timestamp_min, precision => $timestamp_precision, shape => 'run', exact => exact_bound($output_timestamp_min_s, $output_timestamp_min_ns));
+        $observation->{end}   = format_timestamp($output_timestamp_max, precision => $timestamp_precision, shape => 'run', exact => exact_bound($output_timestamp_max_s, $output_timestamp_max_ns));
         my $span = $output_timestamp_max - $output_timestamp_min;
         $observation->{duration_seconds} = aggregate_number($span);
         $observation->{duration}         = format_time($span, 's', 'long', ' ', 3);
@@ -6735,7 +6789,7 @@ sub write_aggregate_export {
     my @buckets;
     for my $bucket (sort { $a <=> $b } keys %log_occurrences) {
         my $b = aggregate_mapping();
-        $b->{timestamp} = format_bucket_timestamp($bucket);
+        $b->{timestamp} = format_bucket_key($bucket, precision => $timestamp_precision, shape => 'run');
         my $occurrences = 0;
         my $bucket_categories = aggregate_mapping();
         my ($err_rate, $msg_rate);
@@ -6931,7 +6985,7 @@ sub write_index_file {
                         my $existing_mtime = $row->[$col_idx{file_mtime}] // '';
                         my $fd = $index_file_data{$epath};
                         if ($fd && $existing_mtime ne '') {
-                            my $current_mtime = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
+                            my $current_mtime = format_timestamp($fd->{file_mtime}, precision => 's', shape => 'iso');
                             if ($existing_mtime eq $current_mtime) {
                                 $files_unchanged{$epath} = 1;
                                 push @preserved_rows, $row;
@@ -6959,16 +7013,20 @@ sub write_index_file {
             $index_csv->print($ofh, $row);
         }
 
-        my $now_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime());
+        my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');
+        # A first or last timestamp at the run's precision, or - where none was
+        # seen; every row states that precision in its ts_precision column.
+        my $index_precision = index_timestamp_precision($timestamp_precision);
+        my $index_timestamp = sub { my ($epoch, $exact) = @_; defined $epoch && $epoch > 0 ? format_timestamp($epoch, precision => $index_precision, shape => 'iso', exact => $exact) : '-' };
 
         for my $file (@files_processed) {
             my $fd = $index_file_data{$file} or next;
             my $path = $use_absolute_paths ? File::Spec->rel2abs($file) : $file;
 
             unless ($files_unchanged{$file}) {
-                my $mtime_iso = strftime("%Y-%m-%dT%H:%M:%S", gmtime($fd->{file_mtime}));
-                my $first_ts  = format_epoch_iso($fd->{first_timestamp});
-                my $last_ts   = format_epoch_iso($fd->{last_timestamp});
+                my $mtime_iso = format_timestamp($fd->{file_mtime}, precision => 's', shape => 'iso');
+                my $first_ts  = $index_timestamp->($fd->{first_timestamp}, exact_bound(@$fd{qw(first_s first_ns)}));
+                my $last_ts   = $index_timestamp->($fd->{last_timestamp}, exact_bound(@$fd{qw(last_s last_ns)}));
 
                 # The means through the one helper and the CSV formatter at two
                 # decimals whatever -cp says, empty for no data (#616 D8, D15, D16).
@@ -6979,7 +7037,7 @@ sub write_index_file {
 
                 my @file_row = (
                     'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
-                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $fd->{ts_precision},
+                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $timestamp_precision,
                     $fd->{duration_occurrences}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
                     $fd->{file_bytes_occurrences}, $fd->{file_bytes_min} // '-', $fd->{file_bytes_max} // '-', $file_bytes_mean,
                     $fd->{count_occurrences}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_mean,
@@ -6989,15 +7047,15 @@ sub write_index_file {
             }
 
             {
-                my $sel_first = format_epoch_iso($fd->{sel_first_timestamp});
-                my $sel_last  = format_epoch_iso($fd->{sel_last_timestamp});
+                my $sel_first = $index_timestamp->($fd->{sel_first_timestamp}, exact_bound(@$fd{qw(sel_first_s sel_first_ns)}));
+                my $sel_last  = $index_timestamp->($fd->{sel_last_timestamp}, exact_bound(@$fd{qw(sel_last_s sel_last_ns)}));
                 my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration_mean', 2 ) // '';
                 my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
                 my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count_mean',    2 ) // '';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
-                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, '-',
+                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, $timestamp_precision,
                     $fd->{sel_duration_occurrences}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
                     $fd->{sel_file_bytes_occurrences}, $fd->{sel_file_bytes_min} // '-', $fd->{sel_file_bytes_max} // '-', $sel_file_bytes_mean,
                     $fd->{sel_count_occurrences}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_mean,
@@ -8772,7 +8830,7 @@ my $explain_resolution_zoom_command = <<'END';
                                                    # the hour, five minutes a row
     ltl -st "2026-05-07 10:45" -et "2026-05-07 11:00" -bs 1 access.log
                                                    # the quarter hour, a minute a row
-    ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -s access.log
+    ltl -st "2026-05-07 10:50" -et "2026-05-07 10:51" -bs 5s -tp s access.log
                                                    # the minute, five seconds a row
 END
 
@@ -9745,7 +9803,7 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'Command' },
             { type => 'pre',       text => $explain_resolution_zoom_command },
             { type => 'subheading', text => 'See also' },
-            { type => 'paragraph', text => 'time (the grouping this belongs to), window-narrowing, traffic-load-profiling. Options: -st, -et, -bs, -s, -ms, -ru.' },
+            { type => 'paragraph', text => 'time (the grouping this belongs to), window-narrowing, traffic-load-profiling. Options: -st, -et, -bs, -tp, -ru.' },
         ],
 
         'traffic-load-profiling' => [
@@ -10004,9 +10062,10 @@ sub print_help {
 
     # Time & Buckets
     $out .= help_subheading("Time & Buckets");
-    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: $time_unit_list; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision stays with -s and -ms.");
-    $out .= help_opt("-s,   --seconds",               "Read a bare -bs number as seconds, and render timestamps with seconds precision");
-    $out .= help_opt("-ms,  --milliseconds",          "Read a bare -bs number as milliseconds, and render timestamps with .fff precision. Lets you draw buckets as narrow as 100ms — used to zoom the timeline into bursts that minute/second-width buckets average out. Does not change how the underlying log records are read, parsed, or measured.");
+    $out .= help_opt("-bs,  --bucket-size <width>",   "Set the width of each time bucket on the timeline: a bare number in minutes (seconds under -s, milliseconds under -ms), or a number with a unit such as 90s, 1.5h, 1d or 1w (units: $time_unit_list; m is always the minute, a month is 30 days and a year 365). The unit sets the width only; the timestamp precision is set by -tp.");
+    $out .= help_opt("-tp,  --timestamp-precision <precision>", "Set the precision timestamps are shown at: m (the minute, the default), s, ms, us or ns, also spelled minute, second, millisecond, microsecond or nanosecond; never finer than the log's timestamps carry. The bucket width is set by -bs alone, so -bs 100ms -tp ms draws ten buckets a second, each labelled to the millisecond.");
+    $out .= help_opt("-s,   --seconds",               "Deprecated: use -tp s for the timestamp precision and a unit on -bs (-bs 30s) for the width. Reads a bare -bs number as seconds, and renders timestamps with seconds precision.");
+    $out .= help_opt("-ms,  --milliseconds",          "Deprecated: use -tp ms for the timestamp precision and a unit on -bs (-bs 100ms) for the width. Reads a bare -bs number as milliseconds, and renders timestamps with .fff precision.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
@@ -10174,7 +10233,7 @@ sub print_help {
     $out .= "\n";
     $out .= $ex->("ltl access.log",                                                "Basic analysis");
     $out .= $ex->("ltl -bs 5 access.log",                                          "5-minute time buckets");
-    $out .= $ex->("ltl -ms -bs 100 -st \"08:15:00\" -et \"08:16:00\" app.log",     "Millisecond zoom into one minute");
+    $out .= $ex->("ltl -bs 100ms -tp ms -st \"08:15:00\" -et \"08:16:00\" app.log", "Millisecond zoom into one minute");
     $out .= $ex->("ltl -i \"POST\" -e healthcheck access.log",                     "Include POST, exclude health checks");
     $out .= $ex->("ltl -h \"/api/v2/orders\" access.log",                          "Highlight a pattern against all traffic");
     $out .= $ex->("ltl -dmin 5000 access.log",                                     "Only requests slower than 5 seconds");
@@ -12855,6 +12914,58 @@ sub gc_heap_size_bytes {
     return $value * $bytes;
 }
 
+# The run's timestamp precision, once, after the read: the precision asked for,
+# never finer than the log's timestamps carry. A file's precision is the
+# coarsest of its sampled formats': a format without a fraction, or with a
+# fixed one, gives its declared precision; a variable-length one gives the
+# precision of the most fractional digits among the detection sample's
+# timestamps. A file whose precision cannot be read (not sampled, CSV input,
+# no format recognised in the sample) sets no limit. The run takes the
+# coarsest file's, so no file's timestamps print a digit they never carried;
+# a behavioural notice says what was shown and why, and the runtime-config
+# row carries the request in its clamp annotation.
+sub resolve_timestamp_precision {
+    my $coarsest = sub { (sort { $time_unit_step{$b}{ms} <=> $time_unit_step{$a}{ms} } @_)[0] };
+    my $name     = sub { (my $n = $time_unit_step{ $_[0] }{long}) =~ s/s$//; $n };
+    my $asked    = $timestamp_precision;
+    my %file_precision;
+    for my $file (@in_files) {
+        my $sample = $format_detection_sample{$file} or next;
+        my @found;
+        for my $name (keys %{ $sample->{formats} // {} }) {
+            my $time = $format_registry_spec{$name} && $format_registry_spec{$name}{time} or next;
+            if (($time->{frac} // 'generic') eq 'generic') {
+                push @found, fraction_precision('s', $sample->{frac_digits}{$name}) if defined $sample->{frac_digits}{$name};
+            } elsif (defined $time->{precision}) {
+                push @found, $time->{precision};
+            }
+        }
+        $file_precision{$file} = $coarsest->(@found) if @found;
+    }
+    my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;
+    return if !defined $limit || $time_unit_step{$timestamp_precision}{ms} >= $time_unit_step{$limit}{ms};
+
+    my $carry = sub { $_[0] eq 's' ? 'whole seconds' : $time_unit_step{ $_[0] }{long} };
+    my %distinct = map { $_ => 1 } values %file_precision;
+    my $what = keys %distinct == 1
+        ? (keys %file_precision == 1 ? "the log's timestamps carry " : "the logs' timestamps carry ") . $carry->($limit)
+        : "the logs' timestamps carry " . join(', ', map { $carry->($file_precision{$_}) . " in $_" } grep { exists $file_precision{$_} } @in_files);
+    my $narrower = $bucket_size_seconds < $time_unit_step{$limit}{ms} / 1000
+        ? "; at a bucket width below a " . $name->($limit) . ", only the buckets that start on a whole " . $name->($limit) . " can hold a line"
+        : '';
+    print STDERR "Note: timestamps are shown to the " . $name->($limit) . ": " . $name->($asked)
+        . " precision was asked for, and $what$narrower\n";
+
+    $timestamp_precision = $limit;
+    $option_overrides{'timestamp-precision'}{clamped_from} = $asked;
+    # The runtime-config section was composed at option settlement, before any
+    # file was sampled: its row takes the resolution here.
+    for (@verbose_output) {
+        last if s/^timestamp-precision: \S+(?:; clamped from \S+)?$/timestamp-precision: $limit; clamped from $asked/;
+    }
+    return;
+}
+
 # The run's byte notation, once, after the read: -bn when given; else the
 # notation every file's format declares; else SI. A file no format
 # recognised declares nothing. When the declarations differ and -bn was not
@@ -12913,29 +13024,104 @@ sub format_bytes {
 # The stamp that names every output file of a run, read once so the STATS
 # and MESSAGES CSVs and the aggregate export share it.
 sub run_file_stamp {
-    return $run_file_stamp if defined $run_file_stamp;
-    my ($sec, $min, $hour, $mday, $mon, $year) = localtime();
-    $run_file_stamp = sprintf("%04d-%02d-%02d_%02d%02d%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec);
+    $run_file_stamp //= format_timestamp(time(), precision => 's', shape => 'file');
     return $run_file_stamp;
 }
 
-# A bucket key rendered as the timeline and the STATS CSV print it: the run's
-# timestamp format, and the millisecond part under -ms, where the key is an
-# integer millisecond count.
-sub format_bucket_timestamp {
-    my ($bucket) = @_;
-    return strftime($output_timestamp_format, gmtime($bucket / 1000)) . sprintf(".%03d", $bucket % 1000)
-        if $print_milliseconds;
-    return strftime($output_timestamp_format, gmtime($bucket));
+# An instant as a whole number of units of a precision step, by the rounding
+# format_timestamp() applies: the second and coarser steps truncate, a
+# sub-second step rounds half-up at its unit. Two timestamps compared at a
+# precision are compared as these numbers. $exact, when given, is the instant
+# as [ whole seconds, nanoseconds ], counted in integers: the floating epoch
+# resolves about 238 ns, and a count of nanoseconds exceeds a double's exact
+# integers.
+sub timestamp_ticks {
+    my ($epoch, $precision, $exact) = @_;
+    my $step = $time_unit_step{$precision};
+    if ($exact) {
+        use integer;
+        my ($seconds, $nanoseconds) = @$exact;
+        return $seconds / ($step->{ms} / 1000) if $step->{ms} >= 1000;
+        my $unit = 1;
+        $unit *= 10 for 1 .. 9 - ($step->{decimals} + 3);
+        return ($seconds * 1_000_000_000 + $nanoseconds + $unit / 2) / $unit;
+    }
+    return int($epoch / ($step->{ms} / 1000)) if $step->{ms} >= 1000;
+    return int($epoch * 10 ** ($step->{decimals} + 3) + 0.5);
 }
 
-# An included-line epoch (fractional seconds) rendered as the run summary
-# heading prints the observation window's bounds.
-sub format_observation_timestamp {
-    my ($epoch) = @_;
-    my $str = strftime($output_timestamp_format, gmtime($epoch));
-    $str .= sprintf ".%03d", ($epoch - int($epoch)) * 1000 if $print_milliseconds;
-    return $str;
+# A bound's exact instant, [ whole seconds, nanoseconds ], when the run took
+# it (nanosecond precision); undef otherwise.
+sub exact_bound {
+    my ($seconds, $nanoseconds) = @_;
+    return defined $seconds ? [ $seconds, $nanoseconds ] : undef;
+}
+
+# An index ISO date-time as [ whole seconds, nanoseconds ], read exactly from
+# its digits; undef when it does not parse.
+sub iso_timestamp_parts {
+    my ($iso_str) = @_;
+    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?/;
+    my $nanoseconds = defined $7 ? substr($7 . '00000000', 0, 9) + 0 : 0;
+    my $seconds = eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
+    return defined $seconds ? [ $seconds, $nanoseconds ] : undef;
+}
+
+# A bucket key rendered at the run's precision. A key held in integer
+# milliseconds or microseconds is split exactly into whole seconds and
+# nanoseconds; a key in seconds is a multiple of the width.
+sub format_bucket_key {
+    my ($bucket, %opt) = @_;
+    my $seconds = int($bucket / $bucket_key_scale);
+    my $nanoseconds = $bucket_key_scale > 1
+        ? ($bucket - $seconds * $bucket_key_scale) * (1_000_000_000 / $bucket_key_scale)
+        : int(($bucket - $seconds) * 1_000_000_000 + 0.5);
+    return format_timestamp($seconds, %opt, exact => [ $seconds, $nanoseconds ]);
+}
+
+# The precision an ISO date-time is written at for a run precision: the ISO
+# form has nothing coarser than the whole second, so a minute run writes
+# whole seconds.
+sub index_timestamp_precision {
+    my ($precision) = @_;
+    return $time_unit_step{$precision}{ms} > 1000 ? 's' : $precision;
+}
+
+# The one timestamp formatter: every site that renders or writes a timestamp
+# calls it. $epoch is in seconds; a bucket key held in integer sub-second
+# units is passed divided by its scale.
+#   precision  a time-unit token. m and s show no sub-second digit and take
+#              the whole second by truncation, as clocks and bucket labels do;
+#              a finer step shows the digits its ladder decimals give (ms 3,
+#              us 6), rounded half-up once at the last one shown, the carry
+#              reaching the second, the minute and the date.
+#   shape      run:  the run's label format ($output_timestamp_format), UTC;
+#              iso:  %Y-%m-%dT%H:%M:%S, UTC, the run index's and the
+#                    aggregate export's date-time;
+#              file: %Y-%m-%d_%H%M%S in local time, the output file-name stamp.
+#   z          appends the UTC designator Z.
+#   exact      the instant as [ whole seconds, nanoseconds ], which $epoch
+#              (the floating epoch, about 238 ns resolution) only
+#              approximates: the digits are taken from it, exactly.
+sub format_timestamp {
+    my ($epoch, %opt) = @_;
+    my $step   = $time_unit_step{ $opt{precision} };
+    my $digits = $step->{ms} <= 1 ? $step->{decimals} + 3 : 0;
+    my ($whole, $fraction) = ($opt{exact} ? $opt{exact}[0] : int($epoch), '');
+    if ($digits) {
+        use integer;
+        my $scale = 1;
+        $scale *= 10 for 1 .. $digits;
+        my $ticks = timestamp_ticks($epoch, $opt{precision}, $opt{exact});
+        my $part  = $ticks % $scale;
+        $whole    = ($ticks - $part) / $scale;
+        $fraction = sprintf('.%0*d', $digits, $part);
+    }
+    my $shape = $opt{shape};
+    my $str = $shape eq 'file'
+        ? strftime('%Y-%m-%d_%H%M%S', localtime($whole))
+        : strftime($shape eq 'iso' ? '%Y-%m-%dT%H:%M:%S' : $output_timestamp_format, gmtime($whole));
+    return $str . $fraction . ($opt{z} ? 'Z' : '');
 }
 
 sub build_csv_filename {
@@ -14283,6 +14469,7 @@ sub adapt_to_command_line_options {
         'hide-stats|hst' => sub { push @section_visibility_ops, [ 'hide', 'stats' ] },
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
+        'timestamp-precision|tp=s' => \$timestamp_precision_option,
         'version|v' => \$print_version,
         'duration-min|dmin=i' => \$filter_duration_min,
         'duration-max|dmax=i' => \$filter_duration_max,
@@ -14580,6 +14767,28 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid rate unit '$rate_unit'. Valid values: $time_unit_list"); exit 1; }
             unless defined $canonical;
         $rate_unit = $canonical;
+    }
+
+    # Timestamp precision: -tp names a ladder step from the minute down, in any
+    # spelling. The deprecated -s and -ms name the second and the millisecond;
+    # either beside a -tp of another precision is a usage error, since the two
+    # would ask for different renderings.
+    {
+        my @steps = reverse map { $_->{token} } grep { $_->{ms} <= $time_unit_step{m}{ms} } @time_unit_ladder;
+        my ($switch, $switch_name) = $print_milliseconds ? ('ms', '-ms/--milliseconds')
+                                   : $print_seconds      ? ('s',  '-s/--seconds')
+                                   :                       ();
+        if (defined $timestamp_precision_option) {
+            my $canonical = time_unit_canonical($timestamp_precision_option);
+            do { print_usage("Invalid timestamp precision '$timestamp_precision_option'. Valid values: " . join(', ', @steps)); exit 1; }
+                unless defined $canonical && grep { $_ eq $canonical } @steps;
+            do { print_usage("$switch_name and -tp $timestamp_precision_option ask for different timestamp precisions: give -tp alone"); exit 1; }
+                if defined $switch && $switch ne $canonical;
+            $timestamp_precision = $canonical;
+        } else {
+            $timestamp_precision = $switch // 'm';
+        }
+        $timestamp_capture_ns = $timestamp_precision eq 'ns' ? 1 : 0;
     }
 
     # Bucket size (Issue #524). A bare number keeps the run's unit: the
@@ -14891,6 +15100,15 @@ sub adapt_to_command_line_options {
         print STDERR "Warning: -uuid/--mask-uuid is deprecated: use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6\n";
     }
 
+    # -s/--seconds and -ms/--milliseconds are deprecated: -tp sets the
+    # timestamp precision and a unit on -bs sets the bucket width. Both keep
+    # their jobs (the precision, and the unit of a bare -bs number and of the
+    # default width) while they exist.
+    print STDERR "Warning: -s/--seconds is deprecated: use -tp s for the timestamp precision, and give -bs a unit (-bs 30s) for the bucket width\n"
+        if $print_seconds;
+    print STDERR "Warning: -ms/--milliseconds is deprecated: use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width\n"
+        if $print_milliseconds;
+
     # With no message retained, the options that only configure the per-message
     # store have nothing left to configure. They are not an error - the retention
     # setting simply wins - but the user is told, because the tool is discarding
@@ -14976,12 +15194,13 @@ sub adapt_to_command_line_options {
     # Under --profile the calendar date is folded away: day/workday render
     # time-of-day only (%H:%M), week/workweek prefix the weekday (%a %H:%M).
     # The format ends at the minute here; the :%S append below adds second
-    # precision within the folded period when -s/-ms is set, same as normal mode.
+    # precision within the folded period when the run's precision is finer
+    # than the minute, same as normal mode.
     if ($profile_mode) {
         $output_timestamp_format = $profile_modes{$profile_mode}{format};
     }
 
-    $output_timestamp_format .= ":%S" if $print_seconds || $print_milliseconds;
+    $output_timestamp_format .= ":%S" if $timestamp_precision ne 'm';
     my %argv_hash = map { $_ => 1 } @ARGV;
     my $skip_next = 0;
     foreach my $arg (@ORIGINAL_ARGV) {
@@ -15080,6 +15299,33 @@ sub adapt_to_terminal_settings {
     # Convert time_bucket_size, in the run's unit, to seconds
     $bucket_size_seconds = convert_duration_to_ms($time_bucket_size, $bucket_size_unit) / 1000;
 
+    # The bucket key's scale from the width alone. A width that is not a whole
+    # number of microseconds keys in seconds.
+    {
+        my $width_us = $bucket_size_seconds * 1_000_000;
+        my $whole_us = int($width_us + 0.5);
+        if ($whole_us > 0 && abs($width_us - $whole_us) < 1e-6) {
+            $bucket_key_scale = $whole_us % 1000      ? 1_000_000
+                              : $whole_us % 1_000_000 ? 1000
+                              :                         1;
+        }
+        $bucket_size_ticks = int($bucket_size_seconds * $bucket_key_scale + 0.5) if $bucket_key_scale > 1;
+    }
+
+    # The parse reads a line's sub-second part only when a consumer uses it: a
+    # precision finer than the second, a width that is not a whole number of
+    # seconds, a -st/-et bound with a non-zero fraction, or the aggregate
+    # export (-o), whose population duration is measured from the full
+    # timestamps. Otherwise a line's instant is its whole second, which every
+    # surface at the second or the minute truncates to, and which a
+    # whole-second bound cannot tell apart.
+    $timestamp_capture_fraction =
+           $time_unit_step{$timestamp_precision}{ms} < 1000
+        || $bucket_size_seconds != int($bucket_size_seconds)
+        || scalar(grep { defined && /\d{2}:\d{2}:\d{2}[.,]\d*[1-9]/ } $filter_range_start, $filter_range_end)
+        || $write_messages_to_csv
+        ? 1 : 0;
+
     # The per-run message-key cut, read by every key site, the trigram entry guard
     # and the benchmark data. Under -o or -g the key is cut at the cap; otherwise
     # at the terminal width, the most the messages table can print without
@@ -15159,7 +15405,6 @@ sub read_and_process_logs {
             match_count     => 0,
             first_timestamp => undef,
             last_timestamp  => undef,
-            ts_precision    => 's',
             duration_occurrences  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
             file_bytes_occurrences     => 0, file_bytes_min    => undef, file_bytes_max    => undef, bytes_sum    => 0,
             count_occurrences     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
@@ -15684,6 +15929,7 @@ sub read_and_process_logs {
                     $timestamp = int($epoch_val);
                     my $frac = $epoch_val - $timestamp;
                     $fractional_ms = $frac > 0 ? $frac * 1000 : 0;
+                    $fraction_digits = '';
                 }
 
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
@@ -15702,8 +15948,10 @@ sub read_and_process_logs {
                     if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
                         # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
                         $fractional_ms = $2 * (10 ** (3 - length($2)));
+                        $fraction_digits = $2;
                     } else {
                         $fractional_ms = 0;
+                        $fraction_digits = '';
                     }
                     # Declarative time contract (D31): the csv entry's
                     # compiled layout parser, sharing %timestamp_date_cache
@@ -15722,7 +15970,15 @@ sub read_and_process_logs {
                     $fd->{match_count}++;
                     $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
-                    $fd->{ts_precision} = 'ms' if $fractional_ms > 0 && $fd->{ts_precision} eq 's';
+                    # Nanosecond precision: a bound this line moved to, or ties,
+                    # takes the line's exact seconds and nanoseconds when they are
+                    # better. The floating comparison never misorders two
+                    # instants; it can only make them equal.
+                    if ($timestamp_capture_ns) {
+                        my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
+                        if ($timestamp_epoch == $fd->{first_timestamp} && (!defined $fd->{first_s} || $timestamp < $fd->{first_s} || ($timestamp == $fd->{first_s} && $ns < $fd->{first_ns}))) { @$fd{qw(first_s first_ns)} = ($timestamp, $ns) }
+                        if ($timestamp_epoch == $fd->{last_timestamp}  && (!defined $fd->{last_s}  || $timestamp > $fd->{last_s}  || ($timestamp == $fd->{last_s}  && $ns > $fd->{last_ns})))  { @$fd{qw(last_s last_ns)}   = ($timestamp, $ns) }
+                    }
                     if (defined $duration) {
                         $fd->{duration_occurrences}++;
                         $fd->{duration_sum} += $duration;
@@ -15885,13 +16141,24 @@ sub read_and_process_logs {
                 # and the summary first/last-seen read as folded positions rather than calendar dates.
                 $output_timestamp_min = $bucket_epoch if $output_timestamp_min == 0 || $output_timestamp_min > $bucket_epoch;
                 $output_timestamp_max = $bucket_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $bucket_epoch;
+                # Nanosecond precision: the selection row's and the heading's
+                # bounds, as the file row's above. The heading's are folded
+                # under --profile, so their whole second is the folded one.
+                if ($timestamp_capture_ns) {
+                    my $fd = $index_file_data{$in_file};
+                    my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
+                    my $bs = $profile_mode ? int($bucket_epoch - $fractional_ms / 1000 + 0.5) : $timestamp;
+                    if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
+                    if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
+                    if ($bucket_epoch == $output_timestamp_min && (!defined $output_timestamp_min_s || $bs < $output_timestamp_min_s || ($bs == $output_timestamp_min_s && $ns < $output_timestamp_min_ns))) { ($output_timestamp_min_s, $output_timestamp_min_ns) = ($bs, $ns) }
+                    if ($bucket_epoch == $output_timestamp_max && (!defined $output_timestamp_max_s || $bs > $output_timestamp_max_s || ($bs == $output_timestamp_max_s && $ns > $output_timestamp_max_ns))) { ($output_timestamp_max_s, $output_timestamp_max_ns) = ($bs, $ns) }
+                }
 
                 my $bucket;
-                if ($print_milliseconds) {
-                    # Use integer milliseconds for bucket keys to avoid floating-point precision issues
-                    my $epoch_ms = int($bucket_epoch * 1000 + 0.5);
-                    my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
-                    $bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;
+                if ($bucket_key_scale > 1) {
+                    # Integer milliseconds or microseconds, rounded at that unit,
+                    # so no floating-point drift moves a line across a bucket edge
+                    $bucket = int(int($bucket_epoch * $bucket_key_scale + 0.5) / $bucket_size_ticks) * $bucket_size_ticks;
                 } else {
                     $bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;
                 }
@@ -18514,12 +18781,11 @@ sub initialize_empty_time_windows {
     unless( $omit_empty ) {
         print "\rInitializing empty time windows..." unless $disable_progress;
 
-        if ($print_milliseconds) {
-            # Use integer milliseconds for bucket keys to avoid floating-point precision issues
-            my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
-            my $start_bucket = int(int($output_timestamp_min * 1000 + 0.5) / $bucket_size_ms) * $bucket_size_ms;
-            my $end_bucket = int($output_timestamp_max * 1000 + 0.5);
-            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ms) {
+        if ($bucket_key_scale > 1) {
+            # Keys in integer milliseconds or microseconds, as the read loop forms them
+            my $start_bucket = int(int($output_timestamp_min * $bucket_key_scale + 0.5) / $bucket_size_ticks) * $bucket_size_ticks;
+            my $end_bucket = int($output_timestamp_max * $bucket_key_scale + 0.5);
+            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ticks) {
                 $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
             }
         } else {
@@ -18552,7 +18818,7 @@ sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
     my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;
     my $show_heatmap = $heatmap_enabled;
-    my $timestamp_w  = length(strftime($output_timestamp_format, gmtime(0))) + ($print_milliseconds ? 4 : 0);
+    my $timestamp_w  = length(format_timestamp(0, precision => $timestamp_precision, shape => 'run'));
     my $latency_w    = $show_heatmap ? $heatmap_width : 52;
 
     my @cols;
@@ -19791,6 +20057,7 @@ sub print_verbose_output {
     printf "CONFIG\tmax_log_message_length\t%d\n", $max_log_message_length;
     printf "CONFIG\ttime_bucket_size\t%s\n", $time_bucket_size;
     printf "CONFIG\tbucket_size_seconds\t%.2f\n", $bucket_size_seconds;
+    printf "CONFIG\ttimestamp_fraction_capture\t%d\n", $timestamp_capture_fraction;
 
     print "=== END benchmark-data ===\n";
 }
@@ -19846,7 +20113,7 @@ sub print_bar_graph {
         my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
         my $prev_fold_wday;
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
-            my $bucket_time_str = format_bucket_timestamp($bucket);
+            my $bucket_time_str = format_bucket_key($bucket, precision => $timestamp_precision, shape => 'run');
             # Blanking the repeated weekday is a terminal-display affordance only.
             # The CSV must keep the full folded timestamp on every row so each
             # row is self-describing (a blanked "    10:00" would be ambiguous to
@@ -19855,7 +20122,7 @@ sub print_bar_graph {
             # whole.
             my $bucket_time_display = $bucket_time_str;
             if ($profile_week_fold) {
-                my $wday = (gmtime($print_milliseconds ? $bucket / 1000 : $bucket))[6];
+                my $wday = (gmtime($bucket / $bucket_key_scale))[6];
                 if (defined $prev_fold_wday && $wday == $prev_fold_wday) {
                     substr($bucket_time_display, 0, 3) = '   ';   # blank the repeated weekday
                 }
@@ -21210,8 +21477,8 @@ sub print_summary_table {
     my ( @match_char ) = ( "$colors{'red'}χ", "$colors{'green'}√", "$colors{'green-HL'}√" );
 
     ## FORMAT MIN/MAX LOG TIMESTAMPS FOR THE SUMMARY ##
-    my $min_timestamp_str = format_observation_timestamp($output_timestamp_min);
-    my $max_timestamp_str = format_observation_timestamp($output_timestamp_max);
+    my $min_timestamp_str = format_timestamp($output_timestamp_min, precision => $timestamp_precision, shape => 'run', exact => exact_bound($output_timestamp_min_s, $output_timestamp_min_ns));
+    my $max_timestamp_str = format_timestamp($output_timestamp_max, precision => $timestamp_precision, shape => 'run', exact => exact_bound($output_timestamp_max_s, $output_timestamp_max_ns));
 
     ## START SUMMARY STATISTIC TABLE ##
     push @summary_table, sprintf( "  " . "─" x ( $category_column_width + $occurrences_column_width + 1 ) . "$padding\n" );
@@ -21928,6 +22195,7 @@ sub pipeline_parse {
     $end_time = [gettimeofday];
     $elapsed_parse_read_files = tv_interval($start_time, $end_time);
     resolve_byte_notation();
+    resolve_timestamp_precision();
     measure_memory_structures();
     memory_debug_decomposition("after_read");
 }

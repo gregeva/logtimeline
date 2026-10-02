@@ -24,7 +24,7 @@ One entry per format carrying everything downstream code currently infers from t
 - field mapping (which captures are timestamp, message, duration, bytes, count, …)
 - **time contract** (three parts, all declarative — D23):
   - *layout* — the timestamp parse pattern
-  - *precision* — what the format resolves to (s / ms / µs); drives sub-second bucketing (`-ms`), the integer-milliseconds hash-key rule, and cross-checks the `ts_precision` hint from index read-back (#179)
+  - *precision* — what the format resolves to (s / ms / µs). Read by the clamp of the run's timestamp precision to what a file's timestamps carry, for the formats whose fraction is absent or fixed (`features/525-timestamp-precision-option.md` D4, D10); it drives neither sub-second bucketing nor the bucket key, whose scale follows `-bs` alone (D14)
   - *timezone semantics* — (a) offset present in the line → parse and honor it; (b) offset absent, format documented as UTC → registry pins UTC; (c) offset absent, format writes local time → registry pins "local", and what local means resolves through the configuration cascade (CLI firmest → registry/user config → default). The format *knows*; the engine never guesses — same declarative pattern as duration units. Consumers: #155 (UTC normalization) reads cases (a)/(b); #154 (fixed rendering offset) is the display-side override.
 - duration field + **declared duration unit** (D18 — declarative format-carried knowledge, e.g. Tomcat 9 `%D` = milliseconds), with an **ambiguity marker** for variants (Tomcat 9 ms vs Tomcat 10.1+/Apache HTTP µs `%D`)
 - access-log property (replacing `$is_access_log`)

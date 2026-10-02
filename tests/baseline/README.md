@@ -105,6 +105,11 @@ the row used to report the terminal width there. From 0.19.0 it reads `350` on
 print `200 → 350` labelled as a regression on those three scenarios** across that
 boundary: the keys are the same length on both sides, and only the report changed.
 
+**`CONFIG timestamp_fraction_capture` is new from release 0.19.0 (#525).** It reports
+whether the run read the sub-second part of its timestamps (1) or skipped it (0). Every
+standard scenario reads 0 except `heatmap-histogram-export` (`-o`), which reads 1.
+**Expect `compare-results.sh` to list it under New In This Version** across that boundary.
+
 ## Results naming
 
 | kind | naming | what it is |

@@ -503,6 +503,55 @@ scenario_error_unknown_so() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; Issue #308 routes the error block to stderr'
 }
 
+# Issue #525 D9: -tp is reported by its canonical token whatever spelling
+# was given; a run that does not supply it emits no row.
+scenario_runtime_config_timestamp_precision() {
+    current_scenario="runtime-config-timestamp-precision"
+    echo "[$current_scenario]"
+
+    # Application logs whose timestamps carry milliseconds and microseconds,
+    # so a request at or above the log's precision is reported unclamped.
+    local ms_log="$TMP_DIR/tp-millis.log" us_log="$TMP_DIR/tp-micros.log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' > "$ms_log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456789 [main] INFO  com.example.Service - second line' > "$us_log"
+
+    local row spelling log want
+    for row in "Millisecond|$ms_log|ms" "MSEC|$ms_log|ms" "microseconds|$us_log|us" "second|$ms_log|s"; do
+        IFS='|' read -r spelling log want <<< "$row"
+        run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$log"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp-precision: $want\$" \
+            asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation when the log carries that precision." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for timestamp-precision, resolved by adapt_to_command_line_options()' \
+            contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
+    done
+
+    # Clamped: the resolved precision, and the request in the annotation.
+    for row in "nanosecond|$us_log|us; clamped from ns|the finest the parse keeps" \
+               "ms|$TEST_LOG|s; clamped from ms|the whole seconds the access log carries" \
+               "us|$ms_log|ms; clamped from us|the milliseconds the log carries"; do
+        local why
+        IFS='|' read -r spelling log want why <<< "$row"
+        run_ltl "rc-tp-clamp-$spelling" -V runtime-config -tp "$spelling" "$log"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp-precision: $want\$" \
+            asserts     "-tp $spelling resolves to $why; the row names the resolved precision and the request in the clamp annotation." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from; the row is resolved by resolve_timestamp_precision() after the read' \
+            contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
+    done
+
+    run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
+    assert_no_line "$RUN_STDOUT" \
+        pattern     '^timestamp-precision:' \
+        asserts     'A run that does not supply -tp emits no timestamp-precision row: defaults are documented, not duplicated in the section.' \
+        produced_by 'emit_runtime_config_verbose() in ltl (provenance partitioning)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
+}
+
 scenario_error_unknown_du() {
     current_scenario="error-unknown-du"
     echo "[$current_scenario]"
@@ -641,6 +690,7 @@ scenario_register runtime-config-command-line \
                   error-unknown-exact-percentiles \
                   runtime-config-data-model-selectors \
                   runtime-config-numeric-highlight \
+                  runtime-config-timestamp-precision \
                   runtime-config-expose \
                   runtime-config-mask \
                   runtime-config-discard \
@@ -664,6 +714,7 @@ while read -r _scenario; do
         error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
         runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
         runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
+        runtime-config-timestamp-precision ) scenario_runtime_config_timestamp_precision ;;
         runtime-config-expose              ) scenario_runtime_config_expose ;;
         runtime-config-mask                ) scenario_runtime_config_mask ;;
         runtime-config-discard             ) scenario_runtime_config_discard ;;
