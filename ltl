@@ -1956,8 +1956,24 @@ sub serialize_filters {
 
 sub parse_iso_date_to_epoch {
     my ($iso_str) = @_;
-    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/;
-    return eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
+    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/;
+    my $fraction = defined $7 ? "0.$7" : 0;
+    my $epoch = eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
+    return defined $epoch ? $epoch + $fraction : undef;
+}
+
+# The precision an index row's timestamps were written at: its ts_precision
+# column when that names a precision step, otherwise (a row written before the
+# column was filled, carrying -) the steps its stored fraction's digits
+# complete: none the whole second, three the millisecond, six the microsecond.
+sub index_row_precision {
+    my ($row) = @_;
+    my $stated = $row->{ts_precision} // '';
+    return $stated if exists $time_unit_step{$stated} && $time_unit_step{$stated}{ms} <= $time_unit_step{m}{ms};
+    my ($fraction) = ($row->{first_timestamp} // '') =~ /\.(\d+)$/;
+    my $steps = int(length($fraction // '') / 3);
+    my @finer = map { $_->{token} } grep { $_->{ms} <= 1 } reverse @time_unit_ladder;   # ms, us, ns
+    return $steps ? $finer[ ($steps > @finer ? scalar(@finer) : $steps) - 1 ] : 's';
 }
 
 sub locate_index_file {
@@ -2081,14 +2097,14 @@ sub read_index_file {
         my $sel_key = $in_file . "\0" . $index_filter_sig;
         my $sel_row = $selection_entries{$sel_key};
         if ($sel_row && $file_fresh) {
-            $index_preseed{$in_file} = _preseed_from_row($sel_row, $file_row, 'tier_1_selection');
+            $index_preseed{$in_file} = _preseed_from_row($sel_row, 'tier_1_selection');
             $tier_seen{tier_1_selection} = 1;
             next;
         }
 
         # Tier 2: file row, fresh.
         if ($file_row && $file_fresh) {
-            $index_preseed{$in_file} = _preseed_from_row($file_row, $file_row, 'tier_2_file');
+            $index_preseed{$in_file} = _preseed_from_row($file_row, 'tier_2_file');
             $tier_seen{tier_2_file} = 1;
             next;
         }
@@ -2119,18 +2135,15 @@ sub read_index_file {
     # Build aggregated bounds with provenance.
     for my $metric (qw(duration_min duration_max file_bytes_min file_bytes_max count_min count_max
                        first_timestamp last_timestamp)) {
-        my $best;
-        my $best_from;
+        # Timestamps are compared as the instants they name, never as strings.
+        my ($best, $best_n, $best_from);
         for my $file (@in_files) {
             my $v = $index_preseed{$file}{$metric};
             next unless defined $v && $v ne '-' && $v ne '';
-            if (!defined $best) {
-                $best = $v; $best_from = $file; next;
-            }
-            if ($metric =~ /_min$|^first_/) {
-                if (_lt($v, $best)) { $best = $v; $best_from = $file; }
-            } else {
-                if (_gt($v, $best)) { $best = $v; $best_from = $file; }
+            my $n = $metric =~ /timestamp/ ? parse_iso_date_to_epoch($v) : $v;
+            next unless defined $n;
+            if (!defined $best || ($metric =~ /_min$|^first_/ ? $n < $best_n : $n > $best_n)) {
+                ($best, $best_n, $best_from) = ($v, $n, $file);
             }
         }
         if (defined $best) {
@@ -2173,11 +2186,12 @@ sub read_index_file {
     return;
 }
 
-# Helper: build a per-file pre-seed record from a matched row (selection or file).
-# $bound_row is the row whose bounds we use. $file_row is always the companion
-# file row (used for ts_precision since selection rows have '-' there).
+# Helper: build a per-file pre-seed record from a matched row (selection or
+# file). $bound_row is the row whose bounds, and whose timestamp precision, we
+# use: a selection row can be written by a later run, at another precision,
+# than the file row beside it.
 sub _preseed_from_row {
-    my ($bound_row, $file_row, $tier_name) = @_;
+    my ($bound_row, $tier_name) = @_;
     my %p = (
         lookup             => $tier_name,
         matched_entry_date => $bound_row->{entry_date} // '-',
@@ -2188,22 +2202,8 @@ sub _preseed_from_row {
         my $v = $bound_row->{$col};
         $p{$col} = (defined $v && $v ne '' && $v ne '-') ? $v : undef;
     }
-    # ts_precision lives only on the file row.
-    my $tp = $file_row->{ts_precision};
-    $p{ts_precision} = (defined $tp && $tp ne '' && $tp ne '-') ? $tp : undef;
+    $p{ts_precision} = index_row_precision($bound_row);
     return \%p;
-}
-
-# Numeric/timestamp comparators that handle ISO timestamps and bare numbers.
-sub _lt {
-    my ($a, $b) = @_;
-    return ($a lt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
-    return ($a + 0) < ($b + 0);
-}
-sub _gt {
-    my ($a, $b) = @_;
-    return ($a gt $b) if $a =~ /^\d{4}-\d{2}-\d{2}T/;
-    return ($a + 0) > ($b + 0);
 }
 
 # Issue #179: After parse pass completes, compare live captured values
@@ -2251,18 +2251,26 @@ sub detect_index_drift {
             my $live_v = $live->{$live_key};
             next unless defined $live_v;
 
-            # Format timestamps to match preseed ISO representation.
-            my $live_v_fmt = $live_v;
+            # A timestamp is compared as a number at the run's precision, or
+            # at the precision the stored row was written at when that is
+            # coarser: a row carries no digit finer than it was written with.
+            my ($live_n, $preseed_n, $live_v_fmt) = ($live_v, $preseed_v, $live_v);
             if ($metric eq 'first_timestamp' || $metric eq 'last_timestamp') {
                 next unless $live_v > 0;
-                $live_v_fmt = format_timestamp($live_v, precision => 'ms', shape => 'iso');
+                my $stored = parse_iso_date_to_epoch($preseed_v);
+                next unless defined $stored;
+                my $row_precision = $pre->{ts_precision} // 's';
+                my $precision = $time_unit_step{$row_precision}{ms} > $time_unit_step{$timestamp_precision}{ms}
+                    ? $row_precision : $timestamp_precision;
+                ($live_n, $preseed_n) = map { timestamp_ticks($_, $precision) } $live_v, $stored;
+                $live_v_fmt = format_timestamp($live_v, precision => index_timestamp_precision($precision), shape => 'iso');
             }
 
             my $drifted = 0;
             if ($direction eq 'min') {
-                $drifted = 1 if _lt($live_v_fmt, $preseed_v);
+                $drifted = 1 if $live_n < $preseed_n;
             } else {
-                $drifted = 1 if _gt($live_v_fmt, $preseed_v);
+                $drifted = 1 if $live_n > $preseed_n;
             }
 
             $index_drift{$file}{$metric} = {
@@ -6970,8 +6978,10 @@ sub write_index_file {
         }
 
         my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');
-        # A first or last timestamp at the millisecond, or - where none was seen.
-        my $index_timestamp = sub { my ($epoch) = @_; defined $epoch && $epoch > 0 ? format_timestamp($epoch, precision => 'ms', shape => 'iso') : '-' };
+        # A first or last timestamp at the run's precision, or - where none was
+        # seen; every row states that precision in its ts_precision column.
+        my $index_precision = index_timestamp_precision($timestamp_precision);
+        my $index_timestamp = sub { my ($epoch) = @_; defined $epoch && $epoch > 0 ? format_timestamp($epoch, precision => $index_precision, shape => 'iso') : '-' };
 
         for my $file (@files_processed) {
             my $fd = $index_file_data{$file} or next;
@@ -6991,7 +7001,7 @@ sub write_index_file {
 
                 my @file_row = (
                     'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
-                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $fd->{ts_precision},
+                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $timestamp_precision,
                     $fd->{duration_occurrences}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
                     $fd->{file_bytes_occurrences}, $fd->{file_bytes_min} // '-', $fd->{file_bytes_max} // '-', $file_bytes_mean,
                     $fd->{count_occurrences}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_mean,
@@ -7009,7 +7019,7 @@ sub write_index_file {
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
-                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, '-',
+                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, $timestamp_precision,
                     $fd->{sel_duration_occurrences}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
                     $fd->{sel_file_bytes_occurrences}, $fd->{sel_file_bytes_min} // '-', $fd->{sel_file_bytes_max} // '-', $sel_file_bytes_mean,
                     $fd->{sel_count_occurrences}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_mean,
@@ -12930,6 +12940,25 @@ sub run_file_stamp {
     return $run_file_stamp;
 }
 
+# An instant as a whole number of units of a precision step, by the rounding
+# format_timestamp() applies: the second and coarser steps truncate, a
+# sub-second step rounds half-up at its unit. Two timestamps compared at a
+# precision are compared as these numbers.
+sub timestamp_ticks {
+    my ($epoch, $precision) = @_;
+    my $step = $time_unit_step{$precision};
+    return int($epoch / ($step->{ms} / 1000)) if $step->{ms} >= 1000;
+    return int($epoch * 10 ** ($step->{decimals} + 3) + 0.5);
+}
+
+# The precision an ISO date-time is written at for a run precision: the ISO
+# form has nothing coarser than the whole second, so a minute run writes
+# whole seconds.
+sub index_timestamp_precision {
+    my ($precision) = @_;
+    return $time_unit_step{$precision}{ms} > 1000 ? 's' : $precision;
+}
+
 # The one timestamp formatter: every site that renders or writes a timestamp
 # calls it. $epoch is in seconds; a bucket key held in integer sub-second
 # units is passed divided by its scale.
@@ -12950,7 +12979,7 @@ sub format_timestamp {
     my ($whole, $fraction) = (int($epoch), '');
     if ($digits) {
         my $scale = 10 ** $digits;
-        my $ticks = int($epoch * $scale + 0.5);
+        my $ticks = timestamp_ticks($epoch, $opt{precision});
         my $part  = $ticks % $scale;
         $whole    = ($ticks - $part) / $scale;
         $fraction = sprintf('.%0*d', $digits, $part);
@@ -15229,7 +15258,6 @@ sub read_and_process_logs {
             match_count     => 0,
             first_timestamp => undef,
             last_timestamp  => undef,
-            ts_precision    => 's',
             duration_occurrences  => 0, duration_min => undef, duration_max => undef, duration_sum => 0,
             file_bytes_occurrences     => 0, file_bytes_min    => undef, file_bytes_max    => undef, bytes_sum    => 0,
             count_occurrences     => 0, count_min    => undef, count_max    => undef, count_sum    => 0,
@@ -15792,7 +15820,6 @@ sub read_and_process_logs {
                     $fd->{match_count}++;
                     $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
-                    $fd->{ts_precision} = 'ms' if $fractional_ms > 0 && $fd->{ts_precision} eq 's';
                     if (defined $duration) {
                         $fd->{duration_occurrences}++;
                         $fd->{duration_sum} += $duration;

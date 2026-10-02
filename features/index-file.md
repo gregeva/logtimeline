@@ -44,9 +44,9 @@ Stores whole-file metadata from a complete file read. Cache key is `file_path`.
 | file_mtime | ISO 8601 - file modification time (for staleness detection) |
 | line_count | Total lines in file |
 | match_count | Lines matching a parsing format (drives memory usage) |
-| first_timestamp | ISO 8601 - earliest timestamp found |
-| last_timestamp | ISO 8601 - latest timestamp found |
-| ts_precision | Timestamp precision: "s", "ms", "us" |
+| first_timestamp | ISO 8601 - earliest timestamp found, at the precision the writing run resolved (whole seconds for a minute-precision run, the ISO form having nothing coarser) |
+| last_timestamp | ISO 8601 - latest timestamp found, at the same precision |
+| ts_precision | The precision the writing run resolved: `m`, `s`, `ms` or `us` (`features/525-timestamp-precision-option.md` D13, D16) |
 | duration_count | Number of lines with duration values |
 | duration_min | Minimum duration value |
 | duration_max | Maximum duration value |
@@ -77,9 +77,9 @@ Stores run statistics for a specific combination of file and filter options. A s
 | file_mtime | `-` |
 | line_count | `-` |
 | match_count | Lines matching after filters applied |
-| first_timestamp | ISO 8601 - earliest timestamp in filtered set |
-| last_timestamp | ISO 8601 - latest timestamp in filtered set |
-| ts_precision | `-` |
+| first_timestamp | ISO 8601 - earliest timestamp in filtered set, at the writing run's precision |
+| last_timestamp | ISO 8601 - latest timestamp in filtered set, at the writing run's precision |
+| ts_precision | The precision the writing run resolved, as on the file entry; a selection entry can be rewritten by a later run at another precision than the file entry beside it, so each states its own (`features/525-timestamp-precision-option.md` D17). Entries written before the column was filled carry `-` |
 | duration_count | Filtered count |
 | duration_min | Filtered min |
 | duration_max | Filtered max |

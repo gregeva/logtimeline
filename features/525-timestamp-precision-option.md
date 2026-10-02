@@ -5,8 +5,8 @@
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
 progress: drops 1 (the one formatter) and 2 (the long spellings) and step
-3a and 3b of drop 3 (the option, the key scale) delivered 2026-10-02,
-§ 10.
+3a, 3b and 3c of drop 3 (the option, the key scale, the run index)
+delivered 2026-10-02, § 10.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -914,14 +914,14 @@ directory, and is shaped to the assertion that reads it.
   generated for `-tp ms` does. *Assertable:* the heading from stdout; the two
   block variants by a structural check on `format_entry_block_src`'s output.
   The per-line effect is measured (§ 9).
-- [ ] **The index at the run's precision (D13, D16, D17).** In a scratch
+- [x] **The index at the run's precision (D13, D16, D17).** In a scratch
   directory, a `-tp ms` run on the three-digit set writes `first_timestamp`
   ending `T10:00:01.123` and `ts_precision` `ms` on its file and selection rows
   (D17: no selection row carries `-`); the same run without `-tp`, at minute
   precision, writes `T10:00:01` and `m` (D16); a `-tp s` run writes
   `T10:00:01` and `s`; a `-tp us` run on the six-digit set writes six digits
   and `us`. *Assertable:* the index file, `validate-index-read-back.sh`.
-- [ ] **Drift at the runtime precision (D13, D15, D16, D17, D18, D19).** A
+- [x] **Drift at the runtime precision (D13, D15, D16, D17, D18, D19).** A
   row written at millisecond precision read back by a whole-second run, a row
   written at whole seconds read back by a `-tp ms` run (compared at the row's
   coarser precision, D15), a row written by a minute run read back by a
@@ -1204,6 +1204,45 @@ sub-second width, so their per-line work is the same seconds-scale branch on
 another variable: the differences are single-run variation, not a gain. The
 rendered timeline of `-bs 100ms -tp ms` over a one-second window of the corpus
 application log is identical, row for row, to `-ms -bs 100`'s at 80 columns.
+
+**Step 3c, delivered 2026-10-02.** `write_index_file` writes `first_timestamp`
+and `last_timestamp`, file and selection rows alike, at the run's precision
+through `index_timestamp_precision` (whole seconds for a minute run), and
+`ts_precision` carries the run's precision on every row in place of the file
+row's per-line `s`/`ms` flag (removed from the read loop) and the selection
+row's `-`. The pre-seed takes each matched row's own precision through
+`index_row_precision`, which reads the column, or for a `-` row the steps its
+stored fraction's digits complete (a fraction whose length is not a multiple of
+three covers only the steps its digits complete). `detect_index_drift` brings
+both timestamps to whole numbers of the coarser of the run's and the row's
+precision through `timestamp_ticks`, the rounding `format_timestamp` uses, and
+compares them as numbers; `parse_iso_date_to_epoch` keeps the fraction; the
+cross-file aggregation compares instants; `_lt` and `_gt` are gone.
+
+Measured against step 3b on the drop 1 capture set: only the index rows
+change. A default run writes `2026-01-26T10:00:01` under `m` (was `.123`
+under `ms` on the file row and `-` on the selection row), `-s` writes whole
+seconds under `s`, `-ms` writes three digits under `ms`; the timeline, heading,
+CSVs and export are byte-identical. `validate-index-read-back.sh` gains
+`index-run-precision` (8 assertions), `drift-runtime-precision` (8) and
+`drift-numeric-structure` (1); 91 passed, the 74 existing unchanged. The 3b
+build writes every row at milliseconds whatever the run asks, so most drift
+cases cannot fail there; each was instead shown to fail against a deliberately
+broken copy of the new build: comparing only at the run's precision fails the
+whole-second, minute and `-`-with-whole-seconds rows read by a millisecond run;
+comparing only at the row's precision fails the narrowed millisecond row read
+by a whole-second run; reading a `-` row as whole seconds fails the
+`-`-with-three-digits row; ignoring the matched row's own precision fails it,
+the narrowed millisecond row and the selection row at `ms` beside a file row at
+`s`; comparing as strings fails both whole-second reads of a millisecond row.
+
+Finding: an index row written by a build before drop 1 in the carry case holds
+a four-digit fraction (`10:06:13.1000`, meaning `10:06:14.000`). Read as a
+number it is `10:06:13.100`, so the first run of this build over such a file
+at millisecond precision reports `last_timestamp` drift (measured: `live=
+2025-02-20T10:06:14.000 preseed=2025-02-20T10:06:13.1000 drifted=yes`), and
+its end-of-run write replaces the row. Drift is observation only; the row is
+corrected once, by the run that reports it.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and

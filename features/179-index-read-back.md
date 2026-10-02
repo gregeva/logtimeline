@@ -86,9 +86,9 @@ When pre-seed activates, the following values populate in-memory state at start 
 | Count bound (min/max) | `count_min` / `count_max` | `min` / `max` |
 | First timestamp | `first_timestamp` | earliest |
 | Last timestamp | `last_timestamp` | latest |
-| ts_precision | `ts_precision` (file entry only — selection entries have `-`) | per-file, not aggregated; see note |
+| ts_precision | `ts_precision` of the matched entry, file or selection | per-file, not aggregated; see note |
 
-**Note on `ts_precision`.** ltl normalizes all timestamps to milliseconds internally; stored bound values (`duration_min/max`, `bytes_min/max`, `count_min/max`) in `ltl-index.csv` are already in milliseconds. `ts_precision` is metadata about source-log timestamp resolution (for memory estimation and display purposes), carried per-file, not aggregated for arithmetic. Selection entries do not carry `ts_precision` (the column is `-` per #46 schema); when the active tier is Tier 1, `ts_precision` is read from the companion `file` entry.
+**Note on `ts_precision`.** ltl normalizes all timestamps to milliseconds internally; stored bound values (`duration_min/max`, `bytes_min/max`, `count_min/max`) in `ltl-index.csv` are already in milliseconds. `ts_precision` is the precision the run that wrote an entry resolved (`m`, `s`, `ms` or `us`), the precision its `first_timestamp` and `last_timestamp` were written at; it is carried per entry, file and selection alike, and not aggregated. The pre-seed reads it from the matched entry itself, so a selection entry rewritten at another precision than its file entry is judged at its own. An entry written before the column was filled carries `-`; its precision is read from the fractional digits its stored timestamps carry: none the whole second, three the millisecond, six the microsecond (`features/525-timestamp-precision-option.md` D17, D19).
 
 Pre-seeded values populate the same in-memory state that the live read pass updates. The read pass continues to run today's `<` / `>` comparisons; it just starts with non-undef values when pre-seed is active.
 
@@ -105,6 +105,8 @@ For each input file that contributed pre-seed values:
 | Tier 2 (file entry, filtered run) | Live filtered values vs pre-seeded file bounds. Drift here means the selection entry needed for this filter signature did not yet exist; the run's end-of-run write creates it. This is normal, not an error. |
 
 Drift conditions per metric: `live min < pre-seeded min`, `live max > pre-seeded max`, `live first_ts < pre-seeded first_ts`, `live last_ts > pre-seeded last_ts`. Any drift on any metric on any file flags the run as drifted.
+
+Timestamps are compared at the current run's precision, or at the matched entry's `ts_precision` when that is coarser (an entry carries no digit finer than it was written with). Both are brought to whole numbers of that precision's unit, the second and coarser truncating and a sub-second unit rounding half-up, and compared as numbers, never as strings; the `live=` value in the drift block is written at the comparison precision. The multi-file aggregation of pre-seeded timestamps compares the instants likewise (`features/525-timestamp-precision-option.md` D13, D15, D18).
 
 ### Drift refresh
 
