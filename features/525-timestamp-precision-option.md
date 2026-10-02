@@ -17,8 +17,9 @@ column as the file rows do) and D18 (drift compares timestamps as numbers
 rounded to the comparison precision, never as strings); amended again
 2026-09-29 with D19 (an index row written before this change, whose precision
 column carries `-`, is read at the precision its stored timestamps' digits
-carry, and no old row is rewritten). The architect's decisions are § 4 (D1 to
-D19); no element of the run index's design remains **proposed**. A design
+carry, and no old row is rewritten); D20 (2026-10-02: at a whole-second
+width a line counts in the second it was written in). The architect's decisions
+are § 4 (D1 to D20); no element of the run index's design remains **proposed**. A design
 element that no decision settles is implementation detail and is marked
 **proposed**.
 
@@ -444,6 +445,20 @@ Only the architect's decisions are numbered here.
   row at that precision as it judges any row at its stated one (D15, D17), and
   no old row is rewritten to carry a precision. Locked by the architect
   2026-09-29.
+
+- **D20. At a whole-second width a line counts in the second it was written
+  in.** Found while planning drop 3: under D14 a whole-second width
+  (`-bs 1s`, or `-ms -bs 1000`) keys buckets in seconds, so a line at
+  `10:06:13.9996` counts in the `10:06:13` bucket while the heading and the
+  index, rounded at the millisecond (D7), name `10:06:14.000`; today's `-ms`
+  key rounds it into `10:06:14`. Put to the architect: A, at a whole-second
+  width a line counts in the second it was written in, bucket membership
+  being the floor of the timestamp as at every whole-second width without
+  `-ms`; or B, each line's timestamp rounded to the run's precision when it is
+  read, so key, heading and index always agree. The architect: "I lock A"
+  (after first answering B). A width with a millisecond or microsecond part is
+  unaffected: its key rounds at that unit, as D7 and D14 have it, so `-bs
+  100ms` keeps ten buckets per second. Locked by the architect 2026-10-02.
 
 ---
 
