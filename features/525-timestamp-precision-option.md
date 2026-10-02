@@ -5,7 +5,8 @@
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
 progress: drops 1 (the one formatter) and 2 (the long spellings) and step
-3a of drop 3 (the option) delivered 2026-10-02, § 10.
+3a and 3b of drop 3 (the option, the key scale) delivered 2026-10-02,
+§ 10.
 Amended 2026-09-29, after the agreed specification merged, with D13
 (the run index writes at the run's resolved precision and its drift check
 follows the runtime options), D14 (the bucket key's scale follows `-bs` alone)
@@ -890,12 +891,12 @@ directory, and is shaped to the assertion that reads it.
   `millisecond`, `us`, `microsecond` and the ladder's other spellings of those
   four steps, in any case; every spelling of a step gives the same run.
   *Assertable.*
-- [ ] **The architect's pair (D5).** On the three-digit set, `-bs 100ms -tp ms`
+- [x] **The architect's pair (D5).** On the three-digit set, `-bs 100ms -tp ms`
   prints ten buckets per second labelled `.000`, `.100` … `.900`, and its
   timeline, heading and STATS CSV timestamps are byte-identical to
   `-ms -bs 100`'s; the only difference is `-ms`'s deprecation line on stderr.
   *Assertable.*
-- [ ] **Equivalence with the switches (D5, D11).** `-tp m` renders as the
+- [x] **Equivalence with the switches (D5, D11).** `-tp m` renders as the
   default; `-tp s -bs 30s` as `-s -bs 30`; `-bs 100ms -tp ms` as `-ms -bs 100`
   (the architect's pair, above). *Assertable.*
 - [x] **Width and precision separate (D11).** `-tp ms` alone reports the same
@@ -939,10 +940,10 @@ directory, and is shaped to the assertion that reads it.
   timestamps (D18). *Assertable:* `validate-index-read-back.sh`, rows
   orchestrated by its `edit_index_row` helper, read from `-V index-read-back`;
   the last by a structural check on `detect_index_drift`.
-- [ ] **Microsecond (D3, D7, D14).** On the six-digit set under `-tp us -bs 500us`,
+- [x] **Microsecond (D3, D7, D14).** On the six-digit set under `-tp us -bs 500us`,
   labels carry six fractional digits (`.000500`); the heading's bounds reproduce
   the written six digits, `.999999` included, without carrying. *Assertable.*
-- [ ] **Key scale from `-bs` alone (D14).** On the three-digit set,
+- [x] **Key scale from `-bs` alone (D14).** On the three-digit set,
   `-bs 100ms -tp us` gives the same buckets as `-bs 100ms -tp ms`, each label
   carrying six fractional digits where the other carries three (`.100000`
   against `.100`); `-tp us` alone gives the same `bucket_size_seconds` and
@@ -1166,6 +1167,43 @@ examples run), `validate-explain.sh` 695, `validate-regression.sh` 74 (the
 `-ms` golden unchanged: the notice is on stderr), `validate-udm-counting.sh`
 44, `validate-bucket-size-units.sh` 64, `validate-aggregate-export.sh` 161, all
 passing.
+
+**Step 3b, delivered 2026-10-02.** `$bucket_key_scale` (1, 1000 or 1 000 000)
+and `$bucket_size_ticks` are settled once in `adapt_to_terminal_settings` from
+the width alone: a width that is a whole number of microseconds but not of
+milliseconds keys in integer microseconds, one that is a whole number of
+milliseconds but not of seconds in integer milliseconds, any other in seconds
+(a width with a nanosecond part included, D14's "anything else"). The read
+loop, `initialize_empty_time_windows`, the two label sites and the fold
+weekday read the scale; no bucket-key site reads `-s` or `-ms`. The per-line
+recomputation of the millisecond width under `-ms` is gone. `-ms -bs 1000`
+now keys in seconds, so a line at `.9996` counts in its own second (D20).
+
+Measured against step 3a's build on the drop 1 capture set (eleven runs:
+default, `-s`, `-ms`, `-pr week`, the carry and day-end lines): the timeline,
+heading, STATS and MESSAGES CSVs, export and index are byte-identical; only the
+deprecation lines on stderr and the clock readings differ. What the key scale
+changes is shown by a line exactly on a sub-second edge: under 3a, `-bs 100ms
+-tp ms` counted a line written at `10:00:01.100` in the `.000` bucket and
+`-bs 500us -tp us` a line at `10:00:02.008000` in `.007500`, because the key
+was formed by dividing floating-point seconds; under 3b each counts in the
+bucket that starts at its timestamp. `validate-timestamp-precision.sh`
+`keyscale/bucket-edge` asserts this and fails against 3a's build; the
+architect's pair, microsecond and key-scale-from-width scenarios also pass on
+3a's build, since their lines sit off the edges, and pin the outcome rather
+than discriminate it. `keyscale/whole-second-floor` (D20) and
+`keyscale/structure` fail against 3a's build. 50 passed; `validate-regression.sh`
+74, `validate-bucket-size-units.sh` 64, `validate-aggregate-export.sh` 161,
+`validate-index-read-back.sh` 74, `validate-profile.sh` 106,
+`validate-profile-render.sh` 50, `validate-udm-counting.sh` 44, all passing.
+Benchmarked once each on this machine against the before runs on 3b673ee:
+`single-day-access-log-standard` 9.1 s to 8.8 s total (−3.3 %), RSS 99.8 MB
+to 99.4 MB; `single-day-application-log-standard` 3.9 s to 3.8 s (−2.3 %),
+RSS 42.4 MB to 42.5 MB; lines read and included identical. Neither run sets a
+sub-second width, so their per-line work is the same seconds-scale branch on
+another variable: the differences are single-run variation, not a gain. The
+rendered timeline of `-bs 100ms -tp ms` over a one-second window of the corpus
+application log is identical, row for row, to `-ms -bs 100`'s at 80 columns.
 
 **Merge gate.** Full harness suite and the before/after benchmark
 (`single-day-access-log-standard`, labels `525-before` on the base commit and

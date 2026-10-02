@@ -430,6 +430,13 @@ my $timestamp_precision_option;   # -tp as given, resolved into $timestamp_preci
 # The finest timestamp precision the parse keeps (six fractional digits): -tp
 # names a step of the time-unit ladder from the minute down to this one.
 my $timestamp_precision_finest = 'us';
+# The bucket key's scale, chosen from the bucket width alone and never from the
+# timestamp precision: integer microseconds (1_000_000) for a width with a
+# microsecond part, integer milliseconds (1000) for one with a millisecond
+# part, otherwise seconds (1). $bucket_size_ticks is the width in key units
+# when the scale is above 1.
+my $bucket_key_scale = 1;
+my $bucket_size_ticks;
 my $output_timestamp_min = 0;
 my $output_timestamp_max = 0;
 
@@ -6738,7 +6745,7 @@ sub write_aggregate_export {
     my @buckets;
     for my $bucket (sort { $a <=> $b } keys %log_occurrences) {
         my $b = aggregate_mapping();
-        $b->{timestamp} = format_timestamp($print_milliseconds ? $bucket / 1000 : $bucket, precision => $timestamp_precision, shape => 'run');
+        $b->{timestamp} = format_timestamp($bucket / $bucket_key_scale, precision => $timestamp_precision, shape => 'run');
         my $occurrences = 0;
         my $bucket_categories = aggregate_mapping();
         my ($err_rate, $msg_rate);
@@ -15130,6 +15137,19 @@ sub adapt_to_terminal_settings {
     # Convert time_bucket_size, in the run's unit, to seconds
     $bucket_size_seconds = convert_duration_to_ms($time_bucket_size, $bucket_size_unit) / 1000;
 
+    # The bucket key's scale from the width alone. A width that is not a whole
+    # number of microseconds keys in seconds.
+    {
+        my $width_us = $bucket_size_seconds * 1_000_000;
+        my $whole_us = int($width_us + 0.5);
+        if ($whole_us > 0 && abs($width_us - $whole_us) < 1e-6) {
+            $bucket_key_scale = $whole_us % 1000      ? 1_000_000
+                              : $whole_us % 1_000_000 ? 1000
+                              :                         1;
+        }
+        $bucket_size_ticks = int($bucket_size_seconds * $bucket_key_scale + 0.5) if $bucket_key_scale > 1;
+    }
+
     # The per-run message-key cut, read by every key site, the trigram entry guard
     # and the benchmark data. Under -o or -g the key is cut at the cap; otherwise
     # at the terminal width, the most the messages table can print without
@@ -15937,11 +15957,10 @@ sub read_and_process_logs {
                 $output_timestamp_max = $bucket_epoch if $output_timestamp_max == 0 || $output_timestamp_max < $bucket_epoch;
 
                 my $bucket;
-                if ($print_milliseconds) {
-                    # Use integer milliseconds for bucket keys to avoid floating-point precision issues
-                    my $epoch_ms = int($bucket_epoch * 1000 + 0.5);
-                    my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
-                    $bucket = int($epoch_ms / $bucket_size_ms) * $bucket_size_ms;
+                if ($bucket_key_scale > 1) {
+                    # Integer milliseconds or microseconds, rounded at that unit,
+                    # so no floating-point drift moves a line across a bucket edge
+                    $bucket = int(int($bucket_epoch * $bucket_key_scale + 0.5) / $bucket_size_ticks) * $bucket_size_ticks;
                 } else {
                     $bucket = int($bucket_epoch / $bucket_size_seconds) * $bucket_size_seconds;
                 }
@@ -18564,12 +18583,11 @@ sub initialize_empty_time_windows {
     unless( $omit_empty ) {
         print "\rInitializing empty time windows..." unless $disable_progress;
 
-        if ($print_milliseconds) {
-            # Use integer milliseconds for bucket keys to avoid floating-point precision issues
-            my $bucket_size_ms = int($bucket_size_seconds * 1000 + 0.5);
-            my $start_bucket = int(int($output_timestamp_min * 1000 + 0.5) / $bucket_size_ms) * $bucket_size_ms;
-            my $end_bucket = int($output_timestamp_max * 1000 + 0.5);
-            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ms) {
+        if ($bucket_key_scale > 1) {
+            # Keys in integer milliseconds or microseconds, as the read loop forms them
+            my $start_bucket = int(int($output_timestamp_min * $bucket_key_scale + 0.5) / $bucket_size_ticks) * $bucket_size_ticks;
+            my $end_bucket = int($output_timestamp_max * $bucket_key_scale + 0.5);
+            for (my $bucket = $start_bucket; $bucket <= $end_bucket; $bucket += $bucket_size_ticks) {
                 $log_occurrences{$bucket}{'empty'}{'occurrences'} = 0;
             }
         } else {
@@ -19896,7 +19914,7 @@ sub print_bar_graph {
         my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
         my $prev_fold_wday;
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
-            my $bucket_time_str = format_timestamp($print_milliseconds ? $bucket / 1000 : $bucket, precision => $timestamp_precision, shape => 'run');
+            my $bucket_time_str = format_timestamp($bucket / $bucket_key_scale, precision => $timestamp_precision, shape => 'run');
             # Blanking the repeated weekday is a terminal-display affordance only.
             # The CSV must keep the full folded timestamp on every row so each
             # row is self-describing (a blanked "    10:00" would be ambiguous to
@@ -19905,7 +19923,7 @@ sub print_bar_graph {
             # whole.
             my $bucket_time_display = $bucket_time_str;
             if ($profile_week_fold) {
-                my $wday = (gmtime($print_milliseconds ? $bucket / 1000 : $bucket))[6];
+                my $wday = (gmtime($bucket / $bucket_key_scale))[6];
                 if (defined $prev_fold_wday && $wday == $prev_fold_wday) {
                     substr($bucket_time_display, 0, 3) = '   ';   # blank the repeated weekday
                 }

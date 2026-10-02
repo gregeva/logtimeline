@@ -40,7 +40,13 @@ scenario_register \
     deprecation/notice \
     deprecation/switch-jobs \
     rejection/values \
-    rejection/switch-conflict
+    rejection/switch-conflict \
+    keyscale/architect-pair \
+    keyscale/microsecond \
+    keyscale/bucket-edge \
+    keyscale/from-width \
+    keyscale/whole-second-floor \
+    keyscale/structure
 SCENARIO_USAGE_NOTE='Contract: features/525-timestamp-precision-option.md § 7 (Acceptance criteria)'
 scenario_parse_args "$@"
 
@@ -65,6 +71,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 THREE="$TMP_DIR/three.log"
 CARRY="$TMP_DIR/carry.log"
 DAYEND="$TMP_DIR/dayend.log"
+SIX="$TMP_DIR/six.log"
+EDGE="$TMP_DIR/edge.log"
 printf '%s\n' \
     '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' \
@@ -77,6 +85,17 @@ printf '%s\n' \
 printf '%s\n' \
     '2025-02-20 23:59:59,500 [main] INFO  com.example.Service - first line' \
     '2025-02-20 23:59:59,9996 [main] INFO  com.example.Service - last line' > "$DAYEND"
+# SIX carries six-digit fractions, the last at .999999, which must not carry.
+printf '%s\n' \
+    '2026-01-26 10:00:00,000250 [main] INFO  com.example.Service - first line' \
+    '2026-01-26 10:00:00,000750 [main] INFO  com.example.Service - second line' \
+    '2026-01-26 10:00:00,999999 [main] INFO  com.example.Service - third line' > "$SIX"
+# EDGE puts one line exactly on a 100 ms edge (.100) and one on a 500 us edge
+# (.008000), where a key formed from floating-point seconds falls into the
+# bucket before.
+printf '%s\n' \
+    '2026-01-26 10:00:01,100000 [main] INFO  com.example.Service - on a 100 ms edge' \
+    '2026-01-26 10:00:02,008000 [main] ERROR com.example.Service - on a 500 us edge' > "$EDGE"
 
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the assertions read the timeline labels, the summary heading's bounds, the
@@ -91,6 +110,7 @@ CONTRACT_D7='features/525-timestamp-precision-option.md D7 (rounded half-up once
 CONTRACT_D3='features/525-timestamp-precision-option.md D3 (-tp covers minute, second, millisecond, microsecond; the ladder tokens and long spellings) and D9 (-tp, --timestamp-precision)'
 CONTRACT_D5='features/525-timestamp-precision-option.md D5 (-s and -ms deprecated with a notice for one release, keeping their jobs) and D12 (-s or -ms beside a -tp of another precision is a usage error)'
 CONTRACT_D11='features/525-timestamp-precision-option.md D11 (timestamp precision and bucket width are separate: -tp sets no width; a bare -bs number is minutes)'
+CONTRACT_D14='features/525-timestamp-precision-option.md D14 (the bucket key scale follows -bs alone: integer milliseconds for a width with a millisecond part, integer microseconds for one with a microsecond part, otherwise seconds) and D20 (at a whole-second width a line counts in the second it was written in)'
 CONTRACT_INDEX='features/525-timestamp-precision-option.md § 7 drop 1 (older index rows stay fresh) and features/179-index-read-back.md § freshness (file_mtime compared by string equality)'
 
 pass=0
@@ -526,6 +546,148 @@ for pair in "-s|ms|-s/--seconds" "-ms|s|-ms/--milliseconds"; do
         "a deprecated switch beside a -tp of another precision is a usage error naming both, and the run does nothing" \
         "$CONTRACT_D5" "${COMMON[@]}" -ni "$flag" -tp "$tp" "$THREE"
 done
+fi
+
+# ---------------------------------------------------------------------------
+# The bucket key's scale (D14, D20)
+# ---------------------------------------------------------------------------
+# labels DIR — the timeline's bucket labels, in order.
+labels() {
+    grep -oE '^ [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:.]+' "$1/plain.txt" | sed 's/^ //'
+}
+
+if scenario_wanted keyscale/architect-pair; then
+current_scenario="keyscale/architect-pair"
+# Empty buckets kept (no -oe): the pair's claim is ten buckets a second.
+PAIR=(--disable-progress -n 0 --terminal-width 200 -o)
+run_in pair-ms "${PAIR[@]}" -ms -bs 100 "$THREE"
+run_in pair-tp "${PAIR[@]}" -bs 100ms -tp ms "$THREE"
+same_run "-bs 100ms -tp ms renders as -ms -bs 100" "$TMP_DIR/pair-ms" "$TMP_DIR/pair-tp" \
+    "the deprecated -ms -bs 100 is reproduced by -bs 100ms -tp ms: the timeline and the heading are byte-identical" \
+    'read_and_process_logs() and print_bar_graph() in ltl (bucket key at millisecond scale)' "$CONTRACT_D5; $CONTRACT_D14"
+stats_ms=$(ls "$TMP_DIR"/pair-ms/*-LTL-STATS-*.csv 2>/dev/null | head -1)
+stats_tp=$(ls "$TMP_DIR"/pair-tp/*-LTL-STATS-*.csv 2>/dev/null | head -1)
+if [[ -n "$stats_ms" && -n "$stats_tp" ]] && diff -q "$stats_ms" "$stats_tp" > /dev/null; then
+    pass_with "the STATS CSVs of the pair are byte-identical"
+else
+    fail_with "the STATS CSVs of the pair are byte-identical" \
+        "the pair's STATS CSV rows, timestamps included, are the same" \
+        'print_bar_graph() in ltl (STATS CSV rows)' "$CONTRACT_D5; $CONTRACT_D14" "ms: ${stats_ms:-none}" "tp: ${stats_tp:-none}"
+fi
+second=$(labels "$TMP_DIR/pair-tp" | grep '^2026-01-26 10:00:02\.' | sed 's/.*\.//' | tr '\n' ' ')
+if [[ "$second" == ".000 .100 .200 .300 .400 .500 .600 .700 .800 .900 " || "$second" == "000 100 200 300 400 500 600 700 800 900 " ]]; then
+    pass_with "the second 10:00:02 has ten buckets, .000 to .900"
+else
+    fail_with "the second 10:00:02 has ten buckets, .000 to .900" \
+        "a 100 ms width draws ten buckets a second, labelled .000, .100 ... .900" \
+        'initialize_empty_time_windows() and print_bar_graph() in ltl' "$CONTRACT_D14" "labels: ${second:-none}"
+fi
+dep=$(grep -c '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt" || true)
+if [[ "$dep" == 1 ]] && diff -q <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" > /dev/null; then
+    pass_with "the pair's stderr differs only by -ms's deprecation line"
+else
+    fail_with "the pair's stderr differs only by -ms's deprecation line" \
+        "-ms -bs 100 prints its one deprecation line; apart from it the two runs print the same stderr" \
+        'adapt_to_command_line_options() in ltl' "$CONTRACT_D5" "-ms notice lines: $dep" \
+        "diff: $(diff <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" | head -4 | tr '\n' '~')"
+fi
+fi
+
+if scenario_wanted keyscale/microsecond; then
+current_scenario="keyscale/microsecond"
+run_in micro "${COMMON[@]}" -ni -tp us -bs 500us "$SIX"
+got=$(labels "$TMP_DIR/micro" | tr '\n' ' ')
+b=$(heading_bounds "$TMP_DIR/micro")
+want="2026-01-26 10:00:00.000000 2026-01-26 10:00:00.000500 2026-01-26 10:00:00.999500 "
+if [[ "$got" == "$want" && "$b" == "2026-01-26 10:00:00.000250|2026-01-26 10:00:00.999999" ]]; then
+    pass_with "-tp us -bs 500us labels six digits and the heading keeps .999999"
+else
+    fail_with "-tp us -bs 500us labels six digits and the heading keeps .999999" \
+        "a microsecond width keys in integer microseconds: the three lines land in the .000000, .000500 and .999500 buckets; the heading reproduces the written six digits without carrying" \
+        'read_and_process_logs() (bucket key) and format_timestamp() in ltl' "$CONTRACT_D14; $CONTRACT_D7" \
+        "labels: $got" "heading: $b"
+fi
+fi
+
+if scenario_wanted keyscale/bucket-edge; then
+current_scenario="keyscale/bucket-edge"
+for row in "ms|-bs 100ms -tp ms|10:00:01\.100 INFO: 1 |10:00:01.100" "us|-bs 500us -tp us|10:00:02\.008000 ERROR: 1 |10:00:02.008000"; do
+    IFS='|' read -r tag args pattern shown <<< "$row"
+    # shellcheck disable=SC2086
+    run_in "edge-$tag" "${COMMON[@]}" -ni $args "$EDGE"
+    n=$(grep -cE "^ 2026-01-26 $pattern" "$TMP_DIR/edge-$tag/plain.txt" || true)
+    if [[ "$n" == 1 ]]; then
+        pass_with "$args: the line written at $shown counts in the $shown bucket"
+    else
+        fail_with "$args: the line written at $shown counts in the $shown bucket" \
+            "a line exactly on a sub-second bucket edge counts in the bucket that starts there: the key is formed in integer milliseconds or microseconds, never by dividing floating-point seconds" \
+            'read_and_process_logs() in ltl (bucket key)' "$CONTRACT_D14" \
+            "labels: $(labels "$TMP_DIR/edge-$tag" | tr '\n' ' ')" "rows: $(grep -E 'INFO: 1|ERROR: 1' "$TMP_DIR/edge-$tag/plain.txt" | cut -c1-40 | tr '\n' '~')"
+    fi
+done
+fi
+
+if scenario_wanted keyscale/from-width; then
+current_scenario="keyscale/from-width"
+run_in fw-ms "${COMMON[@]}" -ni -bs 100ms -tp ms "$THREE"
+run_in fw-us "${COMMON[@]}" -ni -bs 100ms -tp us "$THREE"
+ms_l=$(labels "$TMP_DIR/fw-ms" | sed 's/$/000/' | tr '\n' ' ')
+us_l=$(labels "$TMP_DIR/fw-us" | tr '\n' ' ')
+if [[ -n "$ms_l" && "$ms_l" == "$us_l" ]]; then
+    pass_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .100 and .100000"
+else
+    fail_with "-bs 100ms gives the same buckets under -tp ms and -tp us, labelled .100 and .100000" \
+        "the key's scale follows -bs alone: -tp changes how a key is rendered, not how it is formed" \
+        'adapt_to_terminal_settings() ($bucket_key_scale) and read_and_process_logs() in ltl' "$CONTRACT_D14" \
+        "-tp ms (+000): $ms_l" "-tp us: $us_l"
+fi
+run_in fw-none "${COMMON[@]}" -ni -V benchmark-data "$THREE"
+run_in fw-tpus "${COMMON[@]}" -ni -V benchmark-data -tp us "$THREE"
+w0=$(benchmark_row "$TMP_DIR/fw-none" bucket_size_seconds); w1=$(benchmark_row "$TMP_DIR/fw-tpus" bucket_size_seconds)
+n0=$(labels "$TMP_DIR/fw-none" | wc -l | tr -d ' '); n1=$(labels "$TMP_DIR/fw-tpus" | wc -l | tr -d ' ')
+if [[ "$w0" == "$w1" && "$w0" != MISSING-ANCHOR:* && "$n0" == "$n1" && "$n0" -gt 0 ]]; then
+    pass_with "-tp us alone keeps the default width ($w0 s) and bucket count ($n0)"
+else
+    fail_with "-tp us alone keeps the default width and bucket count" \
+        "-tp sets no width and no key scale: with -bs absent the buckets are the run without any switch's" \
+        'adapt_to_terminal_settings() in ltl' "$CONTRACT_D11; $CONTRACT_D14" "width: $w0 vs $w1" "buckets: $n0 vs $n1"
+fi
+fi
+
+if scenario_wanted keyscale/whole-second-floor; then
+current_scenario="keyscale/whole-second-floor"
+for args in "-tp ms -bs 1s" "-ms -bs 1000"; do
+    tag="floor${args// /}"
+    # shellcheck disable=SC2086
+    run_in "$tag" "${COMMON[@]}" -ni $args "$CARRY"
+    in13=$(grep -cE '^ 2025-02-20 10:06:13\.000 INFO: 1 ' "$TMP_DIR/$tag/plain.txt" || true)
+    in14=$(grep -cE '^ 2025-02-20 10:06:14\.000 ' "$TMP_DIR/$tag/plain.txt" || true)
+    last=$(heading_bounds "$TMP_DIR/$tag"); last=${last##*|}
+    if [[ "$in13" == 1 && "$in14" == 0 && "$last" == "2025-02-20 10:06:14.000" ]]; then
+        pass_with "$args: the 10:06:13.9996 line counts in 10:06:13 while the heading says 10:06:14.000"
+    else
+        fail_with "$args: the 10:06:13.9996 line counts in 10:06:13 while the heading says 10:06:14.000" \
+            "at a whole-second width the key is the second the line was written in (its floor); the heading rounds at the run's millisecond precision" \
+            'read_and_process_logs() in ltl (bucket key at second scale)' "$CONTRACT_D14" \
+            "rows 10:06:13.000 holding the line: $in13" "rows 10:06:14.000: $in14" "heading last bound: $last"
+    fi
+done
+fi
+
+if scenario_wanted keyscale/structure; then
+current_scenario="keyscale/structure"
+readers=$(perl -ne '
+    $sub = $1 if /^sub (\w+)/;
+    next if /^\s*#/;
+    print "$sub:$.: $_" if $sub =~ /^(read_and_process_logs|initialize_empty_time_windows|print_bar_graph|write_aggregate_export)$/ && /\$print_(milli)?seconds\b/;
+' "$LTL")
+if [[ -z "$readers" ]]; then
+    pass_with "no bucket-key site reads -s or -ms"
+else
+    fail_with "no bucket-key site reads -s or -ms" \
+        "the key's scale is read from \$bucket_key_scale wherever a key is formed or rendered; the deprecated switches set the precision and the bare -bs unit only" \
+        'read_and_process_logs(), initialize_empty_time_windows(), print_bar_graph(), write_aggregate_export() in ltl' "$CONTRACT_D14" "readers: $readers"
+fi
 fi
 
 # ---------------------------------------------------------------------------
