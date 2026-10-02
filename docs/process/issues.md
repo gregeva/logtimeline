@@ -86,6 +86,12 @@ The **`not planned` label** marks an *open* issue retained as a decision or
 spec record (e.g. #370, temporal interpolation). Such issues are not closed:
 "label as not planned" and "close as not planned" are different dispositions.
 
+The **`next-up` label** groups the issues selected for the next round of
+roadmap planning, so a request such as "review all of the next-up issues and
+put together an ordering plan" works over that set. It is a selection, not an
+order: it does not say which issue comes next, and it is never cited as the
+reason one issue precedes another. It is removed when an issue completes.
+
 ## Issue status
 
 Every open issue carries exactly one `status:` label. Closed issues carry none.
