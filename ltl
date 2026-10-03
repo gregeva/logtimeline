@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.6";
+my $version_number = "0.18.6-653";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -20808,13 +20808,15 @@ sub render_histogram_legend {
 
         my $legend_line_hl = join($separator, map { $_->{str} } @selected_hl);
 
-        # Center with highlight background color and black/white foreground (like bar charts)
+        # Center on a band of the metric's highlight colour
         my $hl_padding = $left_margin + int(($bar_width - length($legend_line_hl)) / 2);
         $hl_padding = 0 if $hl_padding < 0;
 
-        # Use black foreground on dark terminals, white on light terminals
+        # Black text (index 0) on every background: the band is a bright colour
+        # whatever the terminal, and every highlighted fill in @column_colors
+        # carries the same black, so this row reads like a highlighted timeline cell.
         # Add space padding before and after text for highlighter effect
-        my $fg_color = $heatmap_light_bg ? 15 : 0;  # 15 = white, 0 = black
+        my $fg_color = 0;
         my $hl_text_with_padding = " " . $legend_line_hl . " ";  # space before and after for highlighter effect
         $result_hl = " " x ($hl_padding - 1) . "\e[48;5;${highlight_color}m\e[38;5;${fg_color}m" . $hl_text_with_padding . "\e[0m";
         # Pad to single_width (account for reduced left padding and added highlighter padding)
