@@ -8565,8 +8565,14 @@ my $explain_cross_log_example;
 # %colors so an example cannot drift from the run it depicts, and the bar
 # area is a fixed 20 cells, the width the chart itself carries.
 #
-# Each row is [ timestamp, legend-pairs, err-rate, msg-rate, bar-cells ]
-# where legend-pairs is an arrayref of [ colour-key, label ].
+# Each row is [ timestamp, legend-pairs, err-rate, msg-rate, bar-cells,
+# highlighted-cells, trailing-columns ] where legend-pairs is an arrayref of
+# [ colour-key, label ]. The last two are optional. Trailing columns are the
+# proportional columns a run draws after the occurrences bar (duration, a
+# thread pool's count), each [ column-colour, cell-width, value, filled-cells ]:
+# the value is drawn as a run draws it, its cell filled from the left in the
+# column's background to the cells the bucket's share of the largest value
+# earns, and the rest in the column's foreground.
 sub explain_timeline_rows {
     my ($rows) = @_;
     my $bar_cells = 20;   # the bar area's width; a full bucket fills it
@@ -8589,14 +8595,27 @@ sub explain_timeline_rows {
         # background the legend twin carries.
         my $hl = $r->[5] // 0;
         $hl = $filled if $hl > $filled;
-        # The empty tail of the bar area is not drawn: a run pads it to
-        # keep the columns that follow aligned, and the example has none.
         my $bar = ($hl ? $colors{'green-HL'} . ('█' x $hl) . $colors{'NC'} : '')
                 . $colors{'green'} . ('█' x ($filled - $hl)) . $colors{'NC'};
-        $out .= sprintf("     %s %s%s%s%s %s%s%s %s\n",
+        # The empty tail of the bar area is drawn only when columns follow
+        # it: a run pads it to keep those columns aligned.
+        my $trailing = $r->[6] // [];
+        my $cells = '';
+        if (@$trailing) {
+            $bar .= ' ' x ($bar_cells - $filled) if $filled < $bar_cells;
+            for my $c (@$trailing) {
+                my ($color_name, $width, $value, $fill) = @$c;
+                my $col_color = $column_color_lookup{$color_name};
+                my $text = sprintf('%-*s', $width, " $value");
+                $fill = $width if $fill > $width;
+                $cells .= '  ' . $col_color->{plain_bg} . substr($text, 0, $fill)
+                        . $col_color->{fg} . substr($text, $fill) . $colors{'NC'};
+            }
+        }
+        $out .= sprintf("     %s %s%s%s%s %s%s%s %s%s\n",
                         $ts, $legend_txt, ' ' x $legend_pad,
                         ' ' x $rate_pad, $rate,
-                        $colors{'bright-black'}, '│', $colors{'NC'}, $bar);
+                        $colors{'bright-black'}, '│', $colors{'NC'}, $bar, $cells);
     }
     return $out;
 }
@@ -9108,19 +9127,36 @@ my $explain_status_composition_example;
     $explain_status_composition_example = $out;
 }
 
-# Load Over Time: a distinct-count column beside the occurrences bar. The
-# measured case is a thread pool pinned at its ceiling while throughput
-# falls away underneath it.
+# Load Over Time: the thread-pool column and the duration column a run
+# draws after the occurrences bar, read at two bucket widths. Measured on
+# two days of a web application access log carrying a thread name and a
+# session on every line, each day from a different server of the same
+# deployment. At an hour the pool reads its own size whatever the load;
+# at a minute it follows the request count, and a stall shows as the count
+# falling while requests keep arriving, then a duration surge where the
+# held requests finish. Each cell's fill is the bucket's share of the
+# largest value the run drew: the day for the hourly rows, the half hour
+# around the stall for the one-minute rows.
 my $explain_load_over_time_example;
 {
-    my $out = explain_timeline_rows([
-        [ '2026-01-26 10:00', [['yellow','4xx: 118'],['green','2xx: 42k']],   '2.2', '706', 20 ],
-        [ '2026-01-26 11:00', [['yellow','4xx: 156'],['green','2xx: 34.2k']], '2.9', '576', 16 ],
-        [ '2026-01-26 12:00', [['yellow','4xx: 68'],['green','2xx: 31.9k']],  '1.3', '537', 15 ],
+    my $dur  = sub { [ 'yellow',  8, @_ ] };   # duration: value, filled cells
+    my $pool = sub { [ 'magenta', 7, @_ ] };   # thread pool: value, filled cells
+    my $out = "  A day at one-hour buckets — the pool's size, whatever the load:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-01-26 03:00', [['4xx','4xx: 8'],['3xx','3xx: 56'],['2xx','2xx: 4.9k']],                    '0.1', '82.8',  2,  0, [ $dur->('2.6h', 4), $pool->('182', 6) ] ],
+        [ '2026-01-26 10:00', [['5xx','5xx: 17'],['4xx','4xx: 118'],['3xx','3xx: 197'],['2xx','2xx: 42k']], '2.2', '706',   18, 0, [ $dur->('4.8h', 8), $pool->('182', 6) ] ],
+        [ '2026-01-26 16:00', [['4xx','4xx: 20'],['3xx','3xx: 130'],['2xx','2xx: 45.4k']],                 '0.3', '758.8', 20, 0, [ $dur->('4.5h', 7), $pool->('183', 7) ] ],
     ]);
-    # The pool column the timeline adds, set against the bars above it.
-    $out .= "\n" . ' ' x 5 . $colors{'bright-black'} . 'threads in pool, per bucket:' . $colors{'NC'}
-          . '   ' . $colors{'bright-yellow'} . '182   182   182' . $colors{'NC'} . "\n";
+    $out .= "\n  A stall at one-minute buckets — threads held, then released:\n\n";
+    $out .= explain_timeline_rows([
+        [ '2026-01-21 21:50', [['5xx','5xx: 15'],['4xx','4xx: 3'],['3xx','3xx: 5'],['2xx','2xx: 1k']],   '18', '1.1k', 20, 0, [ $dur->('5.2m', 0), $pool->('149', 5) ] ],
+        [ '2026-01-21 21:51', [['5xx','5xx: 7'],['4xx','4xx: 4'],['3xx','3xx: 3'],['2xx','2xx: 680']],   '11', '694',  13, 0, [ $dur->('3.3m', 0), $pool->('141', 5) ] ],
+        [ '2026-01-21 21:52', [['5xx','5xx: 7'],['3xx','3xx: 3'],['2xx','2xx: 551']],                    '7',  '561',  10, 0, [ $dur->('3.3m', 0), $pool->('134', 4) ] ],
+        [ '2026-01-21 21:53', [['5xx','5xx: 4'],['4xx','4xx: 2'],['3xx','3xx: 5'],['2xx','2xx: 689']],   '6',  '700',  13, 0, [ $dur->('2.5m', 0), $pool->('127', 4) ] ],
+        [ '2026-01-21 21:54', [['5xx','5xx: 6'],['4xx','4xx: 1'],['3xx','3xx: 3'],['2xx','2xx: 363']],   '7',  '373',  7,  0, [ $dur->('2m',   0), $pool->('107', 3) ] ],
+        [ '2026-01-21 21:55', [['5xx','5xx: 9'],['4xx','4xx: 2'],['3xx','3xx: 3'],['2xx','2xx: 773']],   '11', '787',  15, 0, [ $dur->('7.6h', 8), $pool->('159', 5) ] ],
+        [ '2026-01-21 21:56', [['3xx','3xx: 4'],['2xx','2xx: 779']],                                     '0',  '783',  15, 0, [ $dur->('3.5h', 3), $pool->('194', 7) ] ],
+    ]);
     $explain_load_over_time_example = $out;
 }
 
@@ -9193,12 +9229,13 @@ my $explain_status_composition_command = <<'END';
     ltl -hf -bs 10 access.log                      # split it by outcome instead
 END
 
-my $explain_load_over_time_reading = q{A count of lines says how much work arrived. A distinct count says how much was in flight at once, which is a different question and usually the more useful one when the complaint is about capacity. Where the log carries a session or a user, those counts appear on their own and are load measures without any further asking: distinct sessions per bucket is concurrent users, and its shape over the day is the load profile the system actually experienced. Where the log carries a thread name, the thread-pool counts are switched on explicitly, and they answer two questions. Set against the request count they say whether the pool is sized right: a count that rises and falls with demand, well below its maximum, is a pool with headroom. And a count that reaches its maximum and stays there is the bottleneck — in the example the pool sits at exactly 182 in every bucket while throughput falls from 706 a minute to 537, which is a queue forming behind a limit rather than demand falling away. A pool pinned at its ceiling with throughput dropping underneath it is the clearest capacity signal the tool produces. What falsifies the reading: a distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.};
+my $explain_load_over_time_reading = q{A count of lines says how much work arrived. A distinct count says how many different actors did that work in the bucket, and where the actor is held for the whole of the work, that is a measure of load. Where the log carries a session or a user, those counts appear on their own and are load measures without any further asking: distinct sessions per bucket is concurrent users, and its shape over the day is the load profile the system actually experienced. Where the log carries a thread name, the thread-pool counts are switched on explicitly, and each one counts the threads of its pool that finished a request in the bucket. At a wide bucket that count is the pool's size. Once a bucket carries several times as many requests as the pool has threads, every thread finishes at least one request in it, and the column reads the pool's size whether the hour was busy or quiet: in the first example the pool reads 182 at 03:00, carrying 82.8 requests a minute, and 182 again at 10:00, carrying 706. At an hour, and at the default bucket width on a busy server, the column tells you how many threads the pool runs, which is what sizing it needs, and nothing about how loaded it was. How much was in flight is in the duration column: the summed duration divided by the bucket's length is the average number of requests in flight over the bucket. The 10:00 hour carries 4.8 hours of work, so about five requests were in flight on average against a pool of 182. Saturation shows only at one-minute buckets, where the count follows the request count rather than the pool's size, and it shows as a shortfall: a count below what the same request rate produced in the minutes before, while requests keep arriving, is threads held by requests that have not finished. In the second example the count falls minute by minute from 149 to 107 while the server still takes between 373 and 1,054 requests a minute on the threads left free; 700 requests at 21:53 came from 127 threads, where 694 two minutes earlier came from 141. Nothing in the duration column marks the stall while it lasts. It ends in a duration surge in the minute the held requests finish, 7.6 hours of work completing in one minute and 3.5 hours in the next, and in that next minute 783 requests came from 194 threads. What falsifies the reading: the count is of threads that finished a request in the bucket, so a thread held by a request still running is invisible until that request finishes, and a stall lowers the count rather than raising it. The duration surge is a release, not concurrency: a held request's whole duration lands in the bucket where it finishes, so the surge can read as more requests in flight than the pool has threads, and summed duration over the bucket's length is an average in flight only where requests are short against the bucket. Where a log stamps a request with its start rather than its end, a held request's duration lands in the bucket where it began instead. And a distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.};
 
 my $explain_load_over_time_command = <<'END';
-    ltl -tpas access.log                           # every pool the log names
+    ltl -tpas -bs 1h access.log                    # pool size, and the duration
     ltl -tpa "https-jsse-nio" access.log           # one pool
-    ltl -tpas -bs 10 access.log                    # finer, to see a ceiling being reached
+    ltl -tpas -bs 1 -st 21:30 -et 22:00 access.log
+                                                   # a shortfall, at one minute
 END
 
 my $explain_custom_metric_reading = q{Everything else here reads something the tool derives by itself. This one draws a value the log already reports and the tool has no reason to know about. Many logs carry monitoring lines whose payload is a run of name-and-value pairs — a queue depth, a heap size, a connection count, a round-trip time — and each of those is a series waiting to be graphed. Name the value and an aggregation, and it becomes a column beside the occurrences bar, one figure per time bucket, on the same axis as everything else. Which aggregation to ask for is part of the question. A maximum answers how bad it got and is usually right for a depth or a backlog. A mean answers what it was typically doing and is right for a rate or a latency. A distinct count answers how many different values appeared, which is how a count of actors is built out of a field that names them. The value is on the same timeline as the requests and the errors, so a queue that fills at the same moment the error rate rises is a relationship you can see rather than infer. What falsifies the reading: a specification that matches nothing is reported after the read, with how it was interpreted, so a metric that silently produces no column is not something you have to discover for yourself — but you do have to read the notice. And a value reported on some lines rather than every line is a sample, not a series: the bucket figure is an aggregate over the lines that happened to carry it, so a monitoring line written every five minutes gives twelve observations an hour whatever the bucket width says.};

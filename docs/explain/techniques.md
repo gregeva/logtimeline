@@ -537,22 +537,26 @@ ltl -hf -bs 10 access.log                     # split it by outcome instead
 
 *How much was in flight, and did it hit a ceiling?*
 
-**The signal.** A distinct-count column beside the occurrences bar — here a thread pool pinned at its ceiling while throughput falls away underneath it.
+**The signal.** The thread-pool column and the duration column beside the occurrences bar, read at two bucket widths. A day at one-hour buckets, where the pool reads its own size whatever the load: 182 at 03:00 carrying 82.8 requests a minute, 182 at 10:00 carrying 706, 183 at 16:00 carrying 758.8, with 2.6, 4.8 and 4.5 hours of duration. Then a stall at one-minute buckets on another server, threads held and then released: from 21:50 to 21:54 the count falls 149, 141, 134, 127, 107 while 373 to 1,054 requests a minute keep arriving and the duration column stays in minutes; at 21:55 the count is 159 and 7.6 hours of duration lands in one minute, and at 21:56 it is 194 with 3.5 hours.
 
-**How to read it.** A count of lines says how much work arrived. A distinct count says how much was in flight at once, which is a different question and usually the more useful one when the complaint is about capacity.
+**How to read it.** A count of lines says how much work arrived. A distinct count says how many different actors did that work in the bucket, and where the actor is held for the whole of the work, that is a measure of load.
 
 Where the log carries a session or a user, those counts appear on their own and are load measures without any further asking: distinct sessions per bucket is concurrent users, and its shape over the day is the load profile the system actually experienced.
 
-Where the log carries a thread name, the thread-pool counts are switched on explicitly, and they answer two questions. Set against the request count they say whether the pool is sized right: a count that rises and falls with demand, well below its maximum, is a pool with headroom. And a count that reaches its maximum and stays there is the bottleneck — in the example the pool sits at exactly 182 in every bucket while throughput falls from 706 a minute to 537, which is a queue forming behind a limit rather than demand falling away. A pool pinned at its ceiling with throughput dropping underneath it is the clearest capacity signal the tool produces.
+Where the log carries a thread name, the thread-pool counts are switched on explicitly, and each one counts the threads of its pool that finished a request in the bucket. At a wide bucket that count is the pool's size. Once a bucket carries several times as many requests as the pool has threads, every thread finishes at least one request in it, and the column reads the pool's size whether the hour was busy or quiet: in the first example the pool reads 182 at 03:00, carrying 82.8 requests a minute, and 182 again at 10:00, carrying 706. At an hour, and at the default bucket width on a busy server, the column tells you how many threads the pool runs, which is what sizing it needs, and nothing about how loaded it was.
 
-*What falsifies the reading.* A distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.
+How much was in flight is in the duration column: the summed duration divided by the bucket's length is the average number of requests in flight over the bucket. The 10:00 hour carries 4.8 hours of work, so about five requests were in flight on average against a pool of 182.
+
+Saturation shows only at one-minute buckets, where the count follows the request count rather than the pool's size, and it shows as a shortfall: a count below what the same request rate produced in the minutes before, while requests keep arriving, is threads held by requests that have not finished. In the second example the count falls minute by minute from 149 to 107 while the server still takes between 373 and 1,054 requests a minute on the threads left free; 700 requests at 21:53 came from 127 threads, where 694 two minutes earlier came from 141. Nothing in the duration column marks the stall while it lasts. It ends in a duration surge in the minute the held requests finish, 7.6 hours of work completing in one minute and 3.5 hours in the next, and in that next minute 783 requests came from 194 threads.
+
+*What falsifies the reading.* The count is of threads that finished a request in the bucket, so a thread held by a request still running is invisible until that request finishes, and a stall lowers the count rather than raising it. The duration surge is a release, not concurrency: a held request's whole duration lands in the bucket where it finishes, so the surge can read as more requests in flight than the pool has threads, and summed duration over the bucket's length is an average in flight only where requests are short against the bucket. Where a log stamps a request with its start rather than its end, a held request's duration lands in the bucket where it began instead. And a distinct count is a concurrency measure only where the attribute is held for the duration of the work. A session id that persists for hours counts sessions that exist, not sessions doing anything, and a thread name reused between requests undercounts what was actually in flight. Where the attribute does not have that property the count is still a population measure — how many distinct actors appeared — which is worth reading, but it is not concurrency.
 
 **Command.**
 
 ```text
-ltl -tpas access.log                  # every pool the log names
-ltl -tpa "https-jsse-nio" access.log  # one pool
-ltl -tpas -bs 10 access.log           # finer, to see a ceiling being reached
+ltl -tpas -bs 1h access.log                     # pool size, and the duration
+ltl -tpa "https-jsse-nio" access.log            # one pool
+ltl -tpas -bs 1 -st 21:30 -et 22:00 access.log  # a shortfall, at one minute
 ```
 
 **See also.** [Load](#load-load) (the grouping this belongs to), `custom-metric`, `traffic-load-profiling`, `attribute-surfacing`. Options: `-tpa`, `-tpas`, `-bs`, `-xs`, `-xu`.

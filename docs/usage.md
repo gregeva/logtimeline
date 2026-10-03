@@ -460,7 +460,7 @@ ltl -udm "active_users::distinct:U" -udm "actions_per_user::ratio:U" app.log
 
 ### Thread Pool Activity
 
-Thread pool activity tracking adds columns to the timeline showing how many distinct threads were active per time bucket for each matched pool. This reveals infrastructure-level behavior — thread exhaustion, pool saturation, and correlation between thread utilization and latency spikes. When application logs include thread names (common in Java/Tomcat logs), this provides a view into the concurrency dimension that is otherwise invisible in the log messages themselves.
+Thread pool activity tracking adds columns to the timeline showing, for each matched pool, how many distinct threads wrote at least one line in each time bucket — in an access log, how many threads finished a request. At wide buckets on a busy server every thread finishes at least one request, so the column reads the pool's size whether the server was busy or quiet. At one-minute buckets it follows the request count, and a count falling below what the same request rate produced in the minutes before is threads held by requests that have not yet finished. How much was in flight is read from the duration column: summed duration divided by the bucket's length is the average number of requests in flight. When application logs include thread names (common in Java/Tomcat logs), this provides a view into the concurrency dimension that is otherwise invisible in the log messages themselves; `ltl --explain load-over-time` works through both readings.
 
 | Option | Description |
 |--------|-------------|

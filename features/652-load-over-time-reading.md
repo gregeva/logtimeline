@@ -413,4 +413,118 @@ Owning harness: `tests/validate-explain.sh`. A new scenario is added under the
 
 ## Implementation
 
-Not started.
+### What was built
+
+- **The renderer (D3).** `explain_timeline_rows()` takes an optional seventh row
+  element: a list of trailing columns, each a column colour, a cell width, the value
+  and the filled cells. When a row carries them, the bar area is padded to its 20
+  cells, as a run pads it, and each column follows two spaces later, drawn the way
+  `print_bar_graph()` draws a proportional column: the value preceded by one space,
+  the filled cells on the column's background, the rest in its foreground. The
+  colours are read from the run's own column colour table (`%column_color_lookup`):
+  yellow for duration, the colour the duration column always takes, and magenta for
+  the pool, the colour a thread-pool column takes on a log that also carries
+  sessions. A row without the element renders exactly as before.
+- **The signal (D2, C5).** The Load Over Time example is two captioned blocks, in
+  the period-over-period form: three hourly rows of the example day and seven
+  one-minute rows of the stall day, each row carrying its legend, rate, occurrences
+  bar, duration and pool count. The separate `threads in pool, per bucket` line is
+  gone. Cell widths are those a run draws at `--terminal-width 120` (duration 8,
+  pool 7).
+- **The reading (C1 to C4, D4).** Rewritten in the order the content specification
+  gives. The comparison for a shortfall is stated against the count the same
+  request rate produced in the minutes before, with the page's own rows (700
+  requests from 127 threads at 21:53 against 694 from 141 at 21:51, and 783 from 194
+  at 21:56); no expected count, formula or rule of thumb appears.
+- **The commands (C6).** `ltl -tpas -bs 1h access.log`, `ltl -tpa "https-jsse-nio" access.log`
+  and `ltl -tpas -bs 1 -st 21:30 -et 22:00 access.log`, the last with its comment on
+  the following line, as other pages do, so the block fits 80 columns.
+- **The mirror (C7).** `docs/explain/techniques.md` § Load Over Time carries the
+  same reading, split into paragraphs, the same commands, and a signal sentence
+  carrying the rows' numbers.
+- **The user guide (D5).** `docs/usage.md` § Thread Pool Activity says what the
+  column counts, that it reads the pool's size at wide buckets, that a shortfall at
+  one-minute buckets is held threads, that in-flight work is read from the duration
+  column, and points at `ltl --explain load-over-time`.
+- **The owning record.** The Load Over Time entry of the Load content specification
+  in `features/504-explain-technique-topics.md` carries the amended reading (D7's
+  amendment was recorded there with the decisions), and F25 there notes this page's
+  wider signal.
+- **The harness.** `tests/validate-explain.sh` gains `documented:load-over-time-reading`.
+
+### Source of every number (AC4)
+
+Both worked commands were run on the source logs with `--disable-progress -V` and
+`-n 0 -o` for the STATS CSV, at `--terminal-width 120` and `200` for the rendered
+rows:
+
+- `ltl -tpas -bs 1h` on the example day. Hourly rows from the CSV: 03:00, 4,971
+  requests (4xx 8, 3xx 56, 2xx 4,907), 82.8 a minute, error rate 0.1, summed duration
+  9,455,914 ms (rendered `2.6h`), pool 182; 10:00, 42,362 (5xx 17, 4xx 118, 3xx 197,
+  2xx 42,030), 706 a minute, error rate 2.2, 17,315,088 ms (`4.8h`, the day's largest),
+  pool 182; 16:00, 45,527 (4xx 20, 3xx 130, 2xx 45,377, the day's largest), 758.8 a
+  minute, error rate 0.3, 16,077,994 ms (`4.5h`), pool 183. The day's largest pool
+  count is 183.
+- `ltl -tpas -bs 1 -st 21:30 -et 22:00` on the stall day. One-minute rows from the
+  CSV, requests / 5xx / 4xx / 3xx / 2xx / error rate / summed duration / pool:
+  21:50 1,054 / 15 / 3 / 5 / 1,031 / 18 / 314,260 ms (`5.2m`) / 149;
+  21:51 694 / 7 / 4 / 3 / 680 / 11 / 198,375 (`3.3m`) / 141;
+  21:52 561 / 7 / 0 / 3 / 551 / 7 / 199,261 (`3.3m`) / 134;
+  21:53 700 / 4 / 2 / 5 / 689 / 6 / 147,892 (`2.5m`) / 127;
+  21:54 373 / 6 / 1 / 3 / 363 / 7 / 120,359 (`2m`) / 107;
+  21:55 787 / 9 / 2 / 3 / 773 / 11 / 27,183,226 (`7.6h`, the window's largest) / 159;
+  21:56 783 / 0 / 0 / 4 / 779 / 0 / 12,502,884 (`3.5h`) / 194 (the window's largest).
+  The window's largest request count is 1,054.
+- Legends and rates are as the run draws them (`2xx: 42k`, `18:1.1k/m`). Bar cells are
+  computed as the run computes them, the bucket's share of the view's largest request
+  count over the 20 cells, rounded; duration and pool cells are the run's truncated
+  share of the view's largest value over the cell width. Hourly bars 2, 18, 20;
+  duration cells 4, 8, 7; pool cells 6, 6, 7. Stall bars 20, 13, 10, 13, 7, 15, 15;
+  duration cells 0 for the five minute-valued rows, 8 and 3; pool cells 5, 5, 4, 4,
+  3, 5, 7.
+- The reading's figures are the same rows: 182 at 03:00 with 82.8 a minute and at
+  10:00 with 706; 4.8 hours at 10:00, 4.81 in flight on average, against 182; the
+  fall 149, 141, 134, 127, 107 at 1,054 to 373 a minute; 700 from 127 at 21:53 against
+  694 from 141 at 21:51; 7.6 and 3.5 hours; 783 from 194 at 21:56.
+
+### Rendered checks (AC3)
+
+The page at `--terminal-width 120` was set beside both runs at the same width. Every
+row carries the same timestamp, legend, rate, duration and pool count as the run's
+row; the occurrences bar has the same proportion. The run draws columns the page
+leaves out (the success percentage, and on the stall day bytes and sessions), and its
+bar area is sized to the terminal's width where the page's is fixed at 20 cells. The colour escapes of a page
+row and a run row are the same sequence: the column's background over the filled
+cells, then its foreground. No line of the page is one the tool does not draw.
+
+The signal rows are 110 columns (111 for the 10:00 row, whose legend fills its
+34-cell field), against 86 to 91 before. They are verbatim `pre` blocks, exempt from
+the width assertion as before; the command block now fits 80 columns, against 90
+before.
+
+### Acceptance criteria
+
+- **AC1, AC2, AC5, AC6** — `./tests/validate-explain.sh --scenario documented:load-over-time-reading`:
+  20 passed, 0 failed. Run with the same harness against the base commit's `ltl`,
+  mirror and user guide: 1 passed (the exit code), 19 failed, so each assertion fails
+  on the content it guards against. The phrases are matched over the page with its
+  reflow joined, so a phrase broken across two terminal lines still matches; the
+  mirror is cut to its own section so a phrase elsewhere cannot satisfy it.
+- **AC3** — visual, recorded above.
+- **AC4** — recorded above, every figure read from the captured CSVs and renders.
+- **AC7** — `no-internals:load-over-time` 4 passed; `mirror:techniques` 27 passed.
+- **AC8** — `technique-page-anatomy` 114 passed, `all-topics-render` 52, `reflow` 6,
+  `technique-signals` 19 (the load-over-time page carries 294 escapes),
+  `technique-topics-render` 100, `wiki-link-form` 5. Every one of the 38 other
+  `--explain` topics was captured raw at widths 80, 120 and 200 before and after the
+  change: all 114 captures are byte-identical; only the three load-over-time captures
+  differ. `tests/validate-regression.sh` runs at the completion gate.
+- **AC9** — the forward-port to release/0.19.0 follows the merge (D6).
+
+### Found and left
+
+`docs/purpose.md` (*Explore related signals*: "see if thread exhaustion correlates
+with the latency spike") and `README.md` ("check thread pool saturation") name
+saturation and exhaustion as things thread-pool tracking helps investigate. Neither
+claims the count at the pool's size is saturation, so neither contradicts the
+amended reading, and neither is among the places F9 lists; they are unchanged.
