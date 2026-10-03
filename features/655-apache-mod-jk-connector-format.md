@@ -295,44 +295,44 @@ Fixtures are committed under `tests/fixtures/format-detection/` as `.txt`, scrub
 (addresses to private placeholders, worker names `tomcatN`, ids `NO-ID`, counts
 kept), one per entry, each covering every message family its shape carries.
 
-- [ ] **AC1 (C1).** Each entry's fixture, staged under a connector-style file name,
+- [x] **AC1 (C1).** Each entry's fixture, staged under a connector-style file name,
       reports its own `format:`, every line matched, `unregistered_levels: -`,
       `event_ledger: no`, `metrics_observed: no`. *Assertable:* one scenario per
       entry (`-bs 1440 -oe -n 1`).
-- [ ] **AC2 (C1, C6).** The held shape's fixture staged under a neutral name
+- [x] **AC2 (C1, C6).** The held shape's fixture staged under a neutral name
       (`app.txt`) binds the same entry: content alone, no filename evidence.
       *Assertable:* scenario in the detection harness.
-- [ ] **AC3 (D1 samples).** Every entry's samples produce their expected records
+- [x] **AC3 (D1 samples).** Every entry's samples produce their expected records
       (category, object = function, empty thread, message) and outcomes, or the
       build dies naming the entry. *Assertable:* D24 gates 1 and 2 on every run,
       plus a sabotage proof recorded under *Implementation*.
-- [ ] **AC4 (C2).** `-st` one millisecond after a known line's stamp excludes
+- [x] **AC4 (C2).** `-st` one millisecond after a known line's stamp excludes
       exactly the lines at or before it. *Assertable:* `-V filter-summary`
       `excluded_time_window` and `included`, in the detection harness.
-- [ ] **AC5 (C7).** The held shape's fixture beside a scrubbed access fixture whose
+- [x] **AC5 (C7).** The held shape's fixture beside a scrubbed access fixture whose
       413s and 503s sit at the connector lines' seconds: a one-second window at
       each of three seconds includes exactly the connector line and its access
       line, and the legend reads `1=access_common_duration,2=apache_mod_jk`.
       *Assertable:* scenario in the detection harness.
-- [ ] **AC6 (C3, D2).** Each mapped word arrives as its vocabulary name, and a
+- [x] **AC6 (C3, D2).** Each mapped word arrives as its vocabulary name, and a
       word outside the map appears in `unregistered_levels` with its count.
       *Assertable:* scenario in the vocabulary harness; lines for words other than
       `error` are synthetic and marked so in the manifest.
-- [ ] **AC7 (C1).** `--help formats` lists each entry under Other formats, not an
+- [x] **AC7 (C1).** `--help formats` lists each entry under Other formats, not an
       event ledger, with the failure rule and no success rule. *Assertable:*
       existing `declared-levels-in-help` scenario extended.
-- [ ] **AC8 (C1).** `-lf <name>` seats exactly that entry and binds its fixture; a
+- [x] **AC8 (C1).** `-lf <name>` seats exactly that entry and binds its fixture; a
       mistyped `-lf` lists the entries among the known formats. *Assertable:*
       `format-pin` scenario extended.
-- [ ] **AC9 (C9).** `scanned_entries`, `scan_slots`, `entries` and `static_order`
+- [x] **AC9 (C9).** `scanned_entries`, `scan_slots`, `entries` and `static_order`
       move by the number of entries added, each with no ancestors. *Assertable:*
       `inventory`, `structure` and `scan-telemetry` scenarios updated in the same
       commit as the counts in the registry record.
-- [ ] **AC10 (C8, D5).** The Workgroup Manager scenarios pass unchanged.
+- [x] **AC10 (C8, D5).** The Workgroup Manager scenarios pass unchanged.
       *Assertable:* `wgm-client` and `wgm-client-localtime`.
-- [ ] **AC11.** No ` at <file> line <N>` on stderr in any scenario. *Assertable:*
+- [x] **AC11.** No ` at <file> line <N>` on stderr in any scenario. *Assertable:*
       `tests/lib/runtime-warnings.sh`.
-- [ ] **AC12 (C7).** Rendered on the held files: the 413 day shows ERROR 1, 8, 14,
+- [x] **AC12 (C7).** Rendered on the held files: the 413 day shows ERROR 1, 8, 14,
       20, 25, 14, 8, 4, 2, 6 in the hours 11 and 14 to 22 beside each hour's 4xx
       with both formats in the legend; the 503 burst shows ERROR 110, 2,258, 9 at
       11:50 to 11:52 beside the 503s and none beside the 500 storm.
@@ -350,4 +350,104 @@ errors sit on the timeline beside the access log's 413 and 503 responses.*
 
 ## Implementation
 
-Not started.
+Branch `655-apache-mod-jk-format`, cut from release/0.18.6.
+
+### What was built
+
+- **The entries (D1).** Six scanned entries at the tail of the static order, one
+  per combination of the two axes the connector's logging code varies (F6): the
+  stamp fraction and the request-id bracket. Day padding, custom stamp formats
+  and request-level lines are not entries: the default stamp formats always
+  zero-pad the day, a custom strftime layout cannot be enumerated, and request
+  lines are written in a layout the user configures.
+
+  | Entry | Name | Stamp fraction | Request-id bracket |
+  |---|---|---|---|
+  | `mtjk` | `apache_mod_jk` | milliseconds | written |
+  | `mtjkus` | `apache_mod_jk_microseconds` | microseconds | written |
+  | `mtjks` | `apache_mod_jk_seconds` | none | written |
+  | `mtjkni` | `apache_mod_jk_no_request_id` | milliseconds | absent |
+  | `mtjkusni` | `apache_mod_jk_microseconds_no_request_id` | microseconds | absent |
+  | `mtjksni` | `apache_mod_jk_seconds_no_request_id` | none | absent |
+
+  Each pattern is anchored at `[`, reads the weekday and month as closed
+  alternations of the English abbreviations, the bracket as `[^\]]*`, pid:tid as
+  `\d+:\w+`, the level as `\w+`, and `function::source (line): ` with only the
+  function captured (D4). The six are mutually exclusive on the fraction and the
+  bracket, and no other entry's pattern matches their samples, so each slot has
+  no pinned ancestors. `head_class => 'bracket'` keeps them out of the tab-led
+  scan. Classification `{ success => [], failure => [ ERROR|EMERGENCY ] }`,
+  `event_ledger => 0`, `stats_eligible => 0` (D3). Samples per entry: a
+  per-worker marshalling error, a balancer error and one line at another level
+  word, so the six sample sets carry all six words between them.
+- **The time layout.** `asctime` in `compile_format_time_parser()` and the inline
+  parse of `format_entry_block_src()`: the capture runs from the month to the
+  year, the fraction is stripped by `frac => 'generic'` (`none` for the
+  whole-second shapes), and the date-cache key is `Mmm dd yyyy`.
+  `format_probe_layout()` returns undef for it.
+- **The level map (D2, D5).** `level_map` on the entry, applied by the
+  `level_map` transform through an index into `@format_level_maps` that
+  `build_format_registry()` assigns. The build refuses a map nothing applies, the
+  transform without a map, and a mapped name outside the vocabulary and every
+  entry's declared levels. The Workgroup Manager letter map moved onto it in its
+  own commit, with its scenarios run before the connector entries were added.
+- **Records trued up in the same change.** `features/log-format-registry.md`
+  (counts in both section contracts, and a section for this issue),
+  `features/395-wgm-client-log-format.md` and
+  `features/476-per-format-log-level-declarations.md` (the retired transform
+  name).
+
+### Fixtures
+
+Under `tests/fixtures/format-detection/`, each recorded in `manifest.tsv`:
+`apache-mod-jk.txt` (31 lines of the provided connector logs across twelve days,
+every message family of F1 and one restart window whole; process and thread ids,
+addresses and header names replaced), five synthetic rewrites of it into the
+other shapes, `apache-mod-jk-access.txt` (synthetic access lines at the
+connector lines' seconds: a 413 per marshalling error, a 503 per balancer line, a
+502 per 502 line, and three 200s at seconds without a connector line), and
+`apache-mod-jk-level-words.txt` (one line per connector level word plus one
+`notice`, synthetic except the error line).
+
+### How each acceptance criterion was verified
+
+| AC | Evidence |
+|---|---|
+| AC1 | `validate-format-detection.sh` scenarios `apache-mod-jk`, `apache-mod-jk-microseconds`, `apache-mod-jk-seconds`, `apache-mod-jk-no-request-id`, `apache-mod-jk-microseconds-no-request-id`, `apache-mod-jk-seconds-no-request-id`: 7 assertions each (own `format:`, `matched_lines: 31`, `unmatched_lines: 0`, `sample_formats: <entry>=31`, `unregistered_levels: -`, `event_ledger: no`, `metrics_observed: no`), all green. Sabotage: one fixture line rewritten to `[notice]` fails the `unregistered_levels` assertion. |
+| AC2 | Scenario `apache-mod-jk-unnamed` (staged as `app.txt`): `format: apache_mod_jk`, `filename_evidence: stem=-`, `unmatched_lines: 0`. |
+| AC3 | D24 gates 1 and 2 run on every start. Sabotage: an expected object altered on `mtjkus` sample 1 dies with `extraction parity failure for entry 'mtjkus' sample 1 field 'object'`; an expected outcome altered on `mtjksni` dies with `classification self-test failure for entry 'mtjksni' sample 1`; `frac => 'none'` on the millisecond shape dies with a `timestamp_str` parity failure naming `mtjk`. |
+| AC4 | Scenario `apache-mod-jk-stamp`: `-st '2026-08-30 01:18:10.579'` gives `excluded_time_window: 27`, `lines_included: 4`. Sabotage: the generic fraction forced to 0 gives 28 and 3 (the 01:18:10.691 line, in the same second, is lost) and both assertions fail. |
+| AC5 | Scenario `apache-mod-jk-beside-access`: three one-second windows (a 413 second and two 503 seconds, one of them ending where a 200 starts) each give `lines_included: 2`, `failures: 2` and `legend: 1=access_common_duration,2=apache_mod_jk`. Sabotage: the month read one off moves every connector line out of its window and fails 6 of 9. |
+| AC6 | `validate-log-level-vocabulary.sh` scenario `connector-level-words`: TRACE, DEBUG, INFO, WARN, ERROR and EMERGENCY rows present, 7 read and 6 included, the report names `notice` with 1 line under `apache_mod_jk`, `FAILURE CLASSIFIED 2`, and `-V format-detection` shows `unregistered_levels: notice=1`. Sabotage: the base entry's `emerg` mapped to ALERT fails the EMERGENCY row and the failure count. |
+| AC7 | Scenario `declared-levels-in-help` extended: each of the six rows sits under Other formats and reads `not an event ledger. success: none; failure: category_bucket matches ^(?:ERROR|EMERGENCY)$.` with no level statement. Against the base tool the six fail. |
+| AC8 | Scenario `format-pin` extended: `-lf apache_mod_jk` gives `format_pin: apache_mod_jk`, `entries: 1`, `format: apache_mod_jk`, `unmatched_lines: 0`; the mistyped `-lf` list names all six (the list assertion fails against the base tool). |
+| AC9 | `validate-format-registry.sh` `inventory` (`entries: 27`, `scanned_entries: 25`, `scan_slots: 24`, one `entry:` line per connector shape) and `structure` (`static_order` ending `mt11,mtjk,mtjkus,mtjks,mtjkni,mtjkusni,mtjksni`, `ancestors: <entry> <- -` for each); `validate-format-detection.sh` `scan-telemetry` (`entries: 24`). Each new line is absent from the base tool's output. |
+| AC10 | `wgm-client` (9 assertions) and `wgm-client-localtime` (6) green after the level-map commit, assertions unchanged (only their `produced_by` text names the new transform). Sabotage of the map: a target outside the vocabulary dies naming the token; the transform removed dies naming the unapplied map; a letter mapped to another level fails extraction parity. |
+| AC11 | Every scenario of the four surface harnesses run alone, each with its runtime-warning check: format-detection 57 scenarios (338 assertions), format-registry 8 (37), log-level-vocabulary 6 (49), classification-states 56 assertions run whole; no ` at <file> line <N>` on any stderr. |
+| AC12 | Rendered below. |
+
+### Rendered check (AC12), on the provided logs
+
+- The 413 day, deployment A first server, access log and connector log in one
+  run at `-du us -bs 60`: hourly rows read `ERROR: 1` at 11:00 and `ERROR: 8, 14,
+  20, 25, 14, 8, 4, 2, 6` at 14:00 to 22:00, each beside that hour's `4xx`
+  (`4xx: 51` at 14:00); legend `1=access_common_duration,2=apache_mod_jk`, the Log
+  Formats pane numbering both, 0 unmatched in either file, no runtime warning.
+- The 503 burst, deployment B second server, at `-bs 1` from 11:45 to 12:00:
+  `ERROR: 110 5xx: 97` at 11:50, `ERROR: 2.3k 5xx: 2.3k` at 11:51 and `ERROR: 9`
+  with no 5xx at 11:52; the 500 storm reads `5xx: 8.8k`, `9.1k`, `3.3k` at 11:54
+  to 11:56 with no ERROR. Exact counts by one-minute `-st`/`-et` windows: connector
+  110, 2,258, 9, 0, 0, 0 against access-log 503 lines 97, 2,255, 0, 0, 0, 0.
+
+### Found on the way, not changed here
+
+- `--help formats` states the access family's shared rule as `success: none;
+  failure: none`: the family heading reads the resolved rules from a fresh
+  `format_registry_specs()` list, which carries none.
+- `validate-classification-states.sh --scenario line-states/no-rows` fails when
+  run alone (0 of 7), on the base commit as here: it reads a capture another
+  scenario writes. The harness run whole passes.
+- `validate-log-level-vocabulary.sh` printed its summary and exit status only
+  inside its last scenario, so any other scenario selected alone exited 0 without
+  a result. Changed here, since this work iterates on that harness: the summary
+  now follows every selection.
