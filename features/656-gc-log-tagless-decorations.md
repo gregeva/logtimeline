@@ -5,7 +5,8 @@ Issue #656 (Read unified GC logs decorated with the time only). Owning area:
 entry, `java_gc_g1`); registry mechanics in `features/log-format-registry.md`.
 Target: the 0.18.6 patch release, forward-ported to release/0.19.0 afterwards.
 
-Status: specification agreed. The logs this specification was measured on are a
+Status: implemented on branch `656-gc-tagless-decorations` (see *Implementation*);
+the completion gate is pending. The logs this specification was measured on are a
 temporary set in the local corpus, provided for this work and removed once it
 ships; they are not listed in `docs/test-logs.md` and no harness names them.
 
@@ -232,6 +233,40 @@ CPU time, the region detail and the phase timing is #667 (read the per-pause CPU
 time, heap and region detail, and phase timing lines of the GC formats), blocked by
 this issue.
 
+### F14 — the JDK 17 run of the generator, against the JDK 21 run (2026-10-03)
+
+D7's prerequisite, run before any fixture was cut. The same program as F11 (an
+allocator of 16 KB arrays, keeping about a third, one `System.gc()` midway) ran
+once on OpenJDK 17.0.20.1 with `-Xms48m -Xmx48m -XX:+UseG1GC` and one
+`-Xlog:gc*:file=…:<decorations>` output per decoration set: time, level and tags;
+UTC time, level and tags; time only; UTC time only; time and uptime; time and
+level; time and process id; time and thread id; and, with `gc+heap=debug` added on
+the output, time and level, and time, level and tags. The JDK 21 run was repeated
+with the same settings. Every output of one run has the same line count (JDK 17
+4,623 lines, 7,384 with the debug tag set; JDK 21 2,835) and the same events.
+
+- **No decoration shape differs between the two JDKs.** The leading bracket groups
+  of every line of every output were classified: the time with its numeric
+  offset, UTC time at `+0000`, uptime `[N.NNNs]`, level `[info]`, process and
+  thread id as bare integers, and the same padding rule (the level reads
+  `[info ]` once a debug line has been written; a thread id reads `[9731 ]` after
+  a wider one; tags are padded).
+- **When the padding starts differs.** JDK 17 writes a debug line (`Minimum heap
+  …`) first, so every info line of its debug-enabled output reads `[info ]`; JDK 21
+  writes `CardTable entry size: 512` at info first, so its first line is unpadded.
+- **The line bodies differ as F7 and F9 found on the provided logs.** JDK 17 writes
+  evacuation failure as its own `GC(n) To-space exhausted` line (30 in the run) and
+  starts with `Using G1`; JDK 21 appends ` (Evacuation Failure)` to the end line
+  (70 in the run). The JDK 17 run also carries the `G1 Preventive Collection` cause
+  (211 records). Concurrent phase names differ (`Concurrent Rebuild Remembered
+  Sets` against `… and Scrub Regions`); those lines are read by no entry.
+- **Records.** JDK 17: 340 per output (Young 269, Full 7, Remark 17, Cleanup 16,
+  To-space exhausted 30, Using G1 1). JDK 21: 183 per output (Young 155, Full 20,
+  Remark 5, Cleanup 2, Using G1 1). With the entries built, every tag-less output
+  of each run binds its own entry and reads exactly the record count of the same
+  run's tagged output (the thread-id output through the process-id entry), and the
+  tagged debug-enabled output reads all 340 through the padded level.
+
 ### Citation corrections, after the log review
 
 - The issue's reproduction file is held: 76,956 lines, the issue's message verbatim.
@@ -366,38 +401,38 @@ JDK 17 slice and a JDK 21 slice for the time entry, the CRLF specimen's slice wi
 CRLF kept, and for each other entry the JVM run's output with its tagged twin from
 the same run (JDK 21 and JDK 17).
 
-- [ ] **AC1 (C1).** Each entry's samples, as a file, bind that entry: `format:` its
+- [x] **AC1 (C1).** Each entry's samples, as a file, bind that entry: `format:` its
       name, every line matched, `event_ledger: yes`. *Assertable:* one scenario per
       entry through `assert_registry_sample_scenario`.
-- [ ] **AC2 (C2, D5).** On the JDK 17 slice, `matched_lines` equals its
+- [x] **AC2 (C2, D5).** On the JDK 17 slice, `matched_lines` equals its
       figure-bearing pause lines plus markers, every start line in
       `unmatched_lines`. *Assertable:* scenario in the detection harness.
-- [ ] **AC3 (C3).** Per entry, STATS and MESSAGES CSV under `-o -bs 1440` identical
+- [x] **AC3 (C3).** Per entry, STATS and MESSAGES CSV under `-o -bs 1440` identical
       between the fixture and its tagged twin, the twin binding `java_gc_g1`.
       *Assertable:* scenario run in the harness's own scratch directory.
-- [ ] **AC4 (C6).** The CRLF fixture binds the time entry and meets AC3.
+- [x] **AC4 (C6).** The CRLF fixture binds the time entry and meets AC3.
       *Assertable:* scenario in the detection harness.
-- [ ] **AC5 (C5).** The UTC fixture binds the time entry and meets AC3; the padded
+- [x] **AC5 (C5).** The UTC fixture binds the time entry and meets AC3; the padded
       level fixture reads every pause and meets AC3. *Assertable:* two scenarios.
-- [ ] **AC6 (C1, D4).** Tagged and time-only fixtures together give
+- [x] **AC6 (C1, D4).** Tagged and time-only fixtures together give
       `legend: 1=java_gc_g1,2=java_gc_g1_time`; `-lf java_gc_g1_time` pins with
       `selection_basis: pin`; `-lf java_gc_g1` on the time-only fixture matches
       nothing; a mistyped `-lf` lists all five G1 names; `--help formats` states
       each new name as an event ledger that declines, with six categories.
       *Assertable:* `gc-tagless-legend`, `format-pin` extended, and one
       `check_help_states_levels` per name in the vocabulary harness.
-- [ ] **AC7 (C7).** `entries`, `scanned_entries`, `scan_slots`, `static_order` and
+- [x] **AC7 (C7).** `entries`, `scanned_entries`, `scan_slots`, `static_order` and
       the scan sub-section's `entries` move by four, each new entry with no
       ancestors; the registry record's section contracts move in the same commit.
       *Assertable:* `inventory`, `structure`, `scan-telemetry`.
-- [ ] **AC8 (C4, D1).** The `java-gc-g1` scenario passes; a tagged fixture with a
+- [x] **AC8 (C4, D1).** The `java-gc-g1` scenario passes; a tagged fixture with a
       padded `[info ]` on its pause lines reads every pause; the tagged corpus
       measurement (3,865,527 of 4,943,052 lines, same kinds and sums) is re-run at
       the gate and recorded under *Implementation*. *Assertable:* scenario plus
       recorded run.
-- [ ] **AC9.** No ` at <file> line <N>` on stderr in any scenario. *Assertable:*
+- [x] **AC9.** No ` at <file> line <N>` on stderr in any scenario. *Assertable:*
       `tests/lib/runtime-warnings.sh`.
-- [ ] **AC10 (C3).** Rendered on the provided files: the issue's 76,956-line file,
+- [x] **AC10 (C3).** Rendered on the provided files: the issue's 76,956-line file,
       the JDK 21 file with Pause Full and the CRLF specimen give the F10 figures
       (lines included 6,070; Young 2,039, Remark 2,015, Cleanup 2,015, Using G1 1;
       39.5 s) with `java_gc_g1_time` in the legend; the whole provided set reads
@@ -416,4 +451,156 @@ level-and-tags decoration: time only, with uptime, with level, with process id.*
 
 ## Implementation
 
-Not started.
+Built on branch `656-gc-tagless-decorations`, on release/0.18.6 at `62128de`
+(which carries #655, read Apache mod_jk connector logs).
+
+### What was built
+
+- **`format_registry_specs()` in `ltl`.** Four entries declared directly after
+  `java_gc_g1` (D8): `mt6t` `java_gc_g1_time` (match type 29), `mt6tu`
+  `java_gc_g1_time_uptime` (30), `mt6tl` `java_gc_g1_time_level` (31), `mt6tp`
+  `java_gc_g1_time_pid` (32); 23 to 28 are held by the connector-format entries
+  of #655 (read Apache mod_jk connector logs) on the same release. Each pattern
+  is the time bracket, the entry's own bracket (`\[\d+\.\d{3}s *\]`,
+  `\[info *\]`, `\[\d+ *\]`, or none), a space, an
+  optional `GC(n) `, then a branch-reset group: a pause kind with an optional cause
+  and the mandatory heap transition and pause time, or `To-space exhausted` or
+  `Using G1` with nothing after. The branch reset keeps the tagged entry's seven
+  captures in its order, so the field map, the `gc_heap_delta` transform, the
+  time contract, the six declared categories, `event_ledger => 1` and
+  `classification => 'none'` are the tagged entry's. No filename evidence, no
+  family, no ancestors (D4, D9).
+- **Self-validation samples.** Seven per entry (eight for the process-id entry),
+  from the JVM runs of F11 and F14: a Young pause with a cause, a Young pause with
+  the JDK 21 ` (Evacuation Failure)` suffix, Remark, Cleanup, Full (compaction, or
+  `System.gc()`), `To-space exhausted` (a real JDK 17 line), `Using G1`; UTC lines
+  in the time entry; three padded `[info ]` lines in the level entry, all real
+  JDK 17 lines; the thread-id form in the process-id entry. A thread id padded on a
+  record line was not produced by either run (the JVM thread writing records holds
+  the widest id), so the process-id entry's padded sample applies the JVM's padding
+  rule to a real line: the one composed sample.
+- **The tagged entry (D1 as amended).** `\[info\]` became `\[info\s*\]`, as the
+  tag bracket already was, with a seventh sample: a real JDK 17 `[info ][gc ...]`
+  Full pause. Nothing else in the entry moved.
+- **User documentation.** `docs/usage.md` § Log formats and classification names
+  the five G1 formats and the one-record-per-pause reading. `--help formats` lists
+  the four new names from the registry.
+- **Records trued up.** `features/log-format-registry.md`: the `-V format-registry`
+  and `-V format-detection / scan` section contracts carry the new counts, and a
+  section records the four entries. `features/382-gc-log-g1-format-coverage.md`
+  points here.
+
+### Fixtures
+
+Sixteen `.txt` files under `tests/fixtures/format-detection/`, listed with their
+source and purpose in `manifest.tsv`, every one cut from the JVM runs of F14
+(JDK 17 lines 1-150 and 840-905; JDK 21 lines 1-100 and 150-262; the debug-enabled
+JDK 17 outputs' first 240 lines). Each tag-less slice has the tagged slice of the
+same run and line range as its twin. The acceptance criteria's fixture list named
+a scrubbed JDK 17 slice and a slice of the CRLF specimen, both from field logs; no
+field log is committed. The JDK 17 time-only fixture is the JVM's JDK 17 output, and
+the CRLF fixture is the JDK 21 time-only slice with CR LF line endings, as the JVM
+writes them on Windows, pinned byte for byte by `.gitattributes`. The real JDK 17
+field file and the real CRLF specimen are read in the rendered check (AC10).
+
+### Acceptance criteria, as verified
+
+Each scenario was run alone with `--scenario` on this branch; every capture was
+clean of runtime warnings.
+
+- **AC1.** `validate-format-detection.sh` scenarios `java-gc-g1-time`,
+  `java-gc-g1-time-uptime`, `java-gc-g1-time-level`, `java-gc-g1-time-pid`: each
+  feeds the entry's samples and asserts `format:` its name, its match type, every
+  line matched (7, 7, 7, 8), the whole-file sample matched, `event_ledger: yes`.
+  7 passed each.
+- **AC2.** Scenario `gc-tagless-start-lines`: the harness counts the JDK 17 slice
+  independently (14 pause lines with the figure, 3 markers, 15 start lines, 216
+  lines) and asserts `matched_lines: 17` and `unmatched_lines: 199`. 3 passed.
+  Proven to fail by making the figure optional in a scratch copy: both counts
+  failed, and the parity scenario failed on the two time-only pairs.
+- **AC3.** Scenario `gc-tagless-parity`: nine pairs (time, uptime, level, process
+  id, thread id on JDK 17; time, uptime, level, process id on JDK 21), each run
+  with `-o -bs 1440` in a directory the scenario owns. Per pair: the fixture binds
+  its entry, the twin binds `java_gc_g1`, STATS and MESSAGES CSV are byte-identical,
+  and the MESSAGES CSV carries pause rows. 45 passed.
+- **AC4.** Scenario `gc-tagless-crlf`: the fixture's every line ends in CR LF (the
+  check failed on an LF copy), it binds `java_gc_g1_time`, and its CSV equals the
+  JDK 21 tagged twin's. 6 passed.
+- **AC5.** Scenario `gc-tagless-utc`: the UTC fixture binds `java_gc_g1_time` and
+  matches its UTC tagged twin, 5 passed. Scenario `gc-tagless-level-padded`: the
+  fixture carries `[info ]` pause lines, reads all 10 records and markers, and
+  matches its padded tagged twin, 7 passed.
+- **AC6.** Scenario `gc-tagless-legend`: the JDK 21 tagged slice then the JDK 17
+  time-only slice give `legend: 1=java_gc_g1,2=java_gc_g1_time`. Scenario
+  `format-pin`, extended: `-lf java_gc_g1_time` binds with `selection_basis: pin`;
+  `-lf java_gc_g1` on the time-only slice gives `matched_lines: 0`; `-lf
+  java_gc_g1_tim` exits non-zero listing `java_gc_g1, java_gc_g1_time,
+  java_gc_g1_time_level, java_gc_g1_time_pid, java_gc_g1_time_uptime`. 21 passed
+  (the connector pins included).
+  `validate-log-level-vocabulary.sh` scenario `declared-levels-in-help`: per new
+  name, the row states the six pause kinds and begins `event ledger. declines to
+  classify`. 19 passed (the connector rows included); the row check failed when a scratch copy declared the
+  process-id entry not a ledger.
+- **AC7.** `validate-format-registry.sh` scenario `inventory`: `entries: 31`,
+  `scanned_entries: 29`, `scan_slots: 28` (the six connector entries of #655
+  included), and one `entry:` line per new entry in its own group, 18 passed.
+  Scenario `structure`: the `static_order` with the four new slots after `mt6` and
+  an empty ancestor set for `mt6` and the four new slots, 16 passed. Detection
+  scenario `scan-telemetry`: `entries: 28`, 22 passed.
+- **AC8.** Scenario `java-gc-g1` (now seven samples, the padded one included), 7
+  passed. Scenario `gc-tagged-padded-level`: the padded tagged slice binds
+  `java_gc_g1` and reads all 10 records and markers, 3 passed; it failed against a
+  scratch copy with the level bracket unpadded. On the base commit the same slice
+  reads 0 lines, as does F12's 472-line output, which now reads its 18. Tagged
+  corpus, measured on this branch: the 46 tagged G1 files bind `java_gc_g1` and
+  read 3,865,527 of 4,943,052 lines, the figure of F5; a scratch pass of the old and
+  new tagged patterns over the same files writes byte-identical (timestamp, kind,
+  cause, heap from, heap to, heap size, duration) tuple streams, so kinds and sums
+  are unchanged (Young 2,791,229, Remark 536,951, Cleanup 536,950, Full 346,
+  To-space exhausted 5, Using G1 46; 41,356,228 ms). The measured list holds 50
+  files: the 46 tagged files, the CRLF specimen and three files carrying no unified
+  G1 line. Over it the uptime, level and process-id rules admit 0 lines and the
+  time rule admits only the CRLF specimen's 82 records. Re-run at the gate, below.
+- **AC9.** Every scenario above runs the runtime-warning check on each capture;
+  none reported a warning.
+- **AC10.** Rendered at width 200 with one 30-day bucket on the provided field
+  logs, and compared with the tagged twins of the specification phase under
+  `-o -bs 43200`: the issue's 76,956-line JDK 17 file reads 6,070 lines included,
+  Pause Young 2,039, Pause Remark 2,015, Pause Cleanup 2,015, Using G1 1, 39.5 s,
+  P50 / P95 / P99 5 / 20 / 24 ms, legend `1 java_gc_g1_time`; the JDK 21 file with
+  a Full pause reads 6,619 lines, Young 2,803, Full 1, Remark 1,907, Cleanup 1,907,
+  Using G1 1, 3.2 minutes; the CRLF specimen reads 82 lines, Young 65, Remark 8,
+  Cleanup 8, Using G1 1, 8.6 s, 81 / 271 / 511 ms; the JDK 17 file with
+  `To-space exhausted` reads 1,020. All four give STATS and MESSAGES CSV
+  byte-identical to their twins'. The whole provided set read in one run per
+  deployment: deployment A 155,713 records over 40 files, deployment B 79,380 over
+  10, every file `java_gc_g1_time`.
+
+### Tagged-corpus measurement at the gate
+
+Re-run on the gated tool (`fad2a95`, rebased onto `62128de`, which carries the
+connector entries of #655, read Apache mod_jk connector logs) over the same 50
+files: the 46 tagged G1 files of the GC collection, the CRLF specimen and three
+files carrying no unified G1 line, read in one run with
+`ltl --disable-progress -ni -bs 43200 -oe -n 1 -osum -V format-detection`.
+The 46 tagged files bind `java_gc_g1` and read 3,865,527 of 4,943,052 lines
+(`match_counts` `mt6=3865527`); the CRLF specimen binds `java_gc_g1_time` and
+reads 82 of 1,127; the three others bind nothing; `lines_included: 3865609`; the
+uptime, level and process-id entries match 0 lines and every connector entry 0.
+Every file's format, matched and unmatched counts are identical to the
+measurement on the pre-rebase branch; the only differences in the section are
+the six connector slots in the scan order and counts, and the time entry's match
+type moving from 23 to 29. Stderr empty.
+
+### Harness changes
+
+`tests/validate-format-detection.sh`: scenarios `java-gc-g1-time`,
+`java-gc-g1-time-uptime`, `java-gc-g1-time-level`, `java-gc-g1-time-pid`,
+`gc-tagless-start-lines`, `gc-tagless-parity`, `gc-tagless-crlf`,
+`gc-tagless-utc`, `gc-tagless-level-padded`, `gc-tagged-padded-level`,
+`gc-tagless-legend`; `java-gc-g1` gains the padded sample; `format-pin` gains the
+G1 pins; `scan-telemetry` asserts 28 slots. `tests/validate-format-registry.sh`:
+`inventory` and `structure` carry the new counts, entries, order and ancestors.
+`tests/validate-log-level-vocabulary.sh`: `declared-levels-in-help` states each new
+name's categories and posture, through a new row check. No `-V` section or key
+changed.

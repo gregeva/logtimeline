@@ -798,11 +798,316 @@ scenario_java_gc_g1() {
 [2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms
 [2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted
 [2025-06-05T11:17:57.418+0000][info][gc] Using G1
+[2026-10-03T12:57:50.405+0200][info ][gc             ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
 EOF
     # A GC log is an event ledger even though it classifies no outcome: the
     # JVM writes one line per collection it performed, so the lines are the
     # events. event_ledger and outcome classification are independent.
-    assert_registry_sample_scenario "$log" java_gc_g1 6 6 yes
+    assert_registry_sample_scenario "$log" java_gc_g1 6 7 yes
+}
+
+# G1 unified logging written without the level-and-tags decoration: one
+# registry entry per bracket shape after the time. Each scenario feeds the
+# entry's own sample lines (the lines build_format_registry() self-tests at
+# every startup) and asserts the entry binds under its own name, reads every
+# line, and is an event ledger.
+GC_TAGLESS_CONTRACT='features/656-gc-log-tagless-decorations.md'
+
+scenario_java_gc_g1_time() {
+    current_scenario="java-gc-g1-time"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T09:41:12.945+0000] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T10:57:50.365+0000] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.484+0200] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms
+[2026-10-03T12:57:50.376+0200] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time 29 7 yes
+}
+
+scenario_java_gc_g1_time_uptime() {
+    current_scenario="java-gc-g1-time-uptime"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-uptime.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][0.036s] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][0.037s] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][0.045s] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][0.047s] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][0.087s] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][0.058s] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][0.014s] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_uptime 30 7 yes
+}
+
+scenario_java_gc_g1_time_level() {
+    current_scenario="java-gc-g1-time-level"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-level.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][info] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][info] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][info ] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][info] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][info ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][info] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][info ] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_level 31 7 yes
+}
+
+scenario_java_gc_g1_time_pid() {
+    current_scenario="java-gc-g1-time-pid"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-pid.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][91284] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][83936] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][32259] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][91284] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][91284] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][91284] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][9731] Using G1
+[2026-10-03T12:57:50.484+0200][9731 ] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_pid 32 8 yes
+}
+
+# Count, independently of ltl, the lines of a GC fixture that carry a pause
+# record (a pause kind with the heap transition and pause time), the marker
+# lines (To-space exhausted, Using G1) and the pause-start lines (a pause kind
+# with no figure). Prints "records markers starts total".
+gc_fixture_counts() {
+    perl -ne '
+        s/\r?\n\z//;
+        if (/Pause (?:Young|Full|Remark|Cleanup)(?: \(.+?\))? \d[^ ]*->\d[^ ]*\(\d[^)]*\) \d[\d.]*ms\z/) { $r++ }
+        elsif (/(?:To-space exhausted|Using G1)\z/) { $m++ }
+        elsif (/Pause (?:Young|Full|Remark|Cleanup)(?: \(.+\))?\z/) { $s++ }
+        $t++;
+        END { printf "%d %d %d %d\n", $r // 0, $m // 0, $s // 0, $t // 0 }
+    ' "$1"
+}
+
+# The record is the line carrying the measurement: on a JVM-written slice
+# with every gc tag set at info, each pause is written twice (start without
+# the figure, end with it), and only the end and the two marker kinds bind.
+# `-bs 1440 -oe -n 1 -osum` via run_format_detection: the counts are read
+# from -V format-detection; the slice spans under a second.
+scenario_gc_tagless_start_lines() {
+    current_scenario="gc-tagless-start-lines"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 || "$starts" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records or no start lines ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: java_gc_g1_time$' \
+        asserts 'A G1 log decorated with the time alone binds the time-only entry by content' \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4, D8"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Exactly the $records pause lines carrying the heap transition and pause time plus the $markers marker lines are records; none of the $starts pause-start lines is (one record per pause)" \
+        produced_by 'the java_gc_g1_time pattern in format_registry_specs() in ltl (a pause kind requires the figure); counted in read_and_process_logs()' \
+        contract "$GC_TAGLESS_CONTRACT C2, D5"
+    assert_line "$out" pattern "^  unmatched_lines: $((total - records - markers))\$" \
+        asserts "Every other line, the $starts pause-start lines included, is unmatched" \
+        produced_by 'per-file counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C2, D5, D10"
+}
+
+# Run ltl -o on a fixture in a directory this scenario owns, staged as gc.log,
+# and echo the directory. -o writes its products into the working directory,
+# so each run gets its own fresh directory and its products are the only CSV
+# files there (HARNESS-DESIGN.md section A harness owns the directory it runs
+# ltl in). `-o -bs 1440`: the parity assertion reads the STATS and MESSAGES
+# CSV; every fixture spans under a second, so one bucket holds the whole run.
+# -V format-detection is added so the same run states which entry bound.
+run_gc_csv() {
+    local fixture="$1" label="$2"
+    local dir="$TMP_DIR/$current_scenario/$label"
+    mkdir -p "$dir"
+    if [[ ! -f "$FIXTURE_DIR/$fixture" ]]; then
+        echo "FAIL: fixture $FIXTURE_DIR/$fixture is missing" >&2
+        return 1
+    fi
+    cp "$FIXTURE_DIR/$fixture" "$dir/gc.log"
+    local ec
+    set +e
+    ( cd "$dir" && "$LTL" --disable-progress -ni -o -bs 1440 -V format-detection gc.log > run.out 2> run.out.stderr )
+    ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]]; then
+        echo "FAIL: ltl -o exited $ec for $fixture; stderr:" >&2
+        sed 's/^/    /' "$dir/run.out.stderr" >&2
+        return 1
+    fi
+    echo "$dir"
+}
+
+# The one CSV product of a kind (STATS, MESSAGES) in a run directory; fails
+# when there is none, more than one, or it is empty.
+gc_csv_product() {
+    local dir="$1" kind="$2"
+    local found=( "$dir"/*-LTL-"$kind"-*.csv )
+    if [[ "${#found[@]}" -ne 1 || ! -s "${found[0]}" ]]; then
+        return 1
+    fi
+    echo "${found[0]}"
+}
+
+# Parity of one tag-less fixture with its tagged twin: the same JVM run wrote
+# both outputs, so the same events must give the same STATS and MESSAGES CSV,
+# the twin binding the tagged entry and the fixture its own.
+assert_gc_parity() {
+    local fixture="$1" entry="$2" twin="$3"
+    local label="${fixture%.txt}"
+    local a b
+    if ! a=$(run_gc_csv "$fixture" "$label") || ! b=$(run_gc_csv "$twin" "${twin%.txt}-twin-of-$label"); then
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl -o run failed for $fixture or $twin"); return
+    fi
+    check_capture_warnings "$a/run.out"
+    check_capture_warnings "$b/run.out"
+    assert_line "$a/run.out" pattern "^  format: $entry\$" \
+        asserts "The tag-less fixture $fixture binds $entry" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4, D8"
+    assert_line "$b/run.out" pattern '^  format: java_gc_g1$' \
+        asserts "The tagged twin $twin, written by the same JVM run, binds the tagged entry" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C3, F4"
+    local kind pa pb
+    for kind in STATS MESSAGES; do
+        if ! pa=$(gc_csv_product "$a" "$kind") || ! pb=$(gc_csv_product "$b" "$kind"); then
+            echo "  FAIL  $current_scenario :: exactly one non-empty $kind CSV expected in $a and in $b"
+            fail=$((fail + 1)); failures+=("$current_scenario :: $kind CSV missing for $fixture"); continue
+        fi
+        assert_command label "$kind CSV of $fixture identical to its tagged twin" \
+            command "cmp -s '$pa' '$pb'" \
+            asserts "The same events written with and without level and tags give the same $kind CSV: same records, categories, causes, heap deltas and pause times" \
+            produced_by "the $entry and java_gc_g1 entries in format_registry_specs() in ltl; CSV written by the -o writers" \
+            contract "$GC_TAGLESS_CONTRACT C3, D5"
+    done
+    assert_command label "MESSAGES CSV of $fixture carries pause rows" \
+        command "grep -q '^plain,\"\\[Pause Young\\] ' '$pa'" \
+        asserts 'The compared MESSAGES CSV carries pause rows, so identity is not that of two empty tables' \
+        produced_by "the $entry entry in format_registry_specs() in ltl; MESSAGES CSV writer" \
+        contract "$GC_TAGLESS_CONTRACT C3"
+}
+
+# Every tag-less entry against the tagged output of the same JVM run, on a
+# JDK 17 run and a JDK 21 run (the process id and thread id outputs both
+# read through the process-id entry).
+scenario_gc_tagless_parity() {
+    current_scenario="gc-tagless-parity"
+    echo "[$current_scenario]"
+    assert_gc_parity gc-time-jdk17.txt        java_gc_g1_time        gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-uptime-jdk17.txt java_gc_g1_time_uptime gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-level-jdk17.txt  java_gc_g1_time_level  gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-pid-jdk17.txt    java_gc_g1_time_pid    gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-tid-jdk17.txt    java_gc_g1_time_pid    gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-jdk21.txt        java_gc_g1_time        gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-uptime-jdk21.txt java_gc_g1_time_uptime gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-level-jdk21.txt  java_gc_g1_time_level  gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-pid-jdk21.txt    java_gc_g1_time_pid    gc-tagged-jdk21.txt
+}
+
+# CRLF line endings, as the JVM writes them on Windows, read as LF.
+scenario_gc_tagless_crlf() {
+    current_scenario="gc-tagless-crlf"
+    echo "[$current_scenario]"
+    assert_command label 'the fixture keeps CRLF line endings' \
+        command "perl -ne '\$lf++ unless /\\r\\n\\z/; END { exit((\$. && !\$lf) ? 0 : 1) }' '$FIXTURE_DIR/gc-time-crlf-jdk21.txt'" \
+        asserts 'Every line of the CRLF fixture ends in CR LF, so the scenario exercises the carriage-return path' \
+        produced_by 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C6"
+    assert_gc_parity gc-time-crlf-jdk21.txt java_gc_g1_time gc-tagged-jdk21.txt
+}
+
+# UTC time is the time decoration at +0000 and reads through the same entry.
+scenario_gc_tagless_utc() {
+    current_scenario="gc-tagless-utc"
+    echo "[$current_scenario]"
+    assert_gc_parity gc-utctime-jdk17.txt java_gc_g1_time gc-tagged-utc-jdk17.txt
+}
+
+# A level bracket padded to "[info ]" (a debug tag set on the same output)
+# reads every pause, against the tagged output padded the same way.
+scenario_gc_tagless_level_padded() {
+    current_scenario="gc-tagless-level-padded"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-time-level-padded-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    assert_command label 'the fixture pads the level bracket on its pause lines' \
+        command "grep -q '^\\[[^]]*\\]\\[info \\] GC([0-9]*) Pause ' '$log'" \
+        asserts 'The fixture carries pause lines whose level bracket the JVM padded to [info ]' \
+        produced_by 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C5, F11"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
+        produced_by 'the java_gc_g1_time_level pattern in format_registry_specs() in ltl' \
+        contract "$GC_TAGLESS_CONTRACT C5"
+    assert_gc_parity gc-time-level-padded-jdk17.txt java_gc_g1_time_level gc-tagged-padded-jdk17.txt
+}
+
+# The tagged entry tolerates a padded level bracket: a tagged output with a
+# debug tag set writes "[info ][gc ...]" on its pause lines.
+scenario_gc_tagged_padded_level() {
+    current_scenario="gc-tagged-padded-level"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-tagged-padded-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    assert_command label 'the fixture pads the level bracket on its pause lines' \
+        command "grep -q '^\\[[^]]*\\]\\[info \\]\\[gc  *\\] GC([0-9]*) Pause ' '$log'" \
+        asserts 'The fixture carries tagged pause lines whose level bracket the JVM padded to [info ]' \
+        produced_by 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C4, F12"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: java_gc_g1$' \
+        asserts 'A tagged G1 log whose level bracket is padded binds the tagged entry' \
+        produced_by 'the java_gc_g1 pattern in format_registry_specs() in ltl' \
+        contract "$GC_TAGLESS_CONTRACT C4, D1"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
+        produced_by 'the java_gc_g1 pattern in format_registry_specs() in ltl (the level bracket admits padding)' \
+        contract "$GC_TAGLESS_CONTRACT C4, D1"
+}
+
+# Each tag-less entry is a format in its own right: a tagged file and a
+# time-only file in one run are two legend entries.
+scenario_gc_tagless_legend() {
+    current_scenario="gc-tagless-legend"
+    echo "[$current_scenario]"
+    local tagged; tagged=$(stage_fixture gc-tagged-jdk21.txt gc-tagged.log) || return
+    local timeonly; timeonly=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    # run_format_detection places extra arguments before its log argument,
+    # so the tagged file is read first.
+    local out; out=$(run_format_detection "$timeonly" "$tagged"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^legend: 1=java_gc_g1,2=java_gc_g1_time$' \
+        asserts 'A tagged G1 file and a time-only G1 file are two formats, each under its own name, numbered in first-detection order' \
+        produced_by 'emit_format_detection_verbose() in ltl (legend)' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4"
 }
 
 scenario_tw_analytics_v2() {
@@ -870,8 +1175,8 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 24$' \
-        asserts     'All 24 scan slots are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 28$' \
+        asserts     'All 28 scan slots are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
@@ -2118,6 +2423,34 @@ scenario_format_pin() {
         asserts 'Under the pin every connector line still matches' \
         produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
         contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+
+    # The tag-less G1 entries are pinnable by their own names, and the tagged
+    # name does not read a time-only file.
+    local gc; gc=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local out4; out4=$(run_format_detection "$gc" -lf java_gc_g1_time); check_capture_warnings "$out4"
+    assert_line "$out4" pattern '^  format: java_gc_g1_time$' \
+        asserts 'Pinning the time-only G1 entry by its own name reads the file as that format' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract "features/656-gc-log-tagless-decorations.md C1, D4"
+    assert_line "$out4" pattern '^  selection_basis: pin$' \
+        asserts 'Selection basis is pin under -lf java_gc_g1_time' \
+        produced_by 'emit_format_detection_evidence_verbose() in ltl' \
+        contract "features/656-gc-log-tagless-decorations.md D4"
+    local out5; out5=$(run_format_detection "$gc" -lf java_gc_g1); check_capture_warnings "$out5"
+    assert_line "$out5" pattern '^  matched_lines: 0$' \
+        asserts 'The tagged G1 name, pinned on a time-only file, matches nothing: the decorations are distinct formats' \
+        produced_by 'apply_format_pin() in ltl; the java_gc_g1 pattern in format_registry_specs()' \
+        contract "features/656-gc-log-tagless-decorations.md D1, D4"
+    local err2="$TMP_DIR/$current_scenario/gc-typo.stderr"
+    if "$LTL" --disable-progress -ni -bs 1440 -oe -lf java_gc_g1_tim "$gc" > /dev/null 2> "$err2"; then
+        echo "  FAIL  $current_scenario :: -lf java_gc_g1_tim exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf java_gc_g1_tim exited 0")
+    else
+        assert_no_runtime_warnings "$err2" "$current_scenario -lf typo"
+        assert_line "$err2" pattern '^Error: Unknown log format .java_gc_g1_tim. for -lf\. Known formats: .*java_gc_g1, java_gc_g1_time, java_gc_g1_time_level, java_gc_g1_time_pid, java_gc_g1_time_uptime, ' \
+            asserts 'A mistyped pin lists every G1 format name among the known formats' \
+            produced_by 'apply_format_pin() in ltl' \
+            contract "features/656-gc-log-tagless-decorations.md D4"
+    fi
 }
 
 # The per-file record of the levels the category gate rejected in that file.
@@ -2339,6 +2672,17 @@ scenario_register tomcat9-ms \
                   thingworx-rac-client \
                   connection-server-json \
                   java-gc-g1 \
+                  java-gc-g1-time \
+                  java-gc-g1-time-uptime \
+                  java-gc-g1-time-level \
+                  java-gc-g1-time-pid \
+                  gc-tagless-start-lines \
+                  gc-tagless-parity \
+                  gc-tagless-crlf \
+                  gc-tagless-utc \
+                  gc-tagless-level-padded \
+                  gc-tagged-padded-level \
+                  gc-tagless-legend \
                   tw-analytics-v2 \
                   tw-analytics-worker \
                   connection-server-standard \
@@ -2400,6 +2744,17 @@ while read -r _scenario; do
         thingworx-rac-client                   ) scenario_thingworx_rac_client ;;
         connection-server-json                 ) scenario_connection_server_json ;;
         java-gc-g1                             ) scenario_java_gc_g1 ;;
+        java-gc-g1-time                        ) scenario_java_gc_g1_time ;;
+        java-gc-g1-time-uptime                 ) scenario_java_gc_g1_time_uptime ;;
+        java-gc-g1-time-level                  ) scenario_java_gc_g1_time_level ;;
+        java-gc-g1-time-pid                    ) scenario_java_gc_g1_time_pid ;;
+        gc-tagless-start-lines                 ) scenario_gc_tagless_start_lines ;;
+        gc-tagless-parity                      ) scenario_gc_tagless_parity ;;
+        gc-tagless-crlf                        ) scenario_gc_tagless_crlf ;;
+        gc-tagless-utc                         ) scenario_gc_tagless_utc ;;
+        gc-tagless-level-padded                ) scenario_gc_tagless_level_padded ;;
+        gc-tagged-padded-level                 ) scenario_gc_tagged_padded_level ;;
+        gc-tagless-legend                      ) scenario_gc_tagless_legend ;;
         tw-analytics-v2                        ) scenario_tw_analytics_v2 ;;
         tw-analytics-worker                    ) scenario_tw_analytics_worker ;;
         connection-server-standard             ) scenario_connection_server_standard ;;
