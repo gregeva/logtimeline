@@ -1958,8 +1958,8 @@ scenario_windchill_workgroup_manager() {
         produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
         contract 'features/395-wgm-client-log-format.md section Format contract'
     assert_line "$out" pattern $'^lines_included\t44$' \
-        asserts 'Every matched line survives the category-vocabulary gate: the wgm_msgtype transform maps each msgtype letter to a member of @log_levels (a raw letter would be dropped silently)' \
-        produced_by 'wgm_msgtype transform in %format_transform_code, spliced by format_entry_block_src(); the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        asserts 'Every matched line survives the category-vocabulary gate: the level map declared on the entry (the level_map transform) maps each msgtype letter to a member of @log_levels (a raw letter would be dropped silently)' \
+        produced_by 'level_map transform in %format_transform_code over the level_map declared on the entry, spliced by format_entry_block_src(); the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
         contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
     assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
         asserts 'uwgm_client.log.1 decomposes as stem uwgm_client + .log + rotation index (placement after; no date declared)' \
@@ -2007,8 +2007,8 @@ scenario_wgm_client_localtime() {
         produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
         contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
     assert_line "$out" pattern $'^lines_included\t35$' \
-        asserts 'Every matched local-offset line survives the category-vocabulary gate through the wgm_msgtype transform' \
-        produced_by 'wgm_msgtype transform in %format_transform_code; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        asserts 'Every matched local-offset line survives the category-vocabulary gate through the level map declared on the entry' \
+        produced_by 'level_map transform in %format_transform_code over the level_map declared on the entry; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
         contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
     assert_line "$out" pattern '^  sample_formats: mt16=35$' \
         asserts 'The evidence sample recognises every local-offset line as mt16 in static cascade order - no earlier entry accepts the shape' \

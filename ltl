@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.6";
+my $version_number = "0.18.6-655";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -2847,16 +2847,15 @@ my $format_registry_opts;
 # through format_scan_sub_resolve().
 my %format_scan_sub_cache;     # order signature => generated scan sub
 
-# Windchill Workgroup Manager msgtype letters → category vocabulary
-# (@log_levels). The severity letters map to the shared levels; the
-# object-lifecycle letters keep their identity as their own categories,
-# the way the GC pause forms do. A letter outside this table is left as
-# captured and falls to the category-vocabulary gate in
-# read_and_process_logs() like any unknown level.
-my %wgm_msgtype_names = (
-    C => 'CONFIG', D => 'DEBUG', E => 'ERROR', F => 'FINISH', I => 'INFO',
-    S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY',
-);
+# Level maps: a producer's own level tokens -> the category vocabulary
+# (@log_levels). The map is data on the entry (its level_map key), and
+# the level_map transform applies it; build_format_registry() gives each
+# declared map an index here and the transform reads it by that index,
+# the way generated classification reads @format_cls_sets. A token
+# outside the map is left as captured and falls to the category gate in
+# read_and_process_logs() like any unknown level, where it is counted
+# and reported rather than lost.
+my @format_level_maps;
 
 # Transform primitives: named post-capture mutation snippets spliced into
 # generated extraction closures. One resolution surface for this
@@ -2886,7 +2885,7 @@ my %format_transform_code = (
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
-    wgm_msgtype         => q{ $category_bucket = $wgm_msgtype_names{$category_bucket} // $category_bucket; },
+    level_map           => q{ $category_bucket = $format_level_maps[LEVEL_MAP_ID]{$category_bucket} // $category_bucket; },   # LEVEL_MAP_ID: the entry's map index, set at codegen
 );
 
 # Declarative format definitions, in the static cascade order the elsif
@@ -2993,7 +2992,10 @@ sub format_registry_specs {
     # declares `columns "date time tz msgtype logid tid area message"` and
     # `columns_sep ": "`). The timestamp is ISO-8601 UTC with a fixed
     # millisecond fraction and a `Z` suffix outside the capture; the
-    # msgtype letter becomes a category through wgm_msgtype; the `P<hex>`
+    # msgtype letter becomes a category through the entry's level map (the
+    # severity letters map to the shared levels; the object-lifecycle
+    # letters keep their identity as their own categories, the way the GC
+    # pause forms do); the `P<hex>`
     # process id and `T<hex>` thread id keep the prefixes the log prints;
     # the area (dotted component path, `#`-qualified for sessions and
     # transactions) is the object. The area never contains a space or a
@@ -3008,10 +3010,12 @@ sub format_registry_specs {
                     samples => [ 'genlwsc.log.1', 'uwgm_client.log.1', 'uwgm.log.1', 'uwgm_client.log', 'genlwsc.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})(?:Z|[+-]\d{1,2}:\d{2}): ([A-Z]): (P[0-9a-f]+): (T[0-9a-f]+): ([^ :]+): (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'platform'],[4,'thread'],[5,'object'],[6,'message'] ],
-      transforms => [ 'wgm_msgtype' ],
+      transforms => [ 'level_map' ],
+      level_map => { C => 'CONFIG', D => 'DEBUG', E => 'ERROR', F => 'FINISH', I => 'INFO',
+                     S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY' },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
-      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the wgm_msgtype letter map produces
+      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the letter map produces
       expect_ancestors => [],
       samples => [
         '2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"',
@@ -4368,6 +4372,11 @@ sub format_entry_block_src {
         if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
         my $code = $format_transform_code{$t}
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
+        if ($t eq 'level_map') {
+            die "ltl: format registry: entry '$spec->{name}' applies level_map but its level map has no index (build_format_registry() assigns one to every declared level_map)\n"
+                unless defined $spec->{_level_map_id};
+            $code =~ s/LEVEL_MAP_ID/$spec->{_level_map_id}/;
+        }
         push @body, $code;
     }
 
@@ -4691,6 +4700,29 @@ sub build_format_registry {
         $spec->{_cls_src} = format_classification_src($spec);
     }
 
+    # Level maps (data on the entry, applied by the level_map transform):
+    # each declared map gets an index into @format_level_maps, which the
+    # transform's generated code reads. A map nothing applies, or a
+    # transform with no map to apply, is a declaration error.
+    @format_level_maps = ();
+    for my $spec (@specs) {
+        my $applies = grep { $_ eq 'level_map' } @{ $spec->{transforms} // [] };
+        my $map = $spec->{level_map};
+        die "ltl: format registry: entry '$spec->{name}' declares a level_map but its transforms do not apply it (produced_by format_registry_specs())\n"
+            if defined $map && !$applies;
+        die "ltl: format registry: entry '$spec->{name}' applies level_map but declares no level_map (produced_by format_registry_specs())\n"
+            if $applies && !defined $map;
+        next unless defined $map;
+        die "ltl: format registry: entry '$spec->{name}' level_map must be a non-empty hash of token => level name (produced_by format_registry_specs())\n"
+            unless ref $map eq 'HASH' && %$map;
+        for my $token (sort keys %$map) {
+            die "ltl: format registry: entry '$spec->{name}' level_map maps '$token' to a value that is not a non-empty name (produced_by format_registry_specs())\n"
+                unless length $token && defined $map->{$token} && !ref $map->{$token} && length $map->{$token};
+        }
+        push @format_level_maps, $map;
+        $spec->{_level_map_id} = $#format_level_maps;
+    }
+
     # Compile recognition patterns once; validate reserved slots.
     my %patterns;
     for my $spec (@specs) {
@@ -4857,6 +4889,16 @@ sub build_format_registry {
             die "ltl: format registry: entry '$spec->{name}' declares a level that is not a non-empty name (produced_by format_registry_specs())\n"
                 unless defined $level && !ref $level && length $level;
             $declarable{$level} = 1;
+        }
+    }
+    # A level map's target names face the same test: a mapped token whose
+    # name the tool cannot recognise would be translated only to be dropped
+    # by the category gate.
+    for my $spec (grep { $_->{level_map} } @specs) {
+        for my $token (sort keys %{ $spec->{level_map} }) {
+            my $level = $spec->{level_map}{$token};
+            die "ltl: format registry: entry '$spec->{name}' level_map maps '$token' to '$level', which is neither in the recognised level vocabulary nor declared by any entry - a line carrying it would be dropped by the category gate (produced_by format_registry_specs())\n"
+                unless $declarable{$level};
         }
     }
     my @cls_sources = ( [ 'the default classification rules classify', \%classification_default ] );
