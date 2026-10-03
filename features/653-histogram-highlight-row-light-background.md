@@ -173,29 +173,29 @@ a new row records this issue and the bar finding.
 
 ## Acceptance criteria
 
-- [ ] **AC1 (C1).** With a highlight active and `-hg duration`, every non-blank
+- [x] **AC1 (C1).** With a highlight active and `-hg duration`, every non-blank
       cell of the highlighted row has text `38;5;0` under `-lbg`, under `-dbg` and
       with neither. *Assertable:* new harness (D4), scenarios for light, dark and
       default; the row located as the histogram section's last row from
       `-V section-layout`, cells decoded with `tests/lib/rendered-output.pl`;
       fixture `tests/fixtures/http-status-families.txt` with `-h /store/orders`,
       shaped `-bs 1440 -oe -n 1`.
-- [ ] **AC2 (C1, D2).** The row's text code equals the text code on the timeline's
+- [x] **AC2 (C1, D2).** The row's text code equals the text code on the timeline's
       highlighted fill of the same metric in the same run. *Assertable:* the same
       harness, against a `--debug-layout` capture.
-- [ ] **AC3 (C1, C2).** C1 and C2 hold for each metric in one run of
+- [x] **AC3 (C1, C2).** C1 and C2 hold for each metric in one run of
       `-hg duration,bytes`, each band in its own metric's highlight colour.
       *Assertable:* the same harness.
-- [ ] **AC4 (D5).** In the capture tool's light image the row's text measures at
+- [x] **AC4 (D5).** In the capture tool's light image the row's text measures at
       least 4.5:1 against its band for duration, bytes and count. *Unassertable,
       visual:* measured once at implementation and recorded under
       *Implementation*; expected 11.17 / 8.74 / 9.56 against 1.23 / 1.04 / 1.06
       today.
-- [ ] **AC5 (C3, C4).** `tests/validate-regression.sh` passes with no reference
+- [x] **AC5 (C3, C4).** `tests/validate-regression.sh` passes with no reference
       rebaselined; on the reproduction, the `-dbg` capture is byte-identical before
       and after, and the `-lbg` capture differs only in the highlighted row's text
       escape. *Assertable:* the regression harness plus a diff of the captures.
-- [ ] **AC6.** The picture the issue dropped is usable: the capture tool with
+- [x] **AC6.** The picture the issue dropped is usable: the capture tool with
       `background: light` and `sections: histogram` on the reproduction shows a
       legible row. *Unassertable, visual:* the rendered PNG on real data.
 
@@ -213,4 +213,83 @@ highlighted histogram percentile row, unreadable on a light background (`-lbg`).
 
 ## Implementation
 
-Not started.
+### What was built
+
+- **The text colour.** `render_histogram_legend()` prints the highlighted
+  percentile row's text as `38;5;0` on every background; the light-background
+  branch that chose bright white (15) is gone. The band (`highlighted_bg_num`
+  through `%histogram_highlight_colors`), the population row, the bars and the
+  layout are untouched (D1, D2, D3).
+- **The harness (D4).** `tests/validate-histogram-colours.sh`, a render-invariant
+  harness named for the surface whose colours it asserts; it adds no `-V`
+  section and reads only `section-layout`. It locates the histogram's rows from
+  `-V section-layout` (last row: the highlighted percentile row; the row above:
+  the population's), matches each band and each run of population text to its
+  metric by the nearest "*Metric* Distribution" title, decodes cells with
+  `tests/lib/rendered-output.pl`, and cuts timeline cells to one column by the
+  `--debug-layout` offsets. Every capture also gets the runtime-warning check and
+  the soft-wrap check at width 160. Scenarios: `legend-text-light`,
+  `legend-text-dark`, `legend-text-default` (AC1), `legend-matches-timeline`
+  (AC2), `legend-each-metric` (AC3). Fixture: the committed status-family
+  fixture with `-h /store/orders`, `-bs 1440 -oe -n 1 -ni --terminal-width 160`.
+- **Records.** `features/histogram-charts.md`: Criterion 21 and the Decisions Log
+  rows *Two legend lines when highlight exists* and *Highlighted percentile row
+  text is black on every background* were trued up with the specification and
+  match what ships; the record now names the new harness beside the tick
+  harness. No change to `--help`, `docs/usage.md` or any `-V` section.
+
+### How each criterion was verified
+
+- **AC1.** The three `legend-text-*` scenarios pass: under `-lbg`, `-dbg` and
+  with neither option the duration band reports `fill=256:226 text=256:0` over
+  110 cells, labels P10 to P99.99. Against the code before the fix,
+  `legend-text-light` fails on `text=256:15` and the dark and default scenarios
+  pass, as the finding predicts.
+- **AC2.** `legend-matches-timeline` (`-lbg --debug-layout`): the band reports
+  fill 226 with text 0, and the 8 cells of the timeline's duration column on a
+  226 fill report the same pair. Before the fix the band reported text 15 and
+  the assertion failed.
+- **AC3.** `legend-each-metric` (`-hg duration,bytes -lbg`): duration band 226
+  and bytes band 46, both with text 0; each band lists P50, P95, P99, P99.9, the
+  same selection and order as its population row (text 184 and 34). Before the
+  fix both band assertions failed on text 15. The label comparison was shown to
+  fail on a capture doctored to read P90 for P95 in the highlighted row; the row
+  locator stops with a reason, never an empty report, on a capture with the
+  band's background removed and on one with the histogram missing from
+  `-V section-layout`.
+- **AC4 (rendered, measured once).** Through `build/capture-screenshots.pl` with
+  `background: light` and crop `sections: histogram`, measured from the SVG cell
+  colours (WCAG 2): text `#2d3840` (index 0 in the light profile) on `#ffff00` /
+  `#00ff00` / `#00ffff` (duration / bytes / count bands) measures 11.17 / 8.74 /
+  9.56, against 1.23 for the old white text on the duration band. On the dark
+  profile, index 0 (`#35424c`) on the duration band measures 9.61. Duration came
+  from the web-server access log of the reproduction; the three-metric image
+  from a scripting-service log carrying duration, bytes and count
+  (`-hg -hdmin 1000`).
+- **AC5.** `tests/validate-regression.sh` passes every highlighted and histogram
+  scenario one at a time (the `hl-*`, `hg-*`, `hm-hg-*` and `errrate-*`
+  scenarios, 37 in all) with no reference touched. On the reproduction
+  (`-n 0 -bs 1h -du us -hg duration -hgh 10 -h ping`, width 160, bare `-V`),
+  with the `-V` ranges set aside: the `-dbg` capture and the capture with no
+  background option differ from the code before the fix only in the reported
+  peak memory, which also differs between two runs of the same code (44.9
+  against 44.7 MiB); the `-lbg` capture differs in one line, the highlighted
+  row, whose text escape goes from `38;5;15` to `38;5;0`. ANSI-stripped, all
+  three are identical before and after.
+- **AC6 (rendered, looked at).** The light image of the reproduction shows the
+  highlighted row as dark text on the yellow band, as legible as the dark image;
+  the same image from the code before the fix shows pale text on the band that
+  cannot be read. The three-metric light image shows dark text on the yellow,
+  green and cyan bands. The highlighted bars stay pale beside the population's
+  on the light image, as D1 leaves them.
+
+### Surface harnesses run
+
+`validate-histogram-colours.sh` (all five scenarios), `validate-regression.sh`
+(the 37 highlighted and histogram scenarios), `validate-histogram-ticks.sh`
+(all five), `validate-screenshot-capture.sh` (all seventeen),
+`validate-section-layout.sh` (all twenty-four), and the selector sweep of
+`validate-scenario-selector.sh`, which covers the new harness: all green, one
+scenario at a time. The new harness reports the same counts with
+`FORCE_COLOR=3`, with `NO_COLOR=1` and with neither. The full suite and the
+before/after benchmark are the completion gate, run separately.

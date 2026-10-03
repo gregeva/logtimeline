@@ -389,6 +389,12 @@ Use `-hg duration` (single histogram) with varying `-hgw` percentages to exercis
 
 The script emits PASS/FAIL per assertion and exits non-zero on any failure, consistent with `tests/validate-index-readback.sh`.
 
+### Automated Test: Histogram Colours (Issue #653)
+
+Script: `tests/validate-histogram-colours.sh`
+
+Reads the rendered percentile rows cell by cell: the highlighted row's text is black (index 0) under `-lbg`, `-dbg` and neither (Criterion 21), matches the text on the timeline's highlighted fill of the same metric, and with two metrics each band carries its own metric's highlight colour and the population row's percentile selection. Record: `features/653-histogram-highlight-row-light-background.md`.
+
 ## Research & References
 
 ### Logarithmic Histogram Bucket Selection
