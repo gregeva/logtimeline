@@ -20,6 +20,10 @@
 # D24 load-time gates validate, so fixture and registry cannot drift.
 # windchill_workgroup_manager is asserted against the committed wgm-client.txt fixture
 # staged under each of its three producer-true names (issue #395).
+# The six Apache mod_jk connector shapes are asserted against committed
+# fixtures staged as mod_jk.log: one scrubbed slice of the held shape and five
+# synthetic rewrites of it, plus a composed access log for the shared-timeline
+# windows (issue #655).
 # The `format-detection / scan` sub-section (registry scan telemetry,
 # issue #58) is asserted by the scan-telemetry scenarios, and the
 # `format-detection / classification` sub-section (per-line success/failure
@@ -866,8 +870,8 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 18$' \
-        asserts     'All 18 scan slots are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 24$' \
+        asserts     'All 24 scan slots are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
@@ -2085,7 +2089,35 @@ scenario_format_pin() {
             asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
             produced_by 'apply_format_pin() in ltl' \
             contract 'features/log-format-registry.md section Drop 1.5 D49'
+        local jk_slug
+        for jk_slug in apache_mod_jk apache_mod_jk_microseconds apache_mod_jk_seconds apache_mod_jk_no_request_id \
+                       apache_mod_jk_microseconds_no_request_id apache_mod_jk_seconds_no_request_id; do
+            assert_line "$err" pattern "^Error: Unknown log format .nonsense. for -lf\\. Known formats: (.*, )?$jk_slug(,|\$)" \
+                asserts "The known-format list a mistyped -lf is answered with names the connector shape $jk_slug" \
+                produced_by 'apply_format_pin() in ltl' \
+                contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+        done
     fi
+
+    # A connector shape is pinned by its name like any scanned entry.
+    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local out3; out3=$(run_format_detection "$jk" -lf apache_mod_jk); check_capture_warnings "$out3"
+    assert_line "$out3" pattern '^format_pin: apache_mod_jk$' \
+        asserts 'The run-level pin names the connector entry' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+    assert_line "$out3" pattern '^entries: 1$' \
+        asserts 'Pinning the connector name seats exactly its one entry: the other connector shapes carry other names' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1); features/log-format-registry.md section Drop 1.5 N9'
+    assert_line "$out3" pattern '^  format: apache_mod_jk$' \
+        asserts 'The pinned entry binds the connector fixture' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+    assert_line "$out3" pattern '^  unmatched_lines: 0$' \
+        asserts 'Under the pin every connector line still matches' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
 }
 
 # The per-file record of the levels the category gate rejected in that file.
@@ -2130,6 +2162,158 @@ scenario_unregistered_levels_per_file() {
         asserts     'A file that lost nothing at the category gate reports the literal dash rather than omitting the key, so a harness asserting the key per file can tell "none observed" from "the key is gone". The second fixture of this run carries only levels the vocabulary holds.' \
         produced_by 'emit_format_detection_verbose() in ltl (per-file unregistered_levels field, the empty form)' \
         contract    'features/log-format-registry.md § `-V format-detection` section-contract (the literal - when the file produced none; the key is always emitted) and tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors'
+}
+
+# ---------- Apache mod_jk connector shapes ---------------------------------
+# features/655-apache-mod-jk-connector-format.md: the connector's logging code
+# writes one line shape per stamp fraction (milliseconds, none, microseconds)
+# and request-id bracket (present from release 1.2.48, absent before), and each
+# is its own entry (D1). apache-mod-jk.txt is the held shape, scrubbed from
+# connector logs; the five other fixtures are the same lines rewritten into
+# the other shapes (synthetic, marked so in manifest.tsv). Every scenario reads
+# the -V format-detection section, so the run takes -bs 1440 -oe -n 1 -osum
+# (run_format_detection): the fixtures span twelve days and no assertion reads
+# a bucket.
+CONNECTOR_CONTRACT='features/655-apache-mod-jk-connector-format.md'
+
+# One connector shape's fixture, staged under the connector's own file name,
+# binds its own entry with every line matched and nothing dropped.
+assert_connector_shape() {
+    local fixture="$1" format="$2" entry="$3" lines="$4"
+    local log; log=$(stage_fixture "$fixture" mod_jk.log) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern "^  format: $format\$" \
+        asserts "A connector log written in the $format shape binds the entry of that name by its content" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind through the generated scan sub)' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1); features/log-format-registry.md section -V format-detection section-contract"
+    assert_line "$out" pattern "^  matched_lines: $lines\$" \
+        asserts "Every one of the $lines fixture lines matches the $format pattern" \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1)"
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'No line of a connector log in a shape the registry reads is left unmatched' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1, C6)"
+    assert_line "$out" pattern "^  sample_formats: $entry=$lines\$" \
+        asserts "The evidence sample attributes every line to entry $entry and to no other entry" \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1); features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys)"
+    assert_line "$out" pattern '^  unregistered_levels: -$' \
+        asserts 'The connector level word reaches the category vocabulary through the entry level map: nothing is dropped at the category gate' \
+        produced_by 'level_map transform over the level_map declared on the entry; the category gate in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C3, D2)"
+    assert_line "$out" pattern '^  event_ledger: no$' \
+        asserts 'The connector writes a line for what fails, not for every request: it is not an event ledger' \
+        produced_by 'FR_EVENT_LEDGER of the bound entry; emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (D3)"
+    assert_line "$out" pattern '^  metrics_observed: no$' \
+        asserts 'The connector line carries no duration, bytes or count, and the entry is not statistics-eligible' \
+        produced_by 'the generated block of the bound entry (stats_eligible 0, no metric probes); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (D4)"
+}
+
+scenario_apache_mod_jk() {
+    current_scenario="apache-mod-jk"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk.txt apache_mod_jk mtjk 31
+}
+scenario_apache_mod_jk_microseconds() {
+    current_scenario="apache-mod-jk-microseconds"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-microseconds.txt apache_mod_jk_microseconds mtjkus 31
+}
+scenario_apache_mod_jk_seconds() {
+    current_scenario="apache-mod-jk-seconds"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-seconds.txt apache_mod_jk_seconds mtjks 31
+}
+scenario_apache_mod_jk_no_request_id() {
+    current_scenario="apache-mod-jk-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-no-request-id.txt apache_mod_jk_no_request_id mtjkni 31
+}
+scenario_apache_mod_jk_microseconds_no_request_id() {
+    current_scenario="apache-mod-jk-microseconds-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-microseconds-no-request-id.txt apache_mod_jk_microseconds_no_request_id mtjkusni 31
+}
+scenario_apache_mod_jk_seconds_no_request_id() {
+    current_scenario="apache-mod-jk-seconds-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-seconds-no-request-id.txt apache_mod_jk_seconds_no_request_id mtjksni 31
+}
+
+# The held shape under a neutral name: no filename evidence, content alone.
+scenario_apache_mod_jk_unnamed() {
+    current_scenario="apache-mod-jk-unnamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture apache-mod-jk.txt app.txt) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: apache_mod_jk$' \
+        asserts 'A connector log binds its entry from any file name: the shape on the line is the whole evidence' \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); the entry declares no filename evidence' \
+        contract "$CONNECTOR_CONTRACT AC2 (C1, C6)"
+    assert_line "$out" pattern '^  filename_evidence: stem=- ' \
+        asserts 'The neutral name gives no stem evidence, so the bind above rests on content alone' \
+        produced_by 'format_filename_evidence() in ltl; emitted by emit_format_detection_evidence_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'Every line still matches under the neutral name' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC2"
+}
+
+# The stamp is read to the millisecond. The fixture's 27th line is stamped
+# 01:18:10.578 and its 28th 01:18:10.691, in the same second: a start one
+# millisecond after the 27th excludes exactly the first 27 lines. Were the
+# fraction dropped, the 28th line would read as 01:18:10.000 and be excluded
+# too.
+scenario_apache_mod_jk_stamp() {
+    current_scenario="apache-mod-jk-stamp"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local out; out=$(run_format_detection "$log" -V filter-summary -st '2026-08-30 01:18:10.579'); check_capture_warnings "$out"
+    assert_line "$out" pattern '^excluded_time_window: 27$' \
+        asserts 'A start one millisecond after the 27th line stamp (01:18:10.578) excludes exactly the 27 lines at or before it' \
+        produced_by 'the asctime layout parse and generic fraction strip in format_entry_block_src(); the time-window filter in read_and_process_logs(); emitted by the filter-summary section' \
+        contract "$CONNECTOR_CONTRACT AC4 (C2); features/503-yaml-aggregate-export.md section -V filter-summary section contract"
+    assert_line "$out" pattern '^lines_included: 4$' \
+        asserts 'The four lines after the start are included, among them the line at 01:18:10.691 in the same second as the cut, which only a millisecond reading keeps' \
+        produced_by 'the asctime layout parse and generic fraction strip in format_entry_block_src(); emitted by the filter-summary section' \
+        contract "$CONNECTOR_CONTRACT AC4 (C2)"
+}
+
+# Beside its access log: the access fixture carries a 413 at the second of
+# every marshalling error, a 503 at the second of every balancer line, and
+# 200s at seconds with no connector line. A one-second window at each of three
+# seconds holding one connector line includes exactly that line and its
+# access line.
+scenario_apache_mod_jk_beside_access() {
+    current_scenario="apache-mod-jk-beside-access"
+    echo "[$current_scenario]"
+    local access; access=$(stage_fixture apache-mod-jk-access.txt access.log) || return
+    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local window start end out
+    for window in '2026-08-19 11:25:58|2026-08-19 11:25:59|413' \
+                  '2026-08-21 11:50:51|2026-08-21 11:50:52|503' \
+                  '2026-08-30 01:18:07|2026-08-30 01:18:08|503'; do
+        IFS='|' read -r start end status <<< "$window"
+        # run_format_detection puts its first argument last on the command
+        # line, so the access log is passed among the options to come first.
+        out=$(run_format_detection "$jk" -du us -V filter-summary -st "$start" -et "$end" "$access"); check_capture_warnings "$out"
+        assert_line "$out" pattern '^legend: 1=access_common_duration,2=apache_mod_jk$' \
+            asserts 'Both formats are numbered in the run legend, the access log first' \
+            produced_by 'the format legend in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+            contract "$CONNECTOR_CONTRACT AC5 (C7); features/log-format-registry.md section -V format-detection section-contract (#384 additions)"
+        assert_line "$out" pattern '^lines_included: 2$' \
+            asserts "The one-second window from $start holds exactly the connector line and the access line of its $status response: the connector stamp falls in the second of its access-log line" \
+            produced_by 'the asctime layout parse in format_entry_block_src(); the time-window filter in read_and_process_logs(); emitted by the filter-summary section' \
+            contract "$CONNECTOR_CONTRACT AC5 (C2, C7)"
+        assert_line "$out" pattern '^failures: 2$' \
+            asserts "Both lines in the window are failures: the access line by its $status status family, the connector line by its ERROR level" \
+            produced_by 'the generated classification of each entry (format_classification_src()); emitted by emit_format_detection_verbose() classification sub-section' \
+            contract "$CONNECTOR_CONTRACT AC5 (C5, C7); features/453-success-failure-classification-event-ledger.md"
+    done
 }
 
 # ---------- Run -----------------------------------------------------------
@@ -2185,7 +2369,16 @@ scenario_register tomcat9-ms \
                   wgm-filename-family \
                   wgm-client-localtime \
                   unregistered-levels-per-file \
-                  format-pin
+                  format-pin \
+                  apache-mod-jk \
+                  apache-mod-jk-microseconds \
+                  apache-mod-jk-seconds \
+                  apache-mod-jk-no-request-id \
+                  apache-mod-jk-microseconds-no-request-id \
+                  apache-mod-jk-seconds-no-request-id \
+                  apache-mod-jk-unnamed \
+                  apache-mod-jk-stamp \
+                  apache-mod-jk-beside-access
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -2238,6 +2431,15 @@ while read -r _scenario; do
         wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
+        apache-mod-jk                          ) scenario_apache_mod_jk ;;
+        apache-mod-jk-microseconds             ) scenario_apache_mod_jk_microseconds ;;
+        apache-mod-jk-seconds                  ) scenario_apache_mod_jk_seconds ;;
+        apache-mod-jk-no-request-id            ) scenario_apache_mod_jk_no_request_id ;;
+        apache-mod-jk-microseconds-no-request-id ) scenario_apache_mod_jk_microseconds_no_request_id ;;
+        apache-mod-jk-seconds-no-request-id    ) scenario_apache_mod_jk_seconds_no_request_id ;;
+        apache-mod-jk-unnamed                  ) scenario_apache_mod_jk_unnamed ;;
+        apache-mod-jk-stamp                    ) scenario_apache_mod_jk_stamp ;;
+        apache-mod-jk-beside-access            ) scenario_apache_mod_jk_beside_access ;;
     esac
     echo ""
 done < <(scenario_selected)

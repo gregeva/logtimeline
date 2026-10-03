@@ -3407,6 +3407,157 @@ sub format_registry_specs {
         [ '2025-08-09 18:27:18', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
       ],
       expect_outcomes => [ 0, 2, 0 ] },
+    # Apache HTTP Server mod_jk (Tomcat connector) log. The connector writes
+    # one line per failure it handles (and per event at a more verbose
+    # JkLogLevel), in one shape built by its logging code:
+    #   [<stamp>] [<request id>] [<pid>:<tid>] [<level>] <function>::<source> (<line>): <message>
+    # with the stamp in the C library's `Www Mmm dd HH:MM:SS yyyy` order.
+    # The shapes differ along two axes, and each combination is its own
+    # entry, named by how it differs from the base shape:
+    #   - the stamp fraction: milliseconds (the default stamp format), none
+    #     (a stamp format without a fraction, or a build without
+    #     sub-second time), microseconds (the %q stamp directive);
+    #   - the request-id bracket: written from connector release 1.2.48 on
+    #     (`NO-ID`, `-`, or a request id), absent before it.
+    # Nothing else on the line varies by build. The weekday, the request
+    # id, pid:tid, the source file and its line number are matched and not
+    # kept: pid:tid identifies a thread handle rather than a pool, and the
+    # line number changes between builds of the same message, so either
+    # would split one failure into many rows. The object is the function
+    # name; the message keeps a per-worker `(tomcatN)` prefix, which tells
+    # the backends apart. The level word maps to the vocabulary through the
+    # entry's level map; a word outside it stays as written and is reported
+    # by the unregistered-level path. ERROR and EMERGENCY are failures and
+    # nothing is a success: the connector writes a line for what fails,
+    # not for every request, so it is not an event ledger. No zone is
+    # written and none is converted, so a connector line falls in the same
+    # bucket as its own server's access-log line.
+    { name => 'mtjk', slug => 'apache_mod_jk', match_type => 23, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{3} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'ms', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402 2026] [ZdK3fH8AAAEAAB2xGRQAAAAB] [1111:2224] [info] init_jk::mod_jk.c (3591): mod_jk/1.2.50 initialized',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'INFO', 'init_jk', undef, undef, undef, undef, undef, 'mod_jk/1.2.50 initialized', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkus', slug => 'apache_mod_jk_microseconds', match_type => 24, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{6} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'us', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981204 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114560 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402117 2026] [-] [1111:2224] [warn] ajp_service::jk_ajp_common.c (2953): (tomcat2) sending request to tomcat failed (recoverable), because of error during request sending (attempt=1)',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'WARN', 'ajp_service', undef, undef, undef, undef, undef, '(tomcat2) sending request to tomcat failed (recoverable), because of error during request sending (attempt=1)', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjks', slug => 'apache_mod_jk_seconds', match_type => 25, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 's', tz => 'local', frac => 'none' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59 2026] [NO-ID] [1111:2224] [debug] jk_open_socket::jk_connect.c (817): socket TCP_NODELAY set to On',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'DEBUG', 'jk_open_socket', undef, undef, undef, undef, undef, 'socket TCP_NODELAY set to On', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkni', slug => 'apache_mod_jk_no_request_id', match_type => 26, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{3} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'ms', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402 2026] [1111:2224] [trace] ajp_send_request::jk_ajp_common.c (1736): enter',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'TRACE', 'ajp_send_request', undef, undef, undef, undef, undef, 'enter', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkusni', slug => 'apache_mod_jk_microseconds_no_request_id', match_type => 27, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{6} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'us', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981204 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114560 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402117 2026] [1111:2224] [emerg] jk_shm_open::jk_shm.c (712): Unable to create shared memory segment',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'EMERGENCY', 'jk_shm_open', undef, undef, undef, undef, undef, 'Unable to create shared memory segment', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 2 ] },
+    { name => 'mtjksni', slug => 'apache_mod_jk_seconds_no_request_id', match_type => 28, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 's', tz => 'local', frac => 'none' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59 2026] [1111:2224] [info] init_jk::mod_jk.c (3591): mod_jk/1.2.42 initialized',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'INFO', 'init_jk', undef, undef, undef, undef, undef, 'mod_jk/1.2.42 initialized', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
     # CSV is a stateful per-file stage outside the ordered scan (D32): its
     # matcher is the two-line confirmation in read_and_process_logs()
     # (detect_and_parse_csv_header), not a regex, so this entry is never
@@ -3500,10 +3651,22 @@ sub timestamp_date_cache_restore {
 # Timestamp-parse closures per declared layout family (D31), each reading
 # the date's midnight from the cache above. The iso parser serves every
 # iso_* layout (fixed substr offsets); apache_clf parses the
-# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon.
+# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon;
+# asctime parses the C library's `Mmm dd HH:MM:SS yyyy` order (the weekday
+# that leads it is matched by the pattern and not captured), keyed on
+# `Mmm dd yyyy`, a form neither of the other two keys can take.
 my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
 sub compile_format_time_parser {
     my ($layout) = @_;
+    if ($layout eq 'asctime') {
+        return sub {
+            my $ts = $_[0];
+            my $date = substr($ts, 0, 7) . substr($ts, 16, 4);
+            my $midnight = $timestamp_date_cache{$date}
+                // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($ts, 4, 2), $format_month_map{ substr($ts, 0, 3) } - 1, substr($ts, 16, 4) ) );
+            return $midnight + substr($ts, 7, 2) * 3600 + substr($ts, 10, 2) * 60 + substr($ts, 13, 2);
+        };
+    }
     if ($layout eq 'apache_clf') {
         return sub {
             my $ts = $_[0];
@@ -3635,7 +3798,7 @@ sub format_sample_probes {
 }
 
 # Which probe layout an entry's time contract reads under; undef for
-# layouts the date probes do not apply to (apache_clf, csv).
+# layouts the date probes do not apply to (apache_clf, asctime, csv).
 sub format_probe_layout {
     my ($entry) = @_;
     my $layout = $entry->[FR_TIME]{layout} // '';
@@ -4411,7 +4574,9 @@ substr($timestamp_str, 19) = '';};
     my $layout = $spec->{time}{layout} // '';
     # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
     my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
-    my $compute = ($layout eq 'apache_clf')
+    my $compute = ($layout eq 'asctime')
+        ? q{do { my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($timestamp_str, 4, 2), $format_month_map{ substr($timestamp_str, 0, 3) } - 1, substr($timestamp_str, 16, 4) ) ); $midnight + substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2) }}
+        : ($layout eq 'apache_clf')
         ? q{do { my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) ) }; $midnight + substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2) }}
         : qq{do { my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) ) ); \$midnight + substr(\$timestamp_str, 11, 2) * 3600 + substr(\$timestamp_str, 14, 2) * 60 + substr(\$timestamp_str, 17, 2) }};
     # The memo-miss branch runs once per change of timestamp string between
