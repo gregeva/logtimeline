@@ -560,7 +560,7 @@ clean of runtime warnings.
   To-space exhausted 5, Using G1 46; 41,356,228 ms). The measured list holds 50
   files: the 46 tagged files, the CRLF specimen and three files carrying no unified
   G1 line. Over it the uptime, level and process-id rules admit 0 lines and the
-  time rule admits only the CRLF specimen's 82 records. To be re-run at the gate.
+  time rule admits only the CRLF specimen's 82 records. Re-run at the gate, below.
 - **AC9.** Every scenario above runs the runtime-warning check on each capture;
   none reported a warning.
 - **AC10.** Rendered at width 200 with one 30-day bucket on the provided field
@@ -575,6 +575,22 @@ clean of runtime warnings.
   byte-identical to their twins'. The whole provided set read in one run per
   deployment: deployment A 155,713 records over 40 files, deployment B 79,380 over
   10, every file `java_gc_g1_time`.
+
+### Tagged-corpus measurement at the gate
+
+Re-run on the gated tool (`fad2a95`, rebased onto `62128de`, which carries the
+connector entries of #655, read Apache mod_jk connector logs) over the same 50
+files: the 46 tagged G1 files of the GC collection, the CRLF specimen and three
+files carrying no unified G1 line, read in one run with
+`ltl --disable-progress -ni -bs 43200 -oe -n 1 -osum -V format-detection`.
+The 46 tagged files bind `java_gc_g1` and read 3,865,527 of 4,943,052 lines
+(`match_counts` `mt6=3865527`); the CRLF specimen binds `java_gc_g1_time` and
+reads 82 of 1,127; the three others bind nothing; `lines_included: 3865609`; the
+uptime, level and process-id entries match 0 lines and every connector entry 0.
+Every file's format, matched and unmatched counts are identical to the
+measurement on the pre-rebase branch; the only differences in the section are
+the six connector slots in the scan order and counts, and the time entry's match
+type moving from 23 to 29. Stderr empty.
 
 ### Harness changes
 
