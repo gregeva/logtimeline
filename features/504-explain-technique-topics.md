@@ -631,6 +631,16 @@ to render.
 
 The roster is twenty techniques and twenty-six topics.
 
+**Amended (architect, 2026-10-03, under #652, correct the load-over-time
+explanation):** the Load Over Time reading in the row above is replaced. The
+thread-pool column counts the distinct threads that finished a request in the
+bucket, so at wide buckets a count at the pool's size is the pool's size, busy or
+quiet; concurrency is read from the duration column (summed duration divided by
+bucket width); and saturation shows at one-minute buckets as a count falling below
+what the same request rate produced in the minutes before, ending in a duration
+surge where the held requests finish. The measurements and the content
+specification are in `features/652-load-over-time-reading.md`.
+
 ### D8 — File Attribution merges into Cross-Log Correlation (architect, 2026-09-04)
 
 File Attribution (D4) and Cross-Log Correlation are one read of one surface, and are
