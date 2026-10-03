@@ -533,6 +533,35 @@ check_help_states_levels() {
     ' "$1" "$2" "$3"
 }
 
+# The format listing row of a named format begins with a given statement (its
+# event-ledger property and classification posture). The row and its
+# continuation lines are joined before the statement is matched.
+check_help_row_states() {
+    "$PERL" -e '
+        my ($help, $format, $statement) = @ARGV;
+        open my $fh, "<", $help or die "cannot open $help: $!\n";
+        my @lines = <$fh>;
+        close $fh;
+        my ($i) = grep { $lines[$_] =~ /^\s+\Q$format\E\s{2,}\S/ } 0 .. $#lines;
+        unless (defined $i) {
+            print "anchor not found: no listing row for $format\n";
+            exit 1;
+        }
+        my $row = $lines[$i];
+        for my $j ($i + 1 .. $#lines) {
+            last unless $lines[$j] =~ /^\s{20,}\S/;
+            $row .= $lines[$j];
+        }
+        $row =~ s/\s+/ /g;
+        unless ($row =~ /^ \Q$format\E \Q$statement\E/) {
+            print "the $format row does not begin with [$statement]: $row\n";
+            exit 1;
+        }
+        print "$format states: $statement\n";
+        exit 0;
+    ' "$1" "$2" "$3"
+}
+
 # A family states the levels its members share once in the whole listing. Two
 # occurrences would mean the statement had been repeated per member rather than
 # hoisted to the family heading; zero means it is not stated at all.
@@ -1018,6 +1047,21 @@ assert_command \
     asserts     'The G1 entry categorises by pause kind rather than by severity, and its declaration is exactly the closed alternation its own pattern captures. The listing must state those six names, because a reader who expects severity names from this format would otherwise have no way to learn what it actually writes.' \
     produced_by 'print_help_formats() in ltl, reading the declared levels from the compiled registry specs' \
     contract    'features/476-per-format-log-level-declarations.md § D4 table as amended (the list of what each declaring entry adds, read as additions)'
+
+for gc_name in java_gc_g1_time java_gc_g1_time_uptime java_gc_g1_time_level java_gc_g1_time_pid; do
+    assert_command \
+        command     "check_help_states_levels '$HELP_FORMATS' '$gc_name' 'Pause Young, Pause Full, Pause Remark, Pause Cleanup, To-space exhausted, Using G1'" \
+        label       "the $gc_name entry states its pause kinds" \
+        asserts     'Each G1 entry for a decoration without level and tags is a format in its own right and writes the same six pause kinds as the tagged entry; the listing states them on its own row' \
+        produced_by 'print_help_formats() in ltl, reading the declared levels from the compiled registry specs' \
+        contract    'features/656-gc-log-tagless-decorations.md D4 and AC6'
+    assert_command \
+        command     "check_help_row_states '$HELP_FORMATS' '$gc_name' 'event ledger. declines to classify'" \
+        label       "the $gc_name entry is stated as an event ledger that declines" \
+        asserts     'Each tag-less G1 entry carries the posture of the tagged entry: the JVM writes one record per pause (an event ledger) and the format declines to classify success or failure' \
+        produced_by 'print_help_formats() in ltl (event-ledger and classification statement per format)' \
+        contract    'features/656-gc-log-tagless-decorations.md D4 and AC6; features/453-success-failure-classification-event-ledger.md D9'
+done
 
 assert_command \
     command     "check_help_family_states_levels_once '$HELP_FORMATS' '1xx, 2xx, 3xx, 4xx, 5xx'" \

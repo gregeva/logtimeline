@@ -858,6 +858,16 @@ Record: `features/655-apache-mod-jk-connector-format.md` (findings, D1-D5, accep
 - **A time layout `asctime`** for the C library's `Www Mmm dd HH:MM:SS yyyy` order, in both `compile_format_time_parser()` and the inline parse of `format_entry_block_src()`. The capture starts at the month (the weekday is matched, not kept), the fraction is stripped by `frac => 'generic'` (`none` for the whole-second shapes), and the date cache key is `Mmm dd yyyy`, which neither the ISO nor the CLF key can take. `format_probe_layout()` returns undef for it: the date probes are ISO-only. The month and weekday are closed alternations of the English abbreviations, so a stamp written in another locale is unmatched rather than misread.
 - **One level-map mechanism** (D5): a producer's own level tokens are data on the entry (`level_map => { token => level }`), applied by the `level_map` transform, which reads the map through an index into `@format_level_maps` assigned by `build_format_registry()` (the precedent is `@format_cls_sets` for generated classification). The build refuses a map nothing applies, a `level_map` transform with no map, and a mapped name that is neither in the static vocabulary nor declared by an entry (the D24 gate 7 cross-check extended to maps). The Workgroup Manager entry's letter map moved onto it; `%wgm_msgtype_names` and the `wgm_msgtype` transform no longer exist. An unmapped token still passes through as captured and is reported by the unregistered-level path.
 
+## #656 — G1 unified logging without the level-and-tags decoration
+
+Record: `features/656-gc-log-tagless-decorations.md` (findings, D1-D10, acceptance criteria and the implementation record). What changed in the registry:
+
+- **Four entries beside `java_gc_g1`, one per decoration shape** (D2, D8): `mt6t` `java_gc_g1_time` (the time alone, local or UTC), `mt6tu` `java_gc_g1_time_uptime`, `mt6tl` `java_gc_g1_time_level`, `mt6tp` `java_gc_g1_time_pid` (process id or thread id). Each is its own group and its own format on every surface (D4), with no family key and no filename evidence; none shadows another or the tagged entry, so every ancestor set is empty. The decoration is visible on every line, so they are not variants of the tagged entry (D47).
+- **The record is the line carrying the measurement** (D5): without the tag the pause start and end differ only by the heap transition and pause time, so a pause kind requires that figure; `To-space exhausted` and `Using G1` are read as markers. The pattern keeps the tagged entry's capture order behind a branch-reset group, so the field map, the `gc_heap_delta` transform and the expected-record shape are the tagged entry's.
+- **Decoration brackets are matched and not kept** (D9), each admitting the trailing spaces the JVM pads with.
+- **The tagged entry's level bracket admits padding** (D1 as amended): `\[info\s*\]`, as the tag bracket already did; the tagged corpus reads the same 3,865,527 lines with the same tuples.
+- Counts that moved: `entries` 27 to 31, `scanned_entries` 25 to 29, `scan_slots` and the `format-detection / scan` `entries` 24 to 28; the four slots sit after `mt6` in `static_order`, ahead of the connector slots at the tail.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `metrics_observed:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes, with one exception: the per-file key `metrics_observed: yes|no` was renamed from `is_access_log:` under #453 (D18) with byte-identical semantics — any line of the file observed a metric, or the format is statistics-eligible. The `format-detection / classification` sub-section and the `event_ledger:` per-file key are owned by `features/453-success-failure-classification-event-ledger.md` § *`-V` section-contract changes*. Everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
@@ -881,7 +891,7 @@ Detection-evidence keys (umbrella D53, #388; emitted by `emit_format_detection_s
 
 **Sub-section `=== format-detection / scan ===` (run-level, one per run, emitted inside the parent section before its END marker; closed by `=== END format-detection / scan ===`):**
 
-- `entries: N` — count of scan slots compiled into the scan sub (24 since #655 added a slot for each of the six Apache mod_jk connector shapes, after #444 gave the access family seven; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
+- `entries: N` — count of scan slots compiled into the scan sub (28 since #655 added a slot for each of the six Apache mod_jk connector shapes and #656 the four G1 entries for decorations without level and tags, after #444 gave the access family seven; `csv` is outside the scan array by design, D32). Changes only when a scanned format is added/removed — same commit updates this contract and the harness.
 - `guarded: name,...` — registry entry names (FR_NAME, e.g. `mt12`) carrying a D28 cheap-superset guard, static registry order; `-` if none. Currently `mt12,mt4,mt9`.
 - `window_size: N` — the `--detection-window` override value (hidden; D30/D38); 0 when not given. It is not the size engaged per file — that is the per-file `window:` key, which resolves to `window_fallback` for unsampled files.
 - `window_fallback: N` — `FORMAT_DETECTION_WINDOW_FALLBACK`, the window size engaged for a file that could not be sampled (umbrella D53; 1000).
@@ -919,7 +929,7 @@ Sub-section `format-detection / scan` additions:
 
 - `match_counts:` and per-file `sample_formats:` list every scanned **member** (spec order, non-occupant variants included), so a variant member's matches are attributable.
 - `variant_groups: group=occupant,...|-` — each variant group with ≥ 2 members and the entry occupying its slot at emission time (slot order); `-` for the occupant when the pin excluded the group.
-- `entries: N` keeps its meaning — occupants compiled into the scan sub (one per group slot; 24), not members.
+- `entries: N` keeps its meaning — occupants compiled into the scan sub (one per group slot; 28), not members.
 
 ## `-V format-registry` section-contract
 
@@ -931,9 +941,9 @@ Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry or
 
 **Inventory** — what was compiled from the declarative specs:
 
-- `entries: N` — every entry in `format_registry_specs()`, scanned, pin-only and stateful alike (27: 25 scanned + the pin-only `mtvfy` + `csv`).
-- `scanned_entries: N` — entries the scan can recognise, variant members included (25 since #655 added the six Apache mod_jk connector shapes, after #444 replaced the five access entries with the seven-member family; the connection-server pair is the one variant group). Changes only when a scanned format is added or removed — same commit updates this contract and the harness.
-- `scan_slots: N` — slots in the live scan array (24). One per variant group, since only one member of a group is seated at a time (D47), so `scan_slots ≤ scanned_entries`. Equals `entries: N` in `format-detection / scan`, which counts the same slots. Under `-lf` this narrows to the pinned format's member count.
+- `entries: N` — every entry in `format_registry_specs()`, scanned, pin-only and stateful alike (31: 29 scanned + the pin-only `mtvfy` + `csv`).
+- `scanned_entries: N` — entries the scan can recognise, variant members included (29: #444 replaced the five access entries with the seven-member family, #655 added the six Apache mod_jk connector shapes, #656 the four G1 entries for decorations without level and tags; the connection-server pair is the one variant group). Changes only when a scanned format is added or removed — same commit updates this contract and the harness.
+- `scan_slots: N` — slots in the live scan array (28). One per variant group, since only one member of a group is seated at a time (D47), so `scan_slots ≤ scanned_entries`. Equals `entries: N` in `format-detection / scan`, which counts the same slots. Under `-lf` this narrows to the pinned format's member count.
 - `  entry: <name> slug=<slug> group=<group> default=yes|no role=scanned|stateful` — one line per entry, static spec order. `group` is the entry's `variant_group` or its own name; `default=yes` marks the member holding the group's slot by default; `role=stateful` marks an entry outside the generated scan with no pattern (`csv` alone today, D32); `role=pin-only` marks a compiled entry outside the scan cascade that only `-lf` seats (the `mtvfy` classification-verification producer, #456 D12; see § Pin-only entries).
 
 **Structure** — how the scan is organised and what constrains its ordering:

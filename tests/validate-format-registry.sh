@@ -215,14 +215,14 @@ scenario_inventory() {
     check_capture_warnings "$out"
 
     assert_line "$out" \
-        pattern     '^scanned_entries: 25$' \
-        asserts     'The registry compiles 25 scanned entries (every format the scan can recognise, variant members included: the six Apache mod_jk connector shapes among them); csv is stateful and mtvfy pin-only, both outside the scan array' \
+        pattern     '^scanned_entries: 29$' \
+        asserts     'The registry compiles 29 scanned entries (every format the scan can recognise, variant members included: the six Apache mod_jk connector shapes and the four tag-less G1 decorations among them); csv is stateful and mtvfy pin-only, both outside the scan array' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry_members built by build_format_registry()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a scanned format is added or removed, in the same commit as this assertion'
 
     assert_line "$out" \
-        pattern     '^entries: 27$' \
-        asserts     'The registry holds 27 entries in all: the 25 scanned entries, the pin-only mtvfy and the stateful csv' \
+        pattern     '^entries: 31$' \
+        asserts     'The registry holds 31 entries in all: the 29 scanned entries, the pin-only mtvfy and the stateful csv' \
         produced_by 'emit_format_registry_verbose() in ltl, reading every spec of format_registry_specs()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes when any entry is added or removed, in the same commit as this assertion'
 
@@ -251,8 +251,8 @@ scenario_inventory() {
         produced_by 'derive_format_constraints() in ltl' \
         contract    'features/444-access-log-format-family-and-user-surface.md D4'
     assert_line "$out" \
-        pattern     '^scan_slots: 24$' \
-        asserts     'The 25 scanned entries occupy 24 scan slots: one slot per variant group, since only one member of a group is seated at a time (D47); each connector shape is a group of one' \
+        pattern     '^scan_slots: 28$' \
+        asserts     'The 29 scanned entries occupy 28 scan slots: one slot per variant group, since only one member of a group is seated at a time (D47); each connector shape and each tag-less G1 decoration is a group of one' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry (one entry per group slot)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - agrees with entries: N in format-detection / scan, which counts the same slots'
 
@@ -267,6 +267,15 @@ scenario_inventory() {
         asserts     'A non-default variant member reports its group and default=no - the evidence pass can seat it, but it does not hold the slot by default' \
         produced_by 'emit_format_registry_verbose() in ltl (group and FR_GROUP_DEFAULT per entry)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - variant groups are D47/F1'
+
+    local gc_entry
+    for gc_entry in 'mt6t slug=java_gc_g1_time' 'mt6tu slug=java_gc_g1_time_uptime' 'mt6tl slug=java_gc_g1_time_level' 'mt6tp slug=java_gc_g1_time_pid'; do
+        assert_line "$out" \
+            pattern     "^  entry: $gc_entry group=${gc_entry%% *} default=yes role=scanned\$" \
+            asserts     'Each tag-less G1 decoration is its own scanned entry in its own group, not a variant of the tagged entry: the decoration is visible on every line (features/656-gc-log-tagless-decorations.md D2, D4)' \
+            produced_by 'emit_format_registry_verbose() in ltl (FR_NAME, FR_SLUG and group per entry)' \
+            contract    'features/656-gc-log-tagless-decorations.md D8; features/log-format-registry.md section -V format-registry section-contract'
+    done
 
     assert_line "$out" \
         pattern     '^  entry: mt1std slug=thingworx_standard .*$' \
@@ -292,7 +301,7 @@ scenario_structure() {
         contract    'features/log-format-registry.md section -V format-registry section-contract - group membership is declared by variant_group/variant_default in format_registry_specs()'
 
     assert_line "$out" \
-        pattern     '^static_order: mt1std,mt10,mt16,mt1gen,mt2,mt3ts,mt12,mt9,mt19,mt20,mt3,mt4,mt5,mt6,mt7,mt8,mt17,mt11,mtjk,mtjkus,mtjks,mtjkni,mtjkusni,mtjksni$' \
+        pattern     '^static_order: mt1std,mt10,mt16,mt1gen,mt2,mt3ts,mt12,mt9,mt19,mt20,mt3,mt4,mt5,mt6,mt6t,mt6tu,mt6tl,mt6tp,mt7,mt8,mt17,mt11,mtjk,mtjkus,mtjks,mtjkni,mtjkusni,mtjksni$' \
         asserts     'The static scan order is the declaration order of the group slots - the order every run starts from and the baseline promotion permutes' \
         produced_by 'emit_format_registry_verbose() in ltl, reading @format_registry' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - changes only when a format is added, removed or re-sequenced in format_registry_specs()'
@@ -302,6 +311,15 @@ scenario_structure() {
         asserts     'With every family pattern anchored at both ends (#444 D4) no earlier group shadows the common-plus-duration shape: its derived pinned-ancestor set is empty (D26)' \
         produced_by 'derive_format_constraints() in ltl; emitted by emit_format_registry_verbose()' \
         contract    'features/log-format-registry.md section -V format-registry section-contract - the derived set is cross-checked against each entry expect_ancestors by D24 gate 4, so a drift fails the build before this assertion'
+
+    local gc_slot
+    for gc_slot in mt6 mt6t mt6tu mt6tl mt6tp; do
+        assert_line "$out" \
+            pattern     "^  ancestors: $gc_slot <- -\$" \
+            asserts     'No G1 entry shadows another: each decoration shape is distinct on every line, so none has a pinned ancestor (features/656-gc-log-tagless-decorations.md D2)' \
+            produced_by 'derive_format_constraints() in ltl; emitted by emit_format_registry_verbose()' \
+            contract    'features/656-gc-log-tagless-decorations.md AC7; features/log-format-registry.md section -V format-registry section-contract'
+    done
 
     assert_line "$out" \
         pattern     '^  ancestors: mt12 <- -$' \

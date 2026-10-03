@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.18.6";
+my $version_number = "0.18.6-656";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -3288,11 +3288,14 @@ sub format_registry_specs {
     # time. Cause clause and heap/duration payload are both optional: G1
     # writes `Pause Remark`/`Pause Cleanup` with no cause, and
     # `To-space exhausted`/`Using G1` with neither. `Using G1` is also the
-    # only form with no `GC(n)` prefix.
+    # only form with no `GC(n)` prefix. The JVM pads every decoration to the
+    # widest value written so far on its output, so once a debug or warning
+    # line has been written the level reads `[info ]`; the level bracket
+    # admits that padding as the tag bracket does.
     { name => 'mt6', slug => 'java_gc_g1', match_type => 6, scanned => 1, head_class => 'bracket_digit',
       filename => { stem => 'gc(?:-[^.]+)?', index => 'dot_n', ext => '.out', placement => 'after',
                     samples => [ 'gc-2025-01-01.out.3', 'gc.out' ] },
-      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\]\[gc\s*\] (?:GC\(\d+\) )?(Pause (?:Young|Full|Remark|Cleanup)|To-space exhausted|Using G1)(?: (\(.+?\)))?(?: (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms)?$',
+      pattern_src => '^[\[]?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}.*?\[info\s*\]\[gc\s*\] (?:GC\(\d+\) )?(Pause (?:Young|Full|Remark|Cleanup)|To-space exhausted|Using G1)(?: (\(.+?\)))?(?: (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms)?$',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
       transforms => [ 'gc_heap_delta' ],
       time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
@@ -3308,6 +3311,7 @@ sub format_registry_specs {
         '[2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms',
         '[2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted',
         '[2025-06-05T11:17:57.418+0000][info][gc] Using G1',
+        '[2026-10-03T12:57:50.405+0200][info ][gc             ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms',
       ],
       expect => [
         [ '2025-04-05T11:10:47', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '2367000000', '18.406', '0', '1' ],
@@ -3316,8 +3320,147 @@ sub format_registry_specs {
         [ '2025-04-05T11:10:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.204', '0', '1' ],
         [ '2024-10-16T05:27:56', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
         [ '2025-06-05T11:17:57', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(G1 Compaction Pause)', '18000000', '1.900', '0', '1' ],
       ],
-      expect_outcomes => [ 0, 0, 0, 0, 0, 0 ] },
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0, 0 ] },
+    # G1 unified logging written without the level-and-tags decoration. The
+    # operator chooses the decorations; these four entries read the sets
+    # that carry the wall-clock time and no tags, one entry per bracket
+    # shape. Without the tag the pause-start line (kind and cause only) and
+    # the pause-end line differ only by the heap transition and pause time,
+    # so the record is the line carrying that figure: a pause kind requires
+    # it, and `To-space exhausted` and `Using G1`, which never carry one, are
+    # read as markers. The start line, the phase, region, CPU and
+    # concurrent-cycle lines match nothing, which is what the tagged entry
+    # reads from the same events. Brackets after the time (uptime, level,
+    # process or thread id) are matched and not kept; the JVM pads each to
+    # the widest value written so far on its output, so each admits
+    # trailing spaces. Captures keep the tagged entry's order behind a
+    # branch-reset group, so the field map, transform and records are
+    # the tagged entry's.
+    #
+    # The time decoration alone; UTC time is the same shape at +0000.
+    { name => 'mt6t', slug => 'java_gc_g1_time', match_type => 29, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}\] (?:GC\(\d+\) )?(?|(Pause (?:Young|Full|Remark|Cleanup))(?: (\(.+?\)))? (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms|(To-space exhausted|Using G1))$',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
+      expect_ancestors => [],
+      samples => [
+        '[2026-10-03T12:57:50.354+0200] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms',
+        '[2026-10-03T09:41:12.945+0000] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms',
+        '[2026-10-03T12:57:50.364+0200] GC(6) Pause Remark 35M->35M(48M) 0.103ms',
+        '[2026-10-03T10:57:50.365+0000] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms',
+        '[2026-10-03T12:57:50.484+0200] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms',
+        '[2026-10-03T12:57:50.376+0200] GC(20) To-space exhausted',
+        '[2026-10-03T12:57:50.332+0200] Using G1',
+      ],
+      expect => [
+        [ '2026-10-03T12:57:50', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '14000000', '1.845', '0', '1' ],
+        [ '2026-10-03T09:41:12', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause) (Evacuation Failure)', '5000000', '0.637', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '0.103', '0', '1' ],
+        [ '2026-10-03T10:57:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.060', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(System.gc())', '1000000', '1.257', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0, 0 ] },
+    # The time, then the uptime in seconds.
+    { name => 'mt6tu', slug => 'java_gc_g1_time_uptime', match_type => 30, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}\]\[\d+\.\d{3}s *\] (?:GC\(\d+\) )?(?|(Pause (?:Young|Full|Remark|Cleanup))(?: (\(.+?\)))? (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms|(To-space exhausted|Using G1))$',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
+      expect_ancestors => [],
+      samples => [
+        '[2026-10-03T12:57:50.354+0200][0.036s] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms',
+        '[2026-10-03T11:41:12.945+0200][0.037s] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms',
+        '[2026-10-03T12:57:50.364+0200][0.045s] GC(6) Pause Remark 35M->35M(48M) 0.103ms',
+        '[2026-10-03T12:57:50.365+0200][0.047s] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms',
+        '[2026-10-03T12:57:50.405+0200][0.087s] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms',
+        '[2026-10-03T12:57:50.376+0200][0.058s] GC(20) To-space exhausted',
+        '[2026-10-03T12:57:50.332+0200][0.014s] Using G1',
+      ],
+      expect => [
+        [ '2026-10-03T12:57:50', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '14000000', '1.845', '0', '1' ],
+        [ '2026-10-03T11:41:12', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause) (Evacuation Failure)', '5000000', '0.637', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '0.103', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.060', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(G1 Compaction Pause)', '18000000', '1.900', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0, 0 ] },
+    # The time, then the level: every record line is written at info.
+    { name => 'mt6tl', slug => 'java_gc_g1_time_level', match_type => 31, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}\]\[info *\] (?:GC\(\d+\) )?(?|(Pause (?:Young|Full|Remark|Cleanup))(?: (\(.+?\)))? (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms|(To-space exhausted|Using G1))$',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
+      expect_ancestors => [],
+      samples => [
+        '[2026-10-03T12:57:50.354+0200][info] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms',
+        '[2026-10-03T11:41:12.945+0200][info] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms',
+        '[2026-10-03T12:57:50.364+0200][info ] GC(6) Pause Remark 35M->35M(48M) 0.103ms',
+        '[2026-10-03T12:57:50.365+0200][info] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms',
+        '[2026-10-03T12:57:50.405+0200][info ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms',
+        '[2026-10-03T12:57:50.376+0200][info] GC(20) To-space exhausted',
+        '[2026-10-03T12:57:50.332+0200][info ] Using G1',
+      ],
+      expect => [
+        [ '2026-10-03T12:57:50', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '14000000', '1.845', '0', '1' ],
+        [ '2026-10-03T11:41:12', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause) (Evacuation Failure)', '5000000', '0.637', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '0.103', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.060', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(G1 Compaction Pause)', '18000000', '1.900', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0, 0 ] },
+    # The time, then the process id or the thread id, which share a shape.
+    { name => 'mt6tp', slug => 'java_gc_g1_time_pid', match_type => 32, scanned => 1, head_class => 'bracket_digit',
+      pattern_src => '^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})[+-]\d{4}\]\[\d+ *\] (?:GC\(\d+\) )?(?|(Pause (?:Young|Full|Remark|Cleanup))(?: (\(.+?\)))? (\d[^-]+)->(\d[^(]+)\((\d[^)]+)\) (\d.*)ms|(To-space exhausted|Using G1))$',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'message'],[4,'heap_from'],[5,'heap_to'],[6,'heap_size'],[7,'duration'] ],
+      transforms => [ 'gc_heap_delta' ],
+      time => { layout => 'iso_ms', precision => 'ms', tz => 'offset_in_line', frac => 'fixed3' },
+      duration_unit => 'ms', stats_eligible => 1,
+      levels => [ 'Pause Young', 'Pause Full', 'Pause Remark', 'Pause Cleanup', 'To-space exhausted', 'Using G1' ],   # pause kinds, not severities: the closed alternation the pattern captures
+      event_ledger => 1,
+      classification => 'none',   # every pause is logged (a ledger); what makes one a failure is #483
+      expect_ancestors => [],
+      samples => [
+        '[2026-10-03T12:57:50.354+0200][91284] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms',
+        '[2026-10-03T11:41:12.945+0200][83936] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms',
+        '[2026-10-03T12:57:50.364+0200][32259] GC(6) Pause Remark 35M->35M(48M) 0.103ms',
+        '[2026-10-03T12:57:50.365+0200][91284] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms',
+        '[2026-10-03T12:57:50.405+0200][91284] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms',
+        '[2026-10-03T12:57:50.376+0200][91284] GC(20) To-space exhausted',
+        '[2026-10-03T12:57:50.332+0200][9731] Using G1',
+        '[2026-10-03T12:57:50.484+0200][9731 ] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms',
+      ],
+      expect => [
+        [ '2026-10-03T12:57:50', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause)', '14000000', '1.845', '0', '1' ],
+        [ '2026-10-03T11:41:12', 'Pause Young', undef, undef, undef, undef, undef, undef, '(Normal) (G1 Evacuation Pause) (Evacuation Failure)', '5000000', '0.637', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Remark', undef, undef, undef, undef, undef, undef, undef, '0', '0.103', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Cleanup', undef, undef, undef, undef, undef, undef, undef, '0', '0.060', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(G1 Compaction Pause)', '18000000', '1.900', '0', '1' ],
+        [ '2026-10-03T12:57:50', 'To-space exhausted', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Using G1', undef, undef, undef, undef, undef, undef, undef, undef, undef, '0', '1' ],
+        [ '2026-10-03T12:57:50', 'Pause Full', undef, undef, undef, undef, undef, undef, '(System.gc())', '1000000', '1.257', '0', '1' ],
+      ],
+      expect_outcomes => [ 0, 0, 0, 0, 0, 0, 0, 0 ] },
     { name => 'mt7', slug => 'tw_analytics_v2', match_type => 7, scanned => 1, head_class => 'any',
       pattern_src => '^([^ ]+)\s+\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3})\] (.*)$',
       field_map => [ [1,'category_bucket'],[2,'timestamp_str'],[3,'message'] ],

@@ -1,0 +1,2 @@
+# Kept byte for byte: the fixture exists to prove CR LF line endings read as LF.
+tests/fixtures/format-detection/gc-time-crlf-jdk21.txt -text
