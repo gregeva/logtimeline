@@ -1,0 +1,7 @@
+[Fri Aug 21 11:50:40.101 2026] [NO-ID] [2001:140000000000001] [trace] ajp_send_request::jk_ajp_common.c (1736): enter
+[Fri Aug 21 11:50:41.202 2026] [NO-ID] [2001:140000000000001] [debug] jk_open_socket::jk_connect.c (817): socket TCP_NODELAY set to On
+[Fri Aug 21 11:50:42.303 2026] [-] [2001:140000000000002] [info] init_jk::mod_jk.c (3591): mod_jk/1.2.50 initialized
+[Fri Aug 21 11:50:43.404 2026] [NO-ID] [2002:140000000000003] [warn] ajp_service::jk_ajp_common.c (2953): (tomcat2) sending request to tomcat failed (recoverable), because of error during request sending (attempt=1)
+[Fri Aug 21 11:50:51.071 2026] [NO-ID] [2002:140000000000003] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Fri Aug 21 11:50:52.505 2026] [NO-ID] [2003:140000000000004] [emerg] jk_shm_open::jk_shm.c (712): Unable to create shared memory segment
+[Fri Aug 21 11:50:53.606 2026] [NO-ID] [2003:140000000000004] [notice] jk_shm_open::jk_shm.c (720): shared memory segment created

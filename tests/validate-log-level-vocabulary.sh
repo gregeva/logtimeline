@@ -9,7 +9,7 @@
 # vocabulary is therefore invisible data loss, which is what this harness exists
 # to prevent.
 #
-# Five scenarios cover the vocabulary. One reads the levels the Windchill Method
+# Six scenarios cover the vocabulary. One reads the levels the Windchill Method
 # Server format emits, including FATAL, which the format uses for server
 # shutdown ("MethodServer stopped") — among the most consequential lines in the
 # file. One reads the severity names the syslog and java.util.logging
@@ -24,9 +24,12 @@
 # do not move: the report makes the loss audible without giving the lines back.
 # One reads the ThingWorx Edge C SDK tokens, the real-data case the report
 # exists for, where two of the three control tokens are dropped and reported and
-# the third is a vocabulary member and is not. And one reads the format listing,
-# where a format that writes categories of its own states them and one that
-# writes the usual severity names states nothing.
+# the third is a vocabulary member and is not. One reads the Apache mod_jk
+# connector's lower-case level words, which reach the vocabulary through the
+# entry's level map, with one word outside the map reported rather than lost.
+# And one reads the format listing, where a format that writes categories of
+# its own states them and one that writes the usual severity names states
+# nothing.
 #
 # This is a RENDER-INVARIANT harness (tests/HARNESS-DESIGN.md § Render-invariant
 # harnesses): the assertion reads the rendered category table, which is where a
@@ -71,6 +74,11 @@ FIXTURE_OUTSIDE="$REPO_DIR/tests/fixtures/log-level-outside-vocabulary.txt"
 # INFO control line. Two of the three are outside the vocabulary and reported;
 # START is inside it and is not.
 FIXTURE_EDGE="$REPO_DIR/tests/fixtures/edge-c-sdk-unregistered-levels.txt"
+# Seven lines in the Apache mod_jk connector shape: one per level word the
+# connector writes (trace, debug, info, warn, error, emerg) and one notice line,
+# a word outside the connector's level map. Every line but the error one is
+# synthetic, since the held connector logs write only error.
+FIXTURE_CONNECTOR="$REPO_DIR/tests/fixtures/format-detection/apache-mod-jk-level-words.txt"
 WIDTH=140
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -96,6 +104,9 @@ if [[ ! -f "$FIXTURE_OUTSIDE" ]]; then
 fi
 if [[ ! -f "$FIXTURE_EDGE" ]]; then
     echo "ERROR: fixture not found: $FIXTURE_EDGE"; exit 1
+fi
+if [[ ! -f "$FIXTURE_CONNECTOR" ]]; then
+    echo "ERROR: fixture not found: $FIXTURE_CONNECTOR"; exit 1
 fi
 
 TMP_DIR=$(mktemp -d); trap 'rm -rf "$TMP_DIR"' EXIT
@@ -569,6 +580,47 @@ check_help_states_no_levels() {
     ' "$1" "$2"
 }
 
+# A connector entry is listed under "Other formats", not an event ledger, with
+# the failure rule its declaration names and no success rule, and states no
+# levels (the words it writes map to severity names). The row must sit after
+# the "Other formats" heading, or it would be listed as a family member.
+check_help_connector_row() {
+    "$PERL" -e '
+        my ($help, $format) = @ARGV;
+        open my $fh, "<", $help or die "cannot open $help: $!\n";
+        my @lines = <$fh>;
+        close $fh;
+        my ($h) = grep { $lines[$_] =~ /^\s+Other formats\s*$/ } 0 .. $#lines;
+        unless (defined $h) {
+            print "anchor not found: no Other formats heading in the listing\n";
+            exit 1;
+        }
+        my ($i) = grep { $lines[$_] =~ /^\s+\Q$format\E\s{2,}\S/ } 0 .. $#lines;
+        unless (defined $i) {
+            print "anchor not found: no listing row for $format\n";
+            exit 1;
+        }
+        unless ($i > $h) {
+            print "the $format row sits before the Other formats heading (line $i, heading at $h)\n";
+            exit 1;
+        }
+        my $row = $lines[$i];
+        $row .= $lines[$_] for grep { $_ <= $#lines && $lines[$_] =~ /^\s{20,}\S/ } $i + 1 .. $i + 6;
+        $row =~ s/\s+/ /g;
+        my $want = "not an event ledger. success: none; failure: category_bucket matches ^(?:ERROR|EMERGENCY)\$.";
+        unless (index($row, $want) >= 0) {
+            print "the $format row does not read [$want]: $row\n";
+            exit 1;
+        }
+        if (index($row, "Writes the categories") >= 0) {
+            print "the $format row states levels although the entry declares none: $row\n";
+            exit 1;
+        }
+        print "$format: $want\n";
+        exit 0;
+    ' "$1" "$2"
+}
+
 # ---------------------------------------------------------------------------
 # Scenario: one line per level the Windchill Method Server format emits.
 # ---------------------------------------------------------------------------
@@ -578,6 +630,7 @@ scenario_register method-server-levels \
                   extended-severity-vocabulary \
                   unregistered-level-report \
                   edge-c-sdk-unregistered-levels \
+                  connector-level-words \
                   declared-levels-in-help
 scenario_parse_args "$@"
 
@@ -842,6 +895,94 @@ assert_command \
 
 fi
 
+if scenario_wanted connector-level-words; then
+current_scenario="connector-level-words"
+echo "[$current_scenario]"
+
+# features/655-apache-mod-jk-connector-format.md D2: the connector writes its
+# level as a lower-case word, which the entry's level map carries to the
+# vocabulary name. Same invocation shape as the other render scenarios: the
+# assertions read the category table and the run summary.
+RENDER_JK="$TMP_DIR/render-connector.txt"
+STDERR_JK="$TMP_DIR/render-connector.stderr"
+
+set +e
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 \
+    --terminal-width "$WIDTH" "$FIXTURE_CONNECTOR" ) 2>"$STDERR_JK" | strip_ansi > "$RENDER_JK"
+render_jk_status=("${PIPESTATUS[@]}")
+set -e
+
+if [[ "${render_jk_status[0]}" -ne 0 ]]; then
+    echo "  FAIL  $current_scenario :: ltl exited ${render_jk_status[0]} while rendering" >&2
+    sed 's/^/        /' "$STDERR_JK" >&2
+    exit 1
+fi
+
+if ! assert_no_runtime_warnings "$STDERR_JK" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+fi
+
+for level in TRACE DEBUG INFO WARN ERROR EMERGENCY; do
+    assert_command \
+        command     "check_level_present '$RENDER_JK' '$level'" \
+        label       "the connector word for $level arrives as $level and reaches the category table" \
+        asserts     "The connector writes trace, debug, info, warn, error and emerg. The category gate is exact and case-sensitive, so a word left as written would be dropped; the entry level map carries each word to its vocabulary name, and the line must appear under that name." \
+        produced_by 'level_map transform over the level_map declared on the connector entries (format_registry_specs()); gated per line in read_and_process_logs(); rendered by print_summary_table()' \
+        contract    'features/655-apache-mod-jk-connector-format.md D2 and AC6 (C3)'
+done
+
+assert_command \
+    command     "check_lines_read_included '$RENDER_JK' 7 6" \
+    label       'the six mapped lines are counted and the unmapped one is dropped' \
+    asserts     'Seven lines are read; the six carrying a mapped word are included and the notice line, a word outside the map, is dropped by the category gate.' \
+    produced_by '%log_level_set in ltl, gated per line in read_and_process_logs(); rendered by print_summary_table()' \
+    contract    'features/655-apache-mod-jk-connector-format.md D2 (an unmapped word stays as written and is reported, not lost) and features/476-per-format-log-level-declarations.md D1'
+
+assert_command \
+    command     "check_report_names '$STDERR_JK' 'apache_mod_jk' 'notice' 1" \
+    label       'the unmapped word is reported under the connector format with its count' \
+    asserts     'A word outside the level map stays as written. The end-of-run report must name the connector format, the word exactly as the connector wrote it, and the one line that carried it.' \
+    produced_by 'read_and_process_logs() in ltl - the unregistered-level collection on the reject branch of the category gate, reported at the tail of the same sub' \
+    contract    'features/655-apache-mod-jk-connector-format.md D2 and AC6; features/476-per-format-log-level-declarations.md D6'
+
+assert_command \
+    command     "check_failure_classified '$RENDER_JK' 2" \
+    label       'ERROR and EMERGENCY are the connector failures' \
+    asserts     'The connector entries classify ERROR and EMERGENCY as failures and nothing as a success. Of the six included lines exactly two carry those levels, so FAILURE CLASSIFIED must read 2.' \
+    produced_by 'the classification declared on the connector entries, compiled by format_classification_src(); counted in read_and_process_logs() and rendered by print_summary_table()' \
+    contract    'features/655-apache-mod-jk-connector-format.md D3 (C5)'
+
+VERBOSE_JK="$TMP_DIR/connector-format-detection.txt"
+set +e
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum \
+    -V format-detection "$FIXTURE_CONNECTOR" ) > "$VERBOSE_JK" 2>"$VERBOSE_JK.stderr"
+verbose_jk_status=$?
+set -e
+if [[ "$verbose_jk_status" -ne 0 ]]; then
+    echo "  FAIL  $current_scenario :: ltl -V format-detection exited $verbose_jk_status" >&2
+    sed 's/^/        /' "$VERBOSE_JK.stderr" >&2
+    exit 1
+fi
+if ! assert_no_runtime_warnings "$VERBOSE_JK.stderr" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr-verbose")
+fi
+
+assert_command \
+    command     "grep -qE '^  unregistered_levels: notice=1\$' '$VERBOSE_JK'" \
+    label       'the per-file unregistered_levels key names notice=1' \
+    asserts     'The word outside the level map is recorded on the file it came from, exactly as written and with its line count, in the -V format-detection per-file unregistered_levels key.' \
+    produced_by 'emit_format_detection_verbose() in ltl (per-file unregistered_levels, fed by the reject branch of the category gate in read_and_process_logs())' \
+    contract    'features/655-apache-mod-jk-connector-format.md AC6; features/log-format-registry.md section -V format-detection section-contract (per-file unregistered_levels key)'
+
+assert_command \
+    command     "grep -qE '^  format: apache_mod_jk\$' '$VERBOSE_JK'" \
+    label       'the level-word fixture binds the base connector shape' \
+    asserts     'The fixture is written in the base connector shape (millisecond stamp, request-id bracket), so the words above were read by that entry and its level map.' \
+    produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+    contract    'features/655-apache-mod-jk-connector-format.md AC6 (C1)'
+
+fi
+
 if scenario_wanted declared-levels-in-help; then
 current_scenario="declared-levels-in-help"
 echo "[$current_scenario]"
@@ -892,6 +1033,18 @@ assert_command \
     produced_by 'print_help_formats() in ltl — the level statement is emitted only for an entry carrying a declaration' \
     contract    'features/476-per-format-log-level-declarations.md § Amendment of 2026-09-13 (--help formats states the declared levels for an entry that declares any and says nothing about levels for one that does not)'
 
+for jk_slug in apache_mod_jk apache_mod_jk_microseconds apache_mod_jk_seconds apache_mod_jk_no_request_id \
+               apache_mod_jk_microseconds_no_request_id apache_mod_jk_seconds_no_request_id; do
+    assert_command \
+        command     "check_help_connector_row '$HELP_FORMATS' '$jk_slug'" \
+        label       "$jk_slug is listed under Other formats with its failure rule and no success rule" \
+        asserts     'Each connector shape is its own format and belongs to no family, so it is listed under Other formats. It is not an event ledger, its failure rule is ERROR or EMERGENCY, it declares no success rule, and it states no levels because the words it writes map to severity names.' \
+        produced_by 'print_help_formats() in ltl, reading the compiled registry specs' \
+        contract    'features/655-apache-mod-jk-connector-format.md AC7 (C1, D3)'
+done
+
+fi
+
 echo
 echo "─────────────────────────────────────────"
 echo "  PASS: $pass    FAIL: $fail"
@@ -903,5 +1056,4 @@ if [[ "$fail" -gt 0 ]]; then
 fi
 echo "─────────────────────────────────────────"
 exit 0
-fi
 

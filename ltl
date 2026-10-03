@@ -2847,16 +2847,15 @@ my $format_registry_opts;
 # through format_scan_sub_resolve().
 my %format_scan_sub_cache;     # order signature => generated scan sub
 
-# Windchill Workgroup Manager msgtype letters → category vocabulary
-# (@log_levels). The severity letters map to the shared levels; the
-# object-lifecycle letters keep their identity as their own categories,
-# the way the GC pause forms do. A letter outside this table is left as
-# captured and falls to the category-vocabulary gate in
-# read_and_process_logs() like any unknown level.
-my %wgm_msgtype_names = (
-    C => 'CONFIG', D => 'DEBUG', E => 'ERROR', F => 'FINISH', I => 'INFO',
-    S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY',
-);
+# Level maps: a producer's own level tokens -> the category vocabulary
+# (@log_levels). The map is data on the entry (its level_map key), and
+# the level_map transform applies it; build_format_registry() gives each
+# declared map an index here and the transform reads it by that index,
+# the way generated classification reads @format_cls_sets. A token
+# outside the map is left as captured and falls to the category gate in
+# read_and_process_logs() like any unknown level, where it is counted
+# and reported rather than lost.
+my @format_level_maps;
 
 # Transform primitives: named post-capture mutation snippets spliced into
 # generated extraction closures. One resolution surface for this
@@ -2886,7 +2885,7 @@ my %format_transform_code = (
     chop_message        => q{ chop $message; },
     strip_pid           => q{ $message =~ s/\d+ (.*)$/$1/; },
     hoist_cpp_object    => q{ if( $message =~ /\w+\.cpp:\d+ / ) { $message =~ s/(\w+\.cpp:\d+) (.*)$/$2/; $object = $1; } },
-    wgm_msgtype         => q{ $category_bucket = $wgm_msgtype_names{$category_bucket} // $category_bucket; },
+    level_map           => q{ $category_bucket = $format_level_maps[LEVEL_MAP_ID]{$category_bucket} // $category_bucket; },   # LEVEL_MAP_ID: the entry's map index, set at codegen
 );
 
 # Declarative format definitions, in the static cascade order the elsif
@@ -2993,7 +2992,10 @@ sub format_registry_specs {
     # declares `columns "date time tz msgtype logid tid area message"` and
     # `columns_sep ": "`). The timestamp is ISO-8601 UTC with a fixed
     # millisecond fraction and a `Z` suffix outside the capture; the
-    # msgtype letter becomes a category through wgm_msgtype; the `P<hex>`
+    # msgtype letter becomes a category through the entry's level map (the
+    # severity letters map to the shared levels; the object-lifecycle
+    # letters keep their identity as their own categories, the way the GC
+    # pause forms do); the `P<hex>`
     # process id and `T<hex>` thread id keep the prefixes the log prints;
     # the area (dotted component path, `#`-qualified for sessions and
     # transactions) is the object. The area never contains a space or a
@@ -3008,10 +3010,12 @@ sub format_registry_specs {
                     samples => [ 'genlwsc.log.1', 'uwgm_client.log.1', 'uwgm.log.1', 'uwgm_client.log', 'genlwsc.log' ] },
       pattern_src => '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})(?:Z|[+-]\d{1,2}:\d{2}): ([A-Z]): (P[0-9a-f]+): (T[0-9a-f]+): ([^ :]+): (.*)',
       field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'platform'],[4,'thread'],[5,'object'],[6,'message'] ],
-      transforms => [ 'wgm_msgtype' ],
+      transforms => [ 'level_map' ],
+      level_map => { C => 'CONFIG', D => 'DEBUG', E => 'ERROR', F => 'FINISH', I => 'INFO',
+                     S => 'START',  T => 'TRACE', W => 'WARN',  X => 'CREATE', Y => 'DESTROY' },
       time => { layout => 'iso_ms', precision => 'ms', tz => 'utc', frac => 'fixed3' },
       duration_unit => undef, stats_eligible => 0,
-      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the wgm_msgtype letter map produces
+      levels => [ qw(CONFIG DEBUG ERROR FINISH INFO START TRACE WARN CREATE DESTROY) ],   # the names the letter map produces
       expect_ancestors => [],
       samples => [
         '2024-09-16T05:40:41.487Z: C: P3e68: T2950: $default: $generic: columns "date time tz msgtype logid tid area message"',
@@ -3403,6 +3407,157 @@ sub format_registry_specs {
         [ '2025-08-09 18:27:18', 'FORCE', 'twx_connection.cpp:246', undef, undef, undef, undef, undef, 'Run Error in the TWX processor thread, have to reinitialize. Error was [sdk_wrapper_->IsConnected() failed', undef, undef, '0', '0' ],
       ],
       expect_outcomes => [ 0, 2, 0 ] },
+    # Apache HTTP Server mod_jk (Tomcat connector) log. The connector writes
+    # one line per failure it handles (and per event at a more verbose
+    # JkLogLevel), in one shape built by its logging code:
+    #   [<stamp>] [<request id>] [<pid>:<tid>] [<level>] <function>::<source> (<line>): <message>
+    # with the stamp in the C library's `Www Mmm dd HH:MM:SS yyyy` order.
+    # The shapes differ along two axes, and each combination is its own
+    # entry, named by how it differs from the base shape:
+    #   - the stamp fraction: milliseconds (the default stamp format), none
+    #     (a stamp format without a fraction, or a build without
+    #     sub-second time), microseconds (the %q stamp directive);
+    #   - the request-id bracket: written from connector release 1.2.48 on
+    #     (`NO-ID`, `-`, or a request id), absent before it.
+    # Nothing else on the line varies by build. The weekday, the request
+    # id, pid:tid, the source file and its line number are matched and not
+    # kept: pid:tid identifies a thread handle rather than a pool, and the
+    # line number changes between builds of the same message, so either
+    # would split one failure into many rows. The object is the function
+    # name; the message keeps a per-worker `(tomcatN)` prefix, which tells
+    # the backends apart. The level word maps to the vocabulary through the
+    # entry's level map; a word outside it stays as written and is reported
+    # by the unregistered-level path. ERROR and EMERGENCY are failures and
+    # nothing is a success: the connector writes a line for what fails,
+    # not for every request, so it is not an event ledger. No zone is
+    # written and none is converted, so a connector line falls in the same
+    # bucket as its own server's access-log line.
+    { name => 'mtjk', slug => 'apache_mod_jk', match_type => 23, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{3} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'ms', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402 2026] [ZdK3fH8AAAEAAB2xGRQAAAAB] [1111:2224] [info] init_jk::mod_jk.c (3591): mod_jk/1.2.50 initialized',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'INFO', 'init_jk', undef, undef, undef, undef, undef, 'mod_jk/1.2.50 initialized', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkus', slug => 'apache_mod_jk_microseconds', match_type => 24, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{6} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'us', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981204 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114560 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402117 2026] [-] [1111:2224] [warn] ajp_service::jk_ajp_common.c (2953): (tomcat2) sending request to tomcat failed (recoverable), because of error during request sending (attempt=1)',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'WARN', 'ajp_service', undef, undef, undef, undef, undef, '(tomcat2) sending request to tomcat failed (recoverable), because of error during request sending (attempt=1)', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjks', slug => 'apache_mod_jk_seconds', match_type => 25, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2} \d{4})\] \[[^\]]*\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 's', tz => 'local', frac => 'none' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57 2026] [NO-ID] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02 2026] [NO-ID] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59 2026] [NO-ID] [1111:2224] [debug] jk_open_socket::jk_connect.c (817): socket TCP_NODELAY set to On',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'DEBUG', 'jk_open_socket', undef, undef, undef, undef, undef, 'socket TCP_NODELAY set to On', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkni', slug => 'apache_mod_jk_no_request_id', match_type => 26, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{3} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'ms', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402 2026] [1111:2224] [trace] ajp_send_request::jk_ajp_common.c (1736): enter',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'TRACE', 'ajp_send_request', undef, undef, undef, undef, undef, 'enter', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
+    { name => 'mtjkusni', slug => 'apache_mod_jk_microseconds_no_request_id', match_type => 27, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2}\.\d{6} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 'us', tz => 'local', frac => 'generic' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57.981204 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02.114560 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59.402117 2026] [1111:2224] [emerg] jk_shm_open::jk_shm.c (712): Unable to create shared memory segment',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'EMERGENCY', 'jk_shm_open', undef, undef, undef, undef, undef, 'Unable to create shared memory segment', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 2 ] },
+    { name => 'mtjksni', slug => 'apache_mod_jk_seconds_no_request_id', match_type => 28, scanned => 1, head_class => 'bracket',
+      pattern_src => '^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{2} \d{2}:\d{2}:\d{2} \d{4})\] \[\d+:\w+\] \[(\w+)\] (\w+)::[^ ]+ \(\d+\): (.*)',
+      field_map => [ [1,'timestamp_str'],[2,'category_bucket'],[3,'object'],[4,'message'] ],
+      transforms => [ 'level_map' ],
+      level_map => { trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN', error => 'ERROR', emerg => 'EMERGENCY' },
+      time => { layout => 'asctime', precision => 's', tz => 'local', frac => 'none' },
+      duration_unit => undef, stats_eligible => 0,
+      event_ledger => 0,
+      classification => { success => [], failure => [ { category_bucket => '^(?:ERROR|EMERGENCY)$' } ] },
+      expect_ancestors => [],
+      samples => [
+        '[Tue Aug 25 14:19:57 2026] [1111:2222] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 41754',
+        '[Fri Aug 21 11:51:02 2026] [1111:2223] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left',
+        '[Fri Aug 21 11:50:59 2026] [1111:2224] [info] init_jk::mod_jk.c (3591): mod_jk/1.2.42 initialized',
+      ],
+      expect => [
+        [ 'Aug 25 14:19:57 2026', 'ERROR', 'ajp_marshal_into_msgb', undef, undef, undef, undef, undef, '(tomcat1) failed appending the remote port 41754', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:51:02 2026', 'ERROR', 'service', undef, undef, undef, undef, undef, 'All tomcat instances failed, no more workers left', undef, undef, '0', '0' ],
+        [ 'Aug 21 11:50:59 2026', 'INFO', 'init_jk', undef, undef, undef, undef, undef, 'mod_jk/1.2.42 initialized', undef, undef, '0', '0' ],
+      ],
+      expect_outcomes => [ 2, 2, 0 ] },
     # CSV is a stateful per-file stage outside the ordered scan (D32): its
     # matcher is the two-line confirmation in read_and_process_logs()
     # (detect_and_parse_csv_header), not a regex, so this entry is never
@@ -3496,10 +3651,22 @@ sub timestamp_date_cache_restore {
 # Timestamp-parse closures per declared layout family (D31), each reading
 # the date's midnight from the cache above. The iso parser serves every
 # iso_* layout (fixed substr offsets); apache_clf parses the
-# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon.
+# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon;
+# asctime parses the C library's `Mmm dd HH:MM:SS yyyy` order (the weekday
+# that leads it is matched by the pattern and not captured), keyed on
+# `Mmm dd yyyy`, a form neither of the other two keys can take.
 my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
 sub compile_format_time_parser {
     my ($layout) = @_;
+    if ($layout eq 'asctime') {
+        return sub {
+            my $ts = $_[0];
+            my $date = substr($ts, 0, 7) . substr($ts, 16, 4);
+            my $midnight = $timestamp_date_cache{$date}
+                // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($ts, 4, 2), $format_month_map{ substr($ts, 0, 3) } - 1, substr($ts, 16, 4) ) );
+            return $midnight + substr($ts, 7, 2) * 3600 + substr($ts, 10, 2) * 60 + substr($ts, 13, 2);
+        };
+    }
     if ($layout eq 'apache_clf') {
         return sub {
             my $ts = $_[0];
@@ -3631,7 +3798,7 @@ sub format_sample_probes {
 }
 
 # Which probe layout an entry's time contract reads under; undef for
-# layouts the date probes do not apply to (apache_clf, csv).
+# layouts the date probes do not apply to (apache_clf, asctime, csv).
 sub format_probe_layout {
     my ($entry) = @_;
     my $layout = $entry->[FR_TIME]{layout} // '';
@@ -4368,6 +4535,11 @@ sub format_entry_block_src {
         if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }
         my $code = $format_transform_code{$t}
             or die "ltl: format registry: entry '$spec->{name}' references unknown transform '$t'\n";
+        if ($t eq 'level_map') {
+            die "ltl: format registry: entry '$spec->{name}' applies level_map but its level map has no index (build_format_registry() assigns one to every declared level_map)\n"
+                unless defined $spec->{_level_map_id};
+            $code =~ s/LEVEL_MAP_ID/$spec->{_level_map_id}/;
+        }
         push @body, $code;
     }
 
@@ -4402,7 +4574,9 @@ substr($timestamp_str, 19) = '';};
     my $layout = $spec->{time}{layout} // '';
     # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
     my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
-    my $compute = ($layout eq 'apache_clf')
+    my $compute = ($layout eq 'asctime')
+        ? q{do { my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($timestamp_str, 4, 2), $format_month_map{ substr($timestamp_str, 0, 3) } - 1, substr($timestamp_str, 16, 4) ) ); $midnight + substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2) }}
+        : ($layout eq 'apache_clf')
         ? q{do { my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) ) }; $midnight + substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2) }}
         : qq{do { my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) ) ); \$midnight + substr(\$timestamp_str, 11, 2) * 3600 + substr(\$timestamp_str, 14, 2) * 60 + substr(\$timestamp_str, 17, 2) }};
     # The memo-miss branch runs once per change of timestamp string between
@@ -4691,6 +4865,29 @@ sub build_format_registry {
         $spec->{_cls_src} = format_classification_src($spec);
     }
 
+    # Level maps (data on the entry, applied by the level_map transform):
+    # each declared map gets an index into @format_level_maps, which the
+    # transform's generated code reads. A map nothing applies, or a
+    # transform with no map to apply, is a declaration error.
+    @format_level_maps = ();
+    for my $spec (@specs) {
+        my $applies = grep { $_ eq 'level_map' } @{ $spec->{transforms} // [] };
+        my $map = $spec->{level_map};
+        die "ltl: format registry: entry '$spec->{name}' declares a level_map but its transforms do not apply it (produced_by format_registry_specs())\n"
+            if defined $map && !$applies;
+        die "ltl: format registry: entry '$spec->{name}' applies level_map but declares no level_map (produced_by format_registry_specs())\n"
+            if $applies && !defined $map;
+        next unless defined $map;
+        die "ltl: format registry: entry '$spec->{name}' level_map must be a non-empty hash of token => level name (produced_by format_registry_specs())\n"
+            unless ref $map eq 'HASH' && %$map;
+        for my $token (sort keys %$map) {
+            die "ltl: format registry: entry '$spec->{name}' level_map maps '$token' to a value that is not a non-empty name (produced_by format_registry_specs())\n"
+                unless length $token && defined $map->{$token} && !ref $map->{$token} && length $map->{$token};
+        }
+        push @format_level_maps, $map;
+        $spec->{_level_map_id} = $#format_level_maps;
+    }
+
     # Compile recognition patterns once; validate reserved slots.
     my %patterns;
     for my $spec (@specs) {
@@ -4857,6 +5054,16 @@ sub build_format_registry {
             die "ltl: format registry: entry '$spec->{name}' declares a level that is not a non-empty name (produced_by format_registry_specs())\n"
                 unless defined $level && !ref $level && length $level;
             $declarable{$level} = 1;
+        }
+    }
+    # A level map's target names face the same test: a mapped token whose
+    # name the tool cannot recognise would be translated only to be dropped
+    # by the category gate.
+    for my $spec (grep { $_->{level_map} } @specs) {
+        for my $token (sort keys %{ $spec->{level_map} }) {
+            my $level = $spec->{level_map}{$token};
+            die "ltl: format registry: entry '$spec->{name}' level_map maps '$token' to '$level', which is neither in the recognised level vocabulary nor declared by any entry - a line carrying it would be dropped by the category gate (produced_by format_registry_specs())\n"
+                unless $declarable{$level};
         }
     }
     my @cls_sources = ( [ 'the default classification rules classify', \%classification_default ] );
