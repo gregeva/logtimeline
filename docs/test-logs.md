@@ -40,6 +40,38 @@ Per family, both nodes together:
 
 Formats: access logs bind `access_common_duration` (microsecond `%D`, read with `-du us`); connector logs bind `apache_mod_jk`; Method Server and background-server logs bind `windchill_method_server`; GC logs bind `java_gc_g1_time` (the time-only decoration, no level or tags); ServerManager logs bind no format (#675). Background-server file stems are `BackgroundMethodServer`, `BGMSINDX` (indexing) and `BGMSWVS` (visualisation). Each family's files are also listed in that family's section below.
 
+### What each set shows, and the command that shows it
+
+Each row is a condition observed in the set, the files that carry it and a command, run from the set's folder, that puts it on the timeline. These are the scenarios for exercising existing capabilities and for finding the ones that are missing; every command below was run and shows what the row says.
+
+**`windchill-jdk17-two-node-fortnight/`**
+
+| Condition | Files | Command | What appears |
+|---|---|---|---|
+| Connector marshalling failures are the access log's 413s, hour for hour | `node1/apachelogs/mod_jk.log_2026-08-25_00_00_00`, `node1/apachelogs/access.log_2026-08-25_00_00_00` | `ltl -bs 60 -oe node1/apachelogs/mod_jk.log_2026-08-25_00_00_00` then `ltl -bs 60 -oe -i '" 413 ' node1/apachelogs/access.log_2026-08-25_00_00_00` | 102 connector errors and 102 requests with status 413, the same count in every hour (8, 14, 20, 25, 14, 8, 4, 2, 6 from 14:00 to 22:00). The two files on one timeline is the reading the connector format exists for |
+| Maintenance restart window: failures, then recovery, with held requests released | `node1/apachelogs/access.log_2026-08-30_00_00_00`, `node1/apachelogs/mod_jk.log_2026-08-30_00_00_00` | `ltl -bs 5 -st 01:00 -et 02:30 -oe -hf node1/apachelogs/access.log_2026-08-30_00_00_00 node1/apachelogs/mod_jk.log_2026-08-30_00_00_00` | Failures from 01:15 to 01:25 and again at 02:00 to 02:05 while the 2xx count halves; P95 duration in hours in the failing buckets, minutes outside them |
+| JDK 17 evacuation failure written as its own line | `node2/logs/BGMSWVS-260816022753624-2-GC.log` | `ltl -bs 1440 -i "To-space" node2/logs/BGMSWVS-260816022753624-2-GC.log` | 32 `To-space exhausted` records over the fortnight, two to four a day; the `Pause Young` that each one belongs to is the previous record |
+| Pause distribution and heap heatmap of a method server's fortnight | `node1/logs/MethodServer-260816022715264-1-GC.log` | `ltl -bs 60 -hg -hm bytes node1/logs/MethodServer-260816022715264-1-GC.log` | 22,951 pauses, P50 28 ms, P99 191 ms, P99.9 325 ms; the heap-delta heatmap climbs to 9.8 GiB on a 12 GiB heap |
+| A family no format reads (#675) | `node1/logs/ServerManager-2608160227-4140140-log4j.log` | `ltl node1/logs/ServerManager-2608160227-4140140-log4j.log` | `Read 46 lines, however no lines matched any of the patterns` |
+
+**`windchill-jdk21-balancer-outage/`**
+
+| Condition | Files | Command | What appears |
+|---|---|---|---|
+| The outage minute, from the connector | `node2/apachelogs/mod_jk.log_2026-08-21_00_00_00` | `ltl -bs 1 -st 11:40 -et 12:00 -oe node2/apachelogs/mod_jk.log_2026-08-21_00_00_00` | 110 errors at 11:50, 2,300 at 11:51, 9 at 11:52, nothing before or after; every line failure-classified |
+| What the users saw, and the surge that preceded it | `node2/apachelogs/access.log_2026-08-21_00_00_00` | `ltl -bs 1 -st 11:40 -et 12:00 -oe -hf node2/apachelogs/access.log_2026-08-21_00_00_00` | Eight requests a minute until 11:47, then 146, 1,200 and 1,000 a minute from 11:48 (a burst of 1,694 signed direct-download requests, P50 12 s), 9.5% failures at 11:50 and 99.9% at 11:51 (2,300 of 2,302), back to 100% success at 11:52 |
+| Both families on one clock | the two files above | `ltl -bs 1 -st 11:40 -et 12:00 -oe -hf node2/apachelogs/access.log_2026-08-21_00_00_00 node2/apachelogs/mod_jk.log_2026-08-21_00_00_00` | A two-format legend; the 11:51 bucket carries 2,300 access failures and 2,300 connector errors side by side, P50 duration 1.7 min against 1.4 s before the surge |
+| The method server's JVM through the outage: pause storm, full GC, restart | `node2/logs/MethodServer-260809041626499-3-GC.log` (ends 11:50:58), `node2/logs/MethodServer-260821115058428-4-GC.log` (begins 11:50:58) | `ltl -bs 1 -st "2026-08-21 11:40" -et "2026-08-21 12:00" -oe node2/logs/MethodServer-260809041626499-3-GC.log node2/logs/MethodServer-260821115058428-4-GC.log` | From one pause a minute to 20, 34 and 29 at 11:49 to 11:51, a `Pause Full` and a `Using G1` (the new JVM) both at 11:50, settling by 11:54 |
+| JDK 21 evacuation failure on the pause line | `node1/logs/MethodServer-260809041601031-1-GC.log` | `ltl -bs 1440 -i "Evacuation Failure" node1/logs/MethodServer-260809041601031-1-GC.log` | 1,047 `Pause Young` records carrying the suffix, by day; the JDK 17 set writes the same condition as a separate line |
+
+**`windchill-heap-pressure-restart/`**
+
+| Condition | Files | Command | What appears |
+|---|---|---|---|
+| A full collection every ten minutes, around the clock | `node1/logs/MethodServer-260718174708212-1-GC.log.0` | `ltl -bs 60 -oe -i "Pause Full" node1/logs/MethodServer-260718174708212-1-GC.log.0` | 6 `Pause Full` an hour from the first hour to the last, 9,664 in the file, every one caused by `System.gc()`: an explicit collection on a timer, not heap exhaustion |
+| The planned restart as the web tier saw it | `node1/apachelogs/access.log_2026-08-23_00_00_00`, `node1/apachelogs/mod_jk.log_2026-08-23_00_00_00` | `ltl -bs 1 -st 01:00 -et 01:20 -oe -hf node1/apachelogs/access.log_2026-08-23_00_00_00 node1/apachelogs/mod_jk.log_2026-08-23_00_00_00` | Failures at 01:05 and 01:06, nothing from 01:07 to 01:10, failures again at 01:11 and 01:12 as the new servers come up, then a bucket whose P50 duration is 8.7 hours: requests held across the restart and released at 01:13 |
+| The same restart from inside the method server | `node1/logs/MethodServer-2607181747-362981-log4j.log` (before), `node1/logs/MethodServer-2608230111-3901060-log4j.log.2026-08-23_1` (after) | `ltl -bs 1 -st 01:00 -et 01:20 -oe node1/logs/MethodServer-2607181747-362981-log4j.log node1/logs/MethodServer-2608230111-3901060-log4j.log.2026-08-23_1` | 3 FATAL, 17 ERROR and 716 INFO records in the shutdown minute 01:05, silence to 01:10, the startup's 161 INFO records at 01:11, ten errors at 01:12 |
+
 ---
 
 
