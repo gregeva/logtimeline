@@ -444,6 +444,9 @@ issue body; they are restated here, not reinterpreted.
   reference by no more than the intent's tolerance. 2,640 with room for five
   characters: the reference `2.6k`; `3 k` fits but moves the value 15%. 12.17 min
   with room for six: the reference `12.2m`; `12 min` moves it 1.6%.
+  **Tolerances locked by the architect (2026-10-04):** `precise` 0 (no
+  voluntary trade), `tabular` 5%, `prose` 25%, each the most a voluntary trade
+  may move a value from the reference. Each surface's intent is not yet locked.
 
 ### Governing decisions in other records, read and in force
 
