@@ -504,9 +504,10 @@ issue body; they are restated here, not reinterpreted.
   ... the value is a six character wide value, and the intent is precise, then
   it should print a precise value ... If available character width is four,
   then the rule of applying five characters allowed before truncation occurs is
-  wrong." For `precise`, as many digits as the width allows; for `tabular` and
-  `prose`, at most five digits, within the width and no wider than the climbed
-  spelling. `-pv` switches the legend's values from `tabular` to `precise`
+  wrong." **Amended the same day:** the unclimbed value carries at most five
+  digits under every intent, within the width (the architect: "No, it should
+  not be as many as the width allows. That's wrong ... Fix at 5. Keep in mind a
+  producer wanting such precision should ask explicitly"). `-pv` switches the legend's values from `tabular` to `precise`
   ("the option precise values would essentially change the intent for those
   values"): the legend is `tabular` by default, which amends the surface
   assignment of D23 (legend totals and rates were `precise`). The `_nice` CSV
