@@ -463,6 +463,19 @@ issue body; they are restated here, not reinterpreted.
   is a field of its budget table row (the width-passing surfaces have rows of
   their own) and the tolerances are one table beside it, so a retune edits one
   line and no call site.
+  **The order of what gives way, per intent (architect, 2026-10-04):** for
+  `tabular`, "Tabular should first give up on the unit name. And then some of
+  the decimal precision, but not all of it. This is where I think your
+  tolerance notion comes in. And then the space. And then more decimals of
+  precision." So an intent is its tolerance and its own order: `tabular` keeps
+  the reference's digits and the space while the unit shortens (long, medium,
+  short); then gives up decimals within 5%, still loose at the short tier; then
+  the space; then the decimals the width forces. With room for `16.8 kB` a
+  bytes column keeps it rather than `17 kilobytes`; 12.17 min with six
+  characters reads `12.2 m`, with five `12 m`. `precise` keeps its order
+  (within each tier the space before the unit shortens; digits last), `prose`
+  its preference for the full word with the fewest digits within 25%. Each
+  intent's tolerance and order are one entry of one table.
 
 ### Governing decisions in other records, read and in force
 
