@@ -11,6 +11,7 @@ logs/
 ├── UDM/                     # User-defined-metric logs (pattern + CSV modes)
 ├── WGM/                     # SolidWorks Workgroup Manager client logs
 ├── MethodServer/            # Windchill Method Server / Background Method Server logs
+├── Sets/                   # Environment sets: every log family of one environment over one period (§ Sets)
 ├── IntegrationRuntimeLogs/  # ThingWorx Integration Runtime logs (yyyy-dd-MM dates)
 └── ThingworxLogs/           # ThingWorx application logs
     ├── CXS/                 # ThingWorx Connection Server logs
@@ -18,6 +19,29 @@ logs/
 ```
 
 ---
+
+## Sets/ - Environment Sets (every log family of one environment over one time frame)
+
+A set is everything one PLM application environment wrote over one period, kept together so that the families can be read against each other: the Apache access log, the `mod_jk` connector log, the Method Server, Background Method Server and ServerManager `log4j` logs, and each JVM's G1 GC log. Every family in every set stamps UTC, so a restart or an outage shows at the same second in each of them. Each set has two nodes, `node1/` and `node2/`, each with the deployment's own layout: `apachelogs/` (access and connector logs, daily rotation `_YYYY-MM-DD_00_00_00`) and `logs/` (the `log4j` logs with their `.YYYY-MM-DD_N` rotations, and the `-GC.log` files, one per JVM start). File names are the deployment's own; host names appear only inside a few `log4j` records.
+
+| Set | Environment | Period | Condition | Files | Size | Lines |
+|---|---|---|---|---|---|---|
+| `windchill-jdk17-two-node-fortnight/` | Windchill 13.0.2, OpenJDK 17.0.13, G1, 12 GB method-server heap, 8 GB background heap | 2026-08-19 to 2026-08-31 (GC logs from 2026-08-16) | Steady fortnight: daily connector marshalling failures (the 413s), one maintenance restart window on 2026-08-30 from 01:18 to 02:07 UTC on both nodes (`All tomcat instances failed`, connect failures, then recovery), and 36 `To-space exhausted` evacuation failures on the background servers, two to four a day from 2026-08-17 to 2026-08-29. GC logs limited to five JVMs: both method servers, two background servers, one ServerManager | 404 | 4.3GB | 26,060,315 |
+| `windchill-jdk21-balancer-outage/` | Windchill 13.12, OpenJDK 21.0.11, G1, 5.9 GB method-server heap, 4.9 GB background heap | 2026-08-19 to 2026-08-31 (GC logs from 2026-08-09) | Balancer outage on 2026-08-21: node 1's method server restarted at 11:45:40 UTC and node 2's at 11:50:58; the connector wrote 8 lines on node 1 (11:45:33 to 11:45:40) and 2,377 on node 2 (11:50:50 to 11:52:01), `All tomcat instances failed, no more workers left` on nearly every one; the GC logs of both method servers end and begin at those seconds. A second 59-line burst on node 2 on 2026-08-29 at 08:56:57. The JDK 21 GC logs carry `Evacuation Failure` on the pause line (1,047 on node 1's method server) | 231 | 1.4GB | 9,789,647 |
+| `windchill-heap-pressure-restart/` | Windchill 12.12, JVM version not written in the GC log, G1, 5.9 GB method-server heap, 4.9 GB background heap | 2026-08-19 to 2026-08-31 (access logs 2026-08-19 to 2026-08-23 only; GC logs from 2026-07-18) | Heap pressure and a planned restart: every JVM's GC log carries thousands of `Pause Full` collections before the restart on 2026-08-23 between 01:05 and 01:13 UTC (the connector's 83 lines are that window), and continues after it with full collections still frequent. The smallest set; every family of a two-node environment at manageable size | 142 | 213MB | 1,981,965 |
+
+Per family, both nodes together:
+
+| Set | access | mod_jk | MethodServer | Background servers | ServerManager | GC |
+|---|---|---|---|---|---|---|
+| `windchill-jdk17-two-node-fortnight/` | 26 files, 2.2GB, 8,266,583 | 23 files, 1,254 lines | 252 files, 1.9GB, 16,291,556 | 66 files, 79MB, 374,948 | 32 files, 3.0MB, 14,694 | 5 files, 82MB, 1,111,280 |
+| `windchill-jdk21-balancer-outage/` | 26 files, 297MB, 1,008,114 | 3 files, 2,444 lines | 125 files, 887MB, 6,965,816 | 41 files, 97MB, 631,359 | 26 files, 25MB, 178,694 | 10 files, 73MB, 1,003,220 |
+| `windchill-heap-pressure-restart/` | 10 files, 43MB, 265,040 | 2 files, 83 lines | 42 files, 44MB, 268,980 | 42 files, 14MB, 35,607 | 28 files, 3.3MB, 14,217 | 18 files, 108MB, 1,398,038 |
+
+Formats: access logs bind `access_common_duration` (microsecond `%D`, read with `-du us`); connector logs bind `apache_mod_jk`; Method Server and background-server logs bind `windchill_method_server`; GC logs bind `java_gc_g1_time` (the time-only decoration, no level or tags); ServerManager logs bind no format (#675). Background-server file stems are `BackgroundMethodServer`, `BGMSINDX` (indexing) and `BGMSWVS` (visualisation). Each family's files are also listed in that family's section below.
+
+---
+
 
 ## AccessLogs/ - HTTP Request Logs (duration, bytes, status)
 
@@ -44,6 +68,9 @@ logs/
 | `localhost_access_log-twx01-twx-thingworx-4.2026-01-26.txt` | Tomcat 9 | milliseconds (%D, fractional, three places) | duration, bytes, thread, session | 118MB | 517,684 | The common-plus-duration-thread-session shape (`access_common_duration_thread_session`): a fractional millisecond duration, the thread name on every line, a session id on a third to four fifths of the lines and `-` elsewhere. Thread-session shape specimen; no line carries `null` as its thread |
 | `access.log-20260609` | nginx (custom `log_format`) | none read | bytes | 37MB | 219,933 | Combined format plus a quoted forwarded-for and six `key="value"` pairs (a decimal-seconds request time among them). Binds `access_combined`; no duration is read from a custom nginx format. Two lines carry a populated remote user |
 | `really-big/*` | Tomcat 9 (thirty days) | milliseconds (%D); fractional on the later shape | duration, bytes; thread and session on the later shape | 8.5GB | — | Really big access logs from five servers over 30 days (`-0` to `-4`, thirty files each). The shape changes on one date on every server: the common-plus-duration shape (`access_common_duration`, integer milliseconds, 90 files) becomes the thread-session shape (`access_common_duration_thread_session`, fractional milliseconds, 60 files). 3,290 thread-session lines across 31 files carry the literal `null` as their thread (from 1 to 558 per file) |
+| `Sets/windchill-jdk17-two-node-fortnight/node*/apachelogs/access.log_*` | Apache HTTP Server 2.x (Windchill) | microseconds (%D), read with `-du us` | duration, bytes | 2.2GB | 8,266,583 | Thirteen daily rotations per node, 2026-08-19 to 2026-08-31, the busiest of the three sets (up to 134MB a day). The 413s match the connector's marshalling failures to the second; the 503s of 2026-08-30 01:18 to 02:07 match its restart window. See § Sets |
+| `Sets/windchill-jdk21-balancer-outage/node*/apachelogs/access.log_*` | Apache HTTP Server 2.x (Windchill) | microseconds (%D), read with `-du us` | duration, bytes | 297MB | 1,008,114 | Thirteen daily rotations per node, 2026-08-19 to 2026-08-31; the 2026-08-21 files carry the balancer outage of 11:45 to 11:52. See § Sets |
+| `Sets/windchill-heap-pressure-restart/node*/apachelogs/access.log_*` | Apache HTTP Server 2.x (Windchill) | microseconds (%D), read with `-du us` | duration, bytes | 43MB | 265,040 | Five daily rotations per node, 2026-08-19 to 2026-08-23, ending in the planned restart of 2026-08-23 01:05 to 01:13. See § Sets |
 
 **Format**: the access-log family (`access_common`, `access_common_duration`, `access_common_duration_thread_session`/`_us`, `access_combined`, `access_combined_duration`, `access_common_duration_bracketed`): the Common Log Format with the shape's trailing fields; a bare `%D` is read in milliseconds (Tomcat 6-9) unless `-du us` names the microsecond producers (Apache HTTP Server, Tomcat 10.1+); nothing on the line tells them apart
 ```
@@ -104,6 +131,9 @@ Server-side `log4j` diagnostic logs from Windchill Method Server and Background 
 | `multi-node-prod/06Aug2025/` | Node2–4, one unrolled file per node | 4 (MethodServer) | ~21MB | 110,386 | Smaller single-rotation slice of the same set (88% records) |
 | `tests/fixtures/message-control-characters-unmatched.txt` | Two matched lines around one space-led continuation line no format recognises | 1 | 270B | 3 | The one-unmatched-line fixture for `tests/validate-message-control-characters.sh` and the unmatched scenario of `tests/validate-filter-summary.sh` (read 3, unmatched 1, included 2) |
 | `tests/fixtures/log-level-outside-vocabulary.txt` | Two INFO lines around one line whose level, NOTICE, the format matches but the log-level vocabulary does not carry | 1 | 250B | 3 | The vocabulary-rejection fixture for `tests/validate-filter-summary.sh`: the NOTICE line is matched, then dropped at the category gate |
+| `Sets/windchill-jdk17-two-node-fortnight/node*/logs/` | Two nodes, thirteen days, one method server and three background services per node (`BackgroundMethodServer`, `BGMSINDX`, `BGMSWVS`) | 318 (252 MethodServer, 66 background) | 2.0GB | 16,666,504 | The largest method-server set, 9 to 14 rotations a day per node on weekdays. The ServerManager logs beside them bind no format (#675). See § Sets |
+| `Sets/windchill-jdk21-balancer-outage/node*/logs/` | Two nodes, thirteen days; node 1's method server from 2026-08-18 | 166 (125 MethodServer, 41 background) | 984MB | 7,597,175 | The 2026-08-21 rotations hold both method-server restarts (11:45:40 and 11:50:58). See § Sets |
+| `Sets/windchill-heap-pressure-restart/node*/logs/` | Two nodes, thirteen days, a planned restart on 2026-08-23 at 01:05 to 01:13 splitting every service's rotation sequence | 84 (42 MethodServer, 42 background) | 58MB | 304,587 | Smallest complete two-node set; every day's rotation is a single file of about 1MB. See § Sets |
 
 **Format**: `windchill_method_server` — `log4j` pattern layout `%d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%t] %c %x - %m`, one line per record, no self-describing header (unlike WGM's format above). Occurrences only: no line-level duration, bytes or count.
 ```
@@ -136,12 +166,17 @@ Fields: `date time,ms` (space-separated, millisecond precision, no explicit time
 
 Unified-logging (JDK 9+) G1 logs, `[info]` level throughout (no `[debug]`/`[trace]` detail in any file). Pause lines (`Pause Young`/`Full`/`Remark`/`Cleanup` with heap `N->N(M)` and pause ms) match the GC format; the remainder (`Concurrent Mark Cycle`, `Using G1`, …) do not — in the largest file ~71% of lines are pause lines.
 
+The `GC/logs-gc/` files carry the time, level and tags decoration (`java_gc_g1`); the environment sets under `Sets/` carry the time-only decoration (`java_gc_g1_time`), JDK 17 and JDK 21, listed below and in § Sets.
+
 | File | Metrics | Size | Lines | Use Case |
 |---|---|---|---|---|
 | `gc-twx01-twx-thingworx-2.out.8` | duration (pause), heap delta | 79MB | 781,118 | Largest GC log; best single file for scale testing |
 | `gc-twx01-twx-thingworx-3.out.6` | duration (pause), heap delta | 62MB | 599,346 | Second-largest GC log |
 | `gc-twx01-twx-thingworx-0.out.6` | duration (pause), heap delta | 50MB | 495,015 | Third-largest GC log |
 | (many smaller rotations) | duration (pause), heap delta | 1.4KB–33MB | — | Rotated GC logs from 5 servers |
+| `Sets/windchill-jdk17-two-node-fortnight/node*/logs/*-GC.log` | duration (pause), heap delta | 82MB | 1,111,280 | Five JDK 17 logs, 2026-08-16 to 2026-08-30, time-only decoration (`java_gc_g1_time`): both method servers (about 23,000 pauses each), two background servers carrying `To-space exhausted` as a separate line (4 and 32 times), one 288-line ServerManager log for quick iteration |
+| `Sets/windchill-jdk21-balancer-outage/node*/logs/*-GC.log` | duration (pause), heap delta | 73MB | 1,003,220 | Ten JDK 21 logs, 2026-08-09 to 2026-08-31, time-only decoration; `Evacuation Failure` written on the pause line (1,047 on node 1's method server); the method-server logs break at the 2026-08-21 restarts |
+| `Sets/windchill-heap-pressure-restart/node*/logs/*-GC.log*` | duration (pause), heap delta | 108MB | 1,398,038 | Eighteen logs, 2026-07-18 to 2026-08-31, time-only decoration, JVM version not written; the JVMs before the 2026-08-23 restart carry thousands of `Pause Full` each (up to 11,828), including `.log.0` and `.log.1` size rotations; `Pause Full` continues after the restart |
 
 **Format**: JVM unified logging
 ```
@@ -149,6 +184,45 @@ Unified-logging (JDK 9+) G1 logs, `[info]` level throughout (no `[debug]`/`[trac
 ```
 
 ---
+
+## Sets/*/node*/apachelogs/mod_jk.log_* - Apache mod_jk Connector Logs
+
+The connector's error log on each Apache node, daily rotation named like the access log beside it. One line shape across every file (millisecond stamp, request-id placeholder, `apache_mod_jk`), every line at `error` level. The errors correlate with the access log to the second: each `failed appending ...` marshalling error is one HTTP 413, `All tomcat instances failed, no more workers left` is a 503 window.
+
+| Folder | Files | Lines | Use Case |
+|---|---|---|---|
+| `Sets/windchill-jdk17-two-node-fortnight/node*/apachelogs/` | 23 | 1,254 | Steady failures: 649 query-string, 116 remote-port, 92 activation-state and 86 local-address marshalling failures over thirteen days, 95 all-workers-failed lines in the 2026-08-30 restart window |
+| `Sets/windchill-jdk21-balancer-outage/node*/apachelogs/` | 3 | 2,444 | The outage burst: 2,377 lines in 71 seconds on node 2 and 8 on node 1 on 2026-08-21, 2,411 of them all-workers-failed; a 59-line burst on node 2 on 2026-08-29 |
+| `Sets/windchill-heap-pressure-restart/node*/apachelogs/` | 2 | 83 | The restart window alone: connect failures and all-workers-failed lines between 01:05 and 01:13 on 2026-08-23 |
+
+**Format**: `apache_mod_jk`
+```
+[Sun Aug 30 01:18:06.969 2026] [NO-ID] [4140494:139979065804352] [error] ajp_send_request::jk_ajp_common.c (1777): (tomcat1) connecting to backend failed. Tomcat is probably not started or is listening on the wrong port (errno=111)
+[Sun Aug 30 01:18:07.070 2026] [NO-ID] [4140494:139979065804352] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+```
+`[weekday month day HH:MM:SS.mmm year] [request id] [pid:tid] [level] function::source (line): (worker) message`; no time zone written, UTC on every set. The committed fixtures under `tests/fixtures/format-detection/apache-mod-jk*.txt` are scrubbed slices and synthetic variants of this family (see the manifest there).
+
+---
+
+## Sets/*/node*/logs/ServerManager-*-log4j.log* - Windchill ServerManager Logs
+
+The ServerManager is the process that starts and monitors the method servers on a node; its `log4j` log sits beside theirs with the same file naming and daily rotation. **No format reads it** (#675, filed from these sets): every line is unmatched, with detection and with `-lf windchill_method_server`. The layout differs from the Method Server's in one place: `logger - message` with a single space, where the Method Server writes an empty NDC field and two spaces.
+
+| Folder | Files | Lines | Use Case |
+|---|---|---|---|
+| `Sets/windchill-jdk17-two-node-fortnight/node*/logs/` | 32 | 14,694 | Smallest files of the family (45 lines on the smallest); the reproduction for #675 |
+| `Sets/windchill-jdk21-balancer-outage/node*/logs/` | 26 | 178,694 | Densest ServerManager logs: RMI connection errors dominate |
+| `Sets/windchill-heap-pressure-restart/node*/logs/` | 28 | 14,217 | Rotation sequence split by the 2026-08-23 restart |
+
+Across the 86 files, 82% of records are ERROR (RMI connection handling), 9% WARN and 9% INFO: a `wt.summary.general` line every ten minutes with the JVM's heap and non-heap usage, and a liveness ping every five minutes. Stack-trace continuation lines follow the ERROR records.
+
+```
+2026-08-30 00:02:50,656 INFO  [WindchillAIAssistantPinger] wt.server.manager.startup - WindchillAIAssistant at port 8100 is alive.
+2026-08-30 00:07:18,134 INFO  [wt.jmx.core.SharedScheduledExecutor.worker] wt.summary.general - JVMName=4140140@node1.example.internal, HeapMemoryUsage=2982303968, NonHeapMemoryUsage=122...
+```
+
+---
+
 
 ## ThingworxLogs/ - ThingWorx Application Logs
 
@@ -331,3 +405,7 @@ request_timestamp,response_timestamp,latency_ms,request_size,response_size,reque
 | **Quick tests (small files)** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05-5k.txt`, `Codebeamber/*`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.GetComplexPlotByIndex.log` |
 | **Adversarial/malformed input** | `AccessLogs/localhost_access_log.2025-03-21.txt` (corrupt concatenated records — see AccessLogs table note) |
 | **Large file stress tests** | `AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-05.txt`, `ThingworxLogs/CustomThingworxLogs/ScriptLog.2025-04-09.*.log` |
+| **Cross-family correlation (access, connector, method server, GC on one clock)** | `Sets/*` (§ Sets); the outage: `Sets/windchill-jdk21-balancer-outage/node2/*/*2026-08-21*` |
+| **Time-only G1 decoration (`java_gc_g1_time`), JDK 17 and 21** | `Sets/*/node*/logs/*-GC.log*` |
+| **Connector errors beside access statuses** | `Sets/*/node*/apachelogs/mod_jk.log_*` with the same day's `access.log_*` |
+| **Unrecognised family (#675)** | `Sets/*/node*/logs/ServerManager-*-log4j.log*` |
