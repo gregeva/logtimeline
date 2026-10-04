@@ -941,19 +941,34 @@ my @number_unit_ladder = (
 # the width a surface has, and the source's resolution, may allow fewer.
 my %tier_decimals = ( short => 1, medium => 1, long => 2 );
 
-# The width walk: the (tier, fit) steps, most readable first, a surface whose
-# row names no tier tries in order. A whole word keeps its space, so the long
-# tier has no tight step.
+# Every (tier, fit) spelling a value can take. A whole word keeps its space,
+# so the long tier has no tight step.
 my @value_walk = ( [ long => 'loose' ], [ medium => 'loose' ], [ medium => 'tight' ], [ short => 'loose' ], [ short => 'tight' ] );
 
-# Each intent's tolerance: the most a voluntary trade (a digit given up for the
-# space or a longer unit) may move a value from its reference, the most exact
-# spelling that fits the width. A loss the width forces is in the reference and
-# is never limited. A surface names its intent in its budget row.
-my %value_tolerance = (
-    precise => 0,       # a value read on its own terms: no voluntary trade
-    tabular => 0.05,    # a column of values read against each other
-    prose   => 0.25,    # a number inside a sentence: the full word, digits given up within the tolerance even with room
+# Each intent: its tolerance, the most a voluntary trade may move a value from
+# its reference (the most exact spelling that fits the width; a loss the width
+# forces is in the reference and is never limited), and its walk, the order in
+# which the unit name, the decimals and the space give way. A step names a
+# tier, a fit and its digits: 'exact' keeps the reference's, 'within' gives up
+# decimals within the tolerance, 'fewest' gives up every decimal the tolerance
+# allows even with room. A surface names its intent in its budget row; a
+# surface whose row names no tier takes the first step at which every value
+# it shows fits, and the reference where none does.
+my %value_intent = (
+    precise => {    # a value read on its own terms: no voluntary trade
+        tolerance => 0,
+        walk      => [ [ long => 'loose', 'exact' ], [ medium => 'loose', 'exact' ], [ medium => 'tight', 'exact' ],
+                       [ short => 'loose', 'exact' ], [ short => 'tight', 'exact' ] ],
+    },
+    tabular => {    # a column of values read against each other: the unit name, then decimals within the tolerance, then the space
+        tolerance => 0.05,
+        walk      => [ [ long => 'loose', 'exact' ], [ medium => 'loose', 'exact' ], [ short => 'loose', 'exact' ],
+                       [ short => 'loose', 'within' ], [ short => 'tight', 'within' ] ],
+    },
+    prose => {      # a number inside a sentence: the full word, digits given up within the tolerance even with room
+        tolerance => 0.25,
+        walk      => [ map { [ @$_, 'fewest' ] } @value_walk ],
+    },
 );
 
 # The budget table: one row per display surface with a fixed budget. A row
@@ -964,8 +979,8 @@ my %value_tolerance = (
 # row name, and its own width where the row's width is the surface's cell; it
 # never passes a tier, a fit or decimals. The percentage rows carry the
 # parameters of docs/percentage-presentation.md § The surfaces. A row names
-# its intent (%value_tolerance); a row with no tier walks for one
-# (@value_walk), against its own width or the width its surface passes.
+# its intent (%value_intent); a row with no tier walks for one (the intent's
+# walk), against its own width or the width its surface passes.
 my %value_budget = (
     'timeline column'  => { intent => 'tabular' },
     'timeline count cell' => { intent => 'tabular' },
@@ -14130,7 +14145,7 @@ sub value_text {
 
     my $kind = resolve_value_kind(%p);
     $row = value_walk_row( $kind, $row, $width, [$value], $p{unit} ) unless defined $row->{tier};
-    my $reference = ( $row->{intent} // '' ) eq 'prose' ? value_reference( $kind, $value, $p{unit}, $row, $width ) : undef;
+    my $reference = ( $row->{digits} // '' ) eq 'fewest' ? value_reference( $kind, $value, $p{unit}, $row, $width ) : undef;
     my ($text) = value_spelling( $kind, $value, $p{unit}, $row, $width, $reference );
     return $text;
 }
@@ -14158,9 +14173,9 @@ sub value_distance {
 }
 
 # A value's spelling at the row's tier and fit: the most decimals, up to the
-# tier's maximum (or the precision the row fixes), that fit the width; for the
-# prose intent, the fewest decimals within its tolerance of the reference.
-# Returns the text and the value it shows.
+# tier's maximum (or the precision the row fixes), that fit the width; with a
+# reference and the row's digits 'fewest', the fewest decimals within the
+# intent's tolerance of it. Returns the text and the value it shows.
 sub value_spelling {
     my ($kind, $value, $unit, $row, $width, $reference) = @_;
     my $max = $row->{decimals} // $tier_decimals{ value_row_field( $row->{tier}, $kind ) };
@@ -14170,8 +14185,8 @@ sub value_spelling {
         push @fitting, \@spelling if !defined $width || length( $spelling[0] ) <= $width;
     }
     return value_arm( $kind, $value, $unit, $row, 0 ) unless @fitting;
-    if ( defined $reference ) {
-        my $tolerance = $value_tolerance{ $row->{intent} };
+    if ( defined $reference && ( $row->{digits} // '' ) eq 'fewest' ) {
+        my $tolerance = $value_intent{ $row->{intent} }{tolerance};
         for my $spelling ( reverse @fitting ) {
             return @$spelling if value_distance( $spelling->[1], $reference ) <= $tolerance + 1e-12;
         }
@@ -14179,40 +14194,41 @@ sub value_spelling {
     return @{ $fitting[0] };
 }
 
-# The value a value's most exact spelling shows: across every step of the
-# walk, at the most decimals that fit the width, the spelling nearest the value.
+# The value a value's most exact spelling shows: across every spelling, at the
+# most decimals that fit the width, the one nearest the value.
 sub value_reference {
     my ($kind, $value, $unit, $row, $width) = @_;
     my $best;
     for my $step (@value_walk) {
-        my ( undef, $shown ) = value_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1] }, $width );
+        my ( undef, $shown ) = value_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1], digits => undef }, $width );
         $best = $shown if !defined $best || abs( $shown - $value ) < abs( $best - $value );
     }
     return $best;
 }
 
-# The tier and fit a row that names none takes: the first step of the walk,
-# most readable first, at which every value fits the width and no value is
-# moved from its reference by more than the row's intent tolerates. A loss the
-# width forces is in the reference, so when no step is within the tolerance the
-# last step (the most exact) is taken.
+# The tier and fit a row that names none takes: the first step of its
+# intent's walk at which every value fits the width and shows what the step's
+# digits allow ('exact': the reference; 'within' and 'fewest': no further from
+# it than the intent tolerates). When no step does, the most exact spelling:
+# the width has forced the loss.
 sub value_walk_row {
     my ($kind, $row, $width, $values, $unit) = @_;
-    my $tolerance = $value_tolerance{ $row->{intent} // 'precise' };
+    my $intent = $value_intent{ $row->{intent} // 'precise' };
     my @values = grep { defined } @$values;
     my @references = map { value_reference( $kind, $_, $unit, $row, $width ) } @values;
-    for my $step (@value_walk) {
-        my $candidate = { %$row, tier => $step->[0], fit => $step->[1] };
+    for my $step ( @{ $intent->{walk} } ) {
+        my $candidate = { %$row, tier => $step->[0], fit => $step->[1], digits => $step->[2] };
+        my $allowed = $step->[2] eq 'exact' ? 0 : $intent->{tolerance};
         my $within = 1;
         for my $i ( 0 .. $#values ) {
-            my ( $text, $shown ) = value_spelling( $kind, $values[$i], $unit, $candidate, $width, $row->{intent} eq 'prose' ? $references[$i] : undef );
-            next if ( !defined $width || length($text) <= $width ) && value_distance( $shown, $references[$i] ) <= $tolerance + 1e-12;
+            my ( $text, $shown ) = value_spelling( $kind, $values[$i], $unit, $candidate, $width, $references[$i] );
+            next if ( !defined $width || length($text) <= $width ) && value_distance( $shown, $references[$i] ) <= $allowed + 1e-12;
             $within = 0;
             last;
         }
         return $candidate if $within;
     }
-    return { %$row, tier => $value_walk[-1][0], fit => $value_walk[-1][1] };
+    return { %$row, tier => $value_walk[-1][0], fit => $value_walk[-1][1], digits => 'exact' };
 }
 
 # The row a surface that passes a width renders a column with: its budget

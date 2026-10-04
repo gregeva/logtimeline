@@ -1195,12 +1195,13 @@ metric is therefore asserted only for the built-in duration.
 
 **Drop 2 (2026-10-04): the width rule with intents (D23).** `value_column()`
 resolves a width-passing surface's tier and fit once per column through
-`value_walk_row()`: the steps of `@value_walk` in order, most readable first,
-the first at which every value fits the width and no value is moved from its
-reference (`value_reference()`: the most exact spelling that fits, across all
-steps) by more than the row's intent tolerates (`%value_tolerance`). Each value's
-decimals then come from `value_spelling()`: the most that fit, up to the tier's
-maximum, or, for `prose`, the fewest within the tolerance. Every row of
+`value_walk_row()`: the steps of the row's intent's walk in order
+(`%value_intent`: each intent's tolerance and its order of what gives way),
+the first at which every value fits the width and shows what the step allows
+(the reference's digits, or digits within the tolerance), the reference being
+`value_reference()`, the most exact spelling that fits across every spelling.
+Each value's decimals then come from `value_spelling()`: the most that fit, up
+to the tier's maximum, or, for `prose`, the fewest within the tolerance. Every row of
 `%value_budget` names its intent; the width-passing surfaces have rows of their
 own (*timeline column*, *timeline count cell*, *messages total*); a row that
 names no tier walks for one on its own value (*notice*). The arms return the
@@ -1217,7 +1218,10 @@ column, and the walk takes a voluntary trade only within the column's intent.
 
 Proven in drop 2 by `tests/validate-value-display.sh` scenarios *fit-sweep*
 (AC3, AC4, AC11, AC12), *common-maxima* (AC5, on the proposed maxima),
-*boundary-carry* (AC10), *messages-total* (AC17) and *axis-tick* (AC22); the
+*boundary-carry* (AC10), *messages-total* (AC17) and *axis-tick* (AC22), and
+the order of what gives way for `tabular` (*fit-sweep*: 16,800 bytes reads
+`16.8 kilobytes` or `16.8 kB`, `17 kB` only where `16.8 kB` does not fit; it
+fails on the first walk, which read `17 kilobytes` at width 180); the
 assertions of each fail against the drop 1 tree except *messages-total*'s,
 proven on a doctored render (the drop 1 total column did not overflow these
 widths), and `validate-byte-units` re-pointed to the carry (999,999 bytes reads
@@ -1225,17 +1229,18 @@ widths), and `validate-byte-units` re-pointed to the carry (999,999 bytes reads
 observed-zero bytes assertion accepts any byte spelling of zero (`0 B`, `0B`,
 `0 bytes`): the invariant is that the zero shows.
 
-Regression goldens moved by drop 2, against drop 1's: 57 of 74 files, every
-changed value in a class.
+Regression goldens moved by drop 2, against drop 1's, every changed value in a
+class (the first walk, before the order of D23, gave up a significant digit on
+216 values; this one on 87, every one within 5%).
 
 | Class | Values | Example |
 |---|---|---|
-| same value, another tier or fit (the walk) | 312 | `3m` reads `3min`; `3 MB` reads `3MB` |
-| more decimals at the long tier | 81 | `3 minutes` reads `2.96 minutes` |
-| a digit traded within 5% for the space or a longer unit (`tabular`, D23) | 54 | `885.5 kB` reads `885 kilobytes`; `50.8s` reads `51sec` |
+| the space alone (the walk) | 167 | `3m` reads `3 m` |
+| same value, another tier or fit (the walk) | 161 | `3.7 kB` reads `3.7 kilobytes` |
+| more decimals at the long tier | 73 | `3 minutes` reads `2.96 minutes` |
 | a count at the medium tier's one decimal (the proposed maxima) | 39 | `1.68 k` reads `1.7 k` |
 | a millisecond-source value at the millisecond step loses its decimal (D19) | 25 | `207.7ms` reads `208ms`; `3.6ms` reads `4ms` |
-| the space alone | 9 | `3m` reads `3 m` |
+| a digit traded within 5% where the exact digits did not fit loose (`tabular`, D23) | 22 | `16.8 k` (unit cut) reads `17 kB` |
 | a cut value made whole | 5 | `885.5` (unit cut) reads `885 kB`; `119 millisecon` reads `119 msec` |
 | the histogram y-axis tick (correction 6) | 4 | `1k` reads `1.1k` and `1.2k` |
 
