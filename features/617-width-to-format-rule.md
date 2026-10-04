@@ -435,6 +435,15 @@ issue body; they are restated here, not reinterpreted.
   decimals give way. The unit is never cut (D10). The architect: "If you meant
   that the preference is to not give up digits in general, then this logic
   holds." The tolerances and each surface's intent are not yet locked.
+  **The tolerance's meaning, accepted by the architect (2026-10-04):** the
+  reference is the most exact spelling that fits the width (the producer's
+  digits, at the shortest tier and tightest fit); a loss the width forces is in
+  the reference and is never limited by the tolerance. The tolerance prices only
+  a voluntary trade: where a more readable spelling (the space, a longer unit)
+  also fits once a digit is dropped, it is taken if the value moves from the
+  reference by no more than the intent's tolerance. 2,640 with room for five
+  characters: the reference `2.6k`; `3 k` fits but moves the value 15%. 12.17 min
+  with room for six: the reference `12.2m`; `12 min` moves it 1.6%.
 
 ### Governing decisions in other records, read and in force
 
