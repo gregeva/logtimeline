@@ -6,7 +6,7 @@ Specification agreed with the architect 2026-09-28. Implementation started
 2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
 `$version_number` stamped `0.19.0-617`, the before benchmark captured on the
 base commit (`tests/baseline/results/617-before.tsv`). Drops 1, 2 and 3 are
-committed (§ Delivery progress).
+committed and the completion gate passed on dbeb4e8 (§ Delivery progress).
 
 This issue is a sub-issue of #622 (the refactoring dispatched by the #342 audit
 review). It blocks #514 (the count metric becomes explicit and off by default):
@@ -1406,6 +1406,18 @@ at widths 100, 120, 160 and 200, with `-hm duration`, `-hm count` and
 `-hg duration,bytes`. The review produced D25, D26, D27, D28 and the tabular
 walk's own-tier correction; the architect's verdict on the final renders:
 "Everything else looks great."
+
+**Completion gate (2026-10-04), on dbeb4e8** (`$version_number` restored to
+0.19.0): the full suite, 47 harnesses, all exit 0 (`CI=1 validate-csv-output`,
+then `CI=1 validate-statistics`, then the rest; the statistics capture
+refreshed in 365 s, its cache keyed on the whole `ltl` source). Before/after
+benchmark, `single-day-access-log-standard`, three interleaved pairs from two
+worktrees side by side (base 2c04a38, gate dbeb4e8) on this machine: total
+8.7 s (8.7 to 8.7) before, 8.6 s (8.6 to 8.8) after, per pair +1.2%, -1.2%,
+-1.0%; peak RSS 103.8 MB (102.2 to 104.5) before, 103.5 MB (101.1 to 105.7)
+after, per pair +1.1%, +1.3%, -2.6%. No metric is worse by more than 1% across
+the runs; the work runs at render time, not per line. The golden diff is
+classified per drop above.
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after
