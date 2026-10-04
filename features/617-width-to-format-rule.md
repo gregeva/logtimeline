@@ -425,6 +425,16 @@ issue body; they are restated here, not reinterpreted.
   spellings. An intent for a notice is human-readable prose (the full word,
   `2 thousand`), not an approximation: "the intent is not for the value to be
   approximate the intent is it for it to be human readable prose".
+  **Names locked by the architect (2026-10-04):** `prose` (a number inside a
+  sentence: the full word, digits given up within its tolerance even when there
+  is room), `tabular` (a column of values read against each other: the longer
+  unit and the space, a digit given up only within its tolerance) and `precise`
+  (a value read on its own terms). `precise` is a preference, not an absolute:
+  the space gives way first, then the unit shortens (long, medium, short), and
+  only when the value still does not fit at the short tier with no space do the
+  decimals give way. The unit is never cut (D10). The architect: "If you meant
+  that the preference is to not give up digits in general, then this logic
+  holds." The tolerances and each surface's intent are not yet locked.
 
 ### Governing decisions in other records, read and in force
 
