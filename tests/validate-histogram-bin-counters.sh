@@ -1270,7 +1270,7 @@ scenario_display_dimensions() {
     current_scenario="display-dimensions"
     echo "[$current_scenario]"
     local out
-    out=$(run_section -hg duration -hgdm bin)
+    out=$(run_section -hg duration,bytes -hgdm bin)
     check_capture_warnings "$out"
 
     assert_header_present "$out"
@@ -1292,6 +1292,14 @@ scenario_display_dimensions() {
         asserts     'Each metric line reports the display geometry the bars were drawn on: sample count, observed range, decades spanned, and the bucket layout derived from them' \
         produced_by 'format_histogram_dimensions_line() in ltl' \
         contract    'features/187-histogram-bin-counter-percentiles.md section Decision 8 - the sub-section content shape is part of the locked section contract'
+
+    # min= and max= are single tokens for every kind: the dimensions line budget
+    # is tight, so a bytes value carries no space before its unit either.
+    assert_line "$out" \
+        pattern     '^  Bytes: +samples=[0-9]+ +min=[0-9.]+[A-Za-z]+ +max=[0-9.]+[A-Za-z]+ +decades=[0-9]+\.[0-9]{2} buckets_per_decade=[0-9]+ total_buckets=[0-9]+$' \
+        asserts     'A bytes metric line reports min and max as one number-and-unit token each, with no space before the unit, so the line splits on spaces like the duration line' \
+        produced_by 'format_histogram_dimensions_line() in ltl, through value_text() and the dimensions line budget row' \
+        contract    'features/617-width-to-format-rule.md the dimensions line budget (AC19); features/187-histogram-bin-counter-percentiles.md section Decision 8'
 
     # The sub-section is drained inside the parent's brackets, which is what
     # makes its name the only thing distinguishing the two epochs.

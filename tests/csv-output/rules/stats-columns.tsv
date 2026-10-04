@@ -128,6 +128,7 @@ users_distinct	*	int	conditional:udm-counting	0	udm-counting
 actions_count	*	int	conditional:udm-counting	0	udm-counting
 repeat_ratio	*	float	conditional:udm-counting	5	udm-counting
 urate_rate_min	*	float	conditional:udm-counting	5	udm-counting
+urate_rate_sec	*	float	conditional:udm-rate	5	udm-rate
 udrate_drate_min	*	float	conditional:udm-counting	5	udm-counting
 job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric
 job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric

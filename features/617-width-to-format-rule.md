@@ -2,9 +2,11 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`617-width-to-format-rule` off `release/0.19.0` (58f8d94); implementation not
-started. No code has changed on the branch; the version is not stamped.
+Specification agreed with the architect 2026-09-28. Implementation started
+2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
+`$version_number` stamped `0.19.0-617`, the before benchmark captured on the
+base commit (`tests/baseline/results/617-before.tsv`). Drop 1 is committed;
+drops 2 and 3 are not started (§ Delivery progress).
 
 This issue is a sub-issue of #622 (the refactoring dispatched by the #342 audit
 review). It blocks #514 (the count metric becomes explicit and off by default):
@@ -1048,6 +1050,64 @@ re-captured on the tree they leave.
 3. **Notices and the records** (D5, D6, D14, D17). Every notice on its row; the
    five new harness scenarios; the pattern entry and the records below. Proves
    AC13, AC14; AC21 is looked at.
+
+### Delivery progress
+
+**Drop 1 (2026-10-04): one dispatch, the kind resolver, the budget table, the
+strip, the floor.** `value_text()` is the dispatch; `resolve_value_kind()` the
+kind resolver (a built-in metric's family from `@builtin_metrics`, a
+user-defined metric's from its unit type and aggregation through
+`udm_config_by_name()`, its declared unit the floor); `%value_budget` the budget
+table; `@number_unit_ladder` and `%tier_decimals` (short 1, medium 1, long 2, the
+proposed maxima, which reproduce every fixed surface's output today) the kinds
+table; `strip_trailing_zeros()` the strip helper, called by every arm,
+`format_percentage` and `format_csv_value`. `format_heatmap_value`,
+`format_duration` and `normalize` are gone; `format_time`, `format_bytes`,
+`format_number` and `format_cv_display` are the dispatch's arms. A user-defined
+rate's STATS cell resolves to a `rate` CSV family (one decimal by default), with
+the built-in `err-rate` and `msg-rate` columns, which replaces the name-based
+override in `format_csv_value`.
+
+Sequencing within the issue: every fixed-budget surface moved in drop 1. The
+surfaces that pass a width (the timeline's proportional and value-only cells
+and the messages-table total) stay on `format_duration_total`,
+`format_number` and `format_bytes` until drop 2 gives the dispatch its walk;
+routing them through a width before the walk exists would have meant a
+temporary copy of the width-to-tier rules inside the dispatch. The timeline
+column of a user-defined time metric already passes its declared unit as the
+floor, so AC8's timeline half is proven in drop 1. AC15's structural half (the
+arms have one caller) is proven at drop 2.
+
+Proven in drop 1, by `tests/validate-value-display.sh` (scenarios
+*count-spelling*, *fixed-budget-sweep*, *zero-duration*, *floor-unit*,
+*cv-agreement*, *user-defined-kind*, *rate-suffix*, *no-trailing-zero*; 11 of its
+20 assertions fail against the base tree, each on a behaviour this drop
+changes), `validate-histogram-bin-counters` scenario *display-dimensions* (the
+bytes line, AC19), `validate-csv-output` scenario *udm-rate-cell* (AC16, the CSV
+half; fails against the base tree's `0`), and the unchanged assertions of
+`validate-duration-display`, `validate-bucket-size-units`,
+`validate-aggregate-export`, `validate-progress-line`,
+`validate-summary-contribution-bar` and `validate-histogram-ticks` (AC18).
+
+Regression goldens moved by drop 1, against the base commit's captures (which
+equal the committed goldens): 18 of 74 files, 36 lines, in three classes.
+
+| Class | Files | Example |
+|---|---|---|
+| trailing zero in a CV cell (D3) | 11 | `CV:3.00` reads `CV:3`; the timeline CV value is left-aligned in its four characters, as the latency cells beside it are |
+| trailing zero in a count (D3) | 2 | `1.30 Mil` reads `1.3 Mil` |
+| a latency cell's decimal given way to its width rounds instead of being cut (D1, D8) | 5 | under `-du us` a messages-table P50 of 72.6 ms read `72ms` and reads `73ms` |
+
+The third class is not in § Design, *User surface changes*: `format_duration`
+removed the fractional digit with `s/\.\d+//`, which truncates; the dispatch
+renders the value again at fewer decimals, which rounds.
+
+**Findings from drop 1, outside this issue.** A heatmap of a user-defined time
+metric whose every value is zero dies with `Can't use an undefined value as an
+ARRAY reference` in `get_heatmap_column_header` on the base commit as on this
+branch (input: two application-log lines carrying `elapsed=0`,
+`-udm 'elapsed:s:max' -hm elapsed`). AC8's heatmap half for a user-defined
+metric is therefore asserted only for the built-in duration.
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after

@@ -323,7 +323,7 @@ scenario_one_notation_reach() {
         else
             fail_with "every byte string under -bn $n is $n" \
                 'Every byte-valued surface of the run renders in the run notation' \
-                'format_bytes() in ltl, reached from print_bar_graph(), format_heatmap_value(), print_summary_table() and write_aggregate_export()' \
+                'format_bytes() in ltl, the bytes arm of value_text(), reached from print_bar_graph(), the chart labels, print_summary_table() and write_aggregate_export()' \
                 "$CONTRACT_REACH" "tokens: ${tokens:-none}" "foreign: ${foreign:-none}"
         fi
         peak=$(sed -E 's/\x1b\[[0-9;]*m//g' "$dir/run.out" | sed -nE 's/^ *MAXIMUM MEMORY USED +(.*[^ ]) *$/\1/p' | head -1 || true)       # empty is judged below
@@ -385,7 +385,7 @@ $check->('gc-reader-reads-ladder', scalar(($sub_body{gc_heap_size_bytes} // '') 
 my @letters = grep { $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /\b[KMGT]\s*=>\s*(?:'[kKMGT]i?B'|\d)/ } 0 .. $#lines;   # a prefix letter mapped to a byte token or a multiplier
 $check->('no-prefix-letter-table', !@letters, join(' | ', map { 'line ' . ($_ + 1) } @letters));
 $check->('gc-transform-reads-declared-notation', scalar(grep { /^\s*gc_heap_delta\s*=>.*gc_heap_size_bytes\( \$heap_from, 'BYTE_NOTATION' \)/ } @lines) ? 1 : 0, 'the gc_heap_delta snippet passes the entry byte_notation');
-$check->('display-decimals-from-step', scalar(($sub_body{format_duration} // '') =~ /\$time_unit_step\{\$unit\}\{decimals\}/) ? 1 : 0, 'format_duration');
+$check->('display-decimals-from-step', scalar(($sub_body{format_time} // '') =~ /\$time_unit_step\{\s*\$opt\{resolution\}\s*\}\{decimals\}/) ? 1 : 0, 'format_time');
 $check->('csv-decimals-from-step', scalar(($sub_body{adapt_to_command_line_options} // '') =~ /\$time_unit_step\{\$duration_unit_resolved\}\{decimals\}/) ? 1 : 0, 'adapt_to_command_line_options');
 my $help = $sub_body{print_help} // '';
 my @lit = grep { $help =~ /$_/ } ('ns, us, ms', 'kB, MB', 'KiB, MiB', 'B, kB');

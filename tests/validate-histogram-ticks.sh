@@ -284,7 +284,7 @@ inspect_output() {
 # itself and assert nothing.
 #
 # Equality, no tolerance. An earlier form of this assertion predicted from the
-# rendered legend, whose values are rounded by format_heatmap_value() to one
+# rendered legend, whose values are rounded by value_text() (the chart label budget row) to one
 # decimal and a unit -- that mispredicted 3 of 9 columns on this fixture and
 # forced a tolerance wide enough to be inert on the widest histograms. With the
 # unrounded inputs the prediction is exact, so a single-column drift now fails,
