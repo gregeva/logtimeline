@@ -468,7 +468,7 @@ for pair in "2025-06-01|1\.4w" "2025-06-02|1\.5mo" "2025-06-03|1\.1y"; do
     else
         fail_with "$day row renders $want" \
             "format_time() climbs the whole ladder: 10 days render 1.4w, 45 days 1.5mo, 400 days 1.1y (short names)" \
-            'format_time() in ltl, via format_duration() for the latency cells' \
+            'format_time() in ltl, via value_text() and its latency cell budget row' \
             "$CONTRACT_D1; $CONTRACT_D2" "row: $(grep -E "^ $day " "$TMP_DIR/d.out" | cut -c1-160)"
     fi
 done
@@ -482,7 +482,7 @@ if grep -E '^ 2025-06-04 ' "$TMP_DIR/dn.out" | grep -qE 'P50:500ns\b'; then
 else
     fail_with "500 ns renders 500ns" \
         "the ladder's lowest step is nanoseconds: a 500 ns duration renders 500ns" \
-        'format_time() in ltl, via format_duration()' "$CONTRACT_D1; $CONTRACT_D2" \
+        'format_time() in ltl, via value_text() and its latency cell budget row' "$CONTRACT_D1; $CONTRACT_D2" \
         "row: $(grep -E '^ 2025-06-04 ' "$TMP_DIR/dn.out" | cut -c1-160)"
 fi
 fi

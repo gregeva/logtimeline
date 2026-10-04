@@ -161,6 +161,7 @@ scenario_register non-recursive-unchanged \
                   dedup-across-nesting-patterns \
                   bare-directory-matches-nothing \
                   unreadable-directory-note \
+                  unreadable-directory-count \
                   silent-when-all-readable \
                   no-match-quoting-guidance
 scenario_parse_args "$@"
@@ -358,6 +359,34 @@ else
     chmod 755 "$SWEEP/locked"
 fi
 
+fi
+
+# --- Scenario: 1,000 unreadable directories are counted exactly ---
+# The count precedes the list of the directories it counts, so it names the
+# notice exact row: 1000, never 1 thousand (features/617-width-to-format-rule.md
+# D14). Constructed at run time via chmod, as above.
+if scenario_wanted unreadable-directory-count; then
+current_scenario="unreadable-directory-count"
+echo "[$current_scenario]"
+if [[ "$(id -u)" -eq 0 ]]; then
+    echo "  SKIP  $current_scenario :: running as root, which can read a 0-mode directory"
+else
+    SWEEP_MANY="$TMP_DIR/sweep-many"
+    mkdir -p "$SWEEP_MANY"
+    touch "$SWEEP_MANY/top.888"
+    for ((i = 0; i < 1000; i++)); do mkdir "$SWEEP_MANY/locked-$i"; done
+    chmod 000 "$SWEEP_MANY"/locked-*
+    many="$TMP_DIR/unreadable-many.sel"
+    if capture_selection "$many" $SHAPE -r "$SWEEP_MANY/*.888"; then
+        assert_command \
+            command     "grep -aq 'Note: 1000 directories could not be read and were skipped during recursive file selection' '$many.stderr'" \
+            label       'the note counts 1,000 unreadable directories exactly' \
+            asserts     'A notice count that a list beside it must agree with renders exact: 1000 directories, never 1 thousand' \
+            produced_by 'read_and_process_logs() in ltl (end-of-processing note emission), through value_text() and the notice exact row' \
+            contract    'features/617-width-to-format-rule.md D14; features/420-recursive-file-selection.md § D8'
+    fi
+    chmod 755 "$SWEEP_MANY"/locked-*
+fi
 fi
 
 if scenario_wanted silent-when-all-readable; then

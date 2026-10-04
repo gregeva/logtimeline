@@ -3,6 +3,8 @@
 ## Branch
 `feature/heatmap`
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the header and footer labels render through the one dispatch at the *chart label* row; a user-defined metric's labels keep its own unit, never below its declared unit (a seconds metric's 0.25 reads `0.2s`, not `250ms`). Record: `features/617-width-to-format-rule.md` D15, D16.
+
 ## Overview
 Add a heatmap visualization mode to LogTimeLine that replaces the latency statistics column with a visual heat distribution showing request density across latency ranges. This feature is inspired by SRE best practices for analyzing load profiles and latency distributions, providing at-a-glance visibility into request population distribution patterns that percentile numbers alone cannot convey.
 

@@ -59,7 +59,7 @@ for f in "$LTL" "$GC_FIXTURE" "$GC_PREFIX_FIXTURE" "$BOUNDARY_FIXTURE"; do
 done
 
 CONTRACT_CLIMB='features/608-byte-unit-ladder.md D6 and D16 (the display climb compares the ladder multiplier against the value)'
-CONTRACT_CARRY='features/608-byte-unit-ladder.md D16 and section 5.11 (the rounding carry at a unit boundary is handed to #617, one width-to-format rule, which moves it)'
+CONTRACT_CARRY='features/617-width-to-format-rule.md D19 (the rounding carry at a unit boundary, handed on by features/608-byte-unit-ladder.md D16 and section 5.11)'
 CONTRACT_OPTION='features/608-byte-unit-ladder.md D7 and D17 (one notation per run, -bn si|iec in any case, honoured from LTL_CONFIG, the command line overriding; SI when no format declares one)'
 CONTRACT_DECLARE='features/608-byte-unit-ladder.md D7 and D12 (a format declares its byte notation in its spec; the Java GC format declares IEC)'
 CONTRACT_MIXED='features/608-byte-unit-ladder.md D13 and D20 (IEC only when every file declares IEC, else SI with one notice; no notice under -bn; an unrecognised file declares nothing)'
@@ -160,8 +160,8 @@ notice_count() {
     grep -c '^Note: the log formats of this run declare different byte notations' "$1/$2.err" || true
 }
 
-BOUNDARY_SI='999 B|1 kB|1 kB|1 kB|1000 kB|1 MB|1 MB|1 MB|1.5 MB'
-BOUNDARY_IEC='999 B|1000 B|1023 B|1 KiB|976.6 KiB|976.6 KiB|1024 KiB|1 MiB|1.4 MiB'
+BOUNDARY_SI='999 B|1 kB|1 kB|1 kB|1 MB|1 MB|1 MB|1 MB|1.5 MB'
+BOUNDARY_IEC='999 B|1000 B|1023 B|1 KiB|976.6 KiB|976.6 KiB|1 MiB|1 MiB|1.4 MiB'
 
 # ---------------------------------------------------------------------------
 # Criterion 6 — the climb compares the value against each step's byte count:
@@ -184,10 +184,9 @@ scenario_value_climb() {
 }
 
 # ---------------------------------------------------------------------------
-# Criterion 7 — the rounding carry is left as the climb gives it: 999,999
-# bytes is below 1 MB, and one decimal rounds it to 1000 kB. #617 (one
-# width-to-format rule) owns decimals and moves this cell; this assertion
-# changes with it.
+# Criterion 7 — the rounding carry: 999,999 bytes is below 1 MB, but one
+# decimal rounds it to 1000 kB, the next step's size, so it renders at that
+# step: 1 MB (features/617-width-to-format-rule.md D19).
 # ---------------------------------------------------------------------------
 scenario_boundary_carry() {
     current_scenario="boundary-carry"
@@ -195,8 +194,8 @@ scenario_boundary_carry() {
     run_ltl_in "$TMP_DIR/carry" run --disable-progress -ni -bs 1 -oe -o -bn si "$BOUNDARY_FIXTURE"
     local cell
     cell=$(stats_column "$TMP_DIR/carry" bytes_nice | cut -d'|' -f5)
-    expect_equal "999,999 bytes renders 1000 kB under SI" "$cell" "1000 kB" \
-        'The climb names the step the value reaches (kB) and the one-decimal rounding carries it to 1000; the carry is handed forward, not fixed here' \
+    expect_equal "999,999 bytes renders 1 MB under SI" "$cell" "1 MB" \
+        'A value whose rounding reaches the next step size renders at that step: 999,999 bytes rounds to 1000 kB at one decimal, so it reads 1 MB, never 1000 kB' \
         'format_bytes() in ltl' "$CONTRACT_CARRY"
 }
 
@@ -323,7 +322,7 @@ scenario_one_notation_reach() {
         else
             fail_with "every byte string under -bn $n is $n" \
                 'Every byte-valued surface of the run renders in the run notation' \
-                'format_bytes() in ltl, reached from print_bar_graph(), format_heatmap_value(), print_summary_table() and write_aggregate_export()' \
+                'format_bytes() in ltl, the bytes arm of value_text(), reached from print_bar_graph(), the chart labels, print_summary_table() and write_aggregate_export()' \
                 "$CONTRACT_REACH" "tokens: ${tokens:-none}" "foreign: ${foreign:-none}"
         fi
         peak=$(sed -E 's/\x1b\[[0-9;]*m//g' "$dir/run.out" | sed -nE 's/^ *MAXIMUM MEMORY USED +(.*[^ ]) *$/\1/p' | head -1 || true)       # empty is judged below
@@ -385,7 +384,7 @@ $check->('gc-reader-reads-ladder', scalar(($sub_body{gc_heap_size_bytes} // '') 
 my @letters = grep { $lines[$_] !~ /^\s*#/ && $lines[$_] =~ /\b[KMGT]\s*=>\s*(?:'[kKMGT]i?B'|\d)/ } 0 .. $#lines;   # a prefix letter mapped to a byte token or a multiplier
 $check->('no-prefix-letter-table', !@letters, join(' | ', map { 'line ' . ($_ + 1) } @letters));
 $check->('gc-transform-reads-declared-notation', scalar(grep { /^\s*gc_heap_delta\s*=>.*gc_heap_size_bytes\( \$heap_from, 'BYTE_NOTATION' \)/ } @lines) ? 1 : 0, 'the gc_heap_delta snippet passes the entry byte_notation');
-$check->('display-decimals-from-step', scalar(($sub_body{format_duration} // '') =~ /\$time_unit_step\{\$unit\}\{decimals\}/) ? 1 : 0, 'format_duration');
+$check->('display-decimals-from-step', scalar(($sub_body{format_time} // '') =~ /\$time_unit_step\{\s*\$opt\{resolution\}\s*\}\{decimals\}/) ? 1 : 0, 'format_time');
 $check->('csv-decimals-from-step', scalar(($sub_body{adapt_to_command_line_options} // '') =~ /\$time_unit_step\{\$duration_unit_resolved\}\{decimals\}/) ? 1 : 0, 'adapt_to_command_line_options');
 my $help = $sub_body{print_help} // '';
 my @lit = grep { $help =~ /$_/ } ('ns, us, ms', 'kB, MB', 'KiB, MiB', 'B, kB');

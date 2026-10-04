@@ -890,17 +890,17 @@ my $time_unit_list        = join(', ', map { $_->{token} } @time_unit_ladder);  
 # converts or names. Each step carries its token and byte count in both
 # notations: SI (powers of 1000) and IEC (powers of 1024). Each token is its
 # own only spelling, matched case-insensitively, so kb, KB and kB are the
-# one SI kilobyte; the nine lower-cased tokens are distinct, which is what
+# one SI kilobyte; the word is the step's long-tier spelling on display; the nine lower-cased tokens are distinct, which is what
 # makes the fold safe. Every byte surface (the metric unit slot, the GC
 # heap-size transform) reads this ladder through %byte_unit_bytes,
 # byte_unit_canonical() and the views derived below; no sub keeps a byte
 # table of its own.
 my @byte_unit_ladder = (
-    { si => { token => 'B',  bytes => 1 },        iec => { token => 'B',   bytes => 1 }        },
-    { si => { token => 'kB', bytes => 1000 },     iec => { token => 'KiB', bytes => 1024 }     },
-    { si => { token => 'MB', bytes => 1000**2 },  iec => { token => 'MiB', bytes => 1024**2 }  },
-    { si => { token => 'GB', bytes => 1000**3 },  iec => { token => 'GiB', bytes => 1024**3 }  },
-    { si => { token => 'TB', bytes => 1000**4 },  iec => { token => 'TiB', bytes => 1024**4 }  },
+    { si => { token => 'B',  bytes => 1,       word => 'bytes' },      iec => { token => 'B',   bytes => 1,       word => 'bytes' }     },
+    { si => { token => 'kB', bytes => 1000,    word => 'kilobytes' },  iec => { token => 'KiB', bytes => 1024,    word => 'kibibytes' } },
+    { si => { token => 'MB', bytes => 1000**2, word => 'megabytes' },  iec => { token => 'MiB', bytes => 1024**2, word => 'mebibytes' } },
+    { si => { token => 'GB', bytes => 1000**3, word => 'gigabytes' },  iec => { token => 'GiB', bytes => 1024**3, word => 'gibibytes' } },
+    { si => { token => 'TB', bytes => 1000**4, word => 'terabytes' },  iec => { token => 'TiB', bytes => 1024**4, word => 'tebibytes' } },
 );
 my @byte_unit_notations   = qw( si iec );
 my %byte_unit_bytes       = map { my $step = $_; map { $step->{$_}{token} => $step->{$_}{bytes} } @byte_unit_notations } @byte_unit_ladder;
@@ -926,6 +926,100 @@ my %rate_multiplier = map { $_->{token} => $_->{ms} / 1000 } @time_unit_ladder;
 my %rate_suffix     = map { $_->{token} => '/' . $_->{short} } @time_unit_ladder;
 my %rate_csv_suffix = map { $_->{token} => '_' . $_->{medium} } @time_unit_ladder;
 
+# Number ladder: the steps a count climbs and its spelling per tier, the one
+# definition the count arm of value_text() reads. A long-tier word always
+# keeps its space; short and medium follow the fit.
+my @number_unit_ladder = (
+    { factor => 1,       short => '',  medium => '',     long => ''         },
+    { factor => 1000,    short => 'k', medium => 'k',    long => 'thousand' },
+    { factor => 1000**2, short => 'M', medium => 'Mil',  long => 'million'  },
+    { factor => 1000**3, short => 'B', medium => 'Bil',  long => 'billion'  },
+    { factor => 1000**4, short => 'T', medium => 'Tril', long => 'trillion' },
+);
+
+# The most digits a value of each kind shows unclimbed, at its floor step,
+# before it climbs: a bare number reads 1800 rather than 1.8k; a byte or
+# duration value follows its ladder's engineering steps (16.76 kB, never
+# 16763 B). Zero means the kind always climbs.
+my %value_unclimbed_digits = ( count => 5, rate => 5, bytes => 0, duration => 0 );
+
+# The most decimals a value carries at each tier, one set for every kind;
+# the width a surface has, and the source's resolution, may allow fewer.
+my %tier_decimals = ( short => 1, medium => 1, long => 2 );
+
+# Every (tier, fit) spelling a value can take. A whole word keeps its space,
+# so the long tier has no tight step.
+my @value_walk = ( [ long => 'loose' ], [ medium => 'loose' ], [ medium => 'tight' ], [ short => 'loose' ], [ short => 'tight' ] );
+
+# Each intent: its tolerance, the most a voluntary trade may move a value from
+# its reference (the most exact spelling that fits the width; a loss the width
+# forces is in the reference and is never limited), and its walk, the order in
+# which the unit name, the decimals and the space give way. A step names a
+# tier, a fit and its digits: 'exact' keeps the reference's, 'within' gives up
+# decimals within the tolerance, 'fewest' gives up every decimal the tolerance
+# allows even with room. A surface names its intent in its budget row; a
+# surface whose row names no tier takes the first step at which every value
+# it shows fits, and the reference where none does. The precise intent is not
+# in this table: it is asked for explicitly (a row's precise_switch, -pv for
+# the legend) and shows the exact value, unclimbed, every digit, falling back
+# to the row's own intent where that does not fit.
+my %value_intent = (
+    accurate => {   # a value read on its own terms: no voluntary trade
+        tolerance => 0,
+        walk      => [ [ long => 'loose', 'exact' ], [ medium => 'loose', 'exact' ], [ medium => 'tight', 'exact' ],
+                       [ short => 'loose', 'exact' ], [ short => 'tight', 'exact' ] ],
+    },
+    tabular => {    # a column of values read against each other: the unit name, then decimals within the tolerance, then the space
+        tolerance => 0.05,
+        walk      => [ [ long => 'loose', 'exact' ], [ medium => 'loose', 'exact' ], [ short => 'loose', 'exact' ],
+                       [ short => 'loose', 'within' ], [ short => 'tight', 'within' ] ],
+    },
+    prose => {      # a number inside a sentence: the full word, digits given up within the tolerance even with room
+        tolerance => 0.25,
+        walk      => [ map { [ @$_, 'fewest' ] } @value_walk ],
+    },
+);
+
+my $precise_values = 0;     # -pv: the precise intent for the rows whose precise_switch names it (the legend totals)
+
+# The budget table: one row per display surface with a fixed budget. A row
+# names the tier (short, medium, long: how far a number is abbreviated), the
+# fit (tight or loose: the space before the unit; per kind where the kinds
+# differ) and the width where the surface has a fixed one; a row fixes a
+# precision only where a record locks one. A surface passes value_text() its
+# row name, and its own width where the row's width is the surface's cell; it
+# never passes a tier, a fit or decimals. The percentage rows carry the
+# parameters of docs/percentage-presentation.md § The surfaces. A row names
+# its intent (%value_intent); a row with no tier walks for one (the intent's
+# walk), against its own width or the width its surface passes.
+my %value_budget = (
+    'timeline column'  => { intent => 'tabular' },
+    'timeline count cell' => { intent => 'tabular' },
+    'messages total'   => { intent => 'tabular' },
+    'latency cell'     => { tier => 'short',  fit => 'tight' },
+    'cv cell'          => { tier => 'long',   width => 4, keep_zeros => 1 },   # the producer fixes two decimals: 3.00, 0.50, 12.5, 123
+    'axis tick'        => { tier => 'medium', fit => 'tight', width => 6 },
+    'chart label'      => { tier => { duration => 'short', bytes => 'short', default => 'medium' },
+                            fit  => { bytes => 'loose', default => 'tight' }, intent => 'accurate' },
+    'dimensions line'  => { tier => { duration => 'short', bytes => 'short', default => 'medium' }, fit => 'tight' },
+    'legend total'     => { tier => 'short',  fit => 'tight', intent => 'tabular', precise_switch => \$precise_values },
+    'legend rate'      => { tier => 'medium', fit => 'tight', intent => 'tabular' },
+    'progress'         => { tier => 'medium', fit => 'tight', intent => 'accurate' },
+    'notice'           => { intent => 'prose' },
+    'notice exact'     => { exact => 1 },          # a count a list beside it must agree with
+    'notice share'     => { percentage => { mode => 'significant', digits => 3 } },
+    'summary timing'   => { tier => 'medium', fit => 'loose', intent => 'accurate' },
+    'summary memory'   => { tier => 'medium', fit => 'loose', intent => 'accurate' },
+    'memory breakdown' => { tier => 'medium', fit => 'loose', intent => 'accurate', decimals => 0 },
+    'export duration'  => { tier => 'long',   fit => 'loose', intent => 'accurate', significant => 3 },
+    'nice cell'        => { tier => 'medium', fit => 'loose', intent => 'tabular' },
+    'progress percent' => { percentage => { mode => 'integer', width => 3, floor => 1 } },
+    'share cell'       => { percentage => { mode => 'significant', digits => 3 } },
+    'share row'        => { percentage => { mode => 'significant', digits => 3, parens => 1 } },
+    'memory share'     => { percentage => { mode => 'integer', width => 5, parens => 1, floor_at => 1, floor_text => '<1%', pad => 1 } },
+    'axis percent'     => { percentage => { mode => 'integer', width => 4, pad => 1 } },
+);
+
 # Unit of a bare -bs number and of $time_bucket_size once resolved: the
 # minute, or the second under -s, or the millisecond under -ms. Set in
 # adapt_to_command_line_options().
@@ -933,7 +1027,6 @@ my $bucket_size_unit = 'm';
 
 my $pause_output = 0;
 my $omit_values = 0;
-my $precise_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
 # Unsatisfiable statistic sort (#418). Resolved once from the -so operand at parse
 # time and consulted at each of the three detection points (option parsing, before
@@ -4408,7 +4501,7 @@ sub bin_consolidation_notice {
     return unless ($message_stats_capture_mode // 'raw') eq 'bin';
 
     my $detail = $message_stats_collapse_projections > 0
-        ? 'consolidation combined ' . format_number($message_stats_collapse_projections, 'medium')
+        ? 'consolidation combined ' . value_text($message_stats_collapse_projections, kind => 'count', budget => 'notice')
           . ' message histograms onto shared bucket geometries'
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
     print STDERR "Note: $detail, so their percentiles are approximate"
@@ -6731,7 +6824,7 @@ sub emit_udm_csv_unbound_notices {
     for my $idx (0 .. $#udm_configs) {
         my $files = $udm_csv_unbound_files[$idx] or next;
         my $config = $udm_configs[$idx];
-        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of $files CSV file(s)\n";
+        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . " CSV file(s)\n";
     }
 }
 
@@ -6830,8 +6923,8 @@ sub emit_classification_percentage_notices {
     # the format's configured patterns, reported with its scale.
     my $r = $recon;
     if ( !$nonledger && $r->{unclassified} > 0 ) {
-        my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';
-        print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
+        my $leak_pct = value_text( $r->{included} ? $r->{unclassified} / $r->{included} * 100 : 0, kind => 'percentage', budget => 'notice share' );
+        print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
     }
     return;
 }
@@ -7180,7 +7273,7 @@ sub write_aggregate_export {
         $observation->{end}   = format_timestamp($output_timestamp_max, precision => $timestamp_precision, shape => 'run', exact => exact_bound($output_timestamp_max_s, $output_timestamp_max_ns));
         my $span = $output_timestamp_max - $output_timestamp_min;
         $observation->{duration_seconds} = aggregate_number($span);
-        $observation->{duration}         = format_time($span, 's', 'long', ' ', 3);
+        $observation->{duration}         = value_text($span, kind => 'duration', unit => 's', budget => 'export duration');
         $population->{observation} = $observation;
     }
 
@@ -7236,8 +7329,8 @@ sub write_aggregate_export {
         $categories->{$category} = aggregate_number($category_totals{$category});
     }
     $measurements->{categories}      = $categories;
-    $measurements->{total_time}      = format_time($elapsed_total, 's', 'medium', " ");
-    $measurements->{max_memory_used} = format_bytes($reported_max_memory_usage);
+    $measurements->{total_time}      = value_text($elapsed_total, kind => 'duration', unit => 's', budget => 'summary timing');
+    $measurements->{max_memory_used} = value_text($reported_max_memory_usage, kind => 'bytes', budget => 'summary memory');
 
     my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
         (@builtin_metric_names, sort grep { !exists $builtin_metric{$_} } keys %histogram_stats);
@@ -9745,9 +9838,9 @@ my $explain_timeout_clustering_example;
     $bars[$_] = 6 for 51..63;
     my $out = explain_histogram_shape(
         bars => \@bars, scale => [[0,'1s'],[13,'1s'],[25,'1s'],[38,'1s'],[50,'1s'],[62,'1s']],
-        counts => ['0','360','720','1k','1k'],
+        counts => ['0','360','720','1.1k','1.4k'],
         percentiles => ['P50: 1s   P75: 1s   P90: 1s   P95: 1s   P99: 1s   P99.9: 1s'] );
-    $out .= "\n    1,950 requests, and the coefficient of variation is 0.00.\n";
+    $out .= "\n    1,950 requests, and the coefficient of variation is 0.\n";
     $explain_timeout_clustering_example = $out;
 }
 
@@ -9867,7 +9960,7 @@ my $explain_shape_comparison_command = <<'END';
                                                    # does the relationship hold over time?
 END
 
-my $explain_timeout_clustering_reading = q{Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it. The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0.00. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces. Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it. What falsifies the reading: a naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.};
+my $explain_timeout_clustering_reading = q{Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it. The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces. Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it. What falsifies the reading: a naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.};
 
 my $explain_timeout_clustering_command = <<'END';
     ltl -so skewness -sa -n 20 access.log          # rank ascending: the least right-skewed
@@ -13220,7 +13313,7 @@ sub report_skipped_final_pass {
     my $skipped_keys = 0;
     $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
 
-    my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
+    my $notice = "Note: the final consolidation pass was skipped over " . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . " message"
         . ($skipped_keys == 1 ? "" : "s")
         . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
 
@@ -13573,21 +13666,29 @@ sub resolve_byte_notation {
 # count the value reaches names the unit, so 1000 bytes is 1 kB in SI and
 # 1000 B in IEC. The ladder is the only table.
 sub format_bytes {
-    my ($bytes, $decimals) = @_;
+    my ($bytes, $tier, $space, $decimals, $floor, $plain) = @_;
     return undef unless defined $bytes;
     $decimals = 1 if !defined $decimals;
 
-    my ($step_bytes, $token) = @{ $byte_unit_ladder[0]{$byte_notation} }{qw( bytes token )};
-    for my $step (@byte_unit_ladder[1 .. $#byte_unit_ladder]) {
-        my $part = $step->{$byte_notation};
-        last if abs($bytes) < $part->{bytes};
-        ($step_bytes, $token) = ($part->{bytes}, $part->{token});
+    # Climb the ladder from the floor step (the step of a metric's declared
+    # unit, in either notation) to the largest step the value reaches; a value
+    # that rounds up to the next step's size renders at that step.
+    my $floor_bytes = defined $floor ? $byte_unit_by_prefix{ uc substr($floor, 0, 1) }{$byte_notation}{bytes} : 1;
+    my @steps = grep { $_->{bytes} >= $floor_bytes } map { $_->{$byte_notation} } @byte_unit_ladder;
+    splice @steps, 1 if $plain;                     # the value unclimbed, at its floor step
+    my $i = 0;
+    $i++ while $i < $#steps && abs($bytes) >= $steps[$i + 1]{bytes};
+    my $number;
+    while (1) {
+        $number = strip_trailing_zeros(sprintf("%.${decimals}f", $bytes / $steps[$i]{bytes}));
+        last unless $i < $#steps && abs($number) >= $steps[$i + 1]{bytes} / $steps[$i]{bytes};
+        $i++;
     }
 
-    my $formatted_value = sprintf("%.${decimals}f", $bytes / $step_bytes);
-    $formatted_value =~ s/\.0+(?=\s|$)//;             # remove trailing .0 if followed by space or end of string
-
-    return "$formatted_value $token";
+    my $text = $tier && $tier eq 'long'
+        ? "$number " . ( $number == 1 ? $steps[$i]{word} =~ s/s$//r : $steps[$i]{word} )
+        : $number . (defined $space ? ' ' : '') . $steps[$i]{token};
+    return wantarray ? ( $text, $number * $steps[$i]{bytes} ) : $text;
 }
 
 # Build CSV output filename with truncation to avoid filesystem errors
@@ -13845,7 +13946,7 @@ sub progress_line_text {
         # way to tell which of the two they are looking at.
         my $pct = $file_size > 0 ? 100 * $file_position / $file_size : 0;
         $pct = 100 if $pct > 100;
-        $file_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );
+        $file_pct = value_text( $pct, kind => 'percentage', budget => 'progress percent' );
     }
 
     # Overall percentage: bytes of the files already closed plus the live
@@ -13858,7 +13959,7 @@ sub progress_line_text {
         $done += $file_position if defined $file_position && $file_position >= 0;
         my $pct = 100 * $done / $progress_total_bytes;
         $pct = 100 if $pct > 100;
-        $overall_pct = format_percentage( $pct, mode => 'integer', width => 3, floor => 1 );
+        $overall_pct = value_text( $pct, kind => 'percentage', budget => 'progress percent' );
     }
 
     my $pct_segment = "";
@@ -13886,15 +13987,15 @@ sub progress_line_text {
     if (@progress_history >= 2) {
         my $time_diff  = $progress_history[-1][0] - $progress_history[0][0];
         my $lines_diff = $progress_history[-1][1] - $progress_history[0][1];
-        $rate_segment = ", " . format_number( $lines_diff / $time_diff, 'medium' ) . " lines/sec"
+        $rate_segment = ", " . value_text( $lines_diff / $time_diff, kind => 'count', budget => 'progress' ) . " lines/sec"
             if $time_diff > 0;
     }
     my $total_segment = $progress_file_count >= 2
-        ? ", " . format_number($total_lines_read, 'medium') . " total"
+        ? ", " . value_text($total_lines_read, kind => 'count', budget => 'progress') . " total"
         : "";
 
     my $prefix = "Processing$pct_segment$counter_segment line "
-               . format_number( $line_number // 0, 'medium' ) . "$total_segment$rate_segment: ";
+               . value_text( $line_number // 0, kind => 'count', budget => 'progress' ) . "$total_segment$rate_segment: ";
 
     # The filename is the variable-length element, so it absorbs the fit: it is
     # shortened to whatever the terminal leaves, and where even a shortened name
@@ -13902,7 +14003,7 @@ sub progress_line_text {
     my $room = $terminal_width - length($prefix) - 1;   # -1 safety margin
     if ( $room < 10 && $rate_segment ne "" ) {
         $prefix = "Processing$pct_segment$counter_segment line "
-                . format_number( $line_number // 0, 'medium' ) . "$total_segment: ";
+                . value_text( $line_number // 0, kind => 'count', budget => 'progress' ) . "$total_segment: ";
         $room = $terminal_width - length($prefix) - 1;
     }
     return "" if $room <= 0;
@@ -13945,58 +14046,50 @@ sub paint_progress_line {
 
 sub legend_category_total {
     my ($occurrences) = @_;
-    return $precise_values ? $occurrences : format_number($occurrences, 'short');
+    return value_text($occurrences, kind => 'count', budget => 'legend total');
 }
 
+# A count climbed up the number ladder from the floor step (the multiplier of
+# a metric's declared unit) and spelled at the tier. An arm of value_text().
 sub format_number {
-    my ($value, $format, $space, $decimals) = @_;
-    my %units = (
-        '1'  => 1,
-        'k' => 1000,
-        'Mil' => 1000**2,
-        'Bil' => 1000**3,
-        'Tril' => 1000**4,
-    );
-
-    # Unit vocabulary per format tier. 'medium' is the abbreviation set used
-    # across the tool's numeric surfaces; 'short' is the single-letter
-    # engineering prefix, for surfaces where width is at a premium.
-    my %unit_names = (
-        '1'    => { short => '',  medium => '',     long => '' },
-        'k'    => { short => 'k', medium => 'k',    long => ' thousand' },
-        'Mil'  => { short => 'M', medium => 'Mil',  long => ' million' },
-        'Bil'  => { short => 'B', medium => 'Bil',  long => ' billion' },
-        'Tril' => { short => 'T', medium => 'Tril', long => ' trillion' },
-    );
-
-    my @unit_order = ('1', 'k', 'Mil', 'Bil', 'Tril');
-    my $formatted_value = $value;
-    my $formatted_unit = '1';
-    $format = "medium" if !defined $format;
+    my ($value, $tier, $space, $decimals, $floor, $plain) = @_;
+    $tier     = 'medium' if !defined $tier;
     $decimals = 1 if !defined $decimals;
 
-    foreach my $u (@unit_order) {                  # Determine the most relevant unit
-        if ($value >= $units{$u}) {
-            $formatted_value = $value / $units{$u};
-            $formatted_unit = $u;
-        } else {
-            last;
-        }
+    # Climb from the floor step; a value that rounds up to the next step's
+    # size renders at that step (999,960 reads 1 Mil, not 1000 k).
+    my @steps = grep { $_->{factor} >= ($floor // 1) } @number_unit_ladder;
+    splice @steps, 1 if $plain;                     # the value unclimbed, at its floor step
+    my $i = 0;
+    $i++ while $i < $#steps && $value >= $steps[$i + 1]{factor};
+    my $formatted_value;
+    while (1) {
+        # Trailing fractional zeros carry no significance, so they are
+        # stripped from the number before the unit is appended.
+        $formatted_value = strip_trailing_zeros(sprintf("%.${decimals}f", $value / $steps[$i]{factor}));
+        last unless $i < $#steps && abs($formatted_value) >= $steps[$i + 1]{factor} / $steps[$i]{factor};
+        $i++;
     }
-
-    my $unit_name = $unit_names{$formatted_unit}{$format};                                   # Get the appropriate unit name based on format
-    $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                      # Singular units for long format
-
-    # Trailing fractional zeros carry no significance, so they are stripped from
-    # the number before the unit is appended: stripping afterwards cannot see a
-    # ".0" that a unit suffix follows, which is what left "1.0k" in place of "1k".
-    $formatted_value = sprintf("%.${decimals}f", $formatted_value);
-    $formatted_value =~ s/\.0+$//;
-
-    $formatted_value .= (defined($space) ? " " : "") . $unit_name;
-
-    return $formatted_value;
+    my $unit_name = $steps[$i]{$tier};
+    my $text = $unit_name eq ''  ? $formatted_value
+             : $tier eq 'long'   ? "$formatted_value $unit_name"    # a whole word keeps its space
+             :                     $formatted_value . (defined $space ? ' ' : '') . $unit_name;
+    return wantarray ? ( $text, $formatted_value * $steps[$i]{factor} ) : $text;
 }
+
+# The digits after the decimal point that end in zero, and the point with
+# the last of them, removed from a rendered number: a zero in the last place
+# states a precision the value does not have. Every arm of value_text() and
+# the CSV writer call it after the decimals are chosen, before any unit.
+sub strip_trailing_zeros {
+    my ($number) = @_;
+    if ( $number =~ /\./ ) {
+        $number =~ s/0+$//;
+        $number =~ s/\.$//;
+    }
+    return $number;
+}
+
 # Decimal places that give $value a count of significant digits: the integer
 # part takes as many as its magnitude needs and the remainder are decimals,
 # so 98.2, 1.11 and 0.107 all carry three. The one rule for every formatter
@@ -14008,89 +14101,254 @@ sub significant_decimals {
     return $decimals < 0 ? 0 : $decimals;
 }
 
-# $significant, when given, renders the scaled value to that many significant
-# digits with trailing zeros and a bare point stripped (1.5 days, 7 days,
-# 14.4 hours); absent, the value carries one decimal as every existing
-# caller expects.
-sub format_time {
-    my ($value, $unit, $format, $space, $significant) = @_;
-    return undef unless defined $value;
-    $format = "short" if !defined $format;
-
-    # Climb the ladder to the largest step the value reaches; a value below
-    # the lowest step (and zero) renders in that lowest step.
-    my $milliseconds = convert_duration_to_ms($value, $unit);
-    my $step = $time_unit_ladder[0];
-    foreach my $candidate (@time_unit_ladder) {
-        last if $milliseconds < $candidate->{ms};
-        $step = $candidate;
+# The kind of a value a surface renders, and the floor of its ladder: what
+# value_text() needs to choose an arm. A surface that holds a metric names it
+# (a built-in metric, a user-defined metric, a thread-pool or session column);
+# one that holds a value of its own names the kind, which states no source
+# unit and so has no floor (the tool's own timings, a coefficient of
+# variation, a percentage). The one resolution of a metric's kind for display.
+sub resolve_value_kind {
+    my (%p) = @_;
+    return { kind => $p{kind} } if defined $p{kind};
+    my $metric = $p{metric};
+    if ( my $builtin = $builtin_metric{$metric} ) {
+        my $family = $builtin->{family};
+        return { kind => $family, floor => $family eq 'duration' ? ( $duration_unit_resolved // 'ms' ) : undef };
     }
-    my $formatted_value = $step->{per_ms} ? $milliseconds * $step->{per_ms} : $milliseconds / $step->{ms};
+    my $config = udm_config_by_name($metric) or return { kind => 'count' };
+    return { kind => 'rate' } if $config->{aggregation} =~ /^(?:rate|drate)$/;
+    return { kind => 'duration', floor => $config->{unit} } if $config->{unit_type} eq 'time';
+    return { kind => 'bytes',    floor => $config->{unit} } if $config->{unit_type} eq 'bytes';
+    return { kind => 'count',    floor => $config->{unit_type} eq 'number' ? $config->{converter}->(1) : undef };
+}
 
-    if (defined $significant) {
-        $formatted_value = sprintf("%.*f", significant_decimals($formatted_value, $significant), $formatted_value);
-        if ($formatted_value =~ /\./) {
-            $formatted_value =~ s/0+$//;
-            $formatted_value =~ s/\.$//;
+# The arm that renders each kind, given the value, its input unit, the tier,
+# the space before the unit (defined for a loose fit), the decimals, the floor
+# and the budget row.
+# Each returns the text and the value the text shows, in the input's unit.
+my %value_arms = (
+    duration => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_;
+                      format_time( $v, $unit // 'ms', $tier, $space, $d, floor => $floor, resolution => $floor,
+                                   significant => $row->{significant}, plain => $row->{plain} ) },
+    bytes    => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; format_bytes( $v, $tier, $space, $d, $floor, $row->{plain} ) },
+    count    => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; format_number( $v, $tier, $space, $d, $floor, $row->{plain} ) },
+    rate     => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_;
+                      my ($text, $shown) = format_number( $v, $tier, $space, $d, undef, $row->{plain} );
+                      return ( $text . $rate_suffix{$rate_unit}, $shown ) },
+    cv       => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; my $text = format_cv_display( $v, $d, $row->{keep_zeros} ); return ( $text, $text ) },
+);
+
+# The one dispatch every display surface renders a number through. Called as
+# value_text( $value, kind => K | metric => M, budget => ROW, [width => W],
+# [unit => U] ): the kind or the metric whose kind resolve_value_kind()
+# resolves; the budget table row the surface names, or the row value_column()
+# resolved for the surface's column; the surface's own width where the row's
+# width is the surface's cell; and the input unit of a duration held in
+# another unit than milliseconds. A row that names its tier and fit is taken
+# as named, and its decimals give way one at a time until the value fits the
+# width; a row that names no tier walks for one on this value (§ value_walk_row).
+# An undefined value renders empty.
+sub value_text {
+    my ($value, %p) = @_;
+    return '' unless defined $value;
+    my $row = ref $p{budget} ? $p{budget} : $value_budget{ $p{budget} } // die "value_text: no budget row '$p{budget}'\n";
+    my $width = $p{width} // $row->{width};
+    if ( my $percentage = $row->{percentage} ) {
+        my %params = ( %$percentage, defined $width ? ( width => $width ) : () );
+        my $decimals = percentage_decimals( $value, %params );
+        my $text = format_percentage( $value, %params, decimals => $decimals );
+        while ( defined $width && length($text) > $width && $decimals > 0 ) {
+            $decimals--;
+            $text = format_percentage( $value, %params, decimals => $decimals );
         }
-    } else {
-        $formatted_value = sprintf("%.1f", $formatted_value);
-        $formatted_value =~ s/\.0+(?=\s|$)//;                                                # remove trailing .0 if followed by space or end of string
+        return $text;
     }
+    return $value if $row->{exact};
 
-    my $unit_name = $step->{$format};                                                       # Get the appropriate unit name based on format
-    $unit_name =~ s/s$// if $formatted_value == 1 && $format eq 'long';                     # Singular units for long format
-    $unit_name = " " . $unit_name if defined( $space );
-
-    return "$formatted_value$unit_name";
+    my $kind = resolve_value_kind(%p);
+    $row = value_walk_row( $kind, $row, $width, [$value], $p{unit} ) unless defined $row->{tier};
+    if ( $row->{precise_switch} && ${ $row->{precise_switch} } ) {
+        # Precise, asked for: the exact value unclimbed, every digit; where it
+        # does not fit, the row's own intent renders it.
+        my ($text) = value_arm( $kind, $value, $p{unit}, { %$row, plain => 1 }, $tier_decimals{long} );
+        return $text if !defined $width || length($text) <= $width;
+    }
+    my $reference = ( $row->{digits} // '' ) eq 'fewest' ? value_reference( $kind, $value, $p{unit}, $row, $width ) : undef;
+    my ($text) = value_spelling( $kind, $value, $p{unit}, $row, $width, $reference );
+    return $text;
 }
 
-# Render a duration statistic (millisecond-valued) for terminal display. A
-# millisecond-precision source cannot resolve finer than 1 ms, so synthesized
-# sub-grid values (the bin-counter percentile path interpolates inside a
-# log-spaced bin and lands off the integer-ms grid) are first rounded to the
-# source's native resolution before format_time auto-scales the unit. The value
-# always passes through format_time so the unit is always present — there is no
-# bare-number bypass for small magnitudes.
-# Render a millisecond-valued duration for display. With $max_chars set, the
-# result is guaranteed to fit that many characters: if the auto-scaled value
-# carries a fractional digit that pushes it over budget (e.g. "264.4ms" = 7 in
-# a 6-char cell under -du us), the decimal is dropped to fit ("264ms" = 5)
-# rather than clipping the unit and rendering a misleading "264.4m". The
-# fractional digit is the only expendable part — the unit is never truncated.
-# Callers that lay out fixed-width columns (the latency-stats cells) pass their
-# per-cell budget so the column stays aligned regardless of magnitude.
-# A duration-valued total (a bucket's or a message's summed milliseconds)
-# for display. A zero total rendered through the display scaler alone lands
-# on the ladder's lowest step, so a window whose durations sum to zero read
-# `0us` beside neighbours in `ms` (#444 R17): the cause was display scaling,
-# not a unit binding. Zero renders in the resolved source unit, as the
-# latency cells do through format_duration(); every other value climbs the
-# ladder as before.
-sub format_duration_total {
-    my ($value, $format, $space) = @_;
+# A budget row's field for a kind: the field itself, or its entry for the
+# kind (or its default) where the kinds differ.
+sub value_row_field {
+    my ($field, $kind) = @_;
+    return ref $field ? $field->{ $kind->{kind} } // $field->{default} : $field;
+}
+
+# One rendering of a value at a count of decimals, through its kind's arm and
+# the row's tier and fit: the text and the value it shows.
+sub value_arm {
+    my ($kind, $value, $unit, $row, $decimals) = @_;
+    my $tier  = value_row_field( $row->{tier}, $kind );
+    my $space = ( value_row_field( $row->{fit}, $kind ) // 'tight' ) eq 'loose' ? ' ' : undef;
+    return $value_arms{ $kind->{kind} }->( $value, $unit, $tier, $space, $decimals, $kind->{floor}, $row );
+}
+
+# How far a shown value is from the reference, as a share of the reference.
+sub value_distance {
+    my ($shown, $reference) = @_;
+    return abs( $shown - $reference ) < 1e-12 ? 0 : $reference == 0 ? 1 : abs( $shown - $reference ) / abs($reference);
+}
+
+# A value's spelling at the row's tier and fit: the most decimals, up to the
+# tier's maximum (or the precision the row fixes), that fit the width; with a
+# reference and the row's digits 'fewest', the fewest decimals within the
+# intent's tolerance of it. Every row (except one that fixes significant
+# digits) also weighs the value unclimbed, at its floor step, and takes it when
+# its integer part has no more digits than its kind allows
+# (%value_unclimbed_digits), it fits, it is no wider, and it is at least as
+# exact as the climbed spelling (a count of 1,800 reads 1800, never 1.8k).
+# Returns the text and the value it shows.
+sub value_spelling {
+    my ($kind, $value, $unit, $row, $width, $reference) = @_;
+    my @spelling = value_climbed_spelling( $kind, $value, $unit, $row, $width, $reference );
+    my $digits = $value_unclimbed_digits{ $kind->{kind} } // 0;
+    return @spelling if $row->{plain} || $row->{significant} || !$digits;
+    my @plain = value_climbed_spelling( $kind, $value, $unit, { %$row, plain => 1, digits => undef }, $width );
+    return @plain if $plain[0] =~ /^-?\d{1,$digits}(?:\D|$)/
+                  && length( $plain[0] ) <= length( $spelling[0] )
+                  && ( !defined $width || length( $plain[0] ) <= $width )
+                  && abs( $plain[1] - $value ) <= abs( $spelling[1] - $value ) + 1e-12;
+    return @spelling;
+}
+
+# The spelling at the row's tier and fit at the step the value climbs to.
+sub value_climbed_spelling {
+    my ($kind, $value, $unit, $row, $width, $reference) = @_;
+    my $max = $row->{decimals} // $tier_decimals{ value_row_field( $row->{tier}, $kind ) };
+    my @fitting;
+    for my $d ( reverse 0 .. $max ) {
+        my @spelling = value_arm( $kind, $value, $unit, $row, $d );
+        push @fitting, \@spelling if !defined $width || length( $spelling[0] ) <= $width;
+    }
+    return value_arm( $kind, $value, $unit, $row, 0 ) unless @fitting;
+    if ( defined $reference && ( $row->{digits} // '' ) eq 'fewest' ) {
+        my $tolerance = $value_intent{ $row->{intent} }{tolerance};
+        for my $spelling ( reverse @fitting ) {
+            return @$spelling if value_distance( $spelling->[1], $reference ) <= $tolerance + 1e-12;
+        }
+    }
+    return @{ $fitting[0] };
+}
+
+# The value a value's most exact spelling shows: across every spelling (or
+# every spelling of one tier), at the most decimals that fit the width, the one
+# nearest the value.
+sub value_reference {
+    my ($kind, $value, $unit, $row, $width, $tier) = @_;
+    my $best;
+    for my $step ( grep { !defined $tier || $_->[0] eq $tier } @value_walk ) {
+        my ( undef, $shown ) = value_climbed_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1], digits => undef, walked => undef }, $width );
+        $best = $shown if !defined $best || abs( $shown - $value ) < abs( $best - $value );
+    }
+    return $best;
+}
+
+# The tier and fit a row that names none takes: the first step of its
+# intent's walk at which every value fits the width and shows what the step's
+# digits allow ('exact': the step's own tier's most exact spelling, at its
+# full decimals, or one more exact still, such as the value unclimbed; 'within' and 'fewest': no
+# further from the most exact spelling of any tier than the intent tolerates). When no step does, the most exact spelling:
+# the width has forced the loss.
+sub value_walk_row {
+    my ($kind, $row, $width, $values, $unit) = @_;
+    my $intent = $value_intent{ $row->{intent} // 'accurate' };
+    my @values = grep { defined } @$values;
+    my @references = map { value_reference( $kind, $_, $unit, $row, $width ) } @values;
+    my %tier_references;
+    for my $step ( @{ $intent->{walk} } ) {
+        my $candidate = { %$row, tier => $step->[0], fit => $step->[1], digits => $step->[2], walked => 1 };
+        my $exact = $step->[2] eq 'exact';
+        # 'exact' keeps every digit the step's own tier can show, whatever the
+        # width (a shorter unit name carries fewer decimals); the tolerance is
+        # measured from the most exact spelling of any tier that fits.
+        my $against = $exact
+            ? ( $tier_references{ $step->[0] } //= [ map { value_reference( $kind, $_, $unit, $row, undef, $step->[0] ) } @values ] )
+            : \@references;
+        my $allowed = $exact ? 0 : $intent->{tolerance};
+        my $within = 1;
+        for my $i ( 0 .. $#values ) {
+            my ( $text, $shown ) = value_spelling( $kind, $values[$i], $unit, $candidate, $width, $references[$i] );
+            next if ( !defined $width || length($text) <= $width )
+                 && ( value_distance( $shown, $against->[$i] ) <= $allowed + 1e-12
+                      || abs( $shown - $values[$i] ) <= abs( $against->[$i] - $values[$i] ) + 1e-12 );   # as exact as the reference, or more
+            $within = 0;
+            last;
+        }
+        return $candidate if $within;
+    }
+    return { %$row, tier => $value_walk[-1][0], fit => $value_walk[-1][1], digits => 'exact', walked => 1 };
+}
+
+# The row a surface that passes a width renders a column with: its budget
+# row's tier and fit resolved once, against every value the column will show,
+# so one vocabulary runs down it. Called as value_column( kind => K |
+# metric => M, budget => ROW, width => W, values => [...] ); value_text() then
+# chooses each value's decimals.
+sub value_column {
+    my (%p) = @_;
+    my ( $width, $values, $budget ) = delete @p{qw( width values budget )};
+    my $row = $value_budget{$budget} // die "value_column: no budget row '$budget'\n";
+    return value_walk_row( resolve_value_kind(%p), { %$row, width => $width }, $width, $values );
+}
+
+# A duration climbed up the time-unit ladder and spelled at the tier. An arm
+# of value_text(). Options: floor, the smallest step the value may render in
+# (a source's resolved unit or a metric's declared unit: zero and a value
+# below one unit of it render in it); resolution, the step whose precision
+# bounds the value (a source cannot resolve finer than its own unit: the
+# value is rounded to it before it climbs, and no rendered digit is finer
+# than it); significant, a count of significant digits in place of decimals;
+# plain, the value at the floor step, unclimbed. A value that rounds up to the next step's size renders at that step
+# (59,960 ms reads 1 min, not 60 sec).
+sub format_time {
+    my ($value, $unit, $tier, $space, $decimals, %opt) = @_;
     return undef unless defined $value;
-    return format_time($value, 'ms', $format, $space) if $value != 0;
-    my $unit = $duration_unit_resolved // 'ms';
-    return '0' . (defined $space ? ' ' : '') . $time_unit_step{$unit}{ $format // 'short' };
-}
+    $tier     = "short" if !defined $tier;
+    $decimals = 1 if !defined $decimals;
 
-sub format_duration {
-    my ($value, $max_chars) = @_;
-    return "" unless defined $value;
-    my $unit = $duration_unit_resolved // 'ms';
-    # format_time auto-scales 0 down to the ladder's lowest step; render zero
-    # in the source's resolved unit instead so it reads as "zero <source unit>".
-    return "0$unit" if $value == 0;
-    my $decimals = $time_unit_step{$unit}{decimals};
-    my $rounded  = sprintf( "%.${decimals}f", $value );
-    my $out = format_time( $rounded, 'ms', 'short' );
-    # Fit the budget by shedding the fractional digit before any clipping.
-    if (defined $max_chars && length($out) > $max_chars && $out =~ /\.\d/) {
-        (my $no_frac = $out) =~ s/\.\d+//;
-        $out = $no_frac if length($no_frac) <= $max_chars;
+    my $milliseconds = convert_duration_to_ms($value, $unit);
+    my $resolution = defined $opt{resolution} ? $time_unit_step{ $opt{resolution} }{decimals} : undef;
+    $milliseconds = sprintf("%.*f", $resolution, $milliseconds) if defined $resolution;
+
+    my $floor_ms = defined $opt{floor} ? $time_unit_step{ $opt{floor} }{ms} : 0;
+    my @steps = grep { $_->{ms} >= $floor_ms } @time_unit_ladder;
+    splice @steps, 1 if $opt{plain};                # the value unclimbed, at its floor step
+    my $i = 0;
+    $i++ while $i < $#steps && $milliseconds >= $steps[$i + 1]{ms};
+    my $formatted_value;
+    while (1) {
+        my $step = $steps[$i];
+        my $scaled = $step->{per_ms} ? $milliseconds * $step->{per_ms} : $milliseconds / $step->{ms};
+        my $d = defined $opt{significant} ? significant_decimals($scaled, $opt{significant}) : $decimals;
+        if (defined $resolution) {
+            # Decimal digits of the step's size in milliseconds: a second
+            # holds three, a microsecond minus three.
+            my $digits = $step->{per_ms} ? -$step->{decimals} : floor( log( $step->{ms} ) / log(10) + 1e-9 );
+            my $ceiling = $resolution + $digits;
+            $d = $ceiling < 0 ? 0 : $ceiling if $d > $ceiling;
+        }
+        $formatted_value = strip_trailing_zeros(sprintf("%.*f", $d, $scaled));
+        last unless $i < $#steps && abs($formatted_value) >= $steps[$i + 1]{ms} / $step->{ms};
+        $i++;
     }
-    return $out;
+
+    my $unit_name = $steps[$i]{$tier};
+    $unit_name =~ s/s$// if $formatted_value == 1 && $tier eq 'long';                       # Singular units for long tier
+    $unit_name = " " . $unit_name if defined( $space ) || $tier eq 'long';                   # a whole word keeps its space
+
+    return wantarray ? ( "$formatted_value$unit_name", $formatted_value * $steps[$i]{ms} / ( convert_duration_to_ms( 1, $unit ) || 1 ) )
+                     : "$formatted_value$unit_name";
 }
 
 # Issue #268: column-to-family lookup for CSV emit formatting. Mirrors the
@@ -14150,10 +14408,18 @@ my %csv_column_family = (
 );
 
 # Resolve the family for a CSV column name. Returns 'level' for log-level
-# count and rate columns (their names are dynamic — ERROR, WARN, 2xx, 5xx,
-# err-rate_min, etc.). Returns the matching family for UDM dynamic columns
+# count columns (their names are dynamic — ERROR, WARN, 2xx, 5xx) and 'rate'
+# for rate columns. Returns the matching family for UDM dynamic columns
 # (which always have a *_min/_mean/_max/_sum/_occurrences suffix). Returns
 # undef for unknown columns; the formatter falls back to pass-through.
+# The metric a timeline value column renders: a user-defined metric's column
+# carries the udm_ prefix on its name; every other column is named for its
+# metric.
+sub timeline_column_metric {
+    my ($column) = @_;
+    return $column =~ /^udm_(.+)$/ ? $1 : $column;
+}
+
 # The %log_stats field holding a graph column's per-bucket total.
 sub column_total_field {
     my ($column) = @_;
@@ -14164,7 +14430,11 @@ sub resolve_csv_column_family {
     my ($column) = @_;
     return undef unless defined $column;
     return $csv_column_family{$column} if exists $csv_column_family{$column};
-    return 'level' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
+    # Rate columns: the built-in message and error rates, and a user-defined
+    # metric whose kind resolves to a rate (its STATS cell is keyed udm_<name>).
+    return 'rate' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
+    return 'rate' if $column =~ /^udm_(.+)$/ && udm_config_by_name($1)
+                  && resolve_value_kind( metric => $1 )->{kind} eq 'rate';
     # Log-level columns: matched against the configured log levels.
     return 'level' if grep { $_ eq $column } @log_levels;
     # UDM dynamic columns: <name>_<aggregate>; family follows the underlying
@@ -14201,33 +14471,23 @@ sub format_csv_value {
         $decimals = defined $family && exists $csv_family_decimals{$family}
             ? $csv_family_decimals{$family}
             : 0;
-        # Per-column override: rate columns within the level family always use
-        # 1 decimal in default mode (matching the rules TSV's max_decimals=1).
-        # In N mode, N wins.
-        if (defined $column && $column =~ /^(err|msg)-rate/ && $csv_precision eq 'default') {
-            $decimals = 1;
-        }
     }
     return $value if $decimals eq 'n/a';  # defensive — should not occur outside full mode
     # Round to the resolved decimal count, then strip trailing zeros (and a
     # trailing bare decimal point) so the emitted form carries only
     # significant digits. The family decimals are a max, not a fixed width.
-    my $formatted = sprintf("%.${decimals}f", $value);
-    $formatted =~ s/\.0+$//;
-    $formatted =~ s/(\.\d*?)0+$/$1/;
-    return $formatted;
+    return strip_trailing_zeros(sprintf("%.${decimals}f", $value));
 }
 
-# Issue #268: render-time CV formatter. Storage is precise; the table
-# and bar-graph cells have a fixed 4-char value budget, so render with
-# magnitude-adaptive decimals so the value always fits: integer above
-# 100, one decimal between 10 and 100, two decimals below 10.
+# The coefficient of variation at a count of decimals. An arm of
+# value_text(): the CV cell's width chooses the decimals, and the cell keeps
+# its trailing zeros, so a column of CVs reads at one precision down the rows
+# (3.00 beside 2.96); without $keep_zeros they are stripped.
 sub format_cv_display {
-    my ($cv) = @_;
+    my ($cv, $decimals, $keep_zeros) = @_;
     return '' unless defined $cv;
-    return sprintf('%d',   $cv) if $cv >= 100;
-    return sprintf('%.1f', $cv) if $cv >= 10;
-    return sprintf('%.2f', $cv);
+    my $text = sprintf('%.*f', $decimals // 2, $cv);
+    return $keep_zeros ? $text : strip_trailing_zeros($text);
 }
 
 # The single resolution surface for every percentage ltl prints
@@ -14260,32 +14520,22 @@ sub format_cv_display {
 #   pad         right-align the figure within `width`, so a column of them
 #               lines up. Where parens are in use the padding goes inside
 #               them, keeping the brackets hard against the field edges.
+#   decimals    the decimal places to render at; percentage_decimals() gives
+#               the count the mode asks for, and value_text() lowers it.
 #
-# Degradation, when the value does not fit `width`: decimals are dropped one
-# at a time, never below a whole percent, and the '%' sign is always kept.
-# What a surface does when even the whole percent will not fit is the
-# surface's own decision - the caller inspects the returned length. The
-# formatter never exceeds `width` unless the integer part alone is wider,
-# which no percentage of a total can be beyond '100%'.
+# Degradation, when the value does not fit `width`, is value_text()'s: it
+# renders again at one decimal fewer, never below a whole percent, and the
+# '%' sign is always kept. What a surface does when even the whole percent
+# will not fit is the surface's own decision - the caller inspects the
+# returned length. The arm of value_text() for the percentage kind.
 sub format_percentage {
     my ($value, %p) = @_;
     return '' unless defined $value;
 
-    my $mode   = $p{mode} // 'significant';
     my $parens = $p{parens} ? 1 : 0;
     my $width  = $p{width};
 
-    # Decimal places the requested precision asks for, before any fitting.
-    my $decimals;
-    if ($mode eq 'integer') {
-        $decimals = 0;
-    } elsif ($mode eq 'decimals') {
-        $decimals = $p{digits} // 0;
-    } else {
-        # Significant digits: the integer part consumes as many of them as
-        # its own magnitude needs, and the remainder become decimals.
-        $decimals = significant_decimals($value, $p{digits} // 3);
-    }
+    my $decimals = $p{decimals} // percentage_decimals( $value, %p );
 
     # Padding sits inside the brackets, so the inner budget is what the
     # figure itself has to fit into.
@@ -14312,31 +14562,25 @@ sub format_percentage {
             my $scale = 10 ** $d;
             $v = int( $v * $scale ) / $scale;
         }
-        my $t = sprintf( "%.*f", $d, $v );
         # A trailing zero after the decimal states a precision the value does
-        # not have: 0.340 and 0.34 are the same number, and the zero is read
-        # as a measured digit. Trim them, and the point with the last of them.
-        if ( $t =~ /\./ ) {
-            $t =~ s/0+$//;
-            $t =~ s/\.$//;
-        }
-        return $t . '%';
+        # not have: 0.340 and 0.34 are the same number.
+        return strip_trailing_zeros( sprintf( "%.*f", $d, $v ) ) . '%';
     };
 
-    my $figure = $render->($decimals);
-    if ( defined $inner_width ) {
-        while ( length($figure) > $inner_width && $decimals > 0 ) {
-            $decimals--;
-            $figure = $render->($decimals);
-        }
-    }
-
-    return $wrap->($figure);
+    return $wrap->( $render->($decimals) );
 }
 
+# The decimal places a percentage's mode asks for, before any fitting.
+sub percentage_decimals {
+    my ($value, %p) = @_;
+    my $mode = $p{mode} // 'significant';
+    return 0 if $mode eq 'integer';
+    return $p{digits} // 0 if $mode eq 'decimals';
+    # Significant digits: the integer part consumes as many of them as its
+    # own magnitude needs, and the remainder become decimals.
+    return significant_decimals( $value, $p{digits} // 3 );
+}
 
-# utility function for formating numbers to normal format
-sub normalize { $_[0] =~ s/\.0+$//r }
 
 # utility functions for trimming spaces off of a string
 sub ltrim { my $s = shift; $s =~ s/^\s+//; return $s }
@@ -15517,6 +15761,7 @@ sub adapt_to_command_line_options {
             shape      => 3,
             bytes      => 0,
             level      => 0,
+            rate       => 1,
         );
     } elsif ($csv_precision eq 'full') {
         %csv_family_decimals = (
@@ -15527,6 +15772,7 @@ sub adapt_to_command_line_options {
             shape      => 'n/a',
             bytes      => 'n/a',
             level      => 'n/a',
+            rate       => 'n/a',
         );
     } else {
         # Integer N mode: every family uses N decimals.
@@ -15538,6 +15784,7 @@ sub adapt_to_command_line_options {
             shape      => $csv_precision + 0,
             bytes      => $csv_precision + 0,
             level      => $csv_precision + 0,
+            rate       => $csv_precision + 0,
         );
     }
 
@@ -17623,12 +17870,12 @@ sub read_and_process_logs {
             my $tokens = $unregistered_levels{$slug};
             my $lines  = 0;
             $lines += $_ for values %$tokens;
-            print STDERR "Note: $slug lines carried " . scalar(keys %$tokens)
+            print STDERR "Note: $slug lines carried " . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
                 . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
-                . join( ', ', map { "$_ (" . format_number( $tokens->{$_}, 'medium' )
+                . join( ', ', map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' )
                                     . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
                               sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens )
-                . " - " . format_number( $lines, 'medium' )
+                . " - " . value_text( $lines, kind => 'count', budget => 'notice' )
                 . ( $lines == 1 ? " line was" : " lines were" ) . " not counted\n";
         }
     }
@@ -17638,7 +17885,7 @@ sub read_and_process_logs {
     # by far more than the thresholds explain, with no indication why.
     for my $metric (@builtin_metric_names) {
         next unless $numeric_filter_no_metric{$metric};
-        print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric}, 'medium' )
+        print STDERR "Note: " . value_text( $numeric_filter_no_metric{$metric}, kind => 'count', budget => 'notice' )
             . " lines carried no $metric value and were excluded by the $metric filter"
             . " (numeric filters only keep lines that carry the filtered metric)\n";
     }
@@ -17648,7 +17895,7 @@ sub read_and_process_logs {
     # tree the pattern describes unless the gap is reported.
     if (@unreadable_directories) {
         my $count = scalar @unreadable_directories;
-        print STDERR "Note: " . format_number($count, 'medium')
+        print STDERR "Note: " . value_text($count, kind => 'count', budget => 'notice exact')
             . ( $count == 1 ? " directory" : " directories" )
             . " could not be read and " . ( $count == 1 ? "was" : "were" )
             . " skipped during recursive file selection: "
@@ -17995,8 +18242,8 @@ sub find_histogram_bucket_index {
 # stays consistent across the two architectures.
 sub format_histogram_dimensions_line {
     my ($metric, $stats) = @_;
-    my $min_fmt = format_heatmap_value($stats->{min}, $metric);
-    my $max_fmt = format_heatmap_value($stats->{max}, $metric);
+    my $min_fmt = value_text($stats->{min}, metric => $metric, budget => 'dimensions line');
+    my $max_fmt = value_text($stats->{max}, metric => $metric, budget => 'dimensions line');
     return sprintf(
         "  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
         ucfirst($metric) . ":",
@@ -20052,10 +20299,10 @@ sub normalize_data_for_output {
             if( $category_bucket =~ /-HL$/ ) {
                 $title_length = length(legend_category_total($occurrences) . " ");
             } elsif( $category_bucket =~ /^err-rate$/ ) {
-                $title_length = length(format_number( $occurrences, 'medium' ) . ":");
+                $title_length = length(value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . ":");
                 $title_length += length(" ") if !$omit_values;                              # need to add the spacing between values and rate if both will be printed
             } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                $title_length = length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} ");
+                $title_length = length( value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . "$rate_suffix{$rate_unit} ");
             } else {
                 $title_length = length("$category_bucket: " . legend_category_total($occurrences) . " ");
             }
@@ -20290,27 +20537,6 @@ sub normalize_data_for_output {
     return;
 }
 
-# A heatmap or histogram value, formatted by its metric's family: a built-in
-# metric's family is in its table entry, a user-defined metric's follows its
-# unit type.
-sub format_heatmap_value {
-    my ($value, $metric) = @_;
-    my $family;
-    if ( exists $builtin_metric{$metric} ) {
-        $family = $builtin_metric{$metric}{family};
-    } else {
-        my ($config) = defined $heatmap_udm_config && ( $metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name} )
-                     ? ($heatmap_udm_config)
-                     : grep { $_->{name} eq $metric } @histogram_udm_configs;
-        return $value unless $config;
-        my $ut = $config->{unit_type};
-        $family = $ut eq 'time' ? 'duration' : $ut eq 'bytes' ? 'bytes' : 'count';
-    }
-    return $family eq 'duration' ? format_time($value, 'ms')
-         : $family eq 'bytes'    ? format_bytes($value)
-         :                         format_number($value, 'medium');
-}
-
 sub get_heatmap_column_header {
     # Returns the heatmap legend string for use as column header
     # Labels are positioned at their EXACT character positions to align with data and footer
@@ -20377,7 +20603,7 @@ sub get_heatmap_column_header {
             } else {
                 $value = $heatmap_max // 0;
             }
-            $value_str = format_heatmap_value($value, $metric);
+            $value_str = value_text($value, metric => $metric, budget => 'chart label');
         }
 
         push @markers, {
@@ -20524,7 +20750,7 @@ sub print_heatmap_footer_scale {
         } else {
             $value = $heatmap_max // 0;
         }
-        push @marker_values, format_heatmap_value($value, $metric);
+        push @marker_values, value_text($value, metric => $metric, budget => 'chart label');
     }
 
     # Print the leading horizontal line (before heatmap column)
@@ -20769,6 +20995,24 @@ sub print_bar_graph {
         # as a date-change marker. %a is 3 chars wide; the format is "%a %H:%M".
         my $profile_week_fold = ($profile_mode && $output_timestamp_format =~ /%a/) ? 1 : 0;
         my $prev_fold_wday;
+
+        # Each value column resolves its tier and fit once, against every
+        # value it will show, so one vocabulary runs down the column and no
+        # value is cut; the decimals are chosen per value. A proportional
+        # column's value follows a leading space.
+        my %column_budget;
+        for my $col (grep { $_->{visible} } @column_layout) {
+            my $col_w = $col->{width} // 0;
+            if ($col->{value_only}) {
+                $column_budget{ $col->{id} } = value_column( kind => 'count', budget => 'timeline count cell', width => $col_w,
+                    values => [ map { $log_stats{$_}{"$col->{id}_count"} } grep { !defined $log_stats{$_}{ $col->{id} } } keys %log_occurrences ] );
+            } elsif ($col->{type} eq 'proportional' && $col->{id} ne 'occurrences') {
+                my $field = column_total_field( $col->{id} );
+                $column_budget{ $col->{id} } = value_column( metric => timeline_column_metric( $col->{id} ), budget => 'timeline column', width => $col_w - 1,
+                    values => [ map { $log_stats{$_}{$field} } keys %log_occurrences ] );
+            }
+        }
+
         foreach my $bucket (sort { $a <=> $b } keys %log_occurrences) {
             my $bucket_time_str = format_bucket_key($bucket, precision => $timestamp_precision, shape => 'run');
             # Blanking the repeated weekday is a terminal-display affordance only.
@@ -20812,14 +21056,14 @@ sub print_bar_graph {
                     if( $category_bucket =~ /(-HL|err-rate|msg-rate)$/ ) {
                         if( $category_bucket =~ /^err-rate$/ ) {
                             $rate_metrics .= " " if !$omit_values;
-                            $rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}:$colors{'NC'}";
                             $legend_length_bucket += length( " " ) if !$omit_values;
-                            $legend_length_bucket += length( format_number( $occurrences, 'medium' ) . ":" );
+                            $legend_length_bucket += length( value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . ":" );
                         } elsif( $category_bucket =~ /^msg-rate$/ ) {
-                            $rate_metrics .= "${color}" . format_number( $occurrences, 'medium' ) . "$colors{'NC'}";
+                            $rate_metrics .= "${color}" . value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . "$colors{'NC'}";
                             $rate_metrics .= "$colors{'bright-black'}$rate_suffix{$rate_unit}$colors{'NC'} ";
-                            $legend_length_bucket += length( format_number( $occurrences, 'medium' ) . "$rate_suffix{$rate_unit} " );
+                            $legend_length_bucket += length( value_text( $occurrences, kind => 'count', budget => 'legend rate' ) . "$rate_suffix{$rate_unit} " );
                         } else {
                             my $hl_total = legend_category_total($occurrences);
                             $log_details .= "${color}$hl_total$colors{'NC'}" . " " if $category_bucket =~ /-HL$/;
@@ -20926,8 +21170,8 @@ sub print_bar_graph {
                     my $cell_count = $log_stats{$bucket}{"${col_id}_count"};
                     if ((defined $cell_value || defined $cell_count) && $col_w > 0) {
                         my $cell_text = defined $cell_value
-                            ? format_percentage( $cell_value, mode => 'significant', digits => 3, width => $col_w )
-                            : format_number( $cell_count, 'medium' );
+                            ? value_text( $cell_value, kind => 'percentage', budget => 'share cell', width => $col_w )
+                            : value_text( $cell_count, kind => 'count', budget => $column_budget{$col_id} );
                         $cell_text = substr( $cell_text, 0, $col_w ) if length($cell_text) > $col_w;
                         my $cell_pad = $col_w - length($cell_text);
                         $cell_pad = 0 if $cell_pad < 0;
@@ -20955,35 +21199,7 @@ sub print_bar_graph {
                         # (build_proportional_csv_data), so an auto-hidden or
                         # heatmap-replaced column no longer drops its CSV value or
                         # misaligns the row (mirrors the latency-stats block's design).
-                        if( $key =~ /^(time|duration)$/i ) {
-                            my $time_format = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
-                            my $time_space = $time_format eq 'short' ? undef : ' ';
-                            $trend_value = " " . format_duration_total( $log_stats{$bucket}{$field}, $time_format, $time_space );
-                        } elsif( $key =~ /^bytes$/i ) {
-                            $trend_value = " " . format_bytes( $log_stats{$bucket}{$field} );
-                        } elsif( $key =~ /^count$/i ) {
-                            $trend_value = " " . format_number( $log_stats{$bucket}{$field}, 'medium', ' ', 2);
-                        } elsif( $key =~ /^udm_(.+)$/ ) {
-                            my $metric_name = $1;
-                            my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                            if ($config) {
-                                my $unit_type = $config->{unit_type};
-                                if ($unit_type eq 'time') {
-                                    my $fmt = $col_w >= 15 ? 'long' : ($col_w >= 10 ? 'medium' : 'short');
-                                    my $spc = $fmt eq 'short' ? undef : ' ';
-                                    $trend_value = " " . format_duration_total($log_stats{$bucket}{$field}, $fmt, $spc);
-                                } elsif ($unit_type eq 'bytes') {
-                                    $trend_value = " " . format_bytes($log_stats{$bucket}{$field});
-                                } else {
-                                    $trend_value = " " . format_number($log_stats{$bucket}{$field}, 'medium', ' ', 2);
-                                    $trend_value .= $rate_suffix{$rate_unit}
-                                        if $config->{aggregation} =~ /^(rate|drate)$/;
-                                }
-                            }
-                        } else {
-                            my $decimals = $col_w > 10 ? 2 : ($col_w > 8 ? 1 : 0);
-                            $trend_value = defined $log_stats{$bucket}{$field} ? " " . format_number( $log_stats{$bucket}{$field}, 'medium', ' ', $decimals) : "";
-                        }
+                        $trend_value = " " . value_text( $log_stats{$bucket}{$field}, metric => timeline_column_metric($key), budget => $column_budget{$key} );
 
                         # Render the metric bar using color from column layout
                         my $col_color = $col->{color};
@@ -21025,11 +21241,11 @@ sub print_bar_graph {
                         # format_duration is given the 6-char value budget so it
                         # sheds the fractional digit to fit (e.g. 264.4ms -> 264ms)
                         # rather than overflowing; %-6.6s is the final guard.
-                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p50}, 6 ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p95}, 6 ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p99}, 6 ) ) : printf( " " x 11 );
-                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-6.6s$colors{'NC'} ", format_duration( $log_stats{$bucket}{p999}, 6 ) ) : printf( " " x 12 );
-                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%4.4s$colors{'NC'}", format_cv_display( $log_stats{$bucket}{cv} ) ) : printf ( " " x 7 );
+                        defined $log_stats{$bucket}{p50} ? printf( "$colors{'cyan'}P50:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p50}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p95} ? printf( "$colors{'yellow'}P95:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p95}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p99}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 11 );
+                        defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p999}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 12 );
+                        defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%-4.4s$colors{'NC'}", value_text( $log_stats{$bucket}{cv}, kind => 'cv', budget => 'cv cell' ) ) : printf ( " " x 7 );
                     }
 
                 } elsif ($col_id eq 'heatmap') {
@@ -21053,11 +21269,11 @@ sub print_bar_graph {
             foreach my $key (@populated_graph_columns) {
                 if( $key =~ /^(time|duration)$/i ) {
                     push @csv_data,
-                        (defined $log_stats{$bucket}{duration_sum} ? ltrim(format_duration_total($log_stats{$bucket}{duration_sum}, 'medium', ' ')) : undef),
+                        (defined $log_stats{$bucket}{duration_sum} ? value_text($log_stats{$bucket}{duration_sum}, metric => 'duration', budget => 'nice cell') : undef),
                         format_csv_value( $log_stats{$bucket}{duration_sum}, 'duration' );
                 } elsif( $key =~ /^bytes$/i ) {
                     push @csv_data,
-                        (defined $log_stats{$bucket}{$key} ? format_bytes($log_stats{$bucket}{$key}) : undef),
+                        (defined $log_stats{$bucket}{$key} ? value_text($log_stats{$bucket}{$key}, metric => 'bytes', budget => 'nice cell') : undef),
                         format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
                 } elsif( $key =~ /^count$/i ) {
                     next if $omit_count;
@@ -21197,8 +21413,8 @@ sub print_histograms {
         my $percentile_cols = calculate_histogram_percentile_ticks($selected_pcts, $boundaries, $bar_width);
 
         # Issue #462: publish the mapping's INPUTS at full precision. The
-        # legend and the dimensions line both round through
-        # format_heatmap_value(), which is coarse enough that a column cannot
+        # legend and the dimensions line both round through value_text()
+        # at their budget rows, which is coarse enough that a column cannot
         # be predicted from them -- so the D2 requirement that the ticks line
         # up with the printed values could not be asserted, only approximated.
         # The computed columns are deliberately absent: a harness reading them
@@ -21441,7 +21657,7 @@ sub calculate_histogram_x_labels {
     my @label_info;
     for my $pos (@positions) {
         my $value = $min_val * (($max_val / $min_val) ** $pos);
-        my $label = format_heatmap_value($value, $metric);
+        my $label = value_text($value, metric => $metric, budget => 'chart label');
         my $col = int($pos * ($bar_width - 1));
         push @label_info, { pos => $pos, col => $col, value => $value, label => $label };
     }
@@ -21500,9 +21716,8 @@ sub render_histogram_row {
     if ($has_tick) {
         my $pct_val = $y_ticks->{$row}{pct};
         my $count_val = int($max_bucket * $y_ticks->{$row}{count_fraction} + 0.5);
-        my $count_str = format_number($count_val, 'medium', undef, 0);  # No space, 0 decimals
-        $y_label = sprintf("%6s ", $count_str);  # 6 chars + space = 7
-        $y_pct = sprintf(" %3d%%", $pct_val);
+        $y_label = sprintf("%6s ", value_text($count_val, kind => 'count', budget => 'axis tick'));  # 6 chars + space = 7
+        $y_pct = " " . value_text($pct_val, kind => 'percentage', budget => 'axis percent');
     } else {
         $y_label = sprintf("%6s ", "");
         $y_pct = sprintf(" %4s", "");
@@ -21660,7 +21875,7 @@ sub select_histogram_percentiles {
     my @all_entries;
     for my $pct (@percentile_priority) {
         my $value     = $stats->{$pct->{key}};
-        my $value_str = format_heatmap_value($value, $metric);
+        my $value_str = value_text($value, metric => $metric, budget => 'chart label');
         my $entry_str = $pct->{label} . ": " . $value_str;
         push @all_entries, {
             key        => $pct->{key},
@@ -21777,7 +21992,7 @@ sub render_histogram_x_axis {
     }
 
     # Right side: corner + " 0%"
-    $result .= $box->{corner_br} . sprintf(" %3d%%", 0);
+    $result .= $box->{corner_br} . " " . value_text(0, kind => 'percentage', budget => 'axis percent');
 
     return $result;
 }
@@ -21831,7 +22046,7 @@ sub render_histogram_legend {
 
         my @selected_hl;
         for my $entry (@$selected) {
-            my $value_str = format_heatmap_value($stats_hl->{$entry->{key}}, $metric);
+            my $value_str = value_text($stats_hl->{$entry->{key}}, metric => $metric, budget => 'chart label');
             my $entry_str = $entry->{label} . ": " . $value_str;
             push @selected_hl, { str => $entry_str };
         }
@@ -21959,9 +22174,7 @@ sub share_row_text {
         # What the share may occupy: the row's slack once the count and the
         # space separating it from the share are spoken for.
         my $slack = $fit - length($count) - 1;
-        my $share = format_percentage( $count / $denominator * 100,
-                                       mode => 'significant', digits => 3, parens => 1,
-                                       width => $slack );
+        my $share = value_text( $count / $denominator * 100, kind => 'percentage', budget => 'share row', width => $slack );
         $value = "$count $share";
         $value = $count if length($value) > $fit;
     }
@@ -22226,17 +22439,17 @@ sub print_summary_table {
             if $recon->{mixed} > 0;
     }
     if ($show_timing) {
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", format_time( $elapsed_detect_registry_build, 's', 'medium', " " ) );
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", format_time( $elapsed_parse_read_files, 's', 'medium', " " ) );
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", format_time( $elapsed_accumulate_initialize_buckets, 's', 'medium', " " ) );
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", format_time( $elapsed_finalize_group_similar, 's', 'medium', " " ) ) unless $group_similar_sensitivity =~ /^none$/;
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: CALCULATE STATISTICS", format_time( $elapsed_finalize_calculate_statistics, 's', 'medium', " " ) );
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HEATMAP STATISTICS", format_time( $elapsed_finalize_heatmap_statistics, 's', 'medium', " " ) ) if $heatmap_enabled;
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HISTOGRAM STATISTICS", format_time( $elapsed_finalize_histogram_statistics, 's', 'medium', " " ) ) if $histogram_enabled;
-        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", format_time( $elapsed_render_normalize_data, 's', 'medium', " " ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "DETECT: FORMAT REGISTRY BUILD", value_text( $elapsed_detect_registry_build, kind => 'duration', unit => 's', budget => 'summary timing' ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "PARSE: FILE PROCESSING", value_text( $elapsed_parse_read_files, kind => 'duration', unit => 's', budget => 'summary timing' ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "ACCUMULATE: EMPTY BUCKETS", value_text( $elapsed_accumulate_initialize_buckets, kind => 'duration', unit => 's', budget => 'summary timing' ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: GROUP SIMILAR", value_text( $elapsed_finalize_group_similar, kind => 'duration', unit => 's', budget => 'summary timing' ) ) unless $group_similar_sensitivity =~ /^none$/;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: CALCULATE STATISTICS", value_text( $elapsed_finalize_calculate_statistics, kind => 'duration', unit => 's', budget => 'summary timing' ) );
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HEATMAP STATISTICS", value_text( $elapsed_finalize_heatmap_statistics, kind => 'duration', unit => 's', budget => 'summary timing' ) ) if $heatmap_enabled;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "FINALIZE: HISTOGRAM STATISTICS", value_text( $elapsed_finalize_histogram_statistics, kind => 'duration', unit => 's', budget => 'summary timing' ) ) if $histogram_enabled;
+        push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "RENDER: SCALE DATA TO TERMINAL", value_text( $elapsed_render_normalize_data, kind => 'duration', unit => 's', budget => 'summary timing' ) );
     }
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", format_time( $elapsed_total, 's', 'medium', " " ) );
-    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", format_bytes( $reported_max_memory_usage ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "TOTAL TIME", value_text( $elapsed_total, kind => 'duration', unit => 's', budget => 'summary timing' ) );
+    push @summary_table, sprintf( "$padding%-${category_column_width}s %${occurrences_column_width}s$padding\n", "MAXIMUM MEMORY USED", value_text( $reported_max_memory_usage, kind => 'bytes', budget => 'summary memory' ) );
 
     # Add structural breakdown if -mem flag used and we have high-water mark data
     if ($show_memory && %memory_high_water_marks) {
@@ -22271,11 +22484,10 @@ sub print_summary_table {
                 # Whole percent in a fixed five-character parenthesised field;
                 # a structure holding less than one percent of the peak says so
                 # rather than rounding down to a flat 0%.
-                my $pct_str = format_percentage( $pct, mode => 'integer', width => 5, parens => 1,
-                                                 floor_at => 1, floor_text => '<1%', pad => 1 );
+                my $pct_str = value_text( $pct, kind => 'percentage', budget => 'memory share' );
 
                 my $indented_label = sprintf(" %-25s %5s", $label, $pct_str);
-                push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, format_bytes( $size, 0 ) );
+                push @summary_table, sprintf( "$padding%-${category_width}s %${occurrences_width}s$padding\n", $indented_label, value_text( $size, kind => 'bytes', budget => 'memory breakdown' ) );
             };
 
             $emit_breakdown_row->($_, $memory_high_water_marks{$_}) for @sorted;
@@ -22513,6 +22725,13 @@ sub print_message_summary {
             print "$header_title\n" if $shown;
             print " " x $table_padding_outer . "─" x $table_width . "$colors{'NC'}\n" if $shown;
 
+            # The total column resolves its tier and fit once, against every
+            # total the table shows.
+            my @shown_keys = grep { defined && exists $log_messages{$grouping}{$_} } @top_keys;
+            splice @shown_keys, $messages_to_print{$grouping} if @shown_keys > $messages_to_print{$grouping};
+            my $total_budget = value_column( metric => 'duration', budget => 'messages total', width => $col_width{7},
+                values => [ map { $log_messages{$grouping}{$_}{total_duration} } @shown_keys ] );
+
             # Print the top messages
             foreach my $key (@top_keys) {
                 memory_debug_sample("message_summary_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
@@ -22545,7 +22764,7 @@ sub print_message_summary {
                     my $total_bytes_num = $log_messages{$grouping}{$key}{bytes_occurrences}
                         ? $log_messages{$grouping}{$key}{total_bytes}
                         : undef;
-                    my $total_bytes = defined $total_bytes_num ? format_bytes( $total_bytes_num ) : undef;
+                    my $total_bytes = defined $total_bytes_num ? value_text( $total_bytes_num, metric => 'bytes', budget => 'nice cell' ) : undef;
                     my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
                     my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
                     my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
@@ -22580,11 +22799,11 @@ sub print_message_summary {
                     if( $statistics_variant && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", format_duration( $min, $col_width{3} ) ) . " " x $table_padding_inner;
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", format_duration( $p50, $col_width{4} ) ) . " " x $table_padding_inner;
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", format_duration( $p999, $col_width{5} ) ) . " " x $table_padding_inner;
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", format_cv_display( $cv ) ) . " " x $table_padding_inner; 
-                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", format_duration_total( $total_duration, 'medium', 'space' ) // "" ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", value_text( $min, metric => 'duration', budget => 'latency cell', width => $col_width{3} ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", value_text( $p50, metric => 'duration', budget => 'latency cell', width => $col_width{4} ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{5}s", value_text( $p999, metric => 'duration', budget => 'latency cell', width => $col_width{5} ) ) . " " x $table_padding_inner;
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", value_text( $cv, kind => 'cv', budget => 'cv cell' ) ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", value_text( $total_duration, metric => 'duration', budget => $total_budget ) ) . " " x $table_padding_inner; 
                     } else {
                         $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
@@ -22658,7 +22877,7 @@ sub print_message_summary {
                             format_csv_value($kurtosis,          'duration_kurtosis'),
                             format_csv_value($bimodality_coef,   'duration_bimodality_coef'),
                             format_csv_value($total_duration,    'duration'),
-                            format_duration_total( $total_duration, 'medium', 'space' ),
+                            defined $total_duration ? value_text( $total_duration, metric => 'duration', budget => 'nice cell' ) : undef,
                             format_csv_value($impact,            'impact'),
                             @udm_csv_values,
                         ]);

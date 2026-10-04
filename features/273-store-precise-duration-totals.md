@@ -56,6 +56,8 @@ session scratchpad and read from the files.
 
 ---
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the messages-table total is walked by its own column width (the *messages total* row, intent `tabular`, resolved once per table); the MESSAGES and STATS `duration_nice` cells name the *nice cell* row. Record: `features/617-width-to-format-rule.md` D18, D23.
+
 ## 1. The motivating consumer
 
 The nice duration string exists for the MESSAGES CSV: the architect wanted the

@@ -37,6 +37,12 @@ about anything else, these still hold.
 
 - **The way is found on the path.** Small steps, one idea or change at a time,
   confirmation before the next. Do not solve everything up front.
+- **Work in parallel, so neither of us holds the other up.** When a change
+  alters what the architect is reviewing, first put what needs review in front
+  of the architect, with whatever it takes to reach it, then run the
+  validation (harnesses, golden captures, benchmarks) in the background and
+  report when it lands. Validation still completes before anything is
+  committed; it is the waiting that goes, not the check.
 - **Challenge and contribute.** Question assumptions; push back when something
   seems wrong; say "I have not read X yet" rather than frame from a guess.
   A locked decision that measurement shows costing or blocking is brought back

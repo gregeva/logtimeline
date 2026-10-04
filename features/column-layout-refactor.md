@@ -34,6 +34,8 @@ Additionally, graph column widths are distributed using hardcoded percentage tab
 
 This accumulated debt blocks issue #26 (adding a session metric column), which would require yet another column type threaded through all these structures.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** a value is fitted to its column, never cut: each timeline value column resolves its tier and fit once against every value it shows (`value_column()`), and the decimals give way per value. Record: `features/617-width-to-format-rule.md` D10, D23.
+
 ## Goals
 
 1. **Single source of truth** — One data structure defines each column's name, type, width, spacing, visibility, color, and rendering behavior.

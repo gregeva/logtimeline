@@ -2,9 +2,11 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`617-width-to-format-rule` off `release/0.19.0` (58f8d94); implementation not
-started. No code has changed on the branch; the version is not stamped.
+Specification agreed with the architect 2026-09-28. Implementation started
+2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
+`$version_number` stamped `0.19.0-617`, the before benchmark captured on the
+base commit (`tests/baseline/results/617-before.tsv`). Drops 1, 2 and 3 are
+committed and the completion gate passed on dbeb4e8 (§ Delivery progress).
 
 This issue is a sub-issue of #622 (the refactoring dispatched by the #342 audit
 review). It blocks #514 (the count metric becomes explicit and off by default):
@@ -391,6 +393,172 @@ issue body; they are restated here, not reinterpreted.
   the tool stores the clock, not a unit a log or a metric states), so they have
   no floor and D16 does not bind them. Locked by the architect 2026-09-28.
 
+### Locked 2026-10-04 (drop 2, the walk measured on the goldens)
+
+- **D23 — A surface names its intent, and each intent maps to a tolerance.**
+  Width says how much space a value has; intent says how far the rendered
+  value may stray from the stored one, which is what decides between a digit,
+  the space before the unit and the length of the unit. The architect: "there
+  is also an intended use aspect of this. If its a log message giving an
+  approximation, then 2 thousand would perhaps be better ... in the many column
+  scenarios, the readability would be typically most important ... depending on
+  what number is displayed, precision could be more important than readability,
+  as 2.6k tells a very different story than 3k does." Asked whether the intent
+  is a tolerance the caller passes or a named intent: "named intents, each
+  mapping to a tolerance". The caller sets the intent (a budget row names it; a
+  surface that passes a width names it beside the width). The walk takes the
+  most readable spelling (long before medium before short, loose before tight)
+  whose rounding error stays within the intent's tolerance for every value the
+  surface shows; the tier's maximum decimals stays the ceiling (D12) and the
+  column-wide resolution stays (D10). Amends D1 and D11, whose fixed order
+  (decimals give way first, the space second, the tier last) gave up a
+  significant digit on 216 rendered values of the regression goldens. The
+  intents, their tolerances and each surface's intent were locked below.
+  **Refined by the architect (2026-10-04):** "it's the producer who is setting
+  the number of significant digits. The intent is only providing preference
+  mechanism for the width formatting and algorithm adaption to the various
+  parts of that given the use. Hence, this is something that the producer would
+  also need to provide." The digits stay where § 5 puts them (a precision a
+  record locks for the surface, else the tier's maximum, never finer than the
+  source's resolution, then fewer to fit the width); the producer also names
+  the intent, which adds no digit count and only orders the choices among
+  spellings. An intent for a notice is human-readable prose (the full word,
+  `2 thousand`), not an approximation: "the intent is not for the value to be
+  approximate the intent is it for it to be human readable prose".
+  **Names locked by the architect (2026-10-04):** `prose` (a number inside a
+  sentence: the full word, digits given up within its tolerance even when there
+  is room), `tabular` (a column of values read against each other: the longer
+  unit and the space, a digit given up only within its tolerance) and `precise`
+  (a value read on its own terms). `precise` is a preference, not an absolute:
+  the space gives way first, then the unit shortens (long, medium, short), and
+  only when the value still does not fit at the short tier with no space do the
+  decimals give way. The unit is never cut (D10). The architect: "If you meant
+  that the preference is to not give up digits in general, then this logic
+  holds."
+  **The tolerance's meaning, accepted by the architect (2026-10-04):** the
+  reference is the most exact spelling that fits the width (the producer's
+  digits, at the shortest tier and tightest fit); a loss the width forces is in
+  the reference and is never limited by the tolerance. The tolerance prices only
+  a voluntary trade: where a more readable spelling (the space, a longer unit)
+  also fits once a digit is dropped, it is taken if the value moves from the
+  reference by no more than the intent's tolerance. 2,640 with room for five
+  characters: the reference `2.6k`; `3 k` fits but moves the value 15%. 12.17 min
+  with room for six: the reference `12.2m`; `12 min` moves it 1.6%.
+  **Tolerances locked by the architect (2026-10-04):** `precise` 0 (no
+  voluntary trade), `tabular` 5%, `prose` 25%, each the most a voluntary trade
+  may move a value from the reference.
+  **Surface intents locked by the architect (2026-10-04):** `tabular` for the
+  timeline value columns (duration, bytes, count, user-defined, sessions, users,
+  thread pools), the success and failure count cells and the messages-table
+  total; `prose` for the notice counts that report a scale (the *notice* row of
+  § Notices); `precise` for the legend totals and rates, the chart labels, the
+  progress line, the summary timings and memory, the `_nice` CSV cells and the
+  aggregate export (unchanged output); no intent for the cells whose tier and
+  fit are named and whose decimals only the width removes (latency, CV, axis
+  tick, dimensions line) and for the exact counts (*exact count*, *notice
+  exact*). With room, `tabular` keeps the digit (9.7 min stays `9.7 min`); it
+  trades one only when the exact spelling does not fit the more readable tier.
+  The architect: "make sure that we'll have an easy way to change these in the
+  future, as we'll certainly have to tune some of them": every surface's intent
+  is a field of its budget table row (the width-passing surfaces have rows of
+  their own) and the tolerances are one table beside it, so a retune edits one
+  line and no call site.
+  **The order of what gives way, per intent (architect, 2026-10-04):** for
+  `tabular`, "Tabular should first give up on the unit name. And then some of
+  the decimal precision, but not all of it. This is where I think your
+  tolerance notion comes in. And then the space. And then more decimals of
+  precision." So an intent is its tolerance and its own order: `tabular` keeps
+  the reference's digits and the space while the unit shortens (long, medium,
+  short); then gives up decimals within 5%, still loose at the short tier; then
+  the space; then the decimals the width forces. With room for `16.8 kB` a
+  bytes column keeps it rather than `17 kilobytes`; 12.17 min with six
+  characters reads `12.2 m`, with five `12 m`. `precise` keeps its order
+  (within each tier the space before the unit shortens; digits last), `prose`
+  its preference for the full word with the fewest digits within 25%. Each
+  intent's tolerance and order are one entry of one table.
+
+- **D24 — The per-tier maximum decimals: short 1, medium 1, long 2, for every
+  kind** (locked by the architect 2026-10-04: "Yeah, sounds good"). The values
+  proposed in § Decimals, measured on the goldens before the lock: 39 count
+  values in the timeline count column at the medium tier go from two decimals
+  to one (`1.68 k` reads `1.7 k`); every fixed surface reads as today. A
+  producer whose budget row fixes its own precision keeps it (D13).
+
+- **D25 — Not climbing is a candidate of the walk, for every kind, up to five
+  digits** (locked by the architect 2026-10-04: "yes, every kind, with a
+  five-digit limit"). The tiers only spelled a value at the largest step it
+  reaches; under 10,000 the plain number is often shorter, exact and easier to
+  read. The architect: "moving the decimal and adding the long thousand
+  description is actually more complicated to read and less precise". A
+  surface that walks (its row names no tier) also considers the value at its
+  floor step, unclimbed (`1800`, `12345`, `1800 B`), and takes it when it shows
+  the value's most exact spelling, its integer part has at most five digits, it
+  fits, and it is no wider than the spelling the intent's walk chose. 1,800 in
+  a notice reads `1800`, not `2 thousand`; 1,234,567 stays `1.2M`; 1,800 ms
+  stays `1.8 s` (`1800ms` is wider). **Amended by D26.**
+- **D26 — The unclimbed value on every row, its digits set by the intent and
+  the width; `-pv` is an intent switch** (locked by the architect 2026-10-04).
+  Rows that name their tier also consider the value unclimbed ("That sounds
+  like a reasonable rule"). How many digits it may carry depends on the intent
+  and the space: "If we have the possibility to print to seven characters, and
+  ... the value is a six character wide value, and the intent is precise, then
+  it should print a precise value ... If available character width is four,
+  then the rule of applying five characters allowed before truncation occurs is
+  wrong." **Amended the same day:** the unclimbed value carries at most five
+  digits under every intent, within the width (the architect: "No, it should
+  not be as many as the width allows. That's wrong ... Fix at 5. Keep in mind a
+  producer wanting such precision should ask explicitly"). `-pv` switches the legend's values from `tabular` to `precise`
+  ("the option precise values would essentially change the intent for those
+  values"): the legend is `tabular` by default, which amends the surface
+  assignment of D23 (legend totals and rates were `precise`). The `_nice` CSV
+  cells are `tabular` (the architect, 2026-10-04: "Those _nice fields aren't
+  nice like that. They should be tabular intent"), so 2,640,000 bytes reads
+  `2.6 MB`, never `2640000 B`.
+  **Four intents (the architect, 2026-10-04):** `accurate` sits before
+  `precise` and replaces what D23 called `precise` (tolerance 0: no digit
+  given up for readability; unclimbed up to five digits, scaled above); it is
+  the intent of the chart labels, the progress line and the summary rows.
+  `precise` becomes the intent a producer asks for explicitly: the exact value,
+  every digit, no abbreviation. `-pv` names it for the legend today, "creating
+  a surface for us to be able to call on in future to be able to toggle
+  precision for other render points". The architect: "Yeah, effectively, this
+  feels a lot better."
+  **Fallback locked (2026-10-04):** a `precise` value that does not fit its
+  space renders as the surface's default intent would, so a cell never
+  truncates and never overflows (`1002ms` fits a six-character P99 cell;
+  `177644ms` does not, and falls back to `2.96 min` or its tier's spelling).
+
+- **D27 — The climb threshold is a property of each kind** (locked by the
+  architect 2026-10-04). The unclimbed value of D25 and D26 is for bare
+  numbers: "this is a completely wrong way to show bytes values. We are
+  supposed to be following standing engineering notations with appropriate and
+  relevant magnitudes ... that threshold of what triggers the engineering unit
+  conversion is different depending on the kind of number that it is." Counts
+  and rates show unclimbed up to five digits; bytes and durations climb at
+  their ladder's step sizes (16,763 bytes reads `16.76 kilobytes`, never
+  `16763 bytes`; 12,345 ms reads `12.35 seconds`). The threshold is one field
+  per kind beside its ladder, tunable like the intents.
+
+- **D28 — The CV cell keeps its trailing zeros; the CV producer fixes two
+  decimals** (the architect, 2026-10-04, reviewing the renders). Amends D3 for
+  the CV cell and AC7's `CV:0.5`: "this should be reported as 3.00 or 1.00.
+  This is the closest to the current functionality and is more readable
+  because when we go row to row, we actually have small variances after the
+  decimal and larger variances like the one or the three don't cause the
+  overall rendering style to change ... this is a producer level error in the
+  attribution and we should be trying to stick more decimals ... into that
+  producer." The timeline and messages-table CV cells show two decimals,
+  giving them up only as the integer part grows within the four characters
+  (`3.00`, `0.50`, `12.5`, `123`); every other display surface still strips
+  trailing zeros (D3). The CSV `duration_cv` cell is unchanged (`0.5`).
+- **The tabular walk measures an `exact` step against its own tier**
+  (implementation of D23, corrected 2026-10-04 on the architect's review of a
+  messages-table total that read `4.8 m` with room for `4.8 min`): a step keeps
+  every digit its own tier can show at full decimals; giving up the unit name
+  gives up the long tier's second decimal with it (`3.56 minutes` reads
+  `3.6 min` where the long tier's two decimals do not fit). The tolerance is
+  still measured from the most exact spelling of any tier that fits.
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
@@ -534,6 +702,8 @@ against its own column (D18).
 
 **One set of per-tier maxima for every kind** (D12). The values are
 **proposed**:
+
+Locked as D24.
 
 | Tier | Maximum decimals | Why |
 |---|---|---|
@@ -684,7 +854,8 @@ it exposes and why; the choices are **proposed**:
 | Notice | What it exposes, and why the reader reads it | Numbers and their row |
 |---|---|---|
 | Unclassified-lines warning (`emit_classification_percentage_notices`) | the size of a coverage gap in a format's classification patterns: its scale says whether to investigate | the count, *notice*; the share, the notice share row (three significant digits): `1.2k included line(s) (100%)` |
-| CSV-skip warning (`read_and_process_logs`) | how much of a named CSV file was dropped; the first skipped row's own warning already gives its line number | the count, *notice*: `skipped 1.5k CSV rows`; the file name verbatim |
+| CSV-skip warning (`read_and_process_logs`) | gone: #640 (unplaced CSV rows are silent) removed the warning before implementation; nothing to render | none |
+| CSV header without a user-defined metric's column (`emit_udm_csv_unbound_notices`, added by #640 after this specification) | how many CSV files lacked the column a `-udm` metric names, never their names | the file count, *notice* |
 | Final consolidation pass skipped (`report_skipped_final_pass`) | how much data a skipped pass would have grouped, to judge the trade the tool made | the message count, *notice*; the `--group-similar` threshold echoed and the cliff-edge similarity offered as a value to type into `--group-similar`, both verbatim |
 | Unregistered levels (the level-rejection note) | which level tokens were dropped and how many lines each cost, so a reader tells a rounding error from a loss that matters | the number of levels, which precedes their list, *notice exact*; the per-level and total line counts, *notice* (unchanged) |
 | Numeric-filter note | how many lines a numeric filter removed for carrying no value, to explain a shrunken total | *notice* (unchanged) |
@@ -1048,6 +1219,205 @@ re-captured on the tree they leave.
 3. **Notices and the records** (D5, D6, D14, D17). Every notice on its row; the
    five new harness scenarios; the pattern entry and the records below. Proves
    AC13, AC14; AC21 is looked at.
+
+### Delivery progress
+
+**Drop 1 (2026-10-04): one dispatch, the kind resolver, the budget table, the
+strip, the floor.** `value_text()` is the dispatch; `resolve_value_kind()` the
+kind resolver (a built-in metric's family from `@builtin_metrics`, a
+user-defined metric's from its unit type and aggregation through
+`udm_config_by_name()`, its declared unit the floor); `%value_budget` the budget
+table; `@number_unit_ladder` and `%tier_decimals` (short 1, medium 1, long 2, the
+proposed maxima, which reproduce every fixed surface's output today) the kinds
+table; `strip_trailing_zeros()` the strip helper, called by every arm,
+`format_percentage` and `format_csv_value`. `format_heatmap_value`,
+`format_duration` and `normalize` are gone; `format_time`, `format_bytes`,
+`format_number` and `format_cv_display` are the dispatch's arms. A user-defined
+rate's STATS cell resolves to a `rate` CSV family (one decimal by default), with
+the built-in `err-rate` and `msg-rate` columns, which replaces the name-based
+override in `format_csv_value`.
+
+Sequencing within the issue: every fixed-budget surface moved in drop 1. The
+surfaces that pass a width (the timeline's proportional and value-only cells
+and the messages-table total) stay on `format_duration_total`,
+`format_number` and `format_bytes` until drop 2 gives the dispatch its walk;
+routing them through a width before the walk exists would have meant a
+temporary copy of the width-to-tier rules inside the dispatch. The timeline
+column of a user-defined time metric already passes its declared unit as the
+floor, so AC8's timeline half is proven in drop 1. AC15's structural half (the
+arms have one caller) is proven at drop 2.
+
+Proven in drop 1, by `tests/validate-value-display.sh` (scenarios
+*count-spelling*, *fixed-budget-sweep*, *zero-duration*, *floor-unit*,
+*cv-agreement*, *user-defined-kind*, *rate-suffix*, *no-trailing-zero*; 11 of its
+20 assertions fail against the base tree, each on a behaviour this drop
+changes), `validate-histogram-bin-counters` scenario *display-dimensions* (the
+bytes line, AC19), `validate-csv-output` scenario *udm-rate-cell* (AC16, the CSV
+half; fails against the base tree's `0`), and the unchanged assertions of
+`validate-duration-display`, `validate-bucket-size-units`,
+`validate-aggregate-export`, `validate-progress-line`,
+`validate-summary-contribution-bar` and `validate-histogram-ticks` (AC18).
+
+Regression goldens moved by drop 1, against the base commit's captures (which
+equal the committed goldens): 18 of 74 files, 36 lines, in three classes.
+
+| Class | Files | Example |
+|---|---|---|
+| trailing zero in a CV cell (D3) | 11 | `CV:3.00` reads `CV:3`; the timeline CV value is left-aligned in its four characters, as the latency cells beside it are |
+| trailing zero in a count (D3) | 2 | `1.30 Mil` reads `1.3 Mil` |
+| a latency cell's decimal given way to its width rounds instead of being cut (D1, D8) | 5 | under `-du us` a messages-table P50 of 72.6 ms read `72ms` and reads `73ms` |
+
+The third class is not in § Design, *User surface changes*: `format_duration`
+removed the fractional digit with `s/\.\d+//`, which truncates; the dispatch
+renders the value again at fewer decimals, which rounds.
+
+**Findings from drop 1, outside this issue.** A heatmap of a user-defined time
+metric whose every value is zero dies with `Can't use an undefined value as an
+ARRAY reference` in `get_heatmap_column_header` on the base commit as on this
+branch (input: two application-log lines carrying `elapsed=0`,
+`-udm 'elapsed:s:max' -hm elapsed`). AC8's heatmap half for a user-defined
+metric is therefore asserted only for the built-in duration.
+
+**Drop 2 (2026-10-04): the width rule with intents (D23).** `value_column()`
+resolves a width-passing surface's tier and fit once per column through
+`value_walk_row()`: the steps of the row's intent's walk in order
+(`%value_intent`: each intent's tolerance and its order of what gives way),
+the first at which every value fits the width and shows what the step allows
+(the reference's digits, or digits within the tolerance), the reference being
+`value_reference()`, the most exact spelling that fits across every spelling.
+Each value's decimals then come from `value_spelling()`: the most that fit, up
+to the tier's maximum, or, for `prose`, the fewest within the tolerance. Every row of
+`%value_budget` names its intent; the width-passing surfaces have rows of their
+own (*timeline column*, *timeline count cell*, *messages total*); a row that
+names no tier walks for one on its own value (*notice*). The arms return the
+value their text shows. `format_time` holds a value with a source floor to the
+source's resolution (the ceiling, D19, now on every surface); `format_time`,
+`format_bytes` and `format_number` carry a value that rounds up to the next
+step's size (D19); `@byte_unit_ladder` gains the long-tier word per notation;
+the axis tick names its six-character width. `format_duration_total` is gone:
+every arm has one caller, the dispatch (AC15's structural half).
+
+AC4 as written (decimals give way before the space) is superseded by D23; it
+now reads: no long-tier word is tight, one tier and one fit run down each
+column, and the walk takes a voluntary trade only within the column's intent.
+
+Proven in drop 2 by `tests/validate-value-display.sh` scenarios *fit-sweep*
+(AC3, AC4, AC11, AC12), *common-maxima* (AC5, on the proposed maxima),
+*boundary-carry* (AC10), *messages-total* (AC17) and *axis-tick* (AC22), and
+the order of what gives way for `tabular` (*fit-sweep*: 16,800 bytes reads
+`16.8 kilobytes` or `16.8 kB`, `17 kB` only where `16.8 kB` does not fit; it
+fails on the first walk, which read `17 kilobytes` at width 180); the
+assertions of each fail against the drop 1 tree except *messages-total*'s,
+proven on a doctored render (the drop 1 total column did not overflow these
+widths), and `validate-byte-units` re-pointed to the carry (999,999 bytes reads
+`1 MB`; 1,048,575 bytes reads `1 MiB` under IEC). `validate-duration-display`'s
+observed-zero bytes assertion accepts any byte spelling of zero (`0 B`, `0B`,
+`0 bytes`): the invariant is that the zero shows.
+
+Regression goldens moved by drop 2, against drop 1's, every changed value in a
+class (the first walk, before the order of D23, gave up a significant digit on
+216 values; this one on 87, every one within 5%).
+
+| Class | Values | Example |
+|---|---|---|
+| the space alone (the walk) | 167 | `3m` reads `3 m` |
+| same value, another tier or fit (the walk) | 161 | `3.7 kB` reads `3.7 kilobytes` |
+| more decimals at the long tier | 73 | `3 minutes` reads `2.96 minutes` |
+| a count at the medium tier's one decimal (the proposed maxima) | 39 | `1.68 k` reads `1.7 k` |
+| a millisecond-source value at the millisecond step loses its decimal (D19) | 25 | `207.7ms` reads `208ms`; `3.6ms` reads `4ms` |
+| a digit traded within 5% where the exact digits did not fit loose (`tabular`, D23) | 22 | `16.8 k` (unit cut) reads `17 kB` |
+| a cut value made whole | 5 | `885.5` (unit cut) reads `885 kB`; `119 millisecon` reads `119 msec` |
+| the histogram y-axis tick (correction 6) | 4 | `1k` reads `1.1k` and `1.2k` |
+
+The before/after single-day benchmark probe on this machine reads 8.6 s on
+both sides (-0.1%); the gate's pairs are taken at the merge gate.
+
+**Drop 3 (2026-10-04): the notices and the records.** Every measured count in
+a notice renders through `value_text()` at the row § Notices names: *notice*
+(intent `prose`) for a scale, *notice exact* for a count a list beside it must
+agree with, *notice share* for the leakage warning's percentage. The
+percentage arm's decimals loop moved into the dispatch (`percentage_decimals()`
+gives the mode's decimals; `value_text()` lowers them to fit), output unchanged.
+The `--explain` timeout-clustering example and `docs/explain/techniques.md`
+read "the coefficient of variation is 0" and the example's y-axis ticks
+`1.1k`/`1.4k`. Records trued up: `docs/architecture-patterns.md` (the entry
+*Width-to-format rule: one dispatch per metric kind*; the two status edits),
+`docs/percentage-presentation.md`, and features 501, 444, 524, 608, 273, 448,
+503, column-layout-refactor, heatmap, histogram-charts, user-defined-metrics and
+452; the #342 audit report's stages 7 and 8 move to *done* when this issue
+closes.
+
+Proven in drop 3 by `validate-value-display` scenario *exact-counts* (AC13; it
+holds on the base tree too, as D5 records existing behaviour, and is proven on
+doctored captures), and for AC14 by new scenarios in
+`validate-classification-percentages` (*leakage-warning-numbers*),
+`validate-message-grouping` (*skip-final-pass-notice-count*),
+`validate-log-level-vocabulary` (*unregistered-level-numbers*) and
+`validate-recursive-file-selection` (*unreadable-directory-count*), each failing
+against the drop 1 tree.
+
+**D25 (2026-10-04): the value unclimbed.** `value_spelling()` weighs, for a
+row the walk resolved, the value at its floor step (the arms' `plain` option)
+and takes it when its integer part has at most five digits, it fits, it is no
+wider than the climbed spelling and at least as exact; a step of the walk
+accepts a spelling as exact as its reference or more. The reference stays the
+most exact climbed spelling: letting the unclimbed spelling into it made every
+`exact` step fail for a five-digit millisecond value and dropped wide duration
+columns to the short tier (caught on the goldens before commit). Goldens moved:
+70 values in 45 files, every one shown unclimbed (`1.7 k` reads `1681`,
+`1.15 kilobytes` reads `1152 bytes`). The notices read `1500 messages`,
+`1200 included line(s) (100%)` and `AUTH (1500 lines), TRAFFIC_CONTROL (300
+lines) - 1800 lines were not counted`. The *common-maxima* scenario moved to a
+seven-digit count (`value-display-count-maxima.txt`, 1,140,000), which never
+shows unclimbed.
+
+**D26 (2026-10-04): four intents, the unclimbed value on every row.**
+`%value_intent` holds `accurate` (what D23 called `precise`), `tabular` and
+`prose`; `precise` is asked for, not assigned: a row names the switch it obeys
+(`precise_switch`, `\$precise_values` for the legend totals) and, switched on,
+shows the exact value unclimbed, every digit, falling back to the row's own
+intent where that does not fit its width. The legend is `tabular` (its totals
+`precise` under `-pv`); the chart labels, the progress line and the summary rows
+`accurate`; the `_nice` cells `tabular`. Every row but one fixing significant
+digits weighs the value unclimbed up to five digits. Goldens moved: 129 values
+in 47 files, every one a count shown unclimbed on a fixed-tier row (the legend's
+`2.4k` reads `2395`; chart labels and axis ticks alike). AC1 now holds outright:
+a count of 1,500 reads `1500` on the timeline, the heatmap header and the
+histogram legend. AC13 reads: the tables and the summary print `1200`, the
+legend `1200` (unclimbed) and, for 123,456 lines, `123.5k`, and `123456` under
+`-pv`. AC22 reads: the top y-axis tick of 1,155 samples reads `1155`, and no
+two ticks read alike. No surface names a width together with a precise switch
+yet, so the fallback has no consumer to assert against; it is exercised the
+first time one does.
+
+**D27 (2026-10-04): the climb threshold per kind.** `%value_unclimbed_digits`
+(count 5, rate 5, bytes 0, duration 0) bounds the unclimbed value by kind; bytes
+and durations climb at their ladder's steps again. Against the goldens of drop
+2 (before D25), the only values that now differ are 148 counts shown unclimbed;
+no byte or duration value differs. The *fit-sweep* assertion on the
+16,800-byte row asserts the climb (`16.8 kilobytes` or `16.8 kB`, never
+`16800 B`) and fails on the D25 tree.
+
+**AC21 (2026-10-04): looked at by the architect.** Before and after renders of
+a single-day web application access log carrying execution time (the
+regression suite's sampled access log) and of an application log carrying
+count and duration keys (the regression suite's 5,000-line script-log slice),
+at widths 100, 120, 160 and 200, with `-hm duration`, `-hm count` and
+`-hg duration,bytes`. The review produced D25, D26, D27, D28 and the tabular
+walk's own-tier correction; the architect's verdict on the final renders:
+"Everything else looks great."
+
+**Completion gate (2026-10-04), on dbeb4e8** (`$version_number` restored to
+0.19.0): the full suite, 47 harnesses, all exit 0 (`CI=1 validate-csv-output`,
+then `CI=1 validate-statistics`, then the rest; the statistics capture
+refreshed in 365 s, its cache keyed on the whole `ltl` source). Before/after
+benchmark, `single-day-access-log-standard`, three interleaved pairs from two
+worktrees side by side (base 2c04a38, gate dbeb4e8) on this machine: total
+8.7 s (8.7 to 8.7) before, 8.6 s (8.6 to 8.8) after, per pair +1.2%, -1.2%,
+-1.0%; peak RSS 103.8 MB (102.2 to 104.5) before, 103.5 MB (101.1 to 105.7)
+after, per pair +1.1%, +1.3%, -2.6%. No metric is worse by more than 1% across
+the runs; the work runs at render time, not per line. The golden diff is
+classified per drop above.
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after

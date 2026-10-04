@@ -1,0 +1,4 @@
+message_match	expected
+# 19 lines in one minute, 18 carrying the key: the message rate and the user-defined rate of the key are both 0.3 per second, one decimal
+@cell	stats	timestamp=2026-01-26 10:00	msg-rate_sec	0.3	features/617-width-to-format-rule.md D21 (the built-in rate columns are unchanged)
+@cell	stats	timestamp=2026-01-26 10:00	urate_rate_sec	0.3	features/617-width-to-format-rule.md D15, D21 (a user-defined rate belongs to the rate family and carries the one decimal the built-in rate columns carry)

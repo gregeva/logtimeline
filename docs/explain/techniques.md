@@ -463,7 +463,7 @@ ltl -h "/api/v2/checkout" -hm duration access.log  # does the relationship hold 
 
 **How to read it.** Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it.
 
-The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0.00. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces.
+The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces.
 
 Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it.
 

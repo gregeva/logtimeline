@@ -34,3 +34,4 @@ gated-means-impact-discard	tests/fixtures/gated-means-application.txt	-bs 1440 -
 # -bs 1 -oe -n 20: one path's two sizes sit alone in the first minute, so its MESSAGES row and that minute's STATS row hold one bytes mean
 gated-means-bytes-mean-default	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-default.tsv
 gated-means-bytes-mean-full	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20 -cp full	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-full.tsv
+udm-rate-cell	tests/fixtures/numeric-highlight-boundary.txt	-bs 1 -n 1 -ru s -udm urate::rate:count	duration,percentile,dispersion,shape,bytes,count,level,udm-rate	expected/udm-rate-cell.tsv

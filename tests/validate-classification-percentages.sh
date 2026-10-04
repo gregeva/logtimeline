@@ -27,10 +27,12 @@
 #   - the UNCLASSIFIED summary row (R13) and run-level share suppression on a
 #     non-qualifying run (D10);
 #   - notice 3 on an explicit request against formats without both criteria,
-#     and silence on a clean qualifying run (AC11 — notice 1 and the
-#     non-zero-leakage notice 2 have no shipped format that can produce their
-#     condition; recorded as gaps in the feature doc § Scenario-design
-#     findings, not asserted here).
+#     and silence on a clean qualifying run (AC11 — notice 1 has no shipped
+#     format that can produce its condition; recorded as a gap in the feature
+#     doc § Scenario-design findings, not asserted here);
+#   - the non-zero-leakage notice 2 and its numbers, produced by the
+#     verification format seated with -lf classification_verification
+#     (features/617-width-to-format-rule.md correction 10, D14).
 #
 # Timeline cells are read through the column selector
 # (tests/lib/rendered-output.sh timeline_cell_report; method:
@@ -206,6 +208,7 @@ scenario_register column-placement \
                   summary-row-colour \
                   share-omission-notice \
                   clean-run-hygiene \
+                  leakage-warning-numbers \
                   soft-wrap
 scenario_parse_args "$@"
 
@@ -478,6 +481,33 @@ for cap in "$A" "$A2" "$H" "$D0" "$D1" "$G1" "$M" "$M2" "$SM"; do
         contract "tests/HARNESS-DESIGN.md § Runtime-warning cleanliness"
 done
 
+fi
+
+# The leakage warning's numbers: 1,200 lines of the verification format whose
+# duration (1500) satisfies neither criterion. The count names the prose
+# notice row (the full word, a digit given up within 25%), the share the
+# notice share row (three significant digits, no trailing zero). -bs 1440
+# -n 1: the warning reads no bucket and no message row.
+if scenario_wanted leakage-warning-numbers; then
+current_scenario="leakage-warning-numbers"
+LEAK_FIXTURE="$TMP_DIR/leakage-1200.txt"
+"$PERL" -e 'for my $i (0..1199) { printf "VERIFY CLS 2025-06-01 10:%02d:%02d.000 level=INFO thread=worker-1 object=Store took=1500 cache warm\n", int($i/60) % 60, $i % 60 }' > "$LEAK_FIXTURE"
+LK="$TMP_DIR/leakage.out"
+set +e
+"$LTL" --disable-progress -ni -lf classification_verification -bs 1440 -n 1 --terminal-width 160 "$LEAK_FIXTURE" > "$LK" 2> "$LK.stderr"
+set -e
+assert_command \
+    label "the leakage warning reads 1200 included line(s) (100%) for 1,200 unclassified lines" \
+    command "grep -qF 'Warning: 1200 included line(s) (100%) matched neither the success nor the failure classification' '$LK.stderr'" \
+    asserts "a notice's measured count renders through the one dispatch at its row (prose: 1,200 reads 1200 unclimbed, exact and narrower than any scaled spelling) and its share through the percentage formatter (100%, never 100.0%)" \
+    produced_by "emit_classification_percentage_notices() in ltl, through value_text() and the notice and notice share rows" \
+    contract "features/617-width-to-format-rule.md D6, D14, D23, D25"
+assert_command \
+    label "no runtime warnings on stderr (leakage)" \
+    command "assert_no_runtime_warnings '$LK.stderr' 'leakage'" \
+    asserts "no ' at ltl line N' unguarded data path fires on the leakage run" \
+    produced_by "any sub touched by this feature" \
+    contract "tests/HARNESS-DESIGN.md § Runtime-warning cleanliness"
 fi
 
 if scenario_wanted soft-wrap; then
