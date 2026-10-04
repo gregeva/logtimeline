@@ -477,6 +477,13 @@ issue body; they are restated here, not reinterpreted.
   its preference for the full word with the fewest digits within 25%. Each
   intent's tolerance and order are one entry of one table.
 
+- **D24 — The per-tier maximum decimals: short 1, medium 1, long 2, for every
+  kind** (locked by the architect 2026-10-04: "Yeah, sounds good"). The values
+  proposed in § Decimals, measured on the goldens before the lock: 39 count
+  values in the timeline count column at the medium tier go from two decimals
+  to one (`1.68 k` reads `1.7 k`); every fixed surface reads as today. A
+  producer whose budget row fixes its own precision keeps it (D13).
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
@@ -620,6 +627,8 @@ against its own column (D18).
 
 **One set of per-tier maxima for every kind** (D12). The values are
 **proposed**:
+
+Locked as D24.
 
 | Tier | Maximum decimals | Why |
 |---|---|---|
