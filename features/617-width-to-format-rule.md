@@ -513,8 +513,16 @@ issue body; they are restated here, not reinterpreted.
   assignment of D23 (legend totals and rates were `precise`). The `_nice` CSV
   cells are `tabular` (the architect, 2026-10-04: "Those _nice fields aren't
   nice like that. They should be tabular intent"), so 2,640,000 bytes reads
-  `2.6 MB`, never `2640000 B`. Not yet decided: the chart labels, the progress
-  line and the summary rows, `precise` rows that name no width.
+  `2.6 MB`, never `2640000 B`.
+  **Four intents (the architect, 2026-10-04):** `accurate` sits before
+  `precise` and replaces what D23 called `precise` (tolerance 0: no digit
+  given up for readability; unclimbed up to five digits, scaled above); it is
+  the intent of the chart labels, the progress line and the summary rows.
+  `precise` becomes the intent a producer asks for explicitly: the exact value,
+  every digit, no abbreviation. `-pv` names it for the legend today, "creating
+  a surface for us to be able to call on in future to be able to toggle
+  precision for other render points". The architect: "Yeah, effectively, this
+  feels a lot better."
 
 ### Governing decisions in other records, read and in force
 
