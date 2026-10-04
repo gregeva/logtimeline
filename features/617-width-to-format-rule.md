@@ -393,6 +393,28 @@ issue body; they are restated here, not reinterpreted.
   the tool stores the clock, not a unit a log or a metric states), so they have
   no floor and D16 does not bind them. Locked by the architect 2026-09-28.
 
+### Locked 2026-10-04 (drop 2, the walk measured on the goldens)
+
+- **D23 — A surface names its intent, and each intent maps to a tolerance.**
+  Width says how much space a value has; intent says how far the rendered
+  value may stray from the stored one, which is what decides between a digit,
+  the space before the unit and the length of the unit. The architect: "there
+  is also an intended use aspect of this. If its a log message giving an
+  approximation, then 2 thousand would perhaps be better ... in the many column
+  scenarios, the readability would be typically most important ... depending on
+  what number is displayed, precision could be more important than readability,
+  as 2.6k tells a very different story than 3k does." Asked whether the intent
+  is a tolerance the caller passes or a named intent: "named intents, each
+  mapping to a tolerance". The caller sets the intent (a budget row names it; a
+  surface that passes a width names it beside the width). The walk takes the
+  most readable spelling (long before medium before short, loose before tight)
+  whose rounding error stays within the intent's tolerance for every value the
+  surface shows; the tier's maximum decimals stays the ceiling (D12) and the
+  column-wide resolution stays (D10). Amends D1 and D11, whose fixed order
+  (decimals give way first, the space second, the tier last) gave up a
+  significant digit on 216 rendered values of the regression goldens. The
+  intents, their tolerances and each surface's intent are not yet locked.
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
