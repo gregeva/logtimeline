@@ -1296,6 +1296,21 @@ doctored captures), and for AC14 by new scenarios in
 `validate-recursive-file-selection` (*unreadable-directory-count*), each failing
 against the drop 1 tree.
 
+**D25 (2026-10-04): the value unclimbed.** `value_spelling()` weighs, for a
+row the walk resolved, the value at its floor step (the arms' `plain` option)
+and takes it when its integer part has at most five digits, it fits, it is no
+wider than the climbed spelling and at least as exact; a step of the walk
+accepts a spelling as exact as its reference or more. The reference stays the
+most exact climbed spelling: letting the unclimbed spelling into it made every
+`exact` step fail for a five-digit millisecond value and dropped wide duration
+columns to the short tier (caught on the goldens before commit). Goldens moved:
+70 values in 45 files, every one shown unclimbed (`1.7 k` reads `1681`,
+`1.15 kilobytes` reads `1152 bytes`). The notices read `1500 messages`,
+`1200 included line(s) (100%)` and `AUTH (1500 lines), TRAFFIC_CONTROL (300
+lines) - 1800 lines were not counted`. The *common-maxima* scenario moved to a
+seven-digit count (`value-display-count-maxima.txt`, 1,140,000), which never
+shows unclimbed.
+
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after
 benchmark on this machine; `validate-help-content`; the golden diff

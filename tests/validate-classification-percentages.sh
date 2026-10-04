@@ -497,11 +497,11 @@ set +e
 "$LTL" --disable-progress -ni -lf classification_verification -bs 1440 -n 1 --terminal-width 160 "$LEAK_FIXTURE" > "$LK" 2> "$LK.stderr"
 set -e
 assert_command \
-    label "the leakage warning reads 1 thousand included line(s) (100%) for 1,200 unclassified lines" \
-    command "grep -qF 'Warning: 1 thousand included line(s) (100%) matched neither the success nor the failure classification' '$LK.stderr'" \
-    asserts "a notice's measured count renders through the one dispatch at its row (prose: 1,200 reads 1 thousand, 16.7% within the 25% tolerance) and its share through the percentage formatter (100%, never 100.0%)" \
+    label "the leakage warning reads 1200 included line(s) (100%) for 1,200 unclassified lines" \
+    command "grep -qF 'Warning: 1200 included line(s) (100%) matched neither the success nor the failure classification' '$LK.stderr'" \
+    asserts "a notice's measured count renders through the one dispatch at its row (prose: 1,200 reads 1200 unclimbed, exact and narrower than any scaled spelling) and its share through the percentage formatter (100%, never 100.0%)" \
     produced_by "emit_classification_percentage_notices() in ltl, through value_text() and the notice and notice share rows" \
-    contract "features/617-width-to-format-rule.md D6, D14, D23"
+    contract "features/617-width-to-format-rule.md D6, D14, D23, D25"
 assert_command \
     label "no runtime warnings on stderr (leakage)" \
     command "assert_no_runtime_warnings '$LK.stderr' 'leakage'" \

@@ -13656,7 +13656,7 @@ sub resolve_byte_notation {
 # count the value reaches names the unit, so 1000 bytes is 1 kB in SI and
 # 1000 B in IEC. The ladder is the only table.
 sub format_bytes {
-    my ($bytes, $tier, $space, $decimals, $floor) = @_;
+    my ($bytes, $tier, $space, $decimals, $floor, $plain) = @_;
     return undef unless defined $bytes;
     $decimals = 1 if !defined $decimals;
 
@@ -13665,6 +13665,7 @@ sub format_bytes {
     # that rounds up to the next step's size renders at that step.
     my $floor_bytes = defined $floor ? $byte_unit_by_prefix{ uc substr($floor, 0, 1) }{$byte_notation}{bytes} : 1;
     my @steps = grep { $_->{bytes} >= $floor_bytes } map { $_->{$byte_notation} } @byte_unit_ladder;
+    splice @steps, 1 if $plain;                     # the value unclimbed, at its floor step
     my $i = 0;
     $i++ while $i < $#steps && abs($bytes) >= $steps[$i + 1]{bytes};
     my $number;
@@ -14041,13 +14042,14 @@ sub legend_category_total {
 # A count climbed up the number ladder from the floor step (the multiplier of
 # a metric's declared unit) and spelled at the tier. An arm of value_text().
 sub format_number {
-    my ($value, $tier, $space, $decimals, $floor) = @_;
+    my ($value, $tier, $space, $decimals, $floor, $plain) = @_;
     $tier     = 'medium' if !defined $tier;
     $decimals = 1 if !defined $decimals;
 
     # Climb from the floor step; a value that rounds up to the next step's
     # size renders at that step (999,960 reads 1 Mil, not 1000 k).
     my @steps = grep { $_->{factor} >= ($floor // 1) } @number_unit_ladder;
+    splice @steps, 1 if $plain;                     # the value unclimbed, at its floor step
     my $i = 0;
     $i++ while $i < $#steps && $value >= $steps[$i + 1]{factor};
     my $formatted_value;
@@ -14117,11 +14119,11 @@ sub resolve_value_kind {
 my %value_arms = (
     duration => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_;
                       format_time( $v, $unit // 'ms', $tier, $space, $d, floor => $floor, resolution => $floor,
-                                   significant => $row->{significant} ) },
-    bytes    => sub { my ($v, $unit, $tier, $space, $d, $floor) = @_; format_bytes( $v, $tier, $space, $d, $floor ) },
-    count    => sub { my ($v, $unit, $tier, $space, $d, $floor) = @_; format_number( $v, $tier, $space, $d, $floor ) },
-    rate     => sub { my ($v, $unit, $tier, $space, $d) = @_;
-                      my ($text, $shown) = format_number( $v, $tier, $space, $d );
+                                   significant => $row->{significant}, plain => $row->{plain} ) },
+    bytes    => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; format_bytes( $v, $tier, $space, $d, $floor, $row->{plain} ) },
+    count    => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; format_number( $v, $tier, $space, $d, $floor, $row->{plain} ) },
+    rate     => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_;
+                      my ($text, $shown) = format_number( $v, $tier, $space, $d, undef, $row->{plain} );
                       return ( $text . $rate_suffix{$rate_unit}, $shown ) },
     cv       => sub { my ($v, $unit, $tier, $space, $d) = @_; my $text = format_cv_display( $v, $d ); return ( $text, $text ) },
 );
@@ -14185,8 +14187,25 @@ sub value_distance {
 # A value's spelling at the row's tier and fit: the most decimals, up to the
 # tier's maximum (or the precision the row fixes), that fit the width; with a
 # reference and the row's digits 'fewest', the fewest decimals within the
-# intent's tolerance of it. Returns the text and the value it shows.
+# intent's tolerance of it. A row the walk resolved also weighs the value
+# unclimbed, at its floor step, and takes it when its integer part has at most
+# five digits, it is no wider, and it is at least as exact as the climbed
+# spelling (1,800 reads 1800, never 1.8 thousand). Returns the text and the
+# value it shows.
 sub value_spelling {
+    my ($kind, $value, $unit, $row, $width, $reference) = @_;
+    my @spelling = value_climbed_spelling( $kind, $value, $unit, $row, $width, $reference );
+    return @spelling unless $row->{walked} && !$row->{plain} && $kind->{kind} =~ /^(?:duration|bytes|count|rate)$/;
+    my @plain = value_climbed_spelling( $kind, $value, $unit, { %$row, plain => 1, digits => undef }, $width );
+    return @plain if $plain[0] =~ /^-?\d{1,5}(?:\D|$)/
+                  && length( $plain[0] ) <= length( $spelling[0] )
+                  && ( !defined $width || length( $plain[0] ) <= $width )
+                  && abs( $plain[1] - $value ) <= abs( $spelling[1] - $value ) + 1e-12;
+    return @spelling;
+}
+
+# The spelling at the row's tier and fit at the step the value climbs to.
+sub value_climbed_spelling {
     my ($kind, $value, $unit, $row, $width, $reference) = @_;
     my $max = $row->{decimals} // $tier_decimals{ value_row_field( $row->{tier}, $kind ) };
     my @fitting;
@@ -14210,7 +14229,7 @@ sub value_reference {
     my ($kind, $value, $unit, $row, $width) = @_;
     my $best;
     for my $step (@value_walk) {
-        my ( undef, $shown ) = value_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1], digits => undef }, $width );
+        my ( undef, $shown ) = value_climbed_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1], digits => undef, walked => undef }, $width );
         $best = $shown if !defined $best || abs( $shown - $value ) < abs( $best - $value );
     }
     return $best;
@@ -14218,8 +14237,9 @@ sub value_reference {
 
 # The tier and fit a row that names none takes: the first step of its
 # intent's walk at which every value fits the width and shows what the step's
-# digits allow ('exact': the reference; 'within' and 'fewest': no further from
-# it than the intent tolerates). When no step does, the most exact spelling:
+# digits allow ('exact': the reference, or a spelling more exact still, such
+# as the value unclimbed; 'within' and 'fewest': no further from it than the
+# intent tolerates). When no step does, the most exact spelling:
 # the width has forced the loss.
 sub value_walk_row {
     my ($kind, $row, $width, $values, $unit) = @_;
@@ -14227,18 +14247,20 @@ sub value_walk_row {
     my @values = grep { defined } @$values;
     my @references = map { value_reference( $kind, $_, $unit, $row, $width ) } @values;
     for my $step ( @{ $intent->{walk} } ) {
-        my $candidate = { %$row, tier => $step->[0], fit => $step->[1], digits => $step->[2] };
+        my $candidate = { %$row, tier => $step->[0], fit => $step->[1], digits => $step->[2], walked => 1 };
         my $allowed = $step->[2] eq 'exact' ? 0 : $intent->{tolerance};
         my $within = 1;
         for my $i ( 0 .. $#values ) {
             my ( $text, $shown ) = value_spelling( $kind, $values[$i], $unit, $candidate, $width, $references[$i] );
-            next if ( !defined $width || length($text) <= $width ) && value_distance( $shown, $references[$i] ) <= $allowed + 1e-12;
+            next if ( !defined $width || length($text) <= $width )
+                 && ( value_distance( $shown, $references[$i] ) <= $allowed + 1e-12
+                      || abs( $shown - $values[$i] ) <= abs( $references[$i] - $values[$i] ) + 1e-12 );   # as exact as the reference, or more
             $within = 0;
             last;
         }
         return $candidate if $within;
     }
-    return { %$row, tier => $value_walk[-1][0], fit => $value_walk[-1][1], digits => 'exact' };
+    return { %$row, tier => $value_walk[-1][0], fit => $value_walk[-1][1], digits => 'exact', walked => 1 };
 }
 
 # The row a surface that passes a width renders a column with: its budget
@@ -14259,8 +14281,8 @@ sub value_column {
 # below one unit of it render in it); resolution, the step whose precision
 # bounds the value (a source cannot resolve finer than its own unit: the
 # value is rounded to it before it climbs, and no rendered digit is finer
-# than it); significant, a count of significant digits in place of decimals.
-# A value that rounds up to the next step's size renders at that step
+# than it); significant, a count of significant digits in place of decimals;
+# plain, the value at the floor step, unclimbed. A value that rounds up to the next step's size renders at that step
 # (59,960 ms reads 1 min, not 60 sec).
 sub format_time {
     my ($value, $unit, $tier, $space, $decimals, %opt) = @_;
@@ -14274,6 +14296,7 @@ sub format_time {
 
     my $floor_ms = defined $opt{floor} ? $time_unit_step{ $opt{floor} }{ms} : 0;
     my @steps = grep { $_->{ms} >= $floor_ms } @time_unit_ladder;
+    splice @steps, 1 if $opt{plain};                # the value unclimbed, at its floor step
     my $i = 0;
     $i++ while $i < $#steps && $milliseconds >= $steps[$i + 1]{ms};
     my $formatted_value;

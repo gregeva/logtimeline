@@ -892,11 +892,11 @@ if ! assert_no_runtime_warnings "$STDERR_LEVELS" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 assert_command \
-    command     "grep -qF 'lines carried 2 levels ltl does not recognise: AUTH (1.5 thousand lines), TRAFFIC_CONTROL (300 lines)' '$STDERR_LEVELS'" \
-    label       'the report counts its levels exactly and the lines of each level in prose' \
-    asserts     'The number of levels agrees with the list it precedes (notice exact); the line count of each level renders through the one dispatch at the prose notice row (1,500 reads 1.5 thousand: 2 thousand would be 33% off)' \
+    command     "grep -qF 'lines carried 2 levels ltl does not recognise: AUTH (1500 lines), TRAFFIC_CONTROL (300 lines) - 1800 lines were not counted' '$STDERR_LEVELS'" \
+    label       'the report counts its levels exactly, and the lines of each level and their total in prose, which agree' \
+    asserts     'The number of levels agrees with the list it precedes (notice exact); the line count of each level renders through the one dispatch at the prose notice row (1,500 reads 1500 and the total 1800, unclimbed: exact and narrower than any scaled spelling, so the parts and the total agree)' \
     produced_by 'read_and_process_logs() in ltl, the unregistered-level report, through value_text() and the notice exact and notice rows' \
-    contract    'features/617-width-to-format-rule.md D14, D23'
+    contract    'features/617-width-to-format-rule.md D14, D23, D25'
 fi
 
 if scenario_wanted edge-c-sdk-unregistered-levels; then

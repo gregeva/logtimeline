@@ -49,12 +49,12 @@ SECONDS_UDM="$FIXTURES/value-display-seconds-udm.txt"
 DURATION_SPREAD="$FIXTURES/tomcat-access-duration-spread.txt"
 NUMERIC_BOUNDARY="$FIXTURES/numeric-highlight-boundary.txt"
 FIT="$FIXTURES/value-display-fit.txt"
-COUNT_1140="$FIXTURES/value-display-count-1140.txt"
+COUNT_MAXIMA="$FIXTURES/value-display-count-maxima.txt"
 CARRY="$FIXTURES/value-display-carry.txt"
 COUNT_CARRY="$FIXTURES/value-display-count-carry.txt"
 MESSAGES_TOTAL="$FIXTURES/value-display-messages-total.txt"
 
-for f in "$LTL" "$CHECKER" "$COUNT_1500" "$ZERO_DURATION" "$CV_HALF" "$SECONDS_UDM" "$DURATION_SPREAD" "$NUMERIC_BOUNDARY" "$FIT" "$COUNT_1140" "$CARRY" "$COUNT_CARRY" "$MESSAGES_TOTAL"; do
+for f in "$LTL" "$CHECKER" "$COUNT_1500" "$ZERO_DURATION" "$CV_HALF" "$SECONDS_UDM" "$DURATION_SPREAD" "$NUMERIC_BOUNDARY" "$FIT" "$COUNT_MAXIMA" "$CARRY" "$COUNT_CARRY" "$MESSAGES_TOTAL"; do
     [[ -e "$f" ]] || { echo "ERROR: not found: $f"; exit 1; }
 done
 
@@ -151,11 +151,11 @@ scenario_count_spelling() {
     render cs-histogram "$COUNT_1500" -bs 1 -n 0 --terminal-width 220 -hg count || return 0
 
     assert_command \
-        command     "cell_text cs-timeline '^ 2026-01-26 10:00' count | grep -qE '^1\\.5 ?(k|thousand)\$'" \
-        label       'the timeline count cell reads 1.5 and a count unit' \
-        asserts     'A count of 1500 renders as 1.5 followed by the unit of the tier its column resolved, never 1.50 or a cut value' \
+        command     "cell_text cs-timeline '^ 2026-01-26 10:00' count | grep -qx '1500'" \
+        label       'the timeline count cell reads 1500' \
+        asserts     'A count of 1500 in a walking column renders unclimbed: exact, four digits, no wider than 1.5k (D25); never 1.50 or a cut value' \
         produced_by 'print_bar_graph() in ltl, the count column, through format_number() (the count arm of value_text())' \
-        contract    "$CONTRACT D1, D3, D12"
+        contract    "$CONTRACT D1, D3, D12, D25"
     assert_command \
         command     "check tokens --file '$TMP_DIR/cs-heatmap.txt' --line 'heatmap \\[count\\]' --each '1\\.5k' --min 2" \
         label       'the heatmap header reads 1.5k at both ends' \
@@ -419,8 +419,8 @@ scenario_fit_sweep() {
         produced_by 'value_walk_row() in ltl; the word field of @byte_unit_ladder' \
         contract    "$CONTRACT D19 (bytes a tiered kind)"
     assert_command \
-        command     "n=0; for w in 100 110 120 130 140 150 160 170 180 190 200 210 220; do visible_column fs-\$w bytes || continue; c=\$(cell_text fs-\$w '^ 2025-05-07 00:02' bytes) || exit 1; case \"\$c\" in *kilobyte*) n=\$((n + 1)); [[ \"\$c\" == '16.8 kilobytes' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; *' '*) [[ \"\$c\" == '16.8 kB' || \"\$c\" == '17 kB' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; esac; done; [[ \$n -ge 1 ]]" \
-        label       'a tabular column never trades a digit for the unit name: 16,800 bytes reads 16.8 kilobytes or 16.8 kB, and 17 kB only where 16.8 kB does not fit' \
+        command     "n=0; for w in 100 110 120 130 140 150 160 170 180 190 200 210 220; do visible_column fs-\$w bytes || continue; c=\$(cell_text fs-\$w '^ 2025-05-07 00:02' bytes) || exit 1; case \"\$c\" in *kilobyte*) [[ \"\$c\" == '16.8 kilobytes' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; 16800*) n=\$((n + 1)) ;; *' '*) [[ \"\$c\" == '16.8 kB' || \"\$c\" == '17 kB' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; esac; done; [[ \$n -ge 1 ]]" \
+        label       'a tabular column never trades a digit for the unit name: 16,800 bytes reads 16800 B unclimbed where it fits, else 16.8 kilobytes or 16.8 kB, and 17 kB only where 16.8 kB does not fit' \
         asserts     'A tabular column gives up the unit name first, then decimals within its tolerance, then the space, then the decimals the width forces' \
         produced_by 'value_walk_row() in ltl, the tabular walk of %value_intent' \
         contract    "$CONTRACT D23 (the order of what gives way)"
@@ -434,31 +434,33 @@ scenario_fit_sweep() {
 }
 
 # ---------------------------------------------------------------------------
-# common-maxima (AC5): a count of 1140 reads 1.14 thousand where its column
-# resolves the long tier, 1.1 k where it resolves medium, and 1.1k on the
-# heatmap header; no value carries more decimals than its tier allows.
+# common-maxima (AC5): a count of 1,140,000 (seven digits, so never shown
+# unclimbed) reads 1.14 million where its column has room for the long tier's
+# two decimals, 1.1 and a unit where it has less, and 1.1Mil on the heatmap
+# header (medium, one decimal); no value carries more decimals than its tier
+# allows.
 # ---------------------------------------------------------------------------
 scenario_common_maxima() {
     current_scenario="common-maxima"
     echo "[$current_scenario]"
-    render cm-wide "$COUNT_1140" -bs 1 -n 0 --terminal-width 160 --debug-layout || return 0
-    render cm-narrow "$COUNT_1140" -bs 1 -n 0 --terminal-width 100 --debug-layout || return 0
-    render cm-heatmap "$COUNT_1140" -bs 1 -n 0 --terminal-width 160 -hm count || return 0
+    render cm-wide "$COUNT_MAXIMA" -bs 1 -n 0 --terminal-width 160 --debug-layout || return 0
+    render cm-narrow "$COUNT_MAXIMA" -bs 1 -n 0 --terminal-width 100 --debug-layout || return 0
+    render cm-heatmap "$COUNT_MAXIMA" -bs 1 -n 0 --terminal-width 160 -hm count || return 0
     assert_command \
-        command     "cell_text cm-wide '^ 2026-01-26 10:00' count | grep -qx '1.14 thousand'" \
-        label       'a long-tier column reads 1.14 thousand' \
+        command     "cell_text cm-wide '^ 2026-01-26 10:00' count | grep -qx '1.14 million'" \
+        label       'a long-tier column reads 1.14 million' \
         asserts     'The long tier carries up to two decimals, the same maximum for every kind' \
         produced_by 'value_text() in ltl, %tier_decimals' \
         contract    "$CONTRACT D12"
     assert_command \
-        command     "cell_text cm-narrow '^ 2026-01-26 10:00' count | grep -qE '^1\\.1 ?k\$'" \
-        label       'a medium-tier column reads 1.1 k' \
-        asserts     'The medium tier carries up to one decimal' \
+        command     "cell_text cm-narrow '^ 2026-01-26 10:00' count | grep -qE '^1\\.1 ?(M|Mil|million)\$'" \
+        label       'a narrower column reads 1.1 and a unit' \
+        asserts     'Where the width does not afford the long tier two decimals, the value gives one up' \
         produced_by 'value_text() in ltl, %tier_decimals' \
         contract    "$CONTRACT D12"
     assert_command \
-        command     "check tokens --file '$TMP_DIR/cm-heatmap.txt' --line 'heatmap \\[count\\]' --each '1\\.1k' --min 1" \
-        label       'the heatmap header reads 1.1k' \
+        command     "check tokens --file '$TMP_DIR/cm-heatmap.txt' --line 'heatmap \\[count\\]' --each '1\\.1Mil' --min 1" \
+        label       'the heatmap header reads 1.1Mil' \
         asserts     'The chart label budget (medium, tight) carries the medium maximum' \
         produced_by 'get_heatmap_column_header() in ltl, through value_text()' \
         contract    "$CONTRACT D12"

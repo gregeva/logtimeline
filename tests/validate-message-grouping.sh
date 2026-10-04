@@ -531,11 +531,11 @@ if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 assert_command \
-    command     "grep -qF 'the final consolidation pass was skipped over 1.5 thousand messages: grouping at 85% similarity' '$errfile'" \
-    label       'the notice counts 1,500 skipped messages as 1.5 thousand and echoes the threshold verbatim' \
-    asserts     "A notice's measured count renders through the one dispatch at the prose notice row; an echoed setting (the -g similarity) stays verbatim" \
+    command     "grep -qF 'the final consolidation pass was skipped over 1500 messages: grouping at 85% similarity' '$errfile'" \
+    label       'the notice counts 1,500 skipped messages as 1500 and echoes the threshold verbatim' \
+    asserts     "A notice's measured count renders through the one dispatch at the prose notice row (1,500 unclimbed: exact and narrower than 1.5 thousand); an echoed setting (the -g similarity) stays verbatim" \
     produced_by "report_skipped_final_pass() in ltl, through value_text() and the notice row" \
-    contract    "features/617-width-to-format-rule.md D14, D23"
+    contract    "features/617-width-to-format-rule.md D14, D23, D25"
 fi
 
 if scenario_wanted skip-final-pass-population-below-floor; then

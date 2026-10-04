@@ -1,2 +1,0 @@
-2026-01-26 10:00:05.000+0000 [L: INFO] [O: ValueDisplayFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] VD-count executed count=1140
-2026-01-26 10:01:05.000+0000 [L: INFO] [O: ValueDisplayFixture] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] VD-count executed count=5
