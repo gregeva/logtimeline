@@ -495,8 +495,9 @@ issue body; they are restated here, not reinterpreted.
   the value's most exact spelling, its integer part has at most five digits, it
   fits, and it is no wider than the spelling the intent's walk chose. 1,800 in
   a notice reads `1800`, not `2 thousand`; 1,234,567 stays `1.2M`; 1,800 ms
-  stays `1.8 s` (`1800ms` is wider). Rows that name their tier (the legend,
-  the chart labels, the fixed cells) keep it.
+  stays `1.8 s` (`1800ms` is wider). Not locked: whether rows that name
+  their tier (the legend, the chart labels, the fixed cells) also consider it;
+  implemented for walking rows only, pending the architect's answer.
 
 ### Governing decisions in other records, read and in force
 
