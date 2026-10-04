@@ -31,6 +31,8 @@ Ordering:
 
 ---
 
+**Since #617 (one width-to-format rule, 2026-10-04):** each ladder step carries its long-tier word per notation (`kilobytes`, `kibibytes`), and the rounding carry handed forward by D16 and § 5.11 is closed: 999,999 bytes reads `1 MB` under SI, never `1000 kB` (`tests/validate-byte-units.sh` scenario *boundary-carry*). Record: `features/617-width-to-format-rule.md` D19.
+
 ## 1. The motivating consumer
 
 Three readers depend on bytes meaning one thing.

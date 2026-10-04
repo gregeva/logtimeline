@@ -4,6 +4,8 @@
 
 The category rows of the run summary show an absolute count and nothing else. This drop adds each category's share of the lines included, as a percentage beside the count, and a horizontal contribution bar drawn over the row's own text in the category's colour — so the distribution reads at a glance.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** N1's parameters are the *share row* of the budget table `%value_budget`; `share_row_text()` names the row and passes its slack as the width, and `format_percentage()` is the percentage arm of `value_text()`. Record: `features/617-width-to-format-rule.md` D13.
+
 ## GitHub Issue
 
 - #448 — Category summary table: relative percentage and contribution bar per category

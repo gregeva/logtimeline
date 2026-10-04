@@ -4,6 +4,8 @@
 
 Add ASCII terminal histogram charts that visualize the value distribution of key metrics (duration, bytes, count) across all processed log entries. Unlike the time-series heatmap which shows how values change over time, histograms show the overall shape of the data distribution.  Data points are sorted and counted in buckets or bins of a specific size where the amount of data points counted in a bucket represents the height of the bar which will be draw.  The Y-axis then represents the number of data points (in absolute or relative terms), and the X-axis represents the range of values.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the x-axis labels and the percentile legend render at the *chart label* row, the dimensions lines at the *dimensions line* row (tight for every kind: `min=999B`), and the y-axis count ticks at the *axis tick* row (1,155 reads `1.2k`). Record: `features/617-width-to-format-rule.md`.
+
 ## Goals
 
 1. Provide at-a-glance distribution visualization for duration, bytes, and count metrics

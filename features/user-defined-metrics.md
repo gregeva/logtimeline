@@ -5,6 +5,8 @@
 - **Branch**: `22-user-defined-metrics`
 - **Phase**: Implementation
 
+**Since #617 (one width-to-format rule, 2026-10-04):** a user-defined metric renders through the one dispatch: `resolve_value_kind()` resolves its kind from its unit type and aggregation, its declared unit is the floor of every rendering, and a rate's STATS CSV cell belongs to the rate family (one decimal by default, as the built-in rates: 0.3 per second prints `0.3`). Record: `features/617-width-to-format-rule.md` D15, D16, D21.
+
 ## Overview
 
 User-defined metrics (`-udm`) allow users to extract arbitrary numeric values from log lines, track them across time buckets, and display them as additional bar graph columns alongside the built-in duration/bytes/count metrics.

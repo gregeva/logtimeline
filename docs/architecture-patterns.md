@@ -466,7 +466,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 - `resolve_message_name` :: `my $metric = builtin_metric_name($name);`: the one resolution `-x` and `-d` share (#613 section 5.2): the parsed field, the identifier (`-d` only) and the built-in metric in any case, then a user-defined metric by its name, else a key written in the line, carrying the metrics it feeds (`probe_key_metric`, `udm_line_key`).
 - `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };`: `-m` resolves through the identifier table `-d` reads.
 - `print_bar_graph` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');`
-- `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,`
+- `share_row_text` :: `my $share = value_text( $count / $denominator * 100, kind => 'percentage', budget => 'share row', width => $slack );`
 - `write_index_file` :: `my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');`
 
 **Owning record.** This entry; worked contracts in
@@ -474,7 +474,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*).
 
 ---
 
@@ -505,7 +505,7 @@ the sort and the CSV's raw cell.
 - `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;`
 - `print_bar_graph` :: `value_text($log_stats{$bucket}{duration_sum}, metric => 'duration', budget => 'nice cell')`
 - `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? value_text( $total_bytes_num, metric => 'bytes', budget => 'nice cell' ) : undef;`
-- `print_message_summary` :: `format_duration_total( $total_duration, 'medium', 'space' ) // ""` (the messages-table total)
+- `print_message_summary` :: `value_text( $total_duration, metric => 'duration', budget => $total_budget )` (the messages-table total, walked by its column width)
 - `print_message_summary` :: `defined $total_duration ? value_text( $total_duration, metric => 'duration', budget => 'nice cell' ) : undef,` (the MESSAGES CSV `duration_nice`, beside `format_csv_value($total_duration,    'duration'),`)
 - `format_csv_value` :: `my $family = resolve_csv_column_family($column);` (every CSV emit)
 
@@ -517,6 +517,57 @@ the sort and the CSV's raw cell.
 index's six means (`write_index_file`, through `format_csv_value` at a fixed two
 decimals) are sites; the entry *Observation counts and gated means*
 cross-references this one.
+
+---
+
+## Width-to-format rule: one dispatch per metric kind
+
+**Definition.** Every number a person reads is rendered by one dispatch,
+`value_text()`, given the value, its kind (or the metric whose kind
+`resolve_value_kind()` resolves, with its floor: the source's resolved unit or
+a metric's declared unit), and the name of a budget table row (`%value_budget`),
+plus a width where the surface has one. A row names a tier (short, medium,
+long: how far the number is abbreviated), a fit (tight or loose: the space
+before the unit), a width where fixed, a precision where a record locks one,
+and the surface's intent. A row that names no tier walks for one
+(`value_column()`, `value_walk_row()`): its intent (`%value_intent`) is a
+tolerance and an order of what gives way, and the walk takes the first step at
+which every value the surface shows fits and stays within that tolerance of its
+most exact spelling. The digits come from the producer: the row's precision,
+else the tier's maximum (`%tier_decimals`), never finer than the source's
+resolution. A value rounding up to the next step's size renders at that step;
+trailing fractional zeros are stripped by `strip_trailing_zeros()`. The per-kind
+formatters (`format_time`, `format_bytes`, `format_number`, `format_cv_display`,
+`format_percentage`) are the dispatch's arms and have no other caller.
+
+**Intended uses.** Any number a person reads: a timeline cell, a table cell, a
+chart label, a summary row, a notice. A new surface adds a budget row (or reuses
+one) and names its intent; it never calls an arm, passes decimals or chooses a
+spacing. A notice names the row that fits what it exposes. Retuning a surface's
+intent is a one-line edit of its row; retuning an intent is one entry of
+`%value_intent`.
+
+**Reasoning.** One value printed three ways in one run (`1.50 k`, `1.5k`,
+`1.5k`), values cut by their columns (`999 millisecon`, 21 of 74 regression
+goldens), a zero duration in the ladder's lowest unit (`0ns` beside `0ms`), and
+five copies of "which formatter for this kind" with two of "which tier for this
+width" (`features/617-width-to-format-rule.md` § 1).
+
+**Consumption sites.**
+- `value_text` :: `my $row = ref $p{budget} ? $p{budget} : $value_budget{ $p{budget} }`
+- `resolve_value_kind` :: `my $config = udm_config_by_name($metric) or return { kind => 'count' };`
+- `value_walk_row` :: `my $intent = $value_intent{ $row->{intent} // 'precise' };`
+- `print_bar_graph` :: `$column_budget{ $col->{id} } = value_column( metric => timeline_column_metric( $col->{id} ), budget => 'timeline column',` (the timeline value columns, resolved once per column)
+- `print_message_summary` :: `my $total_budget = value_column( metric => 'duration', budget => 'messages total',`
+- `get_heatmap_column_header` and `render_histogram_legend` :: `budget => 'chart label'`; `format_histogram_dimensions_line` :: `budget => 'dimensions line'`
+- `emit_classification_percentage_notices` :: `budget => 'notice share'`; `report_skipped_final_pass` :: `budget => 'notice'`
+- `format_csv_value` :: `return strip_trailing_zeros(sprintf("%.${decimals}f", $value));`
+
+**Owning record.** `features/617-width-to-format-rule.md` (D1 to D24). Its model
+is the one-table-per-surface shape of *Precision tiers: one lever, one table per
+surface*.
+
+**Status.** Established.
 
 ---
 
@@ -644,7 +695,7 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 **Consumption sites.**
 - `defer_notice` :: `push @deferred_notices, $text;`
 - `read_and_process_logs` :: `flush_deferred_notices();`
-- `emit_classification_percentage_notices` :: `print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification`
+- `emit_classification_percentage_notices` :: `print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched`
 - `bin_consolidation_notice` :: `print STDERR "Note: $detail, so their percentiles are approximate"`
 - `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";`: the one way a deprecation prints. A deprecated option or spelling is recorded with `record_deprecation` as it is met (with the options a spelling was given on) and printed once at option settlement (#613 D17); the `-os`, `-uuid`, `-s` and `-ms` notices route through it.
 - `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";`: a metric switched off because `-d` removed the key it reads says so, at option settlement (#613 D4, D12).
@@ -652,9 +703,13 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 **Owning record.** This entry, until #412 (the notices surface) lands and
 inventories every ad-hoc notice.
 
-**Status.** Needs refinement: notices render counts and percentages three ways
-(audit, item 2, F2.8 and F2.9); one warning is emitted inside the option
-parser's warning capture and never prints (item 1, F1.17). The number rendering is #617; the swallowed warning is #614.
+**Status.** Needs refinement: one warning is emitted inside the option
+parser's warning capture and never prints (item 1, F1.17), refined by #614.
+The numbers inside notices render through the one dispatch since #617: each
+notice names the budget row for what it exposes, `notice` (prose) for a scale
+and `notice exact` for a count a list beside it must agree with, and a share
+the `notice share` percentage row (entry *Width-to-format rule: one dispatch
+per metric kind*).
 
 ---
 

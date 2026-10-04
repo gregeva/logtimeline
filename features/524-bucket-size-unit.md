@@ -28,6 +28,8 @@ The conversion is the one the user-defined-metric unit slot already uses, so one
 place owns the vocabulary and the multipliers on both surfaces. `--help` and
 `docs/usage.md` document the accepted forms in the same change.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the note below that a zero duration renders `0ns` no longer describes any surface: a value never renders below its floor unit, so a zero reads in the source's resolved unit. Record: `features/617-width-to-format-rule.md` D4, D16.
+
 ## What exists today (audited on the base commit of this branch)
 
 - `-bs` is declared `bucket-size|bs=i` in `GetOptions`; a non-integer value is

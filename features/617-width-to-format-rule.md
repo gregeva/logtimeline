@@ -5,8 +5,8 @@
 Specification agreed with the architect 2026-09-28. Implementation started
 2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
 `$version_number` stamped `0.19.0-617`, the before benchmark captured on the
-base commit (`tests/baseline/results/617-before.tsv`). Drops 1 and 2 are
-committed; drop 3 is not started (§ Delivery progress).
+base commit (`tests/baseline/results/617-before.tsv`). Drops 1, 2 and 3 are
+committed (§ Delivery progress).
 
 This issue is a sub-issue of #622 (the refactoring dispatched by the #342 audit
 review). It blocks #514 (the count metric becomes explicit and off by default):
@@ -779,7 +779,8 @@ it exposes and why; the choices are **proposed**:
 | Notice | What it exposes, and why the reader reads it | Numbers and their row |
 |---|---|---|
 | Unclassified-lines warning (`emit_classification_percentage_notices`) | the size of a coverage gap in a format's classification patterns: its scale says whether to investigate | the count, *notice*; the share, the notice share row (three significant digits): `1.2k included line(s) (100%)` |
-| CSV-skip warning (`read_and_process_logs`) | how much of a named CSV file was dropped; the first skipped row's own warning already gives its line number | the count, *notice*: `skipped 1.5k CSV rows`; the file name verbatim |
+| CSV-skip warning (`read_and_process_logs`) | gone: #640 (unplaced CSV rows are silent) removed the warning before implementation; nothing to render | none |
+| CSV header without a user-defined metric's column (`emit_udm_csv_unbound_notices`, added by #640 after this specification) | how many CSV files lacked the column a `-udm` metric names, never their names | the file count, *notice* |
 | Final consolidation pass skipped (`report_skipped_final_pass`) | how much data a skipped pass would have grouped, to judge the trade the tool made | the message count, *notice*; the `--group-similar` threshold echoed and the cliff-edge similarity offered as a value to type into `--group-similar`, both verbatim |
 | Unregistered levels (the level-rejection note) | which level tokens were dropped and how many lines each cost, so a reader tells a rounding error from a loss that matters | the number of levels, which precedes their list, *notice exact*; the per-level and total line counts, *notice* (unchanged) |
 | Numeric-filter note | how many lines a numeric filter removed for carrying no value, to explain a shrunken total | *notice* (unchanged) |
@@ -1255,6 +1256,30 @@ class (the first walk, before the order of D23, gave up a significant digit on
 
 The before/after single-day benchmark probe on this machine reads 8.6 s on
 both sides (-0.1%); the gate's pairs are taken at the merge gate.
+
+**Drop 3 (2026-10-04): the notices and the records.** Every measured count in
+a notice renders through `value_text()` at the row § Notices names: *notice*
+(intent `prose`) for a scale, *notice exact* for a count a list beside it must
+agree with, *notice share* for the leakage warning's percentage. The
+percentage arm's decimals loop moved into the dispatch (`percentage_decimals()`
+gives the mode's decimals; `value_text()` lowers them to fit), output unchanged.
+The `--explain` timeout-clustering example and `docs/explain/techniques.md`
+read "the coefficient of variation is 0" and the example's y-axis ticks
+`1.1k`/`1.4k`. Records trued up: `docs/architecture-patterns.md` (the entry
+*Width-to-format rule: one dispatch per metric kind*; the two status edits),
+`docs/percentage-presentation.md`, and features 501, 444, 524, 608, 273, 448,
+503, column-layout-refactor, heatmap, histogram-charts, user-defined-metrics and
+452; the #342 audit report's stages 7 and 8 move to *done* when this issue
+closes.
+
+Proven in drop 3 by `validate-value-display` scenario *exact-counts* (AC13; it
+holds on the base tree too, as D5 records existing behaviour, and is proven on
+doctored captures), and for AC14 by new scenarios in
+`validate-classification-percentages` (*leakage-warning-numbers*),
+`validate-message-grouping` (*skip-final-pass-notice-count*),
+`validate-log-level-vocabulary` (*unregistered-level-numbers*) and
+`validate-recursive-file-selection` (*unreadable-directory-count*), each failing
+against the drop 1 tree.
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after

@@ -546,7 +546,33 @@ scenario_axis_tick() {
         contract    "$CONTRACT D1, D8, D9; correction 6"
 }
 
-scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick no-trailing-zero
+# ---------------------------------------------------------------------------
+# exact-counts (AC13): tables and the summary print exact occurrence counts;
+# the legend keeps its tier, and under -pv reads exact. Generated: 1,200
+# lines of the verification format whose duration satisfies neither outcome.
+# ---------------------------------------------------------------------------
+scenario_exact_counts() {
+    current_scenario="exact-counts"
+    echo "[$current_scenario]"
+    local gen="$TMP_DIR/exact-1200.txt"
+    "$PERL" -e 'for my $i (0..1199) { printf "VERIFY CLS 2025-06-01 10:%02d:%02d.000 level=INFO thread=worker-1 object=Store took=1500 cache warm\n", int($i/60) % 60, $i % 60 }' > "$gen"
+    render ec "$gen" -lf classification_verification -bs 1440 -n 1 --terminal-width 160 || return 0
+    render ec-pv "$gen" -lf classification_verification -bs 1440 -n 1 -pv --terminal-width 160 || return 0
+    assert_command \
+        command     "grep -E 'cache warm' '$TMP_DIR/ec.txt' | grep -qE ' 1200 ' && grep -qE '^ +LINES READ +1200 ' '$TMP_DIR/ec.txt' && grep -qE '^ +INFO +1200 \\(100%\\)' '$TMP_DIR/ec.txt'" \
+        label       'the messages table and the summary read 1200' \
+        asserts     'Tables and the summary print exact occurrence counts' \
+        produced_by 'print_message_summary() and print_summary_table() in ltl (the exact count row)' \
+        contract    "$CONTRACT D5"
+    assert_command \
+        command     "grep -qE '^ 2025-06-01 00:00 INFO: 1\\.2k ' '$TMP_DIR/ec.txt' && grep -qE '^ 2025-06-01 00:00 INFO: 1200 ' '$TMP_DIR/ec-pv.txt'" \
+        label       'the legend reads 1.2k, and 1200 under -pv' \
+        asserts     'The legend keeps its tier; the precise-values switch makes it exact' \
+        produced_by 'legend_category_total() in ltl, through value_text() and the legend total row' \
+        contract    "$CONTRACT D5, D17"
+}
+
+scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick exact-counts no-trailing-zero
 scenario_parse_args "$@"
 
 scenario_wanted count-spelling     && { scenario_count_spelling; echo ""; }
@@ -561,6 +587,7 @@ scenario_wanted common-maxima      && { scenario_common_maxima; echo ""; }
 scenario_wanted boundary-carry     && { scenario_boundary_carry; echo ""; }
 scenario_wanted messages-total     && { scenario_messages_total; echo ""; }
 scenario_wanted axis-tick          && { scenario_axis_tick; echo ""; }
+scenario_wanted exact-counts       && { scenario_exact_counts; echo ""; }
 scenario_wanted no-trailing-zero   && { scenario_no_trailing_zero; echo ""; }
 
 echo "Results: $pass passed, $fail failed"

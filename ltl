@@ -995,6 +995,8 @@ my %value_budget = (
     'legend rate'      => { tier => 'medium', fit => 'tight', intent => 'precise' },
     'progress'         => { tier => 'medium', fit => 'tight', intent => 'precise' },
     'notice'           => { intent => 'prose' },
+    'notice exact'     => { exact => 1 },          # a count a list beside it must agree with
+    'notice share'     => { percentage => { mode => 'significant', digits => 3 } },
     'summary timing'   => { tier => 'medium', fit => 'loose', intent => 'precise' },
     'summary memory'   => { tier => 'medium', fit => 'loose', intent => 'precise' },
     'memory breakdown' => { tier => 'medium', fit => 'loose', intent => 'precise', decimals => 0 },
@@ -6812,7 +6814,7 @@ sub emit_udm_csv_unbound_notices {
     for my $idx (0 .. $#udm_configs) {
         my $files = $udm_csv_unbound_files[$idx] or next;
         my $config = $udm_configs[$idx];
-        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of $files CSV file(s)\n";
+        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . " CSV file(s)\n";
     }
 }
 
@@ -6911,8 +6913,8 @@ sub emit_classification_percentage_notices {
     # the format's configured patterns, reported with its scale.
     my $r = $recon;
     if ( !$nonledger && $r->{unclassified} > 0 ) {
-        my $leak_pct = $r->{included} ? sprintf('%.1f', $r->{unclassified} / $r->{included} * 100) : '0.0';
-        print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
+        my $leak_pct = value_text( $r->{included} ? $r->{unclassified} / $r->{included} * 100 : 0, kind => 'percentage', budget => 'notice share' );
+        print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
     }
     return;
 }
@@ -9826,9 +9828,9 @@ my $explain_timeout_clustering_example;
     $bars[$_] = 6 for 51..63;
     my $out = explain_histogram_shape(
         bars => \@bars, scale => [[0,'1s'],[13,'1s'],[25,'1s'],[38,'1s'],[50,'1s'],[62,'1s']],
-        counts => ['0','360','720','1k','1k'],
+        counts => ['0','360','720','1.1k','1.4k'],
         percentiles => ['P50: 1s   P75: 1s   P90: 1s   P95: 1s   P99: 1s   P99.9: 1s'] );
-    $out .= "\n    1,950 requests, and the coefficient of variation is 0.00.\n";
+    $out .= "\n    1,950 requests, and the coefficient of variation is 0.\n";
     $explain_timeout_clustering_example = $out;
 }
 
@@ -9948,7 +9950,7 @@ my $explain_shape_comparison_command = <<'END';
                                                    # does the relationship hold over time?
 END
 
-my $explain_timeout_clustering_reading = q{Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it. The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0.00. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces. Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it. What falsifies the reading: a naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.};
+my $explain_timeout_clustering_reading = q{Latency is naturally right-skewed: most requests are quick, a few are slow, and the tail trails away to the right. A cap breaks that shape. Requests that should have run long are cut off at the limit and pile up against it, so instead of a tail there is a wall — a mass of observations at one value with nothing beyond it. The signature is unmistakable once seen: in the example 1,950 requests all land on the same second, every percentile from the median to the 99.9th reads the same value, and the coefficient of variation is 0. A distribution with no spread at all is not a distribution of durations; it is a distribution of one number, which is what a timeout produces. Asymmetry is the statistic that makes it rankable. Because latency is normally right-skewed, near-zero or negative asymmetry on a call that is slow is the flag: the tail that should be there has been cut off. Rank ascending by asymmetry to bring those rows to the top, isolate the winner and confirm on its histogram. The value the pile sits at is the configured limit, and it is usually recognisable — one second, thirty seconds, two minutes — which is often enough to say which component owns it. What falsifies the reading: a naturally bounded operation is left-skewed without any timeout involved. A call that always does the same fixed amount of work has little spread for honest reasons, and a poll on a fixed interval will cluster at that interval. The question to ask is whether the value the pile sits at is a round configured-looking number and whether requests that should be slower than it exist at all — a cap has nothing beyond the wall, while a naturally bounded operation usually does.};
 
 my $explain_timeout_clustering_command = <<'END';
     ltl -so skewness -sa -n 20 access.log          # rank ascending: the least right-skewed
@@ -13301,7 +13303,7 @@ sub report_skipped_final_pass {
     my $skipped_keys = 0;
     $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
 
-    my $notice = "Note: the final consolidation pass was skipped over $skipped_keys message"
+    my $notice = "Note: the final consolidation pass was skipped over " . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . " message"
         . ($skipped_keys == 1 ? "" : "s")
         . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
 
@@ -14139,9 +14141,17 @@ sub value_text {
     return '' unless defined $value;
     my $row = ref $p{budget} ? $p{budget} : $value_budget{ $p{budget} } // die "value_text: no budget row '$p{budget}'\n";
     my $width = $p{width} // $row->{width};
-    return format_percentage( $value, %{ $row->{percentage} }, defined $width ? ( width => $width ) : () )
-        if $row->{percentage};
-    return $value if $row->{exact_under_precise} && $precise_values;
+    if ( my $percentage = $row->{percentage} ) {
+        my %params = ( %$percentage, defined $width ? ( width => $width ) : () );
+        my $decimals = percentage_decimals( $value, %params );
+        my $text = format_percentage( $value, %params, decimals => $decimals );
+        while ( defined $width && length($text) > $width && $decimals > 0 ) {
+            $decimals--;
+            $text = format_percentage( $value, %params, decimals => $decimals );
+        }
+        return $text;
+    }
+    return $value if $row->{exact} || ( $row->{exact_under_precise} && $precise_values );
 
     my $kind = resolve_value_kind(%p);
     $row = value_walk_row( $kind, $row, $width, [$value], $p{unit} ) unless defined $row->{tier};
@@ -14457,32 +14467,22 @@ sub format_cv_display {
 #   pad         right-align the figure within `width`, so a column of them
 #               lines up. Where parens are in use the padding goes inside
 #               them, keeping the brackets hard against the field edges.
+#   decimals    the decimal places to render at; percentage_decimals() gives
+#               the count the mode asks for, and value_text() lowers it.
 #
-# Degradation, when the value does not fit `width`: decimals are dropped one
-# at a time, never below a whole percent, and the '%' sign is always kept.
-# What a surface does when even the whole percent will not fit is the
-# surface's own decision - the caller inspects the returned length. The
-# formatter never exceeds `width` unless the integer part alone is wider,
-# which no percentage of a total can be beyond '100%'.
+# Degradation, when the value does not fit `width`, is value_text()'s: it
+# renders again at one decimal fewer, never below a whole percent, and the
+# '%' sign is always kept. What a surface does when even the whole percent
+# will not fit is the surface's own decision - the caller inspects the
+# returned length. The arm of value_text() for the percentage kind.
 sub format_percentage {
     my ($value, %p) = @_;
     return '' unless defined $value;
 
-    my $mode   = $p{mode} // 'significant';
     my $parens = $p{parens} ? 1 : 0;
     my $width  = $p{width};
 
-    # Decimal places the requested precision asks for, before any fitting.
-    my $decimals;
-    if ($mode eq 'integer') {
-        $decimals = 0;
-    } elsif ($mode eq 'decimals') {
-        $decimals = $p{digits} // 0;
-    } else {
-        # Significant digits: the integer part consumes as many of them as
-        # its own magnitude needs, and the remainder become decimals.
-        $decimals = significant_decimals($value, $p{digits} // 3);
-    }
+    my $decimals = $p{decimals} // percentage_decimals( $value, %p );
 
     # Padding sits inside the brackets, so the inner budget is what the
     # figure itself has to fit into.
@@ -14514,15 +14514,18 @@ sub format_percentage {
         return strip_trailing_zeros( sprintf( "%.*f", $d, $v ) ) . '%';
     };
 
-    my $figure = $render->($decimals);
-    if ( defined $inner_width ) {
-        while ( length($figure) > $inner_width && $decimals > 0 ) {
-            $decimals--;
-            $figure = $render->($decimals);
-        }
-    }
+    return $wrap->( $render->($decimals) );
+}
 
-    return $wrap->($figure);
+# The decimal places a percentage's mode asks for, before any fitting.
+sub percentage_decimals {
+    my ($value, %p) = @_;
+    my $mode = $p{mode} // 'significant';
+    return 0 if $mode eq 'integer';
+    return $p{digits} // 0 if $mode eq 'decimals';
+    # Significant digits: the integer part consumes as many of them as its
+    # own magnitude needs, and the remainder become decimals.
+    return significant_decimals( $value, $p{digits} // 3 );
 }
 
 
@@ -17814,7 +17817,7 @@ sub read_and_process_logs {
             my $tokens = $unregistered_levels{$slug};
             my $lines  = 0;
             $lines += $_ for values %$tokens;
-            print STDERR "Note: $slug lines carried " . scalar(keys %$tokens)
+            print STDERR "Note: $slug lines carried " . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
                 . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
                 . join( ', ', map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' )
                                     . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
@@ -17839,7 +17842,7 @@ sub read_and_process_logs {
     # tree the pattern describes unless the gap is reported.
     if (@unreadable_directories) {
         my $count = scalar @unreadable_directories;
-        print STDERR "Note: " . value_text($count, kind => 'count', budget => 'notice')
+        print STDERR "Note: " . value_text($count, kind => 'count', budget => 'notice exact')
             . ( $count == 1 ? " directory" : " directories" )
             . " could not be read and " . ( $count == 1 ? "was" : "were" )
             . " skipped during recursive file selection: "

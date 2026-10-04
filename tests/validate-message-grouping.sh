@@ -309,6 +309,7 @@ scenario_register sensitivity-70 \
                   skip-final-pass-fires \
                   skip-final-pass-population-below-floor \
                   skip-final-pass-absorbing-data \
+                  skip-final-pass-notice-count \
                   key-cut-grouping \
                   key-cut-no-retention \
                   key-cut-terminal-width \
@@ -510,6 +511,31 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 7)"
 fi
 
+fi
+
+# The notice's message count above 1,000 renders through the one dispatch at
+# the prose notice row (the full word, a digit given up within 25%), the
+# threshold echoed verbatim. Generated: 1,500 access-log keys whose paths are
+# random letters, so none pairs at -g 85 and streaming absorbs none.
+# `-bs 1440 -oe -n 1`: the assertion reads the notice on stderr.
+if scenario_wanted skip-final-pass-notice-count; then
+current_scenario="skip-final-pass-notice-count"
+echo "[$current_scenario]"
+gen="$TMP_DIR/skip-count-1500.txt"
+perl -e 'srand(617); my @c = ("a".."z"); for my $i (0..1499) { my $p = join "", map { $c[rand @c] } 1..24; printf "192.0.2.10 - - [19/May/2026:12:%02d:%02d +0000] \"GET /store/%s/fetch HTTP/1.1\" 200 512 5\n", int($i/60) % 60, $i % 60, $p }' > "$gen"
+errfile="$TMP_DIR/skip-count.stderr"
+set +e
+"$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -g 85 --skip-final-min-keys 100 "$gen" > "$TMP_DIR/skip-count.out" 2> "$errfile"
+set -e
+if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+fi
+assert_command \
+    command     "grep -qF 'the final consolidation pass was skipped over 1.5 thousand messages: grouping at 85% similarity' '$errfile'" \
+    label       'the notice counts 1,500 skipped messages as 1.5 thousand and echoes the threshold verbatim' \
+    asserts     "A notice's measured count renders through the one dispatch at the prose notice row; an echoed setting (the -g similarity) stays verbatim" \
+    produced_by "report_skipped_final_pass() in ltl, through value_text() and the notice row" \
+    contract    "features/617-width-to-format-rule.md D14, D23"
 fi
 
 if scenario_wanted skip-final-pass-population-below-floor; then
