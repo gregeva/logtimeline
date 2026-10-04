@@ -2,9 +2,11 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`613-one-name-vocabulary` off `release/0.19.0`; implementation not started. No
-version is stamped and no benchmark is captured yet.
+Specification agreed with the architect 2026-09-28 and merged into
+`release/0.19.0` (PR #623). Implementation started 2026-10-04 on branch
+`613-one-name-vocabulary` off `release/0.19.0` (12712ae): `$version_number`
+stamped `0.19.0-613`, `613-before` benchmark captured on the base commit. The
+working sequence is § 9, *Implementation plan*.
 
 - **Parent:** #622 (the refactoring the redundant-logic audit dispatched), as a
   sub-issue.
@@ -716,6 +718,70 @@ step.
 | 1 | The four tables and their views; every copy of the built-in metric set (the heatmap value formatter's chain included), the identifier list and the statistic aliases reads them; messages and help rows interpolate; the deprecation-notice helper, with the two existing option deprecations routed through it unchanged (proposed, § 5.6); no behaviour changes | criteria 1, 18, 21, 22, and 19 for the rows whose list does not change: the full suite passes unchanged, CSVs byte-identical |
 | 2 | Metric names on every option: case folding on `-x`/`-d` (D15), `time` and `size` deprecations (D1, D8, D17), key spellings (D3) with the mask lifted on `-x` (D11) and the pair removed whole with the metric switched off on `-d` (D12), the discard residue fixed (D12, D13), token-key fallback removed with the switch-off notice (D4); 566, 567, 432 and histogram records and `docs/usage.md` trued in the same commit | criteria 2 to 5, 7 to 13, 15, 16, 23, and 19 for the `-hm`, `-hg` and `-so` rows |
 | 3 | Fields and identifiers: case folding (D15), `-x object` appended in full (D16), `-d` through the identifier table and order (D7, D13), the flags derived once (D9), pattern entries updated | criteria 6, 14, 17, 20, and 19 for the `-x`, `-d` and `-m` rows |
+
+### Implementation plan (2026-10-04)
+
+The sequence inside each drop. It applies § 5 and decides nothing; anything
+marked *proposed* there stays proposed.
+
+**Re-audit at the start of implementation (2026-10-04, base 12712ae).** Every
+snippet § 3 and § 5.3 cite is still found in the sub named. One change since
+the specification: #525 (single timestamp-precision option) added two option
+deprecation notices, `-s/--seconds` and `-ms/--milliseconds`, beside the
+`-os/--omit-stats` and `-uuid/--mask-uuid` notices § 5.6 names. All four route
+through the deprecation-notice helper with their text unchanged, so criterion
+21's single print site holds. Further literal copies found beyond § 3 item 3:
+the `--explain` index footer and the standard-deviation topic's *See also* line
+name the `stddev` alias, and the `-udm` function parser's aggregation and
+transform alternations name the function set; each reads the statistic table.
+
+**Drop 1, the tables, no behaviour change.**
+1. The built-in metric table in `## GLOBALS ##`, before `@graph_columns`: name,
+   layout column, family, help text, deprecated spellings with the options each
+   works on, and the stored key a bare `-so` metric word ranks by (proposed:
+   the `-so` ladder's metric arms then read the table instead of a name chain).
+   Derived views: ordered names, case-folded lookup, the comma and bar list
+   texts.
+2. `@graph_columns`, the metric entries of `@visibility_columns`,
+   `%heatmap_metric_map`, `available_metric_names`, the six internal loops and
+   the export's histogram order read the views; `format_heatmap_value`'s
+   built-in arm dispatches on the family column.
+3. The parsed-field table (name, `-x` action, `-d` action), read by the
+   field-flag derivation; the identifier table (`uuid`, `ip`, `ipv4`, `ipv6`,
+   each expanding to `%mask_patterns` entries in `@mask_order`), read by `-m`,
+   its error and its help row.
+4. The statistic table (typed name, stored key, aliases, deprecated spelling,
+   per-surface columns): the `-udm` function slot's name set, alias map,
+   alternations and invalid-function list; `%explain_aliases`; the bare
+   statistic words of the `-so` allow-list and ladder; the alias notes of
+   `--help statistics`, the `--explain` index footer and the standard-deviation
+   topic.
+5. The deprecation-notice helper: records a deprecated spelling or option
+   with the options it was given on and its replacement, prints one line each
+   at settlement; the four existing option notices route through it.
+6. Help rows and error texts interpolate the lists: `-hm`, `-hg`, `-x`, `-d`,
+   `-m`, `--hide`, the bare words of `-so`, the `-udm` function row. Rendered
+   text identical where the list does not change.
+7. Harness: criterion 1 stderr scenarios, criterion 18, criterion 19 rows added
+   to the help-content parity scenario; full suite unchanged.
+
+**Drop 2, metric names on every option.** `builtin_metric_name` takes the
+option it is resolving for and records `time` and `size` through the helper
+(D1, D8); the `-x`/`-d` resolver folds case (D15); the probe key view from the
+registry specs (`durationMS`, `durationMs`, `bytes`), with the probe's mask key
+split into its written spellings so one can be left out (D11); `-d` on a probe
+key or a user-defined metric's key removes the pair, switches the metric off
+and prints the switch-off notice (D4, D12); the key-discard value pattern
+accepts a masked `?` (D12, D13); the token-key fallback goes (D4); records 566,
+567, 432, histogram and `docs/usage.md` trued in the same commit; harness
+criteria 2 to 5, 7 to 13, 15, 16, 23.
+
+**Drop 3, fields and identifiers.** Field and identifier names in any case on
+`-x`, `-d`, `-m` (D15); `-x object` appends the full object (D16); `-d`
+identifiers through the identifier table, applied in `@mask_order` (D7, D13);
+one settlement step derives the expose, mask and discard flags after the
+precedence pass (D9); 580, 597, 225 records and the pattern entries (§ 5.9);
+harness criteria 6, 14, 17, 20.
 
 **Merge gate:** the full harness suite and the before/after benchmark on the
 final commit, `$version_number` restored to `0.19.0`,
