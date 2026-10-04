@@ -765,6 +765,27 @@ transform alternations name the function set; each reads the statistic table.
 7. Harness: criterion 1 stderr scenarios, criterion 18, criterion 19 rows added
    to the help-content parity scenario; full suite unchanged.
 
+*Delivered 2026-10-04.* Measured against the base build on 45 invocations
+(every `-so` bare word and alias, `-hm` and `-hg` with built-in and unknown
+operands, the three unknown-metric texts, the `-m` and `--hide` errors, the
+`-udm` invalid-function warning, the four option deprecations together, `-m`
+with `-d` on identifiers, `-x` and `-d` on probe keys, `--help`, `--help
+statistics`, `--explain` and its alias topics, heatmap and histogram renders):
+every output is identical apart from the memory and timing lines, except two
+help texts. The `--help statistics` and `--explain` index line for the
+standard deviation reads `(name: stddev; std_dev is a deprecated spelling)`
+where it read `(alias: stddev)` (§ 5.7, D17). The `--hide` column row takes its
+list from the same helper as the `--hide` error, so the column names read
+`values (val), rate (rt)` followed by `values are the numbers on the bars and
+rate the rates in the legend`, where the row carried the two qualifiers inline;
+`docs/usage.md` is trued with it. Harness additions: `K-name-list-parity`
+(help-content), `error-unknown-metric-lists` (runtime-config),
+`function-aliases` (udm-specs), `scenario-16-sort-on-statistic-aliases`
+(statistics-demand), each proven to fail against a sabotaged table or row.
+The statistics-demand harness printed its summary inside its last scenario's
+block, so a `--scenario` run of any other scenario printed no result and
+exited 0 whatever failed; the summary now follows every scenario.
+
 **Drop 2, metric names on every option.** `builtin_metric_name` takes the
 option it is resolving for and records `time` and `size` through the helper
 (D1, D8); the `-x`/`-d` resolver folds case (D15); the probe key view from the

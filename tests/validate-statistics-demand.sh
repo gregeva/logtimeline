@@ -233,7 +233,8 @@ scenario_register scenario-1-terminal-only-default \
                   scenario-12-no-message-retention-csv-request \
                   scenario-13-retained-duration-representation \
                   scenario-14-retained-durations-are-numbers \
-                  scenario-15-exported-spelling-on-fractional-durations
+                  scenario-15-exported-spelling-on-fractional-durations \
+                  scenario-16-sort-on-statistic-aliases
 scenario_parse_args "$@"
 
 if scenario_wanted scenario-1-terminal-only-default; then
@@ -1069,6 +1070,38 @@ else
         contract    "$SPELLING_CONTRACT"
 fi
 echo
+fi
+
+# Issue #613 criterion 18 (D8: one statistic-name table read by -so): an
+# alias and its statistic rank the same messages in the same order, and both
+# select the one stored key. `-bs 1440 -oe` and the timeline, options and
+# summary hidden: only the sort selection and the ranked rows are read.
+if scenario_wanted scenario-16-sort-on-statistic-aliases; then
+current_scenario="scenario-16-sort-on-statistic-aliases"
+echo "--- $current_scenario ---"
+ALIAS_CONTRACT='features/613-one-name-vocabulary.md D8 (one table of statistic names and aliases read by -so) and D17 (stddev the typed name, std_dev the stored key); criterion 18'
+for pair in mean:avg:mean std_dev:stddev:std_dev; do
+    IFS=: read -r first second key <<< "$pair"
+    one=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -n 5 --hide title,timeline,options,summary -so "$first")
+    check_capture_warnings "$one"
+    two=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -n 5 --hide title,timeline,options,summary -so "$second")
+    check_capture_warnings "$two"
+    for capture in "$one" "$two"; do
+        assert_line "$capture" \
+            pattern     "^  sort_selection: statistic=$key defined=" \
+            asserts     "-so $first and -so $second both rank by the stored statistic $key" \
+            produced_by 'adapt_to_command_line_options() in ltl (%statistic_by_spelling over @statistic_names)' \
+            contract    "$ALIAS_CONTRACT"
+    done
+    assert_command \
+        command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ -n \"\$(sed '1,/^=== END statistics-demand ===\$/d' '$one')\" ]" \
+        label       "-so $first and -so $second render the same ranked messages" \
+        asserts     "An alias ranks the messages as its statistic does: the rendered messages table of -so $second is identical to that of -so $first" \
+        produced_by 'adapt_to_command_line_options() and print_message_summary() in ltl' \
+        contract    "$ALIAS_CONTRACT"
+done
+echo
+fi
 
 ############################################################
 echo "=== validate-statistics-demand: $pass passed, $fail failed ==="
@@ -1078,5 +1111,4 @@ if [[ $fail -gt 0 ]]; then
     exit 1
 fi
 exit 0
-fi
 

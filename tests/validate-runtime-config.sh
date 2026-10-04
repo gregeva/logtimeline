@@ -290,6 +290,55 @@ scenario_warning_hm_non_builtin() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
 }
 
+# Issue #613 criterion 1 (D5: one built-in metric table): each unknown-metric
+# message interpolates the table's list, and none names time, which is not a
+# metric name. -udm comes first on the -hg run: without one, -hg pushes an
+# operand it does not recognise back as a file name. `-bs 1440 -oe`: stderr
+# diagnostics only, no bucket read; the twelve-line access fixture.
+METRIC_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+CONTRACT_METRIC_LIST='features/613-one-name-vocabulary.md D5 (every unknown-metric message derives its list from the built-in metric table) and D1 (time is not a metric name); criterion 1'
+
+scenario_error_unknown_metric_lists() {
+    current_scenario="error-unknown-metric-lists"
+    echo "[$current_scenario]"
+
+    run_ltl "metric-list-hm" -bs 1440 -oe -udm x::max -hm foo "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: Unknown heatmap metric 'foo'\\. Available: duration, bytes, count, x$" \
+        asserts     'An -hm operand that names no metric is an error listing the built-in metrics from the table, then the -udm names.' \
+        produced_by 'adapt_to_command_line_options() in ltl (the -hm validation after parse_udm_configs), via available_metric_names()' \
+        contract    "$CONTRACT_METRIC_LIST"
+    assert_no_line "$RUN_STDERR" \
+        pattern     '(^|[^a-z])time([^a-z]|$)' \
+        asserts     'The -hm unknown-metric error does not name time among the metrics.' \
+        produced_by 'available_metric_names() in ltl' \
+        contract    "$CONTRACT_METRIC_LIST"
+
+    run_ltl "metric-list-hg" -bs 1440 -oe -udm x::max -hg foo "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: Unknown histogram metric 'foo'\\. Available: duration, bytes, count, x$" \
+        asserts     'An -hg operand that names no metric is an error listing the built-in metrics from the table, then the -udm names.' \
+        produced_by 'adapt_to_command_line_options() in ltl (the -hg validation after parse_udm_configs), via available_metric_names()' \
+        contract    "$CONTRACT_METRIC_LIST"
+    assert_no_line "$RUN_STDERR" \
+        pattern     '(^|[^a-z])time([^a-z]|$)' \
+        asserts     'The -hg unknown-metric error does not name time among the metrics.' \
+        produced_by 'available_metric_names() in ltl' \
+        contract    "$CONTRACT_METRIC_LIST"
+
+    run_ltl "metric-list-hm-pushback" -bs 1440 -oe -hm foo "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^-hm value 'foo' is not a built-in metric \\(duration\\|bytes\\|count\\) and no -udm configs are defined; treating as positional argument" \
+        asserts     'The -hm pushback warning names the built-in metrics from the table, in the same words as before the table existed.' \
+        produced_by 'adapt_to_command_line_options() in ltl (heatmap non-builtin pushback branch, $builtin_metric_choices)' \
+        contract    "$CONTRACT_METRIC_LIST"
+    assert_no_line "$RUN_STDERR" \
+        pattern     '(^|[^a-z])time([^a-z]|$)' \
+        asserts     'The -hm pushback warning does not name time among the metrics.' \
+        produced_by 'adapt_to_command_line_options() in ltl' \
+        contract    "$CONTRACT_METRIC_LIST"
+}
+
 scenario_error_unknown_exact_percentiles() {
     current_scenario="error-unknown-exact-percentiles"
     echo "[$current_scenario]"
@@ -687,6 +736,7 @@ scenario_register runtime-config-command-line \
                   runtime-config-env-overridden \
                   warning-g-non-numeric \
                   warning-hm-non-builtin \
+                  error-unknown-metric-lists \
                   error-unknown-exact-percentiles \
                   runtime-config-data-model-selectors \
                   runtime-config-numeric-highlight \
@@ -711,6 +761,7 @@ while read -r _scenario; do
         runtime-config-env-overridden      ) scenario_runtime_config_env_overridden ;;
         warning-g-non-numeric              ) scenario_warning_g_non_numeric ;;
         warning-hm-non-builtin             ) scenario_warning_hm_non_builtin ;;
+        error-unknown-metric-lists         ) scenario_error_unknown_metric_lists ;;
         error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
         runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
         runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
