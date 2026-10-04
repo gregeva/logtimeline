@@ -528,6 +528,17 @@ issue body; they are restated here, not reinterpreted.
   truncates and never overflows (`1002ms` fits a six-character P99 cell;
   `177644ms` does not, and falls back to `2.96 min` or its tier's spelling).
 
+- **D27 — The climb threshold is a property of each kind** (locked by the
+  architect 2026-10-04). The unclimbed value of D25 and D26 is for bare
+  numbers: "this is a completely wrong way to show bytes values. We are
+  supposed to be following standing engineering notations with appropriate and
+  relevant magnitudes ... that threshold of what triggers the engineering unit
+  conversion is different depending on the kind of number that it is." Counts
+  and rates show unclimbed up to five digits; bytes and durations climb at
+  their ladder's step sizes (16,763 bytes reads `16.76 kilobytes`, never
+  `16763 bytes`; 12,345 ms reads `12.35 seconds`). The threshold is one field
+  per kind beside its ladder, tunable like the intents.
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
