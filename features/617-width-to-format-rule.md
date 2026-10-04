@@ -1276,7 +1276,12 @@ metric whose every value is zero dies with `Can't use an undefined value as an
 ARRAY reference` in `get_heatmap_column_header` on the base commit as on this
 branch (input: two application-log lines carrying `elapsed=0`,
 `-udm 'elapsed:s:max' -hm elapsed`). AC8's heatmap half for a user-defined
-metric is therefore asserted only for the built-in duration.
+metric is therefore asserted only for the built-in duration. Filed as #678, a
+sub-issue of #622. A second finding, messages-table rows overflowing where the
+Min, P50 and P99.9 columns are narrower than their values (104 columns at
+width 100 on `tests/fixtures/value-display-messages-total.txt`), is the same
+manifestation as #497's second cause and is recorded there with that fixture
+as a test case for the fix.
 
 **Drop 2 (2026-10-04): the width rule with intents (D23).** `value_column()`
 resolves a width-passing surface's tier and fit once per column through
