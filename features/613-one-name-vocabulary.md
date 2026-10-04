@@ -826,6 +826,45 @@ one settlement step derives the expose, mask and discard flags after the
 precedence pass (D9); 580, 597, 225 records and the pattern entries (§ 5.9);
 harness criteria 6, 14, 17, 20.
 
+*Delivered 2026-10-04.* Field and identifier names fold case in
+`resolve_message_name()` and `resolve_mask_names()`; `-x object` appends
+` object=<value>` through a fifth append kind, `EXPOSE_OBJECT`, read in the
+expose loop beside the thread, session and user; the identifiers `-d` names are
+collected and appended after the keys in `@mask_order`;
+`settle_message_option_flags()` derives `@mask_subs`, `$mask_active`,
+`$mask_uuid`, `$expose_active`, `$discard_active` and `$discard_any_field` once,
+after `apply_discard_precedence()`, which with the three resolvers now only
+builds and trims lists. The mask patterns, `@mask_order` and the identifier
+table moved into `## GLOBALS ##` beside the other `-m` state, because the `-m`
+help row reads them. Harness additions: `field-names` (message-expose),
+`field-identifier-names` (message-discard), the case assertions in
+`ip-spellings` (message-mask), the `-m` and `-d` rows in `K-name-list-parity`
+(help-content); each fails on the base build.
+
+**Finding: the object append and the key cut.** On the ThingWorx
+application-log fixture, 19 of the message keys under `-x object` reach the
+350-character cut that `-o` applies, and lose the appended object with
+whatever else passes the cut, as 566 D8 (exposing a value does not move the
+cut) requires; every key under the cut ends ` object=<object>`. Criterion 17
+is asserted on the keys under the cut. The cut belongs to #619 (one per-run key
+cut and cap), which landed; nothing here changes it.
+
+**Criterion 21, measured with `grep -cF` on `ltl` at the base commit and after
+drop 3:**
+
+| Literal | Base | After |
+|---|---|---|
+| `qw(duration bytes count)` and `qw( duration bytes count )` | 8 | 0 |
+| `qw( thread session user object )` | 1 | 0 |
+| `uuid, ip, ipv4, ipv6` | 1 | 0 |
+| `avg => 'mean'` | 1 | 0 |
+| `alias: avg`, `alias: stddev` | 2 | 0 |
+| `if ($metric eq 'duration')` (the heatmap value formatter's chain) | 1 | 0 |
+| print sites of `is deprecated` | 4 | 1 |
+
+The remaining `'durationMs'` is the probe declaration's key spelling, the two
+`eq 'time'` are unit-type tests, and the two `duration|bytes|count` are comments.
+
 **Merge gate:** the full harness suite and the before/after benchmark on the
 final commit, `$version_number` restored to `0.19.0`,
 `tests/validate-help-content.sh` passing, the criterion 21 grep counts

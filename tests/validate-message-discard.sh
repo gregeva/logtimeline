@@ -1065,6 +1065,52 @@ scenario_name_vocabulary() {
         contract    "$CONTRACT_613 D13; criterion 13"
 }
 
+# Issue #613 criteria 6 and 14: field and identifier names match in any case,
+# and the identifiers -d names are removed in the order -m applies them
+# whatever order they were typed in.
+scenario_field_identifier_names() {
+    current_scenario="field-identifier-names"
+    echo "[$current_scenario]"
+
+    # Criterion 6 (D15).
+    local case fixture lower upper extra
+    for case in "$OBJECT_FIXTURE|object|Object|" "$USERS_FIXTURE|session|Session|" "$VOCABULARY_FIXTURE|query-string|Query-String|-xqs" "$DISCARD_FIXTURE|uuid|UUID|" "$DISCARD_FIXTURE|ip|IP|"; do
+        IFS='|' read -r fixture lower upper extra <<< "$case"
+        run_messages "case-$lower" $extra -d "$lower" "$fixture" || return 0
+        local lower_csv="$MSG_CSV"
+        run_messages "case-$upper" $extra -d "$upper" -V runtime-config "$fixture" || return 0
+        assert_command \
+            command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'discard: $lower' '$RUN_OUT'" \
+            label       "-d $upper is -d $lower, listed as $lower" \
+            asserts     "A built-in name matches in any case: -d $upper is the $lower field or identifier, not a key read from the line, and is listed in its canonical spelling." \
+            produced_by 'resolve_message_name() in ltl (the parsed-field and identifier tables, folded)' \
+            contract    "$CONTRACT_613 D15; criterion 6"
+    done
+
+    # Criterion 14 (D7, D13): an IPv6 address ending in an IPv4 address.
+    local staged="$TMP_DIR/$current_scenario/ipv6-ending-ipv4.txt"
+    mkdir -p "$(dirname "$staged")"
+    printf '%s\n' '2026-01-26 10:00:01.000+0000 [L: INFO] [O: Obj] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] peer ::ffff:192.0.2.7 closed' > "$staged"
+    run_messages d-ip -d ip "$staged" || return 0
+    local ip_csv="$MSG_CSV"
+    assert_command \
+        command     "check_some_key_matches '$ip_csv' '\\] peer closed\$'" \
+        label       '-d ip removes the whole IPv6 address' \
+        asserts     'ip removes IPv6 then IPv4 addresses, as -m ip masks them, so an IPv6 address ending in an IPv4 address goes whole.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D7 and D13; criterion 14"
+    local order
+    for order in ipv4,ipv6 ipv6,ipv4; do
+        run_messages "d-$order" -d "$order" "$staged" || return 0
+        assert_command \
+            command     "check_same_csv '$ip_csv' '$MSG_CSV' 'messages'" \
+            label       "-d $order gives the messages -d ip gives" \
+            asserts     'The identifiers named on -d are removed in the order -m applies them (uuid, ipv6, ipv4), never the order typed.' \
+            produced_by 'resolve_discard_names() in ltl (the identifier removals appended in @mask_order)' \
+            contract    "$CONTRACT_613 D13; criterion 14"
+    done
+}
+
 scenario_register key-separators \
                   identifiers \
                   download-requests \
@@ -1074,6 +1120,7 @@ scenario_register key-separators \
                   builtin-precedence \
                   metrics \
                   name-vocabulary \
+                  field-identifier-names \
                   udm-switched-off \
                   query-string \
                   masked-and-discarded \
@@ -1095,6 +1142,7 @@ while read -r s; do
         builtin-precedence)   scenario_builtin_precedence ;;
         metrics)              scenario_metrics ;;
         name-vocabulary)      scenario_name_vocabulary ;;
+        field-identifier-names) scenario_field_identifier_names ;;
         udm-switched-off)     scenario_udm_switched_off ;;
         query-string)         scenario_query_string ;;
         masked-and-discarded) scenario_masked_and_discarded ;;

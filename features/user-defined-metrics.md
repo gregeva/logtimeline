@@ -41,6 +41,9 @@ Multiple metrics can be specified with repeated `-udm` flags:
 ### Functions
 
 Functions control how extracted values are transformed and aggregated per time bucket.
+The function slot's names, aliases and kinds are rows of the statistic-name table
+(`@statistic_names`, #613 D8), which `-so` and `--explain` read too; the
+invalid-function warning and the `--help` function row list them from it.
 
 #### Transforms (applied per-line to raw values)
 

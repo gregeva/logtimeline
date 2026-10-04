@@ -113,7 +113,7 @@ my ( @deprecations, %deprecation_of );
 # (%expose_key, keyed as the line writes the key). $expose_active is the
 # single scalar the per-line path reads: false, and no run without an
 # appended value pays more than that one test.
-use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
+use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3, EXPOSE_OBJECT => 4 };
 my ( @expose_raw, @expose_names, @expose_appends, %expose_metric, %expose_key );
 my ( $expose_active, $expose_count ) = ( 0, 0 );
 # -d / --discard: the names given on the command line (@discard_raw, a value
@@ -134,16 +134,20 @@ my ( $discard_active, $discard_any_field ) = ( 0, 0 );
 # the message, as the append kind says, or keep the query string in it), the
 # run flag that makes the format keep the field, and what -d does (clear the
 # captured value before anything reads it, or take the query string out of
-# the message). Names resolve before a key written in the line.
+# the message). Names match in any case and resolve before a key written in
+# the line (#613 D15). The object is appended whole, where the message key
+# carries only its end (#613 D16).
 my @message_fields = (
     { name => 'thread',       expose => 'append', append_kind => EXPOSE_THREAD,                                     discard => 'clear'  },
     { name => 'session',      expose => 'append', append_kind => EXPOSE_SESSION, include_flag => \$include_session, discard => 'clear'  },
     { name => 'user',         expose => 'append', append_kind => EXPOSE_USER,    include_flag => \$include_user,    discard => 'clear'  },
-    { name => 'object',                                                                                             discard => 'clear'  },
+    { name => 'object',       expose => 'append', append_kind => EXPOSE_OBJECT,                                     discard => 'clear'  },
     { name => 'query-string', expose => 'keep',   include_flag => \$include_query_string,                          discard => 'remove' },
 );
 my %message_field   = map { $_->{name} => $_ } @message_fields;
 my @cleared_fields  = map { $_->{name} } grep { $_->{discard} eq 'clear' } @message_fields;
+my $exposed_field_list = join_with_or( map { $_->{name} } grep { $_->{expose} } @message_fields );   # thread, session, user, object or query-string
+my $cleared_field_list = join_with_or(@cleared_fields);                                               # thread, session, user or object
 my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
@@ -298,6 +302,57 @@ my $max_log_message_length = 0;				    # the per-run message-key cut: resolved i
 # deprecated -uuid spelling was used.
 my ( @mask_raw, @mask_names, @mask_subs );
 my ( $mask_active, $mask_uuid, $mask_uuid_option ) = ( 0, 0, 0 );
+# The identifiers -m / --mask can name, each with the pattern that finds it in
+# the message and the placeholder of its shape that replaces it. Word-boundary
+# tests keep an identifier embedded in a longer token as written: a UUID is
+# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
+# digit either side; an IPv4 address is four decimal octets from 0 to 255
+# without leading zeros, with no word character or digit-and-dot before, and no word
+# character or further dotted digit after, so a port, a leading / and a thread
+# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
+# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
+# with no word character, colon or dot before and no word character or colon
+# after, so a zone and a bracketed port stay as written around the placeholder.
+# A bare :: is a separator in messages and is never matched. Every option that
+# names one of these identifiers resolves it through this table.
+my %mask_patterns;
+{
+    my $hex = '[0-9A-Fa-f]';
+    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+    my $ipv4 = "(?:$octet\\.){3}$octet";
+    my $h = '[0-9A-Fa-f]{1,4}';
+    my $ls32 = "(?:$h:$h|$ipv4)";
+    my $ipv6 = join '|',
+        "(?:${h}:){6}$ls32",
+        "::(?:${h}:){5}$ls32",
+        "(?:${h})?::(?:${h}:){4}$ls32",
+        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
+        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
+        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
+        "(?:(?:${h}:){0,4}${h})?::$ls32",
+        "(?:(?:${h}:){0,5}${h})?::$h",
+        "(?:${h}:){0,6}${h}::";
+    %mask_patterns = (
+        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
+        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
+        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
+    );
+}
+my @mask_order = qw(uuid ipv6 ipv4);
+# The identifier names -m and -d accept, in the order every list names them:
+# each expands to the %mask_patterns entries it covers, ip to both address
+# versions. A run applies the entries in @mask_order whatever order the
+# names were given in.
+my @mask_identifiers = (
+    { name => 'uuid', entries => [ 'uuid' ] },
+    { name => 'ip',   entries => [ 'ipv6', 'ipv4' ], help => 'both address versions' },
+    { name => 'ipv4', entries => [ 'ipv4' ] },
+    { name => 'ipv6', entries => [ 'ipv6' ] },
+);
+my %mask_identifier      = map { $_->{name} => $_ } @mask_identifiers;
+my $mask_identifier_list = join ', ', map { $_->{name} } @mask_identifiers;
+# The -m help row's names: each with the placeholder that replaces it, or what it names.
+my $mask_identifier_help = join_with_or( map { $_->{help} ? "$_->{name} for $_->{help}" : "$_->{name} ($mask_patterns{ $_->{entries}[0] }[1])" } @mask_identifiers );
 my @graph_columns = @builtin_metric_names;
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
@@ -10622,9 +10677,9 @@ sub print_help {
     # Message Grouping
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
-    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
-    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it; a key a metric is read from, such as durationMS, keeps its value in place instead. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
-    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is thread, session, user or object, whose captured value is cleared; uuid, ipv4, ipv6 or ip, removed wherever it sits in the message; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as durationMS, also switches that metric off, with a notice. A name given to both -x and -d, or to both -m and -d, is discarded");
+    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is $mask_identifier_help, in any case. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
+    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is $exposed_field_list, the object appended whole; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it; a key a metric is read from, such as durationMS, keeps its value in place instead. Built-in names match in any case. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
+    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is $cleared_field_list, whose captured value is cleared; " . join_with_or( map { $_->{name} } @mask_identifiers ) . ", removed wherever it sits in the message, in the order -m applies them; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as durationMS, also switches that metric off, with a notice. Built-in names match in any case. A name given to both -x and -d, or to both -m and -d, is discarded");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -14377,6 +14432,13 @@ sub apply_post_walk_sort_gate {
     sort_fallback_to_occurrences('post-walk');
 }
 
+# A list as prose names it: "a, b or c"; one item alone, two joined by "or".
+sub join_with_or {
+    my @items = @_;
+    return $items[0] // '' if @items < 2;
+    return join( ', ', @items[ 0 .. $#items - 1 ] ) . " or $items[-1]";
+}
+
 # Record a deprecated spelling or option as it is met: what was typed, what
 # it is deprecated as (' as a metric name', or empty for an option), the
 # option it was given on (none for an option itself) and the advice that
@@ -14457,55 +14519,6 @@ sub available_metric_names {
     return (@builtin_metric_names, map { $_->{name} } @udm_configs);
 }
 
-# The identifiers -m / --mask can name, each with the pattern that finds it in
-# the message and the placeholder of its shape that replaces it. Word-boundary
-# tests keep an identifier embedded in a longer token as written: a UUID is
-# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
-# digit either side; an IPv4 address is four decimal octets from 0 to 255
-# without leading zeros, with no word character or digit-and-dot before, and no word
-# character or further dotted digit after, so a port, a leading / and a thread
-# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
-# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
-# with no word character, colon or dot before and no word character or colon
-# after, so a zone and a bracketed port stay as written around the placeholder.
-# A bare :: is a separator in messages and is never matched. Every option that
-# names one of these identifiers resolves it through this table.
-my %mask_patterns;
-{
-    my $hex = '[0-9A-Fa-f]';
-    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
-    my $ipv4 = "(?:$octet\\.){3}$octet";
-    my $h = '[0-9A-Fa-f]{1,4}';
-    my $ls32 = "(?:$h:$h|$ipv4)";
-    my $ipv6 = join '|',
-        "(?:${h}:){6}$ls32",
-        "::(?:${h}:){5}$ls32",
-        "(?:${h})?::(?:${h}:){4}$ls32",
-        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
-        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
-        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
-        "(?:(?:${h}:){0,4}${h})?::$ls32",
-        "(?:(?:${h}:){0,5}${h})?::$h",
-        "(?:${h}:){0,6}${h}::";
-    %mask_patterns = (
-        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
-        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
-        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
-    );
-}
-my @mask_order = qw(uuid ipv6 ipv4);
-# The identifier names -m and -d accept, in the order every list names them:
-# each expands to the %mask_patterns entries it covers, ip to both address
-# versions. A run applies the entries in @mask_order whatever order the
-# names were given in.
-my @mask_identifiers = (
-    { name => 'uuid', entries => [ 'uuid' ] },
-    { name => 'ip',   entries => [ 'ipv6', 'ipv4' ] },
-    { name => 'ipv4', entries => [ 'ipv4' ] },
-    { name => 'ipv6', entries => [ 'ipv6' ] },
-);
-my %mask_identifier      = map { $_->{name} => $_ } @mask_identifiers;
-my $mask_identifier_list = join ', ', map { $_->{name} } @mask_identifiers;
 
 # The key a user-defined metric reads from the line: its token key, or the
 # name it was given when it reads the key it is named after. A metric
@@ -14532,8 +14545,8 @@ sub probe_key_metric {
 }
 
 # Resolve one name given to -x or -d, the one resolution both options share
-# (#613 section 5.2). Built-in names resolve first: a parsed field or
-# message part, an identifier (-d only), a built-in metric in any case. Then
+# (#613 section 5.2). Built-in names resolve first, each in any case: a
+# parsed field or message part, an identifier (-d only), a built-in metric. Then
 # a user-defined metric by its name, as written. Anything else is a key
 # written in the line, matched as written, carrying the metrics it feeds:
 # the built-in metric a format probe reads from it, and the user-defined
@@ -14541,11 +14554,11 @@ sub probe_key_metric {
 # key) and the canonical name, with the table entry or the metrics found.
 sub resolve_message_name {
     my ( $name, $option ) = @_;
-    if ( my $field = $message_field{$name} ) {
-        return { kind => 'field', name => $name, field => $field } if $option eq 'discard' || $field->{expose};
+    if ( my $field = $message_field{ lc $name } ) {
+        return { kind => 'field', name => $field->{name}, field => $field } if $option eq 'discard' || $field->{expose};
     }
-    if ( $option eq 'discard' && ( my $identifier = $mask_identifier{$name} ) ) {
-        return { kind => 'identifier', name => $name, identifier => $identifier };
+    if ( $option eq 'discard' && ( my $identifier = $mask_identifier{ lc $name } ) ) {
+        return { kind => 'identifier', name => $identifier->{name}, identifier => $identifier };
     }
     my $metric = builtin_metric_name($name);
     return { kind => 'metric', name => $metric } if defined $metric;
@@ -14598,32 +14611,29 @@ sub resolve_expose_names {
             }
         }
     }
-    $expose_active = @expose_appends ? 1 : 0;
     return;
 }
 
-# Resolve the names given to -m / --mask and -uuid into the substitutions the
-# run applies. A value may be a comma-separated list; a name given twice keeps
-# its first position; ip names both address versions. The substitutions are
-# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the same
-# names give the same message. An unknown name stops the run.
+# Resolve the names given to -m / --mask and -uuid into the identifier names
+# the run masks, through the identifier table: a name in any case, listed in
+# its canonical spelling (#613 D7, D15). A value may be a comma-separated
+# list; a name given twice keeps its first position; ip names both address
+# versions. The substitutions are built from the final list at settlement,
+# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the
+# same names give the same message. An unknown name stops the run.
 sub resolve_mask_names {
     my %seen;
-    my %wanted;
     for my $raw (@mask_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
-            push @mask_names, $name;
-            if ( my $identifier = $mask_identifier{$name} ) { $wanted{$_} = 1 for @{ $identifier->{entries} } }
-            else {
-                print_usage("Unknown mask name '$name' for -m. Valid values: $mask_identifier_list");
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $identifier = $mask_identifier{ lc $given };
+            unless ($identifier) {
+                print_usage("Unknown mask name '$given' for -m. Valid values: $mask_identifier_list");
                 exit 1;
             }
+            push @mask_names, $identifier->{name} unless $seen{ $identifier->{name} }++;
         }
     }
-    @mask_subs = map { $mask_patterns{$_} } grep { $wanted{$_} } @mask_order;
-    $mask_active = @mask_subs ? 1 : 0;
-    $mask_uuid   = $wanted{uuid} ? 1 : 0;
     return;
 }
 
@@ -14633,7 +14643,8 @@ sub resolve_mask_names {
 # captured value, the identifiers remove what the --mask patterns find, a
 # built-in metric name does what its omit option does, a user-defined
 # metric's name switches that metric off, and query-string takes the query
-# string out of the message. Any other name is a key read from the line,
+# string out of the message; the identifiers are removed in the order -m
+# applies them. Built-in names match in any case. Any other name is a key read from the line,
 # removed with its value and the separator beside it; a key a metric is read
 # from switches that metric off too, its value being gone, and says so
 # (D4, D12). An unknown name is such a key, not an error: a key no line
@@ -14642,7 +14653,7 @@ sub resolve_mask_names {
 # against, and before build_format_registry(), which bakes each format's
 # metric masks into its extraction code.
 sub resolve_discard_names {
-    my %seen;
+    my ( %seen, %identifier_wanted );
     for my $raw (@discard_raw) {
         for my $given ( map { trim($_) } split /,/, $raw ) {
             next if $given eq '';
@@ -14651,7 +14662,7 @@ sub resolve_discard_names {
             next if $seen{$name}++;
             push @discard_names, $name;
             if    ( $resolved->{kind} eq 'field' )      { $discard_field{$name} = 1 }
-            elsif ( $resolved->{kind} eq 'identifier' ) { push @discard_subs, map { discard_identifier_sub($_) } @{ $resolved->{identifier}{entries} } }
+            elsif ( $resolved->{kind} eq 'identifier' ) { $identifier_wanted{$_} = 1 for @{ $resolved->{identifier}{entries} } }
             elsif ( $resolved->{kind} eq 'metric' )     { ${ $builtin_metric{$name}{omit_flag} } = 1 }
             else {
                 $resolved->{udm}{discarded} = 1 if $resolved->{udm};
@@ -14667,8 +14678,10 @@ sub resolve_discard_names {
             }
         }
     }
-    $discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;
-    $discard_any_field = ( grep { $discard_field{$_} } @cleared_fields ) ? 1 : 0;
+    # The identifiers go after the keys, in the order -m applies them, never
+    # the order typed: -d ipv4,ipv6 and -d ipv6,ipv4 remove the same text
+    # (#613 D13).
+    push @discard_subs, map { discard_identifier_sub($_) } grep { $identifier_wanted{$_} } @mask_order;
     return;
 }
 
@@ -14737,7 +14750,6 @@ sub apply_discard_precedence {
     if (@exposed_too) {
         @expose_names   = grep { !$discarded{$_} } @expose_names;
         @expose_appends = grep { !$discarded{ $_->[1] } } @expose_appends;
-        $expose_active  = @expose_appends ? 1 : 0;
         for my $name (@exposed_too) {
             $include_query_string = 0 if $name eq 'query-string';
             delete $expose_metric{$name};
@@ -14754,12 +14766,23 @@ sub apply_discard_precedence {
     if (%mask_discarded) {
         my @masked_too = grep { $mask_discarded{$_} } @mask_names;
         @mask_names = grep { !$mask_discarded{$_} } @mask_names;
-        my %still = map { $_ => 1 } map { @{ $mask_identifier{$_}{entries} } } @mask_names;
-        @mask_subs   = map { $mask_patterns{$_} } grep { $still{$_} } @mask_order;
-        $mask_active = @mask_subs ? 1 : 0;
-        $mask_uuid   = $still{uuid} ? 1 : 0;
         print STDERR "Note: " . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked\n";
     }
+    return;
+}
+
+# Derive the run-scoped activation flags of -x, -m and -d once, from their
+# final lists: after the three resolutions and the discard-precedence pass,
+# which only build and trim lists (#613 D9). The per-line path reads these
+# scalars and @mask_subs.
+sub settle_message_option_flags {
+    my %masked = map { $_ => 1 } map { @{ $mask_identifier{$_}{entries} } } @mask_names;
+    @mask_subs         = map { $mask_patterns{$_} } grep { $masked{$_} } @mask_order;
+    $mask_active       = @mask_subs ? 1 : 0;
+    $mask_uuid         = $masked{uuid} ? 1 : 0;
+    $expose_active     = @expose_appends ? 1 : 0;
+    $discard_active    = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;
+    $discard_any_field = ( grep { $discard_field{$_} } @cleared_fields ) ? 1 : 0;
     return;
 }
 
@@ -15671,6 +15694,7 @@ sub adapt_to_command_line_options {
     resolve_mask_names()   if @mask_raw;
     resolve_discard_names() if @discard_raw;
     apply_discard_precedence() if @discard_names;
+    settle_message_option_flags();
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
@@ -16867,6 +16891,7 @@ sub read_and_process_logs {
                             } else {
                                 my $field_value = $ex->[0] == EXPOSE_THREAD  ? $thread
                                                 : $ex->[0] == EXPOSE_SESSION ? $session
+                                                : $ex->[0] == EXPOSE_OBJECT  ? $object
                                                 :                              $user;
                                 next unless defined $field_value && $field_value ne '' && $field_value ne '-';
                                 $message .= " $ex->[1]=$field_value";

@@ -665,6 +665,25 @@ scenario_ip_spellings() {
         asserts     'A comma-separated list and a repeated option name the same identifiers as ip does, and the substitutions run in the same fixed order whatever order the names were given in.' \
         produced_by "$PRODUCED_RESOLVE" \
         contract    "$CONTRACT_DOC section D5 - a comma-separated list names several identifiers; section Acceptance criteria 8"
+
+    # Issue #613 criterion 6 (D15): an identifier name matches in any case
+    # and is listed in its canonical spelling.
+    run_messages ip-upper -m IP -V runtime-config "$FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$ip_csv' '$MSG_CSV' messages && grep -qx 'mask: ip' '$RUN_DIR/run.out'" \
+        label       '-m IP is -m ip, listed as ip' \
+        asserts     'An identifier name matches in any case through the identifier table, and -V runtime-config lists the canonical spelling.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/613-one-name-vocabulary.md D7 and D15; criterion 6'
+    run_messages uuid-lower -m uuid "$FIXTURE" || return 0
+    local uuid_csv="$MSG_CSV"
+    run_messages uuid-upper -m UUID "$FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$uuid_csv' '$MSG_CSV' messages" \
+        label       '-m UUID is -m uuid' \
+        asserts     'An identifier name matches in any case.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/613-one-name-vocabulary.md D15; criterion 6'
 }
 
 # Criterion 9: masking runs after the exposed values are added.

@@ -812,16 +812,20 @@ scenario_K_name_list_parity() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
     ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
     local f
-    for f in hm hg hide udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+    for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
 
     local hm_list hg_list hide_columns udm_functions
     hm_list=$(sed -n "s/^Error: Unknown heatmap metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hm")
     hg_list=$(sed -n "s/^Error: Unknown histogram metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hg")
     hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
     udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
+    local mask_list mask_or_list
+    mask_list=$(sed -n "s/^Error: Unknown mask name 'foo' for -m\. Valid values: //p" "$err/mask")
+    mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
 
-    assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" ]] && echo found )" "found" \
+    assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" && -n "$mask_list" ]] && echo found )" "found" \
         label       'the -hm and -hg unknown-metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
         asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
         produced_by 'adapt_to_command_line_options(), apply_output_visibility() and parse_udm_configs() in ltl' \
@@ -848,6 +852,39 @@ scenario_K_name_list_parity() {
         asserts     'The --hide help row and its unknown-name error print one column list, the built-in metrics among them' \
         produced_by 'visibility_column_list() over @visibility_columns in ltl' \
         contract    "$CONTRACT_NAME_LISTS"
+
+    # The -m row names each identifier with its placeholder, or what it
+    # names; stripped of those, it is the list the -m error prints. The -d
+    # row names the same identifiers (613 D7).
+    local mask_row mask_row_names
+    mask_row=$(grep -E '^ +-m, +--mask <name>' "$help_out" | head -1 || true)
+    mask_row_names=$(sed -E 's/.*<name> is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /' <<< "$mask_row")
+    assert_equal "$mask_row_names" "$mask_list" \
+        label       'the --help -m row names the identifiers the -m error lists, in its order' \
+        asserts     'The -m help row interpolates the identifier table' \
+        produced_by 'print_help() in ltl ($mask_identifier_help over @mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7 (identifiers through one table)"
+    # The -d row wraps even at this width: its lines are joined first.
+    local discard_row="$TMP_DIR/help-discard-row.txt"
+    awk '/^ +-d, +--discard <name>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$discard_row"
+    assert_row_carries "$discard_row" '-d, +--discard <name>' "; $mask_or_list, removed wherever it sits in the message" \
+        label       'the --help -d row names the identifiers the -m error lists' \
+        asserts     'The -d help row interpolates the identifier table -m reads' \
+        produced_by 'print_help() in ltl (@mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    local usage_mask_row usage_mask_names
+    usage_mask_row=$(grep -E '^\| `-m, --mask <name>`' "$USAGE_MD" | head -1 || true)
+    usage_mask_names=$(sed -E 's/.*`<name>` is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /; s/`//g' <<< "$usage_mask_row")
+    assert_equal "$usage_mask_names" "$mask_list" \
+        label       'the docs/usage.md -m row names the identifiers the -m error lists, in its order' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    assert_row_carries "$USAGE_MD" '^\| `-d, --discard <name>`' "; $(backticked_list "$mask_or_list" | sed 's/`or`/or/'), removed wherever it sits in the message" \
+        label       'the docs/usage.md -d row names the identifiers the -m error lists' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
 
     # The -so row: a bare metric word is its total, in the table's order,
     # with time and size shown only as deprecated spellings (613 D1, D8).

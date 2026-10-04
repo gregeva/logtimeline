@@ -263,8 +263,10 @@ another metric would otherwise carry the same name (`rows:sum`, `rows:delta`), a
 `resolve_udm_metric_names()` sets it. That name alone targets the metric,
 uniquely, for `--hide`, `--show`, `--expose` and `--discard` alike, resolved
 through the one lookup `-hm` and `-hg` already use, `resolve_metric_operand()`.
-`--expose` and `--discard` each carry an inline copy of that lookup today and
-converge on the shared one. The lookup stays as it is, consistent with the rest of
+`--expose` and `--discard` each carried an inline copy of that lookup; since
+#613 (one vocabulary for names) both resolve through `resolve_message_name()`,
+which calls `udm_config_by_name()`, and the token-key fallback beside it is gone
+(613 D4). The lookup stays as it is, consistent with the rest of
 the code (architect, 2026-09-25): after the heading name it accepts the name as
 written without its suffix, as `-hm` and `-hg` do (#104, disambiguated metric
 names). `--discard` also keeps matching a key as written in the line

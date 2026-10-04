@@ -65,13 +65,14 @@ METRICS_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
 CONTRACT_DOC='features/566-preserve-named-values-in-message.md'
 CONTRACT_613='features/613-one-name-vocabulary.md'
 VOCABULARY_FIXTURE="$REPO_DIR/tests/fixtures/message-vocabulary-access-keys.txt"
+OBJECT_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
 PRODUCED_APPEND='read_and_process_logs() in ltl (the expose append, applied to the formed message immediately before the message key is assembled)'
 PRODUCED_RESOLVE='adapt_to_command_line_options() in ltl (the -x/--expose resolution into the ordered expose list)'
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$DOWNLOAD_FIXTURE" "$QS_FIXTURE" "$THREAD_FIXTURE" "$USERS_FIXTURE" "$METRICS_FIXTURE" "$VOCABULARY_FIXTURE"; do
+for f in "$DOWNLOAD_FIXTURE" "$QS_FIXTURE" "$THREAD_FIXTURE" "$USERS_FIXTURE" "$METRICS_FIXTURE" "$VOCABULARY_FIXTURE" "$OBJECT_FIXTURE"; do
     if [[ ! -f "$f" ]]; then echo "ERROR: fixture not found: $f"; exit 1; fi
 done
 
@@ -947,6 +948,73 @@ scenario_name_vocabulary() {
         contract    "$CONTRACT_613 D11; criterion 9"
 }
 
+# Issue #613 criteria 6 and 17: the parsed-field names match in any case, and
+# -x object appends the object whole. The ThingWorx application-log fixture
+# carries an object on every line; its message key keeps only the object's
+# last 25 characters, so c.t.s.s.p.PlatformSubsystem (27) reads
+# [t.s.s.p.PlatformSubsystem] in the key.
+scenario_field_names() {
+    current_scenario="field-names"
+    echo "[$current_scenario]"
+
+    # Criterion 17 (D16).
+    run_messages object-plain "$OBJECT_FIXTURE" || return 0
+    local object_plain="$MSG_CSV"
+    run_messages object -x object -V runtime-config "$OBJECT_FIXTURE" || return 0
+    local object_csv="$MSG_CSV"
+    assert_line "$RUN_OUT" \
+        pattern     '^expose: object$' \
+        asserts     'object is a parsed field on -x, listed under expose.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D6 and D16; criterion 17"
+    # Keys at the 350-character cut lose what is appended past it (566 D8:
+    # exposing a value does not move the cut), so the suffix is asserted on
+    # every key shorter than the cut.
+    assert_command \
+        command     "\"\$PERL\" -MText::CSV -e 'my \$c = Text::CSV->new({ binary => 1 }); open my \$f, \"<\", shift or die; my \$h = \$c->getline(\$f); my (\$n, \$bad) = (0, 0); while (my \$r = \$c->getline(\$f)) { my \$m = \$r->[1]; next if length(\$m) >= 350; \$n++; \$bad++, print \"no object suffix: \$m\\n\" unless \$m =~ / object=c\\.[\\w.]+\$/; \$bad++, print \"object twice: \$m\\n\" if \$m =~ / object=.* object=/; } print \"\$n keys under the cut\\n\"; exit(\$n && !\$bad ? 0 : 1)' '$object_csv'" \
+        label       'every key under the cut ends object=<the object>, once' \
+        asserts     'On a format that captures the object, -x object appends it to every message after the formed message, as the thread is appended.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+    assert_command \
+        command     "grep -qF '\"[WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] RelationshipSubsystem: GetWhereUsedCount= 11 object=c.t.s.s.p.PlatformSubsystem\"' '$object_csv'" \
+        label       'the PlatformSubsystem message carries all 27 characters of its object, and its key segment is unchanged' \
+        asserts     'The append is the object as the format captured it, whole, while the bracketed key segment keeps its last 25 characters.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+    assert_command \
+        command     "grep -qF '\"[WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] RelationshipSubsystem: GetWhereUsedCount= 11\"' '$object_plain'" \
+        label       'without -x the same message carries no object suffix' \
+        asserts     'The suffix comes from -x object, not from the key itself.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+
+    run_messages qs-plain -xqs "$VOCABULARY_FIXTURE" || return 0
+    local qs_plain="$MSG_CSV"
+    run_messages qs-object -xqs -x object "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$qs_plain' '$MSG_CSV' 'messages'" \
+        label       '-x object appends nothing on an access log, whose format has no object field' \
+        asserts     'object names the parsed field, not an object= key written in the query string: a format with no object field appends nothing.' \
+        produced_by 'resolve_message_name() in ltl (the parsed-field table before any line key)' \
+        contract    "$CONTRACT_613 D6; criterion 17"
+
+    # Criterion 6 (D15): field names in any case.
+    local case fixture lower upper
+    for case in "$OBJECT_FIXTURE|thread|Thread" "$USERS_FIXTURE|user|USER" "$USERS_FIXTURE|session|Session" "$OBJECT_FIXTURE|object|Object" "$VOCABULARY_FIXTURE|query-string|Query-String"; do
+        IFS='|' read -r fixture lower upper <<< "$case"
+        run_messages "case-$lower" -x "$lower" "$fixture" || return 0
+        local lower_csv="$MSG_CSV"
+        run_messages "case-$upper" -x "$upper" -V runtime-config "$fixture" || return 0
+        assert_command \
+            command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'expose: $lower' '$RUN_OUT'" \
+            label       "-x $upper is -x $lower, listed as $lower" \
+            asserts     "A parsed-field name matches in any case: -x $upper is the $lower field, not a key read from the line, and is listed in its canonical spelling." \
+            produced_by 'resolve_message_name() in ltl (the parsed-field table, folded)' \
+            contract    "$CONTRACT_613 D15; criterion 6"
+    done
+}
+
 scenario_register download-filename \
                   query-string-loss \
                   multi-key-order \
@@ -956,6 +1024,7 @@ scenario_register download-filename \
                   session-user \
                   metric-names \
                   name-vocabulary \
+                  field-names \
                   query-string-alias \
                   classification-unchanged
 scenario_parse_args "$@"
@@ -974,6 +1043,7 @@ while read -r s; do
         thread)                   scenario_thread ;;
         session-user)             scenario_session_user ;;
         name-vocabulary)          scenario_name_vocabulary ;;
+        field-names)              scenario_field_names ;;
         metric-names)             scenario_metric_names ;;
         query-string-alias)       scenario_query_string_alias ;;
         classification-unchanged) scenario_classification_unchanged ;;
