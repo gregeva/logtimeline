@@ -48,8 +48,13 @@ CV_HALF="$FIXTURES/value-display-cv-half.txt"
 SECONDS_UDM="$FIXTURES/value-display-seconds-udm.txt"
 DURATION_SPREAD="$FIXTURES/tomcat-access-duration-spread.txt"
 NUMERIC_BOUNDARY="$FIXTURES/numeric-highlight-boundary.txt"
+FIT="$FIXTURES/value-display-fit.txt"
+COUNT_1140="$FIXTURES/value-display-count-1140.txt"
+CARRY="$FIXTURES/value-display-carry.txt"
+COUNT_CARRY="$FIXTURES/value-display-count-carry.txt"
+MESSAGES_TOTAL="$FIXTURES/value-display-messages-total.txt"
 
-for f in "$LTL" "$CHECKER" "$COUNT_1500" "$ZERO_DURATION" "$CV_HALF" "$SECONDS_UDM" "$DURATION_SPREAD" "$NUMERIC_BOUNDARY"; do
+for f in "$LTL" "$CHECKER" "$COUNT_1500" "$ZERO_DURATION" "$CV_HALF" "$SECONDS_UDM" "$DURATION_SPREAD" "$NUMERIC_BOUNDARY" "$FIT" "$COUNT_1140" "$CARRY" "$COUNT_CARRY" "$MESSAGES_TOTAL"; do
     [[ -e "$f" ]] || { echo "ERROR: not found: $f"; exit 1; }
 done
 
@@ -370,7 +375,172 @@ scenario_no_trailing_zero() {
         contract    "$CONTRACT D3"
 }
 
-scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix no-trailing-zero
+# ---------------------------------------------------------------------------
+# fit-sweep (AC3, AC4, AC11, AC12): at every --terminal-width from 100 to 220
+# in steps of 10, every duration and bytes cell is one whole value (a number
+# and a complete unit spelling, never cut), one tier and one fit run down each
+# column, a long-tier word is never tight, a millisecond-source duration shown
+# in milliseconds carries no decimal on any surface, and the bytes column
+# resolves more than one tier across the widths. One access-log line per
+# minute, totals from 7 ms to 12.2 min and from 512 B to 5 MB; -bs 1 -n 0,
+# -osum: the summary's own timings state no source unit and have no floor.
+# ---------------------------------------------------------------------------
+visible_column() { grep -qE "^  $2 +proportional +[0-9]+ +[0-9]+ +[0-9]+ +1 " "$TMP_DIR/$1.raw"; }
+
+scenario_fit_sweep() {
+    current_scenario="fit-sweep"
+    echo "[$current_scenario]"
+    local w seen=0
+    : > "$TMP_DIR/fs-bytes-tiers"
+    for w in 100 110 120 130 140 150 160 170 180 190 200 210 220; do
+        render "fs-$w" "$FIT" -bs 1 -n 0 -osum --terminal-width "$w" --debug-layout || return 0
+        if visible_column "fs-$w" duration; then
+            seen=$((seen + 1))
+            assert_command \
+                command     "check column --file '$TMP_DIR/fs-$w.raw' --column duration --kind duration --source-unit ms --lib '$_RENDERED_OUTPUT_LIB'" \
+                label       "width $w: every duration cell is a whole value, one tier and fit down the column" \
+                asserts     'A timeline value is never cut: a number and a complete unit spelling; the column resolves one tier and one fit against all its values; a long word keeps its space; a millisecond source shows no decimal in milliseconds' \
+                produced_by 'print_bar_graph() in ltl: value_column() resolves the column (value_walk_row()), value_text() renders each cell' \
+                contract    "$CONTRACT D1, D10, D11, D19, D23"
+        fi
+        if visible_column "fs-$w" bytes; then
+            assert_command \
+                command     "check column --file '$TMP_DIR/fs-$w.raw' --column bytes --kind bytes-si --lib '$_RENDERED_OUTPUT_LIB' >> '$TMP_DIR/fs-bytes-tiers'" \
+                label       "width $w: every bytes cell is a whole SI value, one tier and fit down the column" \
+                asserts     'A bytes value is never cut and spells one tier of the run notation down its column' \
+                produced_by 'print_bar_graph() in ltl, through value_column() and format_bytes()' \
+                contract    "$CONTRACT D10, D19"
+        fi
+    done
+    assert_command \
+        command     "[[ $seen -ge 5 ]] && sort -u '$TMP_DIR/fs-bytes-tiers' | grep -c . | awk '{ exit !(\$1 >= 2) }' && grep -q 'tiers=long' '$TMP_DIR/fs-bytes-tiers'" \
+        label       'the duration column shows at five widths or more; the bytes column resolves more than one tier, the long word among them' \
+        asserts     'Bytes are a tiered kind like every other: the walk reaches the long-tier word where the column is wide and the token below' \
+        produced_by 'value_walk_row() in ltl; the word field of @byte_unit_ladder' \
+        contract    "$CONTRACT D19 (bytes a tiered kind)"
+    render fs-hg "$FIT" -bs 1 -n 0 -osum -hm duration -hg duration --terminal-width 160 || return 0
+    assert_command \
+        command     "for f in '$TMP_DIR'/fs-*.txt; do check absent --file \"\$f\" --regex '(?<![\\w.])\\d+\\.\\d+ ?(ms|msec|milliseconds?)\\b' || exit 1; done" \
+        label       'no surface (timeline, latency cells, heatmap header, histogram labels) shows a decimal at the millisecond step on a millisecond source' \
+        asserts     'A rendered digit is never finer than the source resolution (latency cells included)' \
+        produced_by 'format_time() in ltl: the resolution ceiling' \
+        contract    "$CONTRACT D19"
+}
+
+# ---------------------------------------------------------------------------
+# common-maxima (AC5): a count of 1140 reads 1.14 thousand where its column
+# resolves the long tier, 1.1 k where it resolves medium, and 1.1k on the
+# heatmap header; no value carries more decimals than its tier allows.
+# ---------------------------------------------------------------------------
+scenario_common_maxima() {
+    current_scenario="common-maxima"
+    echo "[$current_scenario]"
+    render cm-wide "$COUNT_1140" -bs 1 -n 0 --terminal-width 160 --debug-layout || return 0
+    render cm-narrow "$COUNT_1140" -bs 1 -n 0 --terminal-width 100 --debug-layout || return 0
+    render cm-heatmap "$COUNT_1140" -bs 1 -n 0 --terminal-width 160 -hm count || return 0
+    assert_command \
+        command     "cell_text cm-wide '^ 2026-01-26 10:00' count | grep -qx '1.14 thousand'" \
+        label       'a long-tier column reads 1.14 thousand' \
+        asserts     'The long tier carries up to two decimals, the same maximum for every kind' \
+        produced_by 'value_text() in ltl, %tier_decimals' \
+        contract    "$CONTRACT D12"
+    assert_command \
+        command     "cell_text cm-narrow '^ 2026-01-26 10:00' count | grep -qE '^1\\.1 ?k\$'" \
+        label       'a medium-tier column reads 1.1 k' \
+        asserts     'The medium tier carries up to one decimal' \
+        produced_by 'value_text() in ltl, %tier_decimals' \
+        contract    "$CONTRACT D12"
+    assert_command \
+        command     "check tokens --file '$TMP_DIR/cm-heatmap.txt' --line 'heatmap \\[count\\]' --each '1\\.1k' --min 1" \
+        label       'the heatmap header reads 1.1k' \
+        asserts     'The chart label budget (medium, tight) carries the medium maximum' \
+        produced_by 'get_heatmap_column_header() in ltl, through value_text()' \
+        contract    "$CONTRACT D12"
+}
+
+# ---------------------------------------------------------------------------
+# boundary-carry (AC10): a value that rounds up to the next step's size
+# renders at that step: 999,999 bytes under SI reads 1 MB, 59,960 ms reads
+# 1 min, a count of 999,960 reads 1 million (timeline and heatmap header).
+# ---------------------------------------------------------------------------
+scenario_boundary_carry() {
+    current_scenario="boundary-carry"
+    echo "[$current_scenario]"
+    render bc "$CARRY" -bs 1 -n 0 -bn si --terminal-width 160 --debug-layout || return 0
+    render bc-count "$COUNT_CARRY" -bs 1 -n 0 --terminal-width 160 --debug-layout || return 0
+    render bc-count-hm "$COUNT_CARRY" -bs 1 -n 0 --terminal-width 160 -hm count || return 0
+    assert_command \
+        command     "cell_text bc '^ 2025-05-07 00:00' bytes | grep -qE '^1 ?(MB|megabyte)\$'" \
+        label       '999,999 bytes reads 1 MB' \
+        asserts     'A value whose rounding reaches the next step size renders at that step, never 1000 kB' \
+        produced_by 'format_bytes() in ltl, the carry' \
+        contract    "$CONTRACT D19"
+    assert_command \
+        command     "cell_text bc '^ 2025-05-07 00:01' duration | grep -qE '^1 ?(m|min|minute)\$'" \
+        label       '59,960 ms reads 1 min' \
+        asserts     'The carry applies to every kind with a ladder: never 60 sec' \
+        produced_by 'format_time() in ltl, the carry' \
+        contract    "$CONTRACT D19"
+    assert_command \
+        command     "cell_text bc-count '^ 2026-01-26 10:00' count | grep -qE '^(1 ?(M|Mil|million)|999\\.96 thousand)\$' && check tokens --file '$TMP_DIR/bc-count-hm.txt' --line 'heatmap \\[count\\]' --each '1Mil' --min 2" \
+        label       'a count of 999,960 never reads 1000 k: 1Mil on the heatmap header, the timeline column as its tier carries it' \
+        asserts     'The carry applies to counts: at one decimal 999,960 rounds to the next step size and reads 1Mil; at the long tier two decimals keep it below (999.96 thousand); never 1000 of the smaller unit' \
+        produced_by 'format_number() in ltl, the carry' \
+        contract    "$CONTRACT D12, D19"
+}
+
+# ---------------------------------------------------------------------------
+# messages-total (AC17): the messages-table total fits its column at every
+# width, a whole value, one tier down the column; the MESSAGES CSV
+# duration_nice reads the same string at every width. Four paths whose
+# totals run from 5 ms to 2 min.
+# ---------------------------------------------------------------------------
+scenario_messages_total() {
+    current_scenario="messages-total"
+    echo "[$current_scenario]"
+    local w
+    for w in 100 120 140 160 180 200 220; do
+        rm -f "$TMP_DIR"/*-LTL-MESSAGES-*.csv
+        render "mt-$w" "$MESSAGES_TOTAL" -bs 60 -n 4 -o --terminal-width "$w" || return 0
+        ls "$TMP_DIR"/*-LTL-MESSAGES-*.csv > /dev/null 2>&1 && \
+            $PERL -MText::ParseWords -ne 'chomp; my @f = parse_line(",", 0, $_); if ($. == 1) { ($i) = grep { $f[$_] eq "duration_nice" } 0..$#f; next } print "$f[$i]\n"' "$TMP_DIR"/*-LTL-MESSAGES-*.csv | sort > "$TMP_DIR/mt-$w.nice"
+    done
+    assert_command \
+        command     "for w in 100 120 140 160 180 200 220; do grep -E 'GET /vd/total' '$TMP_DIR'/mt-\$w.txt | $PERL -ne 'm{(\\d+(?:\\.\\d+)?)( ?)(ms|msec|milliseconds?|s|sec|seconds?|m|min|minutes?)\\s*\$} or die \"no whole total in: \$_\"; \$t{ length(\$3) > 4 ? \"long\" : \$3 =~ /^(ms|s|m)\$/ ? \"short\" : \"medium\" }++; \$f{\$2}++; END { die \"tiers \" . join(\",\", keys %t) . \" fits \" . join(\",\", keys %f) . \"\\n\" if keys %t > 1 || keys %f > 1 || !%t }' || exit 1; done" \
+        label       'at every width each total is a whole value, one tier and fit down the column' \
+        asserts     'The messages-table total is walked by its own column width, resolved once against every total the table shows, never cut' \
+        produced_by 'print_message_summary() in ltl: value_column() with the messages total row, value_text()' \
+        contract    "$CONTRACT D10, D18, D23"
+    assert_command \
+        command     "[[ -s '$TMP_DIR/mt-100.nice' ]] && for w in 120 140 160 180 200 220; do cmp -s '$TMP_DIR/mt-100.nice' '$TMP_DIR'/mt-\$w.nice || exit 1; done" \
+        label       'the MESSAGES CSV duration_nice reads the same at every width' \
+        asserts     'The CSV nice cell keeps a fixed budget whatever the terminal width' \
+        produced_by 'print_message_summary() in ltl, value_text() with the nice cell row' \
+        contract    "$CONTRACT D18"
+}
+
+# ---------------------------------------------------------------------------
+# axis-tick (AC22): a duration histogram whose tallest bin holds 1,155
+# samples labels that tick 1.2k, and no two y-axis ticks read alike.
+# Generated: 1,155 lines at 10 ms and 300 at 2 s, one path.
+# ---------------------------------------------------------------------------
+scenario_axis_tick() {
+    current_scenario="axis-tick"
+    echo "[$current_scenario]"
+    local gen="$TMP_DIR/axis-tick.txt" i
+    : > "$gen"
+    for ((i = 0; i < 1155; i++)); do printf '192.0.2.43 - - [07/May/2025:00:00:%02d +0000] "GET /vd/axis HTTP/1.1" 200 512 10\n' $((i % 60)) >> "$gen"; done
+    for ((i = 0; i < 300; i++)); do printf '192.0.2.43 - - [07/May/2025:00:00:%02d +0000] "GET /vd/axis HTTP/1.1" 200 512 2000\n' $((i % 60)) >> "$gen"; done
+    render at "$gen" -bs 1440 -oe -n 0 -hg duration --terminal-width 160 || return 0
+    assert_command \
+        command     "$PERL -ne 'print \"\$1\\n\" if /^\\s*(\\S+) [^\\x00-\\x7f]/ && \$1 !~ /^(?:0|timestamp)\$/' '$TMP_DIR/at.txt' > '$TMP_DIR/at-ticks' && grep -qx '1.2k' '$TMP_DIR/at-ticks' && [[ \$(sort '$TMP_DIR/at-ticks' | uniq -d | wc -l) -eq 0 ]]" \
+        label       'the top tick reads 1.2k and no two ticks read alike' \
+        asserts     'The y-axis tick names the axis tick budget (medium, tight, the six-character label field): 1,155 reads 1.2k, never 1k above 866' \
+        produced_by 'render_histogram_row() in ltl, through value_text() and the axis tick row' \
+        contract    "$CONTRACT D1, D8, D9; correction 6"
+}
+
+scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick no-trailing-zero
 scenario_parse_args "$@"
 
 scenario_wanted count-spelling     && { scenario_count_spelling; echo ""; }
@@ -380,6 +550,11 @@ scenario_wanted floor-unit         && { scenario_floor_unit; echo ""; }
 scenario_wanted cv-agreement       && { scenario_cv_agreement; echo ""; }
 scenario_wanted user-defined-kind  && { scenario_user_defined_kind; echo ""; }
 scenario_wanted rate-suffix        && { scenario_rate_suffix; echo ""; }
+scenario_wanted fit-sweep          && { scenario_fit_sweep; echo ""; }
+scenario_wanted common-maxima      && { scenario_common_maxima; echo ""; }
+scenario_wanted boundary-carry     && { scenario_boundary_carry; echo ""; }
+scenario_wanted messages-total     && { scenario_messages_total; echo ""; }
+scenario_wanted axis-tick          && { scenario_axis_tick; echo ""; }
 scenario_wanted no-trailing-zero   && { scenario_no_trailing_zero; echo ""; }
 
 echo "Results: $pass passed, $fail failed"

@@ -361,8 +361,8 @@ run_unobserved_scenario() {
         label       "access log: the bucket whose size is '-' has a blank bytes cell" \
         asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
     assert_command \
-        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:02 ' bytes | tee /dev/stderr | grep -qE \"^text=' *0 B\"" \
-        label       "access log: the zero-byte bucket's bytes cell shows 0 B" \
+        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:02 ' bytes | tee /dev/stderr | grep -qE \"^text=' *0 ?(B|bytes) \"" \
+        label       "access log: the zero-byte bucket's bytes cell shows a zero in bytes (0 B, 0B or 0 bytes, by the tier the column resolves)" \
         asserts     "$zero_asserts" produced_by "$produced" contract "$contract"
 }
 

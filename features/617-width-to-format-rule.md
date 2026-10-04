@@ -5,8 +5,8 @@
 Specification agreed with the architect 2026-09-28. Implementation started
 2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
 `$version_number` stamped `0.19.0-617`, the before benchmark captured on the
-base commit (`tests/baseline/results/617-before.tsv`). Drop 1 is committed;
-drops 2 and 3 are not started (§ Delivery progress).
+base commit (`tests/baseline/results/617-before.tsv`). Drops 1 and 2 are
+committed; drop 3 is not started (§ Delivery progress).
 
 This issue is a sub-issue of #622 (the refactoring dispatched by the #342 audit
 review). It blocks #514 (the count metric becomes explicit and off by default):
@@ -1179,6 +1179,55 @@ ARRAY reference` in `get_heatmap_column_header` on the base commit as on this
 branch (input: two application-log lines carrying `elapsed=0`,
 `-udm 'elapsed:s:max' -hm elapsed`). AC8's heatmap half for a user-defined
 metric is therefore asserted only for the built-in duration.
+
+**Drop 2 (2026-10-04): the width rule with intents (D23).** `value_column()`
+resolves a width-passing surface's tier and fit once per column through
+`value_walk_row()`: the steps of `@value_walk` in order, most readable first,
+the first at which every value fits the width and no value is moved from its
+reference (`value_reference()`: the most exact spelling that fits, across all
+steps) by more than the row's intent tolerates (`%value_tolerance`). Each value's
+decimals then come from `value_spelling()`: the most that fit, up to the tier's
+maximum, or, for `prose`, the fewest within the tolerance. Every row of
+`%value_budget` names its intent; the width-passing surfaces have rows of their
+own (*timeline column*, *timeline count cell*, *messages total*); a row that
+names no tier walks for one on its own value (*notice*). The arms return the
+value their text shows. `format_time` holds a value with a source floor to the
+source's resolution (the ceiling, D19, now on every surface); `format_time`,
+`format_bytes` and `format_number` carry a value that rounds up to the next
+step's size (D19); `@byte_unit_ladder` gains the long-tier word per notation;
+the axis tick names its six-character width. `format_duration_total` is gone:
+every arm has one caller, the dispatch (AC15's structural half).
+
+AC4 as written (decimals give way before the space) is superseded by D23; it
+now reads: no long-tier word is tight, one tier and one fit run down each
+column, and the walk takes a voluntary trade only within the column's intent.
+
+Proven in drop 2 by `tests/validate-value-display.sh` scenarios *fit-sweep*
+(AC3, AC4, AC11, AC12), *common-maxima* (AC5, on the proposed maxima),
+*boundary-carry* (AC10), *messages-total* (AC17) and *axis-tick* (AC22); the
+assertions of each fail against the drop 1 tree except *messages-total*'s,
+proven on a doctored render (the drop 1 total column did not overflow these
+widths), and `validate-byte-units` re-pointed to the carry (999,999 bytes reads
+`1 MB`; 1,048,575 bytes reads `1 MiB` under IEC). `validate-duration-display`'s
+observed-zero bytes assertion accepts any byte spelling of zero (`0 B`, `0B`,
+`0 bytes`): the invariant is that the zero shows.
+
+Regression goldens moved by drop 2, against drop 1's: 57 of 74 files, every
+changed value in a class.
+
+| Class | Values | Example |
+|---|---|---|
+| same value, another tier or fit (the walk) | 312 | `3m` reads `3min`; `3 MB` reads `3MB` |
+| more decimals at the long tier | 81 | `3 minutes` reads `2.96 minutes` |
+| a digit traded within 5% for the space or a longer unit (`tabular`, D23) | 54 | `885.5 kB` reads `885 kilobytes`; `50.8s` reads `51sec` |
+| a count at the medium tier's one decimal (the proposed maxima) | 39 | `1.68 k` reads `1.7 k` |
+| a millisecond-source value at the millisecond step loses its decimal (D19) | 25 | `207.7ms` reads `208ms`; `3.6ms` reads `4ms` |
+| the space alone | 9 | `3m` reads `3 m` |
+| a cut value made whole | 5 | `885.5` (unit cut) reads `885 kB`; `119 millisecon` reads `119 msec` |
+| the histogram y-axis tick (correction 6) | 4 | `1k` reads `1.1k` and `1.2k` |
+
+The before/after single-day benchmark probe on this machine reads 8.6 s on
+both sides (-0.1%); the gate's pairs are taken at the merge gate.
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after

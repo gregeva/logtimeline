@@ -6,14 +6,14 @@
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
      timestamp                         legend                           occurrences      duratio   bytes    1ms             heatmap [duration]              1.5m
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- 2025-04-10 06:00 ERROR: 23 498 WARN: 4.5k 4 INFO: 1  0.2:41.7/m │ ████████████████████   31.5m    16.8 k │ █  ██ █|████  ████████████████████|████|██| ██    ██
+ 2025-04-10 06:00 ERROR: 23 498 WARN: 4.5k 4 INFO: 1  0.2:41.7/m │ ████████████████████   32 min   17 kB  │ █  ██ █|████  ████████████████████|████|██| ██    ██
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────14ms─────────244ms────────4.3s────────1.5m
 
 command-line options: -ni -n 1 -hmdm bin -hm duration -hdmin 963 
 
   TOP HIGHLIGHTED MESSAGES (lines matching the highlight criteria)                                       Occur.    Min    P50   P99.   CV .      Duration 
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [WARN] [WC_0K010012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - Brembo.UTM.ShiftInstances_TG SaveShi        4   1.5s   3.6s   4.4s   0.41      12.1 sec 
+  [WARN] [WC_0K010012_ProcessP] [S.c.t.d.e.DSLScript] SUCCEEDED - Brembo.UTM.ShiftInstances_TG SaveShi        4   1.5s   3.6s   4.4s   0.41  12.1 seconds 
 
   ─────────────────────────────────────────   
   Category                            Total      These file(s) were processed with analysis including results between 2025-04-10 06:00 and 2025-04-10 06:07
