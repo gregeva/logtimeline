@@ -38,7 +38,7 @@ read loop already strips.
 | Field | Capture | Record field | Notes |
 |---|---|---|---|
 | date + time | `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}` | `timestamp_str` | The `Z` is matched outside the capture. `frac fixed3` strips the fraction at offset 19; the `T` separator is kept (the fixed-offset parser never reads offset 10). |
-| msgtype | `[A-Z]` | `category_bucket` | Mapped through `wgm_msgtype` (D54). |
+| msgtype | `[A-Z]` | `category_bucket` | Mapped through the entry's `level_map` by the `level_map` transform (D54; one level-map mechanism, #655 D5). |
 | logid | `P[0-9a-f]+` | `platform` | Process id with the `P` prefix the log prints. Captured for the record; no consumer today. |
 | tid | `T[0-9a-f]+` | `thread` | Thread id with its `T` prefix. No `-N` suffix, so no thread-pool grouping is derived. |
 | area | `[^ :]+` | `object` | Dotted component path; `#`-qualified for sessions and transactions (`uwgm.session1.act#…​.srvtxn#0`); `$default` on header lines. Never contains a space or a colon in the corpus, so the class stops at the field separator. |
@@ -120,8 +120,9 @@ connection_server, mt16, mt1gen]`.
 
 The read loop drops any line whose category is not in `@log_levels`, so the
 raw letters cannot be the category — every WGM line would be matched and then
-silently discarded. The mapping is a per-line hash lookup (`wgm_msgtype`,
-one named transform primitive). `D/E/I/T/W` become the shared
+silently discarded. The mapping is a per-line hash lookup (the entry's
+`level_map`, applied by the `level_map` transform primitive that every entry
+mapping a producer's own level tokens shares, #655 D5). `D/E/I/T/W` become the shared
 `DEBUG/ERROR/INFO/TRACE/WARN`, so error rates and highlight semantics work as
 for every other format. `C/X/Y/S/F` have no severity; they become `CONFIG`,
 `CREATE`, `DESTROY`, `START`, `FINISH` — five new members of the vocabulary,

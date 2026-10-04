@@ -631,6 +631,16 @@ to render.
 
 The roster is twenty techniques and twenty-six topics.
 
+**Amended (architect, 2026-10-03, under #652, correct the load-over-time
+explanation):** the Load Over Time reading in the row above is replaced. The
+thread-pool column counts the distinct threads that finished a request in the
+bucket, so at wide buckets a count at the pool's size is the pool's size, busy or
+quiet; concurrency is read from the duration column (summed duration divided by
+bucket width); and saturation shows at one-minute buckets as a count falling below
+what the same request rate produced in the minutes before, ending in a duration
+surge where the held requests finish. The measurements and the content
+specification are in `features/652-load-over-time-reading.md`.
+
 ### D8 — File Attribution merges into Cross-Log Correlation (architect, 2026-09-04)
 
 File Attribution (D4) and Cross-Log Correlation are one read of one surface, and are
@@ -1000,13 +1010,19 @@ The grouping: how much was happening at once. Concurrency is one reading of a
 timeline column, not the whole of it (F21, D7). *See also* points at Time.
 
 **Load Over Time** — `load-over-time`. *Question:* how much was in flight, and did it
-hit a ceiling? *Signal:* a bar-chart column of the distinct count per time bucket.
-*Reading:* distinct sessions per bucket and distinct users per bucket are load
-measures that appear on their own when the log carries the field; active threads in a
-pool set against the request count says whether the pool is sized right, and a count
-sitting at its maximum before throughput stops is the bottleneck (F21). *Falsifier:*
-a distinct count is only a concurrency measure where the attribute is held for the
-duration of the work. *Command:* `-tpas`, or `-tpa <pool>`.
+hit a ceiling? *Signal:* the thread-pool and duration columns beside the
+occurrences bar, read at an hour and at a minute. *Reading* (as amended under D7):
+distinct sessions per bucket and distinct users per bucket are load measures that
+appear on their own when the log carries the field; at wide buckets a thread pool's
+count is the pool's size, busy or quiet; concurrency is summed duration divided by
+bucket width; saturation shows at one-minute buckets as a count below what the same
+request rate produced in the minutes before, ending in a duration surge where the held
+requests finish. *Falsifier:* the count is of threads that finished a request in the
+bucket, so a held thread is invisible until it finishes; the surge is a release, not
+concurrency; and a distinct count is only a concurrency measure where the attribute is
+held for the duration of the work. *Command:* `-tpas -bs 1h`, `-tpa <pool>`, and
+`-tpas -bs 1` over a window. The content specification and its measurements are in
+`features/652-load-over-time-reading.md`.
 
 **Custom Metric Tracking** — `custom-metric`. *Question:* what does a value the log
 already reports look like over time? *Signal:* the analyst's own metric drawn as a
@@ -1089,7 +1105,11 @@ Three findings the implementation added to the record:
   and AC5 exempts verbatim `pre` blocks for that reason. Every one of the
   twenty-five new pages renders with no line over the terminal width at 80,
   120 and 200, generated signals included, so the exemption is unused by
-  this work rather than relied on.
+  this work rather than relied on. Not true of Load Over Time: its signal
+  rows ran 86 to 91 columns at width 80, and since its correction they
+  carry the duration and pool columns a run draws and run to 110, so that
+  page relies on the exemption (`features/652-load-over-time-reading.md`
+  F8 and § Implementation).
 
 ### The wiki mirror
 

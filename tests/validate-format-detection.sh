@@ -20,6 +20,10 @@
 # D24 load-time gates validate, so fixture and registry cannot drift.
 # windchill_workgroup_manager is asserted against the committed wgm-client.txt fixture
 # staged under each of its three producer-true names (issue #395).
+# The six Apache mod_jk connector shapes are asserted against committed
+# fixtures staged as mod_jk.log: one scrubbed slice of the held shape and five
+# synthetic rewrites of it, plus a composed access log for the shared-timeline
+# windows (issue #655).
 # The `format-detection / scan` sub-section (registry scan telemetry,
 # issue #58) is asserted by the scan-telemetry scenarios, and the
 # `format-detection / classification` sub-section (per-line success/failure
@@ -794,11 +798,316 @@ scenario_java_gc_g1() {
 [2025-04-05T11:10:50.309+0000][info][gc] GC(2) Pause Cleanup 82M->82M(320M) 0.204ms
 [2024-10-16T05:27:56.233+0000][info][gc] GC(144521) To-space exhausted
 [2025-06-05T11:17:57.418+0000][info][gc] Using G1
+[2026-10-03T12:57:50.405+0200][info ][gc             ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
 EOF
     # A GC log is an event ledger even though it classifies no outcome: the
     # JVM writes one line per collection it performed, so the lines are the
     # events. event_ledger and outcome classification are independent.
-    assert_registry_sample_scenario "$log" java_gc_g1 6 6 yes
+    assert_registry_sample_scenario "$log" java_gc_g1 6 7 yes
+}
+
+# G1 unified logging written without the level-and-tags decoration: one
+# registry entry per bracket shape after the time. Each scenario feeds the
+# entry's own sample lines (the lines build_format_registry() self-tests at
+# every startup) and asserts the entry binds under its own name, reads every
+# line, and is an event ledger.
+GC_TAGLESS_CONTRACT='features/656-gc-log-tagless-decorations.md'
+
+scenario_java_gc_g1_time() {
+    current_scenario="java-gc-g1-time"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T09:41:12.945+0000] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T10:57:50.365+0000] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.484+0200] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms
+[2026-10-03T12:57:50.376+0200] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time 29 7 yes
+}
+
+scenario_java_gc_g1_time_uptime() {
+    current_scenario="java-gc-g1-time-uptime"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-uptime.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][0.036s] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][0.037s] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][0.045s] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][0.047s] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][0.087s] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][0.058s] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][0.014s] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_uptime 30 7 yes
+}
+
+scenario_java_gc_g1_time_level() {
+    current_scenario="java-gc-g1-time-level"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-level.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][info] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][info] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][info ] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][info] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][info ] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][info] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][info ] Using G1
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_level 31 7 yes
+}
+
+scenario_java_gc_g1_time_pid() {
+    current_scenario="java-gc-g1-time-pid"
+    echo "[$current_scenario]"
+    local log="$TMP_DIR/gc-time-pid.log"
+    cat > "$log" <<'EOF'
+[2026-10-03T12:57:50.354+0200][91284] GC(0) Pause Young (Normal) (G1 Evacuation Pause) 22M->8M(48M) 1.845ms
+[2026-10-03T11:41:12.945+0200][83936] GC(9) Pause Young (Normal) (G1 Evacuation Pause) (Evacuation Failure) 43M->38M(48M) 0.637ms
+[2026-10-03T12:57:50.364+0200][32259] GC(6) Pause Remark 35M->35M(48M) 0.103ms
+[2026-10-03T12:57:50.365+0200][91284] GC(6) Pause Cleanup 28M->28M(48M) 0.060ms
+[2026-10-03T12:57:50.405+0200][91284] GC(55) Pause Full (G1 Compaction Pause) 46M->28M(48M) 1.900ms
+[2026-10-03T12:57:50.376+0200][91284] GC(20) To-space exhausted
+[2026-10-03T12:57:50.332+0200][9731] Using G1
+[2026-10-03T12:57:50.484+0200][9731 ] GC(143) Pause Full (System.gc()) 18M->17M(48M) 1.257ms
+EOF
+    assert_registry_sample_scenario "$log" java_gc_g1_time_pid 32 8 yes
+}
+
+# Count, independently of ltl, the lines of a GC fixture that carry a pause
+# record (a pause kind with the heap transition and pause time), the marker
+# lines (To-space exhausted, Using G1) and the pause-start lines (a pause kind
+# with no figure). Prints "records markers starts total".
+gc_fixture_counts() {
+    perl -ne '
+        s/\r?\n\z//;
+        if (/Pause (?:Young|Full|Remark|Cleanup)(?: \(.+?\))? \d[^ ]*->\d[^ ]*\(\d[^)]*\) \d[\d.]*ms\z/) { $r++ }
+        elsif (/(?:To-space exhausted|Using G1)\z/) { $m++ }
+        elsif (/Pause (?:Young|Full|Remark|Cleanup)(?: \(.+\))?\z/) { $s++ }
+        $t++;
+        END { printf "%d %d %d %d\n", $r // 0, $m // 0, $s // 0, $t // 0 }
+    ' "$1"
+}
+
+# The record is the line carrying the measurement: on a JVM-written slice
+# with every gc tag set at info, each pause is written twice (start without
+# the figure, end with it), and only the end and the two marker kinds bind.
+# `-bs 1440 -oe -n 1 -osum` via run_format_detection: the counts are read
+# from -V format-detection; the slice spans under a second.
+scenario_gc_tagless_start_lines() {
+    current_scenario="gc-tagless-start-lines"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 || "$starts" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records or no start lines ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: java_gc_g1_time$' \
+        asserts 'A G1 log decorated with the time alone binds the time-only entry by content' \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4, D8"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Exactly the $records pause lines carrying the heap transition and pause time plus the $markers marker lines are records; none of the $starts pause-start lines is (one record per pause)" \
+        produced_by 'the java_gc_g1_time pattern in format_registry_specs() in ltl (a pause kind requires the figure); counted in read_and_process_logs()' \
+        contract "$GC_TAGLESS_CONTRACT C2, D5"
+    assert_line "$out" pattern "^  unmatched_lines: $((total - records - markers))\$" \
+        asserts "Every other line, the $starts pause-start lines included, is unmatched" \
+        produced_by 'per-file counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C2, D5, D10"
+}
+
+# Run ltl -o on a fixture in a directory this scenario owns, staged as gc.log,
+# and echo the directory. -o writes its products into the working directory,
+# so each run gets its own fresh directory and its products are the only CSV
+# files there (HARNESS-DESIGN.md section A harness owns the directory it runs
+# ltl in). `-o -bs 1440`: the parity assertion reads the STATS and MESSAGES
+# CSV; every fixture spans under a second, so one bucket holds the whole run.
+# -V format-detection is added so the same run states which entry bound.
+run_gc_csv() {
+    local fixture="$1" label="$2"
+    local dir="$TMP_DIR/$current_scenario/$label"
+    mkdir -p "$dir"
+    if [[ ! -f "$FIXTURE_DIR/$fixture" ]]; then
+        echo "FAIL: fixture $FIXTURE_DIR/$fixture is missing" >&2
+        return 1
+    fi
+    cp "$FIXTURE_DIR/$fixture" "$dir/gc.log"
+    local ec
+    set +e
+    ( cd "$dir" && "$LTL" --disable-progress -ni -o -bs 1440 -V format-detection gc.log > run.out 2> run.out.stderr )
+    ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]]; then
+        echo "FAIL: ltl -o exited $ec for $fixture; stderr:" >&2
+        sed 's/^/    /' "$dir/run.out.stderr" >&2
+        return 1
+    fi
+    echo "$dir"
+}
+
+# The one CSV product of a kind (STATS, MESSAGES) in a run directory; fails
+# when there is none, more than one, or it is empty.
+gc_csv_product() {
+    local dir="$1" kind="$2"
+    local found=( "$dir"/*-LTL-"$kind"-*.csv )
+    if [[ "${#found[@]}" -ne 1 || ! -s "${found[0]}" ]]; then
+        return 1
+    fi
+    echo "${found[0]}"
+}
+
+# Parity of one tag-less fixture with its tagged twin: the same JVM run wrote
+# both outputs, so the same events must give the same STATS and MESSAGES CSV,
+# the twin binding the tagged entry and the fixture its own.
+assert_gc_parity() {
+    local fixture="$1" entry="$2" twin="$3"
+    local label="${fixture%.txt}"
+    local a b
+    if ! a=$(run_gc_csv "$fixture" "$label") || ! b=$(run_gc_csv "$twin" "${twin%.txt}-twin-of-$label"); then
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl -o run failed for $fixture or $twin"); return
+    fi
+    check_capture_warnings "$a/run.out"
+    check_capture_warnings "$b/run.out"
+    assert_line "$a/run.out" pattern "^  format: $entry\$" \
+        asserts "The tag-less fixture $fixture binds $entry" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4, D8"
+    assert_line "$b/run.out" pattern '^  format: java_gc_g1$' \
+        asserts "The tagged twin $twin, written by the same JVM run, binds the tagged entry" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); emitted by emit_format_detection_verbose()' \
+        contract "$GC_TAGLESS_CONTRACT C3, F4"
+    local kind pa pb
+    for kind in STATS MESSAGES; do
+        if ! pa=$(gc_csv_product "$a" "$kind") || ! pb=$(gc_csv_product "$b" "$kind"); then
+            echo "  FAIL  $current_scenario :: exactly one non-empty $kind CSV expected in $a and in $b"
+            fail=$((fail + 1)); failures+=("$current_scenario :: $kind CSV missing for $fixture"); continue
+        fi
+        assert_command label "$kind CSV of $fixture identical to its tagged twin" \
+            command "cmp -s '$pa' '$pb'" \
+            asserts "The same events written with and without level and tags give the same $kind CSV: same records, categories, causes, heap deltas and pause times" \
+            produced_by "the $entry and java_gc_g1 entries in format_registry_specs() in ltl; CSV written by the -o writers" \
+            contract "$GC_TAGLESS_CONTRACT C3, D5"
+    done
+    assert_command label "MESSAGES CSV of $fixture carries pause rows" \
+        command "grep -q '^plain,\"\\[Pause Young\\] ' '$pa'" \
+        asserts 'The compared MESSAGES CSV carries pause rows, so identity is not that of two empty tables' \
+        produced_by "the $entry entry in format_registry_specs() in ltl; MESSAGES CSV writer" \
+        contract "$GC_TAGLESS_CONTRACT C3"
+}
+
+# Every tag-less entry against the tagged output of the same JVM run, on a
+# JDK 17 run and a JDK 21 run (the process id and thread id outputs both
+# read through the process-id entry).
+scenario_gc_tagless_parity() {
+    current_scenario="gc-tagless-parity"
+    echo "[$current_scenario]"
+    assert_gc_parity gc-time-jdk17.txt        java_gc_g1_time        gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-uptime-jdk17.txt java_gc_g1_time_uptime gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-level-jdk17.txt  java_gc_g1_time_level  gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-pid-jdk17.txt    java_gc_g1_time_pid    gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-tid-jdk17.txt    java_gc_g1_time_pid    gc-tagged-jdk17.txt
+    assert_gc_parity gc-time-jdk21.txt        java_gc_g1_time        gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-uptime-jdk21.txt java_gc_g1_time_uptime gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-level-jdk21.txt  java_gc_g1_time_level  gc-tagged-jdk21.txt
+    assert_gc_parity gc-time-pid-jdk21.txt    java_gc_g1_time_pid    gc-tagged-jdk21.txt
+}
+
+# CRLF line endings, as the JVM writes them on Windows, read as LF.
+scenario_gc_tagless_crlf() {
+    current_scenario="gc-tagless-crlf"
+    echo "[$current_scenario]"
+    assert_command label 'the fixture keeps CRLF line endings' \
+        command "perl -ne '\$lf++ unless /\\r\\n\\z/; END { exit((\$. && !\$lf) ? 0 : 1) }' '$FIXTURE_DIR/gc-time-crlf-jdk21.txt'" \
+        asserts 'Every line of the CRLF fixture ends in CR LF, so the scenario exercises the carriage-return path' \
+        produced_by 'tests/fixtures/format-detection/gc-time-crlf-jdk21.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C6"
+    assert_gc_parity gc-time-crlf-jdk21.txt java_gc_g1_time gc-tagged-jdk21.txt
+}
+
+# UTC time is the time decoration at +0000 and reads through the same entry.
+scenario_gc_tagless_utc() {
+    current_scenario="gc-tagless-utc"
+    echo "[$current_scenario]"
+    assert_gc_parity gc-utctime-jdk17.txt java_gc_g1_time gc-tagged-utc-jdk17.txt
+}
+
+# A level bracket padded to "[info ]" (a debug tag set on the same output)
+# reads every pause, against the tagged output padded the same way.
+scenario_gc_tagless_level_padded() {
+    current_scenario="gc-tagless-level-padded"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-time-level-padded-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    assert_command label 'the fixture pads the level bracket on its pause lines' \
+        command "grep -q '^\\[[^]]*\\]\\[info \\] GC([0-9]*) Pause ' '$log'" \
+        asserts 'The fixture carries pause lines whose level bracket the JVM padded to [info ]' \
+        produced_by 'tests/fixtures/format-detection/gc-time-level-padded-jdk17.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C5, F11"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
+        produced_by 'the java_gc_g1_time_level pattern in format_registry_specs() in ltl' \
+        contract "$GC_TAGLESS_CONTRACT C5"
+    assert_gc_parity gc-time-level-padded-jdk17.txt java_gc_g1_time_level gc-tagged-padded-jdk17.txt
+}
+
+# The tagged entry tolerates a padded level bracket: a tagged output with a
+# debug tag set writes "[info ][gc ...]" on its pause lines.
+scenario_gc_tagged_padded_level() {
+    current_scenario="gc-tagged-padded-level"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture gc-tagged-padded-jdk17.txt gc.log) || return
+    local counts records markers starts total
+    counts=$(gc_fixture_counts "$log")
+    read -r records markers starts total <<< "$counts"
+    if [[ -z "$total" || "$records" -eq 0 ]]; then
+        echo "  FAIL  $current_scenario :: fixture carries no pause records ($counts)"
+        fail=$((fail + 1)); failures+=("$current_scenario :: fixture counts"); return
+    fi
+    assert_command label 'the fixture pads the level bracket on its pause lines' \
+        command "grep -q '^\\[[^]]*\\]\\[info \\]\\[gc  *\\] GC([0-9]*) Pause ' '$log'" \
+        asserts 'The fixture carries tagged pause lines whose level bracket the JVM padded to [info ]' \
+        produced_by 'tests/fixtures/format-detection/gc-tagged-padded-jdk17.txt (committed fixture)' \
+        contract "$GC_TAGLESS_CONTRACT C4, F12"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: java_gc_g1$' \
+        asserts 'A tagged G1 log whose level bracket is padded binds the tagged entry' \
+        produced_by 'the java_gc_g1 pattern in format_registry_specs() in ltl' \
+        contract "$GC_TAGLESS_CONTRACT C4, D1"
+    assert_line "$out" pattern "^  matched_lines: $((records + markers))\$" \
+        asserts "Every pause record ($records) and marker ($markers) is read although the level bracket is padded" \
+        produced_by 'the java_gc_g1 pattern in format_registry_specs() in ltl (the level bracket admits padding)' \
+        contract "$GC_TAGLESS_CONTRACT C4, D1"
+}
+
+# Each tag-less entry is a format in its own right: a tagged file and a
+# time-only file in one run are two legend entries.
+scenario_gc_tagless_legend() {
+    current_scenario="gc-tagless-legend"
+    echo "[$current_scenario]"
+    local tagged; tagged=$(stage_fixture gc-tagged-jdk21.txt gc-tagged.log) || return
+    local timeonly; timeonly=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    # run_format_detection places extra arguments before its log argument,
+    # so the tagged file is read first.
+    local out; out=$(run_format_detection "$timeonly" "$tagged"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^legend: 1=java_gc_g1,2=java_gc_g1_time$' \
+        asserts 'A tagged G1 file and a time-only G1 file are two formats, each under its own name, numbered in first-detection order' \
+        produced_by 'emit_format_detection_verbose() in ltl (legend)' \
+        contract "$GC_TAGLESS_CONTRACT C1, D4"
 }
 
 scenario_tw_analytics_v2() {
@@ -866,8 +1175,8 @@ scenario_scan_telemetry() {
         contract    'features/log-format-registry.md section -V format-detection section-contract; delimiters per HARNESS-DESIGN.md section Delimiter contract'
 
     assert_line "$out" \
-        pattern     '^entries: 18$' \
-        asserts     'All 18 scan slots are compiled into the scan (csv is outside the scan array by design)' \
+        pattern     '^entries: 28$' \
+        asserts     'All 28 scan slots are compiled into the scan (csv is outside the scan array by design)' \
         produced_by 'build_format_registry() in ltl; emitted by emit_format_detection_verbose()' \
         contract    'features/log-format-registry.md section -V format-detection section-contract - adding or removing a scanned format changes this count in the same commit'
 
@@ -1958,8 +2267,8 @@ scenario_windchill_workgroup_manager() {
         produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
         contract 'features/395-wgm-client-log-format.md section Format contract'
     assert_line "$out" pattern $'^lines_included\t44$' \
-        asserts 'Every matched line survives the category-vocabulary gate: the wgm_msgtype transform maps each msgtype letter to a member of @log_levels (a raw letter would be dropped silently)' \
-        produced_by 'wgm_msgtype transform in %format_transform_code, spliced by format_entry_block_src(); the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        asserts 'Every matched line survives the category-vocabulary gate: the level map declared on the entry (the level_map transform) maps each msgtype letter to a member of @log_levels (a raw letter would be dropped silently)' \
+        produced_by 'level_map transform in %format_transform_code over the level_map declared on the entry, spliced by format_entry_block_src(); the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
         contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
     assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
         asserts 'uwgm_client.log.1 decomposes as stem uwgm_client + .log + rotation index (placement after; no date declared)' \
@@ -2007,8 +2316,8 @@ scenario_wgm_client_localtime() {
         produced_by 'emit_format_detection_verbose() in ltl (per-file unmatched_lines field)' \
         contract 'features/395-wgm-client-log-format.md section Zone forms (#512)'
     assert_line "$out" pattern $'^lines_included\t35$' \
-        asserts 'Every matched local-offset line survives the category-vocabulary gate through the wgm_msgtype transform' \
-        produced_by 'wgm_msgtype transform in %format_transform_code; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
+        asserts 'Every matched local-offset line survives the category-vocabulary gate through the level map declared on the entry' \
+        produced_by 'level_map transform in %format_transform_code over the level_map declared on the entry; the gate and $total_lines_included in read_and_process_logs(); emitted by the benchmark-data section' \
         contract 'features/395-wgm-client-log-format.md section D54 (msgtype mapping); @log_levels in ltl GLOBALS'
     assert_line "$out" pattern '^  sample_formats: mt16=35$' \
         asserts 'The evidence sample recognises every local-offset line as mt16 in static cascade order - no earlier entry accepts the shape' \
@@ -2085,6 +2394,62 @@ scenario_format_pin() {
             asserts 'An unknown pin name is a usage error listing the known format names (D49)' \
             produced_by 'apply_format_pin() in ltl' \
             contract 'features/log-format-registry.md section Drop 1.5 D49'
+        local jk_slug
+        for jk_slug in apache_mod_jk apache_mod_jk_microseconds apache_mod_jk_seconds apache_mod_jk_no_request_id \
+                       apache_mod_jk_microseconds_no_request_id apache_mod_jk_seconds_no_request_id; do
+            assert_line "$err" pattern "^Error: Unknown log format .nonsense. for -lf\\. Known formats: (.*, )?$jk_slug(,|\$)" \
+                asserts "The known-format list a mistyped -lf is answered with names the connector shape $jk_slug" \
+                produced_by 'apply_format_pin() in ltl' \
+                contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+        done
+    fi
+
+    # A connector shape is pinned by its name like any scanned entry.
+    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local out3; out3=$(run_format_detection "$jk" -lf apache_mod_jk); check_capture_warnings "$out3"
+    assert_line "$out3" pattern '^format_pin: apache_mod_jk$' \
+        asserts 'The run-level pin names the connector entry' \
+        produced_by 'emit_format_detection_verbose() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+    assert_line "$out3" pattern '^entries: 1$' \
+        asserts 'Pinning the connector name seats exactly its one entry: the other connector shapes carry other names' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1); features/log-format-registry.md section Drop 1.5 N9'
+    assert_line "$out3" pattern '^  format: apache_mod_jk$' \
+        asserts 'The pinned entry binds the connector fixture' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+    assert_line "$out3" pattern '^  unmatched_lines: 0$' \
+        asserts 'Under the pin every connector line still matches' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract 'features/655-apache-mod-jk-connector-format.md AC8 (C1)'
+
+    # The tag-less G1 entries are pinnable by their own names, and the tagged
+    # name does not read a time-only file.
+    local gc; gc=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local out4; out4=$(run_format_detection "$gc" -lf java_gc_g1_time); check_capture_warnings "$out4"
+    assert_line "$out4" pattern '^  format: java_gc_g1_time$' \
+        asserts 'Pinning the time-only G1 entry by its own name reads the file as that format' \
+        produced_by 'apply_format_pin() in ltl' \
+        contract "features/656-gc-log-tagless-decorations.md C1, D4"
+    assert_line "$out4" pattern '^  selection_basis: pin$' \
+        asserts 'Selection basis is pin under -lf java_gc_g1_time' \
+        produced_by 'emit_format_detection_evidence_verbose() in ltl' \
+        contract "features/656-gc-log-tagless-decorations.md D4"
+    local out5; out5=$(run_format_detection "$gc" -lf java_gc_g1); check_capture_warnings "$out5"
+    assert_line "$out5" pattern '^  matched_lines: 0$' \
+        asserts 'The tagged G1 name, pinned on a time-only file, matches nothing: the decorations are distinct formats' \
+        produced_by 'apply_format_pin() in ltl; the java_gc_g1 pattern in format_registry_specs()' \
+        contract "features/656-gc-log-tagless-decorations.md D1, D4"
+    local err2="$TMP_DIR/$current_scenario/gc-typo.stderr"
+    if "$LTL" --disable-progress -ni -bs 1440 -oe -lf java_gc_g1_tim "$gc" > /dev/null 2> "$err2"; then
+        echo "  FAIL  $current_scenario :: -lf java_gc_g1_tim exited 0"; fail=$((fail + 1)); failures+=("$current_scenario :: -lf java_gc_g1_tim exited 0")
+    else
+        assert_no_runtime_warnings "$err2" "$current_scenario -lf typo"
+        assert_line "$err2" pattern '^Error: Unknown log format .java_gc_g1_tim. for -lf\. Known formats: .*java_gc_g1, java_gc_g1_time, java_gc_g1_time_level, java_gc_g1_time_pid, java_gc_g1_time_uptime, ' \
+            asserts 'A mistyped pin lists every G1 format name among the known formats' \
+            produced_by 'apply_format_pin() in ltl' \
+            contract "features/656-gc-log-tagless-decorations.md D4"
     fi
 }
 
@@ -2132,6 +2497,158 @@ scenario_unregistered_levels_per_file() {
         contract    'features/log-format-registry.md § `-V format-detection` section-contract (the literal - when the file produced none; the key is always emitted) and tests/HARNESS-DESIGN.md § Harnesses must fail on missing anchors'
 }
 
+# ---------- Apache mod_jk connector shapes ---------------------------------
+# features/655-apache-mod-jk-connector-format.md: the connector's logging code
+# writes one line shape per stamp fraction (milliseconds, none, microseconds)
+# and request-id bracket (present from release 1.2.48, absent before), and each
+# is its own entry (D1). apache-mod-jk.txt is the held shape, scrubbed from
+# connector logs; the five other fixtures are the same lines rewritten into
+# the other shapes (synthetic, marked so in manifest.tsv). Every scenario reads
+# the -V format-detection section, so the run takes -bs 1440 -oe -n 1 -osum
+# (run_format_detection): the fixtures span twelve days and no assertion reads
+# a bucket.
+CONNECTOR_CONTRACT='features/655-apache-mod-jk-connector-format.md'
+
+# One connector shape's fixture, staged under the connector's own file name,
+# binds its own entry with every line matched and nothing dropped.
+assert_connector_shape() {
+    local fixture="$1" format="$2" entry="$3" lines="$4"
+    local log; log=$(stage_fixture "$fixture" mod_jk.log) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern "^  format: $format\$" \
+        asserts "A connector log written in the $format shape binds the entry of that name by its content" \
+        produced_by 'read_and_process_logs() in ltl (first-match bind through the generated scan sub)' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1); features/log-format-registry.md section -V format-detection section-contract"
+    assert_line "$out" pattern "^  matched_lines: $lines\$" \
+        asserts "Every one of the $lines fixture lines matches the $format pattern" \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1)"
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'No line of a connector log in a shape the registry reads is left unmatched' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1, C6)"
+    assert_line "$out" pattern "^  sample_formats: $entry=$lines\$" \
+        asserts "The evidence sample attributes every line to entry $entry and to no other entry" \
+        produced_by 'sample_file_for_detection() in ltl; emitted by emit_format_detection_sample_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C1); features/log-format-registry.md section -V format-detection section-contract (detection-evidence keys)"
+    assert_line "$out" pattern '^  unregistered_levels: -$' \
+        asserts 'The connector level word reaches the category vocabulary through the entry level map: nothing is dropped at the category gate' \
+        produced_by 'level_map transform over the level_map declared on the entry; the category gate in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (C3, D2)"
+    assert_line "$out" pattern '^  event_ledger: no$' \
+        asserts 'The connector writes a line for what fails, not for every request: it is not an event ledger' \
+        produced_by 'FR_EVENT_LEDGER of the bound entry; emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (D3)"
+    assert_line "$out" pattern '^  metrics_observed: no$' \
+        asserts 'The connector line carries no duration, bytes or count, and the entry is not statistics-eligible' \
+        produced_by 'the generated block of the bound entry (stats_eligible 0, no metric probes); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC1 (D4)"
+}
+
+scenario_apache_mod_jk() {
+    current_scenario="apache-mod-jk"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk.txt apache_mod_jk mtjk 31
+}
+scenario_apache_mod_jk_microseconds() {
+    current_scenario="apache-mod-jk-microseconds"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-microseconds.txt apache_mod_jk_microseconds mtjkus 31
+}
+scenario_apache_mod_jk_seconds() {
+    current_scenario="apache-mod-jk-seconds"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-seconds.txt apache_mod_jk_seconds mtjks 31
+}
+scenario_apache_mod_jk_no_request_id() {
+    current_scenario="apache-mod-jk-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-no-request-id.txt apache_mod_jk_no_request_id mtjkni 31
+}
+scenario_apache_mod_jk_microseconds_no_request_id() {
+    current_scenario="apache-mod-jk-microseconds-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-microseconds-no-request-id.txt apache_mod_jk_microseconds_no_request_id mtjkusni 31
+}
+scenario_apache_mod_jk_seconds_no_request_id() {
+    current_scenario="apache-mod-jk-seconds-no-request-id"
+    echo "[$current_scenario]"
+    assert_connector_shape apache-mod-jk-seconds-no-request-id.txt apache_mod_jk_seconds_no_request_id mtjksni 31
+}
+
+# The held shape under a neutral name: no filename evidence, content alone.
+scenario_apache_mod_jk_unnamed() {
+    current_scenario="apache-mod-jk-unnamed"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture apache-mod-jk.txt app.txt) || return
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_line "$out" pattern '^  format: apache_mod_jk$' \
+        asserts 'A connector log binds its entry from any file name: the shape on the line is the whole evidence' \
+        produced_by 'read_and_process_logs() in ltl (first-match bind); the entry declares no filename evidence' \
+        contract "$CONNECTOR_CONTRACT AC2 (C1, C6)"
+    assert_line "$out" pattern '^  filename_evidence: stem=- ' \
+        asserts 'The neutral name gives no stem evidence, so the bind above rests on content alone' \
+        produced_by 'format_filename_evidence() in ltl; emitted by emit_format_detection_evidence_verbose()' \
+        contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
+    assert_line "$out" pattern '^  unmatched_lines: 0$' \
+        asserts 'Every line still matches under the neutral name' \
+        produced_by 'per-file match counters in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+        contract "$CONNECTOR_CONTRACT AC2"
+}
+
+# The stamp is read to the millisecond. The fixture's 27th line is stamped
+# 01:18:10.578 and its 28th 01:18:10.691, in the same second: a start one
+# millisecond after the 27th excludes exactly the first 27 lines. Were the
+# fraction dropped, the 28th line would read as 01:18:10.000 and be excluded
+# too.
+scenario_apache_mod_jk_stamp() {
+    current_scenario="apache-mod-jk-stamp"
+    echo "[$current_scenario]"
+    local log; log=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local out; out=$(run_format_detection "$log" -V filter-summary -st '2026-08-30 01:18:10.579'); check_capture_warnings "$out"
+    assert_line "$out" pattern '^excluded_time_window: 27$' \
+        asserts 'A start one millisecond after the 27th line stamp (01:18:10.578) excludes exactly the 27 lines at or before it' \
+        produced_by 'the asctime layout parse and generic fraction strip in format_entry_block_src(); the time-window filter in read_and_process_logs(); emitted by the filter-summary section' \
+        contract "$CONNECTOR_CONTRACT AC4 (C2); features/503-yaml-aggregate-export.md section -V filter-summary section contract"
+    assert_line "$out" pattern '^lines_included: 4$' \
+        asserts 'The four lines after the start are included, among them the line at 01:18:10.691 in the same second as the cut, which only a millisecond reading keeps' \
+        produced_by 'the asctime layout parse and generic fraction strip in format_entry_block_src(); emitted by the filter-summary section' \
+        contract "$CONNECTOR_CONTRACT AC4 (C2)"
+}
+
+# Beside its access log: the access fixture carries a 413 at the second of
+# every marshalling error, a 503 at the second of every balancer line, and
+# 200s at seconds with no connector line. A one-second window at each of three
+# seconds holding one connector line includes exactly that line and its
+# access line.
+scenario_apache_mod_jk_beside_access() {
+    current_scenario="apache-mod-jk-beside-access"
+    echo "[$current_scenario]"
+    local access; access=$(stage_fixture apache-mod-jk-access.txt access.log) || return
+    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local window start end out
+    for window in '2026-08-19 11:25:58|2026-08-19 11:25:59|413' \
+                  '2026-08-21 11:50:51|2026-08-21 11:50:52|503' \
+                  '2026-08-30 01:18:07|2026-08-30 01:18:08|503'; do
+        IFS='|' read -r start end status <<< "$window"
+        # run_format_detection puts its first argument last on the command
+        # line, so the access log is passed among the options to come first.
+        out=$(run_format_detection "$jk" -du us -V filter-summary -st "$start" -et "$end" "$access"); check_capture_warnings "$out"
+        assert_line "$out" pattern '^legend: 1=access_common_duration,2=apache_mod_jk$' \
+            asserts 'Both formats are numbered in the run legend, the access log first' \
+            produced_by 'the format legend in read_and_process_logs(); emitted by emit_format_detection_verbose()' \
+            contract "$CONNECTOR_CONTRACT AC5 (C7); features/log-format-registry.md section -V format-detection section-contract (#384 additions)"
+        assert_line "$out" pattern '^lines_included: 2$' \
+            asserts "The one-second window from $start holds exactly the connector line and the access line of its $status response: the connector stamp falls in the second of its access-log line" \
+            produced_by 'the asctime layout parse in format_entry_block_src(); the time-window filter in read_and_process_logs(); emitted by the filter-summary section' \
+            contract "$CONNECTOR_CONTRACT AC5 (C2, C7)"
+        assert_line "$out" pattern '^failures: 2$' \
+            asserts "Both lines in the window are failures: the access line by its $status status family, the connector line by its ERROR level" \
+            produced_by 'the generated classification of each entry (format_classification_src()); emitted by emit_format_detection_verbose() classification sub-section' \
+            contract "$CONNECTOR_CONTRACT AC5 (C5, C7); features/453-success-failure-classification-event-ledger.md"
+    done
+}
+
 # ---------- Run -----------------------------------------------------------
 
 echo "Validating format-detection -V section (issue #228)"
@@ -2155,6 +2672,17 @@ scenario_register tomcat9-ms \
                   thingworx-rac-client \
                   connection-server-json \
                   java-gc-g1 \
+                  java-gc-g1-time \
+                  java-gc-g1-time-uptime \
+                  java-gc-g1-time-level \
+                  java-gc-g1-time-pid \
+                  gc-tagless-start-lines \
+                  gc-tagless-parity \
+                  gc-tagless-crlf \
+                  gc-tagless-utc \
+                  gc-tagless-level-padded \
+                  gc-tagged-padded-level \
+                  gc-tagless-legend \
                   tw-analytics-v2 \
                   tw-analytics-worker \
                   connection-server-standard \
@@ -2185,7 +2713,16 @@ scenario_register tomcat9-ms \
                   wgm-filename-family \
                   wgm-client-localtime \
                   unregistered-levels-per-file \
-                  format-pin
+                  format-pin \
+                  apache-mod-jk \
+                  apache-mod-jk-microseconds \
+                  apache-mod-jk-seconds \
+                  apache-mod-jk-no-request-id \
+                  apache-mod-jk-microseconds-no-request-id \
+                  apache-mod-jk-seconds-no-request-id \
+                  apache-mod-jk-unnamed \
+                  apache-mod-jk-stamp \
+                  apache-mod-jk-beside-access
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -2207,6 +2744,17 @@ while read -r _scenario; do
         thingworx-rac-client                   ) scenario_thingworx_rac_client ;;
         connection-server-json                 ) scenario_connection_server_json ;;
         java-gc-g1                             ) scenario_java_gc_g1 ;;
+        java-gc-g1-time                        ) scenario_java_gc_g1_time ;;
+        java-gc-g1-time-uptime                 ) scenario_java_gc_g1_time_uptime ;;
+        java-gc-g1-time-level                  ) scenario_java_gc_g1_time_level ;;
+        java-gc-g1-time-pid                    ) scenario_java_gc_g1_time_pid ;;
+        gc-tagless-start-lines                 ) scenario_gc_tagless_start_lines ;;
+        gc-tagless-parity                      ) scenario_gc_tagless_parity ;;
+        gc-tagless-crlf                        ) scenario_gc_tagless_crlf ;;
+        gc-tagless-utc                         ) scenario_gc_tagless_utc ;;
+        gc-tagless-level-padded                ) scenario_gc_tagless_level_padded ;;
+        gc-tagged-padded-level                 ) scenario_gc_tagged_padded_level ;;
+        gc-tagless-legend                      ) scenario_gc_tagless_legend ;;
         tw-analytics-v2                        ) scenario_tw_analytics_v2 ;;
         tw-analytics-worker                    ) scenario_tw_analytics_worker ;;
         connection-server-standard             ) scenario_connection_server_standard ;;
@@ -2238,6 +2786,15 @@ while read -r _scenario; do
         wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
+        apache-mod-jk                          ) scenario_apache_mod_jk ;;
+        apache-mod-jk-microseconds             ) scenario_apache_mod_jk_microseconds ;;
+        apache-mod-jk-seconds                  ) scenario_apache_mod_jk_seconds ;;
+        apache-mod-jk-no-request-id            ) scenario_apache_mod_jk_no_request_id ;;
+        apache-mod-jk-microseconds-no-request-id ) scenario_apache_mod_jk_microseconds_no_request_id ;;
+        apache-mod-jk-seconds-no-request-id    ) scenario_apache_mod_jk_seconds_no_request_id ;;
+        apache-mod-jk-unnamed                  ) scenario_apache_mod_jk_unnamed ;;
+        apache-mod-jk-stamp                    ) scenario_apache_mod_jk_stamp ;;
+        apache-mod-jk-beside-access            ) scenario_apache_mod_jk_beside_access ;;
     esac
     echo ""
 done < <(scenario_selected)

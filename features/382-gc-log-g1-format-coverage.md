@@ -191,6 +191,14 @@ The summary-table category loop computed a label into a variable that was never
 read, padding it to a fixed 14 characters. `To-space exhausted` is 18 characters,
 producing a negative repeat count warning. The dead assignment is removed.
 
+## Decorations without level and tags
+
+This entry reads lines decorated with the level and tags (`[time][info][gc]`),
+the level bracket admitting the padding the JVM writes (`[info ]`). G1 logs
+written with the time alone, or with the time then the uptime, the level, or a
+process or thread id, are read by four sibling entries recorded in
+`features/656-gc-log-tagless-decorations.md`; D41 and D43 above govern them too.
+
 ## Open items
 
 - Records with no message (`Pause Remark`, `Pause Cleanup`, `To-space

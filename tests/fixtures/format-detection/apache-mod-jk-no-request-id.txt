@@ -1,0 +1,31 @@
+[Wed Aug 19 11:25:58.301 2026] [2001:140000000000001] [error] ajp_marshal_into_msgb::jk_ajp_common.c (637): (tomcat1) failed appending the local address 10.0.0.1
+[Wed Aug 19 11:26:04.409 2026] [2002:140000000000002] [error] ajp_marshal_into_msgb::jk_ajp_common.c (657): (tomcat1) failed appending the activation state ACT
+[Wed Aug 19 11:26:04.415 2026] [2001:140000000000003] [error] ajp_marshal_into_msgb::jk_ajp_common.c (520): (tomcat1) failed appending the query string of length 197
+[Wed Aug 19 13:41:01.258 2026] [2001:140000000000004] [error] ajp_marshal_into_msgb::jk_ajp_common.c (680): (tomcat2) failed appending the message end
+[Wed Aug 19 16:08:52.277 2026] [2003:140000000000005] [error] ajp_marshal_into_msgb::jk_ajp_common.c (530): (tomcat1) failed appending the route
+[Wed Aug 19 18:37:28.643 2026] [2004:140000000000006] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat1) failed appending the remote port 28130
+[Wed Aug 19 19:26:42.542 2026] [2004:140000000000007] [error] ajp_marshal_into_msgb::jk_ajp_common.c (467): (tomcat1) failed appending the header name 'X-Example-Header'
+[Wed Aug 19 22:15:43.353 2026] [2002:140000000000008] [error] ajp_marshal_into_msgb::jk_ajp_common.c (476): (tomcat1) failed appending the header value for header 'X-Example-Header' of length 18
+[Thu Aug 20 15:27:15.721 2026] [2002:140000000000009] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat2) failed appending the remote port 34898
+[Thu Aug 20 15:27:15.730 2026] [2002:140000000000010] [error] ajp_marshal_into_msgb::jk_ajp_common.c (621): (tomcat2) failed appending the remote port 34938
+[Fri Aug 21 11:45:33.028 2026] [2005:140000000000011] [error] ajp_get_reply::jk_ajp_common.c (2355): (tomcat2) Tomcat is down or refused connection. No response has been sent to the client (yet)
+[Fri Aug 21 11:45:33.028 2026] [2005:140000000000011] [error] ajp_service::jk_ajp_common.c (2933): (tomcat2) connecting to tomcat failed (rc=0, errors=1, client_errors=4).
+[Fri Aug 21 11:45:35.215 2026] [2006:140000000000012] [error] ajp_get_reply::jk_ajp_common.c (2385): (tomcat2) Tomcat is down or network problems. Part of the response has already been sent to the client
+[Fri Aug 21 11:50:51.071 2026] [2007:140000000000013] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 23 01:05:49.344 2026] [2008:140000000000014] [error] ajp_send_request::jk_ajp_common.c (1777): (tomcat2) connecting to backend failed. Tomcat is probably not started or is listening on the wrong port (errno=111)
+[Sun Aug 23 01:05:49.349 2026] [2008:140000000000014] [error] ajp_service::jk_ajp_common.c (2933): (tomcat2) connecting to tomcat failed (rc=-3, errors=19, client_errors=51).
+[Mon Aug 24 16:26:22.975 2026] [2001:140000000000015] [error] ajp_marshal_into_msgb::jk_ajp_common.c (498): (tomcat1) failed appending the remote user
+[Wed Aug 26 15:37:51.535 2026] [2004:140000000000016] [error] ajp_marshal_into_msgb::jk_ajp_common.c (488): (tomcat2) failed appending secret
+[Sun Aug 30 01:17:45.295 2026] [2004:140000000000017] [error] ajp_service::jk_ajp_common.c (2899): (tomcat1) sending request to tomcat failed (unrecoverable),  (attempt=1)
+[Sun Aug 30 01:17:45.295 2026] [2004:140000000000017] [error] service::jk_lb_worker.c (1627): unrecoverable error 502, request failed. Tomcat failed in the middle of request, we can't recover to another instance.
+[Sun Aug 30 01:17:45.927 2026] [2004:140000000000018] [error] service::jk_lb_worker.c (1627): unrecoverable error 502, request failed. Tomcat failed in the middle of request, we can't recover to another instance.
+[Sun Aug 30 01:18:06.969 2026] [2002:140000000000019] [error] ajp_send_request::jk_ajp_common.c (1777): (tomcat1) connecting to backend failed. Tomcat is probably not started or is listening on the wrong port (errno=111)
+[Sun Aug 30 01:18:06.969 2026] [2002:140000000000019] [error] ajp_service::jk_ajp_common.c (2933): (tomcat1) connecting to tomcat failed (rc=-3, errors=13, client_errors=1536).
+[Sun Aug 30 01:18:06.969 2026] [2002:140000000000019] [error] ajp_send_request::jk_ajp_common.c (1777): (tomcat2) connecting to backend failed. Tomcat is probably not started or is listening on the wrong port (errno=111)
+[Sun Aug 30 01:18:06.969 2026] [2002:140000000000019] [error] ajp_service::jk_ajp_common.c (2933): (tomcat2) connecting to tomcat failed (rc=-3, errors=14, client_errors=1765).
+[Sun Aug 30 01:18:07.070 2026] [2002:140000000000019] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 30 01:18:10.578 2026] [2001:140000000000020] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 30 01:18:10.691 2026] [2001:140000000000021] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 30 01:18:11.636 2026] [2001:140000000000022] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 30 01:18:12.953 2026] [2001:140000000000023] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
+[Sun Aug 30 01:18:32.551 2026] [2001:140000000000015] [error] service::jk_lb_worker.c (1687): All tomcat instances failed, no more workers left
