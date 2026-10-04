@@ -49,7 +49,7 @@ the errors and help rows read cannot disagree with the parser.
 - `builtin_metric_name` :: `return $lc if exists $builtin_metric{$lc};` over `@builtin_metrics` (name, layout column, family, help text, the stored key a bare `-so` word ranks by, deprecated spellings with the options that accept them), read by `-hm`, `-hg` and `-so`; `@graph_columns`, the metric entries of `@visibility_columns`, `%heatmap_metric_map`, `available_metric_names`, the internal metric loops and `format_heatmap_value` read its views, and every unknown-metric message and the `-hm`, `-hg`, `-x` and `-d` help rows interpolate `$builtin_metric_list` (#613 D5).
 - `adapt_to_command_line_options` :: `my $sort_statistic = $statistic_by_spelling{ lc $sort_type };` over `@statistic_names` (typed name, stored key, aliases, deprecated spelling, `--explain` topic, place in the `-udm` function slot); `parse_udm_configs` reads `%udm_function_names`, `%udm_function_aliases` and `%udm_functions_of_kind` from it, `resolve_explain_topic` reads `%explain_aliases`, and the `--help statistics` and `--explain` alias notes and the `-udm` function help row are derived from it (#613 D8, D17).
 - `resolve_mask_names` :: `if ( my $identifier = $mask_identifier{$name} ) { $wanted{$_} = 1 for @{ $identifier->{entries} } }` over `@mask_identifiers` (each name and the `%mask_patterns` entries it covers, `ip` among them) and `@mask_order`; `resolve_discard_names` reads the same table, and the `-m` error interpolates `$mask_identifier_list` (#613 D7).
-- `resolve_discard_names` :: `if    ( $message_field{$name} ) { $discard_field{$name} = 1 }` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them); `@cleared_fields` is its view for the field-clearing flag (#613 D6).
+- `resolve_message_name` :: `if ( my $field = $message_field{$name} ) {` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them), the one resolution `resolve_expose_names` and `resolve_discard_names` share; `@cleared_fields` is its view for the field-clearing flag (#613 D6).
 - `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;` over `%explain_topics`.
 - `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` over `@output_sections`, `@visibility_columns` and their alias tables.
 - `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
@@ -62,9 +62,10 @@ worked contract; `features/histogram-charts.md` § Command Line Interface for
 metric names; `tests/HARNESS-DESIGN.md` § Reserved section names for `-V`.
 
 **Status.** Needs refinement. The audit's item 1 found the shape followed
-unevenly. The metric-name resolver is called by three of six options that take
-metric names (`-hm`, `-hg`, `-so`); `-x` and `-d` keep a name chain of their
-own until #613 (one vocabulary for names) completes. The family-prefixed `-so`
+unevenly. Since #613 (one vocabulary for names), every option that takes a
+metric name resolves it through the built-in metric table: `-hm`, `-hg`, `-so`,
+`-x` and `-d` through `builtin_metric_name`, `--hide` and `--show` through the
+metric entries of `@visibility_columns`. The family-prefixed `-so`
 names are a literal list beside the two tables; the `-pr` and `--help` errors
 list their vocabularies as literals. Refined by #613 and #614 (operand checks
 and texts derive from the vocabulary).

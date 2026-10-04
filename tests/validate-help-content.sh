@@ -849,6 +849,19 @@ scenario_K_name_list_parity() {
         produced_by 'visibility_column_list() over @visibility_columns in ltl' \
         contract    "$CONTRACT_NAME_LISTS"
 
+    # The -so row: a bare metric word is its total, in the table's order,
+    # with time and size shown only as deprecated spellings (613 D1, D8).
+    assert_row_carries "$help_out" '^ +-so, +--sort-on <field>' "A bare metric name means its total: $hm_list (deprecated: time for duration, size for bytes)." \
+        label       'the --help -so row names the built-in metrics the -hm error lists, with time and size only as deprecated spellings' \
+        asserts     'The -so help row interpolates the built-in metric list and the deprecated spellings from the metric table' \
+        produced_by 'print_help() in ltl ($builtin_metric_list and the deprecated column of @builtin_metrics)' \
+        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+    assert_row_carries "$USAGE_MD" '^\| Totals \|' "$(backticked_list "$hm_list"), \`occurrences\`, \`impact\`; deprecated: \`time\` for \`duration\`, \`size\` for \`bytes\`" \
+        label       'the docs/usage.md -so Totals row names the built-in metrics in table order, time and size only as deprecated' \
+        asserts     'docs/usage.md agrees with the -so help row' \
+        produced_by 'docs/usage.md -so value table' \
+        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+
     # The -udm function row gives the names grouped by kind, each with its
     # note; stripped of the notes and the group labels, it is the list the
     # warning prints.

@@ -797,6 +797,28 @@ accepts a masked `?` (D12, D13); the token-key fallback goes (D4); records 566,
 567, 432, histogram and `docs/usage.md` trued in the same commit; harness
 criteria 2 to 5, 7 to 13, 15, 16, 23.
 
+*Delivered 2026-10-04.* `resolve_message_name()` is the one resolution `-x`
+and `-d` share; the probe declarations carry `mask_keys` (each spelling as the
+line writes it) in place of the `durationM[sS]` alternation, and
+`probe_key_metric()` reads them at option settlement; `udm_line_key()` names
+the key a user-defined metric reads (its token key, or its name for a metric
+that reads the key it is named after, none for a `/regex/` metric); the
+switch-off notice prints from `resolve_discard_names()`. The new fixture
+`tests/fixtures/message-vocabulary-access-keys.txt` is six access-log lines,
+three whose query strings carry `elapsed=` and `v=` and three carrying
+`Bytes=`, `time=`, `object=` and `v=`. Against the base build the 45-invocation
+comparison differs only in the deprecation lines, the `-d durationMS` messages
+and notice, and the help rows; the new scenarios fail on the base build except
+those marked *holds today* (criteria 15, 16, 23 and the `-x durationMS`
+in-place assertions), which pass on both. Harness changes:
+`deprecated-metric-spellings`, `metric-name-case`,
+`metric-key-spelling-unknown` and `udm-key-not-a-name` (runtime-config);
+`name-vocabulary` and the rewritten `-x durationMs` assertion in `metric-names`
+(message-expose); `name-vocabulary` and the rewritten duration-spelling
+assertions in `metrics` (message-discard); the `--hide elapsed` case in
+`unknown-name-refused` (section-layout); the `-so` rows in
+`K-name-list-parity` (help-content).
+
 **Drop 3, fields and identifiers.** Field and identifier names in any case on
 `-x`, `-d`, `-m` (D15); `-x object` appends the full object (D16); `-d`
 identifiers through the identifier table, applied in `@mask_order` (D7, D13);

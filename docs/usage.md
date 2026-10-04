@@ -147,8 +147,8 @@ Consolidated entries are marked with `~` in the summary table output; that marke
 |--------|-------------|
 | `-g, --group-similar <N>` | Enable fuzzy message consolidation with N% Dice similarity threshold (50-99, default: 85). Lower values are more aggressive. Where a log carries many UUIDs, masking them with `--mask uuid` is advisable, as they make the similarity comparison do much more work. |
 | `-m, --mask <name>` | Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. `<name>` is `uuid` (`########-####-####-####-############`), `ipv4` (`###.###.###.###`), `ipv6` (`####:####:####:####:####:####:####:####`) or `ip` for both address versions. Repeat the option or give a comma-separated list: `-m uuid,ip`. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too |
-| `-x, --expose <name>` | Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. `<name>` is `thread`, `session`, `user` or `query-string`; a metric (`duration`, `bytes`, `count`, or one of your own), whose number then stays in the message in place of `?`; or any key written in the line, such as `fileName`, whose value is added to the end of the message as `fileName=<value>` when grouping would otherwise have removed it. Shorthands: `-xt` for thread, `-xs` for session, `-xu` for user, `-xqs` for the query string, spelled in full as `--expose-thread`, `--expose-session`, `--expose-user` and `--expose-query-string` |
-| `-d, --discard <name>` | Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: `-d sign,sT`. `<name>` is `thread`, `session`, `user` or `object`, whose captured value is cleared; `uuid`, `ipv4`, `ipv6` or `ip`, removed wherever it sits in the message; `query-string`; a metric (`duration`, `bytes`, `count`, or one of your own), which is then not read at all; or any key written in the line, such as `sign`, which goes with its value and one separator, so that requests differing only in it become one message. A name given to both `-x` and `-d`, or to both `-m` and `-d`, is discarded |
+| `-x, --expose <name>` | Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. `<name>` is `thread`, `session`, `user` or `query-string`; a metric (`duration`, `bytes`, `count`, or one of your own), whose number then stays in the message in place of `?`; or any key written in the line, such as `fileName`, whose value is added to the end of the message as `fileName=<value>` when grouping would otherwise have removed it; a key a metric is read from, such as `durationMS`, keeps its value in place instead. Shorthands: `-xt` for thread, `-xs` for session, `-xu` for user, `-xqs` for the query string, spelled in full as `--expose-thread`, `--expose-session`, `--expose-user` and `--expose-query-string` |
+| `-d, --discard <name>` | Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: `-d sign,sT`. `<name>` is `thread`, `session`, `user` or `object`, whose captured value is cleared; `uuid`, `ipv4`, `ipv6` or `ip`, removed wherever it sits in the message; `query-string`; a metric (`duration`, `bytes`, `count`, or one of your own), which is then not read at all; or any key written in the line, such as `sign`, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as `durationMS`, also switches that metric off, with a notice. A name given to both `-x` and `-d`, or to both `-m` and `-d`, is discarded |
 | `-gc, --group-ceiling <N>` | Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000) |
 
 ```bash
@@ -232,12 +232,17 @@ aggregates name the metric first and what is being aggregated second, so
 
 | Group | Values |
 |-------|--------|
-| Totals | `bytes` (alias `size`), `duration` (alias `time`), `count`, `occurrences`, `impact` |
+| Totals | `duration`, `bytes`, `count`, `occurrences`, `impact`; deprecated: `time` for `duration`, `size` for `bytes` |
 | Bytes | `bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` |
 | Count | `count_occurrences`, `count_min`, `count_mean`, `count_max` |
-| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev` (alias `std_dev`), `cv` |
+| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev`, `cv` |
 | Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
 | Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
+
+`stddev` is the name of the standard deviation; `std_dev` is the spelling the
+CSV headers and YAML keys carry, and is still accepted by `-so` as a deprecated
+spelling. `time` and `size` print a deprecation notice on stderr for this
+release.
 
 The latency values rank on duration, which is the tool's subject, so they are
 spelled bare. Each also accepts a `duration_` prefix — `duration_p95` is
@@ -565,13 +570,15 @@ Version, help, and diagnostic options.
 
 LogTimeLine uses precise metric names to avoid ambiguity. `duration` explicitly means a time lapse — how long something took. `count` means an amount of work completed in the metrics sense (e.g. rows processed, items returned), distinct from `occurrences` which is the total number of log entries matched. `bytes` means response or payload size. These distinctions matter because imprecise terms like "time" or "size" could refer to different things depending on context.
 
-That said, logtimeline accepts conventional alternates for convenience. These aliases work anywhere a metric or function name is used — sorting (`-so`), heatmap (`-hm`), histogram (`-hg`), and user-defined metric aggregations.
+That said, logtimeline accepts a few alternates, each on the options listed. Built-in metric names match in any case on every option. `time` and `size` are deprecated: they still work for this release and print a notice on stderr naming the replacement.
 
-| Canonical Name | Alternates |
-|---------------|------------|
-| `duration` | `time` |
-| `bytes` | `size` |
-| `occurrences` | `total` |
-| `mean` | `avg` |
-| `distinct` | `dcount`, `unique` |
-| `stddev` | `std_dev` |
+| Canonical Name | Alternates | Accepted by |
+|---------------|------------|-------------|
+| `duration` | `time` (deprecated) | `-so`, `-hm`, `-hg` |
+| `bytes` | `size` (deprecated) | `-so` |
+| `occurrences` | `total` | `-so` |
+| `mean` | `avg` | `-so`, `--explain`, the `-udm` function |
+| `distinct` | `dcount`, `unique` | the `-udm` function |
+| `stddev` | `std_dev`, the spelling CSV headers and YAML keys carry | `-so`, `--explain` |
+
+On `-x` and `-d`, `time` is a key written in the line, never the duration metric.

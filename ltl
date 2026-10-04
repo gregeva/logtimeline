@@ -79,17 +79,18 @@ my ( $include_query_string, $include_session, $include_user, $include_threadpool
 # id of the timeline column that draws it (its colour is resolved from the
 # layout), its family (the kind of value, which chooses its formatter), its
 # help text, the stored key a bare -so metric word ranks by (its total, per
-# the aggregate-naming rule that a bare metric word is its total), and the
+# the aggregate-naming rule that a bare metric word is its total), the flag
+# -d sets to switch it off (what its omit option sets), and the
 # deprecated spellings still accepted for one release, each with the
 # options that accept it. Names match in any case. A key a format reads a
 # metric from (durationMS) is not a name here: it is a key written in the
 # line. Every site reads the views below; no sub keeps a copy of the set.
 my @builtin_metrics = (
-    { name => 'duration', column => 'duration', family => 'duration', help => 'how long an entry took',    sort_key => 'total_duration',
+    { name => 'duration', column => 'duration', family => 'duration', help => 'how long an entry took',    sort_key => 'total_duration', omit_flag => \$omit_durations,
       deprecated => { time => [ '-hm/--heatmap', '-hg/--histogram', '-so/--sort-on' ] } },
-    { name => 'bytes',    column => 'bytes',    family => 'bytes',    help => 'response or payload size',  sort_key => 'total_bytes',
+    { name => 'bytes',    column => 'bytes',    family => 'bytes',    help => 'response or payload size',  sort_key => 'total_bytes',    omit_flag => \$omit_bytes,
       deprecated => { size => [ '-so/--sort-on' ] } },
-    { name => 'count',    column => 'count',    family => 'count',    help => 'work completed, per entry', sort_key => 'count_sum',
+    { name => 'count',    column => 'count',    family => 'count',    help => 'work completed, per entry', sort_key => 'count_sum',      omit_flag => \$omit_count,
       deprecated => {} },
 );
 my @builtin_metric_names   = map { $_->{name} } @builtin_metrics;
@@ -107,11 +108,13 @@ my ( @deprecations, %deprecation_of );
 # (@expose_appends, each [ kind, key name, token pattern for a line key ]),
 # and the metrics whose number stays in the message in place of its mask
 # (%expose_metric keyed by the metric the format spec's probe declares,
-# $expose_count for the count capture's own mask). $expose_active is the
+# $expose_count for the count capture's own mask), and the key spellings a
+# probe reads whose value stays in place because the key was named
+# (%expose_key, keyed as the line writes the key). $expose_active is the
 # single scalar the per-line path reads: false, and no run without an
 # appended value pays more than that one test.
 use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
-my ( @expose_raw, @expose_names, @expose_appends, %expose_metric );
+my ( @expose_raw, @expose_names, @expose_appends, %expose_metric, %expose_key );
 my ( $expose_active, $expose_count ) = ( 0, 0 );
 # -d / --discard: the names given on the command line (@discard_raw, a value
 # may be a comma-separated list), the resolved names in that same order for
@@ -128,16 +131,16 @@ my ( $discard_active, $discard_any_field ) = ( 0, 0 );
 # Parsed fields and message parts -x and -d name, the one table both read
 # (566 D4 to D6, 567 D9 and D15: the two accept the same names). Each carries
 # what -x does with it (append the value the format captured to the end of
-# the message, or keep the query string in it) and what -d does (clear the
+# the message, as the append kind says, or keep the query string in it), the
+# run flag that makes the format keep the field, and what -d does (clear the
 # captured value before anything reads it, or take the query string out of
-# the message). Names match in any case and resolve before a key written in
-# the line.
+# the message). Names resolve before a key written in the line.
 my @message_fields = (
-    { name => 'thread',       expose => 'append', discard => 'clear'  },
-    { name => 'session',      expose => 'append', discard => 'clear'  },
-    { name => 'user',         expose => 'append', discard => 'clear'  },
-    { name => 'object',       expose => 'append', discard => 'clear'  },
-    { name => 'query-string', expose => 'keep',   discard => 'remove' },
+    { name => 'thread',       expose => 'append', append_kind => EXPOSE_THREAD,                                     discard => 'clear'  },
+    { name => 'session',      expose => 'append', append_kind => EXPOSE_SESSION, include_flag => \$include_session, discard => 'clear'  },
+    { name => 'user',         expose => 'append', append_kind => EXPOSE_USER,    include_flag => \$include_user,    discard => 'clear'  },
+    { name => 'object',                                                                                             discard => 'clear'  },
+    { name => 'query-string', expose => 'keep',   include_flag => \$include_query_string,                          discard => 'remove' },
 );
 my %message_field   = map { $_->{name} => $_ } @message_fields;
 my @cleared_fields  = map { $_->{name} } grep { $_->{discard} eq 'clear' } @message_fields;
@@ -3108,11 +3111,13 @@ sub format_registry_specs {
       transforms => [],
       message_metrics => {
           gate_lit => '=',
-          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_key => 'bytes'          },
-                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_key => 'durationM[sS]' } ],
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_keys => [ 'bytes' ]                    },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_keys => [ 'durationMS', 'durationMs' ] } ],
           # One mask over the probe keys it covers: KEYS is filled at compile
-          # time with the mask_key of every probe whose number the run does
-          # not expose, and the mask is left out entirely when that is none.
+          # time with each key spelling, as the line writes it, whose number
+          # the run does not expose (a metric named on -x exposes all of its
+          # spellings, a key named on -x only that spelling), and the mask is
+          # left out entirely when that is none.
           mask => { pattern => ' ((KEYS)\s*=\s*)(\d+)', replace => ' $1?' },
           marks_metrics_observed => 1,
       },
@@ -4838,13 +4843,16 @@ sub format_entry_block_src {
         my @mask_block;
         push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
         # The mask covers the probe keys whose number stays out of the
-        # message: a metric named on -x keeps its value in place, so its key
-        # drops out of the alternation, and a mask covering no key at all is
-        # not emitted.
+        # message: a metric named on -x keeps its value in place, so every
+        # spelling of its key drops out of the alternation; a key named on
+        # -x drops out as written (#613 D11); and a mask covering no key at
+        # all is not emitted.
         if ($mm->{mask}) {
-            my $exposed = $opts->{expose_metric} || {};
-            my @mask_keys = map  { $_->{mask_key} }
-                            grep { defined $_->{mask_key} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
+            my $exposed     = $opts->{expose_metric} || {};
+            my $exposed_key = $opts->{expose_key}    || {};
+            my @mask_keys = grep { !$exposed_key->{$_} }
+                            map  { @{ $_->{mask_keys} } }
+                            grep { $_->{mask_keys} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
             if (@mask_keys) {
                 ( my $mask_pattern = $mm->{mask}{pattern} ) =~ s/KEYS/join('|', @mask_keys)/e;
                 push @mask_block, "        \$message =~ s/$mask_pattern/$mm->{mask}{replace}/g;";
@@ -5435,7 +5443,7 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric,
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric, expose_key => \%expose_key,
                  capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns };
     @format_registry = ();
     @format_registry_members = ();
@@ -10615,8 +10623,8 @@ sub print_help {
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
     $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
-    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
-    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is thread, session, user or object, whose captured value is cleared; uuid, ipv4, ipv6 or ip, removed wherever it sits in the message; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message. A name given to both -x and -d, or to both -m and -d, is discarded");
+    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it; a key a metric is read from, such as durationMS, keeps its value in place instead. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
+    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is thread, session, user or object, whose captured value is cleared; uuid, ipv4, ipv6 or ip, removed wherever it sits in the message; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as durationMS, also switches that metric off, with a notice. A name given to both -x and -d, or to both -m and -d, is discarded");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -10652,7 +10660,10 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
+    my @so_deprecated = map { my $metric = $_; map { "$_ for $metric->{name}" } grep { grep { $_ eq '-so/--sort-on' } @{ $metric->{deprecated}{$_} } } sort keys %{ $metric->{deprecated} } } @builtin_metrics;
+    my @so_statistics = map { $_->{name} } grep { $_->{sort} } @statistic_names;
+    my @so_aliases    = map { my $row = $_; map { "$_ for $row->{name}" } @{ $row->{aliases} } } grep { $_->{sort} } @statistic_names;
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: $builtin_metric_list (deprecated: " . join( ', ', @so_deprecated ) . "). Statistics: " . join( ', ', @so_statistics ) . " (alias: " . join( ', ', @so_aliases ) . "). Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -14399,8 +14410,9 @@ sub print_deprecation_notices {
 
 # A built-in metric's name from the token given to an option, in any case,
 # through the built-in metric table. A deprecated spelling resolves only on
-# the options its table entry lists. Returns the canonical name, or undef
-# when the token names no built-in metric on that option.
+# the options its table entry lists, and records its notice (#613 D1, D8).
+# Returns the canonical name, or undef when the token names no built-in
+# metric on that option.
 sub builtin_metric_name {
     my ($token, $option) = @_;
     return undef unless defined $token;
@@ -14409,7 +14421,9 @@ sub builtin_metric_name {
     return undef unless defined $option;
     for my $metric (@builtin_metrics) {
         my $options = $metric->{deprecated}{$lc} or next;
-        return $metric->{name} if grep { $_ eq $option } @$options;
+        next unless grep { $_ eq $option } @$options;
+        record_deprecation( spelling => $lc, as => ' as a metric name', option => $option, advice => "use $metric->{name}" );
+        return $metric->{name};
     }
     return undef;
 }
@@ -14441,42 +14455,6 @@ sub udm_config_by_name {
 # The metric vocabulary named in every unknown-metric diagnostic.
 sub available_metric_names {
     return (@builtin_metric_names, map { $_->{name} } @udm_configs);
-}
-
-# Resolve the names given to -x / --expose and its shorthands. A built-in
-# name resolves first: the query string is kept in the message; the thread,
-# session and user are appended to the end of it; a metric name, or the key
-# as the file writes it, keeps its number in the message in place of the
-# mask. Any other name is a key read from the line by the counting token
-# rule and appended. The order the names were given is the order the values
-# are appended in, so the same combination of values gives the same message
-# whatever order the line carries them in; a value may be a comma-separated
-# list, and a name given twice keeps its first position. Runs after parse_udm_configs(), whose metric names and
-# token keys it resolves against, and before build_format_registry(), which
-# bakes each format's metric masks into its extraction code.
-sub resolve_expose_names {
-    my %seen;
-    for my $raw (@expose_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
-            push @expose_names, $name;
-            if    ( $name eq 'query-string' ) { $include_query_string = 1 }
-            elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
-            elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
-            elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
-            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
-            elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
-            elsif ( $name eq 'count' )        { $expose_count = 1 }
-            else {
-                my $config = udm_config_by_name($name)
-                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
-                if ($config) { $config->{expose} = 1 }
-                else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
-            }
-        }
-    }
-    $expose_active = @expose_appends ? 1 : 0;
-    return;
 }
 
 # The identifiers -m / --mask can name, each with the pattern that finds it in
@@ -14529,6 +14507,101 @@ my @mask_identifiers = (
 my %mask_identifier      = map { $_->{name} => $_ } @mask_identifiers;
 my $mask_identifier_list = join ', ', map { $_->{name} } @mask_identifiers;
 
+# The key a user-defined metric reads from the line: its token key, or the
+# name it was given when it reads the key it is named after. A metric
+# defined by a /regex/ names no key.
+sub udm_line_key {
+    my ($config) = @_;
+    return $config->{token_key} if $config->{extraction} eq 'token_key';
+    return $config->{base_name} if $config->{extraction} eq 'name';
+    return undef;
+}
+
+# The built-in metric a format probe reads from a key spelled as the line
+# writes it (durationMS, durationMs, bytes), from the static format specs:
+# the -x and -d names settle before the registry is built.
+sub probe_key_metric {
+    my ($key) = @_;
+    for my $spec ( format_registry_specs() ) {
+        my $mm = $spec->{message_metrics} or next;
+        for my $probe ( @{ $mm->{probes} } ) {
+            return $probe->{name} if grep { $_ eq $key } @{ $probe->{mask_keys} || [] };
+        }
+    }
+    return undef;
+}
+
+# Resolve one name given to -x or -d, the one resolution both options share
+# (#613 section 5.2). Built-in names resolve first: a parsed field or
+# message part, an identifier (-d only), a built-in metric in any case. Then
+# a user-defined metric by its name, as written. Anything else is a key
+# written in the line, matched as written, carrying the metrics it feeds:
+# the built-in metric a format probe reads from it, and the user-defined
+# metrics that read it. Returns a hash: kind (field, identifier, metric or
+# key) and the canonical name, with the table entry or the metrics found.
+sub resolve_message_name {
+    my ( $name, $option ) = @_;
+    if ( my $field = $message_field{$name} ) {
+        return { kind => 'field', name => $name, field => $field } if $option eq 'discard' || $field->{expose};
+    }
+    if ( $option eq 'discard' && ( my $identifier = $mask_identifier{$name} ) ) {
+        return { kind => 'identifier', name => $name, identifier => $identifier };
+    }
+    my $metric = builtin_metric_name($name);
+    return { kind => 'metric', name => $metric } if defined $metric;
+    return { kind => 'key', name => $name,
+             udm          => udm_config_by_name($name),
+             readers      => [ grep { ( udm_line_key($_) // '' ) eq $name } @udm_configs ],
+             probe_metric => probe_key_metric($name) };
+}
+
+# Resolve the names given to -x / --expose and its shorthands through
+# resolve_message_name(). The query string is kept in the message; the
+# thread, session and user are appended to the end of it; a built-in metric
+# keeps its number in the message in place of the mask; a user-defined
+# metric named by its name does the same. Any other name is a key read from
+# the line by the counting token rule and appended when grouping would
+# otherwise have removed its value; a key a metric is read from has that
+# mask lifted, so its value stays in place and nothing is appended (D11).
+# The order the names were given is the order the values are appended in,
+# so the same combination of values gives the same message whatever order
+# the line carries them in; a value may be a comma-separated list, and a
+# name given twice keeps its first position. Runs after parse_udm_configs(),
+# whose metric names and keys it resolves against, and before
+# build_format_registry(), which bakes each format's metric masks into its
+# extraction code.
+sub resolve_expose_names {
+    my %seen;
+    for my $raw (@expose_raw) {
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $resolved = resolve_message_name( $given, 'expose' );
+            my $name = $resolved->{name};
+            next if $seen{$name}++;
+            push @expose_names, $name;
+            if ( $resolved->{kind} eq 'field' ) {
+                my $field = $resolved->{field};
+                ${ $field->{include_flag} } = 1 if $field->{include_flag};
+                push @expose_appends, [ $field->{append_kind}, $name ] if $field->{expose} eq 'append';
+            }
+            elsif ( $resolved->{kind} eq 'metric' ) {
+                if ( $name eq 'count' ) { $expose_count = 1 } else { $expose_metric{$name} = 1 }
+            }
+            elsif ( $resolved->{udm} ) {
+                $resolved->{udm}{expose} = 1;
+                $_->{expose} = 1 for @{ $resolved->{readers} };
+            }
+            else {
+                $expose_key{$name} = 1 if defined $resolved->{probe_metric};
+                $_->{expose} = 1 for @{ $resolved->{readers} };
+                push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ];
+            }
+        }
+    }
+    $expose_active = @expose_appends ? 1 : 0;
+    return;
+}
+
 # Resolve the names given to -m / --mask and -uuid into the substitutions the
 # run applies. A value may be a comma-separated list; a name given twice keeps
 # its first position; ip names both address versions. The substitutions are
@@ -14554,34 +14627,42 @@ sub resolve_mask_names {
     return;
 }
 
-# Resolve the names given to -d / --discard into what the run removes. A
-# value may be a comma-separated list; a name given twice keeps its first
-# position. A built-in name resolves before a key written in the line, as
-# for --expose: the four parsed fields clear their captured value, uuid and
-# the IP versions remove the identifier the --mask patterns find, the metric
-# names do what the omit options do, a -udm metric name switches that metric
-# off, and query-string takes the query string out of the message. Any other
-# name is a key read from the line, removed with its value and the separator
-# beside it. An unknown name is such a key, not an error: a key no line
+# Resolve the names given to -d / --discard into what the run removes,
+# through resolve_message_name(). A value may be a comma-separated list; a
+# name given twice keeps its first position. The parsed fields clear their
+# captured value, the identifiers remove what the --mask patterns find, a
+# built-in metric name does what its omit option does, a user-defined
+# metric's name switches that metric off, and query-string takes the query
+# string out of the message. Any other name is a key read from the line,
+# removed with its value and the separator beside it; a key a metric is read
+# from switches that metric off too, its value being gone, and says so
+# (D4, D12). An unknown name is such a key, not an error: a key no line
 # carries removes nothing, and nothing declares the keys a log may write.
-# Runs after parse_udm_configs(), whose metric names and token keys it
-# resolves against, and before build_format_registry(), which bakes each
-# format's metric masks into its extraction code.
+# Runs after parse_udm_configs(), whose metric names and keys it resolves
+# against, and before build_format_registry(), which bakes each format's
+# metric masks into its extraction code.
 sub resolve_discard_names {
     my %seen;
     for my $raw (@discard_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $resolved = resolve_message_name( $given, 'discard' );
+            my $name = $resolved->{name};
+            next if $seen{$name}++;
             push @discard_names, $name;
-            if    ( $message_field{$name} ) { $discard_field{$name} = 1 }
-            elsif ( my $identifier = $mask_identifier{$name} ) { push @discard_subs, map { discard_identifier_sub($_) } @{ $identifier->{entries} } }
-            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $omit_durations = 1 }
-            elsif ( $name eq 'bytes' ) { $omit_bytes = 1 }
-            elsif ( $name eq 'count' ) { $omit_count = 1 }
+            if    ( $resolved->{kind} eq 'field' )      { $discard_field{$name} = 1 }
+            elsif ( $resolved->{kind} eq 'identifier' ) { push @discard_subs, map { discard_identifier_sub($_) } @{ $resolved->{identifier}{entries} } }
+            elsif ( $resolved->{kind} eq 'metric' )     { ${ $builtin_metric{$name}{omit_flag} } = 1 }
             else {
-                my $config = udm_config_by_name($name)
-                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
-                $config->{discarded} = 1 if $config;
+                $resolved->{udm}{discarded} = 1 if $resolved->{udm};
+                for my $reader ( @{ $resolved->{readers} } ) {
+                    $reader->{discarded} = 1;
+                    print STDERR "Note: -d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off\n";
+                }
+                if ( defined( my $metric = $resolved->{probe_metric} ) ) {
+                    ${ $builtin_metric{$metric}{omit_flag} } = 1;
+                    print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";
+                }
                 push @discard_subs, discard_key_sub($name);
             }
         }
@@ -14595,11 +14676,15 @@ sub resolve_discard_names {
 # separator (D16): the pair takes the & ? or space that follows it, or, at
 # the end of the message, the one before it. Every occurrence goes. The value
 # runs to the first character that cannot sit inside a field, the same rule
-# counting_token_pattern() gives -udm and -x, so the three read a line alike.
+# counting_token_pattern() gives -udm and -x, so the three read a line alike;
+# or it is the ? a metric mask left in its place, taken whole, so a masked
+# pair goes as completely as an unmasked one and the result does not depend
+# on whether the mask ran first (#613 D12, D13). The group is atomic: a ?
+# taken as the value is never given back to be read as the separator.
 sub discard_key_sub {
     my ($key) = @_;
     my $escaped_key = quotemeta($key);
-    my $value = q{[^\s,;"'\])&?]*};
+    my $value = q{(?>\?(?=[&?\s]|$)|[^\s,;"'\])&?]*)};
     # Two alternatives, the trailing separator first: a pair followed by one
     # takes it, and a pair at the end of the message takes the one before it
     # instead. Both collapse to nothing, leaving the separators either side
@@ -14655,8 +14740,8 @@ sub apply_discard_precedence {
         $expose_active  = @expose_appends ? 1 : 0;
         for my $name (@exposed_too) {
             $include_query_string = 0 if $name eq 'query-string';
-            delete $expose_metric{duration} if $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS';
-            delete $expose_metric{bytes}    if $name eq 'bytes';
+            delete $expose_metric{$name};
+            delete $expose_key{$name};
             $expose_count = 0 if $name eq 'count';
         }
         print STDERR "Note: " . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed\n";

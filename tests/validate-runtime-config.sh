@@ -339,6 +339,187 @@ scenario_error_unknown_metric_lists() {
         contract    "$CONTRACT_METRIC_LIST"
 }
 
+# Issue #613 criteria 2 and 3 (D1, D8, D17): time and size still name the
+# duration and bytes metrics on the options their table entry lists, for one
+# release, and say so in one deprecation line per spelling however many
+# options it was given to. Each spelling's run is compared with the run under
+# the canonical name; only the surface the option drives is rendered, so the
+# comparison reads that surface and nothing timing-dependent. `-bs 1440 -oe`:
+# no assertion reads a bucket.
+CONTRACT_DEPRECATED='features/613-one-name-vocabulary.md D1 (time is not a metric name; -hm, -hg and -so print a deprecation notice for a release), D8 (size deprecated on -so), D17 (one deprecation-notice helper); criteria 2 and 3'
+TIME_NOTICE='^Warning: time is deprecated as a metric name \(given to [^)]*\): use duration$'
+
+# Run ltl rendering only the named section, stdout to <label>.stdout.
+run_section_only() {
+    local label="$1" section="$2"; shift 2
+    local hide
+    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -)
+    run_ltl "$label" -bs 1440 -oe --terminal-width 200 --hide "$hide" "$@"
+}
+
+assert_one_line() {
+    local file="$1" pattern="$2" label="$3" produced_by="$4"
+    local count
+    count=$(grep -cE "$pattern" "$file" || true)
+    if [[ "$count" == "1" ]]; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        expected:    exactly one line matching $pattern"
+        echo "        actual:      $count"
+        echo "        asserts:     $label"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $CONTRACT_DEPRECATED"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+assert_same_file() {
+    local one="$1" two="$2" label="$3" produced_by="$4" contract="$5"
+    if [[ -s "$one" ]] && diff -q "$one" "$two" >/dev/null; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        asserts:     $label"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        if [[ -s "$one" ]]; then diff "$one" "$two" | head -10 | sed 's/^/        | /' || true; else echo "        (empty capture $one)"; fi
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+scenario_deprecated_metric_spellings() {
+    current_scenario="deprecated-metric-spellings"
+    echo "[$current_scenario]"
+
+    local spelling
+    for spelling in time TIME; do
+        run_ltl "dep-hm-$spelling" -bs 1440 -oe -V runtime-config -hm "$spelling" "$METRIC_FIXTURE"
+        assert_line "$RUN_STDOUT" \
+            pattern     '^heatmap: duration$' \
+            asserts     "-hm $spelling draws the duration heatmap: time is a deprecated spelling of duration on -hm, in any case." \
+            produced_by 'builtin_metric_name() in ltl (the deprecated spellings of @builtin_metrics)' \
+            contract    "$CONTRACT_DEPRECATED"
+        assert_one_line "$RUN_STDERR" "$TIME_NOTICE" "-hm $spelling prints exactly one deprecation line naming time and duration" \
+            'record_deprecation() and print_deprecation_notices() in ltl'
+    done
+
+    run_section_only "dep-hg-duration" histogram -hg duration "$METRIC_FIXTURE"
+    local hg_duration="$RUN_STDOUT"
+    run_section_only "dep-hg-time" histogram -hg time "$METRIC_FIXTURE"
+    assert_same_file "$hg_duration" "$RUN_STDOUT" '-hg time renders the histogram -hg duration renders' \
+        'handle_histogram_option() in ltl, through builtin_metric_name()' "$CONTRACT_DEPRECATED"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-hg time prints exactly one deprecation line, though -hg is read inside the option parser' \
+        'handle_histogram_option() records it; print_deprecation_notices() prints it at option settlement'
+
+    run_section_only "dep-so-duration" messages -so duration "$METRIC_FIXTURE"
+    local so_duration="$RUN_STDOUT"
+    run_section_only "dep-so-time" messages -so time "$METRIC_FIXTURE"
+    assert_same_file "$so_duration" "$RUN_STDOUT" '-so time ranks the messages as -so duration does' \
+        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-so time prints exactly one deprecation line' \
+        'record_deprecation() and print_deprecation_notices() in ltl'
+
+    run_ltl "dep-all-three" -bs 1440 -oe -hm time -hg time -so time "$METRIC_FIXTURE"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" 'time given to -hm, -hg and -so in one run prints one line, not three' \
+        'record_deprecation() in ltl (one notice per spelling, naming every option it was given to)'
+    assert_line "$RUN_STDERR" \
+        pattern     '^Warning: time is deprecated as a metric name \(given to -hg/--histogram, -hm/--heatmap, -so/--sort-on\): use duration$' \
+        asserts     'The one line names each option the deprecated spelling was given to.' \
+        produced_by 'print_deprecation_notices() in ltl' \
+        contract    "$CONTRACT_DEPRECATED"
+
+    # -so size against -so bytes: the MESSAGES CSV, written into a directory
+    # this harness owns, carries the whole ranking.
+    local size_dir="$TMP_DIR/dep-so-size" bytes_dir="$TMP_DIR/dep-so-bytes"
+    mkdir -p "$size_dir" "$bytes_dir"
+    ( cd "$bytes_dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so bytes "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    ( cd "$size_dir"  && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so size  "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    check_stderr_warnings "$bytes_dir/run.err"
+    check_stderr_warnings "$size_dir/run.err"
+    local bytes_csv size_csv
+    bytes_csv=$(find "$bytes_dir" -name '*-LTL-MESSAGES-*.csv' -print -quit)
+    size_csv=$(find "$size_dir" -name '*-LTL-MESSAGES-*.csv' -print -quit)
+    assert_same_file "$bytes_csv" "$size_csv" '-so size writes the MESSAGES CSV -so bytes writes' \
+        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
+    assert_one_line "$size_dir/run.err" '^Warning: size is deprecated as a metric name \(given to -so/--sort-on\): use bytes$' \
+        '-so size prints exactly one deprecation line naming size and bytes' 'record_deprecation() and print_deprecation_notices() in ltl'
+    assert_no_line "$bytes_dir/run.err" \
+        pattern     'deprecated' \
+        asserts     'The canonical name prints no deprecation line.' \
+        produced_by 'builtin_metric_name() in ltl' \
+        contract    "$CONTRACT_DEPRECATED"
+}
+
+# Issue #613 criterion 23 (D15): a built-in metric name matches in any case on
+# every option that takes one.
+scenario_metric_name_case() {
+    current_scenario="metric-name-case"
+    echo "[$current_scenario]"
+    local contract='features/613-one-name-vocabulary.md D15 (every built-in name matches in any case on every option); criterion 23'
+
+    run_ltl "case-hm" -bs 1440 -oe -V runtime-config -hm Bytes "$METRIC_FIXTURE"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^heatmap: bytes$' \
+        asserts     '-hm Bytes draws the bytes heatmap.' \
+        produced_by 'builtin_metric_name() in ltl' \
+        contract    "$contract"
+
+    run_section_only "case-hg-lower" histogram -hg bytes "$METRIC_FIXTURE"
+    local hg_lower="$RUN_STDOUT"
+    run_section_only "case-hg-upper" histogram -hg BYTES "$METRIC_FIXTURE"
+    assert_same_file "$hg_lower" "$RUN_STDOUT" '-hg BYTES renders the histogram -hg bytes renders' 'builtin_metric_name() in ltl' "$contract"
+
+    run_section_only "case-so-lower" messages -so bytes "$METRIC_FIXTURE"
+    local so_lower="$RUN_STDOUT"
+    run_section_only "case-so-upper" messages -so Bytes "$METRIC_FIXTURE"
+    assert_same_file "$so_lower" "$RUN_STDOUT" '-so Bytes ranks the messages as -so bytes does' 'builtin_metric_name() in ltl' "$contract"
+
+    run_section_only "case-hide-lower" timeline --hide bytes "$METRIC_FIXTURE"
+    local hide_lower="$RUN_STDOUT"
+    run_section_only "case-hide-upper" timeline --hide Bytes "$METRIC_FIXTURE"
+    assert_same_file "$hide_lower" "$RUN_STDOUT" '--hide Bytes hides the column --hide bytes hides' 'resolve_visibility_name() in ltl' "$contract"
+}
+
+# Issue #613 criterion 15 (D3): durationMs is a key spelling, not a metric
+# name, so -hm takes it down the unknown-name path of any other word.
+scenario_metric_key_spelling_unknown() {
+    current_scenario="metric-key-spelling-unknown"
+    echo "[$current_scenario]"
+    local contract='features/613-one-name-vocabulary.md D3 (durationMs and durationMS are key spellings, not metric names: an unknown name on -hm and -hg); criterion 15'
+
+    run_ltl "key-hm-pushback" -bs 1440 -oe -hm durationMs "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^-hm value 'durationMs' is not a built-in metric \\(duration\\|bytes\\|count\\) and no -udm configs are defined; treating as positional argument" \
+        asserts     '-hm durationMs with no -udm is the pushback warning any unknown word gets.' \
+        produced_by 'adapt_to_command_line_options() in ltl (heatmap non-builtin pushback branch)' \
+        contract    "$contract"
+
+    run_ltl "key-hm-udm" -bs 1440 -oe -udm x::max -hm durationMs "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: Unknown heatmap metric 'durationMs'\\. Available: duration, bytes, count, x$" \
+        asserts     '-hm durationMs with a -udm is the unknown-metric error any unknown word gets.' \
+        produced_by 'adapt_to_command_line_options() in ltl (the -hm validation after parse_udm_configs)' \
+        contract    "$contract"
+}
+
+# Issue #613 criterion 16 (D4): a user-defined metric is named by its name,
+# so the key it reads is not a metric name on -hm.
+scenario_udm_key_not_a_name() {
+    current_scenario="udm-key-not-a-name"
+    echo "[$current_scenario]"
+    run_ltl "udm-key-hm" -bs 1440 -oe -udm 'lat::max:elapsed' -hm elapsed "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: Unknown heatmap metric 'elapsed'\\. Available: duration, bytes, count, lat$" \
+        asserts     '-hm elapsed is an error naming the vocabulary when the metric reading elapsed is named lat.' \
+        produced_by 'resolve_metric_operand() and udm_config_by_name() in ltl' \
+        contract    'features/613-one-name-vocabulary.md D4 (a user-defined metric is named by its name on every option); criterion 16'
+}
+
 scenario_error_unknown_exact_percentiles() {
     current_scenario="error-unknown-exact-percentiles"
     echo "[$current_scenario]"
@@ -737,6 +918,10 @@ scenario_register runtime-config-command-line \
                   warning-g-non-numeric \
                   warning-hm-non-builtin \
                   error-unknown-metric-lists \
+                  deprecated-metric-spellings \
+                  metric-name-case \
+                  metric-key-spelling-unknown \
+                  udm-key-not-a-name \
                   error-unknown-exact-percentiles \
                   runtime-config-data-model-selectors \
                   runtime-config-numeric-highlight \
@@ -762,6 +947,10 @@ while read -r _scenario; do
         warning-g-non-numeric              ) scenario_warning_g_non_numeric ;;
         warning-hm-non-builtin             ) scenario_warning_hm_non_builtin ;;
         error-unknown-metric-lists         ) scenario_error_unknown_metric_lists ;;
+        deprecated-metric-spellings        ) scenario_deprecated_metric_spellings ;;
+        metric-name-case                   ) scenario_metric_name_case ;;
+        metric-key-spelling-unknown        ) scenario_metric_key_spelling_unknown ;;
+        udm-key-not-a-name                 ) scenario_udm_key_not_a_name ;;
         error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
         runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
         runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
