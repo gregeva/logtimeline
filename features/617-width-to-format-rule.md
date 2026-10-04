@@ -539,6 +539,26 @@ issue body; they are restated here, not reinterpreted.
   `16763 bytes`; 12,345 ms reads `12.35 seconds`). The threshold is one field
   per kind beside its ladder, tunable like the intents.
 
+- **D28 — The CV cell keeps its trailing zeros; the CV producer fixes two
+  decimals** (the architect, 2026-10-04, reviewing the renders). Amends D3 for
+  the CV cell and AC7's `CV:0.5`: "this should be reported as 3.00 or 1.00.
+  This is the closest to the current functionality and is more readable
+  because when we go row to row, we actually have small variances after the
+  decimal and larger variances like the one or the three don't cause the
+  overall rendering style to change ... this is a producer level error in the
+  attribution and we should be trying to stick more decimals ... into that
+  producer." The timeline and messages-table CV cells show two decimals,
+  giving them up only as the integer part grows within the four characters
+  (`3.00`, `0.50`, `12.5`, `123`); every other display surface still strips
+  trailing zeros (D3). The CSV `duration_cv` cell is unchanged (`0.5`).
+- **The tabular walk measures an `exact` step against its own tier**
+  (implementation of D23, corrected 2026-10-04 on the architect's review of a
+  messages-table total that read `4.8 m` with room for `4.8 min`): a step keeps
+  every digit its own tier can show at full decimals; giving up the unit name
+  gives up the long tier's second decimal with it (`3.56 minutes` reads
+  `3.6 min` where the long tier's two decimals do not fit). The tolerance is
+  still measured from the most exact spelling of any tier that fits.
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
@@ -1377,6 +1397,15 @@ and durations climb at their ladder's steps again. Against the goldens of drop
 no byte or duration value differs. The *fit-sweep* assertion on the
 16,800-byte row asserts the climb (`16.8 kilobytes` or `16.8 kB`, never
 `16800 B`) and fails on the D25 tree.
+
+**AC21 (2026-10-04): looked at by the architect.** Before and after renders of
+a single-day web application access log carrying execution time (the
+regression suite's sampled access log) and of an application log carrying
+count and duration keys (the regression suite's 5,000-line script-log slice),
+at widths 100, 120, 160 and 200, with `-hm duration`, `-hm count` and
+`-hg duration,bytes`. The review produced D25, D26, D27, D28 and the tabular
+walk's own-tier correction; the architect's verdict on the final renders:
+"Everything else looks great."
 
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after

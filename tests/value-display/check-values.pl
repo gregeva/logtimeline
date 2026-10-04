@@ -28,6 +28,7 @@
 use strict;
 use warnings;
 use Getopt::Long;
+binmode STDOUT, ':encoding(UTF-8)';
 
 my $mode = shift @ARGV // die "usage: check-values.pl tokens|absent|same --file F ...\n";
 my %o = ( min => 1 );

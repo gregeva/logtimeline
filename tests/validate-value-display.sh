@@ -295,23 +295,23 @@ scenario_cv_agreement() {
     local csv
     csv=$(ls "$TMP_DIR"/*-LTL-MESSAGES-*.csv 2>/dev/null | head -1)
     assert_command \
-        command     "grep -qE 'CV:0\\.5( |\$)' '$TMP_DIR/cv.txt'" \
-        label       'the timeline CV cell reads CV:0.5' \
-        asserts     'The CV cell renders through the CV cell budget with its trailing zero stripped' \
+        command     "grep -qE 'CV:0\\.50( |\$)' '$TMP_DIR/cv.txt'" \
+        label       'the timeline CV cell reads CV:0.50' \
+        asserts     'The CV cell renders through the CV cell budget at the two decimals its producer fixes, trailing zero kept' \
         produced_by 'print_bar_graph() in ltl, through value_text() and the CV cell budget row' \
-        contract    "$CONTRACT D3, D9"
+        contract    "$CONTRACT D9, D28"
     assert_command \
-        command     "grep -E '\\[200\\] GET /vd/cv' '$TMP_DIR/cv.txt' | grep -qE ' 30ms +0\\.5 '" \
-        label       'the messages-table CV cell reads 0.5' \
-        asserts     'The messages-table CV cell renders through the CV cell budget, trailing zero stripped' \
+        command     "grep -E '\\[200\\] GET /vd/cv' '$TMP_DIR/cv.txt' | grep -qE ' 30ms +0\\.50 '" \
+        label       'the messages-table CV cell reads 0.50' \
+        asserts     'The messages-table CV cell renders through the CV cell budget at two decimals, trailing zero kept' \
         produced_by 'print_message_summary() in ltl, through value_text() and the CV cell budget row' \
-        contract    "$CONTRACT D3, D9"
+        contract    "$CONTRACT D9, D28"
     assert_command \
         command     "[[ -n '$csv' ]] && $PERL -MText::ParseWords -ne 'chomp; my @f = parse_line(\",\", 0, \$_); if (\$. == 1) { (\$i) = grep { \$f[\$_] eq \"duration_cv\" } 0..\$#f; die \"no duration_cv column\\n\" unless defined \$i; next } \$v = \$f[\$i]; END { die \"duration_cv is \" . (\$v // \"absent\") . \"\\n\" unless defined \$v && \$v eq \"0.5\" }' '$csv'" \
         label       'the MESSAGES CSV duration_cv cell reads 0.5' \
-        asserts     'The CV cell and the CSV agree where the CSV value fits the cell budget' \
+        asserts     'The CSV keeps its own precision family and strips its trailing zero (0.5); the cell shows the same value at two decimals (0.50)' \
         produced_by 'print_message_summary() in ltl, format_csv_value() for duration_cv' \
-        contract    "$CONTRACT D3, correction 12"
+        contract    "$CONTRACT D28, correction 12"
 }
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,10 @@ scenario_rate_suffix() {
 # ---------------------------------------------------------------------------
 # no-trailing-zero (AC6): no rendered value ends in a fractional zero, over a
 # battery of captures covering every surface, and over every regression
-# golden. Timestamps and IP addresses are excluded by the token shape.
+# golden. Timestamps and IP addresses are excluded by the token shape; the CV
+# cells keep their zeros by design (D28) and are removed before the scan: the
+# timeline's CV: tokens, and on a messages-table row the one bare decimal, the
+# CV column.
 # ---------------------------------------------------------------------------
 scenario_no_trailing_zero() {
     current_scenario="no-trailing-zero"
@@ -361,14 +364,15 @@ scenario_no_trailing_zero() {
     render nz-4 "$DURATION_SPREAD" -bs 60 -n 5 --terminal-width 200 -hm duration || return 0
     render nz-5 "$DURATION_SPREAD" -bs 60 -n 5 --terminal-width 200 -hg duration,bytes || return 0
     local pattern='(?<![\d.])\d+\.\d*0(?![\d.])'
+    without_cv() { $PERL -pe 's/CV:\S+//g; s/(?<=\s)\d+\.\d+(?=\s)//g if /^\S*\s*\[/' "$1" > "$2"; }
     assert_command \
-        command     "for f in '$TMP_DIR'/nz-*.txt; do check absent --file \"\$f\" --regex '$pattern' || exit 1; done" \
+        command     "for f in '$TMP_DIR'/nz-*.txt; do without_cv \"\$f\" \"\$f.nocv\"; check absent --file \"\$f.nocv\" --regex '$pattern' || exit 1; done" \
         label       'no value in the battery ends in a fractional zero' \
         asserts     'Trailing fractional zeros are stripped on every display surface after the decimals are chosen' \
         produced_by 'strip_trailing_zeros() in ltl, called by every arm of value_text()' \
-        contract    "$CONTRACT D3"
+        contract    "$CONTRACT D3, D28 (the CV cells excepted)"
     assert_command \
-        command     "for f in '$REPO_DIR'/tests/reference-output/*.txt; do check absent --file \"\$f\" --regex '$pattern' || exit 1; done" \
+        command     "for f in '$REPO_DIR'/tests/reference-output/*.txt; do without_cv \"\$f\" '$TMP_DIR/golden.nocv'; check absent --file '$TMP_DIR/golden.nocv' --regex '$pattern' || exit 1; done" \
         label       'no value in a regression golden ends in a fractional zero' \
         asserts     'The frozen surfaces carry no trailing fractional zero' \
         produced_by 'strip_trailing_zeros() in ltl, called by every arm of value_text()' \

@@ -997,7 +997,7 @@ my %value_budget = (
     'timeline count cell' => { intent => 'tabular' },
     'messages total'   => { intent => 'tabular' },
     'latency cell'     => { tier => 'short',  fit => 'tight' },
-    'cv cell'          => { tier => 'long',   width => 4 },
+    'cv cell'          => { tier => 'long',   width => 4, keep_zeros => 1 },   # the producer fixes two decimals: 3.00, 0.50, 12.5, 123
     'axis tick'        => { tier => 'medium', fit => 'tight', width => 6 },
     'chart label'      => { tier => { duration => 'short', bytes => 'short', default => 'medium' },
                             fit  => { bytes => 'loose', default => 'tight' }, intent => 'accurate' },
@@ -14135,7 +14135,7 @@ my %value_arms = (
     rate     => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_;
                       my ($text, $shown) = format_number( $v, $tier, $space, $d, undef, $row->{plain} );
                       return ( $text . $rate_suffix{$rate_unit}, $shown ) },
-    cv       => sub { my ($v, $unit, $tier, $space, $d) = @_; my $text = format_cv_display( $v, $d ); return ( $text, $text ) },
+    cv       => sub { my ($v, $unit, $tier, $space, $d, $floor, $row) = @_; my $text = format_cv_display( $v, $d, $row->{keep_zeros} ); return ( $text, $text ) },
 );
 
 # The one dispatch every display surface renders a number through. Called as
@@ -14241,12 +14241,13 @@ sub value_climbed_spelling {
     return @{ $fitting[0] };
 }
 
-# The value a value's most exact spelling shows: across every spelling, at the
-# most decimals that fit the width, the one nearest the value.
+# The value a value's most exact spelling shows: across every spelling (or
+# every spelling of one tier), at the most decimals that fit the width, the one
+# nearest the value.
 sub value_reference {
-    my ($kind, $value, $unit, $row, $width) = @_;
+    my ($kind, $value, $unit, $row, $width, $tier) = @_;
     my $best;
-    for my $step (@value_walk) {
+    for my $step ( grep { !defined $tier || $_->[0] eq $tier } @value_walk ) {
         my ( undef, $shown ) = value_climbed_spelling( $kind, $value, $unit, { %$row, tier => $step->[0], fit => $step->[1], digits => undef, walked => undef }, $width );
         $best = $shown if !defined $best || abs( $shown - $value ) < abs( $best - $value );
     }
@@ -14255,24 +14256,32 @@ sub value_reference {
 
 # The tier and fit a row that names none takes: the first step of its
 # intent's walk at which every value fits the width and shows what the step's
-# digits allow ('exact': the reference, or a spelling more exact still, such
-# as the value unclimbed; 'within' and 'fewest': no further from it than the
-# intent tolerates). When no step does, the most exact spelling:
+# digits allow ('exact': the step's own tier's most exact spelling, at its
+# full decimals, or one more exact still, such as the value unclimbed; 'within' and 'fewest': no
+# further from the most exact spelling of any tier than the intent tolerates). When no step does, the most exact spelling:
 # the width has forced the loss.
 sub value_walk_row {
     my ($kind, $row, $width, $values, $unit) = @_;
     my $intent = $value_intent{ $row->{intent} // 'accurate' };
     my @values = grep { defined } @$values;
     my @references = map { value_reference( $kind, $_, $unit, $row, $width ) } @values;
+    my %tier_references;
     for my $step ( @{ $intent->{walk} } ) {
         my $candidate = { %$row, tier => $step->[0], fit => $step->[1], digits => $step->[2], walked => 1 };
-        my $allowed = $step->[2] eq 'exact' ? 0 : $intent->{tolerance};
+        my $exact = $step->[2] eq 'exact';
+        # 'exact' keeps every digit the step's own tier can show, whatever the
+        # width (a shorter unit name carries fewer decimals); the tolerance is
+        # measured from the most exact spelling of any tier that fits.
+        my $against = $exact
+            ? ( $tier_references{ $step->[0] } //= [ map { value_reference( $kind, $_, $unit, $row, undef, $step->[0] ) } @values ] )
+            : \@references;
+        my $allowed = $exact ? 0 : $intent->{tolerance};
         my $within = 1;
         for my $i ( 0 .. $#values ) {
             my ( $text, $shown ) = value_spelling( $kind, $values[$i], $unit, $candidate, $width, $references[$i] );
             next if ( !defined $width || length($text) <= $width )
-                 && ( value_distance( $shown, $references[$i] ) <= $allowed + 1e-12
-                      || abs( $shown - $values[$i] ) <= abs( $references[$i] - $values[$i] ) + 1e-12 );   # as exact as the reference, or more
+                 && ( value_distance( $shown, $against->[$i] ) <= $allowed + 1e-12
+                      || abs( $shown - $values[$i] ) <= abs( $against->[$i] - $values[$i] ) + 1e-12 );   # as exact as the reference, or more
             $within = 0;
             last;
         }
@@ -14470,12 +14479,15 @@ sub format_csv_value {
     return strip_trailing_zeros(sprintf("%.${decimals}f", $value));
 }
 
-# The coefficient of variation at a count of decimals, trailing zeros
-# stripped. An arm of value_text(): the CV cell's width chooses the decimals.
+# The coefficient of variation at a count of decimals. An arm of
+# value_text(): the CV cell's width chooses the decimals, and the cell keeps
+# its trailing zeros, so a column of CVs reads at one precision down the rows
+# (3.00 beside 2.96); without $keep_zeros they are stripped.
 sub format_cv_display {
-    my ($cv, $decimals) = @_;
+    my ($cv, $decimals, $keep_zeros) = @_;
     return '' unless defined $cv;
-    return strip_trailing_zeros(sprintf('%.*f', $decimals // 2, $cv));
+    my $text = sprintf('%.*f', $decimals // 2, $cv);
+    return $keep_zeros ? $text : strip_trailing_zeros($text);
 }
 
 # The single resolution surface for every percentage ltl prints
