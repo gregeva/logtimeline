@@ -1370,6 +1370,14 @@ two ticks read alike. No surface names a width together with a precise switch
 yet, so the fallback has no consumer to assert against; it is exercised the
 first time one does.
 
+**D27 (2026-10-04): the climb threshold per kind.** `%value_unclimbed_digits`
+(count 5, rate 5, bytes 0, duration 0) bounds the unclimbed value by kind; bytes
+and durations climb at their ladder's steps again. Against the goldens of drop
+2 (before D25), the only values that now differ are 148 counts shown unclimbed;
+no byte or duration value differs. The *fit-sweep* assertion on the
+16,800-byte row asserts the climb (`16.8 kilobytes` or `16.8 kB`, never
+`16800 B`) and fails on the D25 tree.
+
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after
 benchmark on this machine; `validate-help-content`; the golden diff

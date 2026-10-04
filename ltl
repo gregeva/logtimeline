@@ -937,6 +937,12 @@ my @number_unit_ladder = (
     { factor => 1000**4, short => 'T', medium => 'Tril', long => 'trillion' },
 );
 
+# The most digits a value of each kind shows unclimbed, at its floor step,
+# before it climbs: a bare number reads 1800 rather than 1.8k; a byte or
+# duration value follows its ladder's engineering steps (16.76 kB, never
+# 16763 B). Zero means the kind always climbs.
+my %value_unclimbed_digits = ( count => 5, rate => 5, bytes => 0, duration => 0 );
+
 # The most decimals a value carries at each tier, one set for every kind;
 # the width a surface has, and the source's resolution, may allow fewer.
 my %tier_decimals = ( short => 1, medium => 1, long => 2 );
@@ -14199,15 +14205,17 @@ sub value_distance {
 # reference and the row's digits 'fewest', the fewest decimals within the
 # intent's tolerance of it. Every row (except one that fixes significant
 # digits) also weighs the value unclimbed, at its floor step, and takes it when
-# its integer part has at most five digits, it fits, it is no wider, and it is
-# at least as exact as the climbed spelling (1,800 reads 1800, never 1.8
-# thousand or 1.8k). Returns the text and the value it shows.
+# its integer part has no more digits than its kind allows
+# (%value_unclimbed_digits), it fits, it is no wider, and it is at least as
+# exact as the climbed spelling (a count of 1,800 reads 1800, never 1.8k).
+# Returns the text and the value it shows.
 sub value_spelling {
     my ($kind, $value, $unit, $row, $width, $reference) = @_;
     my @spelling = value_climbed_spelling( $kind, $value, $unit, $row, $width, $reference );
-    return @spelling if $row->{plain} || $row->{significant} || $kind->{kind} !~ /^(?:duration|bytes|count|rate)$/;
+    my $digits = $value_unclimbed_digits{ $kind->{kind} } // 0;
+    return @spelling if $row->{plain} || $row->{significant} || !$digits;
     my @plain = value_climbed_spelling( $kind, $value, $unit, { %$row, plain => 1, digits => undef }, $width );
-    return @plain if $plain[0] =~ /^-?\d{1,5}(?:\D|$)/
+    return @plain if $plain[0] =~ /^-?\d{1,$digits}(?:\D|$)/
                   && length( $plain[0] ) <= length( $spelling[0] )
                   && ( !defined $width || length( $plain[0] ) <= $width )
                   && abs( $plain[1] - $value ) <= abs( $spelling[1] - $value ) + 1e-12;

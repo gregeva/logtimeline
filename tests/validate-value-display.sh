@@ -419,11 +419,11 @@ scenario_fit_sweep() {
         produced_by 'value_walk_row() in ltl; the word field of @byte_unit_ladder' \
         contract    "$CONTRACT D19 (bytes a tiered kind)"
     assert_command \
-        command     "n=0; for w in 100 110 120 130 140 150 160 170 180 190 200 210 220; do visible_column fs-\$w bytes || continue; c=\$(cell_text fs-\$w '^ 2025-05-07 00:02' bytes) || exit 1; case \"\$c\" in *kilobyte*) [[ \"\$c\" == '16.8 kilobytes' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; 16800*) n=\$((n + 1)) ;; *' '*) [[ \"\$c\" == '16.8 kB' || \"\$c\" == '17 kB' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; esac; done; [[ \$n -ge 1 ]]" \
-        label       'a tabular column never trades a digit for the unit name: 16,800 bytes reads 16800 B unclimbed where it fits, else 16.8 kilobytes or 16.8 kB, and 17 kB only where 16.8 kB does not fit' \
+        command     "n=0; for w in 100 110 120 130 140 150 160 170 180 190 200 210 220; do visible_column fs-\$w bytes || continue; c=\$(cell_text fs-\$w '^ 2025-05-07 00:02' bytes) || exit 1; case \"\$c\" in *kilobyte*) n=\$((n + 1)); [[ \"\$c\" == '16.8 kilobytes' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; 16800*) echo \"width \$w: \$c shown unclimbed\"; exit 1 ;; *' '*) [[ \"\$c\" == '16.8 kB' || \"\$c\" == '17 kB' ]] || { echo \"width \$w: \$c\"; exit 1; } ;; esac; done; [[ \$n -ge 1 ]]" \
+        label       'a tabular column never trades a digit for the unit name, and bytes always climb: 16,800 bytes reads 16.8 kilobytes or 16.8 kB, 17 kB only where 16.8 kB does not fit, never 16800 B' \
         asserts     'A tabular column gives up the unit name first, then decimals within its tolerance, then the space, then the decimals the width forces' \
         produced_by 'value_walk_row() in ltl, the tabular walk of %value_intent' \
-        contract    "$CONTRACT D23 (the order of what gives way)"
+        contract    "$CONTRACT D23 (the order of what gives way), D27 (bytes climb at their steps)"
     render fs-hg "$FIT" -bs 1 -n 0 -osum -hm duration -hg duration --terminal-width 160 || return 0
     assert_command \
         command     "for f in '$TMP_DIR'/fs-*.txt; do check absent --file \"\$f\" --regex '(?<![\\w.])\\d+\\.\\d+ ?(ms|msec|milliseconds?)\\b' || exit 1; done" \

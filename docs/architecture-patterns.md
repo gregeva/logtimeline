@@ -537,8 +537,9 @@ tolerance and an order of what gives way, and the walk takes the first step at
 which every value the surface shows fits and stays within that tolerance of its
 most exact spelling. The digits come from the producer: the row's precision,
 else the tier's maximum (`%tier_decimals`), never finer than the source's
-resolution. A value of up to five digits shows unclimbed where that is exact
-and no wider (`1800`, never `1.8k`). A value rounding up to the next step's size renders at that step;
+resolution. A count of up to five digits shows unclimbed where that is exact
+and no wider (`1800`, never `1.8k`); bytes and durations climb at their
+ladder's steps (`%value_unclimbed_digits`, one field per kind). A value rounding up to the next step's size renders at that step;
 trailing fractional zeros are stripped by `strip_trailing_zeros()`. The per-kind
 formatters (`format_time`, `format_bytes`, `format_number`, `format_cv_display`,
 `format_percentage`) are the dispatch's arms and have no other caller.
