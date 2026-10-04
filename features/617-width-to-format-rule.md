@@ -484,6 +484,20 @@ issue body; they are restated here, not reinterpreted.
   to one (`1.68 k` reads `1.7 k`); every fixed surface reads as today. A
   producer whose budget row fixes its own precision keeps it (D13).
 
+- **D25 — Not climbing is a candidate of the walk, for every kind, up to five
+  digits** (locked by the architect 2026-10-04: "yes, every kind, with a
+  five-digit limit"). The tiers only spelled a value at the largest step it
+  reaches; under 10,000 the plain number is often shorter, exact and easier to
+  read. The architect: "moving the decimal and adding the long thousand
+  description is actually more complicated to read and less precise". A
+  surface that walks (its row names no tier) also considers the value at its
+  floor step, unclimbed (`1800`, `12345`, `1800 B`), and takes it when it shows
+  the value's most exact spelling, its integer part has at most five digits, it
+  fits, and it is no wider than the spelling the intent's walk chose. 1,800 in
+  a notice reads `1800`, not `2 thousand`; 1,234,567 stays `1.2M`; 1,800 ms
+  stays `1.8 s` (`1800ms` is wider). Rows that name their tier (the legend,
+  the chart labels, the fixed cells) keep it.
+
 ### Governing decisions in other records, read and in force
 
 `features/501-legend-category-total-shortening.md` D1 (the tier is a parameter
