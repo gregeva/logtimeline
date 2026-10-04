@@ -509,9 +509,11 @@ issue body; they are restated here, not reinterpreted.
   spelling. `-pv` switches the legend's values from `tabular` to `precise`
   ("the option precise values would essentially change the intent for those
   values"): the legend is `tabular` by default, which amends the surface
-  assignment of D23 (legend totals and rates were `precise`). Not yet decided:
-  what a `precise` row that names no width (chart labels, progress line,
-  summary) allows.
+  assignment of D23 (legend totals and rates were `precise`). The `_nice` CSV
+  cells are `tabular` (the architect, 2026-10-04: "Those _nice fields aren't
+  nice like that. They should be tabular intent"), so 2,640,000 bytes reads
+  `2.6 MB`, never `2640000 B`. Not yet decided: the chart labels, the progress
+  line and the summary rows, `precise` rows that name no width.
 
 ### Governing decisions in other records, read and in force
 
