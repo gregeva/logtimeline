@@ -1538,6 +1538,124 @@ scenario_technique_documented_capabilities() {
         contract    'Issue #504 AC9, R8: the numeric thresholds and the outcome filters drive the markers as much as a pattern does'
 }
 
+# --- Scenario: the load-over-time page reads the pool's column as it is. ---
+# The thread-pool column counts the threads that finished a request in the
+# bucket, so at wide buckets it is the pool's size and a stall lowers it.
+# The page, its mirror and the user guide carry that reading and none of
+# the saturation reading it replaced. The phrases are joined across the
+# terminal page's reflow before matching, so a phrase broken over two lines
+# still matches; the command lines are verbatim and matched as drawn.
+scenario_load_over_time_reading() {
+    current_scenario="documented:load-over-time-reading"
+    echo "[$current_scenario]"
+    local result
+    result=$(run_ltl "documented-lot" --tw 80 --explain load-over-time)
+    local ec="${result%%:*}"
+    local out="${result#*:}"
+    check_capture_warnings "$out"
+    assert_exit "$ec" 0 \
+        asserts     "ltl --explain load-over-time exits 0" \
+        produced_by 'adapt_to_command_line_options() in ltl (--explain dispatch)' \
+        contract    'features/652-load-over-time-reading.md AC1-AC6: the page under assertion must render'
+
+    local mirror="$REPO_DIR/docs/explain/techniques.md"
+    local usage="$REPO_DIR/docs/usage.md"
+    local f
+    for f in "$mirror" "$usage"; do
+        if [[ ! -s "$f" ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        asserts:     The document under assertion exists and is not empty"
+            echo "        produced_by: $f"
+            echo "        contract:    features/652-load-over-time-reading.md C7: the terminal page, the mirror and the user guide agree"
+            echo "        (missing or empty: $f)"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: missing $f")
+            return
+        fi
+    done
+
+    # The mirror's own section, cut from its heading to the next one, so a
+    # phrase elsewhere in the file cannot satisfy the page's assertion.
+    local mirror_section="$TMP_DIR/documented-lot-mirror.txt"
+    awk '/^### Load Over Time/{on=1; print; next} on && /^##/{on=0} on' "$mirror" > "$mirror_section"
+    if [[ ! -s "$mirror_section" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     The mirror carries a Load Over Time section"
+        echo "        produced_by: docs/explain/techniques.md"
+        echo "        contract:    features/652-load-over-time-reading.md C7"
+        echo "        (no '### Load Over Time' heading in $mirror)"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: mirror section missing")
+        return
+    fi
+
+    local page_joined="$TMP_DIR/documented-lot-page.joined"
+    local mirror_joined="$TMP_DIR/documented-lot-mirror.joined"
+    perl -0pe 's/\s+/ /g' "$out" > "$page_joined"
+    perl -0pe 's/\s+/ /g' "$mirror_section" > "$mirror_joined"
+
+    local target label file
+    for target in "page:$page_joined" "mirror:$mirror_joined"; do
+        label="${target%%:*}"
+        file="${target#*:}"
+
+        # AC1: the saturation reading is gone.
+        local phrase
+        for phrase in 'pinned at its ceiling' 'clearest capacity signal' 'queue forming behind a limit'; do
+            assert_no_line "$file" \
+                pattern     "$phrase" \
+                asserts     "The load-over-time $label no longer reads a pool at its size as saturation ('$phrase')" \
+                produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
+                contract    'features/652-load-over-time-reading.md AC1, D1: at wide buckets a count at the pool size is the pool size, busy or quiet'
+        done
+
+        # AC2: the three readings, each on its fixed phrase.
+        assert_line "$file" \
+            pattern     "the column reads the pool's size whether the hour was busy or quiet" \
+            asserts     "The load-over-time $label states that at wide buckets the pool column reads the pool's size" \
+            produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC2, C1'
+        assert_line "$file" \
+            pattern     "summed duration divided by the bucket's length is the average number of requests in flight" \
+            asserts     "The load-over-time $label states that concurrency is summed duration over bucket length" \
+            produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC2, C2'
+        assert_line "$file" \
+            pattern     "a count below what the same request rate produced in the minutes before" \
+            asserts     "The load-over-time $label states that saturation is a count below what the same request rate produced before" \
+            produced_by '%explain_topics in ltl (the load-over-time reading) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC2, C3, D4: the comparison is stated in plain words, with no expected-count formula'
+    done
+
+    # AC5: the command block, matched on the unjoined lines as drawn.
+    for target in "page:$out" "mirror:$mirror_section"; do
+        label="${target%%:*}"
+        file="${target#*:}"
+        assert_line "$file" \
+            pattern     'ltl -tpas -bs 1h ' \
+            asserts     "The load-over-time $label carries an hour-wide command, which reads the pool's size and the duration" \
+            produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC5, C6'
+        assert_line "$file" \
+            pattern     'ltl -tpas -bs 1 -st [^ ]+ -et [^ ]+ ' \
+            asserts     "The load-over-time $label carries a one-minute command narrowed to a window, to see a shortfall" \
+            produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC5, C6'
+        assert_no_line "$file" \
+            pattern     'ceiling being reached|-bs 10 .*ceiling' \
+            asserts     "No load-over-time $label command claims a ceiling is seen at ten-minute buckets" \
+            produced_by '%explain_topics in ltl (the load-over-time command block) and docs/explain/techniques.md' \
+            contract    'features/652-load-over-time-reading.md AC5, C6: at ten minutes most buckets of a busy server already read the pool size'
+    done
+
+    # AC6: the user guide no longer claims the column reveals saturation.
+    assert_no_line "$usage" \
+        pattern     'thread exhaustion, pool saturation' \
+        asserts     "docs/usage.md Thread Pool Activity no longer says the column reveals thread exhaustion and pool saturation" \
+        produced_by 'docs/usage.md (Thread Pool Activity)' \
+        contract    'features/652-load-over-time-reading.md AC6, D5: the user guide and the explanation agree'
+}
+
 # --- Scenario: no internals leak into the technique pages (AC10). ---
 # No Perl identifier, issue number or decision label may reach a rendered
 # page or the mirror. The page is user-facing prose.
@@ -1887,6 +2005,7 @@ scenario_register all-topics-render \
                   technique-signals \
                   topic-intro-matches-category \
                   documented:cross-log-marker-states \
+                  documented:load-over-time-reading \
                   technique-no-internals \
                   mirror:techniques \
                   wiki-sync-map \
@@ -1918,6 +2037,7 @@ while read -r _scenario; do
         technique-signals                 ) scenario_technique_signals ;;
         topic-intro-matches-category      ) scenario_topic_intro_matches_category ;;
         documented:cross-log-marker-states) scenario_technique_documented_capabilities ;;
+        documented:load-over-time-reading ) scenario_load_over_time_reading ;;
         technique-no-internals            ) scenario_technique_no_internals ;;
         mirror:techniques                 ) scenario_technique_mirror ;;
         wiki-sync-map                     ) scenario_wiki_sync_map ;;

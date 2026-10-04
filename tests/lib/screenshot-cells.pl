@@ -9,6 +9,7 @@
 #   screenshot-cells.pl ticks   SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD
 #   screenshot-cells.pl heatmap SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD LAYOUT GRADIENT
 #   screenshot-cells.pl edges   SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD
+#   screenshot-cells.pl png     SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD PNG
 #
 # CAPTURE is ltl's standard output; FIRST and LAST are the crop's rows (from 1),
 # COL_FIRST and COL_STOP its columns (from 0, stop exclusive); PAD is the
@@ -178,6 +179,30 @@ if ( $mode eq 'heatmap' ) {
     report("$blocks heatmap cells: each in a colour of the reported gradient, each present in the image");
 }
 
+# A PNG's pixels, read through sips as BMP (macOS): width, height and a
+# reader returning the red, green and blue of the pixel at x, y from the top left.
+sub bitmap {
+    my ($png) = @_;
+    my $dir = tempdir( CLEANUP => 1 );
+    system("sips -s format bmp '$png' --out '$dir/r.bmp' >/dev/null 2>&1") == 0 or die "sips failed on $png\n";
+    open my $b, '<:raw', "$dir/r.bmp" or die $!;
+    my $bmp = do { local $/; <$b> };
+    my ($offset) = unpack 'V', substr $bmp, 10, 4;
+    my ( $bw, $bh ) = unpack 'l<l<', substr $bmp, 18, 8;
+    my ($bpp) = unpack 'v', substr $bmp, 28, 2;
+    my $top_down = $bh < 0;
+    $bh = abs $bh;
+    my $stride = int( ( $bw * $bpp / 8 + 3 ) / 4 ) * 4;
+    return { w => $bw, h => $bh, at => sub {
+        my ( $px, $py ) = @_;
+        my $row = $top_down ? $py : $bh - 1 - $py;
+        my ( $bb, $gg, $rr ) = unpack 'CCC', substr $bmp, $offset + $row * $stride + $px * $bpp / 8, 3;
+        return ( $rr, $gg, $bb );
+    } };
+}
+
+sub rgb_of { return map { hex } $_[0] =~ /^#(..)(..)(..)$/ }
+
 if ( $mode eq 'edges' ) {
     # Criterion 11: as displayed (Quick Look, WebKit), a full block sits within
     # its own columns: sampled just inside its left and right edges it is its
@@ -189,26 +214,16 @@ if ( $mode eq 'edges' ) {
     print {$out} $fit;
     close $out;
     system("qlmanage -t -s 3200 -o '$dir' '$dir/fit.svg' >/dev/null 2>&1") == 0 or die "qlmanage failed\n";
-    system("sips -s format bmp '$dir/fit.svg.png' --out '$dir/r.bmp' >/dev/null 2>&1") == 0 or die "sips failed\n";
-    open my $b, '<:raw', "$dir/r.bmp" or die $!;
-    my $bmp = do { local $/; <$b> };
-    my ($offset) = unpack 'V', substr $bmp, 10, 4;
-    my ( $bw, $bh ) = unpack 'l<l<', substr $bmp, 18, 8;
-    my ($bpp) = unpack 'v', substr $bmp, 28, 2;
-    my $top_down = $bh < 0;
-    $bh = abs $bh;
-    my $stride = int( ( $bw * $bpp / 8 + 3 ) / 4 ) * 4;
+    my $bitmap = bitmap("$dir/fit.svg.png");
     my $scale = 3200 / $sw;
     my $samples = 0;
     for my $r ( 0 .. $rows - 1 ) {
         for my $c ( 0 .. $cols - 1 ) {
             next unless $image[$r][$c]{ch} eq "\x{2588}";
-            my @want = map { hex } $image[$r][$c]{fg} =~ /^#(..)(..)(..)$/;
+            my @want = rgb_of( $image[$r][$c]{fg} );
             my $y = $oy + $r * CELL_HEIGHT + CELL_HEIGHT / 2;
             for my $x ( $ox + $c * CELL_WIDTH + 1.5 / $scale, $ox + ( $c + 1 ) * CELL_WIDTH - 1.5 / $scale ) {
-                my ( $px, $py ) = ( int( $x * $scale ), int( $y * $scale ) );
-                my $row = $top_down ? $py : $bh - 1 - $py;
-                my ( $bb, $gg, $rr ) = unpack 'CCC', substr $bmp, $offset + $row * $stride + $px * $bpp / 8, 3;
+                my ( $rr, $gg, $bb ) = $bitmap->{at}->( int( $x * $scale ), int( $y * $scale ) );
                 $samples++;
                 push @problems, sprintf( 'row %d column %d: pixel #%02x%02x%02x, not the block colour %s', $first + $r, $col_first + $c, $rr, $gg, $bb, $image[$r][$c]{fg} )
                     if grep { abs( ( $rr, $gg, $bb )[$_] - $want[$_] ) > 24 } 0 .. 2;
@@ -217,6 +232,39 @@ if ( $mode eq 'edges' ) {
     }
     push @problems, 'no full-block cells in the crop' unless $samples;
     report("$samples edge samples: every full block fills its own columns as displayed");
+}
+
+if ( $mode eq 'png' ) {
+    # Criterion 17: the PNG the tool wrote beside the SVG is the SVG drawn 1:1,
+    # one pixel per unit: its size is the SVG's, its corners are the image's
+    # background, and every full block, sampled at its cell's centre, is its
+    # colour, so the drawing is neither shifted nor scaled (D24, D25).
+    my $png_file = $rest[0] // die "png mode needs the PNG\n";
+    my ( $sw, $sh ) = $svg =~ /<svg [^>]*width="([\d.]+)" height="([\d.]+)"/ or die "no width and height on $svg_file\n";
+    my $bitmap = bitmap($png_file);
+    if ( $bitmap->{w} != $sw || $bitmap->{h} != $sh ) {
+        push @problems, "the PNG is $bitmap->{w} x $bitmap->{h} pixels, the SVG $sw x $sh units";
+        report('');
+    }
+    my @bg = rgb_of($base_bg);
+    for my $corner ( [ 0, 0 ], [ $sw - 1, 0 ], [ 0, $sh - 1 ], [ $sw - 1, $sh - 1 ] ) {
+        my @got = $bitmap->{at}->(@$corner);
+        push @problems, sprintf( 'corner %d,%d: pixel #%02x%02x%02x, not the background %s', @$corner, @got, $base_bg )
+            if grep { abs( $got[$_] - $bg[$_] ) > 2 } 0 .. 2;
+    }
+    my $samples = 0;
+    for my $r ( 0 .. $rows - 1 ) {
+        for my $c ( 0 .. $cols - 1 ) {
+            next unless $image[$r][$c]{ch} eq "\x{2588}";
+            my @want = rgb_of( $image[$r][$c]{fg} );
+            my @got  = $bitmap->{at}->( int( $ox + ( $c + 0.5 ) * CELL_WIDTH ), int( $oy + ( $r + 0.5 ) * CELL_HEIGHT ) );
+            $samples++;
+            push @problems, sprintf( 'row %d column %d: pixel #%02x%02x%02x at the cell centre, not the block colour %s', $first + $r, $col_first + $c, @got, $image[$r][$c]{fg} )
+                if grep { abs( $got[$_] - $want[$_] ) > 24 } 0 .. 2;
+        }
+    }
+    push @problems, 'no full-block cells in the crop' unless $samples;
+    report("$samples full blocks at their cell centres and 4 corners: the PNG is the SVG drawn 1:1");
 }
 
 die "unknown mode '$mode'\n";

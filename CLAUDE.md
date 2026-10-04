@@ -162,6 +162,10 @@ about anything else, these still hold.
       See `tests/HARNESS-DESIGN.md` § Invocation coherence.
 - [ ] The `full`, `xl` and `all` benchmark tiers are release instruments, never
       development tools.
+- [ ] Both sides of a before/after benchmark run from the same kind of checkout:
+      identical code measures 1.9% slower from a worktree under the scratchpad
+      than from the main checkout, so a pair is two worktrees side by side, or
+      the main checkout twice, never one of each.
 - [ ] Benchmark results, analysis reports and comparisons under `tests/` are
       deliverables: never overwritten for a test or a debug run. Use a separate
       label or a scratch copy.
