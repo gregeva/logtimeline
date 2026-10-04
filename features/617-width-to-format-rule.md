@@ -495,9 +495,23 @@ issue body; they are restated here, not reinterpreted.
   the value's most exact spelling, its integer part has at most five digits, it
   fits, and it is no wider than the spelling the intent's walk chose. 1,800 in
   a notice reads `1800`, not `2 thousand`; 1,234,567 stays `1.2M`; 1,800 ms
-  stays `1.8 s` (`1800ms` is wider). Not locked: whether rows that name
-  their tier (the legend, the chart labels, the fixed cells) also consider it;
-  implemented for walking rows only, pending the architect's answer.
+  stays `1.8 s` (`1800ms` is wider). **Amended by D26.**
+- **D26 — The unclimbed value on every row, its digits set by the intent and
+  the width; `-pv` is an intent switch** (locked by the architect 2026-10-04).
+  Rows that name their tier also consider the value unclimbed ("That sounds
+  like a reasonable rule"). How many digits it may carry depends on the intent
+  and the space: "If we have the possibility to print to seven characters, and
+  ... the value is a six character wide value, and the intent is precise, then
+  it should print a precise value ... If available character width is four,
+  then the rule of applying five characters allowed before truncation occurs is
+  wrong." For `precise`, as many digits as the width allows; for `tabular` and
+  `prose`, at most five digits, within the width and no wider than the climbed
+  spelling. `-pv` switches the legend's values from `tabular` to `precise`
+  ("the option precise values would essentially change the intent for those
+  values"): the legend is `tabular` by default, which amends the surface
+  assignment of D23 (legend totals and rates were `precise`). Not yet decided:
+  what a `precise` row that names no width (chart labels, progress line,
+  summary) allows.
 
 ### Governing decisions in other records, read and in force
 
