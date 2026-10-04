@@ -157,15 +157,15 @@ scenario_count_spelling() {
         produced_by 'print_bar_graph() in ltl, the count column, through format_number() (the count arm of value_text())' \
         contract    "$CONTRACT D1, D3, D12, D25"
     assert_command \
-        command     "check tokens --file '$TMP_DIR/cs-heatmap.txt' --line 'heatmap \\[count\\]' --each '1\\.5k' --min 2" \
-        label       'the heatmap header reads 1.5k at both ends' \
-        asserts     'The heatmap header renders its minimum and maximum through the chart label budget (medium, tight): 1.5k' \
+        command     "grep -E 'heatmap \\[count\\]' '$TMP_DIR/cs-heatmap.txt' | $PERL -ne '@t = /(?<![\\w.])(\\d[\\d.]*)(?![\\w.])/g; exit !(@t >= 2 && !grep { \$_ ne \"1500\" } @t)'" \
+        label       'the heatmap header reads 1500 at both ends' \
+        asserts     'The heatmap header renders its minimum and maximum through the chart label budget: 1,500 unclimbed, exact and no wider than 1.5k (D26)' \
         produced_by 'get_heatmap_column_header() in ltl, through value_text() and the chart label budget row' \
         contract    "$CONTRACT D2, D9"
     assert_command \
-        command     "check tokens --file '$TMP_DIR/cs-histogram.txt' --line 'P50:' --after 'P\\d+(?:\\.\\d+)?' --each '1\\.5k' --min 2" \
-        label       'the histogram percentile legend reads 1.5k' \
-        asserts     'The histogram percentile legend names the chart label budget, as the heatmap header does, so one value prints one string on both' \
+        command     "grep -E 'P50:' '$TMP_DIR/cs-histogram.txt' | $PERL -ne '@t = /P\\d+(?:\\.\\d+)?: *(\\S+)/g; exit !(@t >= 2 && !grep { \$_ ne \"1500\" } @t)'" \
+        label       'the histogram percentile legend reads 1500, as the timeline and the heatmap header do' \
+        asserts     'One value prints one string on every surface: the timeline column, the heatmap header and the histogram legend all show 1,500 unclimbed (D25, D26)' \
         produced_by 'render_histogram_legend() in ltl, through value_text() and the chart label budget row' \
         contract    "$CONTRACT D1, D2, D9"
     assert_command \
@@ -541,17 +541,19 @@ scenario_axis_tick() {
     for ((i = 0; i < 300; i++)); do printf '192.0.2.43 - - [07/May/2025:00:00:%02d +0000] "GET /vd/axis HTTP/1.1" 200 512 2000\n' $((i % 60)) >> "$gen"; done
     render at "$gen" -bs 1440 -oe -n 0 -hg duration --terminal-width 160 || return 0
     assert_command \
-        command     "$PERL -ne 'print \"\$1\\n\" if /^\\s*(\\S+) [^\\x00-\\x7f]/ && \$1 !~ /^(?:0|timestamp)\$/' '$TMP_DIR/at.txt' > '$TMP_DIR/at-ticks' && grep -qx '1.2k' '$TMP_DIR/at-ticks' && [[ \$(sort '$TMP_DIR/at-ticks' | uniq -d | wc -l) -eq 0 ]]" \
-        label       'the top tick reads 1.2k and no two ticks read alike' \
-        asserts     'The y-axis tick names the axis tick budget (medium, tight, the six-character label field): 1,155 reads 1.2k, never 1k above 866' \
+        command     "$PERL -ne 'print \"\$1\\n\" if /^\\s*(\\S+) [^\\x00-\\x7f]/ && \$1 !~ /^(?:0|timestamp)\$/' '$TMP_DIR/at.txt' > '$TMP_DIR/at-ticks' && grep -qx '1155' '$TMP_DIR/at-ticks' && [[ \$(sort '$TMP_DIR/at-ticks' | uniq -d | wc -l) -eq 0 ]]" \
+        label       'the top tick reads 1155 and no two ticks read alike' \
+        asserts     'The y-axis tick names the axis tick budget (the six-character label field): 1,155 reads 1155 unclimbed (D26), never 1k above 866' \
         produced_by 'render_histogram_row() in ltl, through value_text() and the axis tick row' \
-        contract    "$CONTRACT D1, D8, D9; correction 6"
+        contract    "$CONTRACT D1, D8, D9, D26; correction 6"
 }
 
 # ---------------------------------------------------------------------------
 # exact-counts (AC13): tables and the summary print exact occurrence counts;
-# the legend keeps its tier, and under -pv reads exact. Generated: 1,200
-# lines of the verification format whose duration satisfies neither outcome.
+# the legend shows a count unclimbed up to five digits and keeps its tier
+# above, and under -pv (the precise intent) reads exact. Generated: 1,200 and
+# 123,456 lines of the verification format whose duration satisfies neither
+# outcome.
 # ---------------------------------------------------------------------------
 scenario_exact_counts() {
     current_scenario="exact-counts"
@@ -559,7 +561,10 @@ scenario_exact_counts() {
     local gen="$TMP_DIR/exact-1200.txt"
     "$PERL" -e 'for my $i (0..1199) { printf "VERIFY CLS 2025-06-01 10:%02d:%02d.000 level=INFO thread=worker-1 object=Store took=1500 cache warm\n", int($i/60) % 60, $i % 60 }' > "$gen"
     render ec "$gen" -lf classification_verification -bs 1440 -n 1 --terminal-width 160 || return 0
-    render ec-pv "$gen" -lf classification_verification -bs 1440 -n 1 -pv --terminal-width 160 || return 0
+    local big="$TMP_DIR/exact-123456.txt"
+    "$PERL" -e 'for my $i (0..123455) { printf "VERIFY CLS 2025-06-01 %02d:%02d:%02d.000 level=INFO thread=worker-1 object=Store took=1500 cache warm\n", int($i/3600) % 24, int($i/60) % 60, $i % 60 }' > "$big"
+    render ec-big "$big" -lf classification_verification -bs 1440 -oe -n 1 --terminal-width 160 || return 0
+    render ec-big-pv "$big" -lf classification_verification -bs 1440 -oe -n 1 -pv --terminal-width 160 || return 0
     assert_command \
         command     "grep -E 'cache warm' '$TMP_DIR/ec.txt' | grep -qE ' 1200 ' && grep -qE '^ +LINES READ +1200 ' '$TMP_DIR/ec.txt' && grep -qE '^ +INFO +1200 \\(100%\\)' '$TMP_DIR/ec.txt'" \
         label       'the messages table and the summary read 1200' \
@@ -567,11 +572,11 @@ scenario_exact_counts() {
         produced_by 'print_message_summary() and print_summary_table() in ltl (the exact count row)' \
         contract    "$CONTRACT D5"
     assert_command \
-        command     "grep -qE '^ 2025-06-01 00:00 INFO: 1\\.2k ' '$TMP_DIR/ec.txt' && grep -qE '^ 2025-06-01 00:00 INFO: 1200 ' '$TMP_DIR/ec-pv.txt'" \
-        label       'the legend reads 1.2k, and 1200 under -pv' \
-        asserts     'The legend keeps its tier; the precise-values switch makes it exact' \
+        command     "grep -qE '^ 2025-06-01 00:00 INFO: 1200 ' '$TMP_DIR/ec.txt' && grep -qE '^ 2025-06-01 00:00 INFO: 123\\.5k ' '$TMP_DIR/ec-big.txt' && grep -qE '^ 2025-06-01 00:00 INFO: 123456 ' '$TMP_DIR/ec-big-pv.txt'" \
+        label       'the legend reads 1200 and 123.5k, and 123456 under -pv' \
+        asserts     'The legend shows a count of five digits or fewer unclimbed (D26); above, it keeps its tier, and -pv names the precise intent: the exact value' \
         produced_by 'legend_category_total() in ltl, through value_text() and the legend total row' \
-        contract    "$CONTRACT D5, D17"
+        contract    "$CONTRACT D5, D17, D26"
 }
 
 scenario_register count-spelling fixed-budget-sweep zero-duration floor-unit cv-agreement user-defined-kind rate-suffix fit-sweep common-maxima boundary-carry messages-total axis-tick exact-counts no-trailing-zero

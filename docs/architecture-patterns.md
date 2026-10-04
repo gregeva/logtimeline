@@ -529,13 +529,16 @@ a metric's declared unit), and the name of a budget table row (`%value_budget`),
 plus a width where the surface has one. A row names a tier (short, medium,
 long: how far the number is abbreviated), a fit (tight or loose: the space
 before the unit), a width where fixed, a precision where a record locks one,
-and the surface's intent. A row that names no tier walks for one
+and the surface's intent (`accurate`, `tabular` or `prose`; `precise`, the exact
+value, only where a row names the switch that asks for it, as `-pv` does for
+the legend). A row that names no tier walks for one
 (`value_column()`, `value_walk_row()`): its intent (`%value_intent`) is a
 tolerance and an order of what gives way, and the walk takes the first step at
 which every value the surface shows fits and stays within that tolerance of its
 most exact spelling. The digits come from the producer: the row's precision,
 else the tier's maximum (`%tier_decimals`), never finer than the source's
-resolution. A value rounding up to the next step's size renders at that step;
+resolution. A value of up to five digits shows unclimbed where that is exact
+and no wider (`1800`, never `1.8k`). A value rounding up to the next step's size renders at that step;
 trailing fractional zeros are stripped by `strip_trailing_zeros()`. The per-kind
 formatters (`format_time`, `format_bytes`, `format_number`, `format_cv_display`,
 `format_percentage`) are the dispatch's arms and have no other caller.

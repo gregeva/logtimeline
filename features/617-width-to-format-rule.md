@@ -1340,6 +1340,25 @@ lines) - 1800 lines were not counted`. The *common-maxima* scenario moved to a
 seven-digit count (`value-display-count-maxima.txt`, 1,140,000), which never
 shows unclimbed.
 
+**D26 (2026-10-04): four intents, the unclimbed value on every row.**
+`%value_intent` holds `accurate` (what D23 called `precise`), `tabular` and
+`prose`; `precise` is asked for, not assigned: a row names the switch it obeys
+(`precise_switch`, `\$precise_values` for the legend totals) and, switched on,
+shows the exact value unclimbed, every digit, falling back to the row's own
+intent where that does not fit its width. The legend is `tabular` (its totals
+`precise` under `-pv`); the chart labels, the progress line and the summary rows
+`accurate`; the `_nice` cells `tabular`. Every row but one fixing significant
+digits weighs the value unclimbed up to five digits. Goldens moved: 129 values
+in 47 files, every one a count shown unclimbed on a fixed-tier row (the legend's
+`2.4k` reads `2395`; chart labels and axis ticks alike). AC1 now holds outright:
+a count of 1,500 reads `1500` on the timeline, the heatmap header and the
+histogram legend. AC13 reads: the tables and the summary print `1200`, the
+legend `1200` (unclimbed) and, for 123,456 lines, `123.5k`, and `123456` under
+`-pv`. AC22 reads: the top y-axis tick of 1,155 samples reads `1155`, and no
+two ticks read alike. No surface names a width together with a precise switch
+yet, so the fallback has no consumer to assert against; it is exercised the
+first time one does.
+
 **Merge gate:** `$version_number` restored; the full harness suite on the final
 commit (`CI=1` CSV output, then statistics, then the rest); the before/after
 benchmark on this machine; `validate-help-content`; the golden diff

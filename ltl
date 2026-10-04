@@ -953,9 +953,12 @@ my @value_walk = ( [ long => 'loose' ], [ medium => 'loose' ], [ medium => 'tigh
 # decimals within the tolerance, 'fewest' gives up every decimal the tolerance
 # allows even with room. A surface names its intent in its budget row; a
 # surface whose row names no tier takes the first step at which every value
-# it shows fits, and the reference where none does.
+# it shows fits, and the reference where none does. The precise intent is not
+# in this table: it is asked for explicitly (a row's precise_switch, -pv for
+# the legend) and shows the exact value, unclimbed, every digit, falling back
+# to the row's own intent where that does not fit.
 my %value_intent = (
-    precise => {    # a value read on its own terms: no voluntary trade
+    accurate => {   # a value read on its own terms: no voluntary trade
         tolerance => 0,
         walk      => [ [ long => 'loose', 'exact' ], [ medium => 'loose', 'exact' ], [ medium => 'tight', 'exact' ],
                        [ short => 'loose', 'exact' ], [ short => 'tight', 'exact' ] ],
@@ -970,6 +973,8 @@ my %value_intent = (
         walk      => [ map { [ @$_, 'fewest' ] } @value_walk ],
     },
 );
+
+my $precise_values = 0;     # -pv: the precise intent for the rows whose precise_switch names it (the legend totals)
 
 # The budget table: one row per display surface with a fixed budget. A row
 # names the tier (short, medium, long: how far a number is abbreviated), the
@@ -989,19 +994,19 @@ my %value_budget = (
     'cv cell'          => { tier => 'long',   width => 4 },
     'axis tick'        => { tier => 'medium', fit => 'tight', width => 6 },
     'chart label'      => { tier => { duration => 'short', bytes => 'short', default => 'medium' },
-                            fit  => { bytes => 'loose', default => 'tight' }, intent => 'precise' },
+                            fit  => { bytes => 'loose', default => 'tight' }, intent => 'accurate' },
     'dimensions line'  => { tier => { duration => 'short', bytes => 'short', default => 'medium' }, fit => 'tight' },
-    'legend total'     => { tier => 'short',  fit => 'tight', intent => 'precise', exact_under_precise => 1 },
-    'legend rate'      => { tier => 'medium', fit => 'tight', intent => 'precise' },
-    'progress'         => { tier => 'medium', fit => 'tight', intent => 'precise' },
+    'legend total'     => { tier => 'short',  fit => 'tight', intent => 'tabular', precise_switch => \$precise_values },
+    'legend rate'      => { tier => 'medium', fit => 'tight', intent => 'tabular' },
+    'progress'         => { tier => 'medium', fit => 'tight', intent => 'accurate' },
     'notice'           => { intent => 'prose' },
     'notice exact'     => { exact => 1 },          # a count a list beside it must agree with
     'notice share'     => { percentage => { mode => 'significant', digits => 3 } },
-    'summary timing'   => { tier => 'medium', fit => 'loose', intent => 'precise' },
-    'summary memory'   => { tier => 'medium', fit => 'loose', intent => 'precise' },
-    'memory breakdown' => { tier => 'medium', fit => 'loose', intent => 'precise', decimals => 0 },
-    'export duration'  => { tier => 'long',   fit => 'loose', intent => 'precise', significant => 3 },
-    'nice cell'        => { tier => 'medium', fit => 'loose', intent => 'precise' },
+    'summary timing'   => { tier => 'medium', fit => 'loose', intent => 'accurate' },
+    'summary memory'   => { tier => 'medium', fit => 'loose', intent => 'accurate' },
+    'memory breakdown' => { tier => 'medium', fit => 'loose', intent => 'accurate', decimals => 0 },
+    'export duration'  => { tier => 'long',   fit => 'loose', intent => 'accurate', significant => 3 },
+    'nice cell'        => { tier => 'medium', fit => 'loose', intent => 'tabular' },
     'progress percent' => { percentage => { mode => 'integer', width => 3, floor => 1 } },
     'share cell'       => { percentage => { mode => 'significant', digits => 3 } },
     'share row'        => { percentage => { mode => 'significant', digits => 3, parens => 1 } },
@@ -1016,7 +1021,6 @@ my $bucket_size_unit = 'm';
 
 my $pause_output = 0;
 my $omit_values = 0;
-my $precise_values = 0;
 my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 0 );
 # Unsatisfiable statistic sort (#418). Resolved once from the -so operand at parse
 # time and consulted at each of the three detection points (option parsing, before
@@ -14153,10 +14157,16 @@ sub value_text {
         }
         return $text;
     }
-    return $value if $row->{exact} || ( $row->{exact_under_precise} && $precise_values );
+    return $value if $row->{exact};
 
     my $kind = resolve_value_kind(%p);
     $row = value_walk_row( $kind, $row, $width, [$value], $p{unit} ) unless defined $row->{tier};
+    if ( $row->{precise_switch} && ${ $row->{precise_switch} } ) {
+        # Precise, asked for: the exact value unclimbed, every digit; where it
+        # does not fit, the row's own intent renders it.
+        my ($text) = value_arm( $kind, $value, $p{unit}, { %$row, plain => 1 }, $tier_decimals{long} );
+        return $text if !defined $width || length($text) <= $width;
+    }
     my $reference = ( $row->{digits} // '' ) eq 'fewest' ? value_reference( $kind, $value, $p{unit}, $row, $width ) : undef;
     my ($text) = value_spelling( $kind, $value, $p{unit}, $row, $width, $reference );
     return $text;
@@ -14187,15 +14197,15 @@ sub value_distance {
 # A value's spelling at the row's tier and fit: the most decimals, up to the
 # tier's maximum (or the precision the row fixes), that fit the width; with a
 # reference and the row's digits 'fewest', the fewest decimals within the
-# intent's tolerance of it. A row the walk resolved also weighs the value
-# unclimbed, at its floor step, and takes it when its integer part has at most
-# five digits, it is no wider, and it is at least as exact as the climbed
-# spelling (1,800 reads 1800, never 1.8 thousand). Returns the text and the
-# value it shows.
+# intent's tolerance of it. Every row (except one that fixes significant
+# digits) also weighs the value unclimbed, at its floor step, and takes it when
+# its integer part has at most five digits, it fits, it is no wider, and it is
+# at least as exact as the climbed spelling (1,800 reads 1800, never 1.8
+# thousand or 1.8k). Returns the text and the value it shows.
 sub value_spelling {
     my ($kind, $value, $unit, $row, $width, $reference) = @_;
     my @spelling = value_climbed_spelling( $kind, $value, $unit, $row, $width, $reference );
-    return @spelling unless $row->{walked} && !$row->{plain} && $kind->{kind} =~ /^(?:duration|bytes|count|rate)$/;
+    return @spelling if $row->{plain} || $row->{significant} || $kind->{kind} !~ /^(?:duration|bytes|count|rate)$/;
     my @plain = value_climbed_spelling( $kind, $value, $unit, { %$row, plain => 1, digits => undef }, $width );
     return @plain if $plain[0] =~ /^-?\d{1,5}(?:\D|$)/
                   && length( $plain[0] ) <= length( $spelling[0] )
@@ -14243,7 +14253,7 @@ sub value_reference {
 # the width has forced the loss.
 sub value_walk_row {
     my ($kind, $row, $width, $values, $unit) = @_;
-    my $intent = $value_intent{ $row->{intent} // 'precise' };
+    my $intent = $value_intent{ $row->{intent} // 'accurate' };
     my @values = grep { defined } @$values;
     my @references = map { value_reference( $kind, $_, $unit, $row, $width ) } @values;
     for my $step ( @{ $intent->{walk} } ) {
