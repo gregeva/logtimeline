@@ -523,6 +523,10 @@ issue body; they are restated here, not reinterpreted.
   a surface for us to be able to call on in future to be able to toggle
   precision for other render points". The architect: "Yeah, effectively, this
   feels a lot better."
+  **Fallback locked (2026-10-04):** a `precise` value that does not fit its
+  space renders as the surface's default intent would, so a cell never
+  truncates and never overflows (`1002ms` fits a six-character P99 cell;
+  `177644ms` does not, and falls back to `2.96 min` or its tier's spelling).
 
 ### Governing decisions in other records, read and in force
 
