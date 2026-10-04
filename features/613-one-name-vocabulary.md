@@ -697,6 +697,27 @@ object` is given (D16). No per-line test is added to a run that names none of
 them. `single-day-access-log-standard`, `613-before` captured on the base commit
 before the first line of code, `613-after` at the gate.
 
+**Measured at the completion gate, 2026-10-04,** on the commit with
+`$version_number` restored (b3d562d), against the base (12712ae), both from the
+main checkout on the development host, `single-day-access-log-standard`.
+`parse/read_files` in seconds, six pairs:
+
+| Pair | Before | After |
+|---|---|---|
+| 1 (before at session start) | 8.464 | 8.419 |
+| 2, 3 (each side's runs back to back) | 8.363, 8.362 | 8.536, 8.525 |
+| 4, 5, 6 (interleaved, before then after) | 8.419, 8.452, 8.409 | 8.373, 8.381, 8.349 |
+| Median of six | 8.414 | 8.400 |
+
+Pairs 2 and 3 alone read as a 1.9% regression; interleaved, the after build is
+faster in every pair, so the gap is the order the runs were taken in, not the
+code. No per-line test is added to a run that names no `-x`, `-d` or `-m`
+name. `detect/scan_sub_compile` reads 9 ms before and 10 ms after in every run
+(1 ms resolution). `log_messages` memory reads 27,480,793 bytes in five before runs and three
+after runs, and about 0.7% more in the other one before run and three after
+runs, the base build included: its size varies run to run.
+Verdict: no regression.
+
 **Prototype: none.** No new or changed data model, no new hot-path capability,
 and every criterion's verification method is known (`prototype/README.md`).
 
