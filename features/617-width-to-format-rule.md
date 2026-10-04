@@ -413,7 +413,7 @@ issue body; they are restated here, not reinterpreted.
   column-wide resolution stays (D10). Amends D1 and D11, whose fixed order
   (decimals give way first, the space second, the tier last) gave up a
   significant digit on 216 rendered values of the regression goldens. The
-  intents, their tolerances and each surface's intent are not yet locked.
+  intents, their tolerances and each surface's intent were locked below.
   **Refined by the architect (2026-10-04):** "it's the producer who is setting
   the number of significant digits. The intent is only providing preference
   mechanism for the width formatting and algorithm adaption to the various
@@ -434,7 +434,7 @@ issue body; they are restated here, not reinterpreted.
   only when the value still does not fit at the short tier with no space do the
   decimals give way. The unit is never cut (D10). The architect: "If you meant
   that the preference is to not give up digits in general, then this logic
-  holds." The tolerances and each surface's intent are not yet locked.
+  holds."
   **The tolerance's meaning, accepted by the architect (2026-10-04):** the
   reference is the most exact spelling that fits the width (the producer's
   digits, at the shortest tier and tightest fit); a loss the width forces is in
@@ -446,7 +446,23 @@ issue body; they are restated here, not reinterpreted.
   with room for six: the reference `12.2m`; `12 min` moves it 1.6%.
   **Tolerances locked by the architect (2026-10-04):** `precise` 0 (no
   voluntary trade), `tabular` 5%, `prose` 25%, each the most a voluntary trade
-  may move a value from the reference. Each surface's intent is not yet locked.
+  may move a value from the reference.
+  **Surface intents locked by the architect (2026-10-04):** `tabular` for the
+  timeline value columns (duration, bytes, count, user-defined, sessions, users,
+  thread pools), the success and failure count cells and the messages-table
+  total; `prose` for the notice counts that report a scale (the *notice* row of
+  § Notices); `precise` for the legend totals and rates, the chart labels, the
+  progress line, the summary timings and memory, the `_nice` CSV cells and the
+  aggregate export (unchanged output); no intent for the cells whose tier and
+  fit are named and whose decimals only the width removes (latency, CV, axis
+  tick, dimensions line) and for the exact counts (*exact count*, *notice
+  exact*). With room, `tabular` keeps the digit (9.7 min stays `9.7 min`); it
+  trades one only when the exact spelling does not fit the more readable tier.
+  The architect: "make sure that we'll have an easy way to change these in the
+  future, as we'll certainly have to tune some of them": every surface's intent
+  is a field of its budget table row (the width-passing surfaces have rows of
+  their own) and the tolerances are one table beside it, so a retune edits one
+  line and no call site.
 
 ### Governing decisions in other records, read and in force
 
