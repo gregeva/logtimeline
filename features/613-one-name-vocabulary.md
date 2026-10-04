@@ -842,8 +842,8 @@ help row reads them. Harness additions: `field-names` (message-expose),
 (help-content); each fails on the base build.
 
 **Finding: the object append and the key cut.** On the ThingWorx
-application-log fixture, 19 of the message keys under `-x object` reach the
-350-character cut that `-o` applies, and lose the appended object with
+application-log fixture, 51 of the 100 message keys a `-n 100 -o -x object`
+run retains reach the 350-character cut that `-o` applies, and lose the appended object with
 whatever else passes the cut, as 566 D8 (exposing a value does not move the
 cut) requires; every key under the cut ends ` object=<object>`. Criterion 17
 is asserted on the keys under the cut. The cut belongs to #619 (one per-run key
