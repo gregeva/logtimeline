@@ -105,6 +105,10 @@ issue body. D4–D7 were taken on 2026-08-27 during the audit walkthrough.
 
 `bytes` = sum of bytes, `duration` / `time` = total duration, `count` = sum of the
 count metric. The rule already holds uniformly in the code; it is now stated.
+*Amended by #613 (one vocabulary for names) D1, 2026-10-04:* `time` is not a
+metric name; on `-so` it still ranks by total duration for one release and
+prints a deprecation notice, as does `size` for bytes. The stored key each
+bare word ranks by is the built-in metric table's `sort_key` column.
 `occurrences` is not an exception to it — it is not a metric, it is how many messages
 matched, so there is nothing to sum.
 

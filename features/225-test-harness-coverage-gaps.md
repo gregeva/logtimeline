@@ -285,6 +285,8 @@ Semicolon-separated form matches the `histogram-bin-counters` (#189) precedent.
 
 **2026-09-13:** the `--exact-percentiles` deprecation warning (site 4, scenario 7) no longer exists. The flag was removed in #287 (message-stats bin-counter data model) as a declared breaking change; `tests/validate-runtime-config.sh` now asserts that `ltl` rejects the flag as an unknown option. The three remaining silent-override warnings are unaffected.
 
+**2026-10-04:** the `expose`, `discard` and `mask` rows list a built-in name (a metric, a parsed field, an identifier) in its canonical spelling whatever case it was given in, and a key written in the line as it was written (#613 D15, section 5.5; 567 D18 "lists the resolved names"). No key is added or renamed.
+
 **2026-10-02:** `-tp, --timestamp-precision` (#525) joins the per-flag rows as `timestamp-precision: <token>`, the canonical time-unit token (`m`, `s`, `ms`, `us`) whatever spelling was given; scenario `runtime-config-timestamp-precision` asserts it and that no row is emitted when `-tp` is not supplied. Its first emitter is the clamp of `-tp` to the precision the log's timestamps carry: `-tp ms` on a whole-second log reads `timestamp-precision: s; clamped from ms`, `-tp ns` on a microsecond log `us; clamped from ns` (`features/525-timestamp-precision-option.md` § 6.4, D4).
 
 Self-test result on landing: **23 passed, 0 failed.**

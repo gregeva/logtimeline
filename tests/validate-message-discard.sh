@@ -64,6 +64,7 @@ neutralize_colour_env
 # directory this harness created and owns.
 
 CONTRACT_DOC='features/567-discard-named-values-from-message.md'
+CONTRACT_613='features/613-one-name-vocabulary.md'
 PRODUCED_RESOLVE='adapt_to_command_line_options() in ltl, through resolve_discard_names() (the -d/--discard resolution into the field, substitution and metric lists)'
 PRODUCED_FIELD='read_and_process_logs() in ltl (the discarded-field clearing, applied where every ingest path has written the fields and nothing has read them)'
 PRODUCED_MESSAGE='read_and_process_logs() in ltl (the discard block, applied to the formed message after the exposed values are added and before the masks run)'
@@ -76,12 +77,13 @@ USERS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-users-sessions.t
 OBJECT_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
 METRICS_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
 QS_FIXTURE="$REPO_DIR/tests/fixtures/udm-counting-query-string.txt"
+VOCABULARY_FIXTURE="$REPO_DIR/tests/fixtures/message-vocabulary-access-keys.txt"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
 for f in "$DISCARD_FIXTURE" "$DOWNLOAD_FIXTURE" "$THREAD_FIXTURE" "$USERS_FIXTURE" \
-         "$OBJECT_FIXTURE" "$METRICS_FIXTURE" "$QS_FIXTURE"; do
+         "$OBJECT_FIXTURE" "$METRICS_FIXTURE" "$QS_FIXTURE" "$VOCABULARY_FIXTURE"; do
     if [[ ! -f "$f" ]]; then echo "ERROR: fixture not found: $f"; exit 1; fi
 done
 
@@ -314,6 +316,19 @@ check_same_csv() {
     fi
     echo "$what CSVs identical over $rows lines"
     return 0
+}
+
+# The category, message and occurrences columns of a MESSAGES CSV, written to
+# a file, so two runs whose metric columns differ can be compared on their
+# messages alone. Prints the path.
+message_columns() {
+    local csv="$1" out="$2"
+    "$PERL" -MText::CSV -e '
+        my $csv = Text::CSV->new({ binary => 1, eol => "\n" });
+        open my $fh, "<", $ARGV[0] or die "cannot open $ARGV[0]: $!\n";
+        while (my $row = $csv->getline($fh)) { $csv->print(*STDOUT, [ @$row[0 .. 2] ]) }
+    ' "$csv" > "$out"
+    printf '%s' "$out"
 }
 
 # A stderr file carries exactly one notice matching the pattern.
@@ -751,19 +766,62 @@ scenario_metrics() {
             contract    "$CONTRACT_DOC section Decisions D5"
     done
 
-    # The three duration spellings are one name (D14).
+    # 613 criteria 10 and 11 (D3, D12): duration is the metric, durationMS
+    # and durationMs are keys the ThingWorx probe reads it from. The fixture
+    # writes every duration key durationMS=.
+    local switch_off='^Note: -d/--discard removes the key %s, which the duration metric reads: the metric is switched off$'
+    run_messages od-duration -od "$METRICS_FIXTURE" || return 0
+    local od_msg="$MSG_CSV" od_stats="$STATS_CSV"
     run_messages dur-plain -d duration "$METRICS_FIXTURE" || return 0
-    local dur_msg="$MSG_CSV"
-    local spelling
-    for spelling in durationMs durationMS; do
-        run_messages "dur-$spelling" -d "$spelling" "$METRICS_FIXTURE" || return 0
-        assert_command \
-            command     "check_same_csv '$dur_msg' '$MSG_CSV' 'messages'" \
-            label       "-d $spelling is the same name as -d duration" \
-            asserts     'The three duration spellings name one metric, so all three produce the same run.' \
-            produced_by "$PRODUCED_RESOLVE" \
-            contract    "$CONTRACT_DOC section Decisions D14 - the three spellings are one name"
-    done
+    assert_command \
+        command     "check_same_csv '$od_msg' '$MSG_CSV' 'messages' && check_some_key_matches '$MSG_CSV' 'durationMS=[?]'" \
+        label       '-d duration nulls the metric and leaves durationMS=? in the message, as -od does' \
+        asserts     'Naming the metric switches it off and touches no key: the messages are those of -od, still reading durationMS=?.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D12; criterion 11"
+    assert_command \
+        command     "! grep -q 'switched off' '$RUN_ERR'" \
+        label       '-d duration prints no switch-off notice' \
+        asserts     'A metric named on -d is switched off without a notice, as its omit option does.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D12; criterion 11"
+
+    run_messages dur-durationMS -d durationMS "$METRICS_FIXTURE" || return 0
+    assert_command \
+        command     "check_no_key_matches '$MSG_CSV' 'durationMS|  |[?]&' && check_some_key_matches '$MSG_CSV' 'executed bytes=[?]'" \
+        label       '-d durationMS removes the pair whole, leaving no doubled space' \
+        asserts     'durationMS is a key: --discard removes the pair, masked value and separator with it, so no message carries durationMS, a doubled space or ?&.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D12 and D13; criterion 10"
+    assert_command \
+        command     "check_same_csv '$od_stats' '$STATS_CSV' 'statistics'" \
+        label       '-d durationMS switches the duration metric off: the statistics are those of -od' \
+        asserts     'The value of the metric is gone with its key, so the metric is switched off and no duration column survives.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D12; criterion 10"
+    assert_command \
+        command     "check_one_notice '$RUN_ERR' \"$(printf "$switch_off" durationMS)\"" \
+        label       '-d durationMS prints one switch-off notice naming the key and the duration metric' \
+        asserts     'Switching a metric off through its key says so, once, on stderr.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D12 (the switch-off notice); criterion 10"
+
+    # The switch-off is taken from the keys the probe declares, so durationMs
+    # switches duration off even on lines written durationMS=, and removes
+    # nothing from them (613 section 5.3).
+    run_messages dur-durationMs -d durationMs "$METRICS_FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$od_msg' '$MSG_CSV' 'messages' && check_same_csv '$od_stats' '$STATS_CSV' 'statistics'" \
+        label       '-d durationMs switches duration off and removes nothing from lines written durationMS=' \
+        asserts     'A key matches as written: durationMs is not in these lines, so the messages are those of -od, and the metric the probe reads from it is still switched off.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D3 and D12, section 5.3"
+    assert_command \
+        command     "check_one_notice '$RUN_ERR' \"$(printf "$switch_off" durationMs)\"" \
+        label       '-d durationMs prints one switch-off notice naming durationMs' \
+        asserts     'The notice names the key that switched the metric off.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D12, section 5.3"
 }
 
 # Criterion 9 (D12): a user-defined metric whose own key is discarded.
@@ -899,6 +957,160 @@ scenario_selection_unchanged() {
 # ---------------------------------------------------------------------------
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 SCENARIO_USAGE_NOTE="  (acceptance criteria 1-13 of $CONTRACT_DOC):)"
+# Issue #613 criteria 4, 5, 12 and 13: one name means one thing on -d, and a
+# key goes whole whether or not a mask replaced its value first. The
+# vocabulary fixture is six access-log lines whose query strings carry
+# elapsed= and v=, or Bytes=, time=, object= and v=.
+scenario_name_vocabulary() {
+    current_scenario="name-vocabulary"
+    echo "[$current_scenario]"
+
+    # Criterion 4 (D1): time is a key on -d.
+    run_messages d-time -xqs -d time "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "check_no_key_matches '$MSG_CSV' 'time=' && check_some_key_matches '$MSG_CSV' 'search[?]Bytes=7&object=9&v=4'" \
+        label       '-xqs -d time removes the time= pair and its separator' \
+        asserts     'time is not a metric name: on -d it is a key written in the line, removed with its value and one separator.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D1; criterion 4"
+    assert_command \
+        command     "head -1 '$STATS_CSV' | grep -q 'duration_'" \
+        label       'the latency columns are still written under -d time' \
+        asserts     'Discarding the time= key touches no metric: the duration statistics are still captured.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D1; criterion 4"
+
+    # Criterion 5 (D15): a built-in metric name in any case is the metric.
+    local pair name spelling
+    for pair in bytes:Bytes duration:DURATION; do
+        name="${pair%%:*}"; spelling="${pair##*:}"
+        run_messages "d-$name" -d "$name" "$VOCABULARY_FIXTURE" || return 0
+        local lower_msg="$MSG_CSV" lower_stats="$STATS_CSV"
+        run_messages "d-$spelling" -d "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
+        assert_command \
+            command     "check_same_csv '$lower_msg' '$MSG_CSV' 'messages' && check_same_csv '$lower_stats' '$STATS_CSV' 'statistics'" \
+            label       "-d $spelling gives the CSVs -d $name gives" \
+            asserts     "A built-in metric name matches in any case: -d $spelling switches the $name metric off, not a $spelling= key." \
+            produced_by 'resolve_message_name() in ltl, through builtin_metric_name()' \
+            contract    "$CONTRACT_613 D15; criterion 5"
+        assert_command \
+            command     "grep -qx 'discard: $name' '$RUN_OUT'" \
+            label       "-V runtime-config lists -d $spelling as $name" \
+            asserts     'A built-in name given in another case is listed in its canonical spelling.' \
+            produced_by "$PRODUCED_RESOLVE" \
+            contract    "$CONTRACT_613 section 5.5; criterion 5"
+    done
+
+    # Criterion 12 (D4, D12): the key a user-defined metric reads switches
+    # the metric off with a notice; the metric's name switches it off
+    # without one.
+    run_messages d-elapsed -udm 'lat::max:elapsed' -xqs -d elapsed -V udm-specs "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && check_one_notice '$RUN_ERR' '^Note: -d/--discard removes the key elapsed, which the -udm metric lat reads: the metric is switched off$'" \
+        label       '-d elapsed switches lat off with one notice' \
+        asserts     'Discarding the key a user-defined metric reads leaves the metric nothing to read: it is switched off, and the run says so.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D4 and D12; criterion 12"
+    assert_command \
+        command     "check_some_key_matches '$MSG_CSV' '^\\[200\\] GET /app/items[?]v=1\$' && check_no_key_matches '$MSG_CSV' '[?]&'" \
+        label       '-d elapsed leaves GET /app/items?v=1, with no ?&' \
+        asserts     'The pair goes whole although the metric masked its value first, so the query string reads ?v=1.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D12 and D13; criterion 12"
+    run_messages d-lat -udm 'lat::max:elapsed' -xqs -d lat -V udm-specs "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && ! grep -q 'switched off' '$RUN_ERR'" \
+        label       '-d lat switches lat off without a notice' \
+        asserts     'A user-defined metric named by its name on -d is switched off as a built-in metric named on -d is, without a notice.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D4; criterion 12"
+
+    # Criterion 13 (D12, D13): a mask and a discard give the same message in
+    # either order. Each pair runs once with a pattern metric masking the key
+    # value first and once without it.
+    run_messages masked-none -xqs -d elapsed "$VOCABULARY_FIXTURE" || return 0
+    local unmasked="$MSG_CSV"
+    run_messages masked-udm -xqs -udm 'lat::max:/elapsed=(\d+)/' -d elapsed "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$(message_columns "$unmasked" "$TMP_DIR/$current_scenario/elapsed-none.cols")' '$(message_columns "$MSG_CSV" "$TMP_DIR/$current_scenario/elapsed-udm.cols")' 'message columns' && check_no_key_matches '$MSG_CSV' '[?]&'" \
+        label       '-d elapsed gives the same messages whether a pattern metric masked elapsed first or not' \
+        asserts     'A discard removes its key whether or not a metric mask has already replaced the value, so the message does not depend on the order the two ran in.' \
+        produced_by 'discard_key_sub() in ltl (the mask placeholder accepted as a whole value)' \
+        contract    "$CONTRACT_613 D12 and D13; criterion 13"
+
+    local staged="$TMP_DIR/$current_scenario/staged.txt"
+    mkdir -p "$(dirname "$staged")"
+    printf '%s\n' \
+        '2026-01-26 10:00:01.000+0000 [L: INFO] [O: Obj] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Query executed tookMs=12 bytes=5' \
+        '2026-01-26 10:00:02.000+0000 [L: INFO] [O: Obj] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Query executed tookMs=30 bytes=7' \
+        '2026-01-26 10:00:03.000+0000 [L: INFO] [O: Obj] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] Connection peer=192.0.2.7 closed' \
+        > "$staged"
+    run_messages tookms-none -d tookMs "$staged" || return 0
+    local took_unmasked="$MSG_CSV"
+    run_messages tookms-udm -udm 't::max:/tookMs=(\d+)/' -d tookMs "$staged" || return 0
+    assert_command \
+        command     "check_same_csv '$(message_columns "$took_unmasked" "$TMP_DIR/$current_scenario/tookms-none.cols")' '$(message_columns "$MSG_CSV" "$TMP_DIR/$current_scenario/tookms-udm.cols")' 'message columns' && check_no_key_matches '$MSG_CSV' '  ' && check_some_key_matches '$MSG_CSV' 'Query executed bytes='" \
+        label       '-d tookMs leaves one space between its neighbours whether or not a pattern metric masked it first' \
+        asserts     'A space-separated pair goes with one separator, masked or not, so no doubled space remains.' \
+        produced_by 'discard_key_sub() in ltl' \
+        contract    "$CONTRACT_613 D12 and D13; criterion 13"
+    run_messages peer-none -d peer "$staged" || return 0
+    local peer_unmasked="$MSG_CSV"
+    run_messages peer-masked -m ipv4 -d peer "$staged" || return 0
+    assert_command \
+        command     "check_same_csv '$peer_unmasked' '$MSG_CSV' 'messages' && check_some_key_matches '$MSG_CSV' 'Connection closed'" \
+        label       '-m ipv4 -d peer gives the messages -d peer gives' \
+        asserts     'A key whose value an identifier mask would replace is discarded whole either way.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D13; criterion 13"
+}
+
+# Issue #613 criteria 6 and 14: field and identifier names match in any case,
+# and the identifiers -d names are removed in the order -m applies them
+# whatever order they were typed in.
+scenario_field_identifier_names() {
+    current_scenario="field-identifier-names"
+    echo "[$current_scenario]"
+
+    # Criterion 6 (D15).
+    local case fixture lower upper extra
+    for case in "$OBJECT_FIXTURE|object|Object|" "$USERS_FIXTURE|session|Session|" "$VOCABULARY_FIXTURE|query-string|Query-String|-xqs" "$DISCARD_FIXTURE|uuid|UUID|" "$DISCARD_FIXTURE|ip|IP|"; do
+        IFS='|' read -r fixture lower upper extra <<< "$case"
+        run_messages "case-$lower" $extra -d "$lower" "$fixture" || return 0
+        local lower_csv="$MSG_CSV"
+        run_messages "case-$upper" $extra -d "$upper" -V runtime-config "$fixture" || return 0
+        assert_command \
+            command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'discard: $lower' '$RUN_OUT'" \
+            label       "-d $upper is -d $lower, listed as $lower" \
+            asserts     "A built-in name matches in any case: -d $upper is the $lower field or identifier, not a key read from the line, and is listed in its canonical spelling." \
+            produced_by 'resolve_message_name() in ltl (the parsed-field and identifier tables, folded)' \
+            contract    "$CONTRACT_613 D15; criterion 6"
+    done
+
+    # Criterion 14 (D7, D13): an IPv6 address ending in an IPv4 address.
+    local staged="$TMP_DIR/$current_scenario/ipv6-ending-ipv4.txt"
+    mkdir -p "$(dirname "$staged")"
+    printf '%s\n' '2026-01-26 10:00:01.000+0000 [L: INFO] [O: Obj] [I: ] [U: admin] [S: ] [P: ] [T: pool-a-1] peer ::ffff:192.0.2.7 closed' > "$staged"
+    run_messages d-ip -d ip "$staged" || return 0
+    local ip_csv="$MSG_CSV"
+    assert_command \
+        command     "check_some_key_matches '$ip_csv' '\\] peer closed\$'" \
+        label       '-d ip removes the whole IPv6 address' \
+        asserts     'ip removes IPv6 then IPv4 addresses, as -m ip masks them, so an IPv6 address ending in an IPv4 address goes whole.' \
+        produced_by "$PRODUCED_MESSAGE" \
+        contract    "$CONTRACT_613 D7 and D13; criterion 14"
+    local order
+    for order in ipv4,ipv6 ipv6,ipv4; do
+        run_messages "d-$order" -d "$order" "$staged" || return 0
+        assert_command \
+            command     "check_same_csv '$ip_csv' '$MSG_CSV' 'messages'" \
+            label       "-d $order gives the messages -d ip gives" \
+            asserts     'The identifiers named on -d are removed in the order -m applies them (uuid, ipv6, ipv4), never the order typed.' \
+            produced_by 'resolve_discard_names() in ltl (the identifier removals appended in @mask_order)' \
+            contract    "$CONTRACT_613 D13; criterion 14"
+    done
+}
+
 scenario_register key-separators \
                   identifiers \
                   download-requests \
@@ -907,6 +1119,8 @@ scenario_register key-separators \
                   object \
                   builtin-precedence \
                   metrics \
+                  name-vocabulary \
+                  field-identifier-names \
                   udm-switched-off \
                   query-string \
                   masked-and-discarded \
@@ -927,6 +1141,8 @@ while read -r s; do
         object)               scenario_object ;;
         builtin-precedence)   scenario_builtin_precedence ;;
         metrics)              scenario_metrics ;;
+        name-vocabulary)      scenario_name_vocabulary ;;
+        field-identifier-names) scenario_field_identifier_names ;;
         udm-switched-off)     scenario_udm_switched_off ;;
         query-string)         scenario_query_string ;;
         masked-and-discarded) scenario_masked_and_discarded ;;

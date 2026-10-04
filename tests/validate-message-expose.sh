@@ -63,13 +63,16 @@ USERS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/access-users-sessions.t
 METRICS_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
 
 CONTRACT_DOC='features/566-preserve-named-values-in-message.md'
+CONTRACT_613='features/613-one-name-vocabulary.md'
+VOCABULARY_FIXTURE="$REPO_DIR/tests/fixtures/message-vocabulary-access-keys.txt"
+OBJECT_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/thingworx-application-log.txt"
 PRODUCED_APPEND='read_and_process_logs() in ltl (the expose append, applied to the formed message immediately before the message key is assembled)'
 PRODUCED_RESOLVE='adapt_to_command_line_options() in ltl (the -x/--expose resolution into the ordered expose list)'
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$DOWNLOAD_FIXTURE" "$QS_FIXTURE" "$THREAD_FIXTURE" "$USERS_FIXTURE" "$METRICS_FIXTURE"; do
+for f in "$DOWNLOAD_FIXTURE" "$QS_FIXTURE" "$THREAD_FIXTURE" "$USERS_FIXTURE" "$METRICS_FIXTURE" "$VOCABULARY_FIXTURE" "$OBJECT_FIXTURE"; do
     if [[ ! -f "$f" ]]; then echo "ERROR: fixture not found: $f"; exit 1; fi
 done
 
@@ -713,10 +716,21 @@ scenario_metric_names() {
     local prefix='[INFO] [pool-a] [BoundaryFixture]'
 
     run_messages plain "$METRICS_FIXTURE" || return 0
-    local plain_stats="$STATS_CSV"
+    local plain_stats="$STATS_CSV" plain_csv="$MSG_CSV"
 
-    run_messages x-durationms -x durationMS "$METRICS_FIXTURE" || return 0
+    run_messages x-durationms -x durationMS -V runtime-config "$METRICS_FIXTURE" || return 0
     local dur_csv="$MSG_CSV" dur_stats="$STATS_CSV"
+    assert_line "$RUN_OUT" \
+        pattern     '^expose: durationMS$' \
+        asserts     'A key is listed under expose as written: durationMS is a key the ThingWorx probe reads the duration metric from, not a metric name.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D3 and D11"
+    assert_command \
+        command     "! grep -q 'durationMS=[^ ]* .*durationMS' '$dur_csv'" \
+        label       'no message carries durationMS twice' \
+        asserts     'Naming the key lifts its mask and the value stays in place, so the key append finds the value in the message and appends nothing.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D11 - nothing is appended twice"
 
     assert_command \
         command     "grep -qF '\"$prefix BD-dur-inside executed durationMS=150 bytes=? count=?\"' '$dur_csv'" \
@@ -746,14 +760,16 @@ scenario_metric_names() {
         produced_by 'read_and_process_logs() in ltl (metric capture, upstream of the message mask)' \
         contract    "$CONTRACT_DOC section Requirements - Metric values: in each case the value is still captured as the metric; only the message text loses it"
 
+    # 613 criterion 8: a key matches as written. The fixture writes every
+    # duration key durationMS=, so naming durationMs lifts no mask.
     run_messages x-durationms-lower -x durationMs "$METRICS_FIXTURE" || return 0
     local lower_csv="$MSG_CSV"
     assert_command \
-        command     "check_same_csv '$dur_csv' '$lower_csv' 'messages'" \
-        label       '-x durationMs is -x durationMS' \
-        asserts     'The metric can be named by either spelling of the key as written in the file: durationMs and durationMS name the same metric and give the same messages.' \
+        command     "check_same_csv '$plain_csv' '$lower_csv' 'messages'" \
+        label       '-x durationMs changes nothing on lines written durationMS=' \
+        asserts     'durationMs is a key spelling, matched as written: on lines that write durationMS= it names no key there, so every message still reads durationMS=? and nothing is appended, exactly as without -x.' \
         produced_by "$PRODUCED_RESOLVE" \
-        contract    "$CONTRACT_DOC section Requirements - Naming: the analyst can name either the internal metric name or the key as written"
+        contract    "$CONTRACT_613 D3 and D11; 566 criterion 8 as amended by #613"
 
     run_messages x-duration -x duration "$METRICS_FIXTURE" || return 0
     assert_command \
@@ -853,6 +869,152 @@ scenario_classification_unchanged() {
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 SCENARIO_USAGE_NOTE="  (acceptance criteria 1-10 of $CONTRACT_DOC):)"
+# Issue #613 criteria 4, 5 and 9: one name means one thing. The vocabulary
+# fixture is six access-log lines whose query strings carry elapsed= and v=,
+# or Bytes=, time=, object= and v=, with distinct values per line: a name read
+# as a line key finds a value, and a name read as a metric changes nothing in
+# the message.
+scenario_name_vocabulary() {
+    current_scenario="name-vocabulary"
+    echo "[$current_scenario]"
+
+    # Criterion 4 (D1): time is a key on -x, never the duration metric.
+    run_messages x-time -x time "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "grep -qF '\"[200] GET /app/search time=3\"' '$MSG_CSV' && grep -qF '\"[200] GET /app/search time=6\"' '$MSG_CSV'" \
+        label       '-x time appends the time= value read from the line' \
+        asserts     'time is not a metric name: on -x it is a key written in the line, appended as time=<value> when the formed message no longer carries it.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D1; criterion 4"
+    assert_command \
+        command     "head -1 '$STATS_CSV' | grep -q 'duration_'" \
+        label       'the latency columns are still written under -x time' \
+        asserts     'Naming time on -x touches no metric: the duration statistics are still captured and written.' \
+        produced_by 'read_and_process_logs() in ltl (metric capture, independent of the expose list)' \
+        contract    "$CONTRACT_613 D1; criterion 4"
+
+    # Criterion 5 (D15): a built-in metric name in any case is the metric.
+    run_messages x-bytes -x bytes "$VOCABULARY_FIXTURE" || return 0
+    local bytes_csv="$MSG_CSV" bytes_stats="$STATS_CSV"
+    local spelling
+    for spelling in Bytes BYTES; do
+        run_messages "x-$spelling" -x "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
+        assert_command \
+            command     "check_same_csv '$bytes_csv' '$MSG_CSV' 'messages' && check_same_csv '$bytes_stats' '$STATS_CSV' 'statistics'" \
+            label       "-x $spelling gives the CSVs -x bytes gives" \
+            asserts     "A built-in metric name matches in any case: -x $spelling is the bytes metric, not a $spelling= key read from the line." \
+            produced_by 'resolve_message_name() in ltl, through builtin_metric_name()' \
+            contract    "$CONTRACT_613 D15; criterion 5"
+        assert_command \
+            command     "! grep -q ' Bytes=' '$MSG_CSV'" \
+            label       "-x $spelling appends no Bytes= key" \
+            asserts     'The Bytes= key the query string carries is not appended: the name resolved to the metric before any line key.' \
+            produced_by 'resolve_message_name() in ltl' \
+            contract    "$CONTRACT_613 D2 and D15; criterion 5"
+        assert_line "$RUN_OUT" \
+            pattern     '^expose: bytes$' \
+            asserts     'A built-in name given in another case is listed in its canonical spelling.' \
+            produced_by "$PRODUCED_RESOLVE" \
+            contract    "$CONTRACT_613 section 5.5; criterion 5"
+    done
+
+    # Criterion 9 (D4, D11): the key a user-defined metric reads, and the
+    # metric's name, each keep the value in place and append nothing.
+    run_messages x-elapsed -udm 'lat::max:elapsed' -xqs -x elapsed -V udm-specs "$VOCABULARY_FIXTURE" || return 0
+    local key_csv="$MSG_CSV" key_out="$RUN_OUT"
+    run_messages x-lat -udm 'lat::max:elapsed' -xqs -x lat "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "grep -qF '\"[200] GET /app/items?elapsed=5&v=1\"' '$key_csv' && grep -qF '\"[200] GET /app/items?elapsed=12&v=3\"' '$key_csv'" \
+        label       '-x elapsed keeps each elapsed= value in place' \
+        asserts     'Naming the key a user-defined metric reads lifts that metric mask: the value stays in place in the message, where it would otherwise read ?.' \
+        produced_by 'read_and_process_logs() in ltl (the user-defined-metric matched-value mask, skipped for an exposed metric)' \
+        contract    "$CONTRACT_613 D11; criterion 9"
+    assert_command \
+        command     "! grep -qE 'v=[0-9]+ elapsed=' '$key_csv'" \
+        label       '-x elapsed appends nothing' \
+        asserts     'The value is already in the message, so the key append adds nothing (566 D7).' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D11; criterion 9"
+    assert_command \
+        command     "check_same_csv '$key_csv' '$MSG_CSV' 'messages'" \
+        label       '-x lat gives the messages -x elapsed gives' \
+        asserts     'A user-defined metric is named by its name: -x lat keeps the value it reads in place, as naming its key does.' \
+        produced_by 'resolve_message_name() and udm_config_by_name() in ltl' \
+        contract    "$CONTRACT_613 D4; criterion 9"
+    assert_line "$key_out" \
+        pattern     "^udm: name=lat spec='lat::max:elapsed'" \
+        asserts     'Exposing the key the metric reads leaves the metric measured.' \
+        produced_by 'emit_udm_specs_verbose() in ltl' \
+        contract    "$CONTRACT_613 D11; criterion 9"
+}
+
+# Issue #613 criteria 6 and 17: the parsed-field names match in any case, and
+# -x object appends the object whole. The ThingWorx application-log fixture
+# carries an object on every line; its message key keeps only the object's
+# last 25 characters, so c.t.s.s.p.PlatformSubsystem (27) reads
+# [t.s.s.p.PlatformSubsystem] in the key.
+scenario_field_names() {
+    current_scenario="field-names"
+    echo "[$current_scenario]"
+
+    # Criterion 17 (D16).
+    run_messages object-plain "$OBJECT_FIXTURE" || return 0
+    local object_plain="$MSG_CSV"
+    run_messages object -x object -V runtime-config "$OBJECT_FIXTURE" || return 0
+    local object_csv="$MSG_CSV"
+    assert_line "$RUN_OUT" \
+        pattern     '^expose: object$' \
+        asserts     'object is a parsed field on -x, listed under expose.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    "$CONTRACT_613 D6 and D16; criterion 17"
+    # Keys at the 350-character cut lose what is appended past it (566 D8:
+    # exposing a value does not move the cut), so the suffix is asserted on
+    # every key shorter than the cut.
+    assert_command \
+        command     "\"\$PERL\" -MText::CSV -e 'my \$c = Text::CSV->new({ binary => 1 }); open my \$f, \"<\", shift or die; my \$h = \$c->getline(\$f); my (\$n, \$bad) = (0, 0); while (my \$r = \$c->getline(\$f)) { my \$m = \$r->[1]; next if length(\$m) >= 350; \$n++; \$bad++, print \"no object suffix: \$m\\n\" unless \$m =~ / object=c\\.[\\w.]+\$/; \$bad++, print \"object twice: \$m\\n\" if \$m =~ / object=.* object=/; } print \"\$n keys under the cut\\n\"; exit(\$n && !\$bad ? 0 : 1)' '$object_csv'" \
+        label       'every key under the cut ends object=<the object>, once' \
+        asserts     'On a format that captures the object, -x object appends it to every message after the formed message, as the thread is appended.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+    assert_command \
+        command     "grep -qF '\"[WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] RelationshipSubsystem: GetWhereUsedCount= 11 object=c.t.s.s.p.PlatformSubsystem\"' '$object_csv'" \
+        label       'the PlatformSubsystem message carries all 27 characters of its object, and its key segment is unchanged' \
+        asserts     'The append is the object as the format captured it, whole, while the bracketed key segment keeps its last 25 characters.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+    assert_command \
+        command     "grep -qF '\"[WARN] [metrics-SystemMetric] [t.s.s.p.PlatformSubsystem] RelationshipSubsystem: GetWhereUsedCount= 11\"' '$object_plain'" \
+        label       'without -x the same message carries no object suffix' \
+        asserts     'The suffix comes from -x object, not from the key itself.' \
+        produced_by "$PRODUCED_APPEND" \
+        contract    "$CONTRACT_613 D16; criterion 17"
+
+    run_messages qs-plain -xqs "$VOCABULARY_FIXTURE" || return 0
+    local qs_plain="$MSG_CSV"
+    run_messages qs-object -xqs -x object "$VOCABULARY_FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$qs_plain' '$MSG_CSV' 'messages'" \
+        label       '-x object appends nothing on an access log, whose format has no object field' \
+        asserts     'object names the parsed field, not an object= key written in the query string: a format with no object field appends nothing.' \
+        produced_by 'resolve_message_name() in ltl (the parsed-field table before any line key)' \
+        contract    "$CONTRACT_613 D6; criterion 17"
+
+    # Criterion 6 (D15): field names in any case.
+    local case fixture lower upper
+    for case in "$OBJECT_FIXTURE|thread|Thread" "$USERS_FIXTURE|user|USER" "$USERS_FIXTURE|session|Session" "$OBJECT_FIXTURE|object|Object" "$VOCABULARY_FIXTURE|query-string|Query-String"; do
+        IFS='|' read -r fixture lower upper <<< "$case"
+        run_messages "case-$lower" -x "$lower" "$fixture" || return 0
+        local lower_csv="$MSG_CSV"
+        run_messages "case-$upper" -x "$upper" -V runtime-config "$fixture" || return 0
+        assert_command \
+            command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'expose: $lower' '$RUN_OUT'" \
+            label       "-x $upper is -x $lower, listed as $lower" \
+            asserts     "A parsed-field name matches in any case: -x $upper is the $lower field, not a key read from the line, and is listed in its canonical spelling." \
+            produced_by 'resolve_message_name() in ltl (the parsed-field table, folded)' \
+            contract    "$CONTRACT_613 D15; criterion 6"
+    done
+}
+
 scenario_register download-filename \
                   query-string-loss \
                   multi-key-order \
@@ -861,6 +1023,8 @@ scenario_register download-filename \
                   thread \
                   session-user \
                   metric-names \
+                  name-vocabulary \
+                  field-names \
                   query-string-alias \
                   classification-unchanged
 scenario_parse_args "$@"
@@ -878,6 +1042,8 @@ while read -r s; do
         builtin-user-precedence)  scenario_builtin_user_precedence ;;
         thread)                   scenario_thread ;;
         session-user)             scenario_session_user ;;
+        name-vocabulary)          scenario_name_vocabulary ;;
+        field-names)              scenario_field_names ;;
         metric-names)             scenario_metric_names ;;
         query-string-alias)       scenario_query_string_alias ;;
         classification-unchanged) scenario_classification_unchanged ;;

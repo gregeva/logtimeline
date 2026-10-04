@@ -781,6 +781,162 @@ scenario_J_unit_list_parity() {
         contract    "$CONTRACT_UNIT_LISTS"
 }
 
+# Name-list parity (issue #613, one vocabulary for names, D5 and D10): a help
+# row that names a metric, field, identifier or statistic vocabulary carries
+# the list the tool's own rejection or warning prints, both derived from the
+# vocabulary's one table; docs/usage.md carries the same. The same helpers as
+# the unit lists above, not a second mechanism.
+CONTRACT_NAME_LISTS='features/613-one-name-vocabulary.md D5 (one built-in metric table every list derives from), D8 (one statistic-name table) and D10 (every error and help row naming a vocabulary derives it from the table it validates against); criterion 19'
+NAME_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+
+# "legend (leg), occurrences (occ)" -> "`legend` (`leg`), `occurrences` (`occ`)"
+backticked_aliased_list() {
+    sed -E 's/([a-z-]+) \(([a-z]+)\)/`\1` (`\2`)/g' <<< "$1"
+}
+
+scenario_K_name_list_parity() {
+    current_scenario="K-name-list-parity"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-names.txt"
+    "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+
+    # The lists the tool's own rejections and warning print. -udm comes
+    # first on the -hg run: without a -udm, -hg pushes an operand it does not
+    # recognise back as a file name. Each run but the -udm one exits non-zero
+    # by design.
+    local err="$TMP_DIR/name-errors"
+    mkdir -p "$err"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hm foo "$NAME_FIXTURE" > "$err/hm.out" 2> "$err/hm" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
+    local f
+    for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local hm_list hg_list hide_columns udm_functions
+    hm_list=$(sed -n "s/^Error: Unknown heatmap metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hm")
+    hg_list=$(sed -n "s/^Error: Unknown histogram metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hg")
+    hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
+    udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
+    local mask_list mask_or_list
+    mask_list=$(sed -n "s/^Error: Unknown mask name 'foo' for -m\. Valid values: //p" "$err/mask")
+    mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
+
+    assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" && -n "$mask_list" ]] && echo found )" "found" \
+        label       'the -hm and -hg unknown-metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
+        asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
+        produced_by 'adapt_to_command_line_options(), apply_output_visibility() and parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_equal "$hg_list" "$hm_list" \
+        label       'the -hm and -hg errors print one built-in metric list' \
+        asserts     'Every unknown-metric message derives its list from the one built-in metric table' \
+        produced_by 'available_metric_names() over @builtin_metric_names in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # --help rows
+    assert_row_carries "$help_out" '^ +-hm, +--heatmap \[metric\]' "($hm_list, or a -udm metric name;" \
+        label       'the --help -hm row carries the -hm error list' \
+        asserts     'The -hm help row interpolates the built-in metric list' \
+        produced_by 'print_help() in ltl ($builtin_metric_list)' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$help_out" '^ +-hg, +--histogram \[metric\]' "($hg_list, or a -udm metric name;" \
+        label       'the --help -hg row carries the -hg error list' \
+        asserts     'The -hg help row interpolates the built-in metric list' \
+        produced_by 'print_help() in ltl ($builtin_metric_list)' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$help_out" '^ +-hi, +--hide <column>' "Hide a timeline column: $hide_columns, or a -udm metric by its column heading;" \
+        label       'the --help --hide column row carries the --hide error column list' \
+        asserts     'The --hide help row and its unknown-name error print one column list, the built-in metrics among them' \
+        produced_by 'visibility_column_list() over @visibility_columns in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # The -m row names each identifier with its placeholder, or what it
+    # names; stripped of those, it is the list the -m error prints. The -d
+    # row names the same identifiers (613 D7).
+    local mask_row mask_row_names
+    mask_row=$(grep -E '^ +-m, +--mask <name>' "$help_out" | head -1 || true)
+    mask_row_names=$(sed -E 's/.*<name> is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /' <<< "$mask_row")
+    assert_equal "$mask_row_names" "$mask_list" \
+        label       'the --help -m row names the identifiers the -m error lists, in its order' \
+        asserts     'The -m help row interpolates the identifier table' \
+        produced_by 'print_help() in ltl ($mask_identifier_help over @mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7 (identifiers through one table)"
+    # The -d row wraps even at this width: its lines are joined first.
+    local discard_row="$TMP_DIR/help-discard-row.txt"
+    awk '/^ +-d, +--discard <name>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$discard_row"
+    assert_row_carries "$discard_row" '-d, +--discard <name>' "; $mask_or_list, removed wherever it sits in the message" \
+        label       'the --help -d row names the identifiers the -m error lists' \
+        asserts     'The -d help row interpolates the identifier table -m reads' \
+        produced_by 'print_help() in ltl (@mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    local usage_mask_row usage_mask_names
+    usage_mask_row=$(grep -E '^\| `-m, --mask <name>`' "$USAGE_MD" | head -1 || true)
+    usage_mask_names=$(sed -E 's/.*`<name>` is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /; s/`//g' <<< "$usage_mask_row")
+    assert_equal "$usage_mask_names" "$mask_list" \
+        label       'the docs/usage.md -m row names the identifiers the -m error lists, in its order' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    assert_row_carries "$USAGE_MD" '^\| `-d, --discard <name>`' "; $(backticked_list "$mask_or_list" | sed 's/`or`/or/'), removed wherever it sits in the message" \
+        label       'the docs/usage.md -d row names the identifiers the -m error lists' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+
+    # The -so row: a bare metric word is its total, in the table's order,
+    # with time and size shown only as deprecated spellings (613 D1, D8).
+    assert_row_carries "$help_out" '^ +-so, +--sort-on <field>' "A bare metric name means its total: $hm_list (deprecated: time for duration, size for bytes)." \
+        label       'the --help -so row names the built-in metrics the -hm error lists, with time and size only as deprecated spellings' \
+        asserts     'The -so help row interpolates the built-in metric list and the deprecated spellings from the metric table' \
+        produced_by 'print_help() in ltl ($builtin_metric_list and the deprecated column of @builtin_metrics)' \
+        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+    assert_row_carries "$USAGE_MD" '^\| Totals \|' "$(backticked_list "$hm_list"), \`occurrences\`, \`impact\`; deprecated: \`time\` for \`duration\`, \`size\` for \`bytes\`" \
+        label       'the docs/usage.md -so Totals row names the built-in metrics in table order, time and size only as deprecated' \
+        asserts     'docs/usage.md agrees with the -so help row' \
+        produced_by 'docs/usage.md -so value table' \
+        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+
+    # The -udm function row gives the names grouped by kind, each with its
+    # note; stripped of the notes and the group labels, it is the list the
+    # warning prints.
+    local function_row row_names
+    function_row=$(grep -E '^ +function +Aggregations: ' "$help_out" | head -1 || true)
+    row_names=$(sed -E 's/.*Aggregations: (.*)\. Combined:.*/\1/; s/ \([^)]*\)//g; s/(Counting|Transforms): //g; s/\. /, /g' <<< "$function_row")
+    assert_equal "$row_names" "$udm_functions" \
+        label       'the --help -udm function row names the functions the invalid-function warning lists, in its order' \
+        asserts     'The -udm function help row interpolates the function names from the statistic-name table' \
+        produced_by 'print_help() in ltl (@udm_functions)' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # docs/usage.md rows: the same lists, each name in backticks
+    assert_row_carries "$USAGE_MD" '^\| `-hm, --heatmap \[metric\]`' "($(backticked_list "$hm_list"), or a \`-udm\` metric name;" \
+        label       'the docs/usage.md -hm row carries the -hm error list' \
+        asserts     'docs/usage.md agrees with the metric list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-hg, --histogram \[metric\]`' "($(backticked_list "$hg_list"), or a \`-udm\` metric name;" \
+        label       'the docs/usage.md -hg row carries the -hg error list' \
+        asserts     'docs/usage.md agrees with the metric list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-hi, --hide <column>`' "Hide a timeline column: $(backticked_aliased_list "$hide_columns"), or a \`-udm\` metric by its column heading;" \
+        label       'the docs/usage.md --hide column row carries the --hide error column list' \
+        asserts     'docs/usage.md agrees with the column list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    local usage_function_row usage_names
+    usage_function_row=$(grep -E '^\| `function` \| \*\*Aggregations:\*\*' "$USAGE_MD" | head -1 || true)
+    usage_names=$(sed -E 's/.*\*\*Aggregations:\*\* (.*) — \*\*Combined:\*\*.*/\1/; s/ \([^)]*\)//g; s/\*\*(Counting|Transforms):\*\* //g; s/ — /, /g; s/`//g' <<< "$usage_function_row")
+    assert_equal "$usage_names" "$udm_functions" \
+        label       'the docs/usage.md -udm function row names the functions the invalid-function warning lists, in its order' \
+        asserts     'docs/usage.md agrees with the function list the tool prints' \
+        produced_by 'docs/usage.md UDM spec table' \
+        contract    "$CONTRACT_NAME_LISTS"
+}
+
 scenario_register A-help-contains-visible-longs \
                   B-usage-contains-visible-longs \
                   C-help-short-forms-match-getopts \
@@ -790,6 +946,7 @@ scenario_register A-help-contains-visible-longs \
                   H-mask-option-rows \
                   I-discard-option-rows \
                   J-unit-list-parity \
+                  K-name-list-parity \
                   F-description-quality-soft
 scenario_parse_args "$@"
 
@@ -804,6 +961,7 @@ while read -r _scenario; do
         H-mask-option-rows              ) scenario_H_mask_option_rows ;;
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
         J-unit-list-parity              ) scenario_J_unit_list_parity ;;
+        K-name-list-parity              ) scenario_K_name_list_parity ;;
         F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
     esac
     echo ""

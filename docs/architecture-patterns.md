@@ -43,10 +43,13 @@ the errors and help rows read cannot disagree with the parser.
 **Consumption sites.**
 - `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` over `@time_unit_ladder`, read by `-du`, `-ru`, `-bs` and the `-udm` unit slot; the three errors interpolate `$time_unit_list`.
 - `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count), read by the `-udm` unit slot; the GC heap-size reader `gc_heap_size_bytes` reads each figure's prefix letter through `byte_prefix_bytes` (`%byte_unit_by_prefix`, a view of the ladder) at the notation the format declares; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
-- `print_help` :: `"Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; ..."`: the `-du`, `-ru`, `-bs` and `-udm unit` rows interpolate both ladders' lists, never a literal; `tests/validate-help-content.sh` scenario `J-unit-list-parity` compares each row, and its `docs/usage.md` row, with the list the matching error or warning prints.
+- `print_help` :: `"Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; ..."`: the `-du`, `-ru`, `-bs` and `-udm unit` rows interpolate both ladders' lists, never a literal; `tests/validate-help-content.sh` scenario `J-unit-list-parity` compares each row, and its `docs/usage.md` row, with the list the matching error or warning prints; scenario `K-name-list-parity` does the same for the name vocabularies (the `-hm`, `-hg`, `--hide` column and `-udm` function rows).
 - `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` over `%verbose_section_registry`, which also serves `-V list` and the unknown-name warning.
 - `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`.
-- `resolve_mask_names` :: `elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }` over `%mask_patterns` and `@mask_order`.
+- `builtin_metric_name` :: `return $lc if exists $builtin_metric{$lc};` over `@builtin_metrics` (name, layout column, family, help text, the stored key a bare `-so` word ranks by, deprecated spellings with the options that accept them), read by `-hm`, `-hg` and `-so`; `@graph_columns`, the metric entries of `@visibility_columns`, `%heatmap_metric_map`, `available_metric_names`, the internal metric loops and `format_heatmap_value` read its views, and every unknown-metric message and the `-hm`, `-hg`, `-x` and `-d` help rows interpolate `$builtin_metric_list` (#613 D5).
+- `adapt_to_command_line_options` :: `my $sort_statistic = $statistic_by_spelling{ lc $sort_type };` over `@statistic_names` (typed name, stored key, aliases, deprecated spelling, `--explain` topic, place in the `-udm` function slot); `parse_udm_configs` reads `%udm_function_names`, `%udm_function_aliases` and `%udm_functions_of_kind` from it, `resolve_explain_topic` reads `%explain_aliases`, and the `--help statistics` and `--explain` alias notes and the `-udm` function help row are derived from it (#613 D8, D17).
+- `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };` over `@mask_identifiers` (each name and the `%mask_patterns` entries it covers, `ip` among them) and `@mask_order`; `resolve_discard_names` reads the same table, and the `-m` error interpolates `$mask_identifier_list` (#613 D7).
+- `resolve_message_name` :: `if ( my $field = $message_field{ lc $name } ) {` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them), the one resolution `resolve_expose_names` and `resolve_discard_names` share; `@cleared_fields` is its view for the field-clearing flag (#613 D6).
 - `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;` over `%explain_topics`.
 - `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` over `@output_sections`, `@visibility_columns` and their alias tables.
 - `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
@@ -58,11 +61,14 @@ ladder: one ladder at file scope, no sub keeps a table of its own) is the
 worked contract; `features/histogram-charts.md` § Command Line Interface for
 metric names; `tests/HARNESS-DESIGN.md` § Reserved section names for `-V`.
 
-**Status.** Needs refinement. The audit's item 1 found the shape followed
-unevenly: the metric-name resolver is called by two of six options that take
-metric names; the `-so` vocabulary is written three times with no table; the
-`-m`, `-pr` and `--help` errors list their vocabularies as literals beside the
-tables they validate against. Refined by #613 (one vocabulary for metric, field, identifier and statistic names) and #614 (operand checks and texts derive from the vocabulary).
+**Status.** Needs refinement, until #614 (operand checks and texts derive from
+the vocabulary) lands. The audit's item 1 found the shape followed
+unevenly. Since #613 (one vocabulary for names), every option that takes a
+metric name resolves it through the built-in metric table: `-hm`, `-hg`, `-so`,
+`-x` and `-d` through `builtin_metric_name`, `--hide` and `--show` through the
+metric entries of `@visibility_columns`. The family-prefixed `-so`
+names are a literal list beside the two tables; the `-pr` and `--help` errors
+list their vocabularies as literals. Refined by #614.
 
 ---
 
@@ -397,16 +403,15 @@ which is the cost a flag exists to bound.
 **Consumption sites.**
 - `adapt_to_command_line_options` :: `$highlight_active = ( defined($highlight_filter) || $numeric_highlight_active`
 - `adapt_to_command_line_options` :: `$outcome_filter_active = ( $include_failure || $exclude_failure`
-- `resolve_discard_names` :: `$discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;`
+- `settle_message_option_flags` :: `$discard_active    = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;`: the expose, mask and discard flags and `@mask_subs` are derived once, from their final lists, after the three resolvers and `apply_discard_precedence`, which only build and trim lists (#613 D9).
 - `read_and_process_logs` :: `if( $discard_active ) {`
 
 **Owning record.** This entry.
 
-**Status.** Needs refinement. Thirty-eight run-scoped flags exist; the expose
-and mask flags are set in their resolve subs and again in
-`apply_discard_precedence` (audit, FP.3); the capture modes are string compares
-in the loop rather than booleans (item 8); the loop carries about 107 tests of
-run constants per line, whose cost drop 2 measures. The expose and mask flags are #613; the capture modes and the run-constant tests are #620.
+**Status.** Needs refinement. Thirty-eight run-scoped flags exist; the capture
+modes are string compares in the loop rather than booleans (item 8); the loop
+carries about 107 tests of run constants per line, whose cost drop 2 measures.
+The capture modes and the run-constant tests are #620.
 
 ---
 
@@ -456,8 +461,10 @@ who exercises two surfaces in one run. The audit that opened this file records
 the state of every vocabulary and value class in `ltl` at 0.19.0.
 
 **Consumption sites.**
-- `adapt_to_command_line_options` :: `my $resolved = resolve_metric_operand($heatmap_metric);`
-- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;`
+- `adapt_to_command_line_options` :: `my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');`
+- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;`
+- `resolve_message_name` :: `my $metric = builtin_metric_name($name);`: the one resolution `-x` and `-d` share (#613 section 5.2): the parsed field, the identifier (`-d` only) and the built-in metric in any case, then a user-defined metric by its name, else a key written in the line, carrying the metrics it feeds (`probe_key_metric`, `udm_line_key`).
+- `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };`: `-m` resolves through the identifier table `-d` reads.
 - `print_bar_graph` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');`
 - `share_row_text` :: `my $share = format_percentage( $count / $denominator * 100,`
 - `write_index_file` :: `my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');`
@@ -467,7 +474,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #613, #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it.
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616, #617, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names.
 
 ---
 
@@ -639,6 +646,8 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 - `read_and_process_logs` :: `flush_deferred_notices();`
 - `emit_classification_percentage_notices` :: `print STDERR "Warning: $r->{unclassified} included line(s) ($leak_pct%) matched neither the success nor the failure classification`
 - `bin_consolidation_notice` :: `print STDERR "Note: $detail, so their percentiles are approximate"`
+- `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";`: the one way a deprecation prints. A deprecated option or spelling is recorded with `record_deprecation` as it is met (with the options a spelling was given on) and printed once at option settlement (#613 D17); the `-os`, `-uuid`, `-s` and `-ms` notices route through it.
+- `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";`: a metric switched off because `-d` removed the key it reads says so, at option settlement (#613 D4, D12).
 
 **Owning record.** This entry, until #412 (the notices surface) lands and
 inventories every ad-hoc notice.

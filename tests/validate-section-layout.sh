@@ -640,6 +640,19 @@ if scenario_wanted unknown-name-refused; then
         asserts     'With -udm an unknown --hide value is refused once the metrics are parsed, naming each metric by its column heading, before any log is read' \
         produced_by 'apply_output_visibility() through print_usage() in ltl, from the pass after parse_udm_configs()' \
         contract    'features/597-section-visibility.md § D24'
+    # A user-defined metric is named by its name, never by the key it reads
+    # (613 D4): --hide elapsed is refused when the metric reading elapsed= is
+    # named lat, and the error names lat.
+    set +e
+    ( cd "$TMP_DIR/unknown" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'lat::max:elapsed' -hi elapsed "$UDM_LOG" > out-key 2> err-key )
+    rc=$?
+    set -e
+    assert_command \
+        command     "[[ $rc -eq 1 ]] && grep -q \"Unknown section or column 'elapsed' for --hide.*; metrics: lat\$\" $(printf '%q' "$TMP_DIR/unknown/err-key")" \
+        label       '-udm lat::max:elapsed -hi elapsed exits 1 naming lat, not elapsed' \
+        asserts     'The key a user-defined metric reads is not its name: --hide refuses it and names the metric by its heading' \
+        produced_by 'resolve_visibility_name() and udm_config_by_name() in ltl' \
+        contract    'features/613-one-name-vocabulary.md D4 (a user-defined metric is named by its name on every option); criterion 16'
     echo ""
 fi
 

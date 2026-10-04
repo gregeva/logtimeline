@@ -823,6 +823,33 @@ scenario_no_collision_names_as_typed() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario: function-aliases — issue #613 criterion 18 (D8: one statistic-name
+# table read by the -udm function slot). Each alias the slot accepts resolves
+# to the function the table names it for: avg to mean, dcount and unique to
+# distinct.
+# ---------------------------------------------------------------------------
+CONTRACT_613_D8='features/613-one-name-vocabulary.md D8 (one table of statistic names and aliases, read by the -udm function slot, -so and --explain); criterion 18'
+
+scenario_function_aliases() {
+    current_scenario="function-aliases"
+    echo "[$current_scenario]"
+    local alias function out
+    for alias in avg:mean dcount:distinct unique:distinct; do
+        function="${alias#*:}"
+        alias="${alias%%:*}"
+        out=$(run_ltl -udm "b::$alias")
+        check_capture_warnings "$out"
+        assert_section_present "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=none(raw)  aggregation=$function  transform=none  extraction=name  key='b'  source=line" \
+            asserts     "The -udm function alias $alias resolves to the $function aggregation" \
+            produced_by 'parse_udm_configs() in ltl (%udm_function_aliases over @statistic_names)' \
+            contract    "$CONTRACT_613_D8"
+        rm -f "$out" "$out.stderr"
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Scenario: delta-shorthand-canonical — 'delta' and 'sum(delta)' are the same
 # spec, so a resolved name must not depend on which the user wrote.
 # ---------------------------------------------------------------------------
@@ -1604,6 +1631,7 @@ scenario_register milliseconds-replacement \
                   collision-safe-boundary \
                   no-collision-names-as-typed \
                   delta-shorthand-canonical \
+                  function-aliases \
                   collision-csv-and-export \
                   collision-operands \
                   collision-columnar \
@@ -1641,6 +1669,7 @@ while read -r _scenario; do
         collision-safe-boundary    ) scenario_collision_safe_boundary ;;
         no-collision-names-as-typed) scenario_no_collision_names_as_typed ;;
         delta-shorthand-canonical  ) scenario_delta_shorthand_canonical ;;
+        function-aliases           ) scenario_function_aliases ;;
         collision-csv-and-export   ) scenario_collision_csv_and_export ;;
         collision-operands         ) scenario_collision_operands ;;
         collision-columnar         ) scenario_collision_columnar ;;

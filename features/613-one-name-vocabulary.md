@@ -2,9 +2,11 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`613-one-name-vocabulary` off `release/0.19.0`; implementation not started. No
-version is stamped and no benchmark is captured yet.
+Specification agreed with the architect 2026-09-28 and merged into
+`release/0.19.0` (PR #623). Implementation started 2026-10-04 on branch
+`613-one-name-vocabulary` off `release/0.19.0` (12712ae): `$version_number`
+stamped `0.19.0-613`, `613-before` benchmark captured on the base commit. The
+working sequence is § 9, *Implementation plan*.
 
 - **Parent:** #622 (the refactoring the redundant-logic audit dispatched), as a
   sub-issue.
@@ -695,6 +697,27 @@ object` is given (D16). No per-line test is added to a run that names none of
 them. `single-day-access-log-standard`, `613-before` captured on the base commit
 before the first line of code, `613-after` at the gate.
 
+**Measured at the completion gate, 2026-10-04,** on the commit with
+`$version_number` restored (b3d562d), against the base (12712ae), both from the
+main checkout on the development host, `single-day-access-log-standard`.
+`parse/read_files` in seconds, six pairs:
+
+| Pair | Before | After |
+|---|---|---|
+| 1 (before at session start) | 8.464 | 8.419 |
+| 2, 3 (each side's runs back to back) | 8.363, 8.362 | 8.536, 8.525 |
+| 4, 5, 6 (interleaved, before then after) | 8.419, 8.452, 8.409 | 8.373, 8.381, 8.349 |
+| Median of six | 8.414 | 8.400 |
+
+Pairs 2 and 3 alone read as a 1.9% regression; interleaved, the after build is
+faster in every pair, so the gap is the order the runs were taken in, not the
+code. No per-line test is added to a run that names no `-x`, `-d` or `-m`
+name. `detect/scan_sub_compile` reads 9 ms before and 10 ms after in every run
+(1 ms resolution). `log_messages` memory reads 27,480,793 bytes in five before runs and three
+after runs, and about 0.7% more in the other one before run and three after
+runs, the base build included: its size varies run to run.
+Verdict: no regression.
+
 **Prototype: none.** No new or changed data model, no new hot-path capability,
 and every criterion's verification method is known (`prototype/README.md`).
 
@@ -716,6 +739,152 @@ step.
 | 1 | The four tables and their views; every copy of the built-in metric set (the heatmap value formatter's chain included), the identifier list and the statistic aliases reads them; messages and help rows interpolate; the deprecation-notice helper, with the two existing option deprecations routed through it unchanged (proposed, § 5.6); no behaviour changes | criteria 1, 18, 21, 22, and 19 for the rows whose list does not change: the full suite passes unchanged, CSVs byte-identical |
 | 2 | Metric names on every option: case folding on `-x`/`-d` (D15), `time` and `size` deprecations (D1, D8, D17), key spellings (D3) with the mask lifted on `-x` (D11) and the pair removed whole with the metric switched off on `-d` (D12), the discard residue fixed (D12, D13), token-key fallback removed with the switch-off notice (D4); 566, 567, 432 and histogram records and `docs/usage.md` trued in the same commit | criteria 2 to 5, 7 to 13, 15, 16, 23, and 19 for the `-hm`, `-hg` and `-so` rows |
 | 3 | Fields and identifiers: case folding (D15), `-x object` appended in full (D16), `-d` through the identifier table and order (D7, D13), the flags derived once (D9), pattern entries updated | criteria 6, 14, 17, 20, and 19 for the `-x`, `-d` and `-m` rows |
+
+### Implementation plan (2026-10-04)
+
+The sequence inside each drop. It applies § 5 and decides nothing; anything
+marked *proposed* there stays proposed.
+
+**Re-audit at the start of implementation (2026-10-04, base 12712ae).** Every
+snippet § 3 and § 5.3 cite is still found in the sub named. One change since
+the specification: #525 (single timestamp-precision option) added two option
+deprecation notices, `-s/--seconds` and `-ms/--milliseconds`, beside the
+`-os/--omit-stats` and `-uuid/--mask-uuid` notices § 5.6 names. All four route
+through the deprecation-notice helper with their text unchanged, so criterion
+21's single print site holds. Further literal copies found beyond § 3 item 3:
+the `--explain` index footer and the standard-deviation topic's *See also* line
+name the `stddev` alias, and the `-udm` function parser's aggregation and
+transform alternations name the function set; each reads the statistic table.
+
+**Drop 1, the tables, no behaviour change.**
+1. The built-in metric table in `## GLOBALS ##`, before `@graph_columns`: name,
+   layout column, family, help text, deprecated spellings with the options each
+   works on, and the stored key a bare `-so` metric word ranks by (proposed:
+   the `-so` ladder's metric arms then read the table instead of a name chain).
+   Derived views: ordered names, case-folded lookup, the comma and bar list
+   texts.
+2. `@graph_columns`, the metric entries of `@visibility_columns`,
+   `%heatmap_metric_map`, `available_metric_names`, the six internal loops and
+   the export's histogram order read the views; `format_heatmap_value`'s
+   built-in arm dispatches on the family column.
+3. The parsed-field table (name, `-x` action, `-d` action), read by the
+   field-flag derivation; the identifier table (`uuid`, `ip`, `ipv4`, `ipv6`,
+   each expanding to `%mask_patterns` entries in `@mask_order`), read by `-m`,
+   its error and its help row.
+4. The statistic table (typed name, stored key, aliases, deprecated spelling,
+   per-surface columns): the `-udm` function slot's name set, alias map,
+   alternations and invalid-function list; `%explain_aliases`; the bare
+   statistic words of the `-so` allow-list and ladder; the alias notes of
+   `--help statistics`, the `--explain` index footer and the standard-deviation
+   topic.
+5. The deprecation-notice helper: records a deprecated spelling or option
+   with the options it was given on and its replacement, prints one line each
+   at settlement; the four existing option notices route through it.
+6. Help rows and error texts interpolate the lists: `-hm`, `-hg`, `-x`, `-d`,
+   `-m`, `--hide`, the bare words of `-so`, the `-udm` function row. Rendered
+   text identical where the list does not change.
+7. Harness: criterion 1 stderr scenarios, criterion 18, criterion 19 rows added
+   to the help-content parity scenario; full suite unchanged.
+
+*Delivered 2026-10-04.* Measured against the base build on 45 invocations
+(every `-so` bare word and alias, `-hm` and `-hg` with built-in and unknown
+operands, the three unknown-metric texts, the `-m` and `--hide` errors, the
+`-udm` invalid-function warning, the four option deprecations together, `-m`
+with `-d` on identifiers, `-x` and `-d` on probe keys, `--help`, `--help
+statistics`, `--explain` and its alias topics, heatmap and histogram renders):
+every output is identical apart from the memory and timing lines, except two
+help texts. The `--help statistics` and `--explain` index line for the
+standard deviation reads `(name: stddev; std_dev is a deprecated spelling)`
+where it read `(alias: stddev)` (§ 5.7, D17). The `--hide` column row takes its
+list from the same helper as the `--hide` error, so the column names read
+`values (val), rate (rt)` followed by `values are the numbers on the bars and
+rate the rates in the legend`, where the row carried the two qualifiers inline;
+`docs/usage.md` is trued with it. Harness additions: `K-name-list-parity`
+(help-content), `error-unknown-metric-lists` (runtime-config),
+`function-aliases` (udm-specs), `scenario-16-sort-on-statistic-aliases`
+(statistics-demand), each proven to fail against a sabotaged table or row.
+The statistics-demand harness printed its summary inside its last scenario's
+block, so a `--scenario` run of any other scenario printed no result and
+exited 0 whatever failed; the summary now follows every scenario.
+
+**Drop 2, metric names on every option.** `builtin_metric_name` takes the
+option it is resolving for and records `time` and `size` through the helper
+(D1, D8); the `-x`/`-d` resolver folds case (D15); the probe key view from the
+registry specs (`durationMS`, `durationMs`, `bytes`), with the probe's mask key
+split into its written spellings so one can be left out (D11); `-d` on a probe
+key or a user-defined metric's key removes the pair, switches the metric off
+and prints the switch-off notice (D4, D12); the key-discard value pattern
+accepts a masked `?` (D12, D13); the token-key fallback goes (D4); records 566,
+567, 432, histogram and `docs/usage.md` trued in the same commit; harness
+criteria 2 to 5, 7 to 13, 15, 16, 23.
+
+*Delivered 2026-10-04.* `resolve_message_name()` is the one resolution `-x`
+and `-d` share; the probe declarations carry `mask_keys` (each spelling as the
+line writes it) in place of the `durationM[sS]` alternation, and
+`probe_key_metric()` reads them at option settlement; `udm_line_key()` names
+the key a user-defined metric reads (its token key, or its name for a metric
+that reads the key it is named after, none for a `/regex/` metric); the
+switch-off notice prints from `resolve_discard_names()`. The new fixture
+`tests/fixtures/message-vocabulary-access-keys.txt` is six access-log lines,
+three whose query strings carry `elapsed=` and `v=` and three carrying
+`Bytes=`, `time=`, `object=` and `v=`. Against the base build the 45-invocation
+comparison differs only in the deprecation lines, the `-d durationMS` messages
+and notice, and the help rows; the new scenarios fail on the base build except
+those marked *holds today* (criteria 15, 16, 23 and the `-x durationMS`
+in-place assertions), which pass on both. Harness changes:
+`deprecated-metric-spellings`, `metric-name-case`,
+`metric-key-spelling-unknown` and `udm-key-not-a-name` (runtime-config);
+`name-vocabulary` and the rewritten `-x durationMs` assertion in `metric-names`
+(message-expose); `name-vocabulary` and the rewritten duration-spelling
+assertions in `metrics` (message-discard); the `--hide elapsed` case in
+`unknown-name-refused` (section-layout); the `-so` rows in
+`K-name-list-parity` (help-content).
+
+**Drop 3, fields and identifiers.** Field and identifier names in any case on
+`-x`, `-d`, `-m` (D15); `-x object` appends the full object (D16); `-d`
+identifiers through the identifier table, applied in `@mask_order` (D7, D13);
+one settlement step derives the expose, mask and discard flags after the
+precedence pass (D9); 580, 597, 225 records and the pattern entries (§ 5.9);
+harness criteria 6, 14, 17, 20.
+
+*Delivered 2026-10-04.* Field and identifier names fold case in
+`resolve_message_name()` and `resolve_mask_names()`; `-x object` appends
+` object=<value>` through a fifth append kind, `EXPOSE_OBJECT`, read in the
+expose loop beside the thread, session and user; the identifiers `-d` names are
+collected and appended after the keys in `@mask_order`;
+`settle_message_option_flags()` derives `@mask_subs`, `$mask_active`,
+`$mask_uuid`, `$expose_active`, `$discard_active` and `$discard_any_field` once,
+after `apply_discard_precedence()`, which with the three resolvers now only
+builds and trims lists. The mask patterns, `@mask_order` and the identifier
+table moved into `## GLOBALS ##` beside the other `-m` state, because the `-m`
+help row reads them. Harness additions: `field-names` (message-expose),
+`field-identifier-names` (message-discard), the case assertions in
+`ip-spellings` (message-mask), the `-m` and `-d` rows in `K-name-list-parity`
+(help-content); each fails on the base build.
+
+**Finding: the object append and the key cut.** On the ThingWorx
+application-log fixture, 51 of the 100 message keys a `-n 100 -o -x object`
+run retains reach the 350-character cut that `-o` applies, and lose the appended object with
+whatever else passes the cut, as 566 D8 (exposing a value does not move the
+cut) requires; every key under the cut ends ` object=<object>`. Criterion 17
+is asserted on the keys under the cut. The cut belongs to #619 (one per-run key
+cut and cap), which landed; nothing here changes it.
+
+**Criterion 21, measured with `grep -cF` on `ltl` at the base commit and after
+drop 3:**
+
+| Literal | Base | After |
+|---|---|---|
+| `qw(duration bytes count)` and `qw( duration bytes count )` | 8 | 0 |
+| `qw( thread session user object )` | 1 | 0 |
+| `uuid, ip, ipv4, ipv6` | 1 | 0 |
+| `avg => 'mean'` | 1 | 0 |
+| `alias: avg`, `alias: stddev` | 2 | 0 |
+| `if ($metric eq 'duration')` (the heatmap value formatter's chain) | 1 | 0 |
+| print sites of `is deprecated` | 4 | 1 |
+
+The remaining `'durationMs'` is the probe declaration's key spelling, the two
+`eq 'time'` are unit-type tests, and the two `duration|bytes|count` are comments.
 
 **Merge gate:** the full harness suite and the before/after benchmark on the
 final commit, `$version_number` restored to `0.19.0`,

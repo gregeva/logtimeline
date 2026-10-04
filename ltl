@@ -73,6 +73,34 @@ my $no_index = 0;                                                       # -ni: n
 my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_user, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0, 0 );
+# Built-in metrics: the one definition of the metric names every option
+# resolves (-hm, -hg, -so, --hide and --show, -x, -d) and of every list a
+# message or help row names. Each entry carries its name, the @column_layout
+# id of the timeline column that draws it (its colour is resolved from the
+# layout), its family (the kind of value, which chooses its formatter), its
+# help text, the stored key a bare -so metric word ranks by (its total, per
+# the aggregate-naming rule that a bare metric word is its total), the flag
+# -d sets to switch it off (what its omit option sets), and the
+# deprecated spellings still accepted for one release, each with the
+# options that accept it. Names match in any case. A key a format reads a
+# metric from (durationMS) is not a name here: it is a key written in the
+# line. Every site reads the views below; no sub keeps a copy of the set.
+my @builtin_metrics = (
+    { name => 'duration', column => 'duration', family => 'duration', help => 'how long an entry took',    sort_key => 'total_duration', omit_flag => \$omit_durations,
+      deprecated => { time => [ '-hm/--heatmap', '-hg/--histogram', '-so/--sort-on' ] } },
+    { name => 'bytes',    column => 'bytes',    family => 'bytes',    help => 'response or payload size',  sort_key => 'total_bytes',    omit_flag => \$omit_bytes,
+      deprecated => { size => [ '-so/--sort-on' ] } },
+    { name => 'count',    column => 'count',    family => 'count',    help => 'work completed, per entry', sort_key => 'count_sum',      omit_flag => \$omit_count,
+      deprecated => {} },
+);
+my @builtin_metric_names   = map { $_->{name} } @builtin_metrics;
+my %builtin_metric         = map { $_->{name} => $_ } @builtin_metrics;
+my $builtin_metric_list    = join( ', ', @builtin_metric_names );   # duration, bytes, count: for messages and help rows
+my $builtin_metric_choices = join( '|', @builtin_metric_names );    # duration|bytes|count: the same list as a choice
+# Deprecated spellings and options met while the options were read, in the
+# order first met, each with the options it was given on: printed once each
+# by print_deprecation_notices() at option settlement.
+my ( @deprecations, %deprecation_of );
 # -x / --expose: the names given on the command line, in the order given
 # (@expose_raw), the resolved names in that same order for the
 # runtime-config surface (@expose_names), and what the run does with them:
@@ -80,11 +108,13 @@ my ( $include_query_string, $include_session, $include_user, $include_threadpool
 # (@expose_appends, each [ kind, key name, token pattern for a line key ]),
 # and the metrics whose number stays in the message in place of its mask
 # (%expose_metric keyed by the metric the format spec's probe declares,
-# $expose_count for the count capture's own mask). $expose_active is the
+# $expose_count for the count capture's own mask), and the key spellings a
+# probe reads whose value stays in place because the key was named
+# (%expose_key, keyed as the line writes the key). $expose_active is the
 # single scalar the per-line path reads: false, and no run without an
 # appended value pays more than that one test.
-use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3 };
-my ( @expose_raw, @expose_names, @expose_appends, %expose_metric );
+use constant { EXPOSE_THREAD => 0, EXPOSE_SESSION => 1, EXPOSE_USER => 2, EXPOSE_LINE_KEY => 3, EXPOSE_OBJECT => 4 };
+my ( @expose_raw, @expose_names, @expose_appends, %expose_metric, %expose_key );
 my ( $expose_active, $expose_count ) = ( 0, 0 );
 # -d / --discard: the names given on the command line (@discard_raw, a value
 # may be a comma-separated list), the resolved names in that same order for
@@ -98,6 +128,26 @@ my ( $expose_active, $expose_count ) = ( 0, 0 );
 # one the field path reads: false, and neither pays more than that one test.
 my ( @discard_raw, @discard_names, @discard_subs, %discard_field );
 my ( $discard_active, $discard_any_field ) = ( 0, 0 );
+# Parsed fields and message parts -x and -d name, the one table both read
+# (566 D4 to D6, 567 D9 and D15: the two accept the same names). Each carries
+# what -x does with it (append the value the format captured to the end of
+# the message, as the append kind says, or keep the query string in it), the
+# run flag that makes the format keep the field, and what -d does (clear the
+# captured value before anything reads it, or take the query string out of
+# the message). Names match in any case and resolve before a key written in
+# the line (#613 D15). The object is appended whole, where the message key
+# carries only its end (#613 D16).
+my @message_fields = (
+    { name => 'thread',       expose => 'append', append_kind => EXPOSE_THREAD,                                     discard => 'clear'  },
+    { name => 'session',      expose => 'append', append_kind => EXPOSE_SESSION, include_flag => \$include_session, discard => 'clear'  },
+    { name => 'user',         expose => 'append', append_kind => EXPOSE_USER,    include_flag => \$include_user,    discard => 'clear'  },
+    { name => 'object',       expose => 'append', append_kind => EXPOSE_OBJECT,                                     discard => 'clear'  },
+    { name => 'query-string', expose => 'keep',   include_flag => \$include_query_string,                          discard => 'remove' },
+);
+my %message_field   = map { $_->{name} => $_ } @message_fields;
+my @cleared_fields  = map { $_->{name} } grep { $_->{discard} eq 'clear' } @message_fields;
+my $exposed_field_list = join_with_or( map { $_->{name} } grep { $_->{expose} } @message_fields );   # thread, session, user, object or query-string
+my $cleared_field_list = join_with_or(@cleared_fields);                                               # thread, session, user or object
 my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
@@ -252,7 +302,58 @@ my $max_log_message_length = 0;				    # the per-run message-key cut: resolved i
 # deprecated -uuid spelling was used.
 my ( @mask_raw, @mask_names, @mask_subs );
 my ( $mask_active, $mask_uuid, $mask_uuid_option ) = ( 0, 0, 0 );
-my @graph_columns = qw( duration bytes count );
+# The identifiers -m / --mask can name, each with the pattern that finds it in
+# the message and the placeholder of its shape that replaces it. Word-boundary
+# tests keep an identifier embedded in a longer token as written: a UUID is
+# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
+# digit either side; an IPv4 address is four decimal octets from 0 to 255
+# without leading zeros, with no word character or digit-and-dot before, and no word
+# character or further dotted digit after, so a port, a leading / and a thread
+# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
+# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
+# with no word character, colon or dot before and no word character or colon
+# after, so a zone and a bracketed port stay as written around the placeholder.
+# A bare :: is a separator in messages and is never matched. Every option that
+# names one of these identifiers resolves it through this table.
+my %mask_patterns;
+{
+    my $hex = '[0-9A-Fa-f]';
+    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
+    my $ipv4 = "(?:$octet\\.){3}$octet";
+    my $h = '[0-9A-Fa-f]{1,4}';
+    my $ls32 = "(?:$h:$h|$ipv4)";
+    my $ipv6 = join '|',
+        "(?:${h}:){6}$ls32",
+        "::(?:${h}:){5}$ls32",
+        "(?:${h})?::(?:${h}:){4}$ls32",
+        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
+        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
+        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
+        "(?:(?:${h}:){0,4}${h})?::$ls32",
+        "(?:(?:${h}:){0,5}${h})?::$h",
+        "(?:${h}:){0,6}${h}::";
+    %mask_patterns = (
+        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
+        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
+        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
+    );
+}
+my @mask_order = qw(uuid ipv6 ipv4);
+# The identifier names -m and -d accept, in the order every list names them:
+# each expands to the %mask_patterns entries it covers, ip to both address
+# versions. A run applies the entries in @mask_order whatever order the
+# names were given in.
+my @mask_identifiers = (
+    { name => 'uuid', entries => [ 'uuid' ] },
+    { name => 'ip',   entries => [ 'ipv6', 'ipv4' ], help => 'both address versions' },
+    { name => 'ipv4', entries => [ 'ipv4' ] },
+    { name => 'ipv6', entries => [ 'ipv6' ] },
+);
+my %mask_identifier      = map { $_->{name} => $_ } @mask_identifiers;
+my $mask_identifier_list = join ', ', map { $_->{name} } @mask_identifiers;
+# The -m help row's names: each with the placeholder that replaces it, or what it names.
+my $mask_identifier_help = join_with_or( map { $_->{help} ? "$_->{name} for $_->{help}" : "$_->{name} ($mask_patterns{ $_->{entries}[0] }[1])" } @mask_identifiers );
+my @graph_columns = @builtin_metric_names;
 my ( @populated_graph_columns, @graph_threadpools_activity, @graph_user_defined_metrics );
 my @column_layout;
 my ($focus_base, $focus_step, $focus_min) = (70, 10, 25);
@@ -329,6 +430,50 @@ my $run_file_stamp;   # the local-time stamp every output file of one run is nam
 # The duration statistics family in STATS CSV column order: the header, the
 # row and the aggregate export read this one list.
 my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
+# Statistic and aggregation names: the one table of the names a user types
+# for a statistic (-so, --explain) or an aggregation (the -udm function
+# slot). Each row carries the typed name, the stored key every CSV header,
+# -V key and YAML key writes, its aliases, a deprecated spelling (with
+# whether its notice prints yet), the --explain topic that covers it, and its
+# place in the -udm function slot: the kind (aggregation, counting or
+# transform), the position the slot lists it at, and the note its help row
+# gives it. The statistic rows keep
+# the order of @duration_family_stats; the rows only the function slot
+# accepts follow. Every surface reads the views below.
+my @statistic_names = (
+    { name => 'min',             key => 'min',             sort => 1, explain => 'min',             udm => 'aggregation', udm_position => 2 },
+    { name => 'mean',            key => 'mean',            sort => 1, explain => 'mean',            udm => 'aggregation', udm_position => 4, aliases => [ 'avg' ] },
+    { name => 'max',             key => 'max',             sort => 1, explain => 'max',             udm => 'aggregation', udm_position => 3 },
+    { name => 'stddev',          key => 'std_dev',         sort => 1, explain => 'std_dev',         deprecated => 'std_dev', deprecation_notice => 0 },
+    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p1 p5 p10 p25 p50 p75 ) ),
+    { name => 'iqr',             key => 'iqr',             sort => 1, explain => 'iqr' },
+    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p90 p95 p99 p999 p9999 p99999 ) ),
+    { name => 'cv',              key => 'cv',              sort => 1, explain => 'cv' },
+    { name => 'skewness',        key => 'skewness',        sort => 1, explain => 'skewness' },
+    { name => 'kurtosis',        key => 'kurtosis',        sort => 1, explain => 'kurtosis' },
+    { name => 'bimodality_coef', key => 'bimodality_coef', sort => 1, explain => 'bimodality_coef' },
+    { name => 'sum',             key => 'sum',             udm => 'aggregation', udm_position => 1, udm_note => 'default' },
+    { name => 'count',           key => 'count',           udm => 'counting',    udm_position => 5 },
+    { name => 'distinct',        key => 'distinct',        udm => 'counting',    udm_position => 6, aliases => [ 'dcount', 'unique' ] },
+    { name => 'ratio',           key => 'ratio',           udm => 'counting',    udm_position => 7 },
+    { name => 'rate',            key => 'rate',            udm => 'counting',    udm_position => 8 },
+    { name => 'drate',           key => 'drate',           udm => 'counting',    udm_position => 9 },
+    { name => 'delta',           key => 'delta',           udm => 'transform',   udm_position => 10, udm_note => 'clamped >=0' },
+    { name => 'idelta',          key => 'idelta',          udm => 'transform',   udm_position => 11, udm_note => 'unclamped' },
+);
+$_->{aliases} //= [] for @statistic_names;
+# Every spelling a statistic row is typed under, lower-cased: its name, its
+# aliases and its deprecated spelling. The -so and --explain lookup.
+my %statistic_by_spelling = map { my $row = $_; map { lc($_) => $row } grep { defined } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } @statistic_names;
+# The -udm function slot, in the order it lists its names: the functions of
+# each kind, every accepted spelling, and the alias of each.
+my @udm_functions          = sort { $a->{udm_position} <=> $b->{udm_position} } grep { $_->{udm} } @statistic_names;
+my %udm_function_names     = map { my $row = $_; map { $_ => 1 } $row->{name}, @{ $row->{aliases} } } @udm_functions;
+my %udm_function_aliases   = map { my $row = $_; map { $_ => $row->{name} } @{ $row->{aliases} } } @udm_functions;
+my %udm_functions_of_kind;
+push @{ $udm_functions_of_kind{ $_->{udm} } }, $_->{name} for @udm_functions;
+# --explain: every spelling that is not itself a topic, to the topic that covers it.
+my %explain_aliases = map { my $row = $_; map { lc($_) => $row->{explain} } grep { defined && lc($_) ne $row->{explain} } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } grep { $_->{explain} } @statistic_names;
 my $total_lines_read = 0;
 my $total_lines_included = 0;
 # Line accounting between read and included: lines no format matched (a CSV
@@ -385,7 +530,7 @@ my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', m
 # The timeline's columns --hide and --show also name, each the suffix of the
 # option it duplicates, with its fixed alias (#597 D21, D25). A user-defined
 # metric's column is named by its heading (D24).
-my @visibility_columns = qw( legend occurrences duration bytes count session user classification stats values rate );
+my @visibility_columns = ( qw( legend occurrences ), @builtin_metric_names, qw( session user classification stats values rate ) );
 my %column_aliases = ( leg => 'legend', occ => 'occurrences', dur => 'duration', byt => 'bytes', cnt => 'count',
                        ses => 'session', usr => 'user', cls => 'classification', stat => 'stats', val => 'values', rt => 'rate' );
 my @section_visibility_ops;     # [ hide|show, value ] in the order given, LTL_CONFIG first
@@ -929,12 +1074,10 @@ my %heatmap_special_gradients = (
                gradient_light => [255, 254, 253, 250, 247, 244, 241, 238] },
 );
 
-# Map metric names to column IDs — colors resolved from @column_layout in normalize_data_for_output()
-my %heatmap_metric_map = (
-    'duration' => { column => 2 },
-    'bytes'    => { column => 3 },
-    'count'    => { column => 4 },
-);
+# The metrics a heatmap can draw, keyed by name: the built-in metrics, and a
+# user-defined one added once it resolves. Colours are resolved from
+# @column_layout in normalize_data_for_output().
+my %heatmap_metric_map = map { $_->{name} => { column => $_->{column} } } @builtin_metrics;
 
 # Histogram data structures and settings (Issue #25)
 my $histogram_enabled = 0;                    # Flag: histogram mode active
@@ -3023,11 +3166,13 @@ sub format_registry_specs {
       transforms => [],
       message_metrics => {
           gate_lit => '=',
-          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_key => 'bytes'          },
-                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_key => 'durationM[sS]' } ],
+          probes => [ { name => 'bytes',    field => 'bytes',    guard_lit => ' bytes',     pattern => ' bytes\s*=\s*(\d+)',          unit => 'B',  mask_keys => [ 'bytes' ]                    },
+                      { name => 'duration', field => 'duration', guard_lit => ' durationM', pattern => ' durationM[sS]\s*=\s*(\d+)',  unit => 'ms', mask_keys => [ 'durationMS', 'durationMs' ] } ],
           # One mask over the probe keys it covers: KEYS is filled at compile
-          # time with the mask_key of every probe whose number the run does
-          # not expose, and the mask is left out entirely when that is none.
+          # time with each key spelling, as the line writes it, whose number
+          # the run does not expose (a metric named on -x exposes all of its
+          # spellings, a key named on -x only that spelling), and the mask is
+          # left out entirely when that is none.
           mask => { pattern => ' ((KEYS)\s*=\s*)(\d+)', replace => ' $1?' },
           marks_metrics_observed => 1,
       },
@@ -4753,13 +4898,16 @@ sub format_entry_block_src {
         my @mask_block;
         push @mask_block, "        \$metrics_observed = 1;" if $mm->{marks_metrics_observed};
         # The mask covers the probe keys whose number stays out of the
-        # message: a metric named on -x keeps its value in place, so its key
-        # drops out of the alternation, and a mask covering no key at all is
-        # not emitted.
+        # message: a metric named on -x keeps its value in place, so every
+        # spelling of its key drops out of the alternation; a key named on
+        # -x drops out as written (#613 D11); and a mask covering no key at
+        # all is not emitted.
         if ($mm->{mask}) {
-            my $exposed = $opts->{expose_metric} || {};
-            my @mask_keys = map  { $_->{mask_key} }
-                            grep { defined $_->{mask_key} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
+            my $exposed     = $opts->{expose_metric} || {};
+            my $exposed_key = $opts->{expose_key}    || {};
+            my @mask_keys = grep { !$exposed_key->{$_} }
+                            map  { @{ $_->{mask_keys} } }
+                            grep { $_->{mask_keys} && !$exposed->{ $_->{name} } } @{ $mm->{probes} };
             if (@mask_keys) {
                 ( my $mask_pattern = $mm->{mask}{pattern} ) =~ s/KEYS/join('|', @mask_keys)/e;
                 push @mask_block, "        \$message =~ s/$mask_pattern/$mm->{mask}{replace}/g;";
@@ -5350,7 +5498,7 @@ sub build_format_registry {
     }
 
     # Freeze the live registry (CLI-gated options baked into extractors).
-    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric,
+    my $opts = { include_query_string => $include_query_string, expose_metric => \%expose_metric, expose_key => \%expose_key,
                  capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns };
     @format_registry = ();
     @format_registry_members = ();
@@ -7092,7 +7240,7 @@ sub write_aggregate_export {
     $measurements->{max_memory_used} = format_bytes($reported_max_memory_usage);
 
     my @histogram_metrics = grep { ($histogram_stats{$_}{count} // 0) > 0 }
-        (qw(duration bytes count), sort grep { !/^(?:duration|bytes|count)$/ } keys %histogram_stats);
+        (@builtin_metric_names, sort grep { !exists $builtin_metric{$_} } keys %histogram_stats);
     if (@histogram_metrics) {
         my $histogram = aggregate_mapping();
         my @ladder = map { $_->[0] } @percentile_ladder;
@@ -7579,6 +7727,13 @@ sub resolve_visibility_name {
     return undef;
 }
 
+# The timeline columns --hide and --show name, each with its fixed alias:
+# the list the --hide help row and the unknown-name error both print.
+sub visibility_column_list {
+    my %column_alias_of = reverse %column_aliases;
+    return join ', ', map { "$_ ($column_alias_of{$_})" } @visibility_columns;
+}
+
 sub column_hidden {
     my ($column) = @_;
     return ( $column_visibility{$column} // '' ) eq 'hide' ? 1 : 0;
@@ -7603,9 +7758,8 @@ sub apply_output_visibility {
             unless ( defined $resolved ) {
                 next unless $metrics_known;
                 my %section_alias_of = reverse %section_aliases;
-                my %column_alias_of  = reverse %column_aliases;
                 my $sections = join ', ', map { $section_alias_of{$_} ? "$_ ($section_alias_of{$_})" : $_ } grep { !/-/ } @output_sections;
-                my $columns  = join ', ', map { "$_ ($column_alias_of{$_})" } @visibility_columns;
+                my $columns  = visibility_column_list();
                 my $metrics  = @udm_configs ? '; metrics: ' . join( ', ', map { $_->{name} } @udm_configs ) : '';
                 print_usage("Unknown section or column '" . trim($given) . "' for --$verb. Sections: $sections; columns: $columns$metrics");
                 exit 1;
@@ -7946,17 +8100,10 @@ sub help_opt {
 # See docs/explain/statistics.md for the Wiki-mirror of the same content.
 # ============================================================================
 
-# Aliases resolved by --explain. Mirrors -so value aliases (avg → mean,
-# stddev → std_dev) plus every individual percentile slug routed to the
-# shared 'percentiles' topic since one explanation covers all of p1..p99999.
-my %explain_aliases = (
-    avg     => 'mean',
-    stddev  => 'std_dev',
-    p1      => 'percentiles', p5     => 'percentiles', p10    => 'percentiles',
-    p25     => 'percentiles', p50    => 'percentiles', p75    => 'percentiles',
-    p90     => 'percentiles', p95    => 'percentiles', p99    => 'percentiles',
-    p999    => 'percentiles', p9999  => 'percentiles', p99999 => 'percentiles',
-);
+# The aliases --explain resolves (%explain_aliases) are derived from the
+# statistic-name table: avg to mean, stddev to std_dev, and every
+# percentile to the shared 'percentiles' topic, since one explanation
+# covers all of p1..p99999.
 
 # Group → ordered topic list. Single source of truth for the --explain
 # registry. Each group has a category tag so the registry can emit
@@ -8011,8 +8158,8 @@ $_explain_stats_group_count++ while $_explain_stats_group_count < @explain_group
 my %explain_summary = (
     min             => 'Smallest observed value',
     max             => 'Largest observed value',
-    mean            => 'Arithmetic mean of all observed values (alias: avg)',
-    std_dev         => 'Standard deviation -- absolute spread (alias: stddev)',
+    mean            => 'Arithmetic mean of all observed values',
+    std_dev         => 'Standard deviation -- absolute spread',
     cv              => 'Coefficient of variation -- relative spread (std_dev / mean)',
     iqr             => 'Interquartile range -- robust spread (p75 - p25)',
     percentiles     => 'Latency percentiles at p1..p99999 (ltl --explain percentiles)',
@@ -8052,6 +8199,29 @@ my %explain_summary = (
     'correlation'               => 'Relating the same system\'s logs to each other -- the group page',
     'cross-log-correlation'     => 'Which of these logs exhibits this condition?',
 );
+
+# The spellings --explain resolves to a topic other than the topic's own
+# name, in statistic-table order: avg for mean, stddev for std_dev.
+sub explain_topic_spellings {
+    my ($topic) = @_;
+    return map { my $row = $_; grep { defined && lc($_) ne $topic } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} }
+           grep { ( $_->{explain} // '' ) eq $topic } @statistic_names;
+}
+
+# A topic's one-line summary for the grouped index views, with the note of
+# how its statistic is typed, from the statistic-name table: an alias, or
+# the typed name of a statistic stored under a deprecated spelling.
+sub explain_summary_line {
+    my ($topic) = @_;
+    my $summary = $explain_summary{$topic} // '';
+    return $summary if $topic eq 'percentiles';
+    my ($row) = grep { ( $_->{explain} // '' ) eq $topic } @statistic_names;
+    return $summary unless $row;
+    my @notes;
+    push @notes, 'alias: ' . join( ', ', @{ $row->{aliases} } ) if @{ $row->{aliases} };
+    push @notes, "name: $row->{name}; $row->{deprecated} is a deprecated spelling" if defined $row->{deprecated};
+    return @notes ? "$summary (" . join( '; ', @notes ) . ')' : $summary;
+}
 
 # Topic content registry. Each value is an arrayref of typed block hashrefs:
 #   { type => 'heading',    text => '...' }
@@ -8290,8 +8460,7 @@ sub print_help_statistics {
     for my $group (@explain_groups[0 .. $_explain_stats_group_count - 1]) {
         $out .= help_subheading_tight($group->{name});
         for my $topic (@{ $group->{topics} }) {
-            my $summary = $explain_summary{$topic} // '';
-            $out .= help_opt($topic, $summary);
+            $out .= help_opt($topic, explain_summary_line($topic));
         }
     }
     $out .= "\n";
@@ -8482,13 +8651,13 @@ sub print_explain_registry {
         }
         $out .= help_subheading_tight($group->{name});
         for my $topic (@{ $group->{topics} }) {
-            my $summary = $explain_summary{$topic} // '';
-            $out .= help_opt($topic, $summary);
+            $out .= help_opt($topic, explain_summary_line($topic));
         }
     }
     $out .= "\n";
     $out .= help_wrap(
-        "Aliases: 'avg' resolves to 'mean'; 'stddev' resolves to 'std_dev'; each percentile slug (p1, p5, p10, ..., p99999) resolves to the shared 'percentiles' topic.",
+        "Aliases: " . join( '; ', map { my $topic = $_; map { "'$_' resolves to '$topic'" } explain_topic_spellings($topic) } grep { $_ ne 'percentiles' } map { @{ $_->{topics} } } @explain_groups )
+          . "; each percentile slug (" . do { my @p = explain_topic_spellings('percentiles'); join( ', ', @p[ 0 .. 2 ], '...', $p[-1] ) } . ") resolves to the shared 'percentiles' topic.",
         indent       => 0,
         first_indent => 0,
     ) . "\n";
@@ -9854,7 +10023,7 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'How ltl computes this' },
             { type => 'paragraph', text => $explain_std_dev_compute },
             { type => 'subheading', text => 'See also' },
-            { type => 'paragraph', text => 'mean, cv, iqr, skewness, kurtosis. Aliases: stddev.' },
+            { type => 'paragraph', text => 'mean, cv, iqr, skewness, kurtosis. Aliases: ' . join( ', ', explain_topic_spellings('std_dev') ) . '.' },
         ],
 
         # ---- cv ----
@@ -10508,9 +10677,9 @@ sub print_help {
     # Message Grouping
     $out .= help_subheading("Message Grouping");
     $out .= help_opt("-g,   --group-similar <N>",     "Consolidate similar log messages using fuzzy matching with N% Dice similarity threshold (50-99, default: 85). Messages that differ only in variable parts (UUIDs, session IDs, paths, numbers, etc.) are merged into a single canonical pattern using * wildcards. Consolidated entries are marked with ~ in the output; that marker position also carries the row's classification as a colour (a bullet on an unconsolidated row): green when every line is a success, red when every line is a failure, violet when every line is a classification conflict, terracotta when the lines are mixed, and no mark when the lines are unclassified. Where a log carries many UUIDs, masking them with --mask uuid is advisable, as they make the similarity comparison do much more work.");
-    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is uuid (########-####-####-####-############), ipv4 (###.###.###.###), ipv6 (####:####:####:####:####:####:####:####) or ip for both address versions. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
-    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is thread, session, user or query-string; a metric (duration, bytes, count, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
-    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is thread, session, user or object, whose captured value is cleared; uuid, ipv4, ipv6 or ip, removed wherever it sits in the message; query-string; a metric (duration, bytes, count, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message. A name given to both -x and -d, or to both -m and -d, is discarded");
+    $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is $mask_identifier_help, in any case. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
+    $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is $exposed_field_list, the object appended whole; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it; a key a metric is read from, such as durationMS, keeps its value in place instead. Built-in names match in any case. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
+    $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is $cleared_field_list, whose captured value is cleared; " . join_with_or( map { $_->{name} } @mask_identifiers ) . ", removed wherever it sits in the message, in the order -m applies them; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as durationMS, also switches that metric off, with a notice. Built-in names match in any case. A name given to both -x and -d, or to both -m and -d, is discarded");
     $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
 
     # Display & Output
@@ -10519,7 +10688,7 @@ sub print_help {
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the source's duration unit), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
-    $out .= help_opt("-hi,  --hide <column>",         "Hide a timeline column: legend (leg), occurrences (occ), duration (dur), bytes (byt), count (cnt), session (ses), user (usr), classification (cls), stats (stat), values (val) on the bars, rate (rt) in the legend, or a -udm metric by its column heading; a comma-separated list, or the option repeated");
+    $out .= help_opt("-hi,  --hide <column>",         "Hide a timeline column: " . visibility_column_list() . ", or a -udm metric by its column heading; values are the numbers on the bars and rate the rates in the legend; a comma-separated list, or the option repeated");
     $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); sections and columns mix in one list");
     $out .= help_opt("-sh,  --show <column>",         "Show a column a --hide turned off; classification also shows the success and failure percentages for a format that is not an event ledger");
     $out .= help_opt("-sh,  --show <section>",        "Show a section a --hide turned off, such as one hidden in LTL_CONFIG; the later of the two wins");
@@ -10546,17 +10715,20 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: bytes, duration (alias time), count. Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. Stats: min, mean, max, stddev, cv. Percentiles: p1, p5, p10, p25, p50, p75, p90, p95, p99, p999, p9999, p99999. Shape: iqr, skewness, kurtosis, bimodality_coef. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
+    my @so_deprecated = map { my $metric = $_; map { "$_ for $metric->{name}" } grep { grep { $_ eq '-so/--sort-on' } @{ $metric->{deprecated}{$_} } } sort keys %{ $metric->{deprecated} } } @builtin_metrics;
+    my @so_statistics = map { $_->{name} } grep { $_->{sort} } @statistic_names;
+    my @so_aliases    = map { my $row = $_; map { "$_ for $row->{name}" } @{ $row->{aliases} } } grep { $_->{sort} } @statistic_names;
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: $builtin_metric_list (deprecated: " . join( ', ', @so_deprecated ) . "). Statistics: " . join( ', ', @so_statistics ) . " (alias: " . join( ', ', @so_aliases ) . "). Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
     $out .= help_subheading("Heatmap");
-    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket (duration, bytes, count, or a -udm metric name; UDM names are case-sensitive)");
+    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket ($builtin_metric_list, or a -udm metric name; UDM names are case-sensitive)");
     $out .= help_opt("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
 
     # Histogram
     $out .= help_subheading("Histogram");
-    $out .= help_opt("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph (duration, bytes, count, or a -udm metric name; UDM names are case-sensitive)");
+    $out .= help_opt("-hg,  --histogram [metric]",    "Show an overall distribution histogram after the bar graph ($builtin_metric_list, or a -udm metric name; UDM names are case-sensitive)");
     $out .= help_opt("-hgw, --histogram-width <N>",   "Histogram width as percentage of terminal (default: 95)");
     $out .= help_opt("-hgh, --histogram-height <N>",  "Histogram height in rows (default: 8)");
     $out .= help_opt("-hgb,  --histogram-buckets <N>",             "Override total histogram bucket count (default: 0 = auto-calculate)");
@@ -10578,7 +10750,14 @@ sub print_help {
     $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line; patterns match against the whole raw line, not only the message. Format: name[:unit[:function]][:key|:/regex/]. A metric that produces nothing is reported with how its spec was read.");
     $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
     $out .= help_opt("      unit",                   "Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000). Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
-    $out .= help_opt("      function",               "Aggregations: sum (default), min, max, mean (alias avg). Counting: count, distinct (alias dcount, unique), ratio, rate, drate. Transforms: delta (clamped >=0), idelta (unclamped). Combined: sum(delta), mean(delta), max(idelta), etc.");
+    my $udm_function_row = sub {
+        my ($kind) = @_;
+        return join ', ', map {
+            my @notes = ( grep( { defined } $_->{udm_note} ), @{ $_->{aliases} } ? 'alias ' . join( ', ', @{ $_->{aliases} } ) : () );
+            $_->{name} . ( @notes ? ' (' . join( '; ', @notes ) . ')' : '' )
+        } grep { $_->{udm} eq $kind } @udm_functions;
+    };
+    $out .= help_opt("      function",               "Aggregations: " . $udm_function_row->('aggregation') . ". Counting: " . $udm_function_row->('counting') . ". Transforms: " . $udm_function_row->('transform') . ". Combined: sum(delta), mean(delta), max(idelta), etc.");
     $out .= help_opt("      key",                    "Token key: builds the default extraction pattern from this token instead of the metric name, so the name stays a pure column label. e.g. exception_variety::distinct:JavaException. A fourth field without /.../ is always a token key and is matched literally.");
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. For sum, min, max, mean, delta and idelta the value must be a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2; any other value (12abc, 1,000, an empty capture) is skipped, and the lines skipped are reported. Capture the whole value, e.g. (\\S+), and let it be checked: (\\d+) reads 1 from 1.5 or 1e3, and \\D* before the capture drops a minus sign, with no notice. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
@@ -10945,11 +11124,15 @@ sub counting_token_pattern {
 sub parse_udm_configs {
     my $number = $udm_number_re;
     my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
-    my %udm_agg_aliases = ( avg => 'mean', dcount => 'distinct', unique => 'distinct' );
-    my %counting_aggs = map { $_ => 1 } qw( count distinct ratio rate drate );
-    # Every name the function field accepts; one of these in the unit slot is a
-    # mis-slotted function, not a unit (Issue #443)
-    my %function_names = map { $_ => 1 } qw( sum min max mean avg count distinct dcount unique ratio rate drate delta idelta );
+    # The function slot's names, aliases and kinds come from the
+    # statistic-name table. Every name the function field accepts is in
+    # %udm_function_names; one of these in the unit slot is a mis-slotted
+    # function, not a unit (Issue #443)
+    my %counting_aggs = map { $_ => 1 } @{ $udm_functions_of_kind{counting} };
+    my $aggregations  = join '|', @{ $udm_functions_of_kind{aggregation} };
+    my $countings     = join '|', @{ $udm_functions_of_kind{counting} };
+    my $transforms    = join '|', @{ $udm_functions_of_kind{transform} };
+    my $function_list = join ', ', map { $_->{name} } @udm_functions;
     my $spec_index = -1;
     my $reject = sub {
         my ($spec, $reason, $at_index) = @_;
@@ -10997,7 +11180,7 @@ sub parse_udm_configs {
 
         # A function name in the unit slot is the spec 'name:distinct:...' written
         # without the empty unit field; the metric would run with the wrong meaning
-        if (defined $unit && $unit =~ /^(\w+)(?:\(\w+\))?$/ && $function_names{$1}) {
+        if (defined $unit && $unit =~ /^(\w+)(?:\(\w+\))?$/ && $udm_function_names{$1}) {
             my $rest = join(':', grep { defined } $unit, $function, $token_key);
             $rest .= ":/$custom_pattern_text/" if defined $custom_pattern_text;
             print STDERR "Warning: '$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping\n";
@@ -11009,21 +11192,21 @@ sub parse_udm_configs {
         my ($transform, $aggregation);
         if (defined $function) {
             # Normalize aggregation aliases, including inside combined forms
-            $function =~ s/^(\w+)/exists $udm_agg_aliases{$1} ? $udm_agg_aliases{$1} : $1/e;
-            if ($function =~ /^(count|distinct|ratio|rate|drate)\(/) {
+            $function =~ s/^(\w+)/exists $udm_function_aliases{$1} ? $udm_function_aliases{$1} : $1/e;
+            if ($function =~ /^($countings)\(/) {
                 print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
                 $reject->($raw_arg, 'counting_with_transform');
                 next;
-            } elsif ($function =~ /^(sum|min|max|mean)\((delta|idelta)\)$/) {
+            } elsif ($function =~ /^($aggregations)\(($transforms)\)$/) {
                 $aggregation = $1;
                 $transform = $2;
-            } elsif ($function =~ /^(delta|idelta)$/) {
+            } elsif ($function =~ /^($transforms)$/) {
                 $transform = $1;
                 $aggregation = 'sum';
-            } elsif ($function =~ /^(sum|min|max|mean|count|distinct|ratio|rate|drate)$/) {
+            } elsif ($function =~ /^($aggregations|$countings)$/) {
                 $aggregation = $1;
             } else {
-                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta, or combined e.g. max(delta))\n";
+                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: $function_list, or combined e.g. max(delta))\n";
                 $reject->($raw_arg, 'unknown_function');
                 next;
             }
@@ -14249,12 +14432,61 @@ sub apply_post_walk_sort_gate {
     sort_fallback_to_occurrences('post-walk');
 }
 
+# A list as prose names it: "a, b or c"; one item alone, two joined by "or".
+sub join_with_or {
+    my @items = @_;
+    return $items[0] // '' if @items < 2;
+    return join( ', ', @items[ 0 .. $#items - 1 ] ) . " or $items[-1]";
+}
+
+# Record a deprecated spelling or option as it is met: what was typed, what
+# it is deprecated as (' as a metric name', or empty for an option), the
+# option it was given on (none for an option itself) and the advice that
+# names its replacement. A spelling met on several options is one notice
+# naming each of them.
+sub record_deprecation {
+    my (%notice) = @_;
+    my $entry = $deprecation_of{ $notice{spelling} };
+    unless ($entry) {
+        $entry = { spelling => $notice{spelling}, as => $notice{as} // '', advice => $notice{advice}, options => [] };
+        push @deprecations, $entry;
+        $deprecation_of{ $notice{spelling} } = $entry;
+    }
+    push @{ $entry->{options} }, $notice{option}
+        if defined $notice{option} && !grep { $_ eq $notice{option} } @{ $entry->{options} };
+    return;
+}
+
+# The one place a deprecation prints: one stderr line per recorded spelling
+# or option, a behavioural notice that always prints (--disable-progress
+# does not touch stderr), for the release a spelling stays accepted.
+sub print_deprecation_notices {
+    for my $notice (@deprecations) {
+        my $given = @{ $notice->{options} } ? ' (given to ' . join( ', ', @{ $notice->{options} } ) . ')' : '';
+        print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";
+    }
+    @deprecations = ();
+    %deprecation_of = ();
+    return;
+}
+
+# A built-in metric's name from the token given to an option, in any case,
+# through the built-in metric table. A deprecated spelling resolves only on
+# the options its table entry lists, and records its notice (#613 D1, D8).
+# Returns the canonical name, or undef when the token names no built-in
+# metric on that option.
 sub builtin_metric_name {
-    my ($token) = @_;
+    my ($token, $option) = @_;
     return undef unless defined $token;
     my $lc = lc trim($token);
-    return 'duration' if $lc eq 'duration' || $lc eq 'time';
-    return $lc        if $lc eq 'bytes' || $lc eq 'count';
+    return $lc if exists $builtin_metric{$lc};
+    return undef unless defined $option;
+    for my $metric (@builtin_metrics) {
+        my $options = $metric->{deprecated}{$lc} or next;
+        next unless grep { $_ eq $option } @$options;
+        record_deprecation( spelling => $lc, as => ' as a metric name', option => $option, advice => "use $metric->{name}" );
+        return $metric->{name};
+    }
     return undef;
 }
 
@@ -14262,10 +14494,10 @@ sub builtin_metric_name {
 # Returns { kind => 'builtin', name => canonical } |
 #         { kind => 'udm', config => $cfg } | undef (unknown token).
 sub resolve_metric_operand {
-    my ($token) = @_;
+    my ($token, $option) = @_;
     return undef unless defined $token;
     $token = trim($token);
-    my $builtin = builtin_metric_name($token);
+    my $builtin = builtin_metric_name($token, $option);
     return { kind => 'builtin', name => $builtin } if defined $builtin;
     my $match = udm_config_by_name($token);
     return { kind => 'udm', config => $match } if $match;
@@ -14284,147 +14516,172 @@ sub udm_config_by_name {
 
 # The metric vocabulary named in every unknown-metric diagnostic.
 sub available_metric_names {
-    return (qw(duration bytes count), map { $_->{name} } @udm_configs);
+    return (@builtin_metric_names, map { $_->{name} } @udm_configs);
 }
 
-# Resolve the names given to -x / --expose and its shorthands. A built-in
-# name resolves first: the query string is kept in the message; the thread,
-# session and user are appended to the end of it; a metric name, or the key
-# as the file writes it, keeps its number in the message in place of the
-# mask. Any other name is a key read from the line by the counting token
-# rule and appended. The order the names were given is the order the values
-# are appended in, so the same combination of values gives the same message
-# whatever order the line carries them in; a value may be a comma-separated
-# list, and a name given twice keeps its first position. Runs after parse_udm_configs(), whose metric names and
-# token keys it resolves against, and before build_format_registry(), which
-# bakes each format's metric masks into its extraction code.
+
+# The key a user-defined metric reads from the line: its token key, or the
+# name it was given when it reads the key it is named after. A metric
+# defined by a /regex/ names no key.
+sub udm_line_key {
+    my ($config) = @_;
+    return $config->{token_key} if $config->{extraction} eq 'token_key';
+    return $config->{base_name} if $config->{extraction} eq 'name';
+    return undef;
+}
+
+# The built-in metric a format probe reads from a key spelled as the line
+# writes it (durationMS, durationMs, bytes), from the static format specs:
+# the -x and -d names settle before the registry is built.
+sub probe_key_metric {
+    my ($key) = @_;
+    for my $spec ( format_registry_specs() ) {
+        my $mm = $spec->{message_metrics} or next;
+        for my $probe ( @{ $mm->{probes} } ) {
+            return $probe->{name} if grep { $_ eq $key } @{ $probe->{mask_keys} || [] };
+        }
+    }
+    return undef;
+}
+
+# Resolve one name given to -x or -d, the one resolution both options share
+# (#613 section 5.2). Built-in names resolve first, each in any case: a
+# parsed field or message part, an identifier (-d only), a built-in metric. Then
+# a user-defined metric by its name, as written. Anything else is a key
+# written in the line, matched as written, carrying the metrics it feeds:
+# the built-in metric a format probe reads from it, and the user-defined
+# metrics that read it. Returns a hash: kind (field, identifier, metric or
+# key) and the canonical name, with the table entry or the metrics found.
+sub resolve_message_name {
+    my ( $name, $option ) = @_;
+    if ( my $field = $message_field{ lc $name } ) {
+        return { kind => 'field', name => $field->{name}, field => $field } if $option eq 'discard' || $field->{expose};
+    }
+    if ( $option eq 'discard' && ( my $identifier = $mask_identifier{ lc $name } ) ) {
+        return { kind => 'identifier', name => $identifier->{name}, identifier => $identifier };
+    }
+    my $metric = builtin_metric_name($name);
+    return { kind => 'metric', name => $metric } if defined $metric;
+    return { kind => 'key', name => $name,
+             udm          => udm_config_by_name($name),
+             readers      => [ grep { ( udm_line_key($_) // '' ) eq $name } @udm_configs ],
+             probe_metric => probe_key_metric($name) };
+}
+
+# Resolve the names given to -x / --expose and its shorthands through
+# resolve_message_name(). The query string is kept in the message; the
+# thread, session and user are appended to the end of it; a built-in metric
+# keeps its number in the message in place of the mask; a user-defined
+# metric named by its name does the same. Any other name is a key read from
+# the line by the counting token rule and appended when grouping would
+# otherwise have removed its value; a key a metric is read from has that
+# mask lifted, so its value stays in place and nothing is appended (D11).
+# The order the names were given is the order the values are appended in,
+# so the same combination of values gives the same message whatever order
+# the line carries them in; a value may be a comma-separated list, and a
+# name given twice keeps its first position. Runs after parse_udm_configs(),
+# whose metric names and keys it resolves against, and before
+# build_format_registry(), which bakes each format's metric masks into its
+# extraction code.
 sub resolve_expose_names {
     my %seen;
     for my $raw (@expose_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $resolved = resolve_message_name( $given, 'expose' );
+            my $name = $resolved->{name};
+            next if $seen{$name}++;
             push @expose_names, $name;
-            if    ( $name eq 'query-string' ) { $include_query_string = 1 }
-            elsif ( $name eq 'thread'  )      { push @expose_appends, [ EXPOSE_THREAD,  'thread'  ] }
-            elsif ( $name eq 'session' )      { $include_session = 1; push @expose_appends, [ EXPOSE_SESSION, 'session' ] }
-            elsif ( $name eq 'user'    )      { $include_user    = 1; push @expose_appends, [ EXPOSE_USER,    'user'    ] }
-            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $expose_metric{duration} = 1 }
-            elsif ( $name eq 'bytes' )        { $expose_metric{bytes} = 1 }
-            elsif ( $name eq 'count' )        { $expose_count = 1 }
+            if ( $resolved->{kind} eq 'field' ) {
+                my $field = $resolved->{field};
+                ${ $field->{include_flag} } = 1 if $field->{include_flag};
+                push @expose_appends, [ $field->{append_kind}, $name ] if $field->{expose} eq 'append';
+            }
+            elsif ( $resolved->{kind} eq 'metric' ) {
+                if ( $name eq 'count' ) { $expose_count = 1 } else { $expose_metric{$name} = 1 }
+            }
+            elsif ( $resolved->{udm} ) {
+                $resolved->{udm}{expose} = 1;
+                $_->{expose} = 1 for @{ $resolved->{readers} };
+            }
             else {
-                my $config = udm_config_by_name($name)
-                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
-                if ($config) { $config->{expose} = 1 }
-                else { push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ] }
+                $expose_key{$name} = 1 if defined $resolved->{probe_metric};
+                $_->{expose} = 1 for @{ $resolved->{readers} };
+                push @expose_appends, [ EXPOSE_LINE_KEY, $name, counting_token_pattern($name) ];
             }
         }
     }
-    $expose_active = @expose_appends ? 1 : 0;
     return;
 }
 
-# The identifiers -m / --mask can name, each with the pattern that finds it in
-# the message and the placeholder of its shape that replaces it. Word-boundary
-# tests keep an identifier embedded in a longer token as written: a UUID is
-# eight, four, four, four and twelve hexadecimal digits with no hexadecimal
-# digit either side; an IPv4 address is four decimal octets from 0 to 255
-# without leading zeros, with no word character or digit-and-dot before, and no word
-# character or further dotted digit after, so a port, a leading / and a thread
-# name's hyphens do not stop a match; an IPv6 address follows the IPv6address
-# grammar of RFC 3986 (full, ::-compressed, or ending in an IPv4 address),
-# with no word character, colon or dot before and no word character or colon
-# after, so a zone and a bracketed port stay as written around the placeholder.
-# A bare :: is a separator in messages and is never matched. Every option that
-# names one of these identifiers resolves it through this table.
-my %mask_patterns;
-{
-    my $hex = '[0-9A-Fa-f]';
-    my $octet = '(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)';
-    my $ipv4 = "(?:$octet\\.){3}$octet";
-    my $h = '[0-9A-Fa-f]{1,4}';
-    my $ls32 = "(?:$h:$h|$ipv4)";
-    my $ipv6 = join '|',
-        "(?:${h}:){6}$ls32",
-        "::(?:${h}:){5}$ls32",
-        "(?:${h})?::(?:${h}:){4}$ls32",
-        "(?:(?:${h}:){0,1}${h})?::(?:${h}:){3}$ls32",
-        "(?:(?:${h}:){0,2}${h})?::(?:${h}:){2}$ls32",
-        "(?:(?:${h}:){0,3}${h})?::${h}:$ls32",
-        "(?:(?:${h}:){0,4}${h})?::$ls32",
-        "(?:(?:${h}:){0,5}${h})?::$h",
-        "(?:${h}:){0,6}${h}::";
-    %mask_patterns = (
-        uuid => [ qr/(?<!$hex)$hex{8}-$hex{4}-$hex{4}-$hex{4}-$hex{12}(?!$hex)/, '########-####-####-####-############' ],
-        ipv6 => [ qr/(?<![\w:.])(?:$ipv6)(?![\w:]|\.\d)/, '####:####:####:####:####:####:####:####' ],
-        ipv4 => [ qr/(?<!\w)(?<!\d\.)$ipv4(?!\w|\.\d)/, '###.###.###.###' ],
-    );
-}
-my @mask_order = qw(uuid ipv6 ipv4);
-
-# Resolve the names given to -m / --mask and -uuid into the substitutions the
-# run applies. A value may be a comma-separated list; a name given twice keeps
-# its first position; ip names both address versions. The substitutions are
-# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the same
-# names give the same message. An unknown name stops the run.
+# Resolve the names given to -m / --mask and -uuid into the identifier names
+# the run masks, through the identifier table: a name in any case, listed in
+# its canonical spelling (#613 D7, D15). A value may be a comma-separated
+# list; a name given twice keeps its first position; ip names both address
+# versions. The substitutions are built from the final list at settlement,
+# ordered uuid, ipv6, ipv4 whatever order the names were given in, so the
+# same names give the same message. An unknown name stops the run.
 sub resolve_mask_names {
     my %seen;
-    my %wanted;
     for my $raw (@mask_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
-            push @mask_names, $name;
-            if    ( $name eq 'ip' )                      { $wanted{ipv4} = 1; $wanted{ipv6} = 1 }
-            elsif ( exists $mask_patterns{$name} )       { $wanted{$name} = 1 }
-            else {
-                print_usage("Unknown mask name '$name' for -m. Valid values: uuid, ip, ipv4, ipv6");
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $identifier = $mask_identifier{ lc $given };
+            unless ($identifier) {
+                print_usage("Unknown mask name '$given' for -m. Valid values: $mask_identifier_list");
                 exit 1;
             }
+            push @mask_names, $identifier->{name} unless $seen{ $identifier->{name} }++;
         }
     }
-    @mask_subs = map { $mask_patterns{$_} } grep { $wanted{$_} } @mask_order;
-    $mask_active = @mask_subs ? 1 : 0;
-    $mask_uuid   = $wanted{uuid} ? 1 : 0;
     return;
 }
 
-# Resolve the names given to -d / --discard into what the run removes. A
-# value may be a comma-separated list; a name given twice keeps its first
-# position. A built-in name resolves before a key written in the line, as
-# for --expose: the four parsed fields clear their captured value, uuid and
-# the IP versions remove the identifier the --mask patterns find, the metric
-# names do what the omit options do, a -udm metric name switches that metric
-# off, and query-string takes the query string out of the message. Any other
-# name is a key read from the line, removed with its value and the separator
-# beside it. An unknown name is such a key, not an error: a key no line
+# Resolve the names given to -d / --discard into what the run removes,
+# through resolve_message_name(). A value may be a comma-separated list; a
+# name given twice keeps its first position. The parsed fields clear their
+# captured value, the identifiers remove what the --mask patterns find, a
+# built-in metric name does what its omit option does, a user-defined
+# metric's name switches that metric off, and query-string takes the query
+# string out of the message; the identifiers are removed in the order -m
+# applies them. Built-in names match in any case. Any other name is a key read from the line,
+# removed with its value and the separator beside it; a key a metric is read
+# from switches that metric off too, its value being gone, and says so
+# (D4, D12). An unknown name is such a key, not an error: a key no line
 # carries removes nothing, and nothing declares the keys a log may write.
-# Runs after parse_udm_configs(), whose metric names and token keys it
-# resolves against, and before build_format_registry(), which bakes each
-# format's metric masks into its extraction code.
+# Runs after parse_udm_configs(), whose metric names and keys it resolves
+# against, and before build_format_registry(), which bakes each format's
+# metric masks into its extraction code.
 sub resolve_discard_names {
-    my %seen;
+    my ( %seen, %identifier_wanted );
     for my $raw (@discard_raw) {
-        for my $name ( map { trim($_) } split /,/, $raw ) {
-            next if $name eq '' || $seen{$name}++;
+        for my $given ( map { trim($_) } split /,/, $raw ) {
+            next if $given eq '';
+            my $resolved = resolve_message_name( $given, 'discard' );
+            my $name = $resolved->{name};
+            next if $seen{$name}++;
             push @discard_names, $name;
-            if    ( $name eq 'thread' || $name eq 'session' || $name eq 'user' || $name eq 'object' ) {
-                $discard_field{$name} = 1;
-            }
-            elsif ( $name eq 'query-string' ) { $discard_field{'query-string'} = 1 }
-            elsif ( $name eq 'ip' ) { push @discard_subs, discard_identifier_sub('ipv6'), discard_identifier_sub('ipv4') }
-            elsif ( $name eq 'uuid' || $name eq 'ipv4' || $name eq 'ipv6' ) { push @discard_subs, discard_identifier_sub($name) }
-            elsif ( $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS' ) { $omit_durations = 1 }
-            elsif ( $name eq 'bytes' ) { $omit_bytes = 1 }
-            elsif ( $name eq 'count' ) { $omit_count = 1 }
+            if    ( $resolved->{kind} eq 'field' )      { $discard_field{$name} = 1 }
+            elsif ( $resolved->{kind} eq 'identifier' ) { $identifier_wanted{$_} = 1 for @{ $resolved->{identifier}{entries} } }
+            elsif ( $resolved->{kind} eq 'metric' )     { ${ $builtin_metric{$name}{omit_flag} } = 1 }
             else {
-                my $config = udm_config_by_name($name)
-                          // ( grep { defined $_->{token_key} && $_->{token_key} eq $name } @udm_configs )[0];
-                $config->{discarded} = 1 if $config;
+                $resolved->{udm}{discarded} = 1 if $resolved->{udm};
+                for my $reader ( @{ $resolved->{readers} } ) {
+                    $reader->{discarded} = 1;
+                    print STDERR "Note: -d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off\n";
+                }
+                if ( defined( my $metric = $resolved->{probe_metric} ) ) {
+                    ${ $builtin_metric{$metric}{omit_flag} } = 1;
+                    print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";
+                }
                 push @discard_subs, discard_key_sub($name);
             }
         }
     }
-    $discard_active = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;
-    $discard_any_field = ( grep { $discard_field{$_} } qw( thread session user object ) ) ? 1 : 0;
+    # The identifiers go after the keys, in the order -m applies them, never
+    # the order typed: -d ipv4,ipv6 and -d ipv6,ipv4 remove the same text
+    # (#613 D13).
+    push @discard_subs, map { discard_identifier_sub($_) } grep { $identifier_wanted{$_} } @mask_order;
     return;
 }
 
@@ -14432,11 +14689,15 @@ sub resolve_discard_names {
 # separator (D16): the pair takes the & ? or space that follows it, or, at
 # the end of the message, the one before it. Every occurrence goes. The value
 # runs to the first character that cannot sit inside a field, the same rule
-# counting_token_pattern() gives -udm and -x, so the three read a line alike.
+# counting_token_pattern() gives -udm and -x, so the three read a line alike;
+# or it is the ? a metric mask left in its place, taken whole, so a masked
+# pair goes as completely as an unmasked one and the result does not depend
+# on whether the mask ran first (#613 D12, D13). The group is atomic: a ?
+# taken as the value is never given back to be read as the separator.
 sub discard_key_sub {
     my ($key) = @_;
     my $escaped_key = quotemeta($key);
-    my $value = q{[^\s,;"'\])&?]*};
+    my $value = q{(?>\?(?=[&?\s]|$)|[^\s,;"'\])&?]*)};
     # Two alternatives, the trailing separator first: a pair followed by one
     # takes it, and a pair at the end of the message takes the one before it
     # instead. Both collapse to nothing, leaving the separators either side
@@ -14451,6 +14712,16 @@ sub discard_identifier_sub {
     my ($name) = @_;
     my $pattern = $mask_patterns{$name}[0];
     return [ qr/(?<=\/)(?:$pattern)\/|(?<= )(?:$pattern) |(?:$pattern)/, '' ];
+}
+
+# True when the identifier name $outer covers every entry $inner expands to:
+# ip covers ip, ipv4 and ipv6; ipv4 covers only ipv4.
+sub identifier_covers {
+    my ( $outer, $inner ) = @_;
+    my ( $o, $i ) = ( $mask_identifier{$outer}, $mask_identifier{$inner} );
+    return 0 unless $o && $i;
+    my %entries = map { $_ => 1 } @{ $o->{entries} };
+    return !grep { !$entries{$_} } @{ $i->{entries} };
 }
 
 # Discard wins over expose and over mask, and says so (D13, D17). A value
@@ -14479,11 +14750,10 @@ sub apply_discard_precedence {
     if (@exposed_too) {
         @expose_names   = grep { !$discarded{$_} } @expose_names;
         @expose_appends = grep { !$discarded{ $_->[1] } } @expose_appends;
-        $expose_active  = @expose_appends ? 1 : 0;
         for my $name (@exposed_too) {
             $include_query_string = 0 if $name eq 'query-string';
-            delete $expose_metric{duration} if $name eq 'duration' || $name eq 'durationMs' || $name eq 'durationMS';
-            delete $expose_metric{bytes}    if $name eq 'bytes';
+            delete $expose_metric{$name};
+            delete $expose_key{$name};
             $expose_count = 0 if $name eq 'count';
         }
         print STDERR "Note: " . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed\n";
@@ -14492,16 +14762,27 @@ sub apply_discard_precedence {
     # A masked identifier that is also discarded: it is removed before the
     # masks run, so the mask would find nothing; drop it from the mask list
     # so the two options cannot disagree about the same identifier.
-    my %mask_discarded = map { $_ => 1 } grep { $discarded{$_} || ( $discarded{ip} && ( $_ eq 'ipv4' || $_ eq 'ipv6' ) ) } @mask_names;
+    my %mask_discarded = map { $_ => 1 } grep { my $masked = $_; grep { identifier_covers( $_, $masked ) } @discard_names } @mask_names;
     if (%mask_discarded) {
         my @masked_too = grep { $mask_discarded{$_} } @mask_names;
         @mask_names = grep { !$mask_discarded{$_} } @mask_names;
-        my %still = map { $_ => 1 } map { $_ eq 'ip' ? ( 'ipv4', 'ipv6' ) : $_ } @mask_names;
-        @mask_subs   = map { $mask_patterns{$_} } grep { $still{$_} } @mask_order;
-        $mask_active = @mask_subs ? 1 : 0;
-        $mask_uuid   = $still{uuid} ? 1 : 0;
         print STDERR "Note: " . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked\n";
     }
+    return;
+}
+
+# Derive the run-scoped activation flags of -x, -m and -d once, from their
+# final lists: after the three resolutions and the discard-precedence pass,
+# which only build and trim lists (#613 D9). The per-line path reads these
+# scalars and @mask_subs.
+sub settle_message_option_flags {
+    my %masked = map { $_ => 1 } map { @{ $mask_identifier{$_}{entries} } } @mask_names;
+    @mask_subs         = map { $mask_patterns{$_} } grep { $masked{$_} } @mask_order;
+    $mask_active       = @mask_subs ? 1 : 0;
+    $mask_uuid         = $masked{uuid} ? 1 : 0;
+    $expose_active     = @expose_appends ? 1 : 0;
+    $discard_active    = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;
+    $discard_any_field = ( grep { $discard_field{$_} } @cleared_fields ) ? 1 : 0;
     return;
 }
 
@@ -14513,7 +14794,7 @@ sub handle_histogram_option {
         # Check if the value looks like a filename (not a valid metric)
         # This handles the case where -hg is followed by a filename
         my @parts = split /,/, $opt_value;
-        my $has_valid_metric = grep { defined builtin_metric_name($_) } @parts;
+        my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;
 
         if (!$has_valid_metric && !@udm_raw_args) {
             # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
@@ -14528,13 +14809,13 @@ sub handle_histogram_option {
         # resolve_metric_operand() after parse_udm_configs().
         for my $metric (split /,/, $opt_value) {
             $metric = trim($metric);
-            my $builtin = builtin_metric_name($metric);
+            my $builtin = builtin_metric_name($metric, '-hg/--histogram');
             if (defined $builtin) {
                 $histogram_metrics{$builtin} = 1;
             } elsif (@udm_raw_args) {
                 $histogram_metrics{$metric} = 1;
             } else {
-                warn "Unknown histogram metric: $metric (valid: duration, time, bytes, count)\n";
+                warn "Unknown histogram metric: $metric (valid: $builtin_metric_list)\n";
             }
         }
     }
@@ -15063,7 +15344,7 @@ sub adapt_to_command_line_options {
     if (defined $heatmap_metric) {
         $heatmap_enabled = 1;
         # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
-        my $builtin = builtin_metric_name($heatmap_metric);
+        my $builtin = builtin_metric_name($heatmap_metric, '-hm/--heatmap');
         if ($heatmap_metric eq '') {
             $heatmap_metric = 'duration';  # Default metric (empty string case)
         } elsif (defined $builtin) {
@@ -15073,7 +15354,7 @@ sub adapt_to_command_line_options {
         } else {
             # No UDM args — it's likely a filename, push it back.
             # Issue #231: surface this previously-silent pushback.
-            warn "-hm value '$heatmap_metric' is not a built-in metric (duration|bytes|count) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
+            warn "-hm value '$heatmap_metric' is not a built-in metric ($builtin_metric_choices) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
             unshift @ARGV, $heatmap_metric;
             $heatmap_metric = 'duration';  # Default metric
         }
@@ -15359,39 +15640,32 @@ sub adapt_to_command_line_options {
     my $sort_operand_typed = $sort_type;
     $sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;
 
-    # The whitelist is matched case-insensitively, as every arm of the resolution
-    # ladder below already is. It was an exact-string test, so an operand the ladder
-    # would have resolved was rejected before reaching it (#432).
-    do { print_usage( "invalid sort type used" ); exit 1; } unless grep { lc $_ eq lc $sort_type } qw(
-        occurrences total duration time bytes size impact cv
+    # A bare metric word is its total, and a bare statistic word its stored key,
+    # each read from its table (the built-in metric and statistic-name tables),
+    # in any case. The other names below are matched case-insensitively, as
+    # every arm of the ladder is.
+    my $sort_metric    = builtin_metric_name( $sort_type, '-so/--sort-on' );
+    my $sort_statistic = $statistic_by_spelling{ lc $sort_type };
+    undef $sort_statistic unless $sort_statistic && $sort_statistic->{sort};
+    do { print_usage( "invalid sort type used" ); exit 1; } unless defined $sort_metric || $sort_statistic || grep { lc $_ eq lc $sort_type } qw(
+        occurrences total impact
         bytes_occurrences bytes_min bytes_mean bytes_max
-        count count_occurrences count_total count_sum count_min count_mean count_avg count_max
-        std_dev stddev min mean avg max
-        p1 p5 p10 p25 p50 p75 p90 p95 p99 p999 p9999 p99999
-        iqr skewness kurtosis bimodality_coef
+        count_occurrences count_total count_sum count_min count_mean count_avg count_max
     );
 
-    if( $sort_type =~ /^(?:duration|time)$/i ) {
-        $sort_key = "total_duration";
-    } elsif( $sort_type =~ /^min$/i ) {
-        $sort_key = "min";
-    } elsif( $sort_type =~ /^(?:mean|avg)$/i ) {
-        $sort_key = "mean";
-    } elsif( $sort_type =~ /^max$/i ) {
-        $sort_key = "max";
-    } elsif( $sort_type =~ /^(?:std_dev|stddev)$/i ) {
-        $sort_key = "std_dev";
+    if( defined $sort_metric ) {
+        $sort_key = $builtin_metric{$sort_metric}{sort_key};
+    } elsif( $sort_statistic ) {
+        # Percentile and distribution-shape statistics are stored on
+        # %log_messages under the key they are named by (#220, #222).
+        $sort_key = $sort_statistic->{key};
     } elsif( $sort_type =~ /^(?:occurrences|total)$/i ) {
         $sort_key = "occurrences";
-    } elsif( $sort_type =~ /^(?:bytes|size)$/i ) {
-        $sort_key = "total_bytes";
     } elsif( $sort_type =~ /^impact$/i ) {
         $sort_key = "impact";
-    } elsif( $sort_type =~ /^cv$/i ) {
-        $sort_key = "cv";
     } elsif( $sort_type =~ /^(?:count_occurrences|count_total)$/i ) {
         $sort_key = "count_occurrences";
-    } elsif( $sort_type =~ /^(?:count|count_sum)$/i ) {
+    } elsif( $sort_type =~ /^count_sum$/i ) {
         $sort_key = "count_sum";
     } elsif( $sort_type =~ /^count_min$/i ) {
         $sort_key = "count_min";
@@ -15407,10 +15681,6 @@ sub adapt_to_command_line_options {
         $sort_key = "bytes_mean";
     } elsif( $sort_type =~ /^bytes_max$/i ) {
         $sort_key = "bytes_max";
-    } elsif( $sort_type =~ /^(p1|p5|p10|p25|p50|p75|p90|p95|p99|p999|p9999|p99999|iqr|skewness|kurtosis|bimodality_coef)$/i ) {
-        # Identity mapping: percentile and distribution-shape metrics are stored on
-        # %log_messages under the same key name they're invoked by on -so (#220, #222).
-        $sort_key = lc $sort_type;
     }
 
     apply_parse_time_sort_gate($sort_operand_typed);
@@ -15424,10 +15694,11 @@ sub adapt_to_command_line_options {
     resolve_mask_names()   if @mask_raw;
     resolve_discard_names() if @discard_raw;
     apply_discard_precedence() if @discard_names;
+    settle_message_option_flags();
 
     # Validate UDM heatmap metric name (must run after parse_udm_configs)
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
-        my $resolved = resolve_metric_operand($heatmap_metric);
+        my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');
         if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
             # A per-line distribution over counting (string) values is meaningless
             print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled\n";
@@ -15443,7 +15714,7 @@ sub adapt_to_command_line_options {
     # Validate UDM histogram metric names (must run after parse_udm_configs)
     if ($histogram_enabled && %histogram_metrics) {
         for my $metric (keys %histogram_metrics) {
-            my $resolved = resolve_metric_operand($metric);
+            my $resolved = resolve_metric_operand($metric, '-hg/--histogram');
             next if $resolved && $resolved->{kind} eq 'builtin';
             my $match = $resolved ? $resolved->{config} : undef;
             # base_name resolution for disambiguated metrics (#104): register
@@ -15477,24 +15748,24 @@ sub adapt_to_command_line_options {
     # statistics panel is not displayed). Statistics capture/computation is
     # governed by the demand resolution below, not by this flag.
     if ($omit_stats) {
-        print STDERR "Warning: -os/--omit-stats is deprecated: use -od/--omit-durations to keep durations from being captured, or -hst/--hide-stats to keep the statistics panel from being displayed\n";
+        record_deprecation( spelling => '-os/--omit-stats', advice => 'use -od/--omit-durations to keep durations from being captured, or -hst/--hide-stats to keep the statistics panel from being displayed' );
         $hide_stats = 1;
     }
 
     # -uuid/--mask-uuid is the deprecated spelling of -m uuid: it masks as
     # before and tells the user where the option went.
-    if ($mask_uuid_option) {
-        print STDERR "Warning: -uuid/--mask-uuid is deprecated: use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6\n";
-    }
+    record_deprecation( spelling => '-uuid/--mask-uuid', advice => 'use -m uuid/--mask uuid, which also masks IP addresses with -m ip, ipv4 or ipv6' )
+        if $mask_uuid_option;
 
     # -s/--seconds and -ms/--milliseconds are deprecated: -tp sets the
     # timestamp precision and a unit on -bs sets the bucket width. Both keep
     # their jobs (the precision, and the unit of a bare -bs number and of the
     # default width) while they exist.
-    print STDERR "Warning: -s/--seconds is deprecated: use -tp s for the timestamp precision, and give -bs a unit (-bs 30s) for the bucket width\n"
+    record_deprecation( spelling => '-s/--seconds', advice => 'use -tp s for the timestamp precision, and give -bs a unit (-bs 30s) for the bucket width' )
         if $print_seconds;
-    print STDERR "Warning: -ms/--milliseconds is deprecated: use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width\n"
+    record_deprecation( spelling => '-ms/--milliseconds', advice => 'use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width' )
         if $print_milliseconds;
+    print_deprecation_notices();
 
     # With no message retained, the options that only configure the per-message
     # store have nothing left to configure. They are not an error - the retention
@@ -16620,6 +16891,7 @@ sub read_and_process_logs {
                             } else {
                                 my $field_value = $ex->[0] == EXPOSE_THREAD  ? $thread
                                                 : $ex->[0] == EXPOSE_SESSION ? $session
+                                                : $ex->[0] == EXPOSE_OBJECT  ? $object
                                                 :                              $user;
                                 next unless defined $field_value && $field_value ne '' && $field_value ne '-';
                                 $message .= " $ex->[1]=$field_value";
@@ -17364,7 +17636,7 @@ sub read_and_process_logs {
     # Surface how many lines a numeric filter removed solely because the line
     # carried no value for the filtered metric; without this the totals shrink
     # by far more than the thresholds explain, with no indication why.
-    for my $metric (qw(duration bytes count)) {
+    for my $metric (@builtin_metric_names) {
         next unless $numeric_filter_no_metric{$metric};
         print STDERR "Note: " . format_number( $numeric_filter_no_metric{$metric}, 'medium' )
             . " lines carried no $metric value and were excluded by the $metric filter"
@@ -17753,7 +18025,7 @@ sub calculate_histogram_buckets_exact {
 
     my @metrics_with_data = ();
 
-    for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs) {
+    for my $metric (@builtin_metric_names, map { $_->{name} } @histogram_udm_configs) {
         my $values_ref = $histogram_values{$metric};
         next unless defined $values_ref && @$values_ref > 0;
 
@@ -17907,7 +18179,7 @@ sub finalize_histogram_unified {
 
     my @metrics_with_data;
 
-    for my $metric (qw(duration bytes count), map { $_->{name} } @histogram_udm_configs) {
+    for my $metric (@builtin_metric_names, map { $_->{name} } @histogram_udm_configs) {
         my $src = $histogram_counters{$metric};
         next unless $src;
 
@@ -18050,9 +18322,9 @@ sub finalize_histogram_unified {
 # Calculate histogram layout dimensions - Issue #25
 # Returns a hash with layout information for rendering histograms side by side
 sub calculate_histogram_layout {
-    # Step 1: Determine which metrics have data (in display order: duration, bytes, count, then UDMs)
+    # Step 1: Determine which metrics have data (in display order: the built-in metrics, then UDMs)
     my @active_metrics = ();
-    for my $metric (qw(duration bytes count)) {
+    for my $metric (@builtin_metric_names) {
         # Check if metric was requested (or all metrics if none specified)
         if ((!%histogram_metrics || $histogram_metrics{$metric}) &&
             exists $histogram_stats{$metric} &&
@@ -19978,9 +20250,9 @@ sub normalize_data_for_output {
     }
 
     # Resolve ALL metric colors from @column_layout (single source of truth)
-    # A. Built-in metrics: duration, bytes, count
-    for my $metric (qw(duration bytes count)) {
-        my ($col_entry) = grep { $_->{id} eq $metric } @column_layout;
+    # A. Built-in metrics
+    for my $metric (@builtin_metric_names) {
+        my ($col_entry) = grep { $_->{id} eq $builtin_metric{$metric}{column} } @column_layout;
         next unless $col_entry && $col_entry->{color};
         $heatmap_metric_map{$metric}{color} = $col_entry->{color}{name};
         $heatmap_metric_map{$metric}{highlight_bg} = $col_entry->{color}{plain_bg_num};
@@ -20018,27 +20290,25 @@ sub normalize_data_for_output {
     return;
 }
 
+# A heatmap or histogram value, formatted by its metric's family: a built-in
+# metric's family is in its table entry, a user-defined metric's follows its
+# unit type.
 sub format_heatmap_value {
     my ($value, $metric) = @_;
-    if ($metric eq 'duration') {
-        return format_time($value, 'ms');
-    } elsif ($metric eq 'bytes') {
-        return format_bytes($value);
-    } elsif ($metric eq 'count') {
-        return format_number($value, 'medium');
-    } elsif (defined $heatmap_udm_config && ($metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name})) {
-        my $ut = $heatmap_udm_config->{unit_type};
-        return $ut eq 'time'  ? format_time($value, 'ms') :
-               $ut eq 'bytes' ? format_bytes($value) :
-                                format_number($value, 'medium');
-    } elsif (my ($hcfg) = grep { $_->{name} eq $metric } @histogram_udm_configs) {
-        my $ut = $hcfg->{unit_type};
-        return $ut eq 'time'  ? format_time($value, 'ms') :
-               $ut eq 'bytes' ? format_bytes($value) :
-                                format_number($value, 'medium');
+    my $family;
+    if ( exists $builtin_metric{$metric} ) {
+        $family = $builtin_metric{$metric}{family};
     } else {
-        return $value;
+        my ($config) = defined $heatmap_udm_config && ( $metric eq $heatmap_udm_config->{name} || $metric eq $heatmap_udm_config->{base_name} )
+                     ? ($heatmap_udm_config)
+                     : grep { $_->{name} eq $metric } @histogram_udm_configs;
+        return $value unless $config;
+        my $ut = $config->{unit_type};
+        $family = $ut eq 'time' ? 'duration' : $ut eq 'bytes' ? 'bytes' : 'count';
     }
+    return $family eq 'duration' ? format_time($value, 'ms')
+         : $family eq 'bytes'    ? format_bytes($value)
+         :                         format_number($value, 'medium');
 }
 
 sub get_heatmap_column_header {
