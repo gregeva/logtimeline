@@ -17,6 +17,11 @@ already failed.
 - **Name the change once.** No second clause restating the first in other
   words, no "so that" chain, no enumerated cases, no list of accepted values,
   no worked example, no remedy advice, no before/after contrast.
+- **Name an option by both its forms at its first reference in a bullet**:
+  `` `-d`/`--discard` ``, each form in its own backticks, any value after the
+  long form (`` `-bn`/`--byte-notation iec` ``). A later reference in the same
+  bullet uses the short form alone (`` `-du us` ``). The long form tells a
+  reader who doesn't know the short form what the option is about.
 - Never describe pre-existing behaviour, what the bug was, or why it happened.
   The fix is the bullet; the cause belongs on the issue.
 - One `(#NNN)` at the end. A second user-observable change in the same issue is
