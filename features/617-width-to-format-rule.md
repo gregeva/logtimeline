@@ -414,6 +414,17 @@ issue body; they are restated here, not reinterpreted.
   (decimals give way first, the space second, the tier last) gave up a
   significant digit on 216 rendered values of the regression goldens. The
   intents, their tolerances and each surface's intent are not yet locked.
+  **Refined by the architect (2026-10-04):** "it's the producer who is setting
+  the number of significant digits. The intent is only providing preference
+  mechanism for the width formatting and algorithm adaption to the various
+  parts of that given the use. Hence, this is something that the producer would
+  also need to provide." The digits stay where § 5 puts them (a precision a
+  record locks for the surface, else the tier's maximum, never finer than the
+  source's resolution, then fewer to fit the width); the producer also names
+  the intent, which adds no digit count and only orders the choices among
+  spellings. An intent for a notice is human-readable prose (the full word,
+  `2 thousand`), not an approximation: "the intent is not for the value to be
+  approximate the intent is it for it to be human readable prose".
 
 ### Governing decisions in other records, read and in force
 
