@@ -37,6 +37,18 @@
 #    lone ERROR key that sorts first by body ahead of five similar WARN keys,
 #    each line three times so every key reaches the final pass.
 #
+# 5. Consolidation's core mandate: merging similar messages while every
+#    occurrence and its data is accounted for exactly once. Each scenario runs
+#    the same input grouped and ungrouped and checks, through the accounting
+#    and cluster-membership sub-sections (tests/message-grouping/
+#    check-accounting.pl): the data is conserved across the two runs and
+#    through every consolidation pass, every key is in exactly one row, and a
+#    row holds each duration once. The inputs: a synthetic access log built to
+#    exercise every way consolidation moves data (streaming checkpoints, the
+#    inline match, the final pass), under the raw and the bin data models; an
+#    application log with levels; and one day of a Tomcat access log from the
+#    corpus, whose volume reaches cross-cluster merges.
+#
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the invariant being tested
 #   - produced_by: where in ltl it is produced (function name)
@@ -57,6 +69,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -69,11 +83,13 @@ FIXTURE_UUID="$REPO_DIR/tests/fixtures/grouping-uuid-pair.txt"
 FIXTURE_KEY_CUT="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
 FIXTURE_LEVEL_PAIR="$REPO_DIR/tests/fixtures/grouping-level-pair.txt"
 FIXTURE_TWO_LEVEL_WINDOW="$REPO_DIR/tests/fixtures/grouping-two-level-window.txt"
+FIXTURE_ACCOUNTING="$REPO_DIR/tests/fixtures/grouping-accounting.txt"
+CHECK_ACCOUNTING="$SCRIPT_DIR/message-grouping/check-accounting.pl"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT" "$FIXTURE_LEVEL_PAIR" "$FIXTURE_TWO_LEVEL_WINDOW"; do
+for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT" "$FIXTURE_LEVEL_PAIR" "$FIXTURE_TWO_LEVEL_WINDOW" "$FIXTURE_ACCOUNTING" "$CHECK_ACCOUNTING"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"; exit 1
     fi
@@ -314,7 +330,11 @@ scenario_register sensitivity-70 \
                   key-cut-no-retention \
                   key-cut-terminal-width \
                   levels-same-body-pair \
-                  levels-lone-key-not-carried
+                  levels-lone-key-not-carried \
+                  accounting-fixture-raw \
+                  accounting-fixture-bin \
+                  accounting-levels \
+                  accounting-corpus-day
 scenario_parse_args "$@"
 
 if scenario_wanted sensitivity-70; then
@@ -711,6 +731,122 @@ if capture_section "$out" $LEVELS_SHAPE "$FIXTURE_TWO_LEVEL_WINDOW"; then
         asserts     "A level whose only key reaches the final pass on its own (the ERROR key, sorted first by body) is not carried into the next level's window: it stays its own row, and the five similar WARN keys group among themselves" \
         produced_by "$LEVELS_PRODUCER" \
         contract    "$LEVELS_CONTRACT"
+fi
+fi
+
+
+# Consolidation's core mandate (system 5). Each scenario runs one input twice,
+# grouped and ungrouped, with -bs 1440 -oe -n 99999999 -o -V message-grouping,
+# filter-summary: the assertions read only the accounting and cluster-membership
+# records and lines_included; every row is kept so every key is reported; -o
+# makes both runs cut keys at the message-key cap, so a key reads the same in
+# both. -o writes its files, so each run has a directory of its own.
+ACCOUNTING_SHAPE="-bs 1440 -oe -n 99999999 -o -V message-grouping,filter-summary"
+ACCOUNTING_CONTRACT='features/619-per-run-key-cut.md § 6 (AC18 to AC21) and § 7 (message-grouping / accounting); tests/HARNESS-DESIGN.md § A feature'"'"'s core requirement is observable and asserted'
+ACCOUNTING_PRODUCER='consolidation_accounting_stage() and consolidation_accounting_reported() in ltl, called from run_consolidation_checkpoint(), group_similar_messages() and pipeline_finalize(); emitted by emit_message_grouping_accounting()'
+MEMBERS_PRODUCER='the cluster member_keys sets written by merge_log_message_entry_into_cluster(), consolidation_process_key() (inline match), try_consolidation_merge_into_existing() and merge_consolidation_overlapping_patterns() in ltl; emitted by group_similar_messages()'
+
+# Runs one ltl invocation in a directory of its own under TMP_DIR, failing hard
+# on a failed run, a missing section or a runtime warning.
+# Usage: capture_accounting <outfile> <ltl-args...>
+capture_accounting() {
+    local outfile="$1"; shift
+    local dir="$outfile.d"
+    mkdir -p "$dir"
+    local errfile="$outfile.stderr"
+    set +e
+    ( cd "$dir" && "$LTL" --disable-progress -ni "$@" ) > "$outfile" 2>"$errfile"
+    local rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc" >&2
+        sed 's/^/        /' "$errfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl run failed"); return 1
+    fi
+    if ! grep -q '^=== message-grouping / accounting ===$' "$outfile"; then
+        echo "  FAIL  $current_scenario :: accounting sub-section missing from $outfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: accounting missing"); return 1
+    fi
+    if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
+    fi
+}
+
+# The four mandate assertions over one grouped and one ungrouped capture.
+# Usage: assert_mandate <grouped> <ungrouped> <raw|bin> <min checkpoints>
+assert_mandate() {
+    local g="$1" u="$2" model="$3" min_cp="$4"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' across-runs --grouped '$g' --ungrouped '$u'" \
+        label       'grouping conserves the data across runs' \
+        asserts     "A grouped and an ungrouped run of the same input hold equal occurrences, duration count, duration total, bytes count and bytes total per category and grouping key, and the grouped run's occurrences equal the lines included (AC18)" \
+        produced_by "$ACCOUNTING_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' per-pass --grouped '$g' --min-checkpoints $min_cp" \
+        label       'every consolidation pass conserves the data' \
+        asserts     "At every streaming checkpoint and at the final pass, the five totals of each category and grouping key, over the message store and the clusters, are the same before and after the pass (AC19)" \
+        produced_by "$ACCOUNTING_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' one-row --grouped '$g' --ungrouped '$u'" \
+        label       'every key is in exactly one row' \
+        asserts     "No key is a member of two clusters or both a member and a row of its own, and the members with the rows left alone are exactly the ungrouped run's keys (AC20)" \
+        produced_by "$MEMBERS_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' durations-once --grouped '$g' --ungrouped '$u' --model $model" \
+        label       'a row holds each duration once' \
+        asserts     "Under the raw data model every row retains as many durations as its duration count (under bin it retains none), and a cluster's duration count is the sum of its members' (AC21)" \
+        produced_by "$ACCOUNTING_PRODUCER; merge_consolidation_stats() in ltl (the durations a merge carries)" \
+        contract    "$ACCOUNTING_CONTRACT"
+}
+
+# --consolidation-trigger 50: on 1,200 lines the streaming checkpoints fire and
+# discover patterns that the inline match then absorbs whole keys into.
+for model in raw bin; do
+if scenario_wanted "accounting-fixture-$model"; then
+current_scenario="accounting-fixture-$model"
+echo "[$current_scenario]"
+g="$TMP_DIR/accounting-fixture-$model-grouped.out"
+u="$TMP_DIR/accounting-fixture-$model-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -mdm "$model" --consolidation-trigger 50 -g "$FIXTURE_ACCOUNTING" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE -mdm "$model" "$FIXTURE_ACCOUNTING"; then
+    assert_mandate "$g" "$u" "$model" 2
+fi
+fi
+done
+
+# The application log with levels: the grouping key is the level, and every
+# key reaches the end-of-file checkpoint and the final pass.
+if scenario_wanted accounting-levels; then
+current_scenario="accounting-levels"
+echo "[$current_scenario]"
+g="$TMP_DIR/accounting-levels-grouped.out"
+u="$TMP_DIR/accounting-levels-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -g "$FIXTURE_TWO_LEVEL_WINDOW" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE "$FIXTURE_TWO_LEVEL_WINDOW"; then
+    assert_mandate "$g" "$u" raw 1
+fi
+fi
+
+# One day of a Tomcat access log carrying the thread name (docs/test-logs.md,
+# the thirty-day set), -m uuid as the benchmark's consolidating scenarios run
+# it: its volume reaches the cross-cluster merges the fixture does not.
+if scenario_wanted accounting-corpus-day; then
+current_scenario="accounting-corpus-day"
+echo "[$current_scenario]"
+day_log="$(resolve_log_path "logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt")"
+if [[ ! -f "$day_log" ]]; then
+    echo "  FAIL  $current_scenario :: corpus log not found: $day_log" >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: corpus log missing")
+else
+g="$TMP_DIR/accounting-corpus-day-grouped.out"
+u="$TMP_DIR/accounting-corpus-day-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -m uuid -g "$day_log" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE -m uuid "$day_log"; then
+    assert_mandate "$g" "$u" raw 2
+fi
 fi
 fi
 

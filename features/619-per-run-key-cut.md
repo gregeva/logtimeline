@@ -875,7 +875,7 @@ following line is one record, tab-separated, in this field order:
 | Field | Meaning |
 |---|---|
 | `kind` | `stage` (totals for one category and grouping key at one point) or `row` (one reported row) |
-| `stage` | `checkpoint-<n>-before`, `checkpoint-<n>-after` (`<n>` counts that category and grouping key's checkpoints), `final-pass-before`, `final-pass-after`, `reported` (the rows the run reports); every `row` record is `reported` |
+| `stage` | `checkpoint-<n>-before`, `checkpoint-<n>-after` (`<n>` counts that category and grouping key's checkpoints; a checkpoint that runs no pass records none), `final-pass-before`, `final-pass-after` (only when the final pass is on), `reported` (the message store as consolidation leaves it: the rows the messages table and the MESSAGES CSV select from); every `row` record is `reported` |
 | `category` | `plain` or `highlight` |
 | `grouping_key` | the log level, or the HTTP status on an access log; empty when the format carries none |
 | `occurrences` | lines |
@@ -887,8 +887,14 @@ following line is one record, tab-separated, in this field order:
 | `key` | the row's message key on a `row` record, `-` on a `stage` record; last, so a key holding a tab cannot shift a field |
 
 A `stage` record's totals are taken over the message store and the clusters of
-that category and grouping key together. Without `-g` only the `reported`
-records are emitted. Additions append fields after `bytes_total` and before
+that category and grouping key together, except `reported`, which reads the
+message store alone, every cluster having been written into it. Without `-g`
+the section holds the line `  Grouping: off` and the accounting sub-section
+with only the `reported` records; each new key then records its grouping key
+so the records group the same way. Numbers are integers except
+`duration_total` and `bytes_total`, printed with 17 significant digits, which
+a consumer compares with a relative tolerance because a sum's last digit
+depends on the order it was added in. Additions append fields after `bytes_total` and before
 `key` only with every consumer updated; renames and removals are breaking
 (`tests/HARNESS-DESIGN.md` § Stability contract).
 
