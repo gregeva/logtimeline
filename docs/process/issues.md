@@ -126,6 +126,7 @@ goes to `in progress` when work has started; `backlog` is reachable only by
 explicit instruction, and an issue never returns to `backlog` once work has
 begun unless the architect says so. A parent issue is `in progress` once work
 has started on it or any child, and stays so until closed or deliberately held.
+Reopening an issue sets it to `in progress` in the same action.
 
 Status is orthogonal to blocking and to `not planned`.
 

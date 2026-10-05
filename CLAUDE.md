@@ -89,6 +89,9 @@ about anything else, these still hold.
       a close-out that did not finish: complete § 4 for it before new work.
       `git branch --no-merged` answers by commit identity, so cross it against
       the issue's state rather than reading it as work outstanding.
+- [ ] The converse is normal: a branch merged into the release while its issue
+      stays `in progress` has usually merged its specification before
+      implementation. Read what the merge carried before calling it a finding.
 - [ ] The open release branch is the base: new work, reads and comparisons start
       from `release/X.Y.Z`, never from main, which trails it until the release
       merges. Main behind a *tagged* release branch is the finding: report it
