@@ -371,6 +371,12 @@ message consolidation) was set beside this specification.
   assertion is shown to fail. Consolidation's data per key and per cluster
   becomes observable through `-V message-grouping`, an addition whose contract
   this document records, so that AC19 and AC21 can be asserted.
+- **D17. The design of § 5.11.** Cluster membership names every key that put
+  data into a cluster, by every merge path, once per cluster. A checkpoint no
+  longer runs before the line that triggered it is stored. Consolidation's data
+  is reported in a new sub-section, `message-grouping / accounting` (§ 7),
+  emitted on grouped and ungrouped runs alike. `cluster-membership` keeps its
+  line format.
 
 ---
 
@@ -626,6 +632,44 @@ here, and the code is held to it.
 | `features/616-gated-mean-derivation.md` D26 and finding 15 | the final pass carrying a lone key into the next level's batch is the design | superseded by D1 as restated and D10 **Done 2026-10-01** (`4811a78`). |
 | `prototype/96-fuzzy-consolidation.pl` (the consolidation prototype) | groups an access log by status family (`2xx`) while its keys carry the exact status; re-scans within a bucket of level plus object class (PF-16); scores UUID-normalised trigrams; searches candidates with the 50 rarest trigrams and a 30 % pre-filter; caps patterns at 50 with no eviction; runs its final pass on ceiling-excluded keys only, at its own 80 % threshold (PF-12) | the engine of the master specification as `ltl` implements it after drop 3 (D12): exact-status grouping key; no re-scan bucket; scoring as written (the decision that consolidation does not replace UUIDs); the candidate search that finds every partner; adaptive eviction with no pattern cap; the final pass over every remaining key, grouped strictly by grouping key, scoring at the `-g` similarity **Done 2026-10-01** (drop 5). |
 
+### 5.11 Consolidation's data made observable (D16, D17)
+
+What it is for: the harness of AC18 to AC23, which asserts that consolidation
+accounts for every occurrence and its data exactly once (§ 11.17 shows today's
+`cluster-membership` cannot carry that).
+
+- **Membership names every key that contributed.** The three merge paths
+  record a key in the cluster's membership: a key's entry merged from the
+  message store (`merge_log_message_entry_into_cluster`, as today), one cluster
+  merged into another (as today), and a line merged by the inline match in
+  `consolidation_process_key` (new). A key is recorded once per cluster
+  however many times it contributes, so the record is a set, not a list of
+  merges. Recorded only when `-V message-grouping` is requested; a run that
+  does not request it pays one flag test at the inline-match site.
+- **A checkpoint runs after the line that triggered it is stored.** Today the
+  trigger fires inside `consolidation_process_key`, before the read loop has
+  stored the line's data, so the checkpoint merges an empty, autovivified entry
+  for that key (§ 11.17). The trigger moves to after the store. This is the one
+  behaviour change: a key whose first line triggered a checkpoint can now be
+  grouped at that checkpoint with its data instead of at the final pass, so
+  consolidation output may move; every difference is attributed.
+- **The data is reported in `message-grouping / accounting`** (contract in
+  § 7): the five totals and the retained durations per category and grouping
+  key before and after every consolidation pass, and per reported row. It is
+  emitted on ungrouped runs too, from the same code, so a grouped and an
+  ungrouped run of one input compare field by field (AC18, AC21).
+- **`cluster-membership` keeps its line format**, so its readers
+  (`validate-statistics.sh`, through the statistics oracle, and
+  `validate-message-control-characters.sh`) parse it unchanged. Its content
+  becomes complete; the oracle's comparisons are re-run on the complete
+  membership and any movement is attributed.
+- **The harness** is new scenarios in `tests/validate-message-grouping.sh`
+  (the file tracks the section), under the raw and the bin data models, on: a
+  new committed access-log fixture (GET and POST requests, several status
+  codes, bytes and durations) run with `--consolidation-trigger` lowered so
+  that streaming checkpoints fire; an application log with levels; and one day
+  of a Tomcat access log from the corpus, chosen from `docs/test-logs.md`.
+
 ---
 
 ## 6. Acceptance criteria
@@ -798,7 +842,7 @@ category and grouping key (the log level, or the HTTP status on an access log).
 ## 7. Verification surface
 
 **`-V` sections read:** `benchmark-data` (the value of one row changes),
-`message-grouping` and `message-grouping / cluster-membership` (read, unchanged).
+`message-grouping` and `message-grouping / cluster-membership` (read; from D17 the membership is complete), and `message-grouping / accounting` (added by D17).
 
 **Section contract (this document owns the row):** `benchmark-data` →
 `CONFIG max_log_message_length <n>`. `<n>` is the length the run's message keys
@@ -822,6 +866,34 @@ carrying thread and logger, an access log whose level is the HTTP status, and a
 log whose lines carry a source-file object but no thread. For any key variant no
 corpus format produces, for the same-body ERROR and WARN pair, and for the
 two-level window of § 5.5, it uses a synthetic `.txt` in the scratchpad.
+
+**Section contract (this document owns the sub-section, D17):**
+`message-grouping / accounting`. Emitted whenever `message-grouping` is
+requested, with or without `-g`. The first line names the fields; every
+following line is one record, tab-separated, in this field order:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `stage` (totals for one category and grouping key at one point) or `row` (one reported row) |
+| `stage` | `checkpoint-<n>-before`, `checkpoint-<n>-after` (`<n>` counts that category and grouping key's checkpoints), `final-pass-before`, `final-pass-after`, `reported` (the rows the run reports); every `row` record is `reported` |
+| `category` | `plain` or `highlight` |
+| `grouping_key` | the log level, or the HTTP status on an access log; empty when the format carries none |
+| `occurrences` | lines |
+| `duration_count` | lines that carried a duration |
+| `duration_total` | summed duration, at full precision |
+| `durations_retained` | durations held in the retained array under the raw data model; `-` under the bin data model |
+| `bytes_count` | lines that carried bytes |
+| `bytes_total` | summed bytes |
+| `key` | the row's message key on a `row` record, `-` on a `stage` record; last, so a key holding a tab cannot shift a field |
+
+A `stage` record's totals are taken over the message store and the clusters of
+that category and grouping key together. Without `-g` only the `reported`
+records are emitted. Additions append fields after `bytes_total` and before
+`key` only with every consumer updated; renames and removals are breaking
+(`tests/HARNESS-DESIGN.md` § Stability contract).
+
+**`message-grouping / cluster-membership` (D17):** format unchanged; every key
+that contributed data to a cluster is a member, once per cluster.
 
 **Run hygiene:** every capture goes to the scratchpad. Any file `ltl` writes into
 the worktree during a check (the CSV outputs of `-o` runs) is deleted by the
