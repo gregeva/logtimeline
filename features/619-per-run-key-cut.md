@@ -4,7 +4,11 @@
 
 **Reopened 2026-10-05 (§ 11.16).** The release's intermediate benchmark shows
 peak memory rising 40 % to 71 % on the month-scale access-log grouping runs,
-isolated to drop 3.
+isolated to drop 3. The memory is two transient copies of a row's durations in
+the statistics step, moved to #680 (D15). This issue stays open for
+consolidation's core mandate: its data made observable through `-V` and a
+harness asserting that every occurrence and its data is accounted for exactly
+once (D16, AC18 to AC23), on branch `619-per-run-key-cut-2`.
 
 **Delivered 2026-10-01:** PR #649 merged into `release/0.19.0` as `85bb50e`,
 after the completion gate on `cc410e6` (§ 11.15) and the architect's acceptance
@@ -350,6 +354,23 @@ message consolidation) was set beside this specification.
   take `ltl`'s arm from `ltl`'s source, or are pinned to the `ltl` commit they
   measured; copies of `ltl` code name the commit they were copied from
   (§ 11.14).
+
+### 4.5 Locked by the architect on 2026-10-05
+
+- **D15. The statistics step's copies of a row's durations are their own
+  defect, #680.** `group_calc` copies a row's whole durations array and
+  `calculate_statistics` sorts the copy into a second one. Both copies predate
+  this issue and affect time buckets as well as message rows. The fix, the audit
+  of arrival-order readers and the month-scale benchmark belong to #680, filed
+  under #622 to land in 0.19.0 (§ 11.16).
+- **D16. Consolidation's core mandate is observable and asserted in this
+  issue.** Under the core-mandate rule of `tests/HARNESS-DESIGN.md`, the
+  reopened scope is the acceptance criteria AC18 to AC23 (§ 6): grouping
+  conserves every occurrence and its data, across runs and through each pass;
+  every key is in exactly one row; a row holds each duration once; and each new
+  assertion is shown to fail. Consolidation's data per key and per cluster
+  becomes observable through `-V message-grouping`, an addition whose contract
+  this document records, so that AC19 and AC21 can be asserted.
 
 ---
 
@@ -734,6 +755,43 @@ here, and the code is held to it.
       fixtures and the corpus logs of § 11.7 the prototype groups exactly the
       keys `ltl -g` groups. *Assertable* as a one-off comparison of cluster
       memberships, recorded here.
+
+The criteria below are consolidation's core mandate (D16), agreed with the
+architect 2026-10-05: merging similar messages while every occurrence and its
+data stays accounted for exactly once. "The five totals" are occurrences,
+duration count, summed duration, bytes count and summed bytes, taken per
+category and grouping key (the log level, or the HTTP status on an access log).
+
+- [ ] **AC18. Grouping conserves the data across runs.** On the same input with
+      every row kept, a grouped run and an ungrouped run have equal five totals
+      per category and grouping key, and the total occurrences equal
+      `lines_included`, under the raw and the bin data models (`-mdm bin`).
+      *Assertable* once duration counts are observable (D16).
+- [ ] **AC19. Each consolidation pass conserves the data within one run.** At
+      every streaming checkpoint and at the final pass, the five totals per
+      category and grouping key are the same before and after the pass.
+      *Assertable* through the consolidation data added to `-V message-grouping`
+      (D16).
+- [ ] **AC20. Every key is in exactly one row.** No key is a member of two
+      clusters, and the clusters' members together with the keys left as rows
+      of their own are exactly the keys of the ungrouped run, none missing and
+      none extra. *Assertable* from `-V message-grouping / cluster-membership`
+      and the ungrouped run's keys.
+- [ ] **AC21. A row holds each duration once.** Under the raw data model, the
+      number of durations every row retains equals its duration count, and a
+      cluster's duration count equals the sum of its members' counts in the
+      ungrouped run. *Assertable* through the consolidation data added to
+      `-V message-grouping` (D16).
+- [ ] **AC22. A grouped row's statistics are those of its members' lines.**
+      Already asserted by the statistics oracle in `validate-statistics.sh`,
+      which reads `cluster-membership`; AC20 makes the membership it reads
+      complete.
+- [ ] **AC23. Each new assertion is shown to fail.** Against scratch copies of
+      `ltl` broken on purpose (a merge that adds a member's durations twice, a
+      key dropped, a key placed in two clusters), the harness fails with its
+      asserts, produced_by and contract surfaced, and passes on the unbroken
+      code. *Assertable*, per `tests/HARNESS-DESIGN.md` § Proving a new
+      assertion can fail.
 
 ---
 
