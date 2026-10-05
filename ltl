@@ -179,8 +179,9 @@ my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 # selection is requested. Iteration uses a parallel ordered list because
 # Perl hash iteration is unordered.
 # Issue #462: recording per-cluster membership costs one key string per
-# absorbed key, so it is gated on the diagnostic that reports it.
-my $consolidation_membership_wanted = 0;
+# absorbed key, and the accounting records walk the message store at every
+# consolidation pass, so both are gated on the diagnostic that reports them.
+my $message_grouping_section_wanted = 0;
 
 my %verbose_section_registry = (
     'runtime-config' => {
@@ -199,7 +200,7 @@ my %verbose_section_registry = (
         description => 'Inputs to the histogram percentile tick mapping, at full precision: per metric the bar width, the axis min and max, and each selected percentile value. The computed columns are deliberately NOT reported -- a test that read them back would be comparing this code to itself (Issue #462).',
     },
     'message-grouping' => {
-        description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction, and the cluster membership consolidation produced (Issue #96, #462).',
+        description => 'Fuzzy message consolidation: per-category S1-S6 counts, checkpoint stats, eviction, reduction, the cluster membership consolidation produced, and the accounting of the data consolidation holds before and after each pass and in each reported row, emitted on ungrouped runs too (Issue #96, #462, #619).',
     },
     'filter-summary' => {
         description => 'Line accounting for the run as the funnel it passed through: lines read, unmatched by any format, excluded per cause (time window, profile fold, content and outcome filters, numeric thresholds, other), included, and highlighted (Issue #503).',
@@ -11714,6 +11715,7 @@ sub group_similar_messages {
         $consolidation_threshold = $consolidation_final_threshold // $consolidation_threshold;
 
         $consolidation_phase = 'final_pass';
+        consolidation_accounting_stage('final-pass-before') if $message_grouping_section_wanted;
         my $fp_total_new_patterns = 0;
         my $fp_window_capacity = 1000;
 
@@ -11879,6 +11881,8 @@ sub group_similar_messages {
             }
         }
 
+        consolidation_accounting_stage('final-pass-after') if $message_grouping_section_wanted;
+
         # Restore threshold and phase
         $consolidation_threshold = $saved_threshold;
         $consolidation_phase = 'streaming';
@@ -11900,6 +11904,7 @@ sub group_similar_messages {
             $log_messages{$category}{$canonical_log_key} = {
                 occurrences       => $cluster->{occurrences},
                 is_consolidated   => 1,
+                grouping_key      => $grouping_key,
                 ($cluster->{outcomes} ? (outcomes => $cluster->{outcomes}) : ()),
             };
 
@@ -11907,11 +11912,11 @@ sub group_similar_messages {
 
             # Issue #462: publish the grouping this cluster represents, keyed by
             # the canonical form the rest of the run reports it under.
-            if ($consolidation_membership_wanted && $cluster->{member_keys}) {
+            if ($message_grouping_section_wanted && $cluster->{member_keys}) {
                 push @{ $verbose_section_buffer{'message-grouping-membership'} },
                     "  cluster: $category\x1f$canonical_log_key";
                 push @{ $verbose_section_buffer{'message-grouping-membership'} },
-                    "    member: $_" for sort @{ $cluster->{member_keys} };
+                    "    member: $_" for sort keys %{ $cluster->{member_keys} };
             }
 
             # Copy duration stats, gated on the observation count (#616 D4)
@@ -11985,6 +11990,8 @@ sub group_similar_messages {
 
         }
     }
+
+    consolidation_accounting_reported() if $message_grouping_section_wanted;
 
     unless ($disable_progress) {
         print "\r$colors{'bright-green'}Consolidating similar messages completed.$colors{'NC'}";
@@ -12709,7 +12716,7 @@ sub merge_log_message_entry_into_cluster {
     # outside -- which is why the statistics oracle could not check a
     # consolidated row and silently skipped it. Recorded only when the
     # diagnostic that reports it was requested, so a normal run pays nothing.
-    push @{ $cluster->{member_keys} }, $log_key if $consolidation_membership_wanted;
+    $cluster->{member_keys}{$log_key} = 1 if $message_grouping_section_wanted;
     if ($message_stats_capture_mode && $message_stats_capture_mode eq 'bin') {
         my $key = "$category\x1f$log_key";
         $source->{bin_entry} = $log_messages_counters{$key};
@@ -12721,8 +12728,95 @@ sub merge_log_message_entry_into_cluster {
     }
 }
 
-# Process a single key through the consolidation pipeline (S1 match → accumulate → trigger checkpoint)
-# Used by both streaming (parsing) and final pass (group_similar_messages) paths.
+# The data a message-store entry or a cluster holds, added into an
+# accounting total: the five totals consolidation must conserve, and the
+# durations retained under the raw data model. Gated on each family's
+# observation count (#616 D4), so a zero-initialised total adds nothing.
+sub consolidation_accounting_add {
+    my ($acc, $entry) = @_;
+    $acc->{occurrences} += $entry->{occurrences} // 0;
+    if ($entry->{duration_count}) {
+        $acc->{duration_count} += $entry->{duration_count};
+        $acc->{duration_total} += $entry->{total_duration} // 0;
+    }
+    $acc->{durations_retained} += scalar @{ $entry->{durations} } if $entry->{durations};
+    if ($entry->{bytes_occurrences}) {
+        $acc->{bytes_count} += $entry->{bytes_occurrences};
+        $acc->{bytes_total} += $entry->{total_bytes} // 0;
+    }
+}
+
+# One record of -V message-grouping / accounting (contract:
+# features/619-per-run-key-cut.md § 7). The key is the last field, so a key
+# holding a tab cannot shift another.
+sub consolidation_accounting_line {
+    my ($kind, $stage, $category, $grouping_key, $acc, $key) = @_;
+    my $retained = $message_stats_capture_mode eq 'bin'
+        ? '-'
+        : ($acc->{durations_retained} // 0);
+    push @{ $verbose_section_buffer{'message-grouping-accounting'} }, join("\t",
+        $kind, $stage, $category, $grouping_key,
+        $acc->{occurrences} // 0,
+        $acc->{duration_count} // 0,
+        sprintf('%.17g', $acc->{duration_total} // 0),
+        $retained,
+        $acc->{bytes_count} // 0,
+        sprintf('%.17g', $acc->{bytes_total} // 0),
+        $key);
+}
+
+# Stage records: the data one category and grouping key holds at one point of
+# consolidation, over the message store and the clusters together, so a pass
+# that moves data from one to the other leaves the totals unchanged. Called
+# with no grouping key, it records every category and grouping key present.
+# The reported stage reads the message store alone: by then every cluster has
+# been written into it, and the clusters still held would count twice.
+sub consolidation_accounting_stage {
+    my ($stage, $only_category, $only_grouping_key) = @_;
+    my $with_clusters = $stage ne 'reported';
+    my %acc;
+    for my $category (sort keys %log_messages) {
+        next if defined $only_category && $category ne $only_category;
+        for my $entry (values %{ $log_messages{$category} }) {
+            my $grouping_key = $entry->{grouping_key} // "";
+            next if defined $only_grouping_key && $grouping_key ne $only_grouping_key;
+            consolidation_accounting_add($acc{"$category|$grouping_key"} //= {}, $entry);
+        }
+    }
+    for my $cat_gk ($with_clusters ? keys %consolidation_clusters : ()) {
+        my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
+        next if defined $only_category && $category ne $only_category;
+        next if defined $only_grouping_key && $grouping_key ne $only_grouping_key;
+        consolidation_accounting_add($acc{$cat_gk} //= {}, $_)
+            for values %{ $consolidation_clusters{$cat_gk} };
+    }
+    $acc{"$only_category|$only_grouping_key"} //= {} if defined $only_grouping_key;
+    for my $cat_gk (sort keys %acc) {
+        my ($category, $grouping_key) = split(/\|/, $cat_gk, 2);
+        consolidation_accounting_line('stage', $stage, $category, $grouping_key, $acc{$cat_gk}, '-');
+    }
+}
+
+# The message store as consolidation leaves it, the rows the messages table and
+# the MESSAGES CSV select from: one stage record per category and grouping key,
+# then one record per row. Recorded on ungrouped runs too, so a grouped and an
+# ungrouped run of the same input compare field by field.
+sub consolidation_accounting_reported {
+    consolidation_accounting_stage('reported');
+    for my $category (sort keys %log_messages) {
+        for my $log_key (sort keys %{ $log_messages{$category} }) {
+            my $entry = $log_messages{$category}{$log_key};
+            my %acc;
+            consolidation_accounting_add(\%acc, $entry);
+            consolidation_accounting_line('row', 'reported', $category, $entry->{grouping_key} // "", \%acc, $log_key);
+        }
+    }
+}
+
+# Process a single key through the consolidation pipeline (S1 match, or held
+# for the next checkpoint). The checkpoint trigger is tested by the caller once
+# the line's data is in the message store (consolidation_fire_checkpoints), so a
+# checkpoint never merges the entry of a line not yet stored.
 # Returns: 1 if S1 matched (key absorbed into cluster), 0 if not (key stored for checkpoint processing)
 sub consolidation_process_key {
     my ($log_key, $category, $cat_gk, $capped_msg, $stats_source) = @_;
@@ -12740,6 +12834,7 @@ sub consolidation_process_key {
         my $cluster = $consolidation_clusters{$cat_gk}{$entry->{canonical}};
         if ($cluster) {
             merge_consolidation_stats($cluster, $stats_source);
+            $cluster->{member_keys}{$log_key} = 1 if $message_grouping_section_wanted;
             $consolidation_cat_stats{$cat_gk}{"${pfx}s1_inline"}++;
             $consolidation_streaming_absorbed{$cat_gk}++ if $consolidation_phase eq 'streaming';
             return 1;
@@ -12753,18 +12848,22 @@ sub consolidation_process_key {
     $consolidation_key_checkpoint_count{$log_key} = 0;
     $consolidation_category_unmatched_count{$category}++;
 
-    # Check trigger per category — fire checkpoints for all groups in this category
-    if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
-        for my $ck (sort keys %consolidation_unmatched) {
-            next unless $ck =~ /^\Q$category\E\|/;
-            next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
-            my ($cc, $gk) = split(/\|/, $ck, 2);
-            run_consolidation_checkpoint($cc, $gk);
-        }
-        $consolidation_category_unmatched_count{$category} = 0;
-    }
-
     return 0;
+}
+
+# Checkpoint trigger, per category: once the keys held for checkpoint
+# processing reach the trigger, fire a checkpoint for every group of the
+# category. Called after the line that added the last key has been stored.
+sub consolidation_fire_checkpoints {
+    my ($category) = @_;
+    return if ($consolidation_category_unmatched_count{$category} // 0) < $consolidation_trigger;
+    for my $ck (sort keys %consolidation_unmatched) {
+        next unless $ck =~ /^\Q$category\E\|/;
+        next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
+        my ($cc, $gk) = split(/\|/, $ck, 2);
+        run_consolidation_checkpoint($cc, $gk);
+    }
+    $consolidation_category_unmatched_count{$category} = 0;
 }
 
 # Try to merge new pattern into an existing similar pattern (merge-first strategy)
@@ -12791,8 +12890,8 @@ sub try_consolidation_merge_into_existing {
 
             merge_consolidation_stats($existing, $new_cluster);
             $existing->{match_count} += $new_cluster->{match_count};
-            push @{ $existing->{member_keys} }, @{ $new_cluster->{member_keys} // [] }
-                if $consolidation_membership_wanted;
+            @{ $existing->{member_keys} }{ keys %{ $new_cluster->{member_keys} // {} } } = ()
+                if $message_grouping_section_wanted;
 
             my $old_canonical = $entry->{canonical};
             $existing->{canonical} = $merged_canonical;
@@ -13209,8 +13308,8 @@ sub merge_consolidation_overlapping_patterns {
 
             merge_consolidation_stats($general_cluster, $specific_cluster);
             $general_cluster->{match_count} += $specific_cluster->{match_count};
-            push @{ $general_cluster->{member_keys} }, @{ $specific_cluster->{member_keys} // [] }
-                if $consolidation_membership_wanted;
+            @{ $general_cluster->{member_keys} }{ keys %{ $specific_cluster->{member_keys} // {} } } = ()
+                if $message_grouping_section_wanted;
             delete $consolidation_clusters{$cat_gk}{$specific->{canonical}};
             $removed{$specific_idx} = 1;
             $merges++;
@@ -13341,6 +13440,9 @@ sub run_consolidation_checkpoint {
     my $pre_count = scalar @unmatched;
     return if $pre_count < 2;
 
+    consolidation_accounting_stage("checkpoint-$cp_num-before", $category, $grouping_key)
+        if $message_grouping_section_wanted;
+
     # Fast-path eviction: if EMA indicates all keys should be evicted immediately,
     # skip the expensive checkpoint pass entirely (#135).
     # Disabled during final pass — eviction is not applicable (bounded set, last chance to consolidate).
@@ -13366,6 +13468,8 @@ sub run_consolidation_checkpoint {
             $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
             $consolidation_cat_stats{$cat_gk}{absorption_ema} = $consolidation_absorption_ema{$cat_gk};
             $consolidation_cat_stats{$cat_gk}{max_survivals} = 0;
+            consolidation_accounting_stage("checkpoint-$cp_num-after", $category, $grouping_key)
+                if $message_grouping_section_wanted;
             return;
         }
     }
@@ -13460,6 +13564,9 @@ sub run_consolidation_checkpoint {
         %{$consolidation_unmatched{$cat_gk}} = %survivors;
         $consolidation_cat_stats{$cat_gk}{evicted} = ($consolidation_cat_stats{$cat_gk}{evicted} // 0) + $evicted;
     }
+
+    consolidation_accounting_stage("checkpoint-$cp_num-after", $category, $grouping_key)
+        if $message_grouping_section_wanted;
 }
 
 # Single resolution surface for the named-structure size map: every consumer
@@ -15526,10 +15633,10 @@ sub adapt_to_command_line_options {
         # exit code unchanged, warning emitted, run continues.
     }
 
-    # Issue #462: consolidation records which keys each cluster absorbed only
-    # when the section that reports it was asked for -- the record costs one
-    # key string per absorbed key and nothing else reads it.
-    $consolidation_membership_wanted = section_requested('message-grouping') ? 1 : 0;
+    # Issue #462: consolidation records which keys each cluster absorbed, and
+    # what data each pass held, only when the section that reports them was
+    # asked for: nothing else reads either record.
+    $message_grouping_section_wanted = section_requested('message-grouping') ? 1 : 0;
 
     # Per-message retention: asking for no message rows means no message is ever
     # retained. Resolved here, ahead of every option block that consults it (the
@@ -17265,6 +17372,13 @@ sub read_and_process_logs {
                         }
                     }
 
+                    # An ungrouped run reporting -V message-grouping records each
+                    # new key's grouping key too, so its accounting records are
+                    # taken per category and grouping key like a grouped run's.
+                    $new_key_grouping_key = $log_level // ""
+                        if $message_grouping_section_wanted && $group_similar_sensitivity eq "none"
+                        && !exists $log_messages{$category}{$log_key};
+
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if (!$consolidation_s1_matched) {
                     if( $metrics_observed ) {
@@ -17457,7 +17571,13 @@ sub read_and_process_logs {
                     }
                     # Under -g a new key's entry carries its grouping key, so the final
                     # pass groups the key by the value the streaming checkpoints used.
-                    $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key if defined $new_key_grouping_key;
+                    if (defined $new_key_grouping_key) {
+                        $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key;
+                        # A new key the inline match missed is held for checkpoint
+                        # processing; its line is now stored, so a checkpoint it
+                        # triggers merges its data.
+                        consolidation_fire_checkpoints($category) if $group_similar_sensitivity ne "none";
+                    }
                     }  # end: if (!$consolidation_s1_matched)
                 }
 
@@ -23092,6 +23212,18 @@ sub pipeline_accumulate {
     memory_debug_decomposition("after_bucket_init");
 }
 
+# -V message-grouping / accounting: the records consolidation_accounting_line
+# buffered, under the header naming their fields.
+sub emit_message_grouping_accounting {
+    my $buf = delete $verbose_section_buffer{'message-grouping-accounting'} // [];
+    push @verbose_output, "";
+    push @verbose_output, "=== message-grouping / accounting ===";
+    push @verbose_output, join("\t", qw(kind stage category grouping_key occurrences duration_count
+        duration_total durations_retained bytes_count bytes_total key));
+    push @verbose_output, @$buf;
+    push @verbose_output, "=== END message-grouping / accounting ===";
+}
+
 # Stage: finalize -- demand-gated derivation over the accumulated stores.
 # Receives: accumulation stores; resolved demand; capture modes.
 # Emits: consolidation final pass (gated on -g sensitivity) and its verbose
@@ -23274,6 +23406,7 @@ sub pipeline_finalize {
                 push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
                 push @verbose_output, "=== END message-grouping / grand-totals ===";
             }
+            emit_message_grouping_accounting();
             # Issue #462: the grouping consolidation actually produced, so a
             # consumer outside ltl can form the same sample sets. Emitted last
             # in the section because it is the longest part of it.
@@ -23286,6 +23419,15 @@ sub pipeline_finalize {
 
             push @verbose_output, "=== END message-grouping ===";
         }
+    }
+    elsif ($message_grouping_section_wanted) {
+        # An ungrouped run reports the data its rows hold, the reference a
+        # grouped run of the same input is compared with.
+        consolidation_accounting_reported();
+        push @verbose_output, "=== message-grouping ===";
+        push @verbose_output, "  Grouping: off";
+        emit_message_grouping_accounting();
+        push @verbose_output, "=== END message-grouping ===";
     }
 
     memory_debug_decomposition("after_grouping") unless $group_similar_sensitivity eq "none";
