@@ -1545,3 +1545,23 @@ is caught there. The first criteria, from this finding:
 Peak memory is not part of this gap: performance benchmarking at scale is the
 mechanism that catches it, and the fix's before/after benchmark includes the
 month-scale grouping case above.
+
+**No duration is stored twice (re-measured 2026-10-05, `0474ad3`).** The same
+month run with every row kept (`-ni -bs 1440 -m uuid -n 99999999 -o`), with and
+without `-g`, sums to 5,733,164,596 ms of duration either way. No row's sum
+divided by its mean departs from its occurrences beyond the rounding of the
+displayed mean, so no row's durations array holds a value twice. In the
+benchmark, `log_messages` (253.9 MB to 253.6 MB) and `consolidation_clusters`
+(222.0 MB to 221.0 MB) stay flat on the worst case while `unattributed` rises
+from 106 MB to 393 MB: the duplication is the two transient copies above, not
+stored data.
+
+**Disposition, decided by the architect 2026-10-05.** The two copies are a
+defect of their own, filed as #680 (computing a row's statistics copies its
+raw durations twice) under #622: they predate this issue, sit in the
+statistics step, and affect time buckets as well as message rows. The fix
+measured above, its audit of arrival-order readers and its month-scale
+before/after benchmark move to #680, to land in 0.19.0. This issue stays
+reopened for the consolidation conservation harness only (the three criteria
+above), per the core-mandate rule in `tests/HARNESS-DESIGN.md`, and closes
+when that harness is in.
