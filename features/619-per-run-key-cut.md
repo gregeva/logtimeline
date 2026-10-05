@@ -1515,19 +1515,33 @@ the before/after benchmark of the fix adds the month-scale single-server
 grouping case (`run-benchmark.sh month-single-server-access-logs`, or the
 bisect command above), run on the benchmarking machine.
 
-**Missing harnesses, to be added with the fix.**
+**The test gap: consolidation's core mandate has no requirements or
+assertions.** Statistics calculation has test cases and harnesses linked to its
+functionality, so a change that breaks a statistic is caught by them.
+Consolidation has none for its core mandate: merging similar messages into rows
+while every occurrence, and the data it carries, stays accounted for exactly
+once. Its harnesses assert the mechanisms individual issues touched
+(sensitivity thresholds, the final-pass skip, key cuts, levels kept apart), so
+a change that alters what consolidation merges passes them whether the result
+is right or wrong. Drop 3 more than doubled the largest row and passed every
+harness; the result happens to be correct, and a wrong one would have passed
+equally. The `[WARN] Tracking mismatch` line is a signal on the stage counters,
+not a check that consolidation works.
 
-1. **Occurrence conservation under grouping.** For each grouping input, the
-   grouped and ungrouped runs (`-n` large enough to keep every row, `-o`) give
-   the same total occurrences and the same `duration_count`, per category and
-   grouping key, equal to `lines_included`; and no key appears as a member of
-   two clusters in `-V message-grouping / cluster-membership`. This asserts
-   what the oracle cannot: that grouping moves occurrences between rows and
-   neither drops nor repeats them.
-2. **Statistics do not copy a row's samples.** A generated fixture whose
-   lines all share one message, enough of them that a full copy of their
-   durations is measurable over the run's baseline, run under `-g` and without;
-   the peak memory of `finalize/calculate_statistics` stays within a bound set
-   from one array of those samples, not two or three. The bound and the line
-   count are set when the harness is written; the month-scale benchmark case
-   above is the measurement it stands in for during development.
+To be built with the fix: requirements around consolidation's expected
+function, written as acceptance criteria before code
+(`docs/test-driven-development.md`), and a harness that asserts them broadly
+through consolidation's own observability, so that a later change to grouping
+is caught there. The first criteria, from this finding:
+
+- Grouping conserves the data: across a grouped and an ungrouped run of the
+  same input, every row kept, the occurrences, `duration_count`,
+  `bytes_occurrences` and their totals are equal per category and grouping
+  key, and the total occurrences equal `lines_included`.
+- Every message key is reported in exactly one row: no key is dropped, and no
+  key is a member of two clusters.
+- A grouped row's statistics are those of its members' lines.
+
+Peak memory is not part of this gap: performance benchmarking at scale is the
+mechanism that catches it, and the fix's before/after benchmark includes the
+month-scale grouping case above.
