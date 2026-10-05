@@ -99,6 +99,14 @@ A counter that serves benchmark attribution (a denominator for per-element cost,
 
 Single source, two surfaces: `benchmark-data` never computes an independent duplicate of a functional counter, and a functional counter that a benchmark comparison needs is never benchmark-only. This keeps the value assertable during development of the functional category and directly attributable in benchmarking data, without the two surfaces drifting apart. (Pre-existing `COUNTS` rows that measure final structure state at emission time — e.g. `log_messages_entries` — are a different quantity from a block-boundary population and are not silently converged; where both exist, the owning feature doc records the distinction.)
 
+## A feature's core requirement is observable and asserted
+
+Every feature has a core mandate: the thing it exists to do, which would make it wrong if it failed. That mandate has requirements and acceptance criteria of its own. The mechanics that carry it out are observable through a `-V` section, and a harness linked to the feature asserts those requirements broadly, across the feature's expected function. A later change that breaks the mandate is then caught by the feature's own observability and assertions, whatever the change set out to do.
+
+Harnesses that assert only the mechanisms individual issues touched do not meet this. Each one checks its own change; none checks that the feature still does its job, so a change that alters the feature's result passes them whether that result is right or wrong. Statistics calculation is the reference: its harnesses assert the statistics themselves, so a change that breaks a statistic fails them. A warning line or a diagnostic counter is a signal, not an assertion that the feature works.
+
+When a feature is built or substantially changed, its core mandate's requirements, the observability of its mechanics, and the harness that asserts them are in scope. Where they are missing on a feature being changed, the gap is recorded on that feature's issue, and closed with it.
+
 ## Render-invariant harnesses
 
 A render-invariant harness asserts that the *rendered terminal output* obeys the rules required for visual consistency and determinism — properties that exist only in the rendered surface and have no internal-state equivalent to read from `-V`. For these harnesses, grepping the (ANSI-stripped) display output is the correct and required approach: the rendered surface is the system under test, not a proxy for it.
@@ -756,6 +764,8 @@ A CLAUDE.md rule points to this section for any contributor (human or LLM-driven
 The rules above are derived from incidents. Add new rules when an incident reveals a class of failure not yet covered; remove rules only when the incident class no longer applies (and record why, in the commit message).
 
 Render-invariant harnesses (the category above) were added after Issue #292: three duration-display bugs shipped — values rendered with no unit (`58` instead of `58ms`), zero rendered without a unit, and synthesized sub-millisecond precision on a millisecond-resolution source — because the only display coverage was snapshot regression, which freezes output and cannot catch a buggy-but-stable value. No harness asserted the *invariants* the rendered surface must hold to, so the snapshots simply froze the bugs as "correct."
+
+The core-mandate rule (above) was added after Issue #619: message consolidation went through weeks of changes with harnesses for each mechanism an issue touched (sensitivity thresholds, the final-pass skip, key cuts, levels kept apart) and none for its mandate, merging similar messages while every occurrence and its data stays accounted for exactly once. One change more than doubled the largest grouped row and passed every harness. The result happened to be correct; a wrong one would have passed equally.
 
 ## See also
 
