@@ -1623,3 +1623,37 @@ before/after benchmark move to #680, to land in 0.19.0. This issue stays
 reopened for the consolidation conservation harness only (the three criteria
 above), per the core-mandate rule in `tests/HARNESS-DESIGN.md`, and closes
 when that harness is in.
+
+### 11.17 Cluster membership is incomplete (2026-10-05, `c707542`)
+
+Found while checking what AC20 can read today. Input: one day of one server's
+Tomcat access log (lines carrying the thread name, 168,981 lines). Runs:
+`-ni -bs 1440 -oe -m uuid -n 99999999 -o`, with and without
+`-g -V message-grouping`.
+
+- **9,242 of the 15,049 keys of the ungrouped run appear nowhere in the grouped
+  run**, neither as a member in `cluster-membership` nor as a row of their own.
+  Occurrences and summed durations are still conserved per grouping key (both
+  runs: 168,981 occurrences, 251,906,283 ms), so the keys' data reached the
+  clusters, but the record of which keys a cluster holds misses them. The path
+  is the inline match: `consolidation_process_key` merges a line that matches
+  an existing pattern straight into the cluster
+  (`merge_consolidation_stats($cluster, $stats_source)`), and only
+  `merge_log_message_entry_into_cluster` and the cluster-into-cluster merges
+  record a member. A key whose every line matched inline is never named.
+- **One key is listed twice in the same cluster**, and its data is counted
+  once. A probe on a scratch copy logged each merge of that key: the streaming
+  merge carried an entry of 0 occurrences and no durations, the final-pass
+  merge carried its one line. The sequence: the line misses the inline match,
+  its key enters the unmatched set, that addition reaches the checkpoint
+  trigger, and the checkpoint runs inside `consolidation_process_key`, before
+  the read loop has stored the line's data. The checkpoint merges an empty,
+  autovivified entry and deletes it; the read loop then creates the entry with
+  the line, and the final pass merges it into the same cluster.
+
+Consequences: AC20 fails on today's code, as a harness for the mandate should.
+The statistics oracle (AC22) folds a line into a cluster only when its key is a
+listed member (`calculate-reference.py`, `membership.get(row_message,
+row_message)`), so on any input where the inline match absorbs whole keys it
+compares a cluster row against a subset of its lines; its fixtures have not yet
+been checked for whether they reach that path.
