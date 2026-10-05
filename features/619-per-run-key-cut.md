@@ -1807,3 +1807,26 @@ nothing new.
 - **The runtime warning is gone.** The accounting fixture under the bin data
   model printed two `$n_a` warnings on drop 1 and prints none on drop 2;
   `validate-message-grouping.sh` passes 51 of 51.
+
+### 11.20 Completion gate (`9119b34`, version 0.19.0)
+
+- **Full suite:** 47 of 47 harnesses exit 0, each summary showing assertions
+  run; no capture carries a runtime warning. `validate-message-grouping.sh` 51
+  of 51 (the four core-mandate scenarios included), `validate-statistics.sh`
+  25 of 25 scenarios.
+- **Before/after benchmark, single-day access-log selection** (`standard`,
+  `top25-consolidate`, `heatmap-histogram-consolidate`), before on the base
+  `5e58f0b` from the `release/0.19.0` worktree, after on `9119b34` from this
+  branch's worktree, medians of three. Memory: `rss_peak`, `log_messages` and
+  `consolidation_clusters` within 0.4 % on every case. Time: `total` +2.3 %,
+  +2.4 % and +3.6 %, including +2.2 % on `standard`, a run that does no
+  grouping and whose only per-line change is one flag test. An interleaved
+  re-run (four pairs each of `standard` and `top25-consolidate`, base and
+  branch alternating) put `standard` at -0.9 % and `top25-consolidate` at
+  +1.2 % `total` (+1.6 % `parse/read_files`, ranges overlapping, after slower in
+  three of four pairs). A three-way interleave (base, drop 1, drop 2, five
+  rounds, `-n 25 -g -m uuid`) drifted from 9.7 s to 11.3 s on the unchanged
+  base: the machine was loaded by an operating-system media analysis process
+  (about 75 % of a core, plus a photo analysis process at about 45 %, load
+  average 5) through the after runs and both re-runs. The timing difference is
+  not separable from that load; not yet accepted.
