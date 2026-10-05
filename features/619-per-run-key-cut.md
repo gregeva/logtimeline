@@ -2,6 +2,11 @@
 
 ## Status
 
+**Delivered again 2026-10-05:** PR #684 (branch `619-per-run-key-cut-2`)
+merged into `release/0.19.0` as `6234145`, after the completion gate on
+`9119b34` and the architect's acceptance of the before/after benchmark
+(§ 11.20).
+
 **Reopened 2026-10-05 (§ 11.16).** The release's intermediate benchmark shows
 peak memory rising 40 % to 71 % on the month-scale access-log grouping runs,
 isolated to drop 3. The memory is two transient copies of a row's durations in
