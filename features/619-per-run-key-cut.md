@@ -1829,4 +1829,17 @@ nothing new.
   base: the machine was loaded by an operating-system media analysis process
   (about 75 % of a core, plus a photo analysis process at about 45 %, load
   average 5) through the after runs and both re-runs. The timing difference is
-  not separable from that load; not yet accepted.
+  not separable from that load.
+- **Re-run on a quiet machine** (load average 1.3 to 1.9, the analysis
+  processes idle), the three cases interleaved base and branch, four pairs
+  each, medians with ranges: `total` `standard` 8.788 s [8.703 to 8.930]
+  against 8.898 s [8.731 to 8.961] (+1.2 %, after slower in three of four
+  pairs, by -0.07 to +0.21 s); `top25-consolidate` 10.611 s [10.205 to 11.542]
+  against 10.578 s [10.209 to 11.557] (-0.3 %); `heatmap-histogram-consolidate`
+  13.186 s [12.505 to 13.740] against 13.036 s [12.684 to 13.225] (-1.1 %).
+  `finalize/group_similar` on `top25-consolidate` 0.613 s [0.568 to 0.750]
+  against 0.638 s [0.569 to 0.777], pairs moving both ways by up to 0.2 s.
+  `rss_peak` within 0.6 % on every case. The `standard` sign flips between the
+  two interleaved runs (-0.9 %, then +1.2 %) and every difference sits inside
+  the run-to-run range of the unchanged base: no movement attributable to the
+  change.
