@@ -2,6 +2,10 @@
 
 ## Status
 
+**Reopened 2026-10-05 (§ 11.16).** The release's intermediate benchmark shows
+peak memory rising 40 % to 71 % on the month-scale access-log grouping runs,
+isolated to drop 3.
+
 **Delivered 2026-10-01:** PR #649 merged into `release/0.19.0` as `85bb50e`,
 after the completion gate on `cc410e6` (§ 11.15) and the architect's acceptance
 of its movements (D14). Specification agreed with the architect 2026-09-28 on
@@ -1378,3 +1382,74 @@ and the 91 extra message rows left by the final pass's search limit (#648) are
 accepted. The PR is opened and merged into `release/0.19.0`. The commit adding
 this record touches only `features/`, so the gate's scope test skips it; the
 gate ran on `cc410e6`, whose code this merge carries.
+
+### 11.16 Reopened: peak memory on month-scale grouping runs (2026-10-05)
+
+**What was measured.** The release's intermediate benchmark
+(`tests/baseline/results/v0.19.0-first.tsv`, `all` tier, `release/0.19.0` at
+`8462ae3`) against the 0.18.6 record (`v0.18.6.tsv`), both on the benchmarking
+machine; report `comparison-v0.18.6-vs-v0.19.0-first.md`. 76 of 77 cases are
+faster (total -13.0 %), but `rss_peak` rises on the four grouping cases of the two
+month-scale access-log selections, and on no other case by more than 3.3 %:
+
+| Case | `rss_peak` 0.18.6 | 0.19.0-first | change | `finalize/calculate_statistics/group_calc` |
+|---|---|---|---|---|
+| month-single-server top25-consolidate | 804.9 MB | 1.1 GB | +40.1 % | |
+| month-single-server heatmap-histogram-consolidate | 642.1 MB | 914.8 MB | +42.5 % | |
+| month-many-servers top25-consolidate | 3.0 GB | 4.3 GB | +45.9 % | |
+| month-many-servers heatmap-histogram-consolidate | 2.3 GB | 4.0 GB | +71.0 % | 10.8 s → 16.6 s |
+
+On the worst case the rise is entirely `MEMORY unattributed` (0 B → 1.6 GB):
+every measured structure, the message store and the consolidation clusters
+included, stays within 1 %. The single-day selection of the completion gate
+(§ 11.15) showed +1.5 % and -5.5 %, so the effect does not appear at that scale.
+
+**Isolated to drop 3 (`fe42422`).** The `top25-consolidate` options
+(`-bs 1440 -n 25 -g -m uuid --terminal-width 200 -V benchmark-data -mem`) on a
+month of one server's Tomcat access logs (28 daily files, 1.5 GB, lines carrying
+the thread name), one run per commit, peak resident size from `/usr/bin/time -l`:
+
+| Commit | What it is | Max RSS | total |
+|---|---|---|---|
+| `v0.18.6` | 0.18.6 | 978 MB | 169 s |
+| `88642ec` | `release/0.19.0` before this issue | 977 MB | 168 s |
+| `a41e05f` | drop 1 merged (PR #628) | 980 MB | 167 s |
+| `af91a69` | before PR #649 | 978 MB | 166 s |
+| `f1a62c3` | drop 1 on the branch | 976 MB | 167 s |
+| `4775344` | drop 2 | 982 MB | 167 s |
+| `fe42422` | drop 3 | 1,249 MB | 127 s |
+| `85bb50e` | PR #649 merged | 1,241 MB | 123 s |
+| `8462ae3` | `release/0.19.0` today | 1,243 MB | 124 s |
+
+Drop 4 changes only comments in `ltl`.
+
+**Mechanism.** Probes on scratch copies of `ltl` at `8462ae3`, the same run:
+
+- The final pass is not where the memory goes. Resident size is 684 MB when
+  `group_similar_messages` starts, 757 MB when it returns; one final-pass window
+  (946 keys of status 200) accounts for the 73 MB. The sort of the 8,641 keys
+  entering the final pass moves nothing.
+- The peak is in `group_calc`, on one row. The first retained row,
+  `[200] [https-jsse-nio-8443-] *T /Thingworx/*`, holds 3,751,230 occurrences;
+  computing its statistics takes resident size from 801 MB to 1,175 MB
+  (+374 MB, about 100 bytes per duration). The next row, of 1,014,511
+  occurrences, adds 10 MB; the rest add nothing. Under the default raw data
+  model `group_calc` copies a row's whole `durations` array into
+  `$aggregated_data` (`push @{$aggregated_data->{durations}}, @{...{durations}}`)
+  and `calculate_statistics` sorts it, so a row's transient cost scales with its
+  occurrence count. That copy predates this issue; drop 3 is what produces a
+  row large enough to expose it.
+- The row is new with drop 3. On drop 2 the same run's corresponding row is
+  `[200] [https-jsse-nio-8443-] GET /Thingworx/*` with 916,843 occurrences; on
+  drop 3 the pattern `*T` takes in the request method as well (GET and POST
+  both end in T), and the row holds 3,751,230. It is the effect § 11.9
+  describes: the 200 keys now reach the final pass in full 1,000-key windows
+  of one status code instead of windows cut short by other status codes, so a
+  pattern spanning methods can form: the first window (946 keys of status 200)
+  discovers 49 patterns, which absorb 855 of its keys.
+
+**Two further readings of the same comparison.** The release-level
+`finalize/group_similar` fall (12.3 min → 57.6 s, -92.2 %) is § 11.11's
+finding at month scale: fewer candidate searches under the 500-key limit
+(#648), not a faster search. The `group_calc` rise (+13.9 % across the
+grouping cases) is the sort of the larger rows.
