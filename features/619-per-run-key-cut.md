@@ -1439,17 +1439,95 @@ Drop 4 changes only comments in `ltl`.
   and `calculate_statistics` sorts it, so a row's transient cost scales with its
   occurrence count. That copy predates this issue; drop 3 is what produces a
   row large enough to expose it.
-- The row is new with drop 3. On drop 2 the same run's corresponding row is
-  `[200] [https-jsse-nio-8443-] GET /Thingworx/*` with 916,843 occurrences; on
-  drop 3 the pattern `*T` takes in the request method as well (GET and POST
-  both end in T), and the row holds 3,751,230. It is the effect § 11.9
-  describes: the 200 keys now reach the final pass in full 1,000-key windows
-  of one status code instead of windows cut short by other status codes, so a
-  pattern spanning methods can form: the first window (946 keys of status 200)
-  discovers 49 patterns, which absorb 855 of its keys.
+- The row is larger with drop 3 because consolidation now does its job on it.
+  On drop 2 the same run's two largest rows held 1,840,336 occurrences (POST
+  requests) and 916,843 (GET requests); on drop 3 GET and POST requests
+  consolidate into one row of 3,751,230. It is the effect § 11.9 describes: the
+  200 keys reach the final pass in full 1,000-key windows of one status code
+  instead of windows cut short by other status codes; the first window (946
+  keys) discovers 49 patterns, which absorb 855 of its keys. The grouping is
+  correct; the cost is the statistics step's copies of the row.
 
 **Two further readings of the same comparison.** The release-level
 `finalize/group_similar` fall (12.3 min → 57.6 s, -92.2 %) is § 11.11's
 finding at month scale: fewer candidate searches under the 500-key limit
 (#648), not a faster search. The `group_calc` rise (+13.9 % across the
 grouping cases) is the sort of the larger rows.
+
+**Counts are conserved; nothing asserts it.** The same month of logs run with
+`-ni -bs 1440 -m uuid -n 99999999 -o`, with and without `-g`: the MESSAGES CSV
+holds 149,508 rows ungrouped and 1,057 grouped, and both sum to 7,749,159
+occurrences, equal to `lines_included`, with the same total under every status
+code (200: 7,641,664; 404: 44,799; 302: 39,004; …). No row or occurrence is
+counted twice: the two copies above are transient memory while one row's
+statistics are computed. But no harness asserts this conservation: no scenario
+in `tests/validate-message-grouping.sh` compares the occurrences of a grouped
+run with an ungrouped one, and the statistics oracle (#462) recomputes each
+grouped row from the membership `ltl` itself reports, so it cannot catch a key
+dropped or counted in two rows.
+
+**The fix, measured on scratch copies of `ltl` at `8462ae3`, not yet
+implemented.** Same run as the bisect; the message table of every variant is
+byte-identical to the unchanged code's.
+
+| Variant | Max RSS | total | `group_calc` |
+|---|---|---|---|
+| drop 2 (`4775344`), before the regression | 982 MB | 167 s | 1.97 s |
+| `8462ae3` unchanged | 1,243 MB | 124 s | 2.22 s |
+| A: `group_calc` hands over the row's array, no copy | 1,133 MB | 125 s | 2.32 s |
+| B: A, plus `@{$bucket_data->{durations}} = sort { $a <=> $b } @{...}` | 1,108 MB | 123 s | 2.33 s |
+| C: A, plus an in-place sort of an aliased array | **973 MB** | 127 s | 1.86 s |
+
+Variant C, as tried (two hunks, `group_calc` and the head of
+`calculate_statistics`):
+
+```perl
+# group_calc: instead of
+#   push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
+$aggregated_data->{durations} = $log_messages{$category}{$log_key}{durations}
+    unless $message_stats_capture_mode eq 'bin';
+
+# calculate_statistics: instead of
+#   my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+#   ... my $min = min(@sorted); my $max = max(@sorted);
+our @sorted; local *sorted = $bucket_data->{durations};
+@sorted = sort { $a <=> $b } @sorted;
+my $duration_count = scalar @sorted;
+my $min = $sorted[0];
+my $max = $sorted[-1];
+```
+
+Why B does not suffice: Perl sorts in place only when the result is assigned
+back to the same named array. On 3,751,230 random doubles in isolation (perl
+5.44), `@$r = sort { $a <=> $b } @$r` adds 293 MB, `@a = sort { $a <=> $b } @a`
+adds 160 MB, and the aliased form of C adds 160 MB. The `our` plus `local *`
+alias is the probe's shortcut; the implementation chooses its own form of the
+same in-place sort.
+
+**Before implementing.** C leaves every array `calculate_statistics` is given
+sorted ascending afterwards, where today it keeps arrival order; that is the
+message rows and the time buckets (`$log_analysis{$bucket}{durations}` is copied
+the same way by its own `push` and passes through the same sort). Every reader
+of a `durations` array after statistics is to be audited for a dependence on
+arrival order before the change; none has been audited yet. The single-day
+access-log selection of the completion gate does not show the regression, so
+the before/after benchmark of the fix adds the month-scale single-server
+grouping case (`run-benchmark.sh month-single-server-access-logs`, or the
+bisect command above), run on the benchmarking machine.
+
+**Missing harnesses, to be added with the fix.**
+
+1. **Occurrence conservation under grouping.** For each grouping input, the
+   grouped and ungrouped runs (`-n` large enough to keep every row, `-o`) give
+   the same total occurrences and the same `duration_count`, per category and
+   grouping key, equal to `lines_included`; and no key appears as a member of
+   two clusters in `-V message-grouping / cluster-membership`. This asserts
+   what the oracle cannot: that grouping moves occurrences between rows and
+   neither drops nor repeats them.
+2. **Statistics do not copy a row's samples.** A generated fixture whose
+   lines all share one message, enough of them that a full copy of their
+   durations is measurable over the run's baseline, run under `-g` and without;
+   the peak memory of `finalize/calculate_statistics` stays within a bound set
+   from one array of those samples, not two or three. The bound and the line
+   count are set when the harness is written; the month-scale benchmark case
+   above is the measurement it stands in for during development.
