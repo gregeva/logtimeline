@@ -12813,8 +12813,10 @@ sub consolidation_accounting_reported {
     }
 }
 
-# Process a single key through the consolidation pipeline (S1 match → accumulate → trigger checkpoint)
-# Used by both streaming (parsing) and final pass (group_similar_messages) paths.
+# Process a single key through the consolidation pipeline (S1 match, or held
+# for the next checkpoint). The checkpoint trigger is tested by the caller once
+# the line's data is in the message store (consolidation_fire_checkpoints), so a
+# checkpoint never merges the entry of a line not yet stored.
 # Returns: 1 if S1 matched (key absorbed into cluster), 0 if not (key stored for checkpoint processing)
 sub consolidation_process_key {
     my ($log_key, $category, $cat_gk, $capped_msg, $stats_source) = @_;
@@ -12846,18 +12848,22 @@ sub consolidation_process_key {
     $consolidation_key_checkpoint_count{$log_key} = 0;
     $consolidation_category_unmatched_count{$category}++;
 
-    # Check trigger per category — fire checkpoints for all groups in this category
-    if (($consolidation_category_unmatched_count{$category} // 0) >= $consolidation_trigger) {
-        for my $ck (sort keys %consolidation_unmatched) {
-            next unless $ck =~ /^\Q$category\E\|/;
-            next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
-            my ($cc, $gk) = split(/\|/, $ck, 2);
-            run_consolidation_checkpoint($cc, $gk);
-        }
-        $consolidation_category_unmatched_count{$category} = 0;
-    }
-
     return 0;
+}
+
+# Checkpoint trigger, per category: once the keys held for checkpoint
+# processing reach the trigger, fire a checkpoint for every group of the
+# category. Called after the line that added the last key has been stored.
+sub consolidation_fire_checkpoints {
+    my ($category) = @_;
+    return if ($consolidation_category_unmatched_count{$category} // 0) < $consolidation_trigger;
+    for my $ck (sort keys %consolidation_unmatched) {
+        next unless $ck =~ /^\Q$category\E\|/;
+        next if scalar(keys %{$consolidation_unmatched{$ck}}) < 2;
+        my ($cc, $gk) = split(/\|/, $ck, 2);
+        run_consolidation_checkpoint($cc, $gk);
+    }
+    $consolidation_category_unmatched_count{$category} = 0;
 }
 
 # Try to merge new pattern into an existing similar pattern (merge-first strategy)
@@ -17565,7 +17571,13 @@ sub read_and_process_logs {
                     }
                     # Under -g a new key's entry carries its grouping key, so the final
                     # pass groups the key by the value the streaming checkpoints used.
-                    $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key if defined $new_key_grouping_key;
+                    if (defined $new_key_grouping_key) {
+                        $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key;
+                        # A new key the inline match missed is held for checkpoint
+                        # processing; its line is now stored, so a checkpoint it
+                        # triggers merges its data.
+                        consolidation_fire_checkpoints($category) if $group_similar_sensitivity ne "none";
+                    }
                     }  # end: if (!$consolidation_s1_matched)
                 }
 
