@@ -894,7 +894,7 @@ following line is one record, tab-separated, in this field order:
 A `stage` record's totals are taken over the message store and the clusters of
 that category and grouping key together, except `reported`, which reads the
 message store alone, every cluster having been written into it. Without `-g`
-the section holds the line `  Grouping: off` and the accounting sub-section
+the section holds the line `grouping: no` and the accounting sub-section
 with only the `reported` records; each new key then records its grouping key
 so the records group the same way. Numbers are integers except
 `duration_total` and `bytes_total`, printed with 17 significant digits, which

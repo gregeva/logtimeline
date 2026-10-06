@@ -33,7 +33,7 @@ population.lines.included	int	yes
 population.lines.excluded.time_window	int	conditional:-st/-et	
 population.lines.excluded.profile	int	conditional:-pr	
 population.lines.excluded.filter	int	conditional:content-or-outcome-filter	
-population.lines.excluded.numeric	int	conditional:numeric-threshold	
+population.lines.excluded.numeric	int	yes	
 population.lines.excluded.other	int	yes	
 population.lines.highlighted	int	conditional:highlight	
 measurements.lines_included	int	yes	

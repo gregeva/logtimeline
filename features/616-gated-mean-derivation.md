@@ -1226,7 +1226,7 @@ does not do; the prototype below measures it.
 
 What the pair does not exercise: the standard case demands no shape statistic
 on either store (`-V statistics-demand` on the web-server access log of the
-standard case at `-mdm bin -bdm bin`: `group shape_moments: demanded=0` for
+standard case at `-mdm bin -bdm bin`: `group: shape_moments demanded=no` for
 both), so the loop update it times is the running mean alone; the three moment
 sums are updated only when skewness, kurtosis or bimodality is demanded (`-o`
 on both stores, `-so skewness` on the message store). The arms of D12 differ
@@ -1546,7 +1546,7 @@ passing after:
   located by the layout engine's own offsets, are blank for the unobserved
   buckets and show the zero for the observed ones, with the bucket statistics
   demanded (the latency column) and not demanded (`-hm duration` without `-o`,
-  `-V statistics-demand`: `store_demand: 0` for the bucket store), under each
+  `-V statistics-demand`: `store_demand: no` for the bucket store), under each
   bucket model.
 - `tests/validate-aggregate-export.sh` scenario `unobserved-metric-absent`: the
   YAML series writes no `duration` or `bytes` block for an unobserved bucket

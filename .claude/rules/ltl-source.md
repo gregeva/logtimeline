@@ -17,9 +17,14 @@ paths:
   enforces parity). A description never restates the row indicator.
 - Behavioural notices (auto-disable, fallback, limit hit) always print;
   `--disable-progress` suppresses progress indicators only.
+- An option whose value is a count, a byte size or a duration is a row of
+  `@quantity_options`, read by `resolve_quantity_option`; a numeric option that
+  stays a bare number is a key of `%bare_number_options` with its reason. See
+  *Quantity units* in `docs/architecture-patterns.md`.
 - Adding or changing a `-V` section or key: read `tests/HARNESS-DESIGN.md`
-  first, find every consumer with `grep -r "=== name ===" tests/`, update the
-  owning feature doc's section contract, and execute each affected harness.
+  first (§ Content shape for the line forms every section follows), find every
+  consumer with `grep -r "=== name ===" tests/`, update the owning feature
+  doc's section contract, and execute each affected harness.
 - Log formats are changed through their spec in `format_registry_specs()`
   (pattern, field map, transforms, time contract, samples, classification),
   never through hot-loop code. Record: `features/log-format-registry.md`.

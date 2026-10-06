@@ -229,13 +229,24 @@ fi
 # `# hidden` annotation on the line marks intentionally hidden flags.
 GETOPTS_TSV="$TMP_DIR/getopts.tsv"
 perl -ne '
-    BEGIN { $in_block = 0 }
-    if (/GetOptions\(/)         { $in_block = 1; next }
-    # End of the GetOptions(...) call: either a trailing `) or die ...` or the
-    # closing `);` on its own line (the call is wrapped in a warning-capturing
-    # do-block). Mid-line `);` inside single-line option callbacks is not at
-    # line start, so `^\s*\);` only matches the real close.
-    if ($in_block && (/\)\s*or\s+die/ || /^\s*\);\s*$/)) { $in_block = 0; next }
+    BEGIN { $in_block = 0; $in_rows = 0 }
+    # The options that take a quantity are rows of @quantity_options, which the
+    # GetOptions spec reads through a map: each row names its long and short
+    # form, and a hidden row carries the annotation.
+    if (/^my \@quantity_options = \(/) { $in_rows = 1; next }
+    if ($in_rows && /^\);/)             { $in_rows = 0; next }
+    if ($in_rows) {
+        next unless /\blong\s*=>\s*\x27([^\x27]+)\x27/;
+        my $long = $1;
+        my ($short) = /\bshort\s*=>\s*\x27([^\x27]+)\x27/;
+        print join("\t", $long, $short // "", (/#\s*hidden\b/ ? 1 : 0)), "\n";
+        next;
+    }
+    if (/my \@getopt_spec = \(/)  { $in_block = 1; next }
+    # End of the spec list: the closing `);` on its own line. Mid-line `);`
+    # inside single-line option callbacks is not at line start, so
+    # `^\s*\);` only matches the real close.
+    if ($in_block && /^\s*\);\s*$/) { $in_block = 0; next }
     next unless $in_block;
     next if /^\s*$/ || /^\s*#/;
     next unless /^\s*[\x27"]([^\x27"]+)[\x27"]\s*=>/;
@@ -937,6 +948,147 @@ scenario_K_name_list_parity() {
         contract    "$CONTRACT_NAME_LISTS"
 }
 
+# #605 criteria AC4 and AC16: the twelve numeric bound rows, generated from
+# the one declaration of the bound set, read in one phrasing that states the
+# bare number's unit and points to the units topic; docs/usage.md carries each
+# row with the same text, pointing to its Units section instead.
+bound_row_text() {
+    local short="$1" metric unit end text
+    case "$short" in
+        *dmin|*dmax) metric="duration";      unit=" A bare N is in milliseconds; N also takes a time unit (see 'ltl --help units')." ;;
+        *bmin|*bmax) metric="response size"; unit=" A bare N is in bytes; N also takes a byte unit (see 'ltl --help units')." ;;
+        *cmin|*cmax) metric="count";         unit=" N also takes a count unit (see 'ltl --help units')." ;;
+    esac
+    end="${short: -3}"
+    case "$short" in
+        h*) if [[ "$end" == min ]]; then text="Highlight log entries whose $metric is at or above N, without filtering anything out."
+            else text="Highlight log entries whose $metric is at or below N, without filtering anything out."; fi ;;
+        *)  if [[ "$end" == min ]]; then text="Hide log entries whose $metric is below N; an entry at N is kept."
+            else text="Hide log entries whose $metric is above N; an entry at N is kept."; fi ;;
+    esac
+    printf '%s%s' "$text" "$unit"
+}
+
+scenario_L_bound_option_rows() {
+    current_scenario="L-bound-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-bounds.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    local pair short long text
+    for pair in dmin:duration-min dmax:duration-max bmin:bytes-min bmax:bytes-max cmin:count-min cmax:count-max \
+                hdmin:highlight-duration-min hdmax:highlight-duration-max hbmin:highlight-bytes-min \
+                hbmax:highlight-bytes-max hcmin:highlight-count-min hcmax:highlight-count-max; do
+        short="${pair%%:*}"; long="${pair#*:}"
+        text="$(bound_row_text "$short")"
+        assert_row_carries "$help_out" "^\s+-$short,\s+--$long <N>\s" "$text" \
+            label       "--help -$short row: $text" \
+            asserts     'Each numeric bound row is written in the one phrasing (filter: hide below/above N, an entry at N kept; highlight: at or above/below N, nothing filtered out) and states the unit of a bare N' \
+            produced_by 'print_help() in ltl (rows generated from @quantity_options)' \
+            contract    'features/605-input-units.md section 5.8 and section 6 AC4 (D1: one phrasing for the twelve rows)'
+        assert_row_carries "$USAGE_MD" "^\| \`-$short, --$long <N>\` \| " "| ${text//"'ltl --help units'"/[Units](#units)} |" \
+            label       "docs/usage.md -$short row matches --help" \
+            asserts     'docs/usage.md carries each numeric bound row with the text --help prints' \
+            produced_by 'docs/usage.md option table - maintained alongside print_help()' \
+            contract    'features/605-input-units.md section 6 AC4; CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    done
+}
+
+# #605 criterion AC16: ltl --help units prints the three kinds with the lists
+# the tool's own rejections print, and no long byte word; docs/usage.md's Units
+# section lists the words; the count rows of -n and -gc point to the topic.
+scenario_M_units_topic() {
+    current_scenario="M-units-topic"
+    echo "[$current_scenario]"
+
+    local units_out="$TMP_DIR/help-units-topic.txt" help_out="$TMP_DIR/help-units-rows.txt" err="$TMP_DIR/units-errors"
+    mkdir -p "$err"
+    local rc=0
+    "$LTL" --disable-progress --terminal-width 400 --help units > "$units_out" 2>"$units_out.stderr" || rc=$?
+    check_stderr_warnings "$units_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$units_out"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+    "$LTL" --disable-progress -ni -bmin 5s "$UNIT_FIXTURE" > "$err/bmin" 2>&1 || true
+    "$LTL" --disable-progress -ni -cmin 5x "$UNIT_FIXTURE" > "$err/cmin" 2>&1 || true
+    "$LTL" --disable-progress -ni -dmin 5x "$UNIT_FIXTURE" > "$err/dmin" 2>&1 || true
+    local f
+    for f in bmin cmin dmin; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local byte_list count_list time_list
+    byte_list=$(sed -n "s/^Error: Invalid -bmin '5s': 's' is not a byte unit (\(.*\))$/\1/p" "$err/bmin")
+    count_list=$(sed -n "s/^Error: Invalid -cmin '5x': 'x' is not a count unit (\(.*\))$/\1/p" "$err/cmin")
+    time_list=$(sed -n "s/^Error: Invalid -dmin '5x': 'x' is not a time unit (\(.*\))$/\1/p" "$err/dmin")
+    assert_equal "$( [[ "$rc" -eq 0 && -n "$byte_list" && -n "$count_list" && -n "$time_list" ]] && echo found )" "found" \
+        label       '--help units exits 0, and the -bmin, -cmin and -dmin rejections each print their list' \
+        asserts     'The units topic exists; each rejection names the units of its kind (an unmatched message is a failure, not a pass)' \
+        produced_by 'dispatch_informational_options() and print_help_units(); resolve_quantity_option() in ltl' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_line "$units_out" \
+        pattern     "^Units: ${time_list}\\. " \
+        asserts     'The units topic lists the time units the rejection prints' \
+        produced_by 'print_help_units() in ltl ($time_unit_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    local si_list iec_list
+    si_list=$(sed -n 's/^Units: \(.*\) (powers of 1000) and .*/\1/p' "$units_out")
+    iec_list=$(sed -n 's/^Units: .* (powers of 1000) and \(.*\) (powers of 1024)\..*/\1/p' "$units_out")
+    assert_equal "$si_list, $iec_list" "$byte_list" \
+        label       '--help units byte lists are the -bmin rejection list' \
+        asserts     'The units topic names the SI tokens as powers of 1000 and the IEC tokens as powers of 1024, together the list a byte option prints' \
+        produced_by 'print_help_units() in ltl ($byte_unit_si_list, $byte_unit_iec_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_line "$units_out" \
+        pattern     "^Units: ${count_list} \\(" \
+        asserts     'The units topic lists the count units the rejection prints' \
+        produced_by 'print_help_units() in ltl ($number_unit_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_equal "$(grep -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte' "$units_out" || true)" "0" \
+        label       'no long byte word in --help units' \
+        asserts     'The long byte words are accepted on input but listed in docs/usage.md only, not in --help' \
+        produced_by 'print_help_units() in ltl' \
+        contract    'features/605-input-units.md section 4 D24'
+    local word
+    for word in kilobytes megabytes gigabytes terabytes kibibytes mebibytes gibibytes tebibytes; do
+        assert_row_carries "$USAGE_MD" '^\| Byte size \| ' "\`$word\`" \
+            label       "docs/usage.md Units lists $word" \
+            asserts     'The Units section of docs/usage.md lists every long byte word a byte option accepts' \
+            produced_by 'docs/usage.md section Units' \
+            contract    'features/605-input-units.md section 4 D23 and D24'
+    done
+    assert_row_carries "$USAGE_MD" '^\| Count \| ' "| $(backticked_list "$count_list") (" \
+        label       'docs/usage.md Units count row carries the count list' \
+        asserts     'docs/usage.md agrees with the count list the tool prints' \
+        produced_by 'docs/usage.md section Units' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    # The -n description wraps at any width, so the help text is collapsed to
+    # one line before the sentence is looked for.
+    local collapsed="$TMP_DIR/help-units-collapsed.txt" pair flag tail
+    tr -s ' \n' '  ' < "$help_out" > "$collapsed"
+    for pair in "-n, --top-messages <N>|with a note saying so." "-gc, --group-ceiling <N>|(default: 1000000)."; do
+        flag="${pair%%|*}"; tail="${pair#*|}"
+        assert_equal "$(grep -cF -- "$tail N also takes a count unit (see 'ltl --help units')." "$collapsed" || true)" "1" \
+            label       "--help ${flag%%,*} row points to the units topic" \
+            asserts     'A count option row says it takes a unit and points to the units topic' \
+            produced_by 'print_help() in ltl (quantity_unit_sentence)' \
+            contract    "$CONTRACT_UNITS_TOPIC"
+        assert_row_carries "$USAGE_MD" "^\| \`$flag\` \| " "$tail N also takes a count unit (see [Units](#units))" \
+            label       "docs/usage.md ${flag%%,*} row points to Units" \
+            asserts     'A count option row in docs/usage.md says it takes a unit and points to the Units section' \
+            produced_by 'docs/usage.md option table' \
+            contract    "$CONTRACT_UNITS_TOPIC"
+    done
+    assert_row_carries "$help_out" '^ +-\?, +--help \[<topic>\]' "or 'units'" \
+        label       'the --help row names the units topic' \
+        asserts     'The help row lists units among the topics it can show' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+}
+CONTRACT_UNITS_TOPIC='features/605-input-units.md section 4 D23 (one Units section; option rows point to it; ltl --help units) and section 6 AC16'
+
 scenario_register A-help-contains-visible-longs \
                   B-usage-contains-visible-longs \
                   C-help-short-forms-match-getopts \
@@ -947,6 +1099,8 @@ scenario_register A-help-contains-visible-longs \
                   I-discard-option-rows \
                   J-unit-list-parity \
                   K-name-list-parity \
+                  L-bound-option-rows \
+                  M-units-topic \
                   F-description-quality-soft
 scenario_parse_args "$@"
 
@@ -962,6 +1116,8 @@ while read -r _scenario; do
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
         J-unit-list-parity              ) scenario_J_unit_list_parity ;;
         K-name-list-parity              ) scenario_K_name_list_parity ;;
+        L-bound-option-rows             ) scenario_L_bound_option_rows ;;
+        M-units-topic                   ) scenario_M_units_topic ;;
         F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
     esac
     echo ""

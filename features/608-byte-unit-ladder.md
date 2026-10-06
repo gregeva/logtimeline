@@ -376,7 +376,11 @@ contents follow from D2 and D7:
 | tera | `TB` | 1000⁴ | `TiB` | 1024⁴ |
 
 - **Spellings.** Each token is its own only spelling, matched
-  case-insensitively (D1). The nine lower-cased tokens (`b`, `kb`, `mb`, `gb`,
+  case-insensitively (D1). On input, each step also accepts the long-tier
+  words `format_bytes()` prints (`kilobytes`, `mebibytes`, and the singular it
+  prints at a value of 1), mapped to the step's token: amended by
+  `features/605-input-units.md` D24 (anything the output prints, an input of
+  that kind accepts); the lists still name the tokens only. The nine lower-cased tokens (`b`, `kb`, `mb`, `gb`,
   `tb`, `kib`, `mib`, `gib`, `tib`) are all distinct, so the fold is safe: the
   audit's condition "case-folding only where two spellings are not both tokens"
   holds because `KB` is no longer a token of its own (D2). None of the nine

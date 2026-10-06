@@ -106,7 +106,7 @@ CONTRACT='features/fuzzy-message-consolidation.md § Final pass follows the sens
 CONTRACT_SEARCH='features/fuzzy-message-consolidation.md § Design: candidate search that finds every partner (#569) — acceptance criteria'
 HEADER_PRODUCER='pipeline_finalize() in ltl (message-grouping header line)'
 FINAL_PASS_PRODUCER='group_similar_messages() in ltl (final-pass threshold), counted per group by process_final_pass_window()'
-REDUCTION_PRODUCER='pipeline_finalize() in ltl (per-group Reduction line), over the patterns run_consolidation_checkpoint() and process_final_pass_window() form from find_consolidation_candidates() results'
+REDUCTION_PRODUCER='pipeline_finalize() in ltl (per-category reduction_keys and reduction_rows), over the patterns run_consolidation_checkpoint() and process_final_pass_window() form from find_consolidation_candidates() results'
 PATTERNS_PRODUCER='run_consolidation_checkpoint() (streaming) and process_final_pass_window() via group_similar_messages() (final pass) in ltl, candidates from find_consolidation_candidates(); reported by pipeline_finalize()'
 MEMBERSHIP_PRODUCER='group_similar_messages() in ltl (message-grouping-membership buffer), emitted by pipeline_finalize()'
 
@@ -174,40 +174,42 @@ assert_command() {
     fi
 }
 
-# Prints one counter from a group's phase block; exits non-zero when the block
-# or the counter is absent (HARNESS-DESIGN.md Trap 4: a missing anchor is never
-# an empty value).
-# Usage: block_counter <file> <group> <Streaming Phase|Final Pass> <counter label>
+# Prints one counter from a category's phase block (an entity block
+# "category: <group>", its "  phase: <phase>" block, its "    <key>: <value>"
+# facts); exits non-zero when the block or the counter is absent
+# (HARNESS-DESIGN.md Trap 4: a missing anchor is never an empty value).
+# Usage: block_counter <file> <group> <streaming|final_pass> <key>
 block_counter() {
-    awk -v grp="--- $2: $3" -v key="$4:" '
-        index($0, "  --- ") == 1 { inblock = (index($0, grp) > 0) }
-        inblock && index($0, key) { sub(/^.*: */, ""); split($0, v, " "); print v[1]; found = 1; exit }
+    awk -v grp="category: $2" -v phase="  phase: $3" -v key="    $4: " '
+        /^[^ ]/ { ingroup = ($0 == grp); inphase = 0; next }
+        ingroup && /^  [^ ]/ { inphase = ($0 == phase); next }
+        ingroup && inphase && index($0, key) == 1 { print substr($0, length(key) + 1); found = 1; exit }
         END { if (!found) exit 1 }
     ' "$1"
 }
 
-# Prints "<keys> <rows>" from a group's "Reduction: N -> M" line; exits
-# non-zero when the group has no Reduction line.
+# Prints "<keys> <rows>" from a category's reduction_keys and reduction_rows
+# facts; exits non-zero when the category has no block or either fact.
 # Usage: group_reduction <file> <group>
 group_reduction() {
-    awk -v grp="  --- $2: " '
-        index($0, "===") == 1 { ingroup = 0 }
-        index($0, "  --- ") == 1 { ingroup = (index($0, grp) == 1) }
-        ingroup && $1 == "Reduction:" && $3 == "->" { print $2, $4; found = 1; exit }
-        END { if (!found) exit 1 }
+    awk -v grp="category: $2" '
+        /^[^ ]/ { ingroup = ($0 == grp); next }
+        ingroup && /^  reduction_keys: / { keys = $2 }
+        ingroup && /^  reduction_rows: / { rows = $2 }
+        END { if (keys == "" || rows == "") exit 1; print keys, rows }
     ' "$1"
 }
 
 # Passes when the group's reduction ends at no more than <max> rows from
-# <keys> keys; prints the observed line on failure.
+# <keys> keys; prints the observed reduction on failure.
 # Usage: check_rows_at_most <file> <group> <keys> <max>
 check_rows_at_most() {
     local r
     if ! r=$(group_reduction "$1" "$2"); then
-        echo "no 'Reduction:' line for group $2 in $1"; return 1
+        echo "no reduction for group $2 in $1"; return 1
     fi
     set -- "$@" $r
-    echo "observed: Reduction $5 -> $6 (expected $3 keys, at most $4 rows)"
+    echo "observed: reduction $5 -> $6 (expected $3 keys, at most $4 rows)"
     [[ "$5" -eq "$3" && "$6" -le "$4" ]]
 }
 
@@ -216,33 +218,29 @@ check_rows_at_most() {
 check_rows_equal() {
     local r
     if ! r=$(group_reduction "$1" "$2"); then
-        echo "no 'Reduction:' line for group $2 in $1"; return 1
+        echo "no reduction for group $2 in $1"; return 1
     fi
     set -- "$@" $r
-    echo "observed: Reduction $5 -> $6 (expected $3 -> $4)"
+    echo "observed: reduction $5 -> $6 (expected $3 -> $4)"
     [[ "$5" -eq "$3" && "$6" -eq "$4" ]]
 }
 
 # Passes when the group has at least one phase block and every block reports
-# zero patterns: the streaming block's "(N checkpoints, P patterns)" and the
-# final-pass block's "New patterns created:". A block whose count cannot be
-# read fails. Prints each block's count.
+# zero patterns: the streaming block's patterns and the final-pass block's
+# pass1_patterns_created. A block whose count cannot be read fails. Prints
+# each block's count.
 # Usage: check_no_patterns <file> <group>
 check_no_patterns() {
-    awk -v grp="  --- $2: " '
+    awk -v grp="category: $2" '
         function close_block() {
             if (inblock != "" && !(inblock in count)) { missing = 1; print inblock ": no pattern count" }
             inblock = ""
         }
-        index($0, "===") == 1 { close_block() }
-        index($0, "  --- ") == 1 {
-            close_block()
-            if (index($0, grp) == 1) { inblock = $0; blocks++ }
-        }
-        inblock ~ /Streaming Phase/ && $1 == "Keys" && match($0, /, [0-9]+ patterns\)/) {
-            p = substr($0, RSTART + 2, RLENGTH - 2); sub(/ .*/, "", p); count[inblock] = p
-        }
-        inblock ~ /Final Pass/ && $1 == "New" && $2 == "patterns" { count[inblock] = $4 }
+        /^[^ ]/ { close_block(); ingroup = ($0 == grp); next }
+        ingroup && /^  phase: / { close_block(); inblock = $2; blocks++; next }
+        ingroup && /^  [^ ]/ { close_block(); next }
+        inblock == "streaming" && /^    patterns: / { count[inblock] = $2 }
+        inblock == "final_pass" && /^    pass1_patterns_created: / { count[inblock] = $2 }
         END {
             close_block()
             if (blocks == 0) { print "no phase block for group"; exit 1 }
@@ -288,19 +286,19 @@ check_membership_identical() {
 check_scenario() {
     local out="$1" t="$2" f="$3" patterns="$4" why="$5"
     assert_command \
-        command     "grep -Eq '^  Threshold: ${t}%  .*Final pass: on \\(threshold=${f}%,' '$out'" \
+        command     "grep -qx 'threshold_pct: ${t}' '$out' && grep -qx 'final_pass: yes' '$out' && grep -qx 'final_threshold_pct: ${f}' '$out'" \
         label       "header reports sensitivity ${t}% and final pass at ${f}%" \
         asserts     "The message-grouping header reports the resolved -g sensitivity and the threshold the final pass scored at ($why)" \
         produced_by "$HEADER_PRODUCER" \
         contract    "$CONTRACT"
     assert_command \
-        command     "[ \"\$(block_counter '$out' 'plain|200' 'Final Pass' 'Keys seen')\" = 4 ]" \
+        command     "[ \"\$(block_counter '$out' 'plain|200' 'final_pass' 'keys_seen')\" = 4 ]" \
         label       'the final pass receives all 4 keys' \
         asserts     'Every fixture key reaches the occurrence ceiling, so streaming groups none of them and all 4 reach the final pass; any pattern counted in the final-pass block was formed there, at its own threshold' \
         produced_by 'group_similar_messages() in ltl (fp_keys_seen), after run_consolidation_pass() skips ceiling keys' \
         contract    "$CONTRACT"
     assert_command \
-        command     "[ \"\$(block_counter '$out' 'plain|200' 'Final Pass' 'New patterns created')\" = $patterns ]" \
+        command     "[ \"\$(block_counter '$out' 'plain|200' 'final_pass' 'pass1_patterns_created')\" = $patterns ]" \
         label       "final pass creates $patterns pattern(s)" \
         asserts     "With pairs at Dice 77 and 89, a final pass scoring at ${f}% groups exactly $patterns pair(s) ($why)" \
         produced_by "$FINAL_PASS_PRODUCER" \
@@ -487,7 +485,7 @@ echo "[$current_scenario]"
 out="$TMP_DIR/skip-fires.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    yes\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: yes\$' '$out'" \
         label       'the final pass is skipped when streaming absorbed nothing and the population is above the floor' \
         asserts     "A group whose streaming phase absorbed at or below the absorption floor, and which would hand at least the floor number of keys to the final pass, has that pass skipped" \
         produced_by "$SKIP_PRODUCER" \
@@ -515,7 +513,7 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 1, criterion 5)"
 
     assert_command \
-        command     "grep -qE '^    Similarity cliff edge: [0-9]+%\$' '$out' && awk '/^    Similarity cliff edge:/ { gsub(/[^0-9]/, \"\", \$4); exit (\$4 < 85 && \$4 >= 50) ? 0 : 1 }' '$out'" \
+        command     "grep -qE '^  similarity_cliff_edge_pct: [0-9]+\$' '$out' && awk '/^  similarity_cliff_edge_pct: [0-9]/ { exit (\$2 < 85 && \$2 >= 50) ? 0 : 1 }' '$out'" \
         label       'a similarity cliff edge is reported, below the requested sensitivity' \
         asserts     "When the skip fires, the run reports the similarity the data clusters at, and it falls below the requested sensitivity (the data does not group at what was asked for)" \
         produced_by "$CLIFF_PRODUCER" \
@@ -564,7 +562,7 @@ echo "[$current_scenario]"
 out="$TMP_DIR/skip-below-floor.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100000 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: no\$' '$out'" \
         label       'a group below the population floor keeps its final pass' \
         asserts     "Absorbing nothing is not on its own a reason to skip: a group handing fewer keys forward than the floor runs its final pass, because skipping a cheap pass saves nothing and costs grouping" \
         produced_by "$SKIP_PRODUCER" \
@@ -586,7 +584,7 @@ echo "[$current_scenario]"
 out="$TMP_DIR/skip-absorbing.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 75 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: no\$' '$out'" \
         label       'a sensitivity the data does reach keeps its final pass' \
         asserts     "At a sensitivity whose partners the data does have, streaming absorbs and the final pass runs: the skip is governed by absorption, not by population size alone" \
         produced_by "$SKIP_PRODUCER" \

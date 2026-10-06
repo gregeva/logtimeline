@@ -34,9 +34,9 @@ Multiple metrics can be specified with repeated `-udm` flags:
 
 ### Unit Types
 
-- **Time units**: `ns`, `us`, `ms`, `s`, `m` (or `min`), `h` — converted to milliseconds internally, displayed via `format_time()`
+- **Time units**: the tokens of the time-unit ladder (`@time_unit_ladder`): `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`, each also by its longer names (`min`, `minute`, `microsecond`, ...); converted to milliseconds internally, displayed via `format_time()`
 - **Byte units**: the tokens of the byte-unit ladder (`@byte_unit_ladder`), SI `B`, `kB`, `MB`, `GB`, `TB` (powers of 1000) and IEC `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024), converted to bytes internally, displayed via `format_bytes()`. Each token is its own only spelling, matched case-insensitively through `byte_unit_canonical()`: `kb`, `KB`, `Kb` and `kB` are the one SI kilobyte, 1000 bytes. The metric keeps the canonical token as its unit (`-V udm-specs` `unit=kB`, CSV column `v_kB_max`, heading `v:kB` when the unit tells two metrics apart). A metric assumes no base: the base comes from the unit given (`features/608-byte-unit-ladder.md` D1, D2, D3, D14).
-- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), displayed via `format_number()`. Case-sensitive and checked first (`m` = minutes, `M` = mega); `K` is a number ×1000, not a byte unit.
+- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), the `udm` symbols of the number ladder (`@number_unit_ladder`, `features/605-input-units.md` § 5.4), displayed via `format_number()`. Case-sensitive and checked first (`m` = minutes, `M` = mega); `K` is a number ×1000, not a byte unit.
 - **Unknown unit**: warns, naming the time and byte vocabularies the slot accepts (the ladders' own lists), and reads the metric as a raw number.
 - **No unit**: displayed as raw numbers via `format_number()`
 

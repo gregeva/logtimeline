@@ -178,7 +178,7 @@ All five flags have explicit short forms per the project convention (`feedback_s
 7. **Surface 4 selector accepted but not honored** — Same with `-bdm bin -o`, observed via the per-time-bucket statistics in CSV.
 8. **Invalid value** — Run with `--data-model dense`; ltl exits non-zero with the validation error message.
 9. **Conflicting last-wins** — Run with `-dm raw -dm bin -hg`; histogram output matches a `-hg` invocation without any new flag (because no new flag survives → step 3 → existing internal logic → bin per histogram's baked-in default).
-10. **`-V runtime-config` rows** — Run with `-V runtime-config -dm raw -hgdm bin`; output contains `data-model: raw` and `histogram-data-model: bin` in the command-line sub-section; no `(--…)` annotations on either row.
+10. **`-V runtime-config` rows** — Run with `-V runtime-config -dm raw -hgdm bin`; output contains `data_model: raw` and `histogram_data_model: bin` in the command-line sub-section; no `(--…)` annotations on either row.
 11. **Deprecation warning text** — Run with `--exact-percentiles`; STDERR contains the updated warning naming the new flags.
 
 ## Acceptance criteria mapping (issue body → this doc)

@@ -369,7 +369,7 @@ scenario_absent_field() {
         produced_by 'parse_udm_configs() (extraction) + udm_read_as() in ltl' \
         contract    "$CONTRACT"
     assert_line "$out" \
-        pattern     '  pattern[1]: ' \
+        pattern     '  pattern_1: ' \
         asserts     'A numeric default-pattern metric lists both compiled patterns' \
         produced_by 'emit_udm_specs_verbose() in ltl' \
         contract    "$CONTRACT"

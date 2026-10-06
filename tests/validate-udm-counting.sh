@@ -194,12 +194,12 @@ scenario_users_column() {
     out=$(run_ltl_users -s -bs 5 -oe -n 0 -h alice -V udm-counting -udm 'ruser::distinct:/^\S+ \S+ ([^- ]\S*) /')
     check_capture_warnings "$out"
     assert_command \
-        command     "awk '/^bucket: [0-9]+  metric: ruser  /{ u[\$2]=\$10; u_hl[\$2]=\$12 } /^bucket: [0-9]+  users: /{ us[\$2]=\$4; us_hl[\$2]=\$6 } END { n=0; for (b in u) { n++; if (!(b in us) || u[b] != us[b] || u_hl[b] != us_hl[b]) { print \"mismatch bucket \" b \": udm \" u[b] \"/\" u_hl[b] \" users \" us[b] \"/\" us_hl[b]; exit 1 } } if (n < 2) { print \"only \" n \" bucket(s)\"; exit 1 } }' '$out'" \
+        command     "awk '/^bucket: [0-9]+ metric=ruser /{ gsub(/[a-z_]+=/, \"\"); u[\$2]=\$6; u_hl[\$2]=\$7 } /^bucket: [0-9]+ users=/{ gsub(/[a-z_]+=/, \"\"); us[\$2]=\$3; us_hl[\$2]=\$4 } END { n=0; for (b in u) { n++; if (!(b in us) || u[b] != us[b] || u_hl[b] != us_hl[b]) { print \"mismatch bucket \" b \": udm \" u[b] \"/\" u_hl[b] \" users \" us[b] \"/\" us_hl[b]; exit 1 } } if (n < 2) { print \"only \" n \" bucket(s)\"; exit 1 } }' '$out'" \
         label       'distinct UDM on the remote-user token equals the built-in users column per bucket, plain and highlight, across >= 2 buckets' \
         asserts     'the users column is the sessions oracle twinned: a distinct-count UDM over the user token reproduces the users column exactly, including the -HL dimension' \
         produced_by 'read_and_process_logs() (%log_users accumulation) + calculate_all_statistics() (users promotion) + emit_udm_counting_verbose() in ltl' \
         contract    "$USERS_CONTRACT"
-    assert_line "$out" pattern '^bucket: [0-9]+  users: [0-9]+  users_hl: 1$' \
+    assert_line "$out" pattern '^bucket: [0-9]+ users=[0-9]+ users_hl=1$' \
         asserts 'with -h alice the highlighted users twin counts the one highlighted user in a bucket she appears in' \
         produced_by 'calculate_all_statistics() users promotion in ltl' contract "$USERS_CONTRACT"
     # The rendered column and its hide option: the header names users beside
@@ -248,7 +248,7 @@ scenario_users_column() {
     # metric makes the users oracle line reachable.
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-counting -udm 'req::count:request' "$wc" > "$wout" 2> "$wout.stderr" || true
     check_capture_warnings "$wout"
-    assert_line "$wout" pattern '^bucket: [0-9]+  users: 3  users_hl: 0$' \
+    assert_line "$wout" pattern '^bucket: [0-9]+ users=3 users_hl=0$' \
         asserts 'the Windchill Method Server user field feeds the same users column (three distinct users in the day bucket)' \
         produced_by 'read_and_process_logs() (%log_users accumulation) in ltl, fed by the windchill_method_server field map' contract "$USERS_CONTRACT"
     rm -f "$out" "$out.stderr" "$wout" "$wout.stderr"
@@ -270,43 +270,43 @@ scenario_fixture_values() {
     assert_header_present "$out"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: users  occurrences: 6  occurrences_hl: 3  distinct: 3  distinct_hl: 2  value: 3  value_hl: 2$' \
+        pattern     '^bucket: 1769421600 metric=users occurrences=6 occurrences_hl=3 distinct=3 distinct_hl=2 value=3 value_hl=2$' \
         asserts     'distinct counts unique extracted strings per bucket (3 users from 6 occurrences) and the highlight set counts only -h-matched lines (2 users from 3 highlighted occurrences)' \
         produced_by 'read_and_process_logs() (%udm_distinct accumulation) + calculate_all_statistics() (counting branch) in ltl' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: actions  .*  value: 6  value_hl: 3$' \
+        pattern     '^bucket: 1769421600 metric=actions .* value=6 value_hl=3$' \
         asserts     'count displays the per-bucket extracted-occurrence total, with the highlight value from the -HL occurrence counter' \
         produced_by 'calculate_all_statistics() counting branch in ltl' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: repeat  .*  value: 2  value_hl: 1\.5$' \
+        pattern     '^bucket: 1769421600 metric=repeat .* value=2 value_hl=1\.5$' \
         asserts     'ratio is occurrences / distinct (6/3=2) and the highlight ratio computes over the highlight counterparts (3/2=1.5), not the totals' \
         produced_by 'calculate_all_statistics() counting branch in ltl' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: urate  .*  value: 6  value_hl: 3$' \
+        pattern     '^bucket: 1769421600 metric=urate .* value=6 value_hl=3$' \
         asserts     'rate is occurrences / bucket_size_seconds * rate multiplier (6 occurrences in a 60s bucket = 6/min at the default -ru)' \
         produced_by 'calculate_all_statistics() counting branch in ltl (reuses %rate_multiplier)' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: udrate  .*  value: 3  value_hl: 2$' \
+        pattern     '^bucket: 1769421600 metric=udrate .* value=3 value_hl=2$' \
         asserts     'drate is distinct / bucket_size_seconds * rate multiplier (3 distinct in a 60s bucket = 3/min at the default -ru)' \
         produced_by 'calculate_all_statistics() counting branch in ltl (reuses %rate_multiplier)' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421660  metric: users  occurrences: 4  occurrences_hl: 1  distinct: 2  distinct_hl: 1  value: 2  value_hl: 1$' \
+        pattern     '^bucket: 1769421660 metric=users occurrences=4 occurrences_hl=1 distinct=2 distinct_hl=1 value=2 value_hl=1$' \
         asserts     'second bucket distinct/highlight values are independent of the first (per-bucket sets, freed after counting)' \
         produced_by 'calculate_all_statistics() counting branch in ltl (free-after-count lifecycle)' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421660  metric: repeat  .*  value: 2  value_hl: 1$' \
+        pattern     '^bucket: 1769421660 metric=repeat .* value=2 value_hl=1$' \
         asserts     'ratio in the second bucket is 4/2=2 with highlight ratio 1/1=1' \
         produced_by 'calculate_all_statistics() counting branch in ltl' \
         contract    "$CONTRACT"
@@ -316,7 +316,7 @@ scenario_fixture_values() {
     # Compared value-to-value from the section rather than against frozen
     # numbers, so the oracle holds regardless of fixture edits.
     assert_command \
-        command     "awk '/^bucket: [0-9]+  metric: sess  /{ sess[\$2]=\$14; sess_hl[\$2]=\$16 } /^bucket: [0-9]+  sessions: /{ ses[\$2]=\$4; ses_hl[\$2]=\$6 } END { n=0; for (b in sess) { n++; if (!(b in ses) || sess[b] != ses[b] || sess_hl[b] != ses_hl[b]) exit 1 } exit (n >= 2 ? 0 : 1) }' '$out'" \
+        command     "awk '/^bucket: [0-9]+ metric=sess /{ gsub(/[a-z_]+=/, \"\"); sess[\$2]=\$8; sess_hl[\$2]=\$9 } /^bucket: [0-9]+ sessions=/{ gsub(/[a-z_]+=/, \"\"); ses[\$2]=\$3; ses_hl[\$2]=\$4 } END { n=0; for (b in sess) { n++; if (!(b in ses) || sess[b] != ses[b] || sess_hl[b] != ses_hl[b]) exit 1 } exit (n >= 2 ? 0 : 1) }' '$out'" \
         label       'distinct UDM on the session token equals the built-in sessions column per bucket, plain and highlight, across >= 2 buckets' \
         asserts     'A distinct-count UDM extracting the session ID reproduces the sessions column exactly (the sessions-column semantics the feature mirrors), including the -HL dimension' \
         produced_by 'read_and_process_logs() (%udm_distinct vs %log_sessions accumulation) + calculate_all_statistics() in ltl' \
@@ -341,7 +341,7 @@ scenario_token_key() {
     assert_header_present "$out"
 
     assert_command \
-        command     "awk '/  metric: who  /{ who[\$2]=\$14 } /  metric: userId  /{ uid[\$2]=\$14 } END { n=0; for (b in who) { n++; if (who[b] != uid[b]) exit 1 } exit (n >= 2 ? 0 : 1) }' '$out'" \
+        command     "awk '/ metric=who /{ who[\$2]=\$8 } / metric=userId /{ uid[\$2]=\$8 } END { n=0; for (b in who) { n++; if (who[b] != uid[b]) exit 1 } exit (n >= 2 ? 0 : 1) }' '$out'" \
         label       'who::distinct:userId equals userId::distinct value-for-value across >= 2 buckets' \
         asserts     'A bare fourth field is the token key: the default pattern is built from the key, so the metric name is purely a display label' \
         produced_by 'parse_udm_configs() in ltl (token_key field and default-pattern construction)' \
@@ -365,13 +365,13 @@ scenario_rate_unit() {
     assert_header_present "$out"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: urate  .*  value: 360  ' \
+        pattern     '^bucket: 1769421600 metric=urate .* value=360 ' \
         asserts     'rate honors the tool-wide -ru unit: 6 occurrences in a 60s bucket = 360/hour under -ru h' \
         produced_by 'calculate_all_statistics() counting branch in ltl (%rate_multiplier lookup)' \
         contract    "$CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: 1769421600  metric: udrate  .*  value: 180  ' \
+        pattern     '^bucket: 1769421600 metric=udrate .* value=180 ' \
         asserts     'drate honors the tool-wide -ru unit: 3 distinct in a 60s bucket = 180/hour under -ru h' \
         produced_by 'calculate_all_statistics() counting branch in ltl (%rate_multiplier lookup)' \
         contract    "$CONTRACT"
@@ -460,12 +460,12 @@ scenario_alias_canonical() {
     check_capture_warnings "$out"
     assert_header_present "$out"
     assert_line "$out" \
-        pattern     '^metric: a  aggregation: distinct  base_name: a$' \
+        pattern     '^metric: a aggregation=distinct base_name=a$' \
         asserts     'The dcount alias is normalized to the canonical distinct keyword before parsing' \
         produced_by 'parse_udm_configs() in ltl (%udm_agg_aliases normalization)' \
         contract    "$CONTRACT"
     assert_line "$out" \
-        pattern     '^metric: b  aggregation: distinct  base_name: b$' \
+        pattern     '^metric: b aggregation=distinct base_name=b$' \
         asserts     'The unique alias is normalized to the canonical distinct keyword before parsing' \
         produced_by 'parse_udm_configs() in ltl (%udm_agg_aliases normalization)' \
         contract    "$CONTRACT"
@@ -610,49 +610,49 @@ scenario_query_string_values() {
     local produced='parse_udm_configs() in ltl (counting default token-capture pattern)'
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: fileName  occurrences: 6  .*  distinct: 3  ' \
+        pattern     '^bucket: [0-9]+ metric=fileName occurrences=6 .* distinct=3 ' \
         asserts     'A value ends at the & before the next key: three file names across six requests count 3, not one per request' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: userid  occurrences: 6  .*  distinct: 1  ' \
+        pattern     '^bucket: [0-9]+ metric=userid occurrences=6 .* distinct=1 ' \
         asserts     'A mid-query key with the same value on every request counts 1, not one per request' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: folderId  occurrences: 6  .*  distinct: 2  ' \
+        pattern     '^bucket: [0-9]+ metric=folderId occurrences=6 .* distinct=2 ' \
         asserts     'The first key of a query string, preceded by ?, is found and its value ends at the next &' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: site  occurrences: 6  .*  distinct: 2  ' \
+        pattern     '^bucket: [0-9]+ metric=site occurrences=6 .* distinct=2 ' \
         asserts     'The last parameter, ended by the space after the query string, counts its whole percent-encoded value (two hosts)' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: ref  occurrences: 6  .*  distinct: 1  ' \
+        pattern     '^bucket: [0-9]+ metric=ref occurrences=6 .* distinct=1 ' \
         asserts     'A value ends at ? wherever it appears: ref=ABC followed by ? and a varying tail counts ABC once' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: path  occurrences: 6  .*  distinct: 2  ' \
+        pattern     '^bucket: [0-9]+ metric=path occurrences=6 .* distinct=2 ' \
         asserts     'A percent-encoded sequence is part of the value: a%2Fb and a%2Fc count 2, not 1' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: fid  occurrences: 6  .*  distinct: 3  ' \
+        pattern     '^bucket: [0-9]+ metric=fid occurrences=6 .* distinct=3 ' \
         asserts     'A token key containing a percent-encoded sequence (file%5Fid) finds its value' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"
 
     assert_line "$out" \
-        pattern     '^bucket: [0-9]+  metric: kind  occurrences: 6  .*  distinct: 2  ' \
+        pattern     '^bucket: [0-9]+ metric=kind occurrences=6 .* distinct=2 ' \
         asserts     'A pipe is part of the value: cad|part and cad|asm count 2, not 1' \
         produced_by "$produced" \
         contract    "$QS_CONTRACT"

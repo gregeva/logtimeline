@@ -2324,17 +2324,17 @@ Fixture: `tests/fixtures/grouping-final-pass-threshold.txt`, a Tomcat-shaped acc
 
 | # | Condition | Observable outcome | Triage |
 |---|---|---|---|
-| 1 | `-g 70` | `message-grouping` header reports `Threshold: 70%` and `Final pass: on (threshold=70%`; the `plain\|200` final pass creates 2 patterns (both pairs grouped) | assertable |
-| 2 | `-g 95` | header reports `Final pass: on (threshold=95%`; the final pass creates 0 patterns (neither pair grouped) | assertable |
-| 3 | `-g` without a value | header reports `Threshold: 85%` and `Final pass: on (threshold=85%`; the final pass creates 1 pattern (only the Dice 89 pair) | assertable |
-| 4 | `-g 95 --final-threshold 70` | header reports `Threshold: 95%` and `Final pass: on (threshold=70%`; the final pass creates 2 patterns | assertable |
-| 5 | Every scenario above | the final pass receives all 4 keys (`Keys seen: 4` in its block): streaming grouped none of them, so the pattern counts are the final pass's own | assertable |
+| 1 | `-g 70` | `message-grouping` reports `threshold_pct: 70`, `final_pass: yes` and `final_threshold_pct: 70`; the `plain\|200` final pass creates 2 patterns (both pairs grouped) | assertable |
+| 2 | `-g 95` | the section reports `final_threshold_pct: 95`; the final pass creates 0 patterns (neither pair grouped) | assertable |
+| 3 | `-g` without a value | the section reports `threshold_pct: 85` and `final_threshold_pct: 85`; the final pass creates 1 pattern (only the Dice 89 pair) | assertable |
+| 4 | `-g 95 --final-threshold 70` | the section reports `threshold_pct: 95` and `final_threshold_pct: 70`; the final pass creates 2 patterns | assertable |
+| 5 | Every scenario above | the final pass receives all 4 keys (`keys_seen: 4` in its `phase: final_pass` block): streaming grouped none of them, so the pattern counts are the final pass's own | assertable |
 
 Criteria 1 and 2 fail against the fixed 85: that final pass creates 1 pattern at any `-g`. Harness: `tests/validate-message-grouping.sh`.
 
 ### `-V message-grouping` keys asserted
 
-The header line `Threshold: <T>%  Trigger: <N>  Ceiling: <C>  Final pass: on (threshold=<F>%, ceiling=<M>)` (emitted by `pipeline_finalize()`), where `<T>` is the resolved `-g` sensitivity and `<F>` the threshold the final pass scored at; and, per group, `Keys seen:` and `New patterns created:` in the `--- <category>|<group>: Final Pass (2-pass) ---` block. Renaming or removing any of these is a breaking change for that harness.
+The settings `threshold_pct`, `final_pass`, `final_threshold_pct` (emitted by `pipeline_finalize()`), where `threshold_pct` is the resolved `-g` sensitivity and `final_threshold_pct` the threshold the final pass scored at; and, per `category: <category>|<group>` block, `reduction_keys` and `reduction_rows`, and in its `phase: final_pass` block `keys_seen` and `pass1_patterns_created`. The section is entity blocks of snake_case facts (`features/605-input-units.md` D28). Renaming or removing any of these is a breaking change for that harness.
 
 ## Consolidation stops absorbing UUID-bearing keys at scale (#584)
 
@@ -2628,8 +2628,7 @@ Three keys, in the consolidation section (not the benchmark-data block), per
 | streaming absorption | the absorption measure the condition tested, so a skip or a non-skip can be explained from the capture |
 | similarity cliff edge | the reported percentage, or absent when not computed |
 
-The existing header line and per-group `Keys seen:` / `New patterns created:` keys are
-unchanged. Renaming or removing any of them is a breaking change for
+The category block reports them as `final_pass_skipped: yes|no`, `similarity_cliff_edge_pct: <N>|-`, and its phase blocks carry `streaming_absorbed` and `streaming_absorption_pct` (`features/605-input-units.md` D28). Renaming or removing any of them is a breaking change for
 `tests/validate-message-grouping.sh`.
 
 #### As implemented
