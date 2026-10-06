@@ -16,15 +16,16 @@ f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
 | 2 quantity units | done 2026-10-06: AC6 to AC16 asserted |
 | 3 `-V` content shape | done 2026-10-06: AC18 and AC19 asserted |
 | 4 patterns and checks | done 2026-10-06: AC17 and AC20 |
-| 5 records and release note | done 2026-10-06; completion gate next |
+| 5 records and release note | done 2026-10-06 |
+| completion gate | passed 2026-10-06 on 6d96de0: full suite, before/after benchmark (below) |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
 agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. `$version_number` is restored to `0.19.0`; the completion
-gate (full suite, `605-after` benchmark) runs on the drop-5 commit.
+from a worktree too. `$version_number` is restored to `0.19.0`. The completion
+gate passed on 6d96de0; the PR to `release/0.19.0` is the next step.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1196,6 +1197,17 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   bullet per user-observable change rather than one for the issue
   (`.claude/rules/release-notes.md`: a second change in the same issue is its
   own bullet).
+- **Completion gate (2026-10-06, commit 6d96de0).** All 49
+  `tests/validate-*.sh` exit 0, each with assertions run (`CI=1`
+  `validate-csv-output.sh` 42 checks, then `CI=1 validate-statistics.sh` 25
+  scenarios, `L3=OK` on the 44 corpus scenarios and `N/A` only on the six
+  scenarios of the gated-means fixtures, then the rest); no ` at <file> line
+  <N>` on any `ltl` stderr. Before/after benchmark, `single-day-access-log-standard`
+  (761,698 lines), three runs per side alternating, the `before` from the
+  `release-0.19.0` worktree at f7c5daa and the `after` from the 605 worktree:
+  total 8.83 s median before (8.72 to 9.08) and 8.80 s after (8.65 to 8.80),
+  -0.4%; peak RSS 106.3 MB before and 106.0 MB after; lines read and included
+  identical. No metric worse by more than 1%: nothing new runs per line (D4).
 - **The help-coverage scenarios had stopped seeing the quantity options
   (found 2026-10-06; since drop 1).** `validate-help-content.sh` reads the
   options from the source to check each appears in `--help` and
