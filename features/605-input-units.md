@@ -4,10 +4,9 @@
 
 Specification agreed with the architect 2026-10-06 in an interview held
 section by section, on branch `605-input-units` off `release/0.19.0` at
-f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
-(the bound declaration), 2 (units on input), 3 (the `-V` content shape) and 4
-(the patterns and their checks) are committed on the branch. Issue #605 is labelled
-`status: in progress`.
+f7c5daa. Drop 0 (this document) was committed as 663c9e1; drops 1 to 5 and
+the completion gate followed, and the branch merged into `release/0.19.0` as
+3c09936 (PR #689). Issue #605 is closed.
 
 | Drop (§ 9) | State |
 |---|---|
@@ -18,14 +17,14 @@ f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
 | 4 patterns and checks | done 2026-10-06: AC17 and AC20 |
 | 5 records and release note | done 2026-10-06 |
 | completion gate | passed 2026-10-06 on 6d96de0: full suite, before/after benchmark (below) |
+| delivered | 2026-10-06: PR #689 merged into `release/0.19.0` as 3c09936; #605 closed; #454, #536, #537 and #620 released from their blocked-by edge |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
 agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. `$version_number` is restored to `0.19.0`. The completion
-gate passed on 6d96de0; the PR to `release/0.19.0` is the next step.
+from a worktree too. Delivered: nothing of this issue remains open.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
