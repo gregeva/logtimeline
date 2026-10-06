@@ -229,13 +229,24 @@ fi
 # `# hidden` annotation on the line marks intentionally hidden flags.
 GETOPTS_TSV="$TMP_DIR/getopts.tsv"
 perl -ne '
-    BEGIN { $in_block = 0 }
-    if (/GetOptions\(/)         { $in_block = 1; next }
-    # End of the GetOptions(...) call: either a trailing `) or die ...` or the
-    # closing `);` on its own line (the call is wrapped in a warning-capturing
-    # do-block). Mid-line `);` inside single-line option callbacks is not at
-    # line start, so `^\s*\);` only matches the real close.
-    if ($in_block && (/\)\s*or\s+die/ || /^\s*\);\s*$/)) { $in_block = 0; next }
+    BEGIN { $in_block = 0; $in_rows = 0 }
+    # The options that take a quantity are rows of @quantity_options, which the
+    # GetOptions spec reads through a map: each row names its long and short
+    # form, and a hidden row carries the annotation.
+    if (/^my \@quantity_options = \(/) { $in_rows = 1; next }
+    if ($in_rows && /^\);/)             { $in_rows = 0; next }
+    if ($in_rows) {
+        next unless /\blong\s*=>\s*\x27([^\x27]+)\x27/;
+        my $long = $1;
+        my ($short) = /\bshort\s*=>\s*\x27([^\x27]+)\x27/;
+        print join("\t", $long, $short // "", (/#\s*hidden\b/ ? 1 : 0)), "\n";
+        next;
+    }
+    if (/my \@getopt_spec = \(/)  { $in_block = 1; next }
+    # End of the spec list: the closing `);` on its own line. Mid-line `);`
+    # inside single-line option callbacks is not at line start, so
+    # `^\s*\);` only matches the real close.
+    if ($in_block && /^\s*\);\s*$/) { $in_block = 0; next }
     next unless $in_block;
     next if /^\s*$/ || /^\s*#/;
     next unless /^\s*[\x27"]([^\x27"]+)[\x27"]\s*=>/;

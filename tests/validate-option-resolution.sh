@@ -236,7 +236,7 @@ scenario_bare_unchanged() {
     local i long typed
     for i in "${!BARE_LONGS[@]}"; do
         long="${BARE_LONGS[$i]}"; typed="${BARE_ARGS[$((2 * i + 1))]}"
-        check "runtime-config $long" "$(line_value bare "$long")" "$typed" \
+        check "runtime-config $long" "$(line_value bare "${long//-/_}")" "$typed" \
             'A bare number reaches the runtime as the number typed, as before units were accepted' \
             'resolve_quantity_option() and emit_runtime_config_verbose() in ltl' 'features/605-input-units.md section 6 AC6 and section 4 D7'
         check "$long entered = resolved" "$(block_value bare "$long" entered)|$(block_value bare "$long" resolved)" "$typed|$typed" \
@@ -468,7 +468,7 @@ scenario_runtime_value() {
     rm -f "$TMP_DIR/ltl-index.csv"
     run_ltl rv-bare -bs 1440 -oe -n 1 -V index-read-back -dmin 0.2 "$BOUNDARY_FIXTURE"
     rm -f "$TMP_DIR/ltl-index.csv"
-    check "runtime-config duration-min" "$(line_value rv-us duration-min)" 0.2 \
+    check "runtime-config duration_min" "$(line_value rv-us duration_min)" 0.2 \
         '-V runtime-config carries the value converted to the unit ltl uses internally (milliseconds)' \
         'emit_runtime_config_verbose() in ltl (from @quantity_options)' 'features/605-input-units.md section 4 D15, section 6 AC14'
     check "one signature for 200us and 0.2" "$(line_value rv-us index_filter_signature)|$(line_value rv-bare index_filter_signature)" "-dmin=0.2|-dmin=0.2" \

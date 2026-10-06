@@ -220,7 +220,7 @@ if want "$current_scenario"; then
         # histogram: the chart's selected percentiles at full precision
         ticks="$TMP_DIR/$current_scenario.ticks"; sed -n '/=== histogram-percentile-ticks ===/,/=== END histogram-percentile-ticks ===/p' "$OUT" > "$ticks"
         for p in P50:p50 P75:p75 P90:p90 P95:p95; do
-            tv="$(grep -E "^\s+${p%%:*}=" "$ticks" | head -1 | sed 's/.*=//')"; fv="$(yget measurements.histogram.duration.${p##*:})"
+            tv="$(grep -E "^\s+percentile: ${p%%:*} value=" "$ticks" | head -1 | sed 's/.*=//')"; fv="$(yget measurements.histogram.duration.${p##*:})"
             assert_near "histogram ${p##*:} = ticks ${p%%:*}" "$fv" "$tv" asserts 'The population-wide percentile is the value the histogram computed, as -V histogram-percentile-ticks prints it' produced_by "$PRODUCER; finalize_histogram_unified() in ltl" contract "$CONTRACT (D3)"
         done
         assert_equal "histogram occurrences excludes non-positive values" "$(yget measurements.histogram.duration.occurrences)" "$(section_value "$OUT" 'lines_included' | awk -v z=0 '{print $1}' | xargs -I{} sh -c 'echo $(( {} - 85 ))')" asserts 'Of the 444 included lines, 85 carry a zero duration the histogram capture gate excludes (10 in the status fixture, 75 in the spread fixture)' produced_by "$PRODUCER; read_and_process_logs() in ltl (histogram capture gate)" contract "$CONTRACT (D3, F1)"

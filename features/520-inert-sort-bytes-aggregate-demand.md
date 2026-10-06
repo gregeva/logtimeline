@@ -30,7 +30,7 @@ produce a bytes-family surface still captures the family.
 
 Conditioning the term rather than clearing `$sort_key` under `-n 0` is deliberate:
 #458 D3 keeps the resolved operand so `-V statistics-demand` can report truthfully
-what the user asked for (`sort_gate: operand=<key> family=<family> observed=n/a
+what the user asked for (`sort_gate: operand=<key> family=<family> observed=-
 fallback=none`). Clearing it would make that diagnostic lie.
 
 ### D2 — Same shape as the sibling store-level demand flags

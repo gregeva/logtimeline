@@ -5,7 +5,8 @@
 Specification agreed with the architect 2026-10-06 in an interview held
 section by section, on branch `605-input-units` off `release/0.19.0` at
 f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
-(the bound declaration) and 2 (units on input) are committed on the branch. Issue #605 is labelled
+(the bound declaration), 2 (units on input) and 3 (the `-V` content shape)
+are committed on the branch. Issue #605 is labelled
 `status: in progress`.
 
 | Drop (§ 9) | State |
@@ -13,8 +14,8 @@ f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
 | 0 specification | done 2026-10-06: committed, comment on #605 listing D11 to D29, #622's order line updated, #688 filed from D12 |
 | 1 bound declaration | done 2026-10-06: AC1 to AC5 asserted; `before` benchmark captured (`605-before`, base f7c5daa) |
 | 2 quantity units | done 2026-10-06: AC6 to AC16 asserted |
-| 3 `-V` content shape | next; starts on the architect's instruction |
-| 4 patterns and checks | not started |
+| 3 `-V` content shape | done 2026-10-06: AC18 and AC19 asserted |
+| 4 patterns and checks | next |
 | 5 records and release note | not started |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
@@ -22,8 +23,8 @@ agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. Drop 3 opens by completing the inventory of § 5.6.2 from
-every section each harness requests.
+from a worktree too. Drop 4 writes the *Quantity units* entry, the bare-number
+list and its structural check, and the pointers of § 5.9.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1125,6 +1126,60 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   `L-bound-option-rows` and `M-units-topic`. The count-list parity the plan put
   in `J-unit-list-parity` is in `M-units-topic`, beside the units topic it
   compares with.
+- **Drop 3, the inventory (2026-10-06).** Two runs that together emit all
+  twenty registered sections were classified line by line, and the emitters
+  read for lines those runs did not reach. Beyond § 5.6.2's table, four
+  sections departed and are converted under D26 and D27: the per-metric
+  `dimensions` lines of `histogram-array` and `histogram-bin-counters /
+  display-dimensions` (`  Duration:  samples=349 ...`, padded, the metric
+  capitalised as the key) are now `  metric: duration samples=349 ...`; the
+  `histogram-percentile-ticks` value lines (`    P50=30.0`) are
+  `    percentile: P50 value=30.0`; `udm-counting`'s lines of several
+  `key: value` pairs (`bucket: N  metric: x  occurrences: 6 ...`) are
+  `bucket: N metric=x occurrences=6 ...`, with `-` for a value never
+  computed; `udm-specs`'s `pattern[0]:` is `pattern_0:`. In
+  `statistics-demand`, `observed=n/a` on the sort gate is `observed=-` and its
+  `1`/`0` are `yes`/`no`. `heatmap-palette` writes `-` for every field of a run
+  without a heatmap (`n/a` before). An ungrouped run's `message-grouping` line
+  `  Grouping: off` is `grouping: no`, and a grouped run opens with
+  `grouping: yes`.
+- **`message-grouping` (D28).** Settings first (`threshold_pct`, `trigger`,
+  `ceiling`, `final_pass`, `final_threshold_pct`, `final_ceiling`), then one
+  `category: <category>|<group>` block per grouping key with its outcome
+  (`reduction_keys`, `reduction_rows`, `reduction_pct`, `final_pass_skipped`,
+  `similarity_cliff_edge_pct`) and a `phase: streaming` block and, when the
+  final pass ran, a `phase: final_pass` block of counters. The `[WARN]
+  Tracking mismatch` line is a `tracking_delta` fact in each phase block,
+  always written (0 when every key is accounted for). `grand-totals` is the
+  same counters as snake_case facts; `accounting` and `cluster-membership` were
+  already in shape and stay.
+- **`runtime-config` (D26).** Which options are written `yes`/`no` is read from
+  the `GetOptions` spec (an option taking no value), not from a list of its own:
+  the spec is now a named array, `@getopt_spec`, whose value-less entries fill
+  `%option_is_flag`.
+- **The content shape records one form the survey of § 5.6.1 did not list.**
+  `index-read-back` writes `aggregated_preseed:` with nothing after the colon,
+  heading the facts indented beneath it; `tests/HARNESS-DESIGN.md` § Content
+  shape records it as a form in use, allowed only as such a heading.
+- **The check.** `tests/validate-verbose-content-shape.sh` reads the registry
+  from `ltl -V list`, runs two invocations that emit all twenty sections (1120
+  lines), and passes them to `tests/lib/verbose-content-shape.pl`. Run directly
+  on doctored captures, the checker fails on a kebab-case key, on `(not set)`,
+  on a malformed entity line (`  Excluded:   numeric=0`), on a key with no value
+  and nothing beneath it, and on a registered section no capture emits; against
+  the drop-2 build the harness fails. Each converted harness fails against the
+  drop-2 build too (runtime-config 25 assertions, statistics-demand 53,
+  heatmap-palette 10, udm-counting 24, histogram-bin-counters 2,
+  message-grouping 21) and passes on the branch.
+- **The help-coverage scenarios had stopped seeing the quantity options
+  (found 2026-10-06; since drop 1).** `validate-help-content.sh` reads the
+  options from the source to check each appears in `--help` and
+  `docs/usage.md`. Once the bound rows became a `map` over `@quantity_options`
+  (drop 1), its parser no longer saw them, and the check passed on the other
+  options' count; when drop 3 named the spec list `@getopt_spec` the parser
+  found none and the harness stopped. It now reads `@getopt_spec` and the rows
+  of `@quantity_options`: 118 options, the seventeen quantity options among
+  them.
 - **Running from a worktree.** A worktree has no `logs/`; every harness and the
   benchmark run with `LTL_LOGS_DIR` pointing at the main checkout's corpus
   (`tests/HARNESS-DESIGN.md` § The log corpus is resolved).

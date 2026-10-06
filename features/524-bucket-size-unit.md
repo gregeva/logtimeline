@@ -146,7 +146,7 @@ zero or negative width with a unit. A bare number is never in this set. `-bs 0` 
 The resolved value may be fractional in the run's unit (`-bs 90s` on a
 minute-display run is 1.5). `$bucket_size_seconds` carries it exactly. The two
 `-V` rows that print `$time_bucket_size` print the resolved value in the run's
-unit, with decimals only when the value is fractional (`bucket-size: 1440`,
+unit, with decimals only when the value is fractional (`bucket_size: 1440`,
 `time_bucket_size 1.5`); the `%d` in `-V benchmark-data` goes.
 
 ### D4 — Bucket width and timestamp precision are separate (locked)
@@ -231,7 +231,7 @@ are the contracts, both existing).
    same as `-ms -bs 500`; `-bs 1d` on a plain run renders the same as
    `-bs 1440`.
 8. **`-V` rows report the resolved value** (assertable): `-V runtime-config`
-   shows `bucket-size: 1440` for `-bs 1d` and `bucket-size: 1.5` for `-bs 90s`
+   shows `bucket_size: 1440` for `-bs 1d` and `bucket_size: 1.5` for `-bs 90s`
    on a minute run; `-V benchmark-data` `time_bucket_size` agrees.
    `tests/validate-runtime-config.sh` keeps passing (its bucket-size assertions
    use bare numbers).

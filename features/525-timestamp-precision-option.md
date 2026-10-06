@@ -1199,7 +1199,7 @@ ladder, from the minute down to `$timestamp_precision_finest` (`us` until drop
 4). `-tp ns` is rejected with the accepted values until drop 4's clamp. `-s`
 and `-ms` resolve to `s` and `ms`; either beside a `-tp` of another precision
 is a usage error naming both, and each prints one deprecation line on stderr.
-`-V runtime-config` reports `timestamp-precision: <token>` when `-tp` is
+`-V runtime-config` reports `timestamp_precision: <token>` when `-tp` is
 supplied. `--help`, `docs/usage.md`, the `resolution-zoom` explain topic and
 `docs/explain/techniques.md` carry the `-tp` row and the edited `-bs`, `-s` and
 `-ms` rows, and the examples are written with `-tp` and a unit on `-bs`. The
@@ -1356,7 +1356,7 @@ digits) resolves to it at settlement, prints "Note: timestamps are shown to the
 microsecond: nanosecond precision was asked for, and at most 6 fractional
 digits are read from a timestamp" (the step names and the digit count read
 from the ladder), and records the request in the `clamped from` annotation, so
-`-V runtime-config` reads `timestamp-precision: us; clamped from ns`. On a log
+`-V runtime-config` reads `timestamp_precision: us; clamped from ns`. On a log
 with nine-digit fractions `-tp ns` renders `.123456` and `.999999` for lines
 written at `.123456789` and `.999999999`: the digits past the sixth are not
 read, so nothing carries. `--help` and `docs/usage.md` name `ns`.

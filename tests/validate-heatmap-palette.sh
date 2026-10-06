@@ -156,7 +156,7 @@ assert_header_present() {
 }
 
 # ---------------------------------------------------------------------------
-# Scenario: no heatmap mode (sanity — section emits with n/a fields)
+# Scenario: no heatmap mode (sanity — section emits with - for every absent field)
 # ---------------------------------------------------------------------------
 scenario_no_heatmap() {
     scenario_wanted no-heatmap || return 0
@@ -175,14 +175,14 @@ scenario_no_heatmap() {
         contract    'Issue #250 - section reports inactive state without crashing when heatmap is off'
 
     assert_line "$out" \
-        pattern     '^metric: n/a$' \
-        asserts     'metric reports `n/a` when no heatmap metric is selected' \
+        pattern     '^metric: -$' \
+        asserts     'metric reports `-` when no heatmap metric is selected' \
         produced_by 'emit_heatmap_palette_verbose() in ltl (inactive branch)' \
         contract    'Issue #250 - locked placeholder for absent metric'
 
     assert_line "$out" \
-        pattern     '^gradient_active: n/a$' \
-        asserts     'gradient_active reports `n/a` when no heatmap is rendering - neither dark nor light branch is selected' \
+        pattern     '^gradient_active: -$' \
+        asserts     'gradient_active reports `-` when no heatmap is rendering - neither dark nor light branch is selected' \
         produced_by 'emit_heatmap_palette_verbose() in ltl (inactive branch)' \
         contract    'Issue #250 - locked placeholder for absent gradient selection'
 }
@@ -194,7 +194,7 @@ scenario_no_heatmap() {
 # ---------------------------------------------------------------------------
 
 # Args: scenario_name, ltl_args, expected_metric, expected_color,
-#       expected_light_bg ("0"|"1"), expected_source, expected_active ("dark"|"light"),
+#       expected_light_bg ("no"|"yes"), expected_source, expected_active ("dark"|"light"),
 #       expected_gradient_dark, expected_gradient_light
 scenario_palette() {
     scenario_wanted "$1" || return 0
@@ -294,51 +294,51 @@ echo ""
 # --- -dbg path: each of three metrics ---
 scenario_palette "dbg-duration" \
     "-hm duration -dbg" \
-    "duration" "yellow" "0" "-dbg" "dark" \
+    "duration" "yellow" "no" "-dbg" "dark" \
     "$YELLOW_DARK" "$YELLOW_LIGHT"
 echo ""
 
 scenario_palette "dbg-bytes" \
     "-hm bytes -dbg" \
-    "bytes" "green" "0" "-dbg" "dark" \
+    "bytes" "green" "no" "-dbg" "dark" \
     "$GREEN_DARK" "$GREEN_LIGHT"
 echo ""
 
 scenario_palette "dbg-count" \
     "-hm count -dbg" \
-    "count" "cyan" "0" "-dbg" "dark" \
+    "count" "cyan" "no" "-dbg" "dark" \
     "$CYAN_DARK" "$CYAN_LIGHT"
 echo ""
 
 # --- -lbg path: each of three metrics ---
 scenario_palette "lbg-duration" \
     "-hm duration -lbg" \
-    "duration" "yellow" "1" "-lbg" "light" \
+    "duration" "yellow" "yes" "-lbg" "light" \
     "$YELLOW_DARK" "$YELLOW_LIGHT"
 echo ""
 
 scenario_palette "lbg-bytes" \
     "-hm bytes -lbg" \
-    "bytes" "green" "1" "-lbg" "light" \
+    "bytes" "green" "yes" "-lbg" "light" \
     "$GREEN_DARK" "$GREEN_LIGHT"
 echo ""
 
 scenario_palette "lbg-count" \
     "-hm count -lbg" \
-    "count" "cyan" "1" "-lbg" "light" \
+    "count" "cyan" "yes" "-lbg" "light" \
     "$CYAN_DARK" "$CYAN_LIGHT"
 echo ""
 
 # --- Precedence: -dbg wins over -lbg regardless of CLI order ---
 scenario_palette "precedence-lbg-then-dbg" \
     "-hm duration -lbg -dbg" \
-    "duration" "yellow" "0" "-dbg" "dark" \
+    "duration" "yellow" "no" "-dbg" "dark" \
     "$YELLOW_DARK" "$YELLOW_LIGHT"
 echo ""
 
 scenario_palette "precedence-dbg-then-lbg" \
     "-hm duration -dbg -lbg" \
-    "duration" "yellow" "0" "-dbg" "dark" \
+    "duration" "yellow" "no" "-dbg" "dark" \
     "$YELLOW_DARK" "$YELLOW_LIGHT"
 
 echo ""

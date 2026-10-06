@@ -1083,6 +1083,7 @@ my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
 # walks these to produce the command-line and environment-variable
 # sub-sections.
 my %option_provenance;
+my %option_is_flag;          # long name => 1 for an option that takes no value, from the GetOptions spec
 my %option_overrides;
 
 # Consolidation data structures (Issue #96 - Fuzzy Message Consolidation)
@@ -2905,18 +2906,18 @@ sub emit_runtime_config_verbose {
     # artifacts that are computed, not directly user-supplied. Stays at
     # the top of the parent section.
     if (defined $ltl_config_raw && $ltl_config_raw ne '') {
-        push @verbose_output, "LTL_CONFIG: $ltl_config_raw";
+        push @verbose_output, "ltl_config: $ltl_config_raw";
     }
-    push @verbose_output, "include (merged): "    . (defined $include_regex   ? $include_regex   : "(not set)");
-    push @verbose_output, "exclude (merged): "    . (defined $exclude_regex   ? $exclude_regex   : "(not set)");
-    push @verbose_output, "highlight (merged): "  . (defined $highlight_regex ? $highlight_regex : "(not set)");
-    push @verbose_output, "threadpool-activity (merged): " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : "(not set)");
+    push @verbose_output, "include_merged: "             . (defined $include_regex             ? $include_regex             : '-');
+    push @verbose_output, "exclude_merged: "             . (defined $exclude_regex             ? $exclude_regex             : '-');
+    push @verbose_output, "highlight_merged: "           . (defined $highlight_regex           ? $highlight_regex           : '-');
+    push @verbose_output, "threadpool_activity_merged: " . (defined $threadpool_activity_regex ? $threadpool_activity_regex : '-');
 
     # Resolved duration-statistics demand — computed, not user-supplied:
     # whether each statistics store has at least one active output surface
     # (see the demand resolution in adapt_to_command_line_options).
-    push @verbose_output, "bucket-duration-stats-demand: $bucket_duration_stats_demand";
-    push @verbose_output, "message-duration-stats-demand: $message_duration_stats_demand";
+    push @verbose_output, "bucket_duration_stats_demand: "  . ($bucket_duration_stats_demand  ? 'yes' : 'no');
+    push @verbose_output, "message_duration_stats_demand: " . ($message_duration_stats_demand ? 'yes' : 'no');
 
     # Per-flag current values (Issue #231) — collected from the snapshot
     # taken at the top of adapt_to_command_line_options() vs the
@@ -3003,12 +3004,16 @@ sub emit_runtime_config_verbose {
         'no-auto-hide'                      => $no_auto_hide,
     );
 
-    # Helper: render the value for display.
+    # Helper: render the value for display: an option taking no value as yes
+    # or no, nothing to report as -.
     my $render = sub {
-        my $v = shift;
-        return '(not set)' unless defined $v;
-        return $v eq '' ? '(empty)' : "$v";
+        my ($flag, $v) = @_;
+        return '-' if !defined $v || $v eq '';
+        return $v ? 'yes' : 'no' if $option_is_flag{$flag} && $v =~ /^[01]$/;
+        return "$v";
     };
+    # The key an option's long name is written under: snake_case.
+    my $key = sub { (my $k = $_[0]) =~ tr/-/_/; $k };
 
     # Helper: annotation suffix per #231 grammar.
     my $annotate = sub {
@@ -3039,7 +3044,7 @@ sub emit_runtime_config_verbose {
     # Command-line sub-section.
     push @verbose_output, "=== runtime-config / command-line ===";
     for my $flag (@cli_flags) {
-        push @verbose_output, "$flag: " . $render->($resolved_values{$flag}) . $annotate->($flag);
+        push @verbose_output, $key->($flag) . ": " . $render->($flag, $resolved_values{$flag}) . $annotate->($flag);
     }
     push @verbose_output, "=== END runtime-config / command-line ===";
 
@@ -3055,7 +3060,7 @@ sub emit_runtime_config_verbose {
         # the flag; when CLI did supply it, the env-var value is lost and
         # we cannot reconstruct it without re-parsing @env_args. For now,
         # surface the resolved value with the overridden annotation.
-        push @verbose_output, "$flag: " . $render->($resolved_values{$flag}) . $suffix;
+        push @verbose_output, $key->($flag) . ": " . $render->($flag, $resolved_values{$flag}) . $suffix;
     }
     push @verbose_output, "=== END runtime-config / environment-variable ===";
 
@@ -6367,13 +6372,13 @@ sub emit_heatmap_palette_verbose {
 
     if (!$heatmap_enabled || !defined $heatmap_metric) {
         push @verbose_output, "heatmap_active: no";
-        push @verbose_output, "metric: n/a";
-        push @verbose_output, "light_bg: $heatmap_light_bg";
+        push @verbose_output, "metric: -";
+        push @verbose_output, "light_bg: " . ($heatmap_light_bg ? 'yes' : 'no');
         push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
-        push @verbose_output, "color_name: n/a";
-        push @verbose_output, "gradient_dark: n/a";
-        push @verbose_output, "gradient_light: n/a";
-        push @verbose_output, "gradient_active: n/a";
+        push @verbose_output, "color_name: -";
+        push @verbose_output, "gradient_dark: -";
+        push @verbose_output, "gradient_light: -";
+        push @verbose_output, "gradient_active: -";
         push @verbose_output, "=== END heatmap-palette ===";
         return;
     }
@@ -6385,15 +6390,15 @@ sub emit_heatmap_palette_verbose {
     my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
     my $entry = $column_color_lookup{$color_key} // $heatmap_special_gradients{$color_key};
 
-    my $gradient_dark_str  = defined $entry && $entry->{gradient}       ? join(',', @{$entry->{gradient}})       : 'n/a';
-    my $gradient_light_str = defined $entry && $entry->{gradient_light} ? join(',', @{$entry->{gradient_light}}) : 'n/a';
+    my $gradient_dark_str  = defined $entry && $entry->{gradient}       ? join(',', @{$entry->{gradient}})       : '-';
+    my $gradient_light_str = defined $entry && $entry->{gradient_light} ? join(',', @{$entry->{gradient_light}}) : '-';
     my $gradient_active    = $heatmap_light_bg ? 'light' : 'dark';
 
     push @verbose_output, "heatmap_active: yes";
     push @verbose_output, "metric: $heatmap_metric";
-    push @verbose_output, "light_bg: $heatmap_light_bg";
+    push @verbose_output, "light_bg: " . ($heatmap_light_bg ? 'yes' : 'no');
     push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
-    push @verbose_output, "color_name: " . (defined $color_key ? $color_key : 'n/a');
+    push @verbose_output, "color_name: " . (defined $color_key ? $color_key : '-');
     push @verbose_output, "gradient_dark: $gradient_dark_str";
     push @verbose_output, "gradient_light: $gradient_light_str";
     push @verbose_output, "gradient_active: $gradient_active";
@@ -6649,13 +6654,13 @@ sub emit_statistics_demand_verbose {
 
     for my $store (qw( bucket message )) {
         push @verbose_output, "store: $store";
-        push @verbose_output, "  store_demand: " . ($store_demand{$store} ? 1 : 0);
+        push @verbose_output, "  store_demand: " . ($store_demand{$store} ? 'yes' : 'no');
         push @verbose_output, "  population: " . $store_population{$store};
         for my $group (qw( terminal_core csv_body extended_percentiles shape_moments )) {
             my $consumers = $stats_group_demand{$store}{$group};
             my $demanded  = ($consumers && @$consumers) ? 1 : 0;
             my $names     = $demanded ? join(',', @$consumers) : '-';
-            push @verbose_output, "  group $group: demanded=$demanded consumers=$names";
+            push @verbose_output, "  group: $group demanded=" . ($demanded ? 'yes' : 'no') . " consumers=$names";
         }
         # Moment source: which mechanism produces this store's shape moments.
         # Derivable from resolved state: none when shape is undemanded (or the
@@ -6675,7 +6680,7 @@ sub emit_statistics_demand_verbose {
         push @verbose_output, "  stats_calls: " . ($t->{stats_calls} // 0);
         for my $group (qw( terminal_core csv_body extended_percentiles shape_moments )) {
             my $g = $t->{$group} // {};
-            push @verbose_output, "  group_calc $group:"
+            push @verbose_output, "  group_calc: $group"
                 . " computed="       . ($g->{computed}       // 0)
                 . " skipped_demand=" . ($g->{skipped_demand} // 0)
                 . " ineligible="     . ($g->{ineligible}     // 0);
@@ -6702,11 +6707,11 @@ sub emit_statistics_demand_verbose {
 
     # Unsatisfiable-sort gate (#418): the -so operand as typed, the metric family
     # it resolves to, whether that family's source metric was observed in the run
-    # (n/a where no detection point needed it), and the detection point that moved
+    # (- where no detection point needed it), and the detection point that moved
     # the sort to occurrences — none when the requested ranking stood.
     push @verbose_output, "sort_gate: operand=" . ($sort_gate{operand} // 'occurrences')
         . " family="   . $sort_gate{family}
-        . " observed=" . ($sort_gate{observed} // 'n/a')
+        . " observed=" . ( !defined $sort_gate{observed} ? '-' : $sort_gate{observed} ? 'yes' : 'no' )
         . " fallback=" . $sort_gate{fallback};
 
     push @verbose_output, "=== END statistics-demand ===";
@@ -6792,46 +6797,46 @@ sub emit_udm_counting_verbose {
 
     my @counting = grep { $_->{agg_kind} eq 'counting' } @udm_configs;
     if (!@counting) {
-        push @verbose_output, "counting_udms: none";
+        push @verbose_output, "counting_udms: -";
         push @verbose_output, "=== END udm-counting ===";
         return;
     }
 
     push @verbose_output, "counting_udms: " . scalar(@counting);
     for my $config (@counting) {
-        push @verbose_output, "metric: $config->{name}  aggregation: $config->{aggregation}  base_name: $config->{base_name}";
+        push @verbose_output, "metric: $config->{name} aggregation=$config->{aggregation} base_name=$config->{base_name}";
     }
 
     for my $bucket (sort keys %log_stats) {
         for my $config (@counting) {
             my $name = $config->{name};
             next unless defined $log_stats{$bucket}{"udm_${name}_occurrences"};
-            push @verbose_output, join('  ',
+            push @verbose_output, join(' ',
                 "bucket: $bucket",
-                "metric: $name",
-                "occurrences: "    . ($log_stats{$bucket}{"udm_${name}_occurrences"}    // 0),
-                "occurrences_hl: " . ($log_stats{$bucket}{"udm_${name}_occurrences-HL"} // 0),
-                "distinct: "       . ($log_stats{$bucket}{"udm_${name}_distinct"}       // 0),
-                "distinct_hl: "    . ($log_stats{$bucket}{"udm_${name}_distinct-HL"}    // 0),
-                "value: "    . ($log_stats{$bucket}{"udm_$name"}    // ''),
-                "value_hl: " . ($log_stats{$bucket}{"udm_$name-HL"} // ''),
+                "metric=$name",
+                "occurrences="    . ($log_stats{$bucket}{"udm_${name}_occurrences"}    // 0),
+                "occurrences_hl=" . ($log_stats{$bucket}{"udm_${name}_occurrences-HL"} // 0),
+                "distinct="       . ($log_stats{$bucket}{"udm_${name}_distinct"}       // 0),
+                "distinct_hl="    . ($log_stats{$bucket}{"udm_${name}_distinct-HL"}    // 0),
+                "value="    . ($log_stats{$bucket}{"udm_$name"}    // '-'),
+                "value_hl=" . ($log_stats{$bucket}{"udm_$name-HL"} // '-'),
             );
         }
         # Sessions oracle reference: lets a harness compare a distinct UDM on the
         # session token against the built-in sessions column, per bucket
         if ($session_data_found && defined $log_stats{$bucket}{sessions}) {
-            push @verbose_output, join('  ',
+            push @verbose_output, join(' ',
                 "bucket: $bucket",
-                "sessions: $log_stats{$bucket}{sessions}",
-                "sessions_hl: " . ($log_stats{$bucket}{'sessions-HL'} // 0),
+                "sessions=$log_stats{$bucket}{sessions}",
+                "sessions_hl=" . ($log_stats{$bucket}{'sessions-HL'} // 0),
             );
         }
         # Users oracle reference (#444 D10): the sessions oracle, twinned
         if ($user_data_found && defined $log_stats{$bucket}{users}) {
-            push @verbose_output, join('  ',
+            push @verbose_output, join(' ',
                 "bucket: $bucket",
-                "users: $log_stats{$bucket}{users}",
-                "users_hl: " . ($log_stats{$bucket}{'users-HL'} // 0),
+                "users=$log_stats{$bucket}{users}",
+                "users_hl=" . ($log_stats{$bucket}{'users-HL'} // 0),
             );
         }
     }
@@ -7044,7 +7049,7 @@ sub emit_udm_specs_verbose {
         push @verbose_output, "udm: name=$config->{name} spec='$config->{raw_arg}'";
         push @verbose_output, "  read_as: " . udm_read_as($config, $entry->{config_idx});
         my $i = 0;
-        push @verbose_output, "  pattern[" . $i++ . "]: $_" for @{$config->{patterns}};
+        push @verbose_output, "  pattern_" . $i++ . ": $_" for @{$config->{patterns}};
         my $produced = "occurrences=$p->{occurrences} buckets=$p->{buckets}";
         if ($p->{occurrences}) {
             $produced .= $config->{agg_kind} eq 'counting'
@@ -13902,7 +13907,7 @@ sub resolve_timestamp_precision {
     # The runtime-config section was composed at option settlement, before any
     # file was sampled: its row takes the resolution here.
     for (@verbose_output) {
-        last if s/^timestamp-precision: \S+(?:; clamped from \S+)?$/timestamp-precision: $limit; clamped from $asked/;
+        last if s/^timestamp_precision: \S+(?:; clamped from \S+)?$/timestamp_precision: $limit; clamped from $asked/;
     }
     return;
 }
@@ -15630,9 +15635,7 @@ sub adapt_to_command_line_options {
     # provided". See classify_option_error().
     my @getopt_warnings;
     @section_visibility_ops = ();
-    my $getopt_ok = do {
-        local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
-        GetOptions(
+    my @getopt_spec = (
         'bucket-size|bs=s' => \$time_bucket_size,
         'pause|p' => \$pause_output,
         'start|st=s' => \$filter_range_start,
@@ -15738,7 +15741,14 @@ sub adapt_to_command_line_options {
         'validate-layout' => \$validate_layout,                                     # hidden
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
-        );
+    );
+    # The options that take no value, by long name (the longest of a spec's
+    # names): -V runtime-config writes a given one as yes, not as 1.
+    %option_is_flag = map { my $spec = $getopt_spec[$_]; $spec =~ /[=:]/ ? () : ( ( sort { length($b) <=> length($a) } split /\|/, $spec )[0] => 1 ) }
+                      grep { $_ % 2 == 0 } 0 .. $#getopt_spec;
+    my $getopt_ok = do {
+        local $SIG{__WARN__} = sub { push @getopt_warnings, $_[0]; };
+        GetOptions(@getopt_spec);
     };
     unless ($getopt_ok) {
         print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
@@ -18553,8 +18563,8 @@ sub format_histogram_dimensions_line {
     my $min_fmt = value_text($stats->{min}, metric => $metric, budget => 'dimensions line');
     my $max_fmt = value_text($stats->{max}, metric => $metric, budget => 'dimensions line');
     return sprintf(
-        "  %-10s samples=%-6d min=%-10s max=%-10s decades=%.2f buckets_per_decade=%d total_buckets=%d",
-        ucfirst($metric) . ":",
+        "  metric: %s samples=%d min=%s max=%s decades=%.2f buckets_per_decade=%d total_buckets=%d",
+        $metric,
         $stats->{count},
         $min_fmt,
         $max_fmt,
@@ -22231,7 +22241,7 @@ sub emit_histogram_tick_inputs {
                          $metric, $bar_width, $min_val, $max_val);
     for my $entry (@$selected) {
         next unless defined $entry->{value};
-        push @lines, sprintf("    %s=%.17g", $entry->{label}, $entry->{value});
+        push @lines, sprintf("    percentile: %s value=%.17g", $entry->{label}, $entry->{value});
     }
     push @{ $verbose_section_buffer{'histogram-percentile-ticks'} }, @lines;
 }
@@ -23405,7 +23415,6 @@ sub pipeline_accumulate {
 # buffered, under the header naming their fields.
 sub emit_message_grouping_accounting {
     my $buf = delete $verbose_section_buffer{'message-grouping-accounting'} // [];
-    push @verbose_output, "";
     push @verbose_output, "=== message-grouping / accounting ===";
     push @verbose_output, join("\t", qw(kind stage category grouping_key occurrences duration_count
         duration_total durations_retained bytes_count bytes_total key));
@@ -23432,10 +23441,17 @@ sub pipeline_finalize {
 
         # message-grouping verbose diagnostics (Issue #96).
         if (section_requested('message-grouping')) {
+            # The settings, then one entity block per category and grouping
+            # key: its outcome, and one block per phase (streaming, and the
+            # final pass when it ran) of snake_case counters.
             push @verbose_output, "=== message-grouping ===";
-            push @verbose_output, sprintf("  Threshold: %d%%  Trigger: %d  Ceiling: %d  Final pass: %s",
-                $consolidation_threshold, $consolidation_trigger, $consolidation_occurrence_ceiling,
-                $consolidation_final_pass ? "on (threshold=" . ($consolidation_final_threshold // $consolidation_threshold) . "%, ceiling=${consolidation_final_ceiling})" : "off");
+            push @verbose_output, "grouping: yes";
+            push @verbose_output, "threshold_pct: $consolidation_threshold";
+            push @verbose_output, "trigger: $consolidation_trigger";
+            push @verbose_output, "ceiling: $consolidation_occurrence_ceiling";
+            push @verbose_output, "final_pass: " . ($consolidation_final_pass ? 'yes' : 'no');
+            push @verbose_output, "final_threshold_pct: " . ($consolidation_final_pass ? ($consolidation_final_threshold // $consolidation_threshold) : '-');
+            push @verbose_output, "final_ceiling: " . ($consolidation_final_pass ? $consolidation_final_ceiling : '-');
 
             my ($grand_keys, $grand_s1, $grand_s2, $grand_s3, $grand_s4, $grand_s5, $grand_s6, $grand_fc) = (0,0,0,0,0,0,0,0);
             my $grand_checkpoints = 0;
@@ -23475,37 +23491,35 @@ sub pipeline_finalize {
                     }
                 }
 
-                push @verbose_output, "";
-                push @verbose_output, sprintf("  --- %s: Streaming Phase ---", $cat_gk);
-                push @verbose_output, sprintf("    Keys seen:             %d  (%d checkpoints, %d patterns)", $keys_seen, $checkpoints, $patterns);
-                push @verbose_output, sprintf("    S1 Inline match:       %d", $s->{s1_inline} // 0);
-                push @verbose_output, sprintf("    S2 Ceiling filter:     %d  (occurrences >= %d)", $ceiling_filtered, $consolidation_occurrence_ceiling);
-                push @verbose_output, sprintf("    S3 Checkpoint match:   %d", $s->{s3_checkpoint} // 0);
-                push @verbose_output, sprintf("    S4 Pairwise discovery: %d", $s->{s4_pairwise} // 0);
-                push @verbose_output, sprintf("    S4 Re-scan absorbed:   %d", $s->{s4_rescan} // 0);
-                push @verbose_output, sprintf("    S5 Unmatched:          %d", $genuinely_unmatched);
-                push @verbose_output, sprintf("    S6 Evicted:            %d", $evicted);
+                my @block;   # the category's block, written once its reduction is known
                 my $ema_pct = ($s->{absorption_ema} // 0) * 100;
-                my $ms = $s->{max_survivals} // 0;
-                push @verbose_output, sprintf("    Eviction:              EMA=%.1f%%, max_survivals=%d", $ema_pct, $ms);
                 # #584: the cumulative measure the final-pass skip decision reads
                 my $absorbed_streaming = $consolidation_streaming_absorbed{$cat_gk} // 0;
-                push @verbose_output, sprintf("    Streaming absorption:  %d of %d keys (%.1f%%)",
-                    $absorbed_streaming, $keys_seen, $keys_seen > 0 ? 100 * $absorbed_streaming / $keys_seen : 0);
-                push @verbose_output, sprintf("    find_candidates calls: %d", $s->{fc_calls} // 0);
-                push @verbose_output, sprintf("    S3 attempts:           %d  (skipped: %d, match rate: %.1f%%)",
-                    $s->{s3_calls} // 0, $s->{s3_skipped} // 0,
-                    ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0);
-                push @verbose_output, sprintf("    Cross-cluster merges:  %d", $s->{cross_cluster_merges} // 0);
-                push @verbose_output, sprintf("    Cleanup keys scanned:  %d  (cumulative across %d checkpoints)",
-                    $s->{cleanup_keys_scanned} // 0, $checkpoints);
-
-                # Streaming tracking invariant
+                # Streaming tracking invariant: every key seen is accounted for once
                 my $accounted = ($s->{s1_inline} // 0) + $ceiling_filtered + ($s->{s3_checkpoint} // 0) + ($s->{s4_pairwise} // 0) + ($s->{s4_rescan} // 0) + $genuinely_unmatched + $evicted;
-                if ($accounted != $keys_seen) {
-                    push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
-                        $accounted, $keys_seen, $keys_seen - $accounted);
-                }
+                push @block,
+                    "  phase: streaming",
+                    "    keys_seen: $keys_seen",
+                    "    checkpoints: $checkpoints",
+                    "    patterns: $patterns",
+                    "    s1_inline_match: " . ($s->{s1_inline} // 0),
+                    "    s2_ceiling_filter: $ceiling_filtered",
+                    "    s3_checkpoint_match: " . ($s->{s3_checkpoint} // 0),
+                    "    s4_pairwise_discovery: " . ($s->{s4_pairwise} // 0),
+                    "    s4_rescan_absorbed: " . ($s->{s4_rescan} // 0),
+                    "    s5_unmatched: $genuinely_unmatched",
+                    "    s6_evicted: $evicted",
+                    sprintf("    eviction_ema_pct: %.1f", $ema_pct),
+                    "    eviction_max_survivals: " . ($s->{max_survivals} // 0),
+                    "    streaming_absorbed: $absorbed_streaming",
+                    sprintf("    streaming_absorption_pct: %.1f", $keys_seen > 0 ? 100 * $absorbed_streaming / $keys_seen : 0),
+                    "    find_candidates_calls: " . ($s->{fc_calls} // 0),
+                    "    s3_attempts: " . ($s->{s3_calls} // 0),
+                    "    s3_skipped: " . ($s->{s3_skipped} // 0),
+                    sprintf("    s3_match_rate_pct: %.1f", ($s->{s3_calls} // 0) > 0 ? (($s->{s3_checkpoint} // 0) / ($s->{s3_calls} // 1)) * 100 : 0),
+                    "    cross_cluster_merges: " . ($s->{cross_cluster_merges} // 0),
+                    "    cleanup_keys_scanned: " . ($s->{cleanup_keys_scanned} // 0),
+                    "    tracking_delta: " . ($keys_seen - $accounted);
 
                 $grand_keys += $keys_seen;
                 $grand_s1 += ($s->{s1_inline} // 0);
@@ -23519,12 +23533,6 @@ sub pipeline_finalize {
                 $grand_patterns += $patterns;
 
                 # --- Final pass phase (2-pass architecture) ---
-                # #584: report the skip and the cliff edge whether or not the pass ran
-                push @verbose_output, sprintf("    Final pass skipped:    %s",
-                    $consolidation_final_pass_skipped{$cat_gk} ? "yes" : "no");
-                if (defined $consolidation_cliff_edge{$cat_gk}) {
-                    push @verbose_output, sprintf("    Similarity cliff edge: %d%%", $consolidation_cliff_edge{$cat_gk});
-                }
                 my $fp_keys = $s->{fp_keys_seen} // 0;
                 if ($fp_keys > 0) {
                     my $fp_p1_s3 = $s->{fp_p1_s3} // 0;
@@ -23537,30 +23545,24 @@ sub pipeline_finalize {
                     my $fp_p1_cross = $s->{fp_p1_cross_merges} // 0;
                     my $fp_p2_s3 = $s->{fp_p2_s3} // 0;
 
-                    push @verbose_output, sprintf("  --- %s: Final Pass (2-pass) ---", $cat_gk);
-                    push @verbose_output, sprintf("    Keys seen:             %d", $fp_keys);
-                    push @verbose_output, sprintf("    Pass 1:");
-                    push @verbose_output, sprintf("      S3 Pattern match:      %d", $fp_p1_s3);
-                    push @verbose_output, sprintf("      S2 Ceiling skipped:    %d  (occurrences >= %d)", $fp_p1_ceiling, $consolidation_final_ceiling);
-                    push @verbose_output, sprintf("      Windows processed:     %d  (capacity 1000)", $fp_p1_windows);
-                    push @verbose_output, sprintf("      S4 Pairwise discovery: %d", $fp_p1_s4_pair);
-                    push @verbose_output, sprintf("      S4 Re-scan absorbed:   %d", $fp_p1_s4_rescan);
-                    push @verbose_output, sprintf("      New patterns created:  %d", $fp_p1_patterns);
-                    push @verbose_output, sprintf("      find_candidates calls: %d", $fp_p1_fc);
-                    push @verbose_output, sprintf("      Cross-cluster merges:  %d", $fp_p1_cross);
-                    push @verbose_output, sprintf("    Pass 2:");
-                    push @verbose_output, sprintf("      S3 Absorbed (cleanup): %d", $fp_p2_s3);
-
                     # Tracking invariant: all keys accounted for
                     my $fp_absorbed = $fp_p1_s3 + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3;
                     my $fp_remaining = $fp_keys - $fp_absorbed - $fp_p1_ceiling;
-                    push @verbose_output, sprintf("    Remaining unmatched:   %d", $fp_remaining);
-
                     my $fp_accounted = $fp_p1_s3 + $fp_p1_ceiling + $fp_p1_s4_pair + $fp_p1_s4_rescan + $fp_p2_s3 + $fp_remaining;
-                    if ($fp_accounted != $fp_keys) {
-                        push @verbose_output, sprintf("    [WARN] Tracking mismatch: %d accounted vs %d seen (delta %d)",
-                            $fp_accounted, $fp_keys, $fp_keys - $fp_accounted);
-                    }
+                    push @block,
+                        "  phase: final_pass",
+                        "    keys_seen: $fp_keys",
+                        "    pass1_s3_pattern_match: $fp_p1_s3",
+                        "    pass1_s2_ceiling_skipped: $fp_p1_ceiling",
+                        "    pass1_windows: $fp_p1_windows",
+                        "    pass1_s4_pairwise_discovery: $fp_p1_s4_pair",
+                        "    pass1_s4_rescan_absorbed: $fp_p1_s4_rescan",
+                        "    pass1_patterns_created: $fp_p1_patterns",
+                        "    pass1_find_candidates_calls: $fp_p1_fc",
+                        "    pass1_cross_cluster_merges: $fp_p1_cross",
+                        "    pass2_s3_absorbed: $fp_p2_s3",
+                        "    remaining_unmatched: $fp_remaining",
+                        "    tracking_delta: " . ($fp_keys - $fp_accounted);
                 }
 
                 # Combined reduction: streaming keys_seen → final remaining
@@ -23569,30 +23571,32 @@ sub pipeline_finalize {
                     my $fp_absorbed = ($s->{fp_p1_s3} // 0) + ($s->{fp_p1_s4_pairwise} // 0) + ($s->{fp_p1_s4_rescan} // 0) + ($s->{fp_p2_s3} // 0);
                     my $combined_patterns = exists $consolidation_patterns{$cat_gk} ? scalar @{$consolidation_patterns{$cat_gk}} : 0;
                     $final_remaining = $fp_keys - $fp_absorbed - ($s->{fp_p1_s2_ceiling} // 0) + $combined_patterns;
-                    push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
-                        $keys_seen, $final_remaining,
-                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 } else {
                     $final_remaining = $genuinely_unmatched + $evicted + $ceiling_filtered + $patterns;
-                    push @verbose_output, sprintf("    Reduction: %d -> %d (%.1f%%)",
-                        $keys_seen, $final_remaining,
-                        $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0);
                 }
+                # #584: the skip and the cliff edge are reported whether or not the pass ran
+                push @verbose_output,
+                    "category: $cat_gk",
+                    "  reduction_keys: $keys_seen",
+                    "  reduction_rows: $final_remaining",
+                    sprintf("  reduction_pct: %.1f", $keys_seen > 0 ? (1 - $final_remaining / $keys_seen) * 100 : 0),
+                    "  final_pass_skipped: " . ($consolidation_final_pass_skipped{$cat_gk} ? 'yes' : 'no'),
+                    "  similarity_cliff_edge_pct: " . ($consolidation_cliff_edge{$cat_gk} // '-'),
+                    @block;
             }
 
             if (scalar keys %consolidation_cat_stats > 1) {
-                push @verbose_output, "";
                 push @verbose_output, "=== message-grouping / grand-totals ===";
-                push @verbose_output, sprintf("    Total keys seen:       %d", $grand_keys);
-                push @verbose_output, sprintf("    Total S1 Inline:       %d", $grand_s1);
-                push @verbose_output, sprintf("    Total S2 Ceiling:      %d", $grand_s2);
-                push @verbose_output, sprintf("    Total S3 Checkpoint:   %d", $grand_s3);
-                push @verbose_output, sprintf("    Total S4 Pairwise:     %d", $grand_s4);
-                push @verbose_output, sprintf("    Total S5 Unmatched:    %d", $grand_s5);
-                push @verbose_output, sprintf("    Total S6 Evicted:      %d", $grand_s6);
-                push @verbose_output, sprintf("    Total checkpoints:     %d", $grand_checkpoints);
-                push @verbose_output, sprintf("    Total patterns:        %d", $grand_patterns);
-                push @verbose_output, sprintf("    Total fc calls:        %d", $grand_fc);
+                push @verbose_output, "keys_seen: $grand_keys";
+                push @verbose_output, "s1_inline_match: $grand_s1";
+                push @verbose_output, "s2_ceiling_filter: $grand_s2";
+                push @verbose_output, "s3_checkpoint_match: $grand_s3";
+                push @verbose_output, "s4_pairwise: $grand_s4";
+                push @verbose_output, "s5_unmatched: $grand_s5";
+                push @verbose_output, "s6_evicted: $grand_s6";
+                push @verbose_output, "checkpoints: $grand_checkpoints";
+                push @verbose_output, "patterns: $grand_patterns";
+                push @verbose_output, "find_candidates_calls: $grand_fc";
                 push @verbose_output, "=== END message-grouping / grand-totals ===";
             }
             emit_message_grouping_accounting();
@@ -23600,7 +23604,6 @@ sub pipeline_finalize {
             # consumer outside ltl can form the same sample sets. Emitted last
             # in the section because it is the longest part of it.
             if (my $buf = delete $verbose_section_buffer{'message-grouping-membership'}) {
-                push @verbose_output, "";
                 push @verbose_output, "=== message-grouping / cluster-membership ===";
                 push @verbose_output, @$buf;
                 push @verbose_output, "=== END message-grouping / cluster-membership ===";
@@ -23614,7 +23617,7 @@ sub pipeline_finalize {
         # grouped run of the same input is compared with.
         consolidation_accounting_reported();
         push @verbose_output, "=== message-grouping ===";
-        push @verbose_output, "  Grouping: off";
+        push @verbose_output, "grouping: no";
         emit_message_grouping_accounting();
         push @verbose_output, "=== END message-grouping ===";
     }

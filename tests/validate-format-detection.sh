@@ -465,7 +465,7 @@ scenario_family_shapes() {
     # all-optional tail no longer exists to swallow a quoted "-" (R13).
     log=$(stage_fixture access-combined.txt access.log) || return
     out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
-    assert_absent "$out" pattern '^bucket: [0-9]+  sessions: ' \
+    assert_absent "$out" pattern '^bucket: [0-9]+ sessions=' \
         asserts 'a combined line yields no session: the quoted "-" of the user-agent position is never captured as one (R13)' \
         produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
     # A bare - session is absent, not a session, on the thread-session shape (R14).
@@ -473,7 +473,7 @@ scenario_family_shapes() {
     # A counting metric makes the section walk the buckets, where the sessions
     # oracle line is printed.
     out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
-    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
+    assert_line "$out" pattern '^bucket: [0-9]+ sessions=2 sessions_hl=0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
     # A bare - thread is absent from the message (R14); a literal null is the

@@ -206,13 +206,13 @@ scenario_runtime_config_command_line() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - command-line sub-section always emits'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^bucket-size: 60$' \
+        pattern     '^bucket_size: 60$' \
         asserts     'A flag supplied on the CLI with a valid value appears in the command-line sub-section with the resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section body)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - value with no annotation means user-supplied, valid, unchanged'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^data-model-precision: 7$' \
+        pattern     '^data_model_precision: 7$' \
         asserts     'Multi-flag invocation surfaces each supplied flag as its own row in command-line sub-section.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -238,7 +238,7 @@ scenario_runtime_config_env_only() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - env-var sub-section always emits'
 
     assert_line "$TMP_DIR/rc-env.stdout" \
-        pattern     '^bucket-size: 30$' \
+        pattern     '^bucket_size: 30$' \
         asserts     'A flag supplied via LTL_CONFIG with no CLI override appears in the environment-variable sub-section with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section body)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -252,13 +252,13 @@ scenario_runtime_config_env_overridden() {
     check_stderr_warnings "$TMP_DIR/rc-over.stderr"
 
     assert_line "$TMP_DIR/rc-over.stdout" \
-        pattern     '^bucket-size: 60$' \
+        pattern     '^bucket_size: 60$' \
         asserts     'When the same flag appears in both env and CLI, the command-line sub-section row carries the resolved (CLI-supplied) value with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - CLI wins; env-side carries override annotation'
 
     assert_line "$TMP_DIR/rc-over.stdout" \
-        pattern     '^bucket-size: 60; overridden$' \
+        pattern     '^bucket_size: 60; overridden$' \
         asserts     'When the same flag appears in both env and CLI, the environment-variable sub-section row carries `; overridden` annotation. (The displayed value is the resolved CLI value; reconstructing the original env value is out of scope.)' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - annotation grammar uses semicolon-separated `; overridden`'
@@ -549,19 +549,19 @@ scenario_runtime_config_data_model_selectors() {
     run_ltl "rc-dm" -V runtime-config -mdm bin -bdm bin -dm bin "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^message-stats-data-model: bin$' \
+        pattern     '^message_stats_data_model: bin$' \
         asserts     'A user-supplied -mdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for message-stats-data-model' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md section R8.3 - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^bucket-stats-data-model: bin$' \
+        pattern     '^bucket_stats_data_model: bin$' \
         asserts     'A user-supplied -bdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231 (Issue #289 honors -bdm bin end-to-end).' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for bucket-stats-data-model' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/289-bucket-stats-bin-counter-data-model.md - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^data-model: bin$' \
+        pattern     '^data_model: bin$' \
         asserts     'A user-supplied omnibus -dm bin appears as the data-model row in the command-line sub-section, alongside any per-surface override.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing.'
@@ -574,26 +574,26 @@ scenario_runtime_config_numeric_highlight() {
     run_ltl "rc-hl" -V runtime-config -hdmin 100 -hbmax 5000 -hcmin 2 "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-duration-min: 100$' \
+        pattern     '^highlight_duration_min: 100$' \
         asserts     'A user-supplied -hdmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-duration-min' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config - the six highlight criteria join the resolved-values registry'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-bytes-max: 5000$' \
+        pattern     '^highlight_bytes_max: 5000$' \
         asserts     'A user-supplied -hbmax appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-bytes-max' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-count-min: 2$' \
+        pattern     '^highlight_count_min: 2$' \
         asserts     'A user-supplied -hcmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-count-min' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight \(merged\): \(not set\)$' \
-        asserts     'The merged highlight regex line reports (not set) when only numeric highlight criteria are given - numeric criteria do not synthesize a regex.' \
+        pattern     '^highlight_merged: -$' \
+        asserts     'The merged highlight regex line reports - (nothing set) when only numeric highlight criteria are given - numeric criteria do not synthesize a regex.' \
         produced_by 'emit_runtime_config_verbose() in ltl (merged-regex display line)' \
         contract    'features/312-numeric-criteria-highlight-selection.md section The defined-highlight_regex gate sweep - the runtime-config merged line stays regex-only'
 }
@@ -613,20 +613,20 @@ scenario_runtime_config_expose() {
         contract    'features/566-preserve-named-values-in-message.md section D2 (command-line order) and section D3 (one option names anything to expose; the existing options are its aliases)'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^expose-query-string: 1$' \
+        pattern     '^expose_query_string: yes$' \
         asserts     'The alias still reports its own state: -xqs sets expose-query-string, whose row is unchanged by the new expose row.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^expose-user: 1$' \
+        pattern     '^expose_user: yes$' \
         asserts     'The alias still reports its own state: -xu sets expose-user, whose row is unchanged by the new expose row.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
 }
 
 # Issue #580 criterion 11: the resolved mask names, in command-line order, a
-# comma-separated list split and a repeated name kept once, and the mask-uuid
+# comma-separated list split and a repeated name kept once, and the mask_uuid
 # row reporting whether UUIDs are masked by either spelling.
 scenario_runtime_config_mask() {
     current_scenario="runtime-config-mask"
@@ -639,10 +639,10 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for mask, filled by resolve_mask_names() from the ordered mask list' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - a new mask key lists the resolved names in command-line order'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 1$' \
-        asserts     'mask-uuid reports 1 when UUIDs are masked through -m uuid, not only through the deprecated -uuid spelling.' \
-        produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
-        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid reports 1 when UUIDs are masked by either spelling'
+        pattern     '^mask_uuid: yes$' \
+        asserts     'mask_uuid reports yes when UUIDs are masked through -m uuid, not only through the deprecated -uuid spelling.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask_uuid row, given command-line provenance whenever -m was supplied' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask_uuid reports yes when UUIDs are masked by either spelling'
 
     run_ltl "rc-mask-uuid" -V runtime-config -uuid "$TEST_LOG"
     assert_line "$RUN_STDOUT" \
@@ -651,8 +651,8 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - the mask row, given command-line provenance whenever -uuid was supplied' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - -V runtime-config reports the effective configuration'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 1$' \
-        asserts     '-uuid still reports mask-uuid: 1, as it did before -m existed.' \
+        pattern     '^mask_uuid: yes$' \
+        asserts     '-uuid still reports mask_uuid: yes, as it did before -m existed.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid stays'
 
@@ -663,8 +663,8 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - the mask row' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 and section Acceptance criteria 11'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 0$' \
-        asserts     'A mask that does not name uuid reports mask-uuid: 0 rather than omitting the row, so a reader of the section sees that UUIDs are not masked.' \
+        pattern     '^mask_uuid: no$' \
+        asserts     'A mask that does not name uuid reports mask_uuid: no rather than omitting the row, so a reader of the section sees that UUIDs are not masked.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
         contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 11 - -m ip reports mask: ip, mask-uuid: 0'
 }
@@ -687,7 +687,7 @@ scenario_runtime_config_discard() {
         produced_by 'apply_discard_precedence() in ltl - the exposed names a discard removes' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D13 and D18'
     assert_no_line "$RUN_STDOUT" \
-        pattern     '^omit-durations:' \
+        pattern     '^omit_durations:' \
         asserts     'runtime-config reports the configuration the user provided: -d duration is reported by the discard row, and the omit row is not printed for an option the user did not give.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the rows are emitted from %option_provenance, which records what was supplied' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
@@ -701,7 +701,7 @@ scenario_runtime_config_discard() {
 
     run_ltl "rc-discard-omit" -V runtime-config -od -d duration "$TEST_LOG"
     assert_line "$RUN_STDOUT" \
-        pattern     '^omit-durations: 1$' \
+        pattern     '^omit_durations: yes$' \
         asserts     'An omit option the user did give is reported on its own row, whether or not --discard names the same metric: each option surfaces itself.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the omit-durations row, given command-line provenance because -od was supplied' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
@@ -754,7 +754,7 @@ scenario_runtime_config_timestamp_precision() {
         IFS='|' read -r spelling log want <<< "$row"
         run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$log"
         assert_line "$RUN_STDOUT" \
-            pattern     "^timestamp-precision: $want\$" \
+            pattern     "^timestamp_precision: $want\$" \
             asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation when the log carries that precision." \
             produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for timestamp-precision, resolved by adapt_to_command_line_options()' \
             contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
@@ -768,7 +768,7 @@ scenario_runtime_config_timestamp_precision() {
         IFS='|' read -r spelling log want why <<< "$row"
         run_ltl "rc-tp-clamp-$spelling" -V runtime-config -tp "$spelling" "$log"
         assert_line "$RUN_STDOUT" \
-            pattern     "^timestamp-precision: $want\$" \
+            pattern     "^timestamp_precision: $want\$" \
             asserts     "-tp $spelling resolves to $why; the row names the resolved precision and the request in the clamp annotation." \
             produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from; the row is resolved by resolve_timestamp_precision() after the read' \
             contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
@@ -776,7 +776,7 @@ scenario_runtime_config_timestamp_precision() {
 
     run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
     assert_no_line "$RUN_STDOUT" \
-        pattern     '^timestamp-precision:' \
+        pattern     '^timestamp_precision:' \
         asserts     'A run that does not supply -tp emits no timestamp-precision row: defaults are documented, not duplicated in the section.' \
         produced_by 'emit_runtime_config_verbose() in ltl (provenance partitioning)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'

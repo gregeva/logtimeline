@@ -269,7 +269,7 @@ scenario_floor_unit() {
         produced_by 'get_heatmap_column_header() in ltl, through value_text(): resolve_value_kind() gives the declared unit as the floor' \
         contract    "$CONTRACT D15, D16"
     assert_command \
-        command     "grep -qE '^  Elapsed: .* min=[0-9.]+s +max=[0-9.]+s ' '$TMP_DIR/fu-dims.txt'" \
+        command     "grep -qE '^  metric: elapsed .* min=[0-9.]+s max=[0-9.]+s ' '$TMP_DIR/fu-dims.txt'" \
         label       'the dimensions line reads min and max in seconds' \
         asserts     'The histogram display-dimensions line renders a seconds-declared metric in seconds' \
         produced_by 'format_histogram_dimensions_line() in ltl, through value_text() and the dimensions line budget row' \

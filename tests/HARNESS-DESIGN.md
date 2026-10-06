@@ -173,6 +173,21 @@ Sub-sections use the same form with `/` as the nesting separator:
 
 End markers are required. They exist so harnesses can use range extraction (`sed -n '/=== section/,/=== END section/p'`) unambiguously. The next-section-as-end pattern (`sed -n '/=== a/,/=== b/p'`) is inclusive of the end line and drags adjacent content; explicit end markers eliminate that brittleness.
 
+## Content shape
+
+Every section's content follows one shape, written down from the forms the sections already used (`features/605-input-units.md` D25 to D29). A harness reads a section by these forms; a new section is written to them.
+
+- **A fact is `key: value`, one per line.** The key is snake_case (`[a-z][a-z0-9_]*`), even where it names an option (`bucket_size: 60` for `-bs`); a unit travels in the key and the value is a bare number (`sample_us`, `threshold_pct`).
+- **Several entities of one kind are entity blocks.** `<entity>: <name>` opens the block, its facts indented two spaces beneath it (`file: <path>`, `store: bucket`, `category: plain|200`); a block may hold blocks of its own, indented two further spaces (`  phase: streaming`).
+- **Many small entities are one line each: `<entity>: <name> key=value ...`**, keys snake_case (`group: terminal_core demanded=yes consumers=stats-csv`, `bucket: 1769421600 metric=users occurrences=6`).
+- **A key with nothing after its colon heads the facts indented beneath it**, and is used only so (`aggregated_preseed:` in `index-read-back`).
+- **Bulk records are tab-separated with a header row** (`benchmark-data`, `section-layout`, `message-grouping / accounting`).
+- **A boolean is `yes` or `no`.** A `1` or `0` that is a count stays a number.
+- **An absent value is `-`**, as a value or after `key=`; never `(not set)`, `n/a`, `none`, `(empty)` or nothing. A `none` that is a value in its own right stays (`lookup: none`: no index lookup happened; `fallback=none`: the ranking stood).
+- **A resolved value's source is a parenthesised annotation** after the value (`byte_notation: si (default)`), or a `; clamped from <asked>` / `; overridden` suffix in `runtime-config`.
+
+`tests/validate-verbose-content-shape.sh` requests every registered section (it reads the registry from `ltl -V list`) and fails on a line that departs from the shape, through `tests/lib/verbose-content-shape.pl`; it fails too on a registered section none of its runs emits, so a new section cannot escape it.
+
 ## Reserved section names
 
 This list prevents collisions across parallel work. Update it when adding a new section.

@@ -839,13 +839,13 @@ scenario_udm_switched_off() {
 
     run_messages discard -xqs -udm sign::distinct -d sign -V udm-counting "$DOWNLOAD_FIXTURE" || return 0
     assert_command \
-        command     "grep -qE '^counting_udms: none\$' '$RUN_OUT'" \
+        command     "grep -qE '^counting_udms: -\$' '$RUN_OUT'" \
         label       'the metric produces nothing' \
         asserts     'A metric whose own key is discarded is switched off when the options are resolved, so it reports no line rather than reporting zero, and the built-in and user-defined counts of the same value cannot disagree.' \
         produced_by "$PRECEDENCE" \
         contract    "$CONTRACT_DOC section Decisions D12"
     assert_command \
-        command     "! grep -qE 'metric: sign' '$RUN_OUT'" \
+        command     "! grep -qE '^metric: sign ' '$RUN_OUT'" \
         label       'no udm-counting line names the metric' \
         asserts     'The switched-off metric leaves no trace in the verbose surface.' \
         produced_by "$PRECEDENCE" \
@@ -863,7 +863,7 @@ scenario_query_string() {
     local metric_only="$RUN_OUT"
     run_messages metric-discard -d query-string -udm fileName::distinct -V udm-counting "$DOWNLOAD_FIXTURE" || return 0
     assert_command \
-        command     "grep -qE '^counting_udms: 1\$' '$RUN_OUT' && grep -qE 'metric: fileName' '$RUN_OUT'" \
+        command     "grep -qE '^counting_udms: 1\$' '$RUN_OUT' && grep -qE '^metric: fileName ' '$RUN_OUT'" \
         label       'a metric counting a query-string key keeps counting' \
         asserts     'D12 switches off only a metric whose own key is discarded; a metric counting a key inside a discarded query string reads the raw line and is unaffected.' \
         produced_by "$PRECEDENCE" \

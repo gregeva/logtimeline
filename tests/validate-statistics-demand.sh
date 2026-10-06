@@ -246,18 +246,18 @@ if body=$(extract_section "$out"); then
     for store in bucket message; do
         sb=$(extract_store "$body" "$store")
         assert_line "$sb" \
-            pattern     '^  store_demand: 1$' \
+            pattern     '^  store_demand: yes$' \
             asserts     "On a default terminal run the $store store is demanded (its terminal surface is active)" \
             produced_by 'resolve_statistics_group_demand() in ltl (store-level booleans from adapt_to_command_line_options)' \
             contract    "$CONTRACT"
         assert_line "$sb" \
-            pattern     '^  group terminal_core: demanded=1 consumers=' \
+            pattern     '^  group: terminal_core demanded=yes consumers=' \
             asserts     "terminal_core is demanded on the $store store whenever the store is (every store-activating consumer declares it)" \
             produced_by 'resolve_statistics_group_demand() in ltl' \
             contract    "$CONTRACT"
         for group in csv_body extended_percentiles shape_moments; do
             assert_line "$sb" \
-                pattern     "^  group $group: demanded=0 consumers=-\$" \
+                pattern     "^  group: $group demanded=no consumers=-\$" \
                 asserts     "On a terminal-only run no consumer raises $group demand on the $store store (terminal surfaces read only terminal_core fields)" \
                 produced_by 'resolve_statistics_group_demand() in ltl' \
                 contract    "$CONTRACT"
@@ -273,19 +273,19 @@ if body=$(extract_section "$out"); then
             produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls in %stats_demand_telemetry)' \
             contract    "$CONTRACT"
         assert_line "$sb" \
-            pattern     '^  group_calc terminal_core: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+            pattern     '^  group_calc: terminal_core computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
             asserts     "terminal_core is derived on every non-early-returned invocation of the $store store's statistics primitive (never demand-skipped: terminal_core demand equals store demand)" \
             produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
             contract    "$CONTRACT"
         assert_line "$sb" \
-            pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[0-9]+ ineligible=[0-9]+$' \
+            pattern     '^  group_calc: shape_moments computed=0 skipped_demand=[0-9]+ ineligible=[0-9]+$' \
             asserts     "On a terminal-only run the $store store's shape-moment derivation never runs — eligible (n>=4) calls are demand-skipped and n<4 calls are counted ineligible, so every invocation is accounted for" \
             produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (group_calc counters)' \
             contract    "$CONTRACT"
     done
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  group_calc shape_moments: computed=0 skipped_demand=[1-9][0-9]* ineligible=[0-9]+$' \
+        pattern     '^  group_calc: shape_moments computed=0 skipped_demand=[1-9][0-9]* ineligible=[0-9]+$' \
         asserts     'On a terminal-only run the message store demand-skips the shape derivation for every eligible key — the observable proof that demand gating fires' \
         produced_by 'calculate_statistics() in ltl (group_calc counters in %stats_demand_telemetry)' \
         contract    "$CONTRACT"
@@ -309,18 +309,18 @@ check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
-        pattern     '^  group shape_moments: demanded=1 consumers=.*stats-csv' \
+        pattern     '^  group: shape_moments demanded=yes consumers=.*stats-csv' \
         asserts     'With -o active the STATS CSV raises shape_moments demand on the bucket store' \
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS stats-csv declaration)' \
         contract    "$CONTRACT"
     assert_line "$sb" \
-        pattern     '^  group extended_percentiles: demanded=1 consumers=.*stats-csv' \
+        pattern     '^  group: extended_percentiles demanded=yes consumers=.*stats-csv' \
         asserts     'With -o active the STATS CSV raises extended_percentiles demand on the bucket store' \
         produced_by 'resolve_statistics_group_demand() in ltl' \
         contract    "$CONTRACT"
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  group shape_moments: demanded=1 consumers=.*messages-csv' \
+        pattern     '^  group: shape_moments demanded=yes consumers=.*messages-csv' \
         asserts     'With -o active the MESSAGES CSV raises shape_moments demand on the message store' \
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS messages-csv declaration)' \
         contract    "$CONTRACT"
@@ -330,12 +330,12 @@ if body=$(extract_section "$out"); then
         produced_by 'emit_statistics_demand_verbose() in ltl' \
         contract    "$CONTRACT"
     assert_line "$sm" \
-        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
+        pattern     '^  group_calc: shape_moments computed=[1-9][0-9]* skipped_demand=0 ineligible=[0-9]+$' \
         asserts     'With every group demanded the message store derives shape moments for every eligible key and demand-skips nothing — output parity with the pre-gating behavior' \
         produced_by 'calculate_statistics() in ltl (group_calc counters)' \
         contract    "$CONTRACT"
     assert_command \
-        command     "calls=\$(awk '/^  stats_calls: /{print \$2; exit}' '$sm'); tc=\$(grep -oE '^  group_calc terminal_core: computed=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$calls\" && -n \"\$tc\" && \"\$calls\" -ge \"\$tc\" ]]" \
+        command     "calls=\$(awk '/^  stats_calls: /{print \$2; exit}' '$sm'); tc=\$(grep -oE '^  group_calc: terminal_core computed=[0-9]+' '$sm' | grep -oE '[0-9]+\$'); [[ -n \"\$calls\" && -n \"\$tc\" && \"\$calls\" -ge \"\$tc\" ]]" \
         label       'message stats_calls >= terminal_core computed (early-returned calls are counted as invocations)' \
         asserts     'stats_calls counts every statistics-primitive invocation, so it is always >= the terminal_core computed count (the difference is the early-returned no-duration calls)' \
         produced_by 'calculate_statistics() / calculate_statistics_bin() in ltl (stats_calls vs group_calc counters)' \
@@ -354,13 +354,13 @@ check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  group shape_moments: demanded=1 consumers=sort-on:skewness$' \
+        pattern     '^  group: shape_moments demanded=yes consumers=sort-on:skewness$' \
         asserts     'Sorting on a statistic makes -so an explicit demand contributor: -so skewness raises shape_moments demand on the message store with sort-on:<field> provenance' \
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS sort-on declaration)' \
         contract    "$CONTRACT"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
-        pattern     '^  group shape_moments: demanded=0 consumers=-$' \
+        pattern     '^  group: shape_moments demanded=no consumers=-$' \
         asserts     'A message-store sort key raises no demand on the bucket store' \
         produced_by 'resolve_statistics_group_demand() in ltl' \
         contract    "$CONTRACT"
@@ -370,7 +370,7 @@ if body=$(extract_section "$out"); then
         produced_by 'emit_statistics_demand_verbose() in ltl' \
         contract    "$CONTRACT"
     assert_line "$sm" \
-        pattern     '^  group_calc shape_moments: computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
+        pattern     '^  group_calc: shape_moments computed=[1-9][0-9]* skipped_demand=0 ineligible=0$' \
         asserts     'Under the #303 two-pass sort the shape derivation runs only for keys that met the n>=4 eligibility floor (population pass) or won a display slot (top-N pass) — nothing is demand-skipped and no ineligible key ever reaches the primitive' \
         produced_by 'calculate_statistics() in ltl (group_calc counters; two-pass sort path in calculate_all_statistics)' \
         contract    "$CONTRACT"
@@ -403,7 +403,7 @@ if body=$(extract_section "$out"); then
     # #418 control for the D6 amendment: the ordinary partial case (some keys
     # rank, some fill) is untouched — the gate stands aside and stays quiet.
     assert_line "$body" \
-        pattern     '^sort_gate: operand=skewness family=duration observed=1 fallback=none$' \
+        pattern     '^sort_gate: operand=skewness family=duration observed=yes fallback=none$' \
         asserts     'A statistic sort that ranks at least one key is left standing: the unsatisfiable-sort gate resolves the family, sees it observed, and takes no fallback' \
         produced_by 'apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
         contract    "$CONTRACT"
@@ -436,13 +436,13 @@ check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  group terminal_core: demanded=1 consumers=messages-table,sort-on:p99$' \
+        pattern     '^  group: terminal_core demanded=yes consumers=messages-table,sort-on:p99$' \
         asserts     'Sorting on p99 raises no group beyond terminal_core (p99 is a terminal_core field): the sort-on consumer joins the existing terminal_core demand with provenance' \
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS sort-on declaration)' \
         contract    "$CONTRACT"
     for group in csv_body extended_percentiles shape_moments; do
         assert_line "$sm" \
-            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            pattern     "^  group: $group demanded=no consumers=-\$" \
             asserts     "A terminal_core sort key ($group check) raises no demand on any other statistics group" \
             produced_by 'resolve_statistics_group_demand() in ltl' \
             contract    "$CONTRACT"
@@ -495,7 +495,7 @@ for combo in "p99:-od:duration:-od/--omit-durations" "bytes_mean:-ob:bytes:-ob/-
     check_capture_warnings "$out"
     if body=$(extract_section "$out"); then
         assert_line "$body" \
-            pattern     "^sort_gate: operand=$operand family=$family observed=0 fallback=parse\$" \
+            pattern     "^sort_gate: operand=$operand family=$family observed=no fallback=parse\$" \
             asserts     "-so $operand with $flag is a contradiction knowable at option parsing: the gate resolves the $family family, records the metric as never collected, and falls back at parse time" \
             produced_by 'apply_parse_time_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
             contract    "$GATE_CONTRACT"
@@ -529,7 +529,7 @@ for combo in "p99:duration" "bytes_mean:bytes" "count_mean:count"; do
     check_capture_warnings "$out"
     if body=$(extract_section "$out"); then
         assert_line "$body" \
-            pattern     "^sort_gate: operand=$operand family=$family observed=0 fallback=pre-walk\$" \
+            pattern     "^sort_gate: operand=$operand family=$family observed=no fallback=pre-walk\$" \
             asserts     "-so $operand on a log with no $family values: the gate reads the family's observation state after the read loop, finds nothing observed, and falls back before the population walk" \
             produced_by 'apply_pre_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
             contract    "$GATE_CONTRACT"
@@ -570,7 +570,7 @@ for combo in "skewness:12" "cv:12"; do
             produced_by 'calculate_all_statistics() in ltl (sort_selection telemetry), emitted by emit_statistics_demand_verbose()' \
             contract    "$CONTRACT"
         assert_line "$body" \
-            pattern     "^sort_gate: operand=$operand family=duration observed=1 fallback=post-walk\$" \
+            pattern     "^sort_gate: operand=$operand family=duration observed=yes fallback=post-walk\$" \
             asserts     "-so $operand where no key meets the eligibility floor: the family was observed (so neither earlier point fired), and the gate falls back after the walk on an empty defined block" \
             produced_by 'apply_post_walk_sort_gate() in ltl, emitted by emit_statistics_demand_verbose()' \
             contract    "$GATE_CONTRACT"
@@ -588,7 +588,7 @@ out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -so bytes_mean)
 check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     assert_line "$body" \
-        pattern     '^sort_gate: operand=bytes_mean family=bytes observed=1 fallback=none$' \
+        pattern     '^sort_gate: operand=bytes_mean family=bytes observed=yes fallback=none$' \
         asserts     'A bytes operand on a log carrying bytes ranks on the available-value branch, which the post-walk gate never judges — the gate is scoped to calculated statistics with an eligibility floor' \
         produced_by 'apply_post_walk_sort_gate() in ltl (%STAT_FIELD_GROUP membership test)' \
         contract    "$GATE_CONTRACT"
@@ -606,20 +606,20 @@ check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
-        pattern     '^  store_demand: 0$' \
+        pattern     '^  store_demand: no$' \
         asserts     'With the heatmap replacing the timeline latency column and no CSV active, the bucket store has no consumer and store demand is 0' \
         produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution, #349)' \
         contract    "$CONTRACT"
     for group in terminal_core csv_body extended_percentiles shape_moments; do
         assert_line "$sb" \
-            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            pattern     "^  group: $group demanded=no consumers=-\$" \
             asserts     "With the bucket store undemanded no group can be demanded on it ($group)" \
             produced_by 'resolve_statistics_group_demand() in ltl (store-level demand is a precondition for every consumer)' \
             contract    "$CONTRACT"
     done
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  store_demand: 1$' \
+        pattern     '^  store_demand: yes$' \
         asserts     'The heatmap does not suppress the message store: the messages table remains active' \
         produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution, #349)' \
         contract    "$CONTRACT"
@@ -636,15 +636,15 @@ out=$(run_section statistics-demand,runtime-config)
 check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     assert_command \
-        command     "bd=\$(grep -oE 'bucket-duration-stats-demand: [01]' '$out' | grep -oE '[01]\$'); sd=\$(awk '/^store: bucket\$/{f=1;next} f&&/store_demand:/{print \$2; exit}' '$body'); [[ -n \"\$bd\" && \"\$bd\" == \"\$sd\" ]]" \
-        label       'bucket store_demand agrees with runtime-config bucket-duration-stats-demand' \
-        asserts     'The statistics-demand store_demand line and the runtime-config bucket-duration-stats-demand boolean report the same resolved value (single resolution surface)' \
+        command     "bd=\$(grep -oE 'bucket_duration_stats_demand: (yes|no)' '$out' | grep -oE '(yes|no)\$'); sd=\$(awk '/^store: bucket\$/{f=1;next} f&&/store_demand:/{print \$2; exit}' '$body'); [[ -n \"\$bd\" && \"\$bd\" == \"\$sd\" ]]" \
+        label       'bucket store_demand agrees with runtime-config bucket_duration_stats_demand' \
+        asserts     'The statistics-demand store_demand line and the runtime-config bucket_duration_stats_demand boolean report the same resolved value (single resolution surface)' \
         produced_by 'emit_statistics_demand_verbose() and emit_runtime_config_verbose() in ltl, both reading $bucket_duration_stats_demand' \
         contract    "$CONTRACT"
     assert_command \
-        command     "md=\$(grep -oE 'message-duration-stats-demand: [01]' '$out' | grep -oE '[01]\$'); sd=\$(awk '/^store: message\$/{f=1;next} f&&/store_demand:/{print \$2; exit}' '$body'); [[ -n \"\$md\" && \"\$md\" == \"\$sd\" ]]" \
-        label       'message store_demand agrees with runtime-config message-duration-stats-demand' \
-        asserts     'The statistics-demand store_demand line and the runtime-config message-duration-stats-demand boolean report the same resolved value (single resolution surface)' \
+        command     "md=\$(grep -oE 'message_duration_stats_demand: (yes|no)' '$out' | grep -oE '(yes|no)\$'); sd=\$(awk '/^store: message\$/{f=1;next} f&&/store_demand:/{print \$2; exit}' '$body'); [[ -n \"\$md\" && \"\$md\" == \"\$sd\" ]]" \
+        label       'message store_demand agrees with runtime-config message_duration_stats_demand' \
+        asserts     'The statistics-demand store_demand line and the runtime-config message_duration_stats_demand boolean report the same resolved value (single resolution surface)' \
         produced_by 'emit_statistics_demand_verbose() and emit_runtime_config_verbose() in ltl, both reading $message_duration_stats_demand' \
         contract    "$CONTRACT"
 fi
@@ -671,7 +671,7 @@ sed -E 's/\x1b\[[0-9;]*m//g' "$out" > "$out.plain"
 if body=$(extract_section "$out"); then
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  store_demand: 0$' \
+        pattern     '^  store_demand: no$' \
         asserts     'With no message retained the message store has no active consumer, so its store demand is 0' \
         produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution gated on $capture_messages)' \
         contract    "$CONTRACT"
@@ -682,7 +682,7 @@ if body=$(extract_section "$out"); then
         contract    "$CONTRACT"
     for group in terminal_core csv_body extended_percentiles shape_moments; do
         assert_line "$sm" \
-            pattern     "^  group $group: demanded=0 consumers=-\$" \
+            pattern     "^  group: $group demanded=no consumers=-\$" \
             asserts     "With the message store undemanded no group can be demanded on it ($group)" \
             produced_by 'resolve_statistics_group_demand() in ltl (store-level demand is a precondition for every consumer)' \
             contract    "$CONTRACT"
@@ -694,7 +694,7 @@ if body=$(extract_section "$out"); then
         contract    "$CONTRACT"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
-        pattern     '^  store_demand: 1$' \
+        pattern     '^  store_demand: yes$' \
         asserts     'Retaining no message leaves the per-time-bucket store untouched: the timeline latency column still consumes it' \
         produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution)' \
         contract    "$CONTRACT"
@@ -745,7 +745,7 @@ assert_line "$out.stderr" \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
 if body=$(extract_section "$out"); then
     assert_line "$body" \
-        pattern     '^sort_gate: operand=p50 family=duration observed=n/a fallback=none$' \
+        pattern     '^sort_gate: operand=p50 family=duration observed=- fallback=none$' \
         asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
         produced_by 'apply_parse_time_sort_gate() / apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl' \
         contract    "$CONTRACT"
@@ -766,7 +766,7 @@ check_capture_warnings "$out"
 if body=$(extract_section "$out"); then
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
-        pattern     '^  store_demand: 0$' \
+        pattern     '^  store_demand: no$' \
         asserts     'A negative top-message count retains nothing, exactly as zero does: the message store has no active consumer' \
         produced_by 'adapt_to_command_line_options() in ltl (retention resolved from the top-message count being greater than zero)' \
         contract    "$CONTRACT"

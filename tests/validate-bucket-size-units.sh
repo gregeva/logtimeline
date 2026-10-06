@@ -6,8 +6,8 @@
 # and its spellings, D3 the -bs grammar, D4 width and precision separate,
 # D5 documentation) and its Acceptance criteria, with the long sub-second
 # spellings of features/525-timestamp-precision-option.md D6. The surfaces
-# read are the existing `-V runtime-config` (`bucket-size:`, `duration-unit:`
-# and `rate-unit:` rows) and `-V benchmark-data`
+# read are the existing `-V runtime-config` (`bucket_size:`, `duration_unit:`
+# and `rate_unit:` rows) and `-V benchmark-data`
 # (`CONFIG time_bucket_size` / `CONFIG bucket_size_seconds` rows); the
 # harness file name tracks the surface under test rather than a section
 # because the criteria compare whole runs.
@@ -257,13 +257,13 @@ check_v_rows() {
     current_scenario="verbose-rows/$tag"
     # shellcheck disable=SC2086
     run_ltl v "${COMMON[@]}" $args -V runtime-config,benchmark-data "$SPAN_FIXTURE"
-    if grep -qE "^bucket-size: ${expected}\$" "$TMP_DIR/v.out"; then
-        pass_with "runtime-config bucket-size: $expected for '$args'"
+    if grep -qE "^bucket_size: ${expected}\$" "$TMP_DIR/v.out"; then
+        pass_with "runtime-config bucket_size: $expected for '$args'"
     else
-        fail_with "runtime-config bucket-size: $expected for '$args'" \
+        fail_with "runtime-config bucket_size: $expected for '$args'" \
             "-V runtime-config reports the resolved bucket width in the run's unit, decimals only when fractional" \
             'emit_runtime_config_verbose() in ltl' "$CONTRACT_D3" \
-            "got: $(grep -E '^bucket-size:' "$TMP_DIR/v.out" || echo '(no bucket-size row)')"
+            "got: $(grep -E '^bucket_size:' "$TMP_DIR/v.out" || echo '(no bucket_size row)')"
     fi
     local tbs
     tbs=$(benchmark_row "$TMP_DIR/v.out" time_bucket_size)
@@ -366,8 +366,8 @@ current_scenario="one-mechanism/long-spellings-canonical"
 for pair in millisecond:ms Milliseconds:ms microsecond:us MICROSECONDS:us nanosecond:ns Nanoseconds:ns; do
     u=${pair%%:*}; want=${pair##*:}
     run_ltl lc "${COMMON[@]}" -bs 1440 -du "$u" -ru "$u" -V runtime-config "$SPAN_FIXTURE"
-    du=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^duration-unit: / {print $2; exit}' "$TMP_DIR/lc.out")
-    ru=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^rate-unit: / {print $2; exit}' "$TMP_DIR/lc.out")
+    du=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^duration_unit: / {print $2; exit}' "$TMP_DIR/lc.out")
+    ru=$(awk '/^=== runtime-config ===/ {s=1; next} s && /^rate_unit: / {print $2; exit}' "$TMP_DIR/lc.out")
     if [[ "$(cat "$TMP_DIR/lc.rc")" == 0 && "$du" == "$want" && "$ru" == "$want" ]]; then
         pass_with "-du and -ru resolve '$u' to $want"
     else
@@ -375,7 +375,7 @@ for pair in millisecond:ms Milliseconds:ms microsecond:us MICROSECONDS:us nanose
             "a long spelling is the same unit as its step's token, in any case: -du and -ru report the canonical token in -V runtime-config" \
             'time_unit_canonical() in ltl, called by adapt_to_command_line_options()' \
             "$CONTRACT_D2; $CONTRACT_525_D6" "exit: $(cat "$TMP_DIR/lc.rc")" \
-            "duration-unit: ${du:-MISSING-ANCHOR}" "rate-unit: ${ru:-MISSING-ANCHOR}"
+            "duration_unit: ${du:-MISSING-ANCHOR}" "rate_unit: ${ru:-MISSING-ANCHOR}"
     fi
 done
 fi

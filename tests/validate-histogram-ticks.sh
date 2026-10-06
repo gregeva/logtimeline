@@ -314,7 +314,7 @@ assert_tick_positions() {
             next unless $in;
             if ($line =~ /^\s+metric:\s+(\S+)\s+bar_width=(\d+)\s+min=(\S+)\s+max=(\S+)/) {
                 push @blocks, { metric => $1, w => $2, min => $3, max => $4, vals => [] };
-            } elsif (@blocks && $line =~ /^\s+(P[\d.]+)=(\S+)/) {
+            } elsif (@blocks && $line =~ /^\s+percentile:\s+(P[\d.]+)\s+value=(\S+)/) {
                 push @{ $blocks[-1]{vals} }, [$1, $2];
             }
         }
