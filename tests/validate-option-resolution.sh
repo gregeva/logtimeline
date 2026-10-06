@@ -147,9 +147,43 @@ $check->('bound-scalars-only-in-declaration', !@scalars, join(' | ', map { 'line
 my $name = qr/['"|](?:-?h?[dbc](?:min|max)|(?:highlight-)?(?:duration|bytes|count)-(?:min|max))['"|=,]/;
 my @names = grep { $code->($_) && !$in_decl{$_} && $lines[$_] =~ $name } 0 .. $#lines;
 $check->('bound-names-only-in-declaration', !@names, join(' | ', map { 'line ' . ($_ + 1) } @names));
+# Every numeric option of the GetOptions spec (typed =i, =f, :i or :f) is
+# either a row of the declaration or a key of %bare_number_options.
+my (%bare, $in_bare, $in_spec, @numeric);
+for my $l (@lines) {
+    $in_bare = 1 if $l =~ /^my %bare_number_options = \(/;
+    if ($in_bare) { $bare{$1} = 1 if $l =~ /^\s*'([a-z-]+)'\s*=>\s*'[^']+'/; $in_bare = 0 if $l =~ /^\);/; }
+    $in_spec = 1 if $l =~ /^\s*my \@getopt_spec = \(/;
+    if ($in_spec) {
+        $in_spec = 0 if $l =~ /^\s*\);\s*$/;
+        if ($l =~ /^\s*'([^']+?)[=:][if]'/) { my ($long) = sort { length($b) <=> length($a) } split /\|/, $1; push @numeric, $long; }
+    }
+}
+$check->('bare-number-list', scalar(grep { /^my %bare_number_options = \(/ } @lines) == 1 && scalar(keys %bare) > 0, scalar(keys %bare) . ' bare-number options');
+my @undeclared = grep { !$bare{$_} } @numeric;
+$check->('numeric-options-declared', @numeric > 0 && !@undeclared, @numeric . ' numeric options; undeclared: ' . join(', ', @undeclared));
+# Every row is a string option read by the one parse; no other sub splits a
+# number from a unit.
+my ($sub, %body);
+for my $l (@lines) { $sub = $1 if $l =~ /^sub (\w+)/; $body{$sub} .= $l if defined $sub; undef $sub if defined $sub && $l =~ /^\}/; }
+my $adapt = $body{adapt_to_command_line_options} // '';
+$check->('rows-read-by-parse', scalar($adapt =~ /quantity_option_spec\(\$row\) \. '=s'/ && $adapt =~ /resolve_quantity_option\(\$row, \$text\)/) ? 1 : 0, 'adapt_to_command_line_options');
+my @splits;
+{
+    my $cur;
+    for my $i (0 .. $#lines) {
+        $cur = $1 if $lines[$i] =~ /^sub (\w+)/;
+        next unless $code->($i);
+        next if $lines[$i] =~ /^my \$quantity_number_re = /;
+        next if defined $cur && $cur eq 'resolve_quantity_option';
+        push @splits, $i if $lines[$i] =~ /\$quantity_number_re|\(\[A-Za-z\][*+]\)\$/;
+    }
+}
+$check->('one-number-unit-split', !@splits, join(' | ', map { 'line ' . ($_ + 1) } @splits));
 PL
     local name status detail
-    local -a expected=(one-declaration twelve-bound-rows bound-scalars-only-in-declaration bound-names-only-in-declaration)
+    local -a expected=(one-declaration twelve-bound-rows bound-scalars-only-in-declaration bound-names-only-in-declaration
+                       bare-number-list numeric-options-declared rows-read-by-parse one-number-unit-split)
     for name in "${expected[@]}"; do
         status=""; detail=""
         IFS=$'\t' read -r _ _ status detail < <(awk -F'\t' -v n="$name" '$1 == "CHECK" && $2 == n' "$report") || true
@@ -157,9 +191,9 @@ PL
             pass_with "$name"
         else
             fail_with "$name" \
-                'The twelve numeric bounds are declared once (@quantity_options); option parsing, provenance, runtime-config, the activation tests, the index signature, the settlement checks, the export and the help rows read the declaration rather than a list of their own' \
-                'the source of ltl (@quantity_options and every site of features/605-input-units.md § 5.1 except read_and_process_logs)' \
-                "$CONTRACT_DECL" \
+                'The options that take a quantity are declared once (@quantity_options) and read by one parse (resolve_quantity_option); every other numeric option is in %bare_number_options with its reason; no site lists the bound set or splits a number from a unit on its own' \
+                'the source of ltl (@quantity_options, %bare_number_options, resolve_quantity_option, and every site of features/605-input-units.md section 5.1 except read_and_process_logs)' \
+                "$CONTRACT_DECL; features/605-input-units.md section 4 D14 and section 5.9" \
                 "status: ${status:-MISSING-ANCHOR}" "detail: ${detail:-}"
         fi
     done

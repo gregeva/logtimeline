@@ -41,8 +41,9 @@ one resolver (`features/histogram-charts.md` § Command Line Interface). A table
 the errors and help rows read cannot disagree with the parser.
 
 **Consumption sites.**
-- `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` over `@time_unit_ladder`, read by `-du`, `-ru`, `-bs` and the `-udm` unit slot; the three errors interpolate `$time_unit_list`.
-- `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count), read by the `-udm` unit slot; the GC heap-size reader `gc_heap_size_bytes` reads each figure's prefix letter through `byte_prefix_bytes` (`%byte_unit_by_prefix`, a view of the ladder) at the notation the format declares; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
+- `time_unit_canonical` :: `return $time_unit_by_spelling{ lc $spelling };` over `@time_unit_ladder`, read by `-du`, `-ru`, `-tp`, the `-udm` unit slot, and through `resolve_quantity_option` by `-bs` and the duration rows of `@quantity_options`; the errors interpolate `$time_unit_list`.
+- `number_unit_canonical` :: `return $number_unit_by_spelling{ lc $spelling };` over `@number_unit_ladder` (every tier's spelling and the input-only `also` spellings), read through `resolve_quantity_option` by the count rows of `@quantity_options`; the `-udm` unit slot reads the ladder's `udm` symbols case-sensitively through `%udm_number_factor`; the count errors and `--help units` interpolate `$number_unit_list`.
+- `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count, and on input its long-tier words), read by the `-udm` unit slot and through `resolve_quantity_option` by the byte rows of `@quantity_options`; the GC heap-size reader `gc_heap_size_bytes` reads each figure's prefix letter through `byte_prefix_bytes` (`%byte_unit_by_prefix`, a view of the ladder) at the notation the format declares; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
 - `print_help` :: `"Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; ..."`: the `-du`, `-ru`, `-bs` and `-udm unit` rows interpolate both ladders' lists, never a literal; `tests/validate-help-content.sh` scenario `J-unit-list-parity` compares each row, and its `docs/usage.md` row, with the list the matching error or warning prints; scenario `K-name-list-parity` does the same for the name vocabularies (the `-hm`, `-hg`, `--hide` column and `-udm` function rows).
 - `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` over `%verbose_section_registry`, which also serves `-V list` and the unknown-name warning.
 - `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`.
@@ -69,6 +70,60 @@ metric name resolves it through the built-in metric table: `-hm`, `-hg`, `-so`,
 metric entries of `@visibility_columns`. The family-prefixed `-so`
 names are a literal list beside the two tables; the `-pr` and `--help` errors
 list their vocabularies as literals. Refined by #614.
+
+---
+
+## Quantity units
+
+**Definition.** An option whose value is a count, a byte size or a duration is
+a row of `@quantity_options`: its names, its kind (`count`, `bytes` or
+`duration`), whether it is a bound (a fraction applies as written, a negative is
+refused) or a size (it must be whole), and the scalar the run reads. Every row
+is a string option whose text `resolve_quantity_option` reads once at
+settlement: a bare number as it stands, in the option's base unit (milliseconds,
+bytes, a count), or a number followed by a unit with no space, the unit read in
+the row's kind only and matched without regard to case. Each kind's vocabulary
+is its ladder: `@time_unit_ladder`, `@byte_unit_ladder`, `@number_unit_ladder`.
+Everything the output prints for a kind, an input of that kind accepts. A value
+the option cannot read stops the run with a usage error that quotes it and lists
+the kind's units from the ladder. A numeric option that stays a bare number is a
+key of `%bare_number_options`, with its reason.
+
+**Intended uses.** Any new option whose value is a quantity: add a row (and, for
+a bound, its role, end and signature), and the parse, the provenance, `-V
+runtime-config`, `-V option-resolution` and the help sentence follow. Any new
+numeric option that is not a quantity (a width, a percentage, a tier): add it
+to `%bare_number_options` with its reason. An option with its own base unit
+(`-bs`, whose bare number is in the run's unit) calls `resolve_quantity_option`
+with a row of the same shape rather than splitting the text itself.
+
+**Reasoning.** A quantity is written the way it is thought of (`-dmin 200us`,
+`-gc 2M`, `-bs 7d`) and the tool does the arithmetic; a bare number keeps its
+meaning, so no command line changes behaviour (`features/605-input-units.md`
+D7). One declaration keeps the lists of the bound set from diverging (the
+redundant-logic audit found eight hand-written copies), and one parse keeps the
+grammar, the case rule and the rejection text the same on every option.
+
+**Consumption sites.**
+- `(file scope, GLOBALS)` :: `my @quantity_options = (`: the seventeen rows (the twelve numeric bounds, `-n`, `-gc` and the three hidden consolidation counts) beside the scalars the read loop compares; `%bare_number_options` beside it.
+- `resolve_quantity_option` :: `my ($number, $spelling) = $text =~ /^($quantity_number_re)([A-Za-z]*)$/`: the one number-and-unit split, reading `%quantity_kind` (each kind's canonical sub, value, noun and list).
+- `adapt_to_command_line_options` :: `( map { my $row = $_; ( quantity_option_spec($row) . '=s' => sub { $quantity_entered{ $row->{long} } = $_[1] } ) } @quantity_options ),`: the rows' `GetOptions` entries; the settlement loop beside it resolves each given row, and the `-bs` block calls `resolve_quantity_option` with its run unit as base.
+- `adapt_to_command_line_options` :: `for my $min_row (grep { $_->{bound} && $_->{bound}{end} eq 'min' } @quantity_options) {`: the inverted-range check, quoting the values as typed; `has_active_filters`, `serialize_filters` and `quantity_bounds_given` read the rows' roles and signature flags.
+- `note_finer_duration_bounds` :: `next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};`: a duration bound typed finer than the log's declared unit gets a note.
+- `emit_option_resolution_verbose` :: `grep { defined $quantity_entered{ $_->{long} } } @quantity_options;`: `-V option-resolution`, each given option as entered beside what it resolved to.
+- `print_help` :: `$out .= help_opt("-$_->{short}, --$_->{long} <N>", bound_option_help($_)) for grep { $_->{bound} } @quantity_options;`: the bound rows in one phrasing; `quantity_unit_sentence` ends every unit-bearing row with its pointer to `print_help_units` (`ltl --help units`).
+- `-tp` follows the pattern through `time_unit_canonical` directly: its value is a unit name, not a quantity.
+
+**Owning record.** `features/605-input-units.md` (D1 to D24; § 5.2 the
+declaration, § 5.3 the parse, § 5.4 the vocabularies); `docs/usage.md` § Units
+for the user surface. Checked by `tests/validate-option-resolution.sh`:
+`quantity-units-declared` (every `=i` or `=f` option is in
+`%bare_number_options`, every row is a string option read by the parse, no
+other number-and-unit split, no list of the bound set outside the declaration)
+and `printed-spellings-accepted` (every spelling the three ladders print is
+accepted on input of its kind).
+
+**Status.** Established (#605).
 
 ---
 
@@ -419,7 +474,10 @@ The capture modes and the run-constant tests are #620.
 
 **Definition.** Every machine-readable diagnostic is a named section registered
 in `%verbose_section_registry` and `@verbose_section_order`, emitted by an
-`emit_<section>_verbose` sub gated on `section_requested()`, ASCII only.
+`emit_<section>_verbose` sub gated on `section_requested()`, ASCII only, in the
+one content shape (`tests/HARNESS-DESIGN.md` § Content shape): `key: value`
+facts with snake_case keys, entity blocks, `<entity>: <name> key=value` lines,
+tab-separated bulk records, `yes`/`no` booleans and `-` for an absent value.
 Harnesses assert on sections, never on rendered output.
 
 **Intended uses.** Any new behaviour a harness must assert on gets a section
@@ -436,7 +494,10 @@ contract).
 - `emit_statistics_demand_verbose` :: `return unless section_requested('statistics-demand');`
 - `emit_format_registry_verbose` :: `push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";`
 
-**Owning record.** `tests/HARNESS-DESIGN.md`.
+**Owning record.** `tests/HARNESS-DESIGN.md` (§ Content shape for the line
+forms; `features/605-input-units.md` D25 to D29). Checked by
+`tests/validate-verbose-content-shape.sh`, which runs every registered section
+and fails on a line that departs from the shape.
 
 **Status.** Established. One naming drift: the `histogram-bin-counters` section
 has two emitters and its emitter sub carries an older name (audit, FP.2). The naming drift is noted on #469, the next change to that section.
@@ -474,7 +535,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616, #618 and #605 (the bound declaration), each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*).
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616 and #618, each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*); #605 closed the copies of the bound set and the number-and-unit split (entry *Quantity units*).
 
 ---
 

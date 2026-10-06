@@ -5,8 +5,8 @@
 Specification agreed with the architect 2026-10-06 in an interview held
 section by section, on branch `605-input-units` off `release/0.19.0` at
 f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
-(the bound declaration), 2 (units on input) and 3 (the `-V` content shape)
-are committed on the branch. Issue #605 is labelled
+(the bound declaration), 2 (units on input), 3 (the `-V` content shape) and 4
+(the patterns and their checks) are committed on the branch. Issue #605 is labelled
 `status: in progress`.
 
 | Drop (§ 9) | State |
@@ -15,16 +15,16 @@ are committed on the branch. Issue #605 is labelled
 | 1 bound declaration | done 2026-10-06: AC1 to AC5 asserted; `before` benchmark captured (`605-before`, base f7c5daa) |
 | 2 quantity units | done 2026-10-06: AC6 to AC16 asserted |
 | 3 `-V` content shape | done 2026-10-06: AC18 and AC19 asserted |
-| 4 patterns and checks | next |
-| 5 records and release note | not started |
+| 4 patterns and checks | done 2026-10-06: AC17 and AC20 |
+| 5 records and release note | next |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
 agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. Drop 4 writes the *Quantity units* entry, the bare-number
-list and its structural check, and the pointers of § 5.9.
+from a worktree too. Drop 5 trues up the records of § 10, writes the release
+note, restores `$version_number` and runs the completion gate.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1171,6 +1171,21 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   drop-2 build too (runtime-config 25 assertions, statistics-demand 53,
   heatmap-palette 10, udm-counting 24, histogram-bin-counters 2,
   message-grouping 21) and passes on the branch.
+- **Drop 4 (2026-10-06).** `%bare_number_options` sits beside
+  `@quantity_options` and names twelve options with their reasons: the ten
+  typed `=i` (`-hmw`, `-hgw`, `-hgh`, `-hgb`, `-dmp`, the hidden `-tw`, `-th`,
+  `--detection-window`, `--final-threshold` and `--skip-final-min-keys`) and two
+  numeric options typed as strings (`-g`, `-cp`). `--skip-final-min-keys` is a
+  hidden count D13 does not name; it stays a bare number, as a test lever typed
+  small. `quantity-units-declared` gains four checks (the list exists; every
+  `=i`, `=f`, `:i` or `:f` option is in it; every row is a string option read
+  by `resolve_quantity_option`; no other number-and-unit split), each proven to
+  fail on a copy of `ltl` doctored for it (a new `=i` option, the rows read as
+  integers without the parse, a second split in another sub). The *Quantity
+  units* entry is in `docs/architecture-patterns.md` after *Declarative table
+  with one resolver*; that entry's sites name `number_unit_canonical` and the
+  options each ladder serves; the *`-V` telemetry sections* entry carries the
+  content shape; `.claude/rules/ltl-source.md` points to both.
 - **The help-coverage scenarios had stopped seeing the quantity options
   (found 2026-10-06; since drop 1).** `validate-help-content.sh` reads the
   options from the source to check each appears in `--help` and

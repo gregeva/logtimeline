@@ -1155,6 +1155,23 @@ my @quantity_options = (
     { long => 'consolidation-max-patterns',                kind => 'count', value => 'size', target => \$consolidation_max_patterns },            # hidden
 );
 my %quantity_option_by_long = map { $_->{long} => $_ } @quantity_options;
+# The options whose value is a number that is not a quantity, each with the
+# reason it takes no unit. An option typed =i or =f is either here or a row of
+# @quantity_options (tests/validate-option-resolution.sh, quantity-units-declared).
+my %bare_number_options = (
+    'heatmap-width'        => 'columns of the terminal, not a quantity',
+    'histogram-width'      => 'a percentage of the terminal width',
+    'histogram-height'     => 'rows of the terminal, not a quantity',
+    'histogram-buckets'    => 'the bucket count of the histogram axis',
+    'data-model-precision' => 'a precision tier, 1 to 9',
+    'terminal-width'       => 'columns of the terminal, not a quantity',
+    'terminal-height'      => 'rows of the terminal, not a quantity',
+    'detection-window'     => 'the hidden detection window, a line count typed small',
+    'final-threshold'      => 'a similarity percentage',
+    'skip-final-min-keys'  => 'a hidden test lever, a key count typed small',
+    'group-similar'        => 'a similarity percentage',
+    'csv-precision'        => 'a count of decimals',
+);
 my %quantity_entered;          # long name => the text as typed, for each option of @quantity_options given on this run
 my %quantity_unit_entered;     # long name => the canonical unit it was typed in; absent for a bare number
 # Skip the final pass when streaming absorbed almost nothing AND the population it
