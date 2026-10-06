@@ -2,9 +2,29 @@
 
 ## Status
 
-Specification agreed with the architect 2026-10-06 on branch
-`605-input-units` off `release/0.19.0` (drop 0); implementation not started. Issue #605
-is labelled `status: in progress`. Nothing in `ltl` has changed on the branch.
+Specification agreed with the architect 2026-10-06 in an interview held
+section by section, on branch `605-input-units` off `release/0.19.0` at
+f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1);
+implementation has not started and nothing in `ltl` has changed on the branch.
+Issue #605 is labelled `status: in progress`.
+
+| Drop (§ 9) | State |
+|---|---|
+| 0 specification | done 2026-10-06: committed, comment on #605 listing D11 to D29, #622's order line updated, #688 filed from D12 |
+| 1 bound declaration | next; starts on the architect's instruction |
+| 2 quantity units | not started |
+| 3 `-V` content shape | not started |
+| 4 patterns and checks | not started |
+| 5 records and release note | not started |
+
+**Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
+agreed 2026-10-06), § 6 (the criteria) and § 9. Drop 1 opens with: sync the
+branch with `release/0.19.0` if it has moved; stamp `$version_number` to
+`0.19.0-605`; capture the `before` benchmark (`--label 605-before`) on the base
+commit from a worktree beside the branch's own worktree, so both sides of the
+pair run from the same kind of checkout; then write the drop-1 scenarios of
+`tests/validate-option-resolution.sh` (AC1, AC2) and the changed assertions for
+AC3 to AC5, see them fail, and implement § 5.2's twelve bound rows.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
