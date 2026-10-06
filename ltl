@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-605";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -417,6 +417,26 @@ my %numeric_filter_no_metric;	# per-metric tally of lines a numeric filter dropp
 my ( $highlight_duration_min, $highlight_duration_max );
 my ( $highlight_bytes_min, $highlight_bytes_max );
 my ( $highlight_count_min, $highlight_count_max );
+# The options that take a quantity, declared once. Every site that names them
+# (option parsing, provenance, -V runtime-config, the filter and highlight
+# activation tests, the index signature, the settlement checks, the help rows)
+# reads this table; the read loop compares the target scalars directly. A
+# bound row carries its role (filter or highlight), its end (min or max) and
+# whether it is part of the index signature (filters are, highlights are not).
+my @quantity_options = (
+    { long => 'duration-min',           short => 'dmin',  kind => 'duration', value => 'bound', target => \$filter_duration_min,    bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'duration-max',           short => 'dmax',  kind => 'duration', value => 'bound', target => \$filter_duration_max,    bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'bytes-min',              short => 'bmin',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'bytes-max',              short => 'bmax',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'count-min',              short => 'cmin',  kind => 'count',    value => 'bound', target => \$filter_count_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'count-max',              short => 'cmax',  kind => 'count',    value => 'bound', target => \$filter_count_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'highlight-duration-min', short => 'hdmin', kind => 'duration', value => 'bound', target => \$highlight_duration_min, bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-duration-max', short => 'hdmax', kind => 'duration', value => 'bound', target => \$highlight_duration_max, bound => { role => 'highlight', end => 'max', signature => 0 } },
+    { long => 'highlight-bytes-min',    short => 'hbmin', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-bytes-max',    short => 'hbmax', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
+    { long => 'highlight-count-min',    short => 'hcmin', kind => 'count',    value => 'bound', target => \$highlight_count_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-count-max',    short => 'hcmax', kind => 'count',    value => 'bound', target => \$highlight_count_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
+);
 my $numeric_highlight_active = 0;   # any numeric highlight bound given
 my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
@@ -2156,14 +2176,19 @@ sub percentile {
 
 # Index file subroutines (Issue #46)
 
+# The number of bound rows of @quantity_options given on this run in a role
+# (filter or highlight); non-zero when any such bound is in force.
+sub quantity_bounds_given {
+    my ($role) = @_;
+    return scalar grep { $_->{bound} && $_->{bound}{role} eq $role && defined ${ $_->{target} } } @quantity_options;
+}
+
 sub has_active_filters {
     return 1 if @include_args || @exclude_args;
     return 1 if @include_files || @exclude_files;
     return 1 if $include_failure || $exclude_failure || $include_success || $exclude_success;
     return 1 if $filter_range_start ne "" || $filter_range_end ne "";
-    return 1 if defined $filter_duration_min || defined $filter_duration_max;
-    return 1 if defined $filter_bytes_min    || defined $filter_bytes_max;
-    return 1 if defined $filter_count_min    || defined $filter_count_max;
+    return 1 if quantity_bounds_given('filter');
     return 0;
 }
 
@@ -2174,12 +2199,9 @@ sub serialize_filters {
         $str =~ s/([^A-Za-z0-9\-_.~])/sprintf("%%%02X", ord($1))/ge;
         return $str;
     };
-    push @parts, "-bmax=$filter_bytes_max"       if defined $filter_bytes_max;
-    push @parts, "-bmin=$filter_bytes_min"        if defined $filter_bytes_min;
-    push @parts, "-cmax=$filter_count_max"       if defined $filter_count_max;
-    push @parts, "-cmin=$filter_count_min"        if defined $filter_count_min;
-    push @parts, "-dmax=$filter_duration_max"    if defined $filter_duration_max;
-    push @parts, "-dmin=$filter_duration_min"     if defined $filter_duration_min;
+    push @parts, map { "-$_->{short}=${ $_->{target} }" }
+                 sort { $a->{short} cmp $b->{short} }
+                 grep { $_->{bound} && $_->{bound}{signature} && defined ${ $_->{target} } } @quantity_options;
     # Sort the values within each repeated flag so the same logical selection
     # always produces one identical signature regardless of the order the
     # values were given on the command line (Issue #310). Cross-flag order is
@@ -2768,13 +2790,9 @@ sub _classify_argv_provenance {
                 'hide-classification|hcl', 'show-classification|scl',
                 'hide-stats|hst', 'seconds|s', 'milliseconds|ms',
                 'timestamp-precision|tp',
-                'version|v', 'duration-min|dmin', 'duration-max|dmax',
+                'version|v',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
-                'bytes-min|bmin', 'bytes-max|bmax',
-                'count-min|cmin', 'count-max|cmax',
-                'highlight-duration-min|hdmin', 'highlight-duration-max|hdmax',
-                'highlight-bytes-min|hbmin', 'highlight-bytes-max|hbmax',
-                'highlight-count-min|hcmin', 'highlight-count-max|hcmax',
+                ( map { "$_->{long}|$_->{short}" } @quantity_options ),
                 'memory-usage|mem', 'timing|t', 'disable-progress', 'hide|hi', 'show|sh',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
@@ -2908,22 +2926,11 @@ sub emit_runtime_config_verbose {
         'hide-stats'                        => $hide_stats,
         'seconds'                           => $print_seconds,
         'milliseconds'                      => $print_milliseconds,
-        'duration-min'                      => $filter_duration_min,
-        'duration-max'                      => $filter_duration_max,
+        ( map { $_->{long} => ${ $_->{target} } } @quantity_options ),
         'duration-unit'                     => $duration_unit_override,
         'timestamp-precision'               => $timestamp_precision,
         'rate-unit'                         => $rate_unit,
         'byte-notation'                     => $byte_notation_option,
-        'bytes-min'                         => $filter_bytes_min,
-        'bytes-max'                         => $filter_bytes_max,
-        'count-min'                         => $filter_count_min,
-        'count-max'                         => $filter_count_max,
-        'highlight-duration-min'            => $highlight_duration_min,
-        'highlight-duration-max'            => $highlight_duration_max,
-        'highlight-bytes-min'               => $highlight_bytes_min,
-        'highlight-bytes-max'               => $highlight_bytes_max,
-        'highlight-count-min'               => $highlight_count_min,
-        'highlight-count-max'               => $highlight_count_max,
         'memory-usage'                      => $show_memory,
         'memory-usage-debug'                => $show_memory_debug,
         'timing'                            => $show_timing,
@@ -7299,7 +7306,7 @@ sub write_aggregate_export {
     $excluded->{time_window} = $excluded_time_window if $filter_range_start ne '' || $filter_range_end ne '';
     $excluded->{profile}     = $profile_dropped_samples if $profile_mode;
     $excluded->{filter}      = $excluded_filter if defined $include_filter || defined $exclude_filter || $outcome_filter_active;
-    $excluded->{numeric}     = $excluded_numeric if grep { defined } ($filter_duration_min, $filter_duration_max, $filter_bytes_min, $filter_bytes_max, $filter_count_min, $filter_count_max);
+    $excluded->{numeric}     = $excluded_numeric;
     $excluded->{other}       = $excluded_other;
     $lines->{excluded}    = $excluded;
     $lines->{highlighted} = $total_lines_highlighted if $highlight_active;
@@ -10692,6 +10699,19 @@ sub populate_explain_topics {
 
 populate_explain_topics();
 
+# The help text of a bound row of @quantity_options, in the one phrasing all
+# twelve share: what the bound keeps or marks, then the unit of a bare N.
+sub bound_option_help {
+    my ($row) = @_;
+    my %metric = ( duration => 'duration', bytes => 'response size', count => 'count' );
+    my %unit   = ( duration => ' N is in milliseconds.', bytes => ' N is in bytes.', count => '' );
+    my ($metric, $end) = ( $metric{ $row->{kind} }, $row->{bound}{end} );
+    my $text = $row->{bound}{role} eq 'filter'
+        ? "Hide log entries whose $metric is " . ( $end eq 'min' ? 'below' : 'above' ) . " N; an entry at N is kept."
+        : "Highlight log entries whose $metric is at or " . ( $end eq 'min' ? 'above' : 'below' ) . " N, without filtering anything out.";
+    return $text . $unit{ $row->{kind} };
+}
+
 sub print_help {
     my $out = "";
 
@@ -10738,18 +10758,7 @@ sub print_help {
     $out .= help_opt("-is,  --include-success",       "Only include lines the log format classifies as successes; lines without a classification are dropped too");
     $out .= help_opt("-es,  --exclude-success",       "Drop lines the log format classifies as successes; unclassified lines are kept. Combine -ef and -es to see only the unclassified remainder");
     $out .= help_opt("-hs,  --highlight-success",     "Highlight lines the log format classifies as successes, without filtering anything out");
-    $out .= help_opt("-dmin, --duration-min <N>",     "Hide log entries with duration below this threshold (inclusive: entries exactly at N are kept)");
-    $out .= help_opt("-dmax, --duration-max <N>",     "Hide log entries with duration above this threshold (inclusive: entries exactly at N are kept)");
-    $out .= help_opt("-bmin, --bytes-min <N>",        "Hide log entries with response size below this threshold (inclusive)");
-    $out .= help_opt("-bmax, --bytes-max <N>",        "Hide log entries with response size above this threshold (inclusive)");
-    $out .= help_opt("-cmin, --count-min <N>",        "Hide log entries with count below this threshold (inclusive)");
-    $out .= help_opt("-cmax, --count-max <N>",        "Hide log entries with count above this threshold (inclusive)");
-    $out .= help_opt("-hdmin, --highlight-duration-min <N>", "Highlight log entries with duration at or above this value, without filtering anything out");
-    $out .= help_opt("-hdmax, --highlight-duration-max <N>", "Highlight log entries with duration at or below this value, without filtering anything out");
-    $out .= help_opt("-hbmin, --highlight-bytes-min <N>",    "Highlight log entries with response size at or above this value, without filtering anything out");
-    $out .= help_opt("-hbmax, --highlight-bytes-max <N>",    "Highlight log entries with response size at or below this value, without filtering anything out");
-    $out .= help_opt("-hcmin, --highlight-count-min <N>",    "Highlight log entries with count at or above this value, without filtering anything out");
-    $out .= help_opt("-hcmax, --highlight-count-max <N>",    "Highlight log entries with count at or below this value, without filtering anything out");
+    $out .= help_opt("-$_->{short}, --$_->{long} <N>", bound_option_help($_)) for grep { $_->{bound} } @quantity_options;
     $out .= "\n";
     my $note_text = "Note: filters affect all computed statistics. For example, -dmin 1000 will show a minimum duration of ~1s because faster entries were excluded. The statistics reflect the filtered subset, not the full population. Numeric filters only keep entries that carry the filtered metric: an entry with no duration value cannot satisfy a duration threshold and is excluded; ltl reports how many entries were excluded this way. An inverted range (minimum above maximum) is unsatisfiable and warns up front. Highlight criteria (-h, -hpf, -hf, -hs and the -h*min/-h*max options) never change which entries are analyzed - they only mark a subset within the full population. When several highlight criteria are given, an entry is highlighted only if it satisfies all of them; an entry with no value for a metric never satisfies a criterion on that metric, and an entry classified to neither outcome never satisfies -hf or -hs.";
     $out .= help_wrap($note_text, indent => $help_opt_col, first_indent => $help_opt_col) . "\n";
@@ -15490,22 +15499,11 @@ sub adapt_to_command_line_options {
         'milliseconds|ms' => \$print_milliseconds,
         'timestamp-precision|tp=s' => \$timestamp_precision_option,
         'version|v' => \$print_version,
-        'duration-min|dmin=i' => \$filter_duration_min,
-        'duration-max|dmax=i' => \$filter_duration_max,
+        ( map { ( "$_->{long}|$_->{short}=i" => $_->{target} ) } @quantity_options ),
         'duration-unit|du=s' => \$duration_unit_override,
         'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
         'byte-notation|bn=s' => \$byte_notation_option,
-        'bytes-min|bmin=i' => \$filter_bytes_min,
-        'bytes-max|bmax=i' => \$filter_bytes_max,
-        'count-min|cmin=i' => \$filter_count_min,
-        'count-max|cmax=i' => \$filter_count_max,
-        'highlight-duration-min|hdmin=i' => \$highlight_duration_min,
-        'highlight-duration-max|hdmax=i' => \$highlight_duration_max,
-        'highlight-bytes-min|hbmin=i' => \$highlight_bytes_min,
-        'highlight-bytes-max|hbmax=i' => \$highlight_bytes_max,
-        'highlight-count-min|hcmin=i' => \$highlight_count_min,
-        'highlight-count-max|hcmax=i' => \$highlight_count_max,
 	    'memory-usage|mem:s' => \$memory_usage_operand,
         'timing|t' => \$show_timing,
         'disable-progress' => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },   # hidden
@@ -15911,29 +15909,32 @@ sub adapt_to_command_line_options {
 
     # Highlight activation: numeric criteria and the regex matcher each activate
     # highlighting on their own; when both are given a line must satisfy both (AND).
-    $numeric_highlight_active = ( grep { defined }
-        $highlight_duration_min, $highlight_duration_max,
-        $highlight_bytes_min, $highlight_bytes_max,
-        $highlight_count_min, $highlight_count_max ) ? 1 : 0;
+    $numeric_highlight_active = quantity_bounds_given('highlight') ? 1 : 0;
     $outcome_highlight_active = ( $highlight_failure || $highlight_success ) ? 1 : 0;
     $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
                        || $outcome_highlight_active ) ? 1 : 0;
+
+    # No duration, size or count is below zero, so a negative bound is a
+    # usage error rather than a filter that silently keeps everything.
+    for my $row (grep { $_->{bound} } @quantity_options) {
+        my $value = ${ $row->{target} };
+        next unless defined $value && $value < 0;
+        print_usage("Invalid -$row->{short} '$value': a bound cannot be negative");
+        exit 1;
+    }
 
     # An inverted numeric range (minimum above maximum) is unsatisfiable: no
     # line can ever pass the filter pair, and no line can ever be highlighted
     # by the highlight pair. Warn up front so the resulting empty selection
     # (or highlight-less run) is explained rather than silent.
-    for my $range (
-        [ $filter_duration_min,    $filter_duration_max,    '-dmin',  '-dmax',  'no log entries can match'         ],
-        [ $filter_bytes_min,       $filter_bytes_max,       '-bmin',  '-bmax',  'no log entries can match'         ],
-        [ $filter_count_min,       $filter_count_max,       '-cmin',  '-cmax',  'no log entries can match'         ],
-        [ $highlight_duration_min, $highlight_duration_max, '-hdmin', '-hdmax', 'no log entries can be highlighted' ],
-        [ $highlight_bytes_min,    $highlight_bytes_max,    '-hbmin', '-hbmax', 'no log entries can be highlighted' ],
-        [ $highlight_count_min,    $highlight_count_max,    '-hcmin', '-hcmax', 'no log entries can be highlighted' ],
-    ) {
-        my ($min, $max, $min_opt, $max_opt, $consequence) = @$range;
+    my %bound_pair;
+    $bound_pair{ $_->{kind} }{ $_->{bound}{role} }{ $_->{bound}{end} } = $_ for grep { $_->{bound} } @quantity_options;
+    my %unsatisfiable = ( filter => 'no log entries can match', highlight => 'no log entries can be highlighted' );
+    for my $min_row (grep { $_->{bound} && $_->{bound}{end} eq 'min' } @quantity_options) {
+        my $max_row = $bound_pair{ $min_row->{kind} }{ $min_row->{bound}{role} }{max};
+        my ($min, $max) = ( ${ $min_row->{target} }, ${ $max_row->{target} } );
         if (defined $min && defined $max && $min > $max) {
-            print STDERR "Warning: $min_opt $min is greater than $max_opt $max - the range is unsatisfiable, $consequence\n";
+            print STDERR "Warning: -$min_row->{short} $min is greater than -$max_row->{short} $max - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }\n";
         }
     }
 

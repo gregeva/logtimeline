@@ -276,6 +276,8 @@ if want "$current_scenario"; then
         assert_equal "section blocks" "$(section_value "$agg" blocks)" "provenance,population,measurements,series" asserts 'Only the four blocks are written' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
         assert_absent_key population.lines.highlighted asserts 'No highlight, no highlighted count' produced_by "$PRODUCER" contract "$CONTRACT (R9)"
         assert_absent_key population.lines.excluded.time_window asserts 'No window given, no time_window key' produced_by "$PRODUCER" contract "$CONTRACT (D12: a key is present when its cause was active)"
+        assert_equal "excluded.numeric = 0 with no bound" "$(yget population.lines.excluded.numeric)" 0 asserts 'The numeric exclusion count is written on every run, zero when no bound was given' produced_by "$PRODUCER" contract 'features/605-input-units.md section 4 D3 (the numeric exclusion count is reported by every consumer whenever the filter surface exists)'
+        assert_equal "excluded.numeric = filter-summary excluded_numeric" "$(yget population.lines.excluded.numeric)" "$(section_value "$OUT" excluded_numeric)" asserts 'The export and -V filter-summary report the same numeric exclusion count' produced_by "$PRODUCER; emit_filter_summary_verbose() in ltl" contract 'features/605-input-units.md section 4 D3'
     fi
 fi
 

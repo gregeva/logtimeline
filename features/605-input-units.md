@@ -4,27 +4,26 @@
 
 Specification agreed with the architect 2026-10-06 in an interview held
 section by section, on branch `605-input-units` off `release/0.19.0` at
-f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1);
-implementation has not started and nothing in `ltl` has changed on the branch.
-Issue #605 is labelled `status: in progress`.
+f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drop 1
+(the bound declaration) is committed on the branch. Issue #605 is labelled
+`status: in progress`.
 
 | Drop (§ 9) | State |
 |---|---|
 | 0 specification | done 2026-10-06: committed, comment on #605 listing D11 to D29, #622's order line updated, #688 filed from D12 |
-| 1 bound declaration | next; starts on the architect's instruction |
-| 2 quantity units | not started |
+| 1 bound declaration | done 2026-10-06: AC1 to AC5 asserted; `before` benchmark captured (`605-before`, base f7c5daa) |
+| 2 quantity units | next; starts on the architect's instruction |
 | 3 `-V` content shape | not started |
 | 4 patterns and checks | not started |
 | 5 records and release note | not started |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
-agreed 2026-10-06), § 6 (the criteria) and § 9. Drop 1 opens with: sync the
-branch with `release/0.19.0` if it has moved; stamp `$version_number` to
-`0.19.0-605`; capture the `before` benchmark (`--label 605-before`) on the base
-commit from a worktree beside the branch's own worktree, so both sides of the
-pair run from the same kind of checkout; then write the drop-1 scenarios of
-`tests/validate-option-resolution.sh` (AC1, AC2) and the changed assertions for
-AC3 to AC5, see them fail, and implement § 5.2's twelve bound rows.
+agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
+below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
+`tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
+(`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
+from a worktree too. Drop 2 opens by re-reading § 5.3, § 5.4 and § 5.6 against
+the code as drop 1 left it.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1022,12 +1021,39 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
 | `features/user-defined-metrics.md` § Unit Types | the time units the ladder carries (§ 3 item 9); the multipliers read from the number ladder |
 | `features/312-numeric-criteria-highlight-selection.md` § Option surface | the twelve options accept a unit and are declared once (D1, D13) |
 | `features/342-redundant-logic-surfaces-audit-report.md` § Review progress | stage 11 to *done* when this issue closes |
+| `features/503-yaml-aggregate-export.md` § D12 and the schema comment | `excluded.numeric` written on every run (D3); done in drop 1 |
 | the owning feature docs of the converted sections | each section contract that names a converted key or value |
 | #620 (hoisting the read loop's run-constant tests) | a comment: the twelve bounds are declared in one table, whose rows point at the scalars the loop reads |
 | #614 (operand checks) | a comment: `units` was added to the `--help` topic dispatch, its error and its row, three lists its topic table derives |
 | Release notes | one bullet (§ 5.8) |
 
 ---
+
+## Findings from implementation
+
+- **Drop 1 (2026-10-06).** The twelve bounds are the rows of one file-scope
+  table, `@quantity_options` in `ltl`, beside the twelve scalars it points at.
+  The eight hand-written lists of § 3 item 6 and the twelve help rows read it;
+  `tests/validate-option-resolution.sh` `quantity-units-declared` found
+  exactly those eight sites on the base build (43 lines naming a bound scalar,
+  54 quoting a bound option name, the twelve help rows among them) and finds none after, and fails on a copy of `ltl`
+  with one scalar test and one quoted option name added back. The `GetOptions`
+  rows are still `=i`; they become `=s` with the parse in drop 2.
+- **The help rows carry the bare unit only, until units exist.** Drop 1 writes
+  § 5.8's phrasing with `N is in milliseconds.` and `N is in bytes.` (nothing
+  for a count); the word *bare* and the pointer to `ltl --help units` join the
+  rows in drop 2, with the *Units* section they point at.
+- **AC5's surface.** `index_filter_signature` is a key of `-V index-read-back`,
+  not of `-V runtime-config` as AC5 is worded; the assertion reads it there
+  (`tests/validate-index-read-back.sh` `bound-signature-unchanged`, five command
+  lines, expected values captured from the base build at f7c5daa).
+- **The export's key rules.** `tests/aggregate-export/rules/keys.tsv` declared
+  `population.lines.excluded.numeric` conditional on a numeric threshold; D3
+  makes it required, and `features/503-yaml-aggregate-export.md` § D12 records
+  the amendment.
+- **Running from a worktree.** A worktree has no `logs/`; every harness and the
+  benchmark run with `LTL_LOGS_DIR` pointing at the main checkout's corpus
+  (`tests/HARNESS-DESIGN.md` § The log corpus is resolved).
 
 ## Findings from the interview
 

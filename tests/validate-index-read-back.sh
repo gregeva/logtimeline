@@ -1425,6 +1425,45 @@ scenario_drift_numeric_structure() {
         contract    "$IDX525_CONTRACT"
 }
 
+# ---------------------------------------------------------------------------
+# #605: the filter part of the index signature is written from the one
+# declaration of the bound set. For every command line valid before it, the
+# signature is byte-identical to the base build's (captured from the build at
+# f7c5daa on these same command lines), so an index an earlier release wrote
+# is still reused; highlight bounds stay out of it.
+# Boundary fixture, one-day bucket; the assertion reads index_filter_signature.
+# ---------------------------------------------------------------------------
+BOUNDARY_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
+IDX605_CONTRACT='features/605-input-units.md section 6 AC5 and section 5.2 (the signature string stays byte-identical for every command line valid today; highlights carry signature 0)'
+
+scenario_bound_signature_unchanged() {
+    current_scenario="bound-signature-unchanged"
+    echo "[$current_scenario]"
+    local -a cases=(
+        '-dmin 200 -bmax 5000|-bmax=5000;-dmin=200'
+        '-dmin 1 -dmax 2 -bmin 3 -bmax 4 -cmin 5 -cmax 6|-bmax=4;-bmin=3;-cmax=6;-cmin=5;-dmax=2;-dmin=1'
+        '-dmin 10 -hdmin 20 -hbmax 30 -hcmin 1|-dmin=10'
+        '-hdmin 20 -hbmax 30|-'
+        '-dmin 0 -cmax 0|-cmax=0;-dmin=0'
+    )
+    local c args expected out sig
+    for c in "${cases[@]}"; do
+        args="${c%%|*}"; expected="${c#*|}"
+        rm -f ltl-index.csv
+        # shellcheck disable=SC2086
+        out=$(run_ltl $COMMON -V index-read-back $args "$BOUNDARY_FIXTURE")
+        check_capture_warnings "$out"
+        sig=$(extract_v_value "$out" 'index_filter_signature')
+        assert_command \
+            command     "[ \"$sig\" = \"$expected\" ]" \
+            label       "$args -> $expected (got ${sig:-MISSING-ANCHOR})" \
+            asserts     'The filter signature of a bound command line valid before the bound declaration is byte-identical to the base build: filter bounds sorted by short name as -<short>=<value>, highlight bounds absent' \
+            produced_by 'serialize_filters() in ltl (rows of @quantity_options with signature 1), surfaced by emit_index_readback_verbose()' \
+            contract    "$IDX605_CONTRACT"
+    done
+    rm -f ltl-index.csv
+}
+
 scenario_register cold-no-index \
                   warm-unfiltered \
                   cold-filtered-tier2-fallback \
@@ -1449,7 +1488,8 @@ scenario_register cold-no-index \
                   index-heatmap-bytes-preseed \
                   index-run-precision \
                   drift-runtime-precision \
-                  drift-numeric-structure
+                  drift-numeric-structure \
+                  bound-signature-unchanged
 scenario_parse_args "$@"
 
 echo "Validating index read-back against ltl at $LTL"
@@ -1488,6 +1528,7 @@ while read -r _scenario; do
         index-run-precision                  ) _fn=scenario_index_run_precision ;;
         drift-runtime-precision              ) _fn=scenario_drift_runtime_precision ;;
         drift-numeric-structure              ) _fn=scenario_drift_numeric_structure ;;
+        bound-signature-unchanged            ) _fn=scenario_bound_signature_unchanged ;;
     esac
     echo ""
     in_scenario_dir "$_fn"

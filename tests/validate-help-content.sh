@@ -937,6 +937,54 @@ scenario_K_name_list_parity() {
         contract    "$CONTRACT_NAME_LISTS"
 }
 
+# #605 criterion AC4: the twelve numeric bound rows, generated from the one
+# declaration of the bound set, read in one phrasing that states the bare
+# number's unit, and docs/usage.md carries each row with the same text.
+bound_row_text() {
+    local short="$1" metric unit end text
+    case "$short" in
+        *dmin|*dmax) metric="duration";      unit=" N is in milliseconds." ;;
+        *bmin|*bmax) metric="response size"; unit=" N is in bytes." ;;
+        *cmin|*cmax) metric="count";         unit="" ;;
+    esac
+    end="${short: -3}"
+    case "$short" in
+        h*) if [[ "$end" == min ]]; then text="Highlight log entries whose $metric is at or above N, without filtering anything out."
+            else text="Highlight log entries whose $metric is at or below N, without filtering anything out."; fi ;;
+        *)  if [[ "$end" == min ]]; then text="Hide log entries whose $metric is below N; an entry at N is kept."
+            else text="Hide log entries whose $metric is above N; an entry at N is kept."; fi ;;
+    esac
+    printf '%s%s' "$text" "$unit"
+}
+
+scenario_L_bound_option_rows() {
+    current_scenario="L-bound-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-bounds.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    local pair short long text
+    for pair in dmin:duration-min dmax:duration-max bmin:bytes-min bmax:bytes-max cmin:count-min cmax:count-max \
+                hdmin:highlight-duration-min hdmax:highlight-duration-max hbmin:highlight-bytes-min \
+                hbmax:highlight-bytes-max hcmin:highlight-count-min hcmax:highlight-count-max; do
+        short="${pair%%:*}"; long="${pair#*:}"
+        text="$(bound_row_text "$short")"
+        assert_row_carries "$help_out" "^\s+-$short,\s+--$long <N>\s" "$text" \
+            label       "--help -$short row: $text" \
+            asserts     'Each numeric bound row is written in the one phrasing (filter: hide below/above N, an entry at N kept; highlight: at or above/below N, nothing filtered out) and states the unit of a bare N' \
+            produced_by 'print_help() in ltl (rows generated from @quantity_options)' \
+            contract    'features/605-input-units.md section 5.8 and section 6 AC4 (D1: one phrasing for the twelve rows)'
+        assert_row_carries "$USAGE_MD" "^\| \`-$short, --$long <N>\` \| " "| $text |" \
+            label       "docs/usage.md -$short row matches --help" \
+            asserts     'docs/usage.md carries each numeric bound row with the text --help prints' \
+            produced_by 'docs/usage.md option table - maintained alongside print_help()' \
+            contract    'features/605-input-units.md section 6 AC4; CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    done
+}
+
 scenario_register A-help-contains-visible-longs \
                   B-usage-contains-visible-longs \
                   C-help-short-forms-match-getopts \
@@ -947,6 +995,7 @@ scenario_register A-help-contains-visible-longs \
                   I-discard-option-rows \
                   J-unit-list-parity \
                   K-name-list-parity \
+                  L-bound-option-rows \
                   F-description-quality-soft
 scenario_parse_args "$@"
 
@@ -962,6 +1011,7 @@ while read -r _scenario; do
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
         J-unit-list-parity              ) scenario_J_unit_list_parity ;;
         K-name-list-parity              ) scenario_K_name_list_parity ;;
+        L-bound-option-rows             ) scenario_L_bound_option_rows ;;
         F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
     esac
     echo ""
