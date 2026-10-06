@@ -16,15 +16,15 @@ f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
 | 2 quantity units | done 2026-10-06: AC6 to AC16 asserted |
 | 3 `-V` content shape | done 2026-10-06: AC18 and AC19 asserted |
 | 4 patterns and checks | done 2026-10-06: AC17 and AC20 |
-| 5 records and release note | next |
+| 5 records and release note | done 2026-10-06; completion gate next |
 
 **Resuming.** Read § 4 (the locks), § 5 (the agreed design, every subsection
 agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. Drop 5 trues up the records of § 10, writes the release
-note, restores `$version_number` and runs the completion gate.
+from a worktree too. `$version_number` is restored to `0.19.0`; the completion
+gate (full suite, `605-after` benchmark) runs on the drop-5 commit.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1186,6 +1186,16 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   with one resolver*; that entry's sites name `number_unit_canonical` and the
   options each ladder serves; the *`-V` telemetry sections* entry carries the
   content shape; `.claude/rules/ltl-source.md` points to both.
+- **Drop 5 (2026-10-06).** The records of § 10 are trued up:
+  `features/608-byte-unit-ladder.md` § 5.2 (the long words on input, D24),
+  `features/user-defined-metrics.md` § Unit Types (the ladder's time units; the
+  slot's multipliers are the number ladder's `udm` symbols),
+  `features/312-numeric-criteria-highlight-selection.md` § Option surface. The
+  `-udm unit` help row's count symbols, a literal #608 left to this issue, are
+  interpolated from the ladder (`$udm_number_list`, D8). The release note is one
+  bullet per user-observable change rather than one for the issue
+  (`.claude/rules/release-notes.md`: a second change in the same issue is its
+  own bullet).
 - **The help-coverage scenarios had stopped seeing the quantity options
   (found 2026-10-06; since drop 1).** `validate-help-content.sh` reads the
   options from the source to check each appears in `--help` and

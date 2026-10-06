@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0-605";
+my $version_number = "0.19.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -962,6 +962,7 @@ my @number_unit_ladder = (
 my %number_unit_step        = map { $_->{short} => $_ } grep { $_->{short} ne '' } @number_unit_ladder;
 my %number_unit_by_spelling = map { my $step = $_; map { lc($_) => $step->{short} } grep { $_ ne '' } @$step{qw(short medium long)}, @{ $step->{also} } } @number_unit_ladder;
 my %udm_number_factor       = map { my $step = $_; map { $_ => $step->{factor} } @{ $step->{udm} } } @number_unit_ladder;
+my $udm_number_list         = join(', ', map { join('/', @{ $_->{udm} }) } grep { @{ $_->{udm} } } @number_unit_ladder);    # k/K, M, G, T: the -udm unit slot's multipliers, for its help row
 my $number_unit_list        = join(', ', map { $_->{short} } grep { $_->{short} ne '' } @number_unit_ladder);    # k, M, B, T: for usage messages and help rows
 
 # The vocabulary of each kind of quantity: its canonical sub, the value of
@@ -10995,7 +10996,7 @@ sub print_help {
     $out .= help_subheading("User-Defined Metrics");
     $out .= help_opt("-udm, --user-defined-metrics <spec>", "Extract a custom metric from each log line; patterns match against the whole raw line, not only the message. Format: name[:unit[:function]][:key|:/regex/]. A metric that produces nothing is reported with how its spec was read.");
     $out .= help_opt("      name",                   "Metric name and column label; also matches \"name=value\" or \"name: value\" in log lines when no key or /regex/ is given");
-    $out .= help_opt("      unit",                   "Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; case does not matter. Numbers: k/K, M, G, T (powers of 1000). Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
+    $out .= help_opt("      unit",                   "Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; case does not matter. Numbers: $udm_number_list (powers of 1000). Leave empty for raw numbers (name::max, not name:max). Ignored for counting aggregations.");
     my $udm_function_row = sub {
         my ($kind) = @_;
         return join ', ', map {
