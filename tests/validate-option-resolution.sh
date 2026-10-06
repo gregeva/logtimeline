@@ -449,6 +449,12 @@ scenario_finer_bound_note() {
     done
     check "-dmin 200us applies as -dmin 0.2" "$(line_value finer-us excluded_numeric)" "$(line_value finer-0.2 excluded_numeric)" \
         'The note clamps nothing: the bound applies as written' 'note_finer_duration_bounds() and read_and_process_logs() in ltl' 'features/605-input-units.md section 4 D22'
+    # A format whose lines each name their unit ([150us]) declares 'line', not a
+    # unit: there is no declared unit to be finer than, so no note.
+    run_ltl finer-line -ni -bs 1440 -oe -n 1 -V filter-summary -dmin 200us "$SUBMS_FIXTURE"
+    check "-dmin 200us on a log naming its unit per line prints no note" "$(grep -c 'is finer than the log' "$TMP_DIR/finer-line.err" || true)" 0 \
+        'A log whose lines each name their own duration unit declares no unit to compare a bound with, so a sub-millisecond bound gets no note' \
+        'note_finer_duration_bounds() in ltl (a declaration of line contributes no unit)' 'features/605-input-units.md section 4 D22 and D30'
 }
 
 # ---------------------------------------------------------------------------

@@ -553,25 +553,44 @@ scenario_family_bracketed_unit() {
         label 'bracketed [Nus] durations read as microseconds: bucket duration sum 258 ms' \
         asserts 'the first bracketed token is the duration and its unit is the one written on the line (us here), converted to milliseconds before any statistic' \
         produced_by 'the duration_from_unit_token transform in the access_common_duration_bracketed entry in ltl' contract "$FAMILY_CONTRACT D7"
+
+    # The format names the unit on each line (duration_unit 'line'), so -du is
+    # not applied to it: the sum stays 258 ms, not 0.258, and one notice says
+    # so for the two files read.
+    local dir2="$TMP_DIR/$current_scenario-du"; mkdir -p "$dir2"
+    cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/one.txt"; cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/two.txt"
+    ( cd "$dir2" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o -du us one.txt two.txt > out 2> out.stderr ) || true
+    check_capture_warnings "$dir2/out"
+    local csv2; csv2=$(ls "$dir2"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
+    assert_command \
+        command "[ -n '$csv2' ] && col=\$(head -1 '$csv2' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv2')\" = 516 ]" \
+        label '-du us leaves [Nus] durations as the line wrote them: duration sum 516 ms over two copies' \
+        asserts 'a format whose lines name their own duration unit declares line, and -du is not applied on top of the unit each line names' \
+        produced_by 'read_and_process_logs() in ltl (the -du branch skips an entry declaring line)' contract 'features/605-input-units.md D30'
+    assert_command \
+        command "[ \"\$(grep -c -- '^Note: -du us is not applied to one.txt, two.txt: their format names the duration unit on each line (access_common_duration_bracketed)\$' '$dir2/out.stderr')\" = 1 ] && [ \"\$(grep -c -- '-du us is not applied' '$dir2/out.stderr')\" = 1 ]" \
+        label 'one notice names every file -du is not applied to' \
+        asserts 'the notice that -du is not applied to a format naming its unit per line is printed once per run, naming each file, never per line or per file' \
+        produced_by 'defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D30 and D31'
 }
 
-scenario_family_ambiguity_note_per_file() {
-    current_scenario="ambiguity-note-per-file"
+scenario_family_ambiguity_note_once() {
+    current_scenario="ambiguity-note-once"
     echo "[$current_scenario]"
     # Two files of the connection-server group with no name evidence and no
     # deciding content (a day-3 date eliminates neither member) both fall to
-    # the group default: the note prints twice, each naming its file
-    # and the alternative member (R15/D15).
+    # the group default: one note for the run names both files and the
+    # alternative member (#605 D31, superseding the once-per-file rule of D15).
     local a b out
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
     a="$dir/one.txt"; b="$dir/two.txt"
     sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
     out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
     assert_command \
-        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 2 ] && grep -q 'one.txt: the detected' '$out.stderr' && grep -q 'two.txt: the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
-        label 'the ambiguity note prints once per file that fell to a default, naming the file and the alternative' \
-        asserts 'a two-file run where both files fall to the group default prints the note twice, each naming its file and every other member (R15/D15)' \
-        produced_by 'format_variant_ambiguity_note() in ltl (per-file latch)' contract "$FAMILY_CONTRACT D15"
+        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 1 ] && grep -qE '(one\.txt, [^:]*two\.txt|two\.txt, [^:]*one\.txt): the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
+        label 'the ambiguity note prints once per run, naming every file that fell to a default and the alternative' \
+        asserts 'a two-file run where both files fall to the group default prints the note once, naming both files and every other member' \
+        produced_by 'format_variant_ambiguity_note() and defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D31 (superseding the once-per-file rule of features/444-access-log-format-family-and-user-surface.md D15)'
 }
 
 scenario_codebeamer() {
@@ -2777,7 +2796,7 @@ scenario_register tomcat9-ms \
                   family-fields-evidence \
                   family-pin-names \
                   family-bracketed-unit \
-                  ambiguity-note-per-file \
+                  ambiguity-note-once \
                   thingworx-standard \
                   thingworx-with-metrics \
                   tw-edge-c-sdk \
@@ -2850,7 +2869,7 @@ while read -r _scenario; do
         family-fields-evidence                 ) scenario_family_fields_evidence ;;
         family-pin-names                       ) scenario_family_pin_names ;;
         family-bracketed-unit                  ) scenario_family_bracketed_unit ;;
-        ambiguity-note-per-file                ) scenario_family_ambiguity_note_per_file ;;
+        ambiguity-note-once                    ) scenario_family_ambiguity_note_once ;;
         thingworx-standard                     ) scenario_thingworx_standard ;;
         thingworx-with-metrics                 ) scenario_thingworx_with_metrics ;;
         tw-edge-c-sdk                          ) scenario_tw_edge_c_sdk ;;

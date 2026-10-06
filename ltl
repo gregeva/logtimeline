@@ -730,7 +730,7 @@ use constant {
     FR_FIELD_MAP       => 6,   # [ [capture_ordinal, field_name], ... ]
     FR_TRANSFORMS      => 7,   # [ transform primitive names ] (post-capture)
     FR_TIME            => 8,   # { layout, precision, tz } — declarative time contract
-    FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none)
+    FR_DURATION_UNIT   => 9,   # declared unit of the duration field (undef = none; 'line' = each line names its own, converted by the entry's transform)
     FR_STATS           => 10,  # statistics-eligible: sets metrics_observed statically
     FR_GUARD           => 11,  # cheap superset guard closure or undef (D28)
     FR_EXTRACT         => 12,  # compiled extraction closure (fixed-order list return)
@@ -854,7 +854,9 @@ my $format_scan_subs_rss      = 0;     # D62: accumulated compile-boundary RSS d
 my $format_scan_measure_rss   = 0;     # armed at option parse when a memory surface is requested
 my $format_scan_nomatch_samples = 0;   # sampled no-match scans timed
 my $format_scan_nomatch_sample_us = 0; # summed elapsed us across those samples
-my %format_unit_ambiguity_warned;      # file => 1 once its unit-ambiguity note has been emitted (#444 D15)
+my %format_unit_ambiguity_warned;      # file => 1 once it has been recorded as falling to a group default
+my @format_unit_ambiguity;             # [ entry, consequence, override, [ files ] ] per entry a file fell to by default, in the order met
+my @duration_unit_line_files;          # [ file, slug ] per file bound to a format declaring duration_unit 'line' while -du was given
 my $format_current_file = '';          # file being read (steady-loop probe signals, -V)
 my $format_current_line_ref = \0;      # ref to the read loop's line counter (diagnostics)
 
@@ -3517,14 +3519,14 @@ sub format_registry_specs {
     # CodeBeamer's Tomcat valve writes the duration twice, each bracketed
     # with its unit (D7): the first token is read in the unit written on the
     # line, the second is matched and discarded, so this shape carries no
-    # unit ambiguity.
+    # unit ambiguity: its duration unit is declared 'line'.
     { name => 'mt12', slug => 'access_common_duration_bracketed', match_type => 12, scanned => 1, head_class => 'any',
       family => 'access',
       pattern_src => '^([^ ]+) ([^ ]+) ([^ ]+) [\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-) \[(\d+(?:\.\d+)?)(us|ms|s)\] \[(\d+(?:\.\d+)?)(?:us|ms|s)\]$',
       field_map => [ [3,'user'],[4,'timestamp_str'],[5,'message'],[6,'category_bucket'],[7,'bytes'],[8,'duration'],[9,'duration_unit_token'] ],
       transforms => [ 'status_bucket', 'chop_tz_offset', 'undef_bytes_dash', 'chop_http_proto', 'strip_query_string', 'duration_from_unit_token' ],
       time => { layout => 'apache_clf', precision => 's', tz => 'offset_in_line', frac => 'none' },
-      duration_unit => 'ms', stats_eligible => 1,
+      duration_unit => 'line', stats_eligible => 1,
       levels => [ qw(1xx 2xx 3xx 4xx 5xx) ],   # the status families the status_bucket transform folds a three-digit code into
       event_ledger => 1,
       classification => { success => [ { category_bucket => '^(?:1xx|2xx|3xx)$' } ],
@@ -4596,7 +4598,7 @@ sub format_variant_ambiguity_note {
     my ($entry) = @_;
     return if defined $log_format_pin;
     my $file = $format_current_file;
-    return if $format_unit_ambiguity_warned{$file}++;   # once per file that fell to a default (#444 D15)
+    return if $format_unit_ambiguity_warned{$file}++;   # each file recorded once
     my $g = $format_variant_groups{ $entry->[FR_GROUP] } or return;
     my $sel = $format_detection_evidence{$file}{groups}{ $entry->[FR_GROUP] } or return;
     return unless $sel->{basis} eq 'default';
@@ -4610,8 +4612,33 @@ sub format_variant_ambiguity_note {
         $consequence = 'the duration unit differs between them (assumed ' . ($entry->[FR_DURATION_UNIT] // 'ms') . ')';
         $override = '-du <unit>, or ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] . ' (' . ($_->[FR_DURATION_UNIT] // 'ms') . ')' } @others) . ',';
     }
-    defer_notice( "Note: $file: the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
-        . "; nothing in the file name or content decided which - use $override if the file comes from the other producer\n" );
+    my ($seen) = grep { $_->[0] == $entry } @format_unit_ambiguity;
+    push @format_unit_ambiguity, $seen = [ $entry, $consequence, $override, [] ] unless $seen;
+    push @{ $seen->[3] }, $file;
+    return;
+}
+
+# The notes about the unit or layout a format was read in, each printed once
+# per run, after the read, however many files it concerns: the files that fell
+# to a variant group's default, and the files whose format names the duration
+# unit on each line, to which -du is not applied.
+sub defer_format_unit_notes {
+    if (@format_unit_ambiguity) {
+        my @clauses = map {
+            my ($entry, $consequence, $override, $files) = @$_;
+            my $plural = @$files > 1;
+            join(', ', @$files) . ": the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
+                . "; nothing in the file name" . ($plural ? 's' : '') . " or content decided which - use $override if the "
+                . ($plural ? 'files come' : 'file comes') . " from the other producer"
+        } @format_unit_ambiguity;
+        defer_notice( "Note: " . join('; ', @clauses) . "\n" );
+    }
+    if (@duration_unit_line_files) {
+        my %slugs = map { $_->[1] => 1 } @duration_unit_line_files;
+        defer_notice( "Note: -du $duration_unit_override is not applied to " . join(', ', map { $_->[0] } @duration_unit_line_files)
+            . ": " . (@duration_unit_line_files > 1 ? 'their format names' : 'its format names') . " the duration unit on each line ("
+            . join(', ', sort keys %slugs) . ")\n" );
+    }
     return;
 }
 
@@ -13884,11 +13911,16 @@ sub resolve_timestamp_precision {
 # recorded in gets a note, once, after the read; the bound is applied as
 # written. The log's unit is the declared one: -du when given, else the
 # duration unit each file's format declares (the finest of them when they
-# differ); a bare number is in milliseconds and is never finer.
+# differ); a bare number is in milliseconds and is never finer. A format whose
+# lines each name their own unit ('line') declares no unit to compare with.
 sub note_finer_duration_bounds {
-    my @declared = defined $duration_unit_override ? ( time_unit_canonical($duration_unit_override) )
-                 : map { $format_detection{$_}{duration_unit} } grep { $format_detection{$_} && defined $format_detection{$_}{duration_unit} } @in_files;
-    @declared = grep { defined } @declared;
+    my @declared = map {
+        my $declared = $format_detection{$_} ? $format_detection{$_}{duration_unit} : undef;
+        ( defined $declared && $declared eq 'line' ) ? ()
+            : defined $duration_unit_override ? time_unit_canonical($duration_unit_override)
+            : $declared
+    } @in_files;
+    @declared = grep { defined && exists $time_unit_step{$_} } @declared;
     return unless @declared;
     my ($finest) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @declared;
     for my $row (grep { $_->{kind} eq 'duration' } @quantity_options) {
@@ -17033,6 +17065,8 @@ sub read_and_process_logs {
                     # after the read by resolve_byte_notation().
                     $fdd->{byte_notation}    = $line_entry ? $line_entry->[FR_BYTE_NOTATION] : undef;
                     $fdd->{duration_unit}    = $line_entry ? $line_entry->[FR_DURATION_UNIT] : undef;
+                    push @duration_unit_line_files, [ $in_file, $line_entry->[FR_SLUG] ]
+                        if defined $duration_unit_override && ($fdd->{duration_unit} // '') eq 'line';
                     udm_note_sources($match_type == 13) if @udm_configs;
                     # The levels the bound format declares join the run's
                     # category vocabulary here, once per file rather than for
@@ -17067,9 +17101,10 @@ sub read_and_process_logs {
                 # a non-ms format declaration is honored without code changes.
                 if (defined $duration) {
                     if (defined $duration_unit_override) {
-                        $duration = convert_duration_to_ms($duration, $duration_unit_override);
+                        $duration = convert_duration_to_ms($duration, $duration_unit_override)
+                            unless $line_entry && ($line_entry->[FR_DURATION_UNIT] // '') eq 'line';
                     } elsif ($line_entry && defined $line_entry->[FR_DURATION_UNIT]
-                             && $line_entry->[FR_DURATION_UNIT] ne 'ms') {
+                             && $line_entry->[FR_DURATION_UNIT] ne 'ms' && $line_entry->[FR_DURATION_UNIT] ne 'line') {
                         $duration = convert_duration_to_ms($duration, $line_entry->[FR_DURATION_UNIT]);
                     }
                 }
@@ -18128,6 +18163,7 @@ sub read_and_process_logs {
 
     # Notices raised while the read was running, held back so they did not
     # print into the progress line's row.
+    defer_format_unit_notes();
     flush_deferred_notices();
 
     # Surface the levels the tool did not recognise. A line whose level slot

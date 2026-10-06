@@ -453,6 +453,28 @@ separate issue". Its parts:
   `<entity>: <name>`, or an absent value written as anything but `-`.
   Booleans are `yes`/`no` by D26. *Locked by the architect 2026-10-06.*
 
+**During implementation (2026-10-06).**
+
+- **D30 — A format whose lines each name their own duration unit declares
+  `duration_unit => 'line'`.** It is not a unit: the line carries the unit
+  beside the value (`[150us]`, `[1.5s]`) and the entry's transform converts it
+  to milliseconds as the line is read. The registry names this kind of
+  declaration `line`; `access_common_duration_bracketed` is the one format
+  that declares it. A `line` declaration contributes no unit to anything that
+  compares against the log's unit, so D22's note does not fire on such a log,
+  and the read loop does not convert its durations a second time, with or
+  without `-du`: the line's own unit wins, and `-du` is not applied to such a
+  format. No message about a format's unit is printed per line. *Locked by the
+  architect 2026-10-06; `-du` included in the fix on the architect's direction
+  the same day.*
+- **D31 — A notice about the unit or layout a format was read in prints once
+  per run.** Not per line, not per file: one message after the read, naming
+  every file it concerns. This holds for the producer-ambiguity note (a file
+  that fell to a variant group's default), superseding the once-per-file rule
+  of `features/444-access-log-format-family-and-user-surface.md` D15, and for
+  the notice that `-du` is not applied to a format that names its unit on each
+  line (D30). *Locked by the architect 2026-10-06.*
+
 ---
 
 ## 5. Design
@@ -1072,11 +1094,30 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   `-V runtime-config / command-line` values and the same filter-summary counts
   (16 excluded, 1 highlighted); the one difference is that the three hidden
   consolidation counts now appear in `runtime-config` when given, an addition.
-- **The duration note on a log that writes a unit per line.** The bracketed
-  access format (`[150us]`) declares `ms`, because each line's own unit token
-  is converted to milliseconds as it is read. Under D22 the note reads the
-  declared unit, so `-dmin 200us` on such a log prints `... recorded in
-  milliseconds` although the log wrote microseconds. Raised with the architect.
+- **The duration note on a log that writes a unit per line (fixed under D30).**
+  The bracketed access format (`[150us]`) declared `ms`, because each line's
+  own unit token is converted to milliseconds as it is read; the note read
+  that declaration, so `-dmin 200us` on such a log printed `... recorded in
+  milliseconds` although the log wrote microseconds. The format now declares
+  `line` (D30) and the note does not fire there
+  (`validate-option-resolution.sh` `finer-bound-note`, which fails on the
+  drop-2 build). The producer-ambiguity note never reaches this format: it is
+  the only member of its variant group.
+- **`-du` converted a `line` format's durations twice (found 2026-10-06 on
+  the base build f7c5daa; fixed under D30).** The per-line token turned
+  `[1500us]` into 1.5 ms, then `-du us` divided by 1000 again: on
+  `tests/fixtures/access-bracketed-sub-millisecond.txt`, `-hdmax 1` highlighted
+  5 of 6 lines without `-du` and 6 of 6 with `-du us`. `-du` is no longer
+  applied to an entry declaring `line`, and one notice per run names the files
+  it was not applied to (`validate-format-detection.sh`
+  `family-bracketed-unit`: the duration sum of two copies of the bracketed
+  microsecond fixture is 516 ms under `-du us`, as without it).
+- **The producer-ambiguity note, once per run (D31).** `format_variant_ambiguity_note()`
+  records each file that fell to a group default; `defer_format_unit_notes()`
+  queues one note for the run, after the read, naming them all. The
+  `validate-format-detection.sh` scenario that asserted two notes for two
+  files is now `ambiguity-note-once` and asserts one note naming both; it
+  fails on the drop-2 build.
 - **Tests in drop 2 were written beside the code, not before it.** Each new
   scenario was then run against the base build (f7c5daa) and fails there:
   every scenario of `validate-option-resolution.sh` except the assertions that
