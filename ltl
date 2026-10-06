@@ -187,6 +187,9 @@ my %verbose_section_registry = (
     'runtime-config' => {
         description => 'Effective runtime configuration: LTL_CONFIG, merged include/exclude/highlight/threadpool-activity regexes, resolved duration-statistics demand.',
     },
+    'option-resolution' => {
+        description => 'Each option that takes a quantity (a count, a byte size or a duration), as entered beside the value it resolved to and the unit of that value (Issue #605).',
+    },
     'index-read-back' => {
         description => 'Index pre-seed lookups, freshness checks, aggregated bounds, drift detection (Issue #179).',
     },
@@ -244,6 +247,7 @@ my %verbose_section_registry = (
 );
 my @verbose_section_order = qw(
     runtime-config
+    option-resolution
     index-read-back
     histogram-array
     histogram-bin-counters
@@ -417,26 +421,6 @@ my %numeric_filter_no_metric;	# per-metric tally of lines a numeric filter dropp
 my ( $highlight_duration_min, $highlight_duration_max );
 my ( $highlight_bytes_min, $highlight_bytes_max );
 my ( $highlight_count_min, $highlight_count_max );
-# The options that take a quantity, declared once. Every site that names them
-# (option parsing, provenance, -V runtime-config, the filter and highlight
-# activation tests, the index signature, the settlement checks, the help rows)
-# reads this table; the read loop compares the target scalars directly. A
-# bound row carries its role (filter or highlight), its end (min or max) and
-# whether it is part of the index signature (filters are, highlights are not).
-my @quantity_options = (
-    { long => 'duration-min',           short => 'dmin',  kind => 'duration', value => 'bound', target => \$filter_duration_min,    bound => { role => 'filter',    end => 'min', signature => 1 } },
-    { long => 'duration-max',           short => 'dmax',  kind => 'duration', value => 'bound', target => \$filter_duration_max,    bound => { role => 'filter',    end => 'max', signature => 1 } },
-    { long => 'bytes-min',              short => 'bmin',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
-    { long => 'bytes-max',              short => 'bmax',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
-    { long => 'count-min',              short => 'cmin',  kind => 'count',    value => 'bound', target => \$filter_count_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
-    { long => 'count-max',              short => 'cmax',  kind => 'count',    value => 'bound', target => \$filter_count_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
-    { long => 'highlight-duration-min', short => 'hdmin', kind => 'duration', value => 'bound', target => \$highlight_duration_min, bound => { role => 'highlight', end => 'min', signature => 0 } },
-    { long => 'highlight-duration-max', short => 'hdmax', kind => 'duration', value => 'bound', target => \$highlight_duration_max, bound => { role => 'highlight', end => 'max', signature => 0 } },
-    { long => 'highlight-bytes-min',    short => 'hbmin', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
-    { long => 'highlight-bytes-max',    short => 'hbmax', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
-    { long => 'highlight-count-min',    short => 'hcmin', kind => 'count',    value => 'bound', target => \$highlight_count_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
-    { long => 'highlight-count-max',    short => 'hcmax', kind => 'count',    value => 'bound', target => \$highlight_count_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
-);
 my $numeric_highlight_active = 0;   # any numeric highlight bound given
 my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
@@ -593,6 +577,7 @@ my $output_timestamp_format = "%Y-%m-%d %H:%M";
 # site that renders at the run's precision.
 my $timestamp_precision = 'm';
 my $timestamp_precision_option;   # -tp as given, resolved into $timestamp_precision
+my $bucket_size_entered;          # -bs as given, resolved into $time_bucket_size in $bucket_size_unit
 # Nanosecond precision: the parse keeps a timestamp's fraction digits and the
 # read loop takes the run's first and last timestamps exactly, as whole
 # seconds and nanoseconds beside the floating epoch (which resolves about
@@ -925,12 +910,23 @@ my @byte_unit_ladder = (
 );
 my @byte_unit_notations   = qw( si iec );
 my %byte_unit_bytes       = map { my $step = $_; map { $step->{$_}{token} => $step->{$_}{bytes} } @byte_unit_notations } @byte_unit_ladder;
-my %byte_unit_by_spelling = map { lc($_) => $_ } keys %byte_unit_bytes;
+# Input also reads the words format_bytes() prints at its long tier, in the
+# plural and the singular it prints at a value of 1; the lists name the
+# tokens only.
+my %byte_unit_by_spelling = (
+    ( map { lc($_) => $_ } keys %byte_unit_bytes ),
+    ( map { my $step = $_; map { ( $step->{$_}{word} => $step->{$_}{token}, $step->{$_}{word} =~ s/s$//r => $step->{$_}{token} ) } @byte_unit_notations } @byte_unit_ladder ),
+);
 my %byte_unit_by_prefix   = map { uc(substr($_->{iec}{token}, 0, 1)) => $_ } @byte_unit_ladder;   # B, K, M, G, T: the letter both notations' tokens of a step begin with
 my $byte_unit_si_list     = join(', ', map { $_->{si}{token} } @byte_unit_ladder);                                   # B, kB, MB, GB, TB
 my $byte_unit_iec_list    = join(', ', map { $_->{iec}{token} } grep { $_->{iec}{token} ne $_->{si}{token} } @byte_unit_ladder);   # KiB, MiB, GiB, TiB: the tokens only IEC has
 my $byte_unit_list        = "$byte_unit_si_list, $byte_unit_iec_list";    # every token, SI then IEC, for usage messages and help rows
 my $byte_notation_list    = join(', ', @byte_unit_notations);           # si, iec: the -bn values, for its usage error and help row
+
+# The grammar of a quantity an option takes: a decimal number, then
+# optionally a unit with no space between, read in the vocabulary of the
+# option's kind (time, byte or count units). Read by resolve_quantity_option().
+my $quantity_number_re = qr/[-+]?(?:\d+(?:\.\d+)?|\.\d+)/;
 
 # The run's byte notation: one per run, the key of @byte_unit_ladder's step
 # parts that format_bytes() climbs and names. Resolved once after the read by
@@ -948,14 +944,34 @@ my %rate_suffix     = map { $_->{token} => '/' . $_->{short} } @time_unit_ladder
 my %rate_csv_suffix = map { $_->{token} => '_' . $_->{medium} } @time_unit_ladder;
 
 # Number ladder: the steps a count climbs and its spelling per tier, the one
-# definition the count arm of value_text() reads. A long-tier word always
-# keeps its space; short and medium follow the fit.
+# definition the count arm of value_text() reads and the count vocabulary an
+# option reads. A long-tier word always keeps its space; short and medium
+# follow the fit. On input every tier's spelling is accepted, matched
+# case-insensitively, with the spellings in also that output does not print;
+# udm names the symbols the -udm unit slot reads case-sensitively, where B is
+# a byte and m a minute.
 my @number_unit_ladder = (
-    { factor => 1,       short => '',  medium => '',     long => ''         },
-    { factor => 1000,    short => 'k', medium => 'k',    long => 'thousand' },
-    { factor => 1000**2, short => 'M', medium => 'Mil',  long => 'million'  },
-    { factor => 1000**3, short => 'B', medium => 'Bil',  long => 'billion'  },
-    { factor => 1000**4, short => 'T', medium => 'Tril', long => 'trillion' },
+    { factor => 1,       short => '',  medium => '',     long => '',         also => [],        udm => []         },
+    { factor => 1000,    short => 'k', medium => 'k',    long => 'thousand', also => ['kil'],   udm => [qw(k K)]  },
+    { factor => 1000**2, short => 'M', medium => 'Mil',  long => 'million',  also => [],        udm => ['M']      },
+    { factor => 1000**3, short => 'B', medium => 'Bil',  long => 'billion',  also => ['G'],     udm => ['G']      },
+    { factor => 1000**4, short => 'T', medium => 'Tril', long => 'trillion', also => [],        udm => ['T']      },
+);
+my %number_unit_step        = map { $_->{short} => $_ } grep { $_->{short} ne '' } @number_unit_ladder;
+my %number_unit_by_spelling = map { my $step = $_; map { lc($_) => $step->{short} } grep { $_ ne '' } @$step{qw(short medium long)}, @{ $step->{also} } } @number_unit_ladder;
+my %udm_number_factor       = map { my $step = $_; map { $_ => $step->{factor} } @{ $step->{udm} } } @number_unit_ladder;
+my $number_unit_list        = join(', ', map { $_->{short} } grep { $_->{short} ne '' } @number_unit_ladder);    # k, M, B, T: for usage messages and help rows
+
+# The vocabulary of each kind of quantity: its canonical sub, the value of
+# one of its units in the kind's base unit (a duration's in the row's base,
+# the millisecond unless the row names another), its noun and its list.
+my %quantity_kind = (
+    duration => { canonical => \&time_unit_canonical,   noun => 'time',  list => $time_unit_list,
+                  value     => sub { my ($number, $unit, $row) = @_; convert_duration_to_ms($number, $unit) / $time_unit_step{ $row->{base} // 'ms' }{ms} } },
+    bytes    => { canonical => \&byte_unit_canonical,   noun => 'byte',  list => $byte_unit_list,
+                  value     => sub { my ($number, $unit) = @_; $number * $byte_unit_bytes{$unit} } },
+    count    => { canonical => \&number_unit_canonical, noun => 'count', list => $number_unit_list,
+                  value     => sub { my ($number, $unit) = @_; $number * $number_unit_step{$unit}{factor} } },
 );
 
 # The most digits a value of each kind shows unclimbed, at its floor step,
@@ -1107,6 +1123,37 @@ my $consolidation_eviction_ema_alpha = 0.4; # EMA smoothing factor for absorptio
 my $consolidation_final_pass         = 1;
 my $consolidation_final_threshold;          # unset: the final pass scores at the -g sensitivity; --final-threshold overrides it
 my $consolidation_final_ceiling      = 1_000_000;
+# The options that take a quantity, declared once. Every site that names them
+# (option parsing, provenance, -V runtime-config and option-resolution, the
+# filter and highlight activation tests, the index signature, the settlement
+# checks, the help rows) reads this table; the read loop compares the target
+# scalars directly. Each option is read by resolve_quantity_option() in the
+# vocabulary of its kind. A bound accepts a fraction and refuses a negative; a
+# size the tool acts on must be whole. A bound row carries its role (filter or
+# highlight), its end (min or max) and whether it is part of the index
+# signature (filters are, highlights are not).
+my @quantity_options = (
+    { long => 'duration-min',           short => 'dmin',  kind => 'duration', value => 'bound', target => \$filter_duration_min,    bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'duration-max',           short => 'dmax',  kind => 'duration', value => 'bound', target => \$filter_duration_max,    bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'bytes-min',              short => 'bmin',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'bytes-max',              short => 'bmax',  kind => 'bytes',    value => 'bound', target => \$filter_bytes_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'count-min',              short => 'cmin',  kind => 'count',    value => 'bound', target => \$filter_count_min,       bound => { role => 'filter',    end => 'min', signature => 1 } },
+    { long => 'count-max',              short => 'cmax',  kind => 'count',    value => 'bound', target => \$filter_count_max,       bound => { role => 'filter',    end => 'max', signature => 1 } },
+    { long => 'highlight-duration-min', short => 'hdmin', kind => 'duration', value => 'bound', target => \$highlight_duration_min, bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-duration-max', short => 'hdmax', kind => 'duration', value => 'bound', target => \$highlight_duration_max, bound => { role => 'highlight', end => 'max', signature => 0 } },
+    { long => 'highlight-bytes-min',    short => 'hbmin', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-bytes-max',    short => 'hbmax', kind => 'bytes',    value => 'bound', target => \$highlight_bytes_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
+    { long => 'highlight-count-min',    short => 'hcmin', kind => 'count',    value => 'bound', target => \$highlight_count_min,    bound => { role => 'highlight', end => 'min', signature => 0 } },
+    { long => 'highlight-count-max',    short => 'hcmax', kind => 'count',    value => 'bound', target => \$highlight_count_max,    bound => { role => 'highlight', end => 'max', signature => 0 } },
+    { long => 'top-messages',               short => 'n',  kind => 'count', value => 'size', target => \$top_n_messages },
+    { long => 'group-ceiling',              short => 'gc', kind => 'count', value => 'size', target => \$consolidation_final_ceiling },
+    { long => 'consolidation-trigger',                     kind => 'count', value => 'size', target => \$consolidation_trigger },                 # hidden
+    { long => 'consolidation-ceiling',                     kind => 'count', value => 'size', target => \$consolidation_occurrence_ceiling },      # hidden
+    { long => 'consolidation-max-patterns',                kind => 'count', value => 'size', target => \$consolidation_max_patterns },            # hidden
+);
+my %quantity_option_by_long = map { $_->{long} => $_ } @quantity_options;
+my %quantity_entered;          # long name => the text as typed, for each option of @quantity_options given on this run
+my %quantity_unit_entered;     # long name => the canonical unit it was typed in; absent for a bare number
 # Skip the final pass when streaming absorbed almost nothing AND the population it
 # would hand forward is large enough for that pass to be expensive (#584). Both
 # conditions are required: size alone is not evidence that the pass is futile.
@@ -2774,7 +2821,7 @@ sub _classify_argv_provenance {
                 'exclude-pattern-file|epf', 'include-pattern-file|ipf', 'highlight-pattern-file|hpf',
                 'include-failure|if', 'exclude-failure|ef', 'highlight-failure|hf',
                 'include-success|is', 'exclude-success|es', 'highlight-success|hs',
-                'verbose|V', 'top-messages|n',
+                'verbose|V',
                 'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
                 'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
@@ -2792,16 +2839,15 @@ sub _classify_argv_provenance {
                 'timestamp-precision|tp',
                 'version|v',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
-                ( map { "$_->{long}|$_->{short}" } @quantity_options ),
+                ( map { quantity_option_spec($_) } @quantity_options ),
                 'memory-usage|mem', 'timing|t', 'disable-progress', 'hide|hi', 'show|sh',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
                 'threadpool-activity-summary|tpas', 'threadpool-activity|tpa',
                 'user-defined-metrics|udm', 'udm-csv-message|ucm',
                 'udm-csv-separator|ucs', 'mask|m', 'mask-uuid|uuid',
                 'group-similar|g', 'no-final-pass',
-                'consolidation-trigger', 'consolidation-ceiling',
-                'consolidation-max-patterns', 'final-threshold', 'skip-final-min-keys',
-                'group-ceiling|gc', 'heatmap|hm', 'heatmap-width|hmw',
+                'final-threshold', 'skip-final-min-keys',
+                'heatmap|hm', 'heatmap-width|hmw',
                 'light-background|lbg', 'dark-background|dbg', 'histogram|hg',
                 'histogram-width|hgw', 'histogram-height|hgh',
                 'hgb|histogram-buckets',
@@ -2881,7 +2927,6 @@ sub emit_runtime_config_verbose {
         'pause'                             => $pause_output,
         'start'                             => $filter_range_start,
         'end'                               => $filter_range_end,
-        'top-messages'                      => $top_n_messages,
         'omit-values'                       => $omit_values,
         'precise-values'                    => $precise_values,
         'omit-stats'                        => $omit_stats,
@@ -2941,7 +2986,6 @@ sub emit_runtime_config_verbose {
         'mask'                              => join(',', @mask_names),
         'mask-uuid'                         => $mask_uuid,
         'group-similar'                     => $group_similar_sensitivity,
-        'group-ceiling'                     => $consolidation_final_ceiling,
         'heatmap'                           => $heatmap_metric,
         'heatmap-width'                     => $heatmap_width,
         'histogram-buckets'                 => $histogram_bucket_override,
@@ -3014,6 +3058,24 @@ sub emit_runtime_config_verbose {
     push @verbose_output, "=== END runtime-config / environment-variable ===";
 
     push @verbose_output, "=== END runtime-config ===";
+}
+
+# Each option that takes a quantity, as entered beside what it resolved to
+# and the unit of the resolved value: one block per option given on this run,
+# in the order of @quantity_options, then -bs and -tp.
+sub emit_option_resolution_verbose {
+    return unless section_requested('option-resolution');
+    my %unit_of = ( duration => 'ms', bytes => 'B', count => 'count' );
+    my @blocks = map { [ $_->{long}, $quantity_entered{ $_->{long} }, ${ $_->{target} }, $unit_of{ $_->{kind} } ] }
+                 grep { defined $quantity_entered{ $_->{long} } } @quantity_options;
+    push @blocks, [ 'bucket-size', $bucket_size_entered, $time_bucket_size, $bucket_size_unit ] if $option_provenance{'bucket-size'};
+    push @blocks, [ 'timestamp-precision', $timestamp_precision_option, $timestamp_precision, '-' ] if defined $timestamp_precision_option;
+    push @verbose_output, "=== option-resolution ===";
+    for my $block (@blocks) {
+        my ($option, $entered, $resolved, $unit) = @$block;
+        push @verbose_output, "option: $option", "  entered: $entered", "  resolved: $resolved", "  unit: $unit";
+    }
+    push @verbose_output, "=== END option-resolution ===";
 }
 
 # Issue #179: Emit the dedicated `=== index-read-back ===` section
@@ -10704,12 +10766,44 @@ populate_explain_topics();
 sub bound_option_help {
     my ($row) = @_;
     my %metric = ( duration => 'duration', bytes => 'response size', count => 'count' );
-    my %unit   = ( duration => ' N is in milliseconds.', bytes => ' N is in bytes.', count => '' );
     my ($metric, $end) = ( $metric{ $row->{kind} }, $row->{bound}{end} );
     my $text = $row->{bound}{role} eq 'filter'
         ? "Hide log entries whose $metric is " . ( $end eq 'min' ? 'below' : 'above' ) . " N; an entry at N is kept."
         : "Highlight log entries whose $metric is at or " . ( $end eq 'min' ? 'above' : 'below' ) . " N, without filtering anything out.";
-    return $text . $unit{ $row->{kind} };
+    return "$text " . quantity_unit_sentence($row);
+}
+
+# The sentence an option row of @quantity_options ends with: the unit of a
+# bare N where the option has one, and the units N also takes.
+sub quantity_unit_sentence {
+    my ($row) = @_;
+    my %bare = ( duration => 'A bare N is in milliseconds; ', bytes => 'A bare N is in bytes; ', count => '' );
+    return "$bare{ $row->{kind} }N also takes a $quantity_kind{ $row->{kind} }{noun} unit (see 'ltl --help units').";
+}
+
+# --help units: the three kinds of quantity an option takes, their units
+# (interpolated from the ladders), the options that read each, and the rule
+# on fractions. The long byte words are listed in docs/usage.md, not here.
+sub print_help_units {
+    my $out = '';
+    my $para = sub { help_wrap($_[0], indent => 0, first_indent => 0) . "\n" };
+    my $options_of = sub { my ($kind) = @_; join(', ', map { quantity_option_flag($_) } grep { $_->{kind} eq $kind && defined $_->{short} } @quantity_options) };
+    my @count_also = map { ( $_->{medium} ne $_->{short} ? $_->{medium} : () ), @{ $_->{also} } } grep { $_->{short} ne '' } @number_unit_ladder;
+    my @count_long = map { $_->{long} } grep { $_->{short} ne '' } @number_unit_ladder;
+    $out .= get_title_string();
+    $out .= $para->("An option that takes a count, a byte size or a duration accepts a bare number, or a number followed by a unit with no space between: -dmin 200us, -bmin 5MB, -bmin 2MiB, -gc 2M, -bs 7d. A unit is matched without regard to case among the units of the option's own kind, so -cmin 5m is five million and -dmin 5m is five minutes. A bare number means what it has always meant for the option.");
+    $out .= help_heading("DURATIONS");
+    $out .= $para->("Options: " . $options_of->('duration') . " (a bare number is in milliseconds), and -bs (a bare number is in the run's unit: minutes, seconds under -s, milliseconds under -ms).");
+    $out .= $para->("Units: $time_unit_list. Each is also accepted by its longer names, such as sec, second and seconds; m is always the minute.");
+    $out .= help_heading("BYTE SIZES");
+    $out .= $para->("Options: " . $options_of->('bytes') . " (a bare number is in bytes).");
+    $out .= $para->("Units: $byte_unit_si_list (powers of 1000) and $byte_unit_iec_list (powers of 1024). A byte size needs a byte unit: 1M is refused, write 1MB or 1MiB.");
+    $out .= help_heading("COUNTS");
+    $out .= $para->("Options: " . $options_of->('count') . ".");
+    $out .= $para->("Units: $number_unit_list (a thousand, a million, a billion, a trillion), also written " . join(', ', @count_also) . ', ' . join(', ', @count_long) . ".");
+    $out .= help_heading("FRACTIONS");
+    $out .= $para->("A filter or highlight bound accepts a fraction and applies it as written (-dmin 0.2, -dmin 1.5s, -bmin 1.5kB), and refuses a negative value. A count the tool acts on (-n, -gc) must come to a whole number: -n 1.5k is 1500, -n 2.5 is refused.");
+    return $out;
 }
 
 sub print_help {
@@ -10783,11 +10877,11 @@ sub print_help {
     $out .= help_opt("-m,   --mask <name>",          "Replace an identifier in the message with a placeholder of the same shape, so that messages differing only by that identifier become one while still showing where it sat. <name> is $mask_identifier_help, in any case. Repeat the option or give a comma-separated list: -m uuid,ip. Only well-formed identifiers are replaced: hexadecimal UUIDs, and valid IP addresses whatever their written length; a version number that is also a valid address is replaced too");
     $out .= help_opt("-x,   --expose <name>",        "Keep a named value in the message instead of losing it to grouping. Repeat the option for several values; they are added in the order you name them. <name> is $exposed_field_list, the object appended whole; a metric ($builtin_metric_list, or one of your own), whose number then stays in the message in place of ?; or any key written in the line, such as fileName, whose value is added to the end of the message as fileName=<value> when grouping would otherwise have removed it; a key a metric is read from, such as durationMS, keeps its value in place instead. Built-in names match in any case. Shorthands: -xt for thread, -xs for session, -xu for user, -xqs for the query string, spelled in full as --expose-thread, --expose-session, --expose-user and --expose-query-string");
     $out .= help_opt("-d,   --discard <name>",       "Remove a named part of the line so that it takes no part in the run: it is gone from the message, from every count and from every statistic, as if it had never been written. Repeat the option or give a comma-separated list: -d sign,sT. <name> is $cleared_field_list, whose captured value is cleared; " . join_with_or( map { $_->{name} } @mask_identifiers ) . ", removed wherever it sits in the message, in the order -m applies them; query-string; a metric ($builtin_metric_list, or one of your own), which is then not read at all; or any key written in the line, such as sign, which goes with its value and one separator, so that requests differing only in it become one message; a key a metric is read from, such as durationMS, also switches that metric off, with a notice. Built-in names match in any case. A name given to both -x and -d, or to both -m and -d, is discarded");
-    $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000)");
+    $out .= help_opt("-gc,  --group-ceiling <N>",              "Messages with more than N occurrences skip pairwise discovery but still match existing patterns (default: 1000000). " . quantity_unit_sentence($quantity_option_by_long{'group-ceiling'}));
 
     # Display & Output
     $out .= help_subheading("Display & Output");
-    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so.");
+    $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so. " . quantity_unit_sentence($quantity_option_by_long{'top-messages'}));
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the source's duration unit), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
@@ -10880,7 +10974,7 @@ sub print_help {
     # INFO
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
-    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) or 'formats' (the log formats it recognises and how each classifies successes and failures).");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) 'formats' (the log formats it recognises and how each classifies successes and failures) or 'units' (the units an option taking a count, a byte size or a duration accepts).");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
@@ -11226,7 +11320,6 @@ sub counting_token_pattern {
 
 sub parse_udm_configs {
     my $number = $udm_number_re;
-    my %si_units = ( 'k' => 1000, 'K' => 1000, 'M' => 1000**2, 'G' => 1000**3, 'T' => 1000**4 );
     # The function slot's names, aliases and kinds come from the
     # statistic-name table. Every name the function field accepts is in
     # %udm_function_names; one of these in the unit slot is a mis-slotted
@@ -11335,7 +11428,7 @@ sub parse_udm_configs {
         # Resolve the unit to its canonical token: the number multipliers
         # case-sensitively first (m = minutes, M = mega), then the time and
         # byte ladders, each case-insensitively
-        if (defined $unit && !exists $si_units{$unit}) {
+        if (defined $unit && !exists $udm_number_factor{$unit}) {
             $unit = time_unit_canonical($unit) // byte_unit_canonical($unit) // $unit;
         }
 
@@ -11344,9 +11437,9 @@ sub parse_udm_configs {
         if (defined $unit && exists $time_unit_step{$unit}) {
             $unit_type = 'time';
             $converter = sub { convert_duration_to_ms($_[0], $unit) };
-        } elsif (defined $unit && exists $si_units{$unit}) {
+        } elsif (defined $unit && exists $udm_number_factor{$unit}) {
             $unit_type = 'number';
-            my $multiplier = $si_units{$unit};
+            my $multiplier = $udm_number_factor{$unit};
             $converter = sub { $_[0] * $multiplier };
         } elsif (defined $unit && exists $byte_unit_bytes{$unit}) {
             $unit_type = 'bytes';
@@ -11518,6 +11611,48 @@ sub time_unit_canonical {
     return undef unless defined $spelling;
     return $time_unit_by_spelling{ lc $spelling };
 }
+
+# The canonical number-ladder symbol (k, M, B, T) for a count spelling,
+# matched case-insensitively; undef when the spelling is not a count unit.
+sub number_unit_canonical {
+    my ($spelling) = @_;
+    return undef unless defined $spelling;
+    return $number_unit_by_spelling{ lc $spelling };
+}
+
+# An option's text read against its row of @quantity_options (or a row of the
+# same shape): the value in the option's base unit, the canonical unit it was
+# typed in (undef for a bare number, which is taken as it stands), and the
+# problem that stops the run, if any. A unit is read in the row's kind only. A
+# value within rounding of a whole number is that whole number, so 1.1k is
+# 1100. A bound refuses a negative; a size refuses a fraction.
+sub resolve_quantity_option {
+    my ($row, $text) = @_;
+    my $kind = $quantity_kind{ $row->{kind} };
+    my $units = "($kind->{noun} units: $kind->{list})";
+    my ($number, $spelling) = $text =~ /^($quantity_number_re)([A-Za-z]*)$/
+        or return (undef, undef, "not a number $units");
+    my ($value, $unit) = ($number + 0, undef);
+    if ($spelling ne '') {
+        $unit = $kind->{canonical}->($spelling);
+        if (!defined $unit) {
+            return (undef, undef, $row->{kind} eq 'bytes' && defined number_unit_canonical($spelling)
+                ? "a byte size needs a byte unit ($kind->{list})"
+                : "'$spelling' is not a $kind->{noun} unit ($kind->{list})");
+        }
+        $value = $kind->{value}->($number, $unit, $row);
+        my $whole = sprintf('%.0f', $value);
+        $value = $whole + 0 if abs($value - $whole) <= 1e-9 * abs($value);
+    }
+    return (undef, $unit, 'a bound cannot be negative')  if $row->{value} eq 'bound' && $value < 0;
+    return (undef, $unit, "not a whole number $units")    if $row->{value} eq 'size'  && $value != int($value);
+    return ($value, $unit, undef);
+}
+
+# A row's option names as Getopt::Long and the provenance map spell them,
+# and the flag a message names it by.
+sub quantity_option_spec { my ($row) = @_; return defined $row->{short} ? "$row->{long}|$row->{short}" : $row->{long}; }
+sub quantity_option_flag { my ($row) = @_; return defined $row->{short} ? "-$row->{short}" : "--$row->{long}"; }
 
 # The canonical byte-ladder token for a spelling, matched case-insensitively,
 # or undef when the spelling is not a byte unit.
@@ -13745,6 +13880,25 @@ sub resolve_timestamp_precision {
     return;
 }
 
+# A duration bound typed in a unit finer than the one the log's durations are
+# recorded in gets a note, once, after the read; the bound is applied as
+# written. The log's unit is the declared one: -du when given, else the
+# duration unit each file's format declares (the finest of them when they
+# differ); a bare number is in milliseconds and is never finer.
+sub note_finer_duration_bounds {
+    my @declared = defined $duration_unit_override ? ( time_unit_canonical($duration_unit_override) )
+                 : map { $format_detection{$_}{duration_unit} } grep { $format_detection{$_} && defined $format_detection{$_}{duration_unit} } @in_files;
+    @declared = grep { defined } @declared;
+    return unless @declared;
+    my ($finest) = sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @declared;
+    for my $row (grep { $_->{kind} eq 'duration' } @quantity_options) {
+        my $unit = $quantity_unit_entered{ $row->{long} } // next;
+        next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};
+        print STDERR "Note: " . quantity_option_flag($row) . " $quantity_entered{ $row->{long} } is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}\n";
+    }
+    return;
+}
+
 # The run's byte notation, once, after the read: -bn when given; else the
 # notation every file's format declares; else SI. A file no format
 # recognised declares nothing. When the declarations differ and -bn was not
@@ -15283,8 +15437,13 @@ sub dispatch_informational_options {
             $out =~ s/^\n+//;
             pipe_to_pager($out);
         }
+        elsif ($help_topic eq 'units') {
+            my $out = print_help_units();
+            $out =~ s/^\n+//;
+            pipe_to_pager($out);
+        }
         else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile)");
+            print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile, units)");
             exit 1;
         }
         exit 0;
@@ -15459,7 +15618,6 @@ sub adapt_to_command_line_options {
         'exclude-success|es' => \$exclude_success,
         'highlight-success|hs' => \$highlight_success,
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
-        'top-messages|n=i' => \$top_n_messages,
         'omit-values|ov' => sub { push @section_visibility_ops, [ 'hide', 'values' ] },
         'precise-values|pv' => \$precise_values,
         'omit-stats|os' => \$omit_stats,
@@ -15499,7 +15657,7 @@ sub adapt_to_command_line_options {
         'milliseconds|ms' => \$print_milliseconds,
         'timestamp-precision|tp=s' => \$timestamp_precision_option,
         'version|v' => \$print_version,
-        ( map { ( "$_->{long}|$_->{short}=i" => $_->{target} ) } @quantity_options ),
+        ( map { my $row = $_; ( quantity_option_spec($row) . '=s' => sub { $quantity_entered{ $row->{long} } = $_[1] } ) } @quantity_options ),
         'duration-unit|du=s' => \$duration_unit_override,
         'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
@@ -15520,12 +15678,8 @@ sub adapt_to_command_line_options {
         'mask-uuid|uuid' => sub { push @mask_raw, 'uuid'; $mask_uuid_option = 1 },        # hidden - deprecated spelling of -m uuid; kept working, prints a notice
         'group-similar|g:s' => \$group_similar_sensitivity,
         'no-final-pass' => sub { $consolidation_final_pass = 0; },                  # hidden
-        'consolidation-trigger=i' => \$consolidation_trigger,                       # hidden
-        'consolidation-ceiling=i' => \$consolidation_occurrence_ceiling,            # hidden
-        'consolidation-max-patterns=i' => \$consolidation_max_patterns,             # hidden
         'final-threshold=i' => \$consolidation_final_threshold,                     # hidden
         'skip-final-min-keys=i' => \$consolidation_skip_min_keys,                    # hidden (#584): population floor for the final-pass skip, so the decision is testable on a small fixture
-        'group-ceiling|gc=i' => \$consolidation_final_ceiling,
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
         'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; $heatmap_light_bg_source = '-lbg'; },
@@ -15557,6 +15711,20 @@ sub adapt_to_command_line_options {
     unless ($getopt_ok) {
         print_usage( classify_option_error(\@getopt_warnings), join('', @getopt_warnings) );
         exit 1;
+    }
+
+    # Every option of @quantity_options given on this run, read once: its
+    # value in the option's base unit lands in the scalar the run reads, and
+    # the unit it was typed in is kept beside the text as typed.
+    for my $row (@quantity_options) {
+        my $text = $quantity_entered{ $row->{long} } // next;
+        my ($value, $unit, $problem) = resolve_quantity_option($row, $text);
+        if (defined $problem) {
+            print_usage("Invalid " . quantity_option_flag($row) . " '$text': $problem");
+            exit 1;
+        }
+        ${ $row->{target} } = $value;
+        $quantity_unit_entered{ $row->{long} } = $unit if defined $unit;
     }
     apply_output_visibility(0);
 
@@ -15816,22 +15984,12 @@ sub adapt_to_command_line_options {
     # no number, a malformed number, or a zero or negative width with a unit.
     $bucket_size_unit = $print_seconds ? 's' : $print_milliseconds ? 'ms' : 'm';
     if (defined $time_bucket_size && $time_bucket_size ne '') {
-        my $decimal = qr/-?(?:\d+(?:\.\d+)?|\.\d+)/;
         my $accepted_forms = "Accepted forms: a bare number in the run's unit, or <number><unit> such as 90s, 1.5h or 1d with a unit of $time_unit_list";
-        if ($time_bucket_size =~ /^$decimal$/) {
-            $time_bucket_size += 0;
-        } elsif ($time_bucket_size =~ /^($decimal)([A-Za-z]+)$/) {
-            my ($width, $spelling) = ($1, $2);
-            my $canonical = time_unit_canonical($spelling);
-            my $problem = !defined $canonical ? "unknown unit '$spelling'"
-                        : $width <= 0          ? 'the width must be positive'
-                        :                        undef;
-            do { print_usage("Invalid bucket size '$time_bucket_size' ($problem). $accepted_forms"); exit 1; } if defined $problem;
-            $time_bucket_size = convert_duration_to_ms($width, $canonical) / $time_unit_step{$bucket_size_unit}{ms};
-        } else {
-            print_usage("Invalid bucket size '$time_bucket_size'. $accepted_forms");
-            exit 1;
-        }
+        $bucket_size_entered = $time_bucket_size;
+        my ($width, $unit, $problem) = resolve_quantity_option({ kind => 'duration', value => 'width', base => $bucket_size_unit }, $time_bucket_size);
+        $problem = 'the width must be positive' if !defined $problem && defined $unit && $width <= 0;
+        do { print_usage("Invalid bucket size '$time_bucket_size' ($problem). $accepted_forms"); exit 1; } if defined $problem;
+        $time_bucket_size = $width;
     }
 
     # CSV precision option validation (Issue #268)
@@ -15914,15 +16072,6 @@ sub adapt_to_command_line_options {
     $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
                        || $outcome_highlight_active ) ? 1 : 0;
 
-    # No duration, size or count is below zero, so a negative bound is a
-    # usage error rather than a filter that silently keeps everything.
-    for my $row (grep { $_->{bound} } @quantity_options) {
-        my $value = ${ $row->{target} };
-        next unless defined $value && $value < 0;
-        print_usage("Invalid -$row->{short} '$value': a bound cannot be negative");
-        exit 1;
-    }
-
     # An inverted numeric range (minimum above maximum) is unsatisfiable: no
     # line can ever pass the filter pair, and no line can ever be highlighted
     # by the highlight pair. Warn up front so the resulting empty selection
@@ -15934,7 +16083,7 @@ sub adapt_to_command_line_options {
         my $max_row = $bound_pair{ $min_row->{kind} }{ $min_row->{bound}{role} }{max};
         my ($min, $max) = ( ${ $min_row->{target} }, ${ $max_row->{target} } );
         if (defined $min && defined $max && $min > $max) {
-            print STDERR "Warning: -$min_row->{short} $min is greater than -$max_row->{short} $max - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }\n";
+            print STDERR "Warning: -$min_row->{short} $quantity_entered{ $min_row->{long} } is greater than -$max_row->{short} $quantity_entered{ $max_row->{long} } - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }\n";
         }
     }
 
@@ -16203,6 +16352,7 @@ sub adapt_to_command_line_options {
     # option is resolved (heatmap/histogram validation, -os deprecation fold,
     # duration-statistics demand) so the section reports post-resolution values.
     emit_runtime_config_verbose();
+    emit_option_resolution_verbose();
 
     # Under --profile the calendar date is folded away: day/workday render
     # time-of-day only (%H:%M), week/workweek prefix the weekday (%a %H:%M).
@@ -16882,6 +17032,7 @@ sub read_and_process_logs {
                     # The byte notation the bound format declares, read once
                     # after the read by resolve_byte_notation().
                     $fdd->{byte_notation}    = $line_entry ? $line_entry->[FR_BYTE_NOTATION] : undef;
+                    $fdd->{duration_unit}    = $line_entry ? $line_entry->[FR_DURATION_UNIT] : undef;
                     udm_note_sources($match_type == 13) if @udm_configs;
                     # The levels the bound format declares join the run's
                     # category vocabulary here, once per file rather than for
@@ -23195,6 +23346,7 @@ sub pipeline_parse {
     $elapsed_parse_read_files = tv_interval($start_time, $end_time);
     resolve_byte_notation();
     resolve_timestamp_precision();
+    note_finer_duration_bounds();
     measure_memory_structures();
     memory_debug_decomposition("after_read");
 }

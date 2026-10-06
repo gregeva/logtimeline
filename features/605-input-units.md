@@ -4,16 +4,16 @@
 
 Specification agreed with the architect 2026-10-06 in an interview held
 section by section, on branch `605-input-units` off `release/0.19.0` at
-f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drop 1
-(the bound declaration) is committed on the branch. Issue #605 is labelled
+f7c5daa. Drop 0 (this document) is committed and pushed (663c9e1); drops 1
+(the bound declaration) and 2 (units on input) are committed on the branch. Issue #605 is labelled
 `status: in progress`.
 
 | Drop (§ 9) | State |
 |---|---|
 | 0 specification | done 2026-10-06: committed, comment on #605 listing D11 to D29, #622's order line updated, #688 filed from D12 |
 | 1 bound declaration | done 2026-10-06: AC1 to AC5 asserted; `before` benchmark captured (`605-before`, base f7c5daa) |
-| 2 quantity units | next; starts on the architect's instruction |
-| 3 `-V` content shape | not started |
+| 2 quantity units | done 2026-10-06: AC6 to AC16 asserted |
+| 3 `-V` content shape | next; starts on the architect's instruction |
 | 4 patterns and checks | not started |
 | 5 records and release note | not started |
 
@@ -22,8 +22,8 @@ agreed 2026-10-06), § 6 (the criteria), § 9 and *Findings from implementation*
 below. `$version_number` reads `0.19.0-605`. The `before` benchmark is
 `tests/baseline/results/605-before.tsv` in the `release-0.19.0` worktree
 (`.claude/worktrees/release-0.19.0`, at f7c5daa), so the `after` run is taken
-from a worktree too. Drop 2 opens by re-reading § 5.3, § 5.4 and § 5.6 against
-the code as drop 1 left it.
+from a worktree too. Drop 3 opens by completing the inventory of § 5.6.2 from
+every section each harness requests.
 
 This issue is a sub-issue of #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). It blocks #620 (hoisting the read loop's run-constant tests),
@@ -1051,6 +1051,39 @@ merged; the before/after benchmark on `single-day-access-log-standard`;
   `population.lines.excluded.numeric` conditional on a numeric threshold; D3
   makes it required, and `features/503-yaml-aggregate-export.md` § D12 records
   the amendment.
+- **Drop 2 (2026-10-06).** `resolve_quantity_option($row, $text)` reads every
+  row of `@quantity_options`, now seventeen (the twelve bounds and the five
+  sizes); the rows are string options whose text lands in `%quantity_entered`,
+  so a target scalar never holds unit text and a default (`-n` 10) stays where
+  it was. `-bs` calls the same parse with its run unit as base and keeps its
+  own messages and value rule. Proposed in the drop-2 plan, on which the
+  architect directed the drop to proceed (not locked as decisions): the
+  rejection wording (`Invalid -bmin '5s': 's' is not a byte unit (B, kB, ...)`,
+  `Invalid -bmin '1M': a byte size needs a byte unit (...)`,
+  `Invalid -n '2.5': not a whole number (count units: k, M, B, T)`); a leading
+  `+` on a bare number stays accepted, as the integer check accepted it; AC10
+  is asserted by running `ltl` on every spelling read from the three ladders
+  (77 spellings), the source-only checks staying in drop 4; the hidden
+  consolidation counts have no help row, so § 5.8's count sentence reaches
+  `-n` and `-gc` only. A value within rounding of a whole number is that whole
+  number (`-n 1.1k` is 1100, not 1100.0000000000002).
+- **What a bare number shows that it did not.** On the base build and the
+  branch, the same seventeen bare options on the boundary fixture give the same
+  `-V runtime-config / command-line` values and the same filter-summary counts
+  (16 excluded, 1 highlighted); the one difference is that the three hidden
+  consolidation counts now appear in `runtime-config` when given, an addition.
+- **The duration note on a log that writes a unit per line.** The bracketed
+  access format (`[150us]`) declares `ms`, because each line's own unit token
+  is converted to milliseconds as it is read. Under D22 the note reads the
+  declared unit, so `-dmin 200us` on such a log prints `... recorded in
+  milliseconds` although the log wrote microseconds. Raised with the architect.
+- **Tests in drop 2 were written beside the code, not before it.** Each new
+  scenario was then run against the base build (f7c5daa) and fails there:
+  every scenario of `validate-option-resolution.sh` except the assertions that
+  held before (bare values, no note on a bare number), and the help scenarios
+  `L-bound-option-rows` and `M-units-topic`. The count-list parity the plan put
+  in `J-unit-list-parity` is in `M-units-topic`, beside the units topic it
+  compares with.
 - **Running from a worktree.** A worktree has no `logs/`; every harness and the
   benchmark run with `LTL_LOGS_DIR` pointing at the main checkout's corpus
   (`tests/HARNESS-DESIGN.md` § The log corpus is resolved).
