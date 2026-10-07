@@ -5,8 +5,8 @@
 `status: in progress`. Scope widened by the architect on 2026-10-07 to every
 store of raw values (§ 2). The first design (`ee1326c`, in-place sort of the
 stored array) regresses peak memory when every row is given statistics on a log
-with non-integer durations (§ 4.4); the design of § 5 replaces it and awaits the
-architect's lock.
+with non-integer durations (§ 4.4); the design of § 5 replaces it, locked by the
+architect on 2026-10-07 with the acceptance criteria of § 6.
 
 ## 1. The motivating consumer
 
@@ -255,7 +255,32 @@ and it is held to exit. Releasing its arrays after their last use frees memory
 for the rest of the run, but does not lower a peak reached while the store is
 whole: the peak falls only by the copies removed from the statistics step.
 
-## 5. Design (one pattern for every raw store, awaiting the architect's lock)
+### 4.6 Sorts after the change (code reading, AC3a)
+
+Every numeric sort in `ltl` that orders raw values, after the change:
+
+| Sort | Sub | Array | Runs |
+|---|---|---|---|
+| `sort_numeric_in_place` (the only one) | `calculate_statistics` | a time bucket's array taken out of its store; a displayed row's array taken out of its store; under `-so` on a statistic, each row's stored array in the ranking pre-pass | once per array: group_calc skips the sort for a key the pre-pass sorted (`durations_sorted`, from `%presorted`) |
+| same helper | `calculate_heatmap_buckets_exact` | the bucket's raw values, deleted after | once per bucket |
+| same helper | `calculate_histogram_buckets_exact` | the metric's raw values and their highlight twin, emptied after | once per metric |
+
+Every one runs from `pipeline_finalize` after `group_similar_messages` has
+returned. The other numeric sorts in `ltl` order bucket timestamps, partition
+telemetry and cliff edges, not raw values. group_calc no longer writes
+`total_bytes` back (D7).
+
+### 4.7 Hand-forward: every entry is created with an empty durations array
+
+The read loop creates `durations => []` on every message entry and every time
+bucket whatever the data model and whether any surface demands statistics
+(the entry initialisers in `read_and_process_logs`). Under `-mdm bin`, `-bdm
+bin`, or `-od`, each entry carries an empty array no reader uses. This change
+releases them at the statistics step (D1, D2), but they exist from the read
+until then. Changing it is a read-loop change, outside this issue: not filed
+yet, for the architect to decide.
+
+## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 **The pattern.** At a raw array's last use, the computation that needs it in
 order takes it out of its store, sorts it in place, computes from it and lets
@@ -271,7 +296,7 @@ unless the caller states the array is already sorted.
 | D1 | Time buckets | once, in place | bucket statistics, after taking the array out of the bucket | when the bucket's statistics are done |
 | D2 | Message rows, no `-so` on a statistic | once, in place | group_calc, after taking the array out of the row | when the row's statistics are done; a row not displayed, once the selection is made |
 | D3 | Message rows, `-so` on a statistic | once, in place in the store | the ranking step, which needs every row's statistic before it can rank the messages | a row not displayed, once the selection is made; a displayed row, after group_calc computes its full statistics from the sorted array without sorting it again |
-| D4 | Consolidation clusters | never | (the final pass hands each cluster's array to its row) | the cluster keeps no reference after the hand-over |
+| D4 | Consolidation clusters: the cluster structure, consolidation's working store | not in that structure: at the final pass each cluster becomes a consolidated row in the message store, sorted, given statistics and ranked by D2 or D3 like any message | (the final pass) | the cluster structure hands its array to the row and keeps no reference, so releasing the row's array frees it |
 | D5 | Heatmap raw store (`-hmdm raw`) | once, in place | the heatmap's per-bucket percentiles | when the bucket is done (as today) |
 | D6 | Histogram raw store (`-hgdm raw`) | once, in place | the histogram's percentiles, per metric and its highlight twin | when the metric is done (as today) |
 
@@ -295,7 +320,7 @@ unless the caller states the array is already sorted.
   every sort above runs after `group_similar_messages` has returned, when the
   arrays are final.
 
-## 6. Acceptance criteria (revised to § 2, awaiting the architect's lock)
+## 6. Acceptance criteria (locked by the architect, 2026-10-07)
 
 The scenarios are those of § 4.4 on the month of § 4.2, base `a585f97`
 against the branch, on this machine: `-n 25 -g` (the issue's command),

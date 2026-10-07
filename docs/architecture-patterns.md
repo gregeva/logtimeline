@@ -404,6 +404,55 @@ per-message bytes mean and the run index's means as sites.
 
 ---
 
+## Raw value arrays: sorted once, in place, at their last use
+
+**Definition.** A store of raw values under the raw data model (a time bucket's
+durations, a message row's durations, the heatmap's per-bucket values, the
+histogram's per-metric values and their highlight twins) is sorted once, by the
+computation that needs it in order, through one helper,
+`sort_numeric_in_place($arrayref)`: the array is aliased to a named array and
+assigned back to itself, the only form Perl sorts in place, so no copy of the
+values exists. The sort runs at the array's last use, on an array the caller
+owns at that moment: taken out of its store (`delete`), or about to be emptied.
+The array is released after that use. The one sort that leaves its order in the
+store is the message ranking pre-pass under `-so` on a statistic, whose order
+the displayed rows' statistics then read without sorting again. Every sort runs
+after consolidation has returned, when the arrays are final.
+
+**Intended uses.** Any new statistic, percentile or distribution computed from
+a raw store: call the helper on the array at its last use instead of sorting
+into a new array, and release the array after it. A store whose values are not
+read after its computation never keeps them.
+
+**Reasoning.** `sort { $a <=> $b } @$ref` reads the stored scalars and builds a
+second array: two arrays of the values at once, three where a working copy was
+made first. Perl's numeric sort also converts every scalar of an array holding a
+non-integer to a larger type (24 to 56 bytes) that it never converts back, so a
+sort of an array that stays in its store leaves the store larger. Sorting in
+place at the last use removes the copy, and the enlargement ends with the
+array. Measured on a month of one server's Tomcat access logs: peak memory and
+the store sizes in `features/680-statistics-duration-copies.md` § 4.
+
+**Consumption sites.**
+- `sort_numeric_in_place` :: `@values_in_place = sort { $a <=> $b } @values_in_place;` (the helper)
+- `calculate_statistics` :: `sort_numeric_in_place($bucket_data->{durations}) unless $bucket_data->{durations_sorted};`
+- `calculate_all_statistics` :: `my $bucket_durations = delete $log_analysis{$bucket}{durations};` (a time bucket's array taken out of the store)
+- `calculate_all_statistics` :: `my $durations = delete $log_messages{$category}{$log_key}{durations};` (a displayed row's array taken out of the store)
+- `calculate_all_statistics` :: `delete $entry->{durations} unless exists $displayed{$log_key};` (rows not displayed, released at the selection)
+- `calculate_all_statistics` :: `$aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};` (the ranking pre-pass's order reused)
+- `group_similar_messages` :: `$entry->{durations}          = delete $cluster->{durations} // [];` (a cluster hands its array to its row)
+- `calculate_heatmap_buckets_exact` :: `my $sorted_values = sort_numeric_in_place($heatmap_raw{$bucket});`
+- `calculate_histogram_buckets_exact` :: `my $sorted = sort_numeric_in_place($values_ref);` and its highlight twin
+
+**Owning record.** `features/680-statistics-duration-copies.md` § 2 (the
+resource guidelines), § 5 (D1 to D8). Cross-reference: *Data-model selectors
+resolved once per surface*, which decides whether a surface holds raw values at
+all.
+
+**Status.** Established.
+
+---
+
 ## Statistics-group consumer registry
 
 **Definition.** `@STAT_CONSUMERS` declares each output surface with the store it
