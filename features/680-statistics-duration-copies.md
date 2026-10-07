@@ -465,6 +465,130 @@ grows the process by about 250 MB without a named structure holding it (not
 measured inside the step), and the histogram empties its arrays but keeps their
 allocated slots, 130 MB, to exit.
 
+### 4.11 The locked default (§ 5.0) measured (`d298fd1` against `a585f97`)
+
+Three rounds, interleaved base then branch, the month of § 4.2 with `-bs 1440
+-m uuid --terminal-width 200 -V benchmark-data -mem` plus: `g` `-n 25 -g`,
+`n25` `-n 25`, `sop99` `-n 25 -so p99`, `hmhg` `-n 25 -hm -hg -hmdm raw -hgdm
+raw`. Peak resident size from `/usr/bin/time -l`; "% of run" is the change
+against the base's median total.
+
+```
+== g
+  metric                                base median [range]          branch median [range]    change  % of run
+  peak resident (OS)              1,242.5 [1,213.7–1,242.6]      1,017.5 [1,017.3–1,017.6]    -18.1%          
+  log_messages high-water               253.6 [253.6–253.6]            253.6 [253.6–253.6]     +0.0%          
+  log_messages at end                   253.6 [253.6–253.6]            253.6 [253.6–253.6]     +0.0%          
+  clusters high-water                   221.0 [221.0–221.0]            221.0 [221.0–221.0]     -0.0%          
+  clusters at end                       221.0 [221.0–221.0]                  0.9 [0.9–0.9]    -99.6%          
+  log_analysis high-water               254.0 [254.0–254.0]            254.0 [254.0–254.0]     -0.0%          
+  heatmap_raw high-water                      0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  histogram high-water                        0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  statistics step                          5.45 [5.27–5.46]               4.66 [4.62–4.77]    -14.5%    -0.62%
+    time-bucket statistics                 2.98 [2.86–3.01]               1.68 [1.67–1.79]    -43.7%    -1.03%
+    displayed-row statistics               2.43 [2.40–2.47]               2.98 [2.94–2.98]    +22.6%    +0.43%
+  consolidation                            4.39 [4.34–4.42]               4.37 [4.36–4.54]     -0.3%    -0.01%
+  read files (untouched)             116.81 [114.91–131.40]         115.46 [114.33–115.98]     -1.2%    -1.07%
+  total                              126.70 [124.54–141.28]         124.52 [123.33–125.32]     -1.7%    -1.72%
+== n25
+  metric                                base median [range]          branch median [range]    change  % of run
+  peak resident (OS)                    800.5 [800.0–810.3]            767.8 [759.3–768.5]     -4.1%          
+  log_messages high-water               376.6 [376.6–386.2]            386.2 [376.6–386.2]     +2.5%          
+  log_messages at end                   376.6 [376.6–386.2]            386.2 [376.6–386.2]     +2.5%          
+  clusters high-water                         0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  clusters at end                             0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  log_analysis high-water               253.3 [253.3–253.3]            253.3 [253.3–253.3]     +0.0%          
+  heatmap_raw high-water                      0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  histogram high-water                        0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  statistics step                          2.69 [2.68–2.70]               2.67 [2.67–2.73]     -0.9%    -0.02%
+    time-bucket statistics                 1.80 [1.79–1.81]               1.59 [1.58–1.59]    -11.8%    -0.22%
+    displayed-row statistics               0.47 [0.47–0.47]               0.63 [0.63–0.72]    +34.9%    +0.17%
+  read files (untouched)                95.63 [95.60–96.03]            95.47 [95.21–97.06]     -0.2%    -0.17%
+  total                                 98.34 [98.32–98.76]            98.16 [97.97–99.75]     -0.2%    -0.18%
+== sop99
+  metric                                base median [range]          branch median [range]    change  % of run
+  peak resident (OS)                    911.3 [910.4–920.8]            897.6 [887.9–897.6]     -1.5%          
+  log_messages high-water               496.9 [496.9–506.4]            506.4 [496.9–506.4]     +1.9%          
+  log_messages at end                   496.9 [496.9–506.4]            506.4 [496.9–506.4]     +1.9%          
+  clusters high-water                         0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  clusters at end                             0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  log_analysis high-water               253.3 [253.3–253.3]            253.3 [253.3–253.3]     -0.0%          
+  heatmap_raw high-water                      0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  histogram high-water                        0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  statistics step                          3.95 [3.94–4.20]               3.72 [3.71–3.81]     -5.8%    -0.23%
+    time-bucket statistics                 1.78 [1.77–1.78]               1.58 [1.57–1.64]    -11.2%    -0.20%
+    ranking pre-pass                       1.94 [1.93–2.11]               1.86 [1.86–1.87]     -4.1%    -0.08%
+    displayed-row statistics               0.01 [0.01–0.01]               0.00 [0.00–0.00]   -100.0%    -0.01%
+  read files (untouched)                94.98 [94.68–95.22]            95.44 [94.89–96.11]     +0.5%    +0.47%
+  total                                 98.94 [98.65–99.44]            99.27 [98.63–99.86]     +0.3%    +0.34%
+== hmhg
+  metric                                base median [range]          branch median [range]    change  % of run
+  peak resident (OS)              2,161.8 [2,093.6–2,263.5]      2,071.5 [2,059.4–2,086.1]     -4.2%          
+  log_messages high-water               386.2 [386.2–386.2]            376.6 [376.6–386.2]     -2.5%          
+  log_messages at end                   386.2 [386.2–386.2]            376.6 [376.6–386.2]     -2.5%          
+  clusters high-water                         0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  clusters at end                             0.0 [0.0–0.0]                  0.0 [0.0–0.0]     +0.0%          
+  log_analysis high-water                     0.0 [0.0–0.0]                  0.0 [0.0–0.0]     -8.9%          
+  heatmap_raw high-water                589.7 [589.7–589.7]            589.7 [589.7–589.7]     +0.0%          
+  histogram high-water                  794.4 [794.4–794.4]            794.4 [794.4–794.4]     +0.0%          
+  statistics step                          0.93 [0.90–0.97]               0.92 [0.91–0.93]     -1.1%    -0.01%
+    time-bucket statistics                 0.00 [0.00–0.00]               0.00 [0.00–0.00]     +0.0%    +0.00%
+    displayed-row statistics               0.44 [0.44–0.45]               0.44 [0.44–0.44]     -0.2%    -0.00%
+  heatmap step                          10.92 [10.76–11.16]            10.17 [10.17–10.24]     -6.8%    -0.54%
+  histogram step                        23.79 [23.08–23.83]            23.05 [22.71–23.36]     -3.1%    -0.53%
+  read files (untouched)             103.09 [102.60–103.61]         102.18 [101.79–103.33]     -0.9%    -0.66%
+  total                              138.47 [138.06–139.21]         136.35 [135.62–137.90]     -1.5%    -1.53%
+```
+
+- **Memory.** Peak resident size is lower in all four. `log_messages` moves
+  between two values, 376.6 and 386.2 MB (496.9 and 506.4 MB under `-so`), on
+  base and branch alike: `Devel::Size` measures a hash's allocation, which
+  varies with the per-process hash seed (the note above
+  `named_structure_sizes`). No structure grows.
+- **Rows keep their data.** A probe on a scratch copy after statistics, grouped
+  run: by default the largest row's array holds its 3,751,230 values in
+  121.4 MB, the base's size, so the store is neither reordered nor enlarged;
+  under `-mem release`, 0 arrays remain.
+- **Outputs.** Byte-identical to the base on the seven single-day cases and the
+  two month cases; under `-mem release` the CSVs and the aggregate export are
+  identical (the export's command line names `-mem release`). No runtime
+  warnings.
+- **Time.** Totals: −1.7 %, −0.2 %, +0.3 %, −1.5 %. One step is slower:
+  displayed-row statistics, +22.6 % on `g` (+0.55 s, 0.43 % of the run) and
+  +34.9 % on `n25` (+0.16 s). In isolation, a copy sorted in place costs less
+  than the base's copy and sorted copy (1.45 s against 1.63 to 1.71 s on
+  3,751,230 values, freeing included), so the cost is not the sort itself;
+  shape moments are not demanded on these runs (`-V statistics-demand`).
+  Attribution: § 4.12.
+
+### 4.12 Attribution: sorting the time buckets in place slows the displayed rows' statistics
+
+The grouped month run (`g` of § 4.11), three interleaved rounds, a scratch copy
+of `d298fd1` with two switches, run from the branch's worktree; medians:
+
+| Variant | Peak resident | Time-bucket statistics | Displayed-row statistics | Total |
+|---|---|---|---|---|
+| Base `a585f97` | 1,225.9 [1,180.7–1,242.5] MB | 3.01 s | 2.47 s | 125.3 s |
+| Branch `d298fd1`: buckets sorted in place | 1,015.8 [1,015.5–1,017.1] MB | 1.66 s | 2.95 s | 124.6 s |
+| + displayed rows sorted into a fresh copy | 1,181.3 [1,179.9–1,181.6] MB | 1.66 s | 3.30 s | 124.1 s |
+| + time buckets sorted into a fresh copy | 1,016.6 [1,016.5–1,016.8] MB | 1.93 s | 2.29 s | 122.7 s |
+
+The displayed rows' sort is not what costs: sorting their copy into a second,
+freshly allocated array is slower still, and gives back the memory. The time
+buckets are: sorted in place and then freed, each bucket's scalars return to
+Perl's free lists in sorted order, scattered through memory, and the displayed
+rows' copy, allocated next from those lists, is scattered too, so every pass
+over it misses the cache. Sorting each bucket into a fresh copy (`[ sort { $a
+<=> $b } @$values ]` on the array already taken out of the store) frees the
+store's array in allocation order and the copy in sorted order, both laid out
+contiguously: the peak is unchanged (a bucket holds about 280,000 values, a day
+of the month), time-bucket statistics are 36 % faster than the base instead of
+45 %, displayed-row statistics are 7 % faster than the base instead of 19 %
+slower, and the total is the lowest of the four.
+
+This contradicts D1 as locked (time buckets sorted in place) and is brought to
+the architect; it is not implemented.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 ### 5.0 Scope as locked after the release costs were measured (2026-10-07)
