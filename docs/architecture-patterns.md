@@ -412,13 +412,16 @@ histogram's per-metric values and their highlight twins) is sorted once, by the
 computation that needs it in order, through one helper,
 `sort_numeric_in_place($arrayref)`: the array is aliased to a named array and
 assigned back to itself, the only form Perl sorts in place, so no copy of the
-values exists. The sort runs at the array's last use, on an array the caller
-owns at that moment: taken out of its store (`delete`), or about to be emptied.
+values exists. The sort runs on an array the caller owns at that moment: taken out of its
+store (`delete`), or about to be emptied. An array that stays in its store (a
+message row's, by default, so the rows keep their data) is copied first and the
+copy sorted, so the stored values are neither reordered nor enlarged.
 A pass over every value that does not need the order (a bucket count, a
 range) runs before the sort, over the values in the order the read stored
 them: after an in-place sort, neighbouring elements point to scalars scattered
-through memory, and a pass in sorted order misses the cache. The array is
-released after its use. The one sort that leaves its order in the
+through memory, and a pass in sorted order misses the cache. A store whose
+values have no later reader releases the array after its use; the message
+rows release theirs only under `-mem release`. The one sort that leaves its order in the
 store is the message ranking pre-pass under `-so` on a statistic, whose order
 the displayed rows' statistics then read without sorting again. Every sort runs
 after consolidation has returned, when the arrays are final.
@@ -439,10 +442,11 @@ the store sizes in `features/680-statistics-duration-copies.md` § 4.
 
 **Consumption sites.**
 - `sort_numeric_in_place` :: `@values_in_place = sort { $a <=> $b } @values_in_place;` (the helper)
-- `calculate_statistics` :: `sort_numeric_in_place($bucket_data->{durations}) unless $bucket_data->{durations_sorted};`
+- `calculate_statistics` :: `sort_numeric_in_place($values);`
 - `calculate_all_statistics` :: `my $bucket_durations = delete $log_analysis{$bucket}{durations};` (a time bucket's array taken out of the store)
-- `calculate_all_statistics` :: `my $durations = delete $log_messages{$category}{$log_key}{durations};` (a displayed row's array taken out of the store)
-- `calculate_all_statistics` :: `delete $entry->{durations} unless exists $displayed{$log_key};` (rows not displayed, released at the selection)
+- `calculate_statistics` :: `$values = [ @$values ] if $bucket_data->{durations_in_store};` (an array that stays in its store: the copy is sorted)
+- `calculate_all_statistics` :: `? delete $log_messages{$category}{$log_key}{durations}` (a displayed row's array taken out of the store, under `-mem release`)
+- `calculate_all_statistics` :: `delete $entry->{durations} unless exists $displayed{$log_key};` (rows not displayed, released at the selection, under `-mem release`)
 - `calculate_all_statistics` :: `$aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};` (the ranking pre-pass's order reused)
 - `group_similar_messages` :: `$entry->{durations}          = delete $cluster->{durations} // [];` (a cluster hands its array to its row)
 - `calculate_heatmap_buckets_exact` :: `my $sorted_values = sort_numeric_in_place($bucket_values);` (after the range count over the unsorted values)

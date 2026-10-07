@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-680";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -412,6 +412,11 @@ my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
 my $bytes_observed = 0;
 my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
+# -mem release (hidden): each message row's durations array is released after
+# its last use, the displayed rows' after their statistics and the others' at
+# the selection, at the cost of the time to free them. Off by default: the rows
+# keep their data, unsorted, for the rest of the run (features/680 § 5).
+my $memory_release_after_use = 0;
 my $show_timing = 0;   # -t, --timing: per-stage timing rows in the summary
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
@@ -15885,6 +15890,8 @@ sub adapt_to_command_line_options {
         $show_memory = 1;
         if ($memory_usage_operand eq 'debug') {
             $show_memory_debug = 1;
+        } elsif ($memory_usage_operand eq 'release') {
+            $memory_release_after_use = 1;
         } elsif ($memory_usage_operand ne '') {
             unshift @ARGV, $memory_usage_operand;
         }
@@ -19514,10 +19521,11 @@ sub calculate_all_statistics {
             # #417 sub-stage boundary: group_calc (full statistics for the
             # keys that won a display slot, plus per-message UDM means).
             my $t0_group_calc = [gettimeofday];
-            # A key not displayed has no reader of its durations left: its
-            # array is released now. A displayed key's array is taken out of
-            # the store below, for its statistics, and freed after them.
-            {
+            # Under -mem release a key not displayed, which has no reader of its
+            # durations left, has its array released now, and a displayed key's
+            # array is taken out of the store below, for its statistics, and
+            # freed after them. By default every key keeps its array.
+            if ($memory_release_after_use) {
                 my %displayed;
                 @displayed{@top_keys} = ();
                 while (my ($log_key, $entry) = each %{$log_messages{$category}}) {
@@ -19527,7 +19535,9 @@ sub calculate_all_statistics {
             foreach my $log_key (@top_keys) {
                 memory_debug_sample("stats_top_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                 my $aggregated_data = {};
-                my $durations = delete $log_messages{$category}{$log_key}{durations};
+                my $durations = $memory_release_after_use
+                    ? delete $log_messages{$category}{$log_key}{durations}
+                    : $log_messages{$category}{$log_key}{durations};
 
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
@@ -19549,12 +19559,15 @@ sub calculate_all_statistics {
                     # longer exists. calculate_statistics_bin reads sidecars +
                     # %log_messages_counters{...} entry directly, ignoring
                     # $aggregated_data->{durations}. Under raw the key's array
-                    # is taken out of the store, its last use: statistics sort
-                    # it in place, unless the ranking pre-pass already has, and
-                    # it is freed with the working record.
+                    # is read where it is: the ranking pre-pass may already have
+                    # sorted it, and otherwise statistics sort a copy and leave
+                    # the store untouched, unless -mem release took the array
+                    # out of the store, when it is sorted in place and freed
+                    # with the working record.
                     $aggregated_data->{durations} = $durations
                         unless $message_stats_capture_mode eq 'bin';
                     $aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};
+                    $aggregated_data->{durations_in_store} = 1 unless $memory_release_after_use;
                 } elsif ( !$duration_observed ) {
                     # No duration was ever observed for this key, including
                     # every key under -od: clear the 0-initialized accumulator
@@ -19833,12 +19846,18 @@ sub calculate_statistics {
     # The observation count is the gate (#616 D9): no timed line, no statistic.
     return unless ($bucket_data->{duration_count} // 0) > 0;
 
-    # The caller owns the array (taken out of its store, or sorted for a reader
-    # that needs the order), so it is sorted in place, once: an array the
-    # ranking pre-pass already sorted arrives marked durations_sorted.
-    sort_numeric_in_place($bucket_data->{durations}) unless $bucket_data->{durations_sorted};
+    # The array is sorted once. One the ranking pre-pass already sorted arrives
+    # marked durations_sorted and is read as it is. One the caller owns (taken
+    # out of its store, or sorted for a reader of the order) is sorted in place.
+    # One that stays in its store (durations_in_store) is copied and the copy
+    # sorted, so the stored values are neither reordered nor enlarged.
+    my $values = $bucket_data->{durations};
+    if (!$bucket_data->{durations_sorted}) {
+        $values = [ @$values ] if $bucket_data->{durations_in_store};
+        sort_numeric_in_place($values);
+    }
     our @sorted;
-    local *sorted = $bucket_data->{durations};
+    local *sorted = $values;
     my $duration_count = scalar @sorted;
 
     my $min = $sorted[0];

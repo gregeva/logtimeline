@@ -2,7 +2,8 @@
 
 ## Status
 
-`status: in progress`. Scope widened by the architect on 2026-10-07 to every
+`status: in progress`. Scope as locked last, 2026-10-07: § 5.0 (rows keep
+their data by default; the release is behind a hidden `-mem release`). Scope widened by the architect on 2026-10-07 to every
 store of raw values (§ 2). The first design (`ee1326c`, in-place sort of the
 stored array) regresses peak memory when every row is given statistics on a log
 with non-integer durations (§ 4.4); the design of § 5 replaces it, locked by the
@@ -441,7 +442,62 @@ file system, so the second run's directory holds both runs' CSVs and
 `find … -print -quit` returns whichever the directory lists first. The failing
 run read `…-ddurationMS.csv` from the `dur-durationMs` directory.
 
+### 4.10 Where memory goes after statistics (stage timeline, `-mem debug`)
+
+One run each, `a585f97` against `ef95ff4`, the month of § 4.2; process size at
+the end of each stage (`MEMDIAG-FULL`), peak from `/usr/bin/time -l`. Perl keeps
+freed memory for reuse, so a release shows as later stages not growing.
+
+| Stage | `hmhg` base | `hmhg` branch | `g` base | `g` branch |
+|---|---|---|---|---|
+| read | 1,760 MB | 1,640 MB | 717 MB | 714 MB |
+| consolidation | | | 793 | 790 |
+| statistics | 1,802 | 1,684 | 1,058 | 903 |
+| heatmap | 2,075 | 1,925 | | |
+| histogram | 2,069 | 1,813 | | |
+| normalise, bar graph, message table and CSV, summary | +0 to +9 per stage | +0 to +9 per stage | +0 | +0 |
+| peak | 2,198 | 1,987 | 1,242 | 903 |
+
+The stages after statistics that use memory are the heatmap and histogram, and
+only on the raw data model (their defaults are bin counters, 2.5 MB and 0.3 MB on
+this month); output uses none. Two findings on both commits: the heatmap step
+grows the process by about 250 MB without a named structure holding it (not
+measured inside the step), and the histogram empties its arrays but keeps their
+allocated slots, 130 MB, to exit.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
+
+### 5.0 Scope as locked after the release costs were measured (2026-10-07)
+
+The measurements of § 4.8 and § 4.9 and the stage timeline of § 4.10 showed that
+releasing the message rows' arrays after their last use lowers the peak only
+when a raw heatmap or histogram follows statistics, and costs the time to free
+them. The architect locked the scope below: by default the message rows keep
+their data; the release is behind a hidden `-mem release`. This table governs
+where it differs from D2 to D4 below.
+
+| | Default | `-mem release` |
+|---|---|---|
+| No working copy before statistics (D1) | yes | yes |
+| Time buckets taken out of the store, sorted in place (D1) | yes | yes |
+| Heatmap and histogram raw: count first, then sort in place for percentiles (D5, D6, D9) | yes | yes |
+| `total_bytes` write-back (D7) | removed | removed |
+| A cluster hands its array to its row and keeps no reference (D4) | yes | yes |
+| `-so` on a statistic: the ranking pre-pass sorts each row once, in place, and statistics reuse that order (D3) | yes; the store ends as on the base | yes |
+| Displayed rows, ranked on an available value | statistics sort a copy; the store is neither reordered nor enlarged | taken out of the store, sorted in place, freed after statistics |
+| Rows not displayed | kept, as on the base | released at the selection |
+| Large rows | handed forward to #354 (raw below a crossover, bin partition above) | |
+
+**Why the rows keep their data by default.** After statistics the message store
+holds every row's data. An interactive mode that re-ranks the message table
+(raised by the architect, 2026-10-07) would recompute statistics for a new top
+list from it without re-reading the logs; releasing the rows would remove that.
+**Why large rows are not this issue's.** #354 (`-mdm bin` heavier than `-mdm raw`
+on singleton-dominated logs; on hold behind #2, the memory ceiling) carries the
+fix that keeps a message raw below an occurrence crossover and promotes it to a
+bin partition above it (#323 researches the promotion). A row of millions of
+values then holds no raw array to copy, sort or release; a raw row holds
+hundreds, and releasing it is worth tens of kilobytes.
 
 **The pattern.** At a raw array's last use, the computation that needs it in
 order takes it out of its store, sorts it in place, computes from it and lets
@@ -504,12 +560,13 @@ each with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
   in every scenario the `-mem` high-water marks of `log_messages`,
   `consolidation_clusters`, `log_analysis`, `heatmap_raw` and
   `histogram_values` are no higher than the base's.
-- [ ] **AC3 — Durations are released after their last use** (assertable,
-  guideline 4): after statistics no message row and no cluster holds a
-  durations array under the raw data model, so `MEMORY_FINAL log_messages` is
-  lower than the base's by the arrays released. Verified by `-mem` and by a
-  one-off probe on a scratch copy that counts the arrays left after
-  statistics.
+- [ ] **AC3 — Durations are released after their last use under `-mem
+  release`** (assertable, guideline 4, § 5.0): with `-mem release`, after
+  statistics no message row and no cluster holds a durations array under the
+  raw data model. Verified by a one-off probe on a scratch copy that counts the
+  arrays left after statistics. By default the message rows keep their arrays,
+  unsorted unless ranked on a statistic, and `MEMORY_FINAL log_messages` is no
+  higher than the base's.
 - [ ] **AC3a — Each array sorted once, the messages ranked once, nothing
   written back unchanged** (assertable by code reading, guideline 6): every
   sort of a raw array is one of D1 to D6, runs after consolidation has
