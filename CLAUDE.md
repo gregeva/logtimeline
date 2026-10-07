@@ -59,6 +59,11 @@ about anything else, these still hold.
   would look like", until asked.
 - **Short and plain.** Lead with the outcome. Plain words over internal jargon.
   Bookkeeping gets one line. A reply that is running long stops and asks.
+- **Show the situation before discussing it.** A problem that spans several
+  stores, phases, paths or options is drawn first (swim lane, flow, matrix),
+  and every guideline and decision is then placed on the picture. Shorthand
+  prose is not a substitute, and a fix scoped from one routine is checked
+  against the whole picture before it is proposed.
 - **The one licensed long message** is the findings report after measured
   work: what was built, correctness proof, measured tables (medians with
   ranges), attribution of the mechanism, ceiling analysis of alternatives, and
@@ -125,6 +130,9 @@ about anything else, these still hold.
 - [ ] A waiver question lists every decision that depends on the step being waived.
 - [ ] A claim about tool output was read from the tool's output, not derived
       from its inputs.
+- [ ] A claim about a structure's size or cost comes from a measurement: the
+      `-mem` high-water marks in the at-scale benchmark records
+      (`tests/baseline/results/*.tsv`) or a run made for it, never from code reading.
 
 ### Before planning, scoping, or stating a design view
 
