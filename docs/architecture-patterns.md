@@ -414,7 +414,11 @@ computation that needs it in order, through one helper,
 assigned back to itself, the only form Perl sorts in place, so no copy of the
 values exists. The sort runs at the array's last use, on an array the caller
 owns at that moment: taken out of its store (`delete`), or about to be emptied.
-The array is released after that use. The one sort that leaves its order in the
+A pass over every value that does not need the order (a bucket count, a
+range) runs before the sort, over the values in the order the read stored
+them: after an in-place sort, neighbouring elements point to scalars scattered
+through memory, and a pass in sorted order misses the cache. The array is
+released after its use. The one sort that leaves its order in the
 store is the message ranking pre-pass under `-so` on a statistic, whose order
 the displayed rows' statistics then read without sorting again. Every sort runs
 after consolidation has returned, when the arrays are final.
@@ -441,8 +445,8 @@ the store sizes in `features/680-statistics-duration-copies.md` § 4.
 - `calculate_all_statistics` :: `delete $entry->{durations} unless exists $displayed{$log_key};` (rows not displayed, released at the selection)
 - `calculate_all_statistics` :: `$aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};` (the ranking pre-pass's order reused)
 - `group_similar_messages` :: `$entry->{durations}          = delete $cluster->{durations} // [];` (a cluster hands its array to its row)
-- `calculate_heatmap_buckets_exact` :: `my $sorted_values = sort_numeric_in_place($heatmap_raw{$bucket});`
-- `calculate_histogram_buckets_exact` :: `my $sorted = sort_numeric_in_place($values_ref);` and its highlight twin
+- `calculate_heatmap_buckets_exact` :: `my $sorted_values = sort_numeric_in_place($bucket_values);` (after the range count over the unsorted values)
+- `calculate_histogram_buckets_exact` :: `my $sorted = sort_numeric_in_place($values_ref);` and its highlight twin (after the range and the bucket count over the unsorted values)
 
 **Owning record.** `features/680-statistics-duration-copies.md` § 2 (the
 resource guidelines), § 5 (D1 to D8). Cross-reference: *Data-model selectors

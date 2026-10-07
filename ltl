@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0-680";
+my $version_number = "0.19.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -18286,9 +18286,23 @@ sub calculate_heatmap_buckets_exact {
 
     # Distribute raw values into histogram buckets and calculate percentiles
     foreach my $bucket (keys %heatmap_raw) {
-        # The bucket's values are sorted in place at their last use; the
-        # bucket is deleted below.
-        my $sorted_values = sort_numeric_in_place($heatmap_raw{$bucket});
+        my $bucket_values = $heatmap_raw{$bucket};
+
+        # Each value is counted into its range before the sort, in the order
+        # the read stored it: a pass in sorted order over values sorted in
+        # place visits scalars scattered through memory (features/680 D9).
+        foreach my $value (@$bucket_values) {
+            my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
+            $heatmap_data{$bucket}{$range_index}++;
+
+            # Track max density for color normalization
+            $heatmap_max_density = $heatmap_data{$bucket}{$range_index}
+                if $heatmap_data{$bucket}{$range_index} > $heatmap_max_density;
+        }
+
+        # The bucket's values are sorted in place at their last use, for the
+        # percentiles only; the bucket is deleted below.
+        my $sorted_values = sort_numeric_in_place($bucket_values);
         my $count = scalar @$sorted_values;
 
         if ($count > 0) {
@@ -18316,15 +18330,6 @@ sub calculate_heatmap_buckets_exact {
                 $heatmap_percentiles{$bucket}{values}      = \%values;
                 $heatmap_percentiles{$bucket}{occurrences} = $count;
             }
-        }
-
-        foreach my $value (@$sorted_values) {
-            my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
-            $heatmap_data{$bucket}{$range_index}++;
-
-            # Track max density for color normalization
-            $heatmap_max_density = $heatmap_data{$bucket}{$range_index}
-                if $heatmap_data{$bucket}{$range_index} > $heatmap_max_density;
         }
 
         # Process highlighted values
@@ -18617,8 +18622,45 @@ sub calculate_histogram_buckets_exact {
 
         push @metrics_with_data, $metric;
 
-        # The metric's values are sorted in place at their last use; the
-        # array is emptied below.
+        # The range and the bucket counts come from passes over the values in
+        # the order the read stored them, before the sort: a pass in sorted
+        # order over values sorted in place visits scalars scattered through
+        # memory (features/680 D9).
+        my $min = min(@$values_ref);
+        my $max = max(@$values_ref);
+
+        # Handle edge case: all values identical
+        if ($min == $max) {
+            $min = $min * 0.9 if $min > 0;
+            $max = $max * 1.1 if $max > 0;
+            $min = 0.1 if $min <= 0;
+            $max = 1 if $min == $max;
+        }
+
+        # Ensure min > 0 for logarithmic scale
+        $min = 0.1 if $min <= 0;
+
+        # Calculate bucket count using HdrHistogram approach
+        my ($bucket_count, $decades) = calculate_histogram_bucket_count($min, $max);
+
+        # Calculate logarithmic boundaries
+        @{$histogram_boundaries{$metric}} = ();
+        for my $i (0 .. $bucket_count) {
+            my $boundary = $min * (($max / $min) ** ($i / $bucket_count));
+            push @{$histogram_boundaries{$metric}}, $boundary;
+        }
+
+        # Initialize bucket counts
+        @{$histogram_buckets{$metric}} = (0) x $bucket_count;
+
+        # Assign values to buckets using binary search
+        for my $value (@$values_ref) {
+            my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
+            $histogram_buckets{$metric}[$bucket_idx]++;
+        }
+
+        # The values are sorted in place at their last use, for the
+        # percentiles only; the array is emptied below.
         my $sorted = sort_numeric_in_place($values_ref);
         my $n = scalar @$sorted;
 
@@ -18639,42 +18681,9 @@ sub calculate_histogram_buckets_exact {
             p999   => $sorted->[int($n * 0.999)] // $sorted->[-1],
             p9999  => $sorted->[int($n * 0.9999)] // $sorted->[-1],
             p99999 => $sorted->[int($n * 0.99999)] // $sorted->[-1],
+            bucket_count => $bucket_count,
+            decades      => $decades,
         };
-
-        my $min = $sorted->[0];
-        my $max = $sorted->[-1];
-
-        # Handle edge case: all values identical
-        if ($min == $max) {
-            $min = $min * 0.9 if $min > 0;
-            $max = $max * 1.1 if $max > 0;
-            $min = 0.1 if $min <= 0;
-            $max = 1 if $min == $max;
-        }
-
-        # Ensure min > 0 for logarithmic scale
-        $min = 0.1 if $min <= 0;
-
-        # Calculate bucket count using HdrHistogram approach
-        my ($bucket_count, $decades) = calculate_histogram_bucket_count($min, $max);
-        $histogram_stats{$metric}{bucket_count} = $bucket_count;
-        $histogram_stats{$metric}{decades} = $decades;
-
-        # Calculate logarithmic boundaries
-        @{$histogram_boundaries{$metric}} = ();
-        for my $i (0 .. $bucket_count) {
-            my $boundary = $min * (($max / $min) ** ($i / $bucket_count));
-            push @{$histogram_boundaries{$metric}}, $boundary;
-        }
-
-        # Initialize bucket counts
-        @{$histogram_buckets{$metric}} = (0) x $bucket_count;
-
-        # Assign values to buckets using binary search
-        for my $value (@$sorted) {
-            my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
-            $histogram_buckets{$metric}[$bucket_idx]++;
-        }
 
         # Free memory - raw values no longer needed
         @{$histogram_values{$metric}} = ();
@@ -18685,7 +18694,14 @@ sub calculate_histogram_buckets_exact {
             # Initialize highlight bucket counts
             @{$histogram_buckets_hl{$metric}} = (0) x $bucket_count;
 
-            # Sorted in place at their last use, as above.
+            # Assign highlighted values to buckets using same boundaries
+            for my $value (@$hl_values_ref) {
+                my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
+                $histogram_buckets_hl{$metric}[$bucket_idx]++;
+            }
+
+            # Counted before the sort and sorted in place for the percentiles,
+            # as above.
             my $sorted_hl = sort_numeric_in_place($hl_values_ref);
             my $n_hl = scalar @$sorted_hl;
 
@@ -18707,12 +18723,6 @@ sub calculate_histogram_buckets_exact {
                 p9999  => $sorted_hl->[int($n_hl * 0.9999)] // $sorted_hl->[-1],
                 p99999 => $sorted_hl->[int($n_hl * 0.99999)] // $sorted_hl->[-1],
             };
-
-            # Assign highlighted values to buckets using same boundaries
-            for my $value (@$sorted_hl) {
-                my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
-                $histogram_buckets_hl{$metric}[$bucket_idx]++;
-            }
         }
 
         # Free highlight memory - raw values no longer needed

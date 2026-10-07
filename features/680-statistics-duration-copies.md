@@ -403,6 +403,13 @@ unless the caller states the array is already sorted.
 - **D7 — group_calc writes back only what it derives** (guideline 6).
   `$log_messages{…}{total_bytes} = $aggregated_data->{total_bytes}` stores back
   the value group_calc has just read from the same entry; it goes.
+- **D9 — A pass that does not need the order runs before the sort** (locked
+  by the architect on 2026-10-07, from § 4.8). The heatmap counts each value
+  into its range, and the histogram takes its range and counts each value into
+  its bucket, over the values in the order the read stored them; the in-place
+  sort follows, for the percentiles only. The shape-moment pass of
+  `calculate_statistics` stays in sorted order: its floating-point sums depend
+  on the order, so moving it would change the reported moments.
 - **D8 — The pattern is recorded in `docs/architecture-patterns.md`**, with its
   consumption sites, in the commit that implements it.
 - **Sort moments.** No raw array is sorted before or during consolidation;
