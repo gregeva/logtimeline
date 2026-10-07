@@ -36,6 +36,9 @@ and the acceptance criteria answer to:
    message row's durations array once its statistics are done.
 5. Temporary spikes are acceptable, provided the memory that stays is memory
    the run still needs.
+6. Data is written back to a structure only when there is a need for it and
+   the data is known to have changed; the same array of durations is never
+   sorted more than once.
 
 ## 3. The sites, as they are today (`release/0.19.0` at `a585f97`)
 
@@ -179,22 +182,32 @@ sorted in place in isolation:
   the first design). In group_calc and in the time-bucket block,
   `$aggregated_data->{durations}` is the store's arrayref, not a copy of its
   contents.
-- **D2 — `calculate_statistics` sorts a private copy, never the store's
-  scalars** (replaces the in-place sort of the stored array). The copy is
-  taken first and then sorted in place (`my @sorted = @$ref;
-  @sorted = sort { $a <=> $b } @sorted;`): a sort that reads the stored
-  scalars, as `my @sorted = sort { … } @$ref` does, enlarges them (§ 4.4), so
-  the copy has to exist before the sort. The copy is local to the routine and
-  freed when it returns (guideline 1); any enlargement falls on it. Min and max
-  are its first and last elements. This also ends the enlargement the sort
-  pre-pass for a statistic operand (`-so`) applies today to every key's stored
-  array.
+- **D2 — Each array is sorted once, in place, by the routine that owns it at
+  that moment** (replaces both the in-place sort of the stored array and the
+  private copy). `calculate_statistics` sorts the array it is given in place
+  (aliased to a named array, the only form Perl sorts in place) unless the
+  caller states the array is already sorted, and reads min and max from its
+  ends. What it is given:
+  - *group_calc*: the row's array taken out of the store (`delete`), so the
+    sort is of an array the routine owns, nothing is written back to the
+    store, and the array is freed when the row's statistics are done (D4). Any
+    enlargement (§ 4.4) lasts only for that row (guideline 1).
+  - *time buckets*: the same, the bucket's array taken out of the store.
+  - *the sort pre-pass under `-so`*: the stored array, sorted in place, since
+    group_calc needs the same values in the same order for the keys selected.
+    That write-back is the one the sort produces and group_calc reads
+    (guideline 6). The keys whose array the pre-pass sorted are known from its
+    own transient map of computed values, plus the keys it demoted, so group_calc
+    passes "already sorted" for them and no array is sorted twice; no flag is
+    stored on the entry (guideline 2). The pre-pass enlarges the arrays it
+    sorts as the base's pre-pass already does (§ 4.4, `-so p99`); those of
+    unselected keys are deleted right after the selection (D4).
 - **D3 — The population walk's comment** states the contract: the array it
-  hands over is read, never modified.
+  hands over comes back sorted, and group_calc does not sort it again.
 - **D4 — A message row's durations array is deleted after its last use**
   (guideline 4). Its readers end with statistics (§ 4.1), so:
-  - a row given statistics in group_calc has its array deleted once its
-    statistics are stored;
+  - a row given statistics in group_calc has its array taken out of the store
+    for them (D2) and freed when they are done;
   - a row not selected for display has its array deleted once the selection
     is made (after the sort pre-pass under `-so`, which reads it);
   - at the final consolidation pass the cluster hands its array to the row it
@@ -202,13 +215,14 @@ sorted in place in isolation:
     frees it. Nothing reads a cluster's durations after that hand-over: the
     reported accounting stage reads the message store alone.
   - Time buckets already delete theirs after statistics.
+- **D5 — group_calc writes back only what it derives** (guideline 6).
+  `$log_messages{…}{total_bytes} = $aggregated_data->{total_bytes}` stores back
+  the value group_calc has just read from the same entry; it goes. The
+  statistics, the means and impact are derived there and stay.
 
-**The alternative measured beside D2.** In-place sort of the stored array
-(the first design) combined with D4 makes the enlargement transient as well,
-holding no copy at all in group_calc, but under `-so` it enlarges every key's
-array at once during the pre-pass. Both are measured against the criteria;
-if the in-place form meets them with a lower peak, it is brought back to the
-architect rather than substituted.
+**Alternative not taken.** Sorting a private copy in every caller leaves the
+store untouched but sorts a selected key's values twice under `-so`
+(guideline 6) and holds a copy of each row beside its array in group_calc.
 
 ## 6. Acceptance criteria (revised to § 2, awaiting the architect's lock)
 
@@ -230,6 +244,11 @@ with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
   lower than the base's by the arrays released. Verified by `-mem` and by a
   one-off probe on a scratch copy that counts the arrays left after
   statistics.
+- [ ] **AC3a — No array sorted twice, nothing written back unchanged**
+  (assertable, guideline 6): a one-off probe on a scratch copy counts the
+  sorts of each array on the single-day access log with `-n 25 -g -m uuid` and
+  with `-n 25 -so p99`, and every array is sorted at most once; group_calc
+  writes nothing back to an entry that it did not derive (code reading).
 - [ ] **AC4 — Time not sacrificed** (assertable, guideline 3): the
   before/after benchmark on `single-day-access-log-standard` and on
   `month-single-server-access-logs-top25-consolidate` shows no metric worse by
