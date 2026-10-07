@@ -19064,8 +19064,9 @@ sub calculate_all_statistics {
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
         # partition + sidecars carry the data). Skip the aggregation; the bin consumer
-        # reads the sidecars off $log_analysis{$bucket} directly.
-        push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}}
+        # reads the sidecars off $log_analysis{$bucket} directly. Under raw the
+        # bucket's own array is handed over, not copied.
+        $aggregated_data->{durations} = $log_analysis{$bucket}{durations}
             unless $bucket_stats_capture_mode eq 'bin';
 
         # Aggregate min/max across buckets
@@ -19399,8 +19400,8 @@ sub calculate_all_statistics {
                         );
                     } else {
                         # The durations arrayref is aliased, not copied:
-                        # calculate_statistics sorts into its own copy and
-                        # never mutates its input.
+                        # calculate_statistics sorts it in place, and the
+                        # group_calc pass below re-sorts it already ordered.
                         $stats = calculate_statistics({
                             occurrences    => $entry->{occurrences},
                             duration_count => $entry->{duration_count},
@@ -19518,10 +19519,9 @@ sub calculate_all_statistics {
                     # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
                     # longer exists. calculate_statistics_bin reads sidecars +
                     # %log_messages_counters{...} entry directly, ignoring
-                    # $aggregated_data->{durations} — so the push is a no-op under
-                    # bin even if the source were present, and the absent field
-                    # would auto-vivify it as an empty arrayref. Skip the push.
-                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
+                    # $aggregated_data->{durations}. Under raw the key's own array
+                    # is handed over, not copied.
+                    $aggregated_data->{durations} = $log_messages{$category}{$log_key}{durations}
                         unless $message_stats_capture_mode eq 'bin';
                 } elsif ( !$duration_observed ) {
                     # No duration was ever observed for this key, including
@@ -19793,11 +19793,17 @@ sub calculate_statistics {
     # The observation count is the gate (#616 D9): no timed line, no statistic.
     return unless ($bucket_data->{duration_count} // 0) > 0;
 
-    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+    # The durations are sorted in place, so the row's array is the only copy
+    # held: Perl sorts in place only when the result is assigned back to the
+    # same named array, so the arrayref is aliased to one for the sort. The
+    # caller's array is left sorted ascending; nothing reads it in arrival order.
+    our @sorted;
+    local *sorted = $bucket_data->{durations};
+    @sorted = sort { $a <=> $b } @sorted;
     my $duration_count = scalar @sorted;
 
-    my $min = min(@sorted);
-    my $max = max(@sorted);
+    my $min = $sorted[0];
+    my $max = $sorted[-1];
     # The shape group's moment sums come from one pass over the samples about
     # the mean: the dominant per-key cost of this function, run only under
     # shape demand at n >= 4 (#305).
