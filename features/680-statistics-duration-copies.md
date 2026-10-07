@@ -280,6 +280,95 @@ releases them at the statistics step (D1, D2), but they exist from the read
 until then. Changing it is a read-loop change, outside this issue: not filed
 yet, for the architect to decide.
 
+### 4.8 Delivery measurements of the pattern (`ef95ff4` against `a585f97`)
+
+Three rounds, interleaved base then branch, one run each per round, on this
+machine; the month of § 4.2 with `-bs 1440 -m uuid --terminal-width 200
+-V benchmark-data -mem` plus the scenario's options: `g` is `-n 25 -g`, `n25`
+is `-n 25`, `hmhg` is `-n 25 -hm -hg -hmdm raw -hgdm raw`. Peak resident size
+is the operating system's (`/usr/bin/time -l`); `-mem`'s own `rss_peak`
+samples between steps and misses the spike inside statistics (969 MB against
+1,124 MB on the same base run). Medians with ranges:
+
+```
+== g
+  metric                              base median [range]        branch median [range]     change
+  peak resident (OS)            1,236.1 [1,123.9–1,239.9]          970.2 [905.5–978.8]     -21.5%
+  log_messages high-water             253.6 [253.6–253.6]          172.3 [172.3–172.3]     -32.1%
+  log_messages at end                 253.6 [253.6–253.6]                1.1 [1.1–1.1]     -99.5%
+  clusters high-water                 221.0 [221.0–221.0]          221.0 [221.0–221.0]      -0.0%
+  clusters at end                     221.0 [221.0–221.0]                0.9 [0.9–0.9]     -99.6%
+  log_analysis high-water             254.0 [254.0–254.0]          254.0 [254.0–254.0]      +0.0%
+  heatmap_raw high-water                    0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  histogram high-water                      0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  statistics step                        6.42 [5.94–7.07]             4.97 [3.99–5.20]     -22.7%
+    bucket_stats                         3.39 [3.34–3.85]             2.28 [1.76–2.41]     -32.7%
+    group_calc                           3.02 [2.59–3.20]             2.68 [2.22–2.78]     -11.4%
+  read files (untouched)           153.37 [119.43–156.25]       156.83 [116.68–157.26]      +2.3%
+  total                            165.18 [130.11–168.77]       167.39 [125.15–167.97]      +1.3%
+== n25
+  metric                              base median [range]        branch median [range]     change
+  peak resident (OS)                  800.0 [774.2–810.4]          758.5 [755.3–759.2]      -5.2%
+  log_messages high-water             376.6 [376.6–386.2]          376.6 [376.6–376.6]      -0.0%
+  log_messages at end                 376.6 [376.6–386.2]          104.2 [104.2–104.2]     -72.3%
+  clusters high-water                       0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  clusters at end                           0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  log_analysis high-water             253.3 [253.3–253.3]          253.3 [253.3–253.3]      +0.0%
+  heatmap_raw high-water                    0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  histogram high-water                      0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  statistics step                        2.75 [2.71–3.64]             2.94 [2.89–3.73]      +7.0%
+    bucket_stats                         1.84 [1.83–2.39]             1.63 [1.63–2.12]     -11.1%
+    group_calc                           0.47 [0.47–0.68]             0.82 [0.80–1.07]     +73.2%
+  read files (untouched)            101.46 [97.27–130.97]         99.00 [98.01–127.50]      -2.4%
+  total                            104.24 [100.00–134.65]       101.96 [100.92–131.27]      -2.2%
+== hmhg
+  metric                              base median [range]        branch median [range]     change
+  peak resident (OS)            2,278.0 [2,122.4–2,394.4]    2,054.4 [2,020.7–2,083.4]      -9.8%
+  log_messages high-water             386.2 [376.6–386.2]          386.2 [376.6–386.2]      -0.0%
+  log_messages at end                 386.2 [376.6–386.2]          113.8 [104.2–113.8]     -70.5%
+  clusters high-water                       0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  clusters at end                           0.0 [0.0–0.0]                0.0 [0.0–0.0]      +0.0%
+  log_analysis high-water                   0.0 [0.0–0.0]                0.0 [0.0–0.0]      -8.9%
+  heatmap_raw high-water              589.7 [589.7–589.7]          589.7 [589.7–589.7]      +0.0%
+  histogram high-water                794.4 [794.4–794.4]          794.4 [794.4–794.4]      +0.0%
+  statistics step                        0.91 [0.91–1.29]             1.44 [1.32–1.87]     +58.3%
+    bucket_stats                         0.00 [0.00–0.00]             0.00 [0.00–0.00]      +0.0%
+    group_calc                           0.44 [0.43–0.62]             0.93 [0.89–1.32]    +112.6%
+  heatmap step                        11.10 [11.01–15.07]          11.71 [11.49–14.55]      +5.4%
+  histogram step                      22.85 [22.75–30.70]          25.83 [25.18–32.75]     +13.0%
+  read files (untouched)           104.20 [103.59–147.94]       102.61 [101.85–138.30]      -1.5%
+  total                            139.10 [138.29–195.05]       141.62 [139.87–187.52]      +1.8%
+```
+
+**Memory.** Peak resident size is lower in all three scenarios; no structure's
+high-water mark is higher; after statistics no durations array remains (a probe
+on a scratch copy counts 0 arrays on the `g` run), so the message store ends
+70 % to 99.5 % smaller. The `+79 MB` of the single `hmhg` run in § 4.4's
+tables was run-to-run variation: the base alone ranges 2,122 to 2,394 MB.
+
+**Time, attributed.** File reading, untouched, varies by up to 30 % between
+rounds, so totals are compared within a round.
+- *Releasing the rows not displayed* costs about 0.35 to 0.5 s in group_calc
+  when most of the month's 7.7 million values sit in rows not displayed (`n25`,
+  `hmhg`): freeing them. The base never freed them; it held them to exit.
+- *A pass over values sorted in place is slower.* After an in-place sort,
+  neighbouring elements point to scalars scattered through memory in the order
+  the read allocated them, so a pass in sorted order misses the cache; a sorted
+  copy lays its scalars out in order. On 7,750,000 integers allocated among
+  other structures, in isolation:
+
+  | Order | sort + pass + free | Peak resident |
+  |---|---|---|
+  | Sort into a copy, pass over the copy (base) | 3.21 to 3.22 s | 1,785 to 1,839 MB |
+  | Sort in place, pass in sorted order (`ef95ff4`) | 4.40 to 4.43 s | 1,589 MB |
+  | Pass over the unsorted values first, then sort in place for percentiles | 3.30 to 3.36 s | 1,589 MB |
+
+  The histogram (+3.0 s median) and heatmap (+0.6 s) steps each make a
+  bucket-counting pass over every value after sorting; the count does not
+  depend on order. The shape-moment loop of `calculate_statistics` makes the
+  same kind of pass, under shape demand only, and its floating-point sums
+  depend on the order, so moving it would change the reported moments.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 **The pattern.** At a raw array's last use, the computation that needs it in
