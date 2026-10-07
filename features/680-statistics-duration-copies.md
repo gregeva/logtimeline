@@ -2,10 +2,11 @@
 
 ## Status
 
-`status: in progress`. Design (D1 to D3) and acceptance criteria locked by the
-architect on 2026-10-07. D2 as implemented (`ee1326c`) regresses peak memory
-when every row is given statistics on a log with non-integer durations
-(§ 4.4); the design is reopened with the architect.
+`status: in progress`. The first design (D1 to D3, locked 2026-10-07) was
+implemented in `ee1326c` and regresses peak memory when every row is given
+statistics on a log with non-integer durations (§ 4.4). The architect then set
+the resource guidelines of § 2; the design and the acceptance criteria below
+are revised to them and await the architect's lock.
 
 ## 1. The motivating consumer
 
@@ -23,6 +24,18 @@ bisect and the trial fix this issue inherits).
 Computing the statistics of a message row or a time bucket under the raw data
 model holds no copy of its durations beyond the one the store already keeps.
 Every statistic, every table and every CSV is unchanged.
+
+**Resource guidelines, set by the architect on 2026-10-07**, which the design
+and the acceptance criteria answer to:
+
+1. Higher memory during a subroutine, in a local variable freed when it
+   returns, is a per-execution peak of that routine and acceptable.
+2. The core data structures do not grow with these changes.
+3. Overall resource usage is not sacrificed to optimise a single routine.
+4. A large data structure no longer needed is deleted after its last use: a
+   message row's durations array once its statistics are done.
+5. Temporary spikes are acceptable, provided the memory that stays is memory
+   the run still needs.
 
 ## 3. The sites, as they are today (`release/0.19.0` at `a585f97`)
 
@@ -160,66 +173,87 @@ sorted in place in isolation:
 | `sort { $a <=> $b }` (optimised) | 1.63 s | 120.0 MB to 240.1 MB | 569 MB |
 | `sort { $a < $b ? -1 : $a > $b ? 1 : 0 }` | 3.84 s | 120.0 MB, unchanged | 431 MB |
 
-## 5. Design (locked by the architect, 2026-10-07)
+## 5. Design (revised to § 2, awaiting the architect's lock)
 
-The record's variant C, measured on scratch copies at `8462ae3` (§ 11.16:
-1,243 MB to 973 MB maximum resident size, message table byte-identical, the
-pre-regression commit at 982 MB).
+- **D1 — The working record takes the store's array by reference** (kept from
+  the first design). In group_calc and in the time-bucket block,
+  `$aggregated_data->{durations}` is the store's arrayref, not a copy of its
+  contents.
+- **D2 — `calculate_statistics` sorts a private copy, never the store's
+  scalars** (replaces the in-place sort of the stored array). The copy is
+  taken first and then sorted in place (`my @sorted = @$ref;
+  @sorted = sort { $a <=> $b } @sorted;`): a sort that reads the stored
+  scalars, as `my @sorted = sort { … } @$ref` does, enlarges them (§ 4.4), so
+  the copy has to exist before the sort. The copy is local to the routine and
+  freed when it returns (guideline 1); any enlargement falls on it. Min and max
+  are its first and last elements. This also ends the enlargement the sort
+  pre-pass for a statistic operand (`-so`) applies today to every key's stored
+  array.
+- **D3 — The population walk's comment** states the contract: the array it
+  hands over is read, never modified.
+- **D4 — A message row's durations array is deleted after its last use**
+  (guideline 4). Its readers end with statistics (§ 4.1), so:
+  - a row given statistics in group_calc has its array deleted once its
+    statistics are stored;
+  - a row not selected for display has its array deleted once the selection
+    is made (after the sort pre-pass under `-so`, which reads it);
+  - at the final consolidation pass the cluster hands its array to the row it
+    becomes, keeping no reference of its own, so deleting the row's array
+    frees it. Nothing reads a cluster's durations after that hand-over: the
+    reported accounting stage reads the message store alone.
+  - Time buckets already delete theirs after statistics.
 
-- **D1 — The working record takes the store's array by reference.** In
-  group_calc and in the time-bucket block, `$aggregated_data->{durations}` is
-  the store's arrayref, not a copy of its contents. The time bucket's
-  `delete` after statistics stays, and frees the array once the working record
-  goes out of scope.
-- **D2 — `calculate_statistics` sorts its input in place.** The array it is
-  given is sorted ascending afterwards; min and max are its first and last
-  elements. Perl sorts in place only when the result is assigned back to the
-  same *named* array (`@x = sort … @x`); through a reference
-  (`@$r = sort … @$r`) it builds a temporary list, which the record measured at
-  293 MB against 160 MB on 3,751,230 values. So the arrayref is aliased to a
-  named array for the sort. The form proposed is a package array aliased with
-  `local *name = $arrayref`, the form the record probed; the alternative,
-  `\my @x = $arrayref`, needs the experimental `refaliasing` feature, which
-  `ltl` does not use anywhere.
-- **D3 — The population walk's comment is rewritten** to the new contract: the
-  array it hands over comes back sorted, which group_calc then re-sorts at the
-  cost of a pass over already-ordered input.
+**The alternative measured beside D2.** In-place sort of the stored array
+(the first design) combined with D4 makes the enlargement transient as well,
+holding no copy at all in group_calc, but under `-so` it enlarges every key's
+array at once during the pre-pass. Both are measured against the criteria;
+if the in-place form meets them with a lower peak, it is brought back to the
+architect rather than substituted.
 
-## 6. Acceptance criteria
+## 6. Acceptance criteria (revised to § 2, awaiting the architect's lock)
 
-- [ ] **AC1 — Peak memory no longer carries the copies** (assertable): the
-  issue's command on the month of one server's Tomcat access logs, run before
-  and after on this machine, shows maximum resident size falling by at least
-  the size of two copies of the largest row's durations, and `group_calc` time
-  no worse. Read from `/usr/bin/time -l` and `-V benchmark-data`.
-- [ ] **AC2 — Every statistic unchanged, raw data model** (assertable): on the
-  same input before and after, with and without `-g`, the rendered message
-  table, the STATS CSV and the MESSAGES CSV (`-o`) are byte-identical after
-  version normalisation. By direct diff, on the single-day access log and on
-  the month selection of AC1. `tests/validate-statistics.sh` (the statistics
-  oracle) passes.
-- [x] **AC3 — Bin data model unchanged** (assertable): the AC2 diff under
-  `-bdm bin -mdm bin` on the single-day access log is byte-identical.
-- [x] **AC4 — A statistic sort operand unchanged** (assertable): under
-  `-so p99` (the population walk's path) the message table is byte-identical
-  before and after.
-- [x] **AC5 — No runtime warnings** (assertable): no ` at <file> line <N>` on
-  stderr for any run of AC1 to AC4.
-- [ ] **AC6 — Completion gate** (assertable): the full harness suite passes;
-  the before/after benchmark on `single-day-access-log-standard` shows no
-  metric worse by more than 1 %, and the month-scale grouping case of AC1
-  (`month-single-server-access-logs-top25-consolidate`) is benchmarked before
-  and after, as the architect directed on 2026-10-05 (`features/619-per-run-key-cut.md`
-  § 11.16, Disposition).
+The scenarios are those of § 4.4 on the month of § 4.2, base `a585f97`
+against the branch, on this machine: `-n 25 -g` (the issue's command),
+`-n 25`, `-n 99999999` (every row given statistics) and `-n 25 -so p99`, each
+with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
+
+- [ ] **AC1 — Peak memory no higher in any scenario, lower on the issue's**
+  (assertable): `MEMORY rss_peak` and the maximum resident size of
+  `/usr/bin/time -l` are no higher than the base's in every scenario, and lower
+  on `-n 25 -g`.
+- [ ] **AC2 — The core data structures do not grow** (assertable, guideline 2):
+  in every scenario the `-mem` high-water marks of `log_messages`,
+  `consolidation_clusters` and `log_analysis` are no higher than the base's.
+- [ ] **AC3 — Durations are released after their last use** (assertable,
+  guideline 4): after statistics no message row and no cluster holds a
+  durations array under the raw data model, so `MEMORY_FINAL log_messages` is
+  lower than the base's by the arrays released. Verified by `-mem` and by a
+  one-off probe on a scratch copy that counts the arrays left after
+  statistics.
+- [ ] **AC4 — Time not sacrificed** (assertable, guideline 3): the
+  before/after benchmark on `single-day-access-log-standard` and on
+  `month-single-server-access-logs-top25-consolidate` shows no metric worse by
+  more than 1 % across repeated runs.
+- [ ] **AC5 — Every statistic unchanged** (assertable): the rendered table,
+  STATS CSV, MESSAGES CSV and aggregate export are byte-identical before and
+  after, after removing the version stamp, paths, timestamps, run time and
+  peak memory: on the single-day access log with `-n 25`, `-n 25 -g -m uuid`,
+  `-n 25 -g -m uuid -bdm bin -mdm bin`, `-n 25 -so p99` and
+  `-n 25 -g -m uuid -so p99`, and on the month with `-bs 1440 -n 25` with and
+  without `-g -m uuid`. `tests/validate-statistics.sh` (the statistics oracle)
+  passes.
+- [ ] **AC6 — No runtime warnings** (assertable): no ` at <file> line <N>` on
+  stderr for any run above.
+- [ ] **AC7 — Completion gate** (assertable): the full harness suite passes.
 
 No new harness: the outputs are asserted by the statistics oracle and the
-existing CSV harnesses, and peak memory by the benchmark, as § 11.16 records
-for this defect.
+existing CSV harnesses, and memory by the measurements above, as
+`features/619-per-run-key-cut.md` § 11.16 records for this defect.
 
 ## 7. Measurement obligations
 
 - `680-before` on `single-day-access-log-standard`, captured on `a585f97`.
-- AC1's run, before: § 4.2. After: the same command on the branch, from a
-  worktree beside the base's.
+- The four scenarios of § 6, before (§ 4.4) and after, from worktrees side by
+  side; the in-place alternative of § 5 measured on the same four.
 - `month-single-server-access-logs-top25-consolidate` before and after, through
   `run-benchmark.sh`.
