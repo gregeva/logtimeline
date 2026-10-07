@@ -6,7 +6,7 @@
 implemented in `ee1326c` and regresses peak memory when every row is given
 statistics on a log with non-integer durations (§ 4.4). The architect then set
 the resource guidelines of § 2; the design and the acceptance criteria below
-are revised to them and await the architect's lock.
+are being re-examined against the map of every duration store (§ 4.5).
 
 ## 1. The motivating consumer
 
@@ -175,6 +175,58 @@ sorted in place in isolation:
 |---|---|---|---|
 | `sort { $a <=> $b }` (optimised) | 1.63 s | 120.0 MB to 240.1 MB | 569 MB |
 | `sort { $a < $b ? -1 : $a > $b ? 1 : 0 }` | 3.84 s | 120.0 MB, unchanged | 431 MB |
+
+### 4.5 Where a duration lives, from read to exit (code reading, `a585f97`)
+
+Five stores hold raw duration values under the raw data model. A line's value
+can be in the time-bucket store, the message store, the heatmap store (`-hm`
+on durations) and the histogram store (`-hg`) at once, each its own copy; a
+consolidated row's values are also referenced by its cluster. Phases run top
+to bottom in `pipeline_finalize` order (`group_similar_messages`,
+`calculate_all_statistics`, `calculate_heatmap_buckets`,
+`calculate_histogram_buckets`, output). ✓ marks an array released after its
+last use; ✗ marks a copy, a second sort or a retention the § 2 guidelines
+rule out.
+
+```
+             │ Time buckets      │ Message rows           │ Clusters (-g)        │ Heatmap (-hm)     │ Histogram (-hg)
+─────────────┼───────────────────┼────────────────────────┼──────────────────────┼───────────────────┼─────────────────────
+READ         │ each line's value │ each line's value      │ a line matching a    │ each line's value │ each line's value,
+per line     │ appended          │ appended               │ pattern: value       │ appended          │ one array for the
+             │                   │                        │ copied in            │                   │ whole run
+─────────────┼───────────────────┼────────────────────────┼──────────────────────┼───────────────────┼─────────────────────
+CONSOLIDATE  │                   │ a merged row: values   │ grows with each      │                   │
+(-g; also at │                   │ copied into its        │ merge                │                   │
+checkpoints  │                   │ cluster, row deleted   │ final pass: gives    │                   │
+during READ) │                   │ (2x one row, briefly)  │ its array to the new │                   │
+             │                   │                        │ row and KEEPS it  ✗  │                   │
+─────────────┼───────────────────┼────────────────────────┼──────────────────────┼───────────────────┼─────────────────────
+STATISTICS   │ per bucket:       │ -so <stat>: EVERY row  │                      │                   │
+             │ copy -> sorted    │ sorted; the stored     │                      │                   │
+             │ copy -> stats;    │ values enlarged, kept ✗│                      │                   │
+             │ stored array      │ select the top -n rows │                      │                   │
+             │ deleted  ✓        │ per top row: copy ->   │                      │                   │
+             │ peak 3x one       │ sorted copy -> stats   │                      │                   │
+             │ bucket            │ peak 3x one row  ✗     │                      │                   │
+             │                   │ -so: top rows sorted a │                      │                   │
+             │                   │ second time  ✗         │                      │                   │
+─────────────┼───────────────────┼────────────────────────┼──────────────────────┼───────────────────┼─────────────────────
+HEATMAP,     │                   │                        │                      │ per bucket: sorted│ sorted copy of the
+HISTOGRAM    │                   │                        │                      │ copy -> values;   │ whole run -> stats;
+             │                   │                        │                      │ deleted  ✓        │ emptied  ✓
+             │                   │                        │                      │ peak 2x one bucket│ peak 2x every line ✗
+─────────────┼───────────────────┼────────────────────────┼──────────────────────┼───────────────────┼─────────────────────
+OUTPUT, EXIT │                   │ every row's array kept │ kept to exit  ✗      │                   │
+             │                   │ to exit, displayed or  │                      │                   │
+             │                   │ not; no reader  ✗      │                      │                   │
+```
+
+Every computation over a raw store follows one pattern: sort the stored values
+into a new array, compute, then (except the message store) release the stored
+array. The sort reads the stored scalars, so it also enlarges them when they
+hold a non-integer (§ 4.4). Where the store is released straight after, the
+copy has no purpose. The heatmap and histogram rows come from code reading
+and are not measured.
 
 ## 5. Design (revised to § 2, awaiting the architect's lock)
 
