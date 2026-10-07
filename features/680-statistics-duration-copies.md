@@ -2,11 +2,11 @@
 
 ## Status
 
-`status: in progress`. The first design (D1 to D3, locked 2026-10-07) was
-implemented in `ee1326c` and regresses peak memory when every row is given
-statistics on a log with non-integer durations (§ 4.4). The architect then set
-the resource guidelines of § 2; the design and the acceptance criteria below
-are being re-examined against the map of every duration store (§ 4.5).
+`status: in progress`. Scope widened by the architect on 2026-10-07 to every
+store of raw values (§ 2). The first design (`ee1326c`, in-place sort of the
+stored array) regresses peak memory when every row is given statistics on a log
+with non-integer durations (§ 4.4); the design of § 5 replaces it and awaits the
+architect's lock.
 
 ## 1. The motivating consumer
 
@@ -25,6 +25,13 @@ Computing the statistics of a message row or a time bucket under the raw data
 model holds no copy of its durations beyond the one the store already keeps.
 Every statistic, every table and every CSV is unchanged.
 
+**Scope, widened by the architect on 2026-10-07.** Every store of raw values
+whose statistics are computed by sorting them follows one pattern, and the fix
+is that pattern applied to all five: the time-bucket store, the message store,
+the consolidation clusters' references to it, the heatmap's raw store and the
+histogram's raw store (§ 4.5). The pattern is recorded in
+`docs/architecture-patterns.md`.
+
 **Resource guidelines, set by the architect on 2026-10-07**, which the design
 and the acceptance criteria answer to:
 
@@ -37,8 +44,10 @@ and the acceptance criteria answer to:
 5. Temporary spikes are acceptable, provided the memory that stays is memory
    the run still needs.
 6. Data is written back to a structure only when there is a need for it and
-   the data is known to have changed; the same array of durations is never
-   sorted more than once.
+   the data is known to have changed. The accumulated values of an array are
+   sorted once, and the messages are ranked once; neither is redone. Sorts
+   happen at a defined moment, after the data they order is final (never
+   before consolidation, which merges arrays).
 
 ## 3. The sites, as they are today (`release/0.19.0` at `a585f97`)
 
@@ -225,63 +234,74 @@ Every computation over a raw store follows one pattern: sort the stored values
 into a new array, compute, then (except the message store) release the stored
 array. The sort reads the stored scalars, so it also enlarges them when they
 hold a non-integer (§ 4.4). Where the store is released straight after, the
-copy has no purpose. The heatmap and histogram rows come from code reading
-and are not measured.
+copy has no purpose.
 
-## 5. Design (revised to § 2, awaiting the architect's lock)
+**The heatmap and histogram hold raw values only when pinned to the raw data
+model** (`-hmdm raw`, `-hgdm raw`, or `-dm raw`); by default they use bin
+counters. The release benchmark (`tests/baseline/results/v0.19.0-first.tsv`,
+`all` tier, `-mem` high-water marks) shows the stores' measured sizes; no case
+pins the heatmap or histogram to raw, so their raw stores measure 0 throughout:
 
-- **D1 — The working record takes the store's array by reference** (kept from
-  the first design). In group_calc and in the time-bucket block,
-  `$aggregated_data->{durations}` is the store's arrayref, not a copy of its
-  contents.
-- **D2 — Each array is sorted once, in place, by the routine that owns it at
-  that moment** (replaces both the in-place sort of the stored array and the
-  private copy). `calculate_statistics` sorts the array it is given in place
-  (aliased to a named array, the only form Perl sorts in place) unless the
-  caller states the array is already sorted, and reads min and max from its
-  ends. What it is given:
-  - *group_calc*: the row's array taken out of the store (`delete`), so the
-    sort is of an array the routine owns, nothing is written back to the
-    store, and the array is freed when the row's statistics are done (D4). Any
-    enlargement (§ 4.4) lasts only for that row (guideline 1).
-  - *time buckets*: the same, the bucket's array taken out of the store.
-  - *the sort pre-pass under `-so`*: the stored array, sorted in place, since
-    group_calc needs the same values in the same order for the keys selected.
-    That write-back is the one the sort produces and group_calc reads
-    (guideline 6). The keys whose array the pre-pass sorted are known from its
-    own transient map of computed values, plus the keys it demoted, so group_calc
-    passes "already sorted" for them and no array is sorted twice; no flag is
-    stored on the entry (guideline 2). The pre-pass enlarges the arrays it
-    sorts as the base's pre-pass already does (§ 4.4, `-so p99`); those of
-    unselected keys are deleted right after the selection (D4).
-- **D3 — The population walk's comment** states the contract: the array it
-  hands over comes back sorted, and group_calc does not sort it again.
-- **D4 — A message row's durations array is deleted after its last use**
-  (guideline 4). Its readers end with statistics (§ 4.1), so:
-  - a row given statistics in group_calc has its array taken out of the store
-    for them (D2) and freed when they are done;
-  - a row not selected for display has its array deleted once the selection
-    is made (after the sort pre-pass under `-so`, which reads it);
-  - at the final consolidation pass the cluster hands its array to the row it
-    becomes, keeping no reference of its own, so deleting the row's array
-    frees it. Nothing reads a cluster's durations after that hand-over: the
-    reported accounting stage reads the message store alone.
-  - Time buckets already delete theirs after statistics.
-- **D5 — group_calc writes back only what it derives** (guideline 6).
+| Case | `log_messages` | `consolidation_clusters` | `log_analysis` | `heatmap_counters` | `histogram_counters` | `rss_peak` |
+|---|---|---|---|---|---|---|
+| month, many servers, standard | 6,731.2 MB | 0 | 1,267.2 MB | 0 | 0 | 9,439.4 MB |
+| month, many servers, `-so p99` | 7,636.7 MB | 0 | 1,267.2 MB | 0 | 0 | 10,807.5 MB |
+| month, many servers, top25 consolidate | 1,282.5 MB | 1,162.3 MB | 1,275.4 MB | 0 | 0 | 4,644.2 MB |
+| month, one server, standard | 1,316.1 MB | 0 | 255.9 MB | 0 | 0 | 1,894.4 MB |
+| month, one server, heatmap histogram | 1,393.7 MB | 0 | 0 | 2.5 MB | 0.3 MB | 1,727.3 MB |
+
+The message store is the largest structure in every case that keeps messages,
+and it is held to exit. Releasing its arrays after their last use frees memory
+for the rest of the run, but does not lower a peak reached while the store is
+whole: the peak falls only by the copies removed from the statistics step.
+
+## 5. Design (one pattern for every raw store, awaiting the architect's lock)
+
+**The pattern.** At a raw array's last use, the computation that needs it in
+order takes it out of its store, sorts it in place, computes from it and lets
+it go. No copy is made; the enlargement of § 4.4 falls on an array the routine
+owns and ends with it (guidelines 1, 5); nothing is written back to the store
+(guideline 6); the store never holds an array past its last use (guideline 4).
+`calculate_statistics` sorts the array it is given in place (aliased to a named
+array, the only form Perl sorts in place) and reads min and max from its ends,
+unless the caller states the array is already sorted.
+
+| | Store | Sorted | By | Released |
+|---|---|---|---|---|
+| D1 | Time buckets | once, in place | bucket statistics, after taking the array out of the bucket | when the bucket's statistics are done |
+| D2 | Message rows, no `-so` on a statistic | once, in place | group_calc, after taking the array out of the row | when the row's statistics are done; a row not displayed, once the selection is made |
+| D3 | Message rows, `-so` on a statistic | once, in place in the store | the ranking step, which needs every row's statistic before it can rank the messages | a row not displayed, once the selection is made; a displayed row, after group_calc computes its full statistics from the sorted array without sorting it again |
+| D4 | Consolidation clusters | never | (the final pass hands each cluster's array to its row) | the cluster keeps no reference after the hand-over |
+| D5 | Heatmap raw store (`-hmdm raw`) | once, in place | the heatmap's per-bucket percentiles | when the bucket is done (as today) |
+| D6 | Histogram raw store (`-hgdm raw`) | once, in place | the histogram's percentiles, per metric and its highlight twin | when the metric is done (as today) |
+
+- **D3, the order of sorts.** The values of each row are sorted once and the
+  messages are ranked once. The ranking step's in-place sort is the one
+  write-back to the store, and the order it writes is the order group_calc
+  reads. group_calc knows which arrays the ranking step sorted from that
+  step's own transient map of computed values plus the keys it demoted; no flag
+  is stored on the entry (guideline 2). A row ranked without a value (below the
+  statistic's floor) was not sorted, and group_calc sorts it if it is
+  displayed. For a log with non-integer durations, the ranking step enlarges
+  every row's array at once, as the base's ranking step already does, and the
+  enlargement ends with each row's release; the architect accepted this on
+  2026-10-07.
+- **D7 — group_calc writes back only what it derives** (guideline 6).
   `$log_messages{…}{total_bytes} = $aggregated_data->{total_bytes}` stores back
-  the value group_calc has just read from the same entry; it goes. The
-  statistics, the means and impact are derived there and stay.
-
-**Alternative not taken.** Sorting a private copy in every caller leaves the
-store untouched but sorts a selected key's values twice under `-so`
-(guideline 6) and holds a copy of each row beside its array in group_calc.
+  the value group_calc has just read from the same entry; it goes.
+- **D8 — The pattern is recorded in `docs/architecture-patterns.md`**, with its
+  consumption sites, in the commit that implements it.
+- **Sort moments.** No raw array is sorted before or during consolidation;
+  every sort above runs after `group_similar_messages` has returned, when the
+  arrays are final.
 
 ## 6. Acceptance criteria (revised to § 2, awaiting the architect's lock)
 
 The scenarios are those of § 4.4 on the month of § 4.2, base `a585f97`
 against the branch, on this machine: `-n 25 -g` (the issue's command),
-`-n 25`, `-n 99999999` (every row given statistics) and `-n 25 -so p99`, each
-with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
+`-n 25`, `-n 99999999` (every row given statistics), `-n 25 -so p99`, and
+`-n 25 -hm -hg -hmdm raw -hgdm raw` (the heatmap and histogram raw stores),
+each with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
 
 - [ ] **AC1 — Peak memory no higher in any scenario, lower on the issue's**
   (assertable): `MEMORY rss_peak` and the maximum resident size of
@@ -289,18 +309,19 @@ with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
   on `-n 25 -g`.
 - [ ] **AC2 — The core data structures do not grow** (assertable, guideline 2):
   in every scenario the `-mem` high-water marks of `log_messages`,
-  `consolidation_clusters` and `log_analysis` are no higher than the base's.
+  `consolidation_clusters`, `log_analysis`, `heatmap_raw` and
+  `histogram_values` are no higher than the base's.
 - [ ] **AC3 — Durations are released after their last use** (assertable,
   guideline 4): after statistics no message row and no cluster holds a
   durations array under the raw data model, so `MEMORY_FINAL log_messages` is
   lower than the base's by the arrays released. Verified by `-mem` and by a
   one-off probe on a scratch copy that counts the arrays left after
   statistics.
-- [ ] **AC3a — No array sorted twice, nothing written back unchanged**
-  (assertable, guideline 6): a one-off probe on a scratch copy counts the
-  sorts of each array on the single-day access log with `-n 25 -g -m uuid` and
-  with `-n 25 -so p99`, and every array is sorted at most once; group_calc
-  writes nothing back to an entry that it did not derive (code reading).
+- [ ] **AC3a — Each array sorted once, the messages ranked once, nothing
+  written back unchanged** (assertable by code reading, guideline 6): every
+  sort of a raw array is one of D1 to D6, runs after consolidation has
+  returned, and no path reaches a second sort of the same array; group_calc
+  writes back nothing it did not derive.
 - [ ] **AC4 — Time not sacrificed** (assertable, guideline 3): the
   before/after benchmark on `single-day-access-log-standard` and on
   `month-single-server-access-logs-top25-consolidate` shows no metric worse by
@@ -310,8 +331,8 @@ with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
   after, after removing the version stamp, paths, timestamps, run time and
   peak memory: on the single-day access log with `-n 25`, `-n 25 -g -m uuid`,
   `-n 25 -g -m uuid -bdm bin -mdm bin`, `-n 25 -so p99` and
-  `-n 25 -g -m uuid -so p99`, and on the month with `-bs 1440 -n 25` with and
-  without `-g -m uuid`. `tests/validate-statistics.sh` (the statistics oracle)
+  `-n 25 -g -m uuid -so p99` and `-n 25 -hm -hg -hmdm raw -hgdm raw`, and on the
+  month with `-bs 1440 -n 25` with and without `-g -m uuid`. `tests/validate-statistics.sh` (the statistics oracle)
   passes.
 - [ ] **AC6 — No runtime warnings** (assertable): no ` at <file> line <N>` on
   stderr for any run above.
