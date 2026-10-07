@@ -3,7 +3,9 @@
 ## Status
 
 `status: in progress`. Design (D1 to D3) and acceptance criteria locked by the
-architect on 2026-10-07; implementation under way.
+architect on 2026-10-07. D2 as implemented (`ee1326c`) regresses peak memory
+when every row is given statistics on a log with non-integer durations
+(§ 4.4); the design is reopened with the architect.
 
 ## 1. The motivating consumer
 
@@ -80,6 +82,84 @@ The record's 1,243 MB at `8462ae3` was measured on the benchmarking machine;
 the two are not comparable, which is why the fix's before and after are both
 measured here (§ 7).
 
+### 4.3 Delivery measurements (`ee1326c` against `a585f97`, this machine)
+
+**Peak memory (AC1).** The issue's command, one run each:
+
+| Measure | `a585f97` | `ee1326c` | change |
+|---|---|---|---|
+| Maximum resident size (`/usr/bin/time -l`) | 1,162 MB | 924 MB | -238 MB (-20.5 %) |
+| `MEMORY rss_peak` | 1,000.6 MB | 923.4 MB | -77.2 MB |
+| `finalize/calculate_statistics/group_calc` | 2.68 s | 2.08 s | -0.60 s |
+| total | 131.6 s | 125.9 s | |
+
+The largest row on this run holds 3,751,230 occurrences; two copies of that
+many numeric values at about 32 bytes each is 240 MB, the fall measured.
+
+**Outputs unchanged (AC2 to AC5).** Each run before and after, from a worktree
+of each commit side by side, compared after removing the version stamp, the
+checkout path, timestamps, run time and peak memory:
+
+| Input | Options (plus `--disable-progress --terminal-width 200 -o`) | Table, STATS CSV, MESSAGES CSV, aggregate export, stderr |
+|---|---|---|
+| One day of one server's Tomcat access log (761,698 lines) | `-n 25` | identical |
+| same | `-n 25 -g -m uuid` | identical |
+| same | `-n 25 -g -m uuid -bdm bin -mdm bin` | identical |
+| same | `-n 25 -so p99` | identical |
+| same | `-n 25 -g -m uuid -so p99` | identical |
+| The month of § 4.2 | `-bs 1440 -n 25` | identical |
+| same | `-bs 1440 -n 25 -g -m uuid` | identical |
+
+The run index differs only in its read rate, peak memory and processing time
+columns. No run printed a runtime warning.
+
+### 4.4 The in-place sort enlarges the stored values it sorts (found at delivery)
+
+**What grows.** Each duration is one Perl scalar: 24 bytes, plus 8 for its
+slot in the array. Perl's optimised numeric sort (`sort { $a <=> $b }`) reads
+the scalars it sorts, and when an array holds at least one non-integer value
+it converts every scalar in it to a larger type that caches a second numeric
+form (`NV` or `IV` to `PVNV`, 24 to 56 bytes; seen with `Devel::Peek`). Perl
+never converts a scalar back, so the growth lasts as long as the scalar. An
+array of integers only is left unchanged. This happens whether the sort writes
+to a new array or in place: it reads the original scalars either way. Before
+this change the sorted scalars were the working copy's, freed after the row's
+statistics; with the in-place sort they are the store's, and stay for the run.
+
+**Which arrays hold a non-integer.** Any log whose duration field carries a
+fraction, and any row merging lines of such a log. In the month of § 4.2 the
+later files write the duration with a decimal (`3125.6`) and the earlier files
+as integers; the largest row (3,751,230 values) mixes both, so after its
+statistics it measures 241.4 MB on `ee1326c` against 121.4 MB on `a585f97`,
+while the next two rows (1,014,511 and 546,779 values, integers only) are the
+same size on both.
+
+**Every path that sorts a stored durations array**, measured on that month
+(`-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`, one run each,
+`a585f97` against `ee1326c`):
+
+| Path | Arrays sorted | Lifetime after the sort | Options | `rss_peak` base → branch | `log_messages` base → branch |
+|---|---|---|---|---|---|
+| Time-bucket statistics | every bucket | freed after its statistics | (every run) | | |
+| Message rows given statistics | the top `-n` rows of each category | to the end of the run | `-n 25 -g` (the issue's) | 1,000.6 → 923.4 MB | 253.6 → 373.7 MB |
+| same | same | same | `-n 25` | 780.6 → 779.9 MB | 376.6 → 411.5 MB |
+| same | every row | same | `-n 99999999` | **837.1 → 988.0 MB (+18.0 %)** | 491.7 → 621.5 MB |
+| Sort pre-pass for a statistic operand | every key at or above the statistic's floor | to the end of the run, on both commits | `-n 25 -so p99` | 911.1 → 887.7 MB | 496.9 → 496.9 MB |
+
+The last row shows the pre-pass already enlarged every key's array on the
+base: it sorts the stored scalars. With every row given statistics, the
+in-place sort is a regression: the growth accumulates across rows where the
+base's copies were transient, one row at a time.
+
+A comparator the optimiser does not recognise reads the scalars without
+converting them, at a cost in time. On 3,751,230 random non-integer values,
+sorted in place in isolation:
+
+| Sort form | Sort time | Array after | Process peak |
+|---|---|---|---|
+| `sort { $a <=> $b }` (optimised) | 1.63 s | 120.0 MB to 240.1 MB | 569 MB |
+| `sort { $a < $b ? -1 : $a > $b ? 1 : 0 }` | 3.84 s | 120.0 MB, unchanged | 431 MB |
+
 ## 5. Design (locked by the architect, 2026-10-07)
 
 The record's variant C, measured on scratch copies at `8462ae3` (§ 11.16:
@@ -118,12 +198,12 @@ pre-regression commit at 982 MB).
   version normalisation. By direct diff, on the single-day access log and on
   the month selection of AC1. `tests/validate-statistics.sh` (the statistics
   oracle) passes.
-- [ ] **AC3 — Bin data model unchanged** (assertable): the AC2 diff under
+- [x] **AC3 — Bin data model unchanged** (assertable): the AC2 diff under
   `-bdm bin -mdm bin` on the single-day access log is byte-identical.
-- [ ] **AC4 — A statistic sort operand unchanged** (assertable): under
+- [x] **AC4 — A statistic sort operand unchanged** (assertable): under
   `-so p99` (the population walk's path) the message table is byte-identical
   before and after.
-- [ ] **AC5 — No runtime warnings** (assertable): no ` at <file> line <N>` on
+- [x] **AC5 — No runtime warnings** (assertable): no ` at <file> line <N>` on
   stderr for any run of AC1 to AC4.
 - [ ] **AC6 — Completion gate** (assertable): the full harness suite passes;
   the before/after benchmark on `single-day-access-log-standard` shows no
