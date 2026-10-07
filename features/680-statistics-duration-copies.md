@@ -369,6 +369,78 @@ rounds, so totals are compared within a round.
   same kind of pass, under shape demand only, and its floating-point sums
   depend on the order, so moving it would change the reported moments.
 
+### 4.9 Completion gate (`d6f1ecf`, version restored to `0.19.0`)
+
+**D9 on the raw heatmap and histogram** (`hmhg` of § 4.8, three interleaved
+rounds, medians with ranges):
+
+```
+  metric                              base median [range]        branch median [range]    change
+  peak resident (OS)            2,269.0 [2,209.3–2,291.7]    2,085.0 [1,982.3–2,119.4]     -8.1%
+  log_messages high-water             386.2 [376.6–386.2]          386.2 [376.6–386.2]     -0.0%
+  log_messages at end                 386.2 [376.6–386.2]          113.8 [104.2–113.8]    -70.5%
+  heatmap_raw high-water              589.7 [589.7–589.7]          589.7 [589.7–589.7]     +0.0%
+  histogram high-water                794.4 [794.4–794.4]          794.4 [794.4–794.4]     +0.0%
+  statistics step                        0.91 [0.91–0.92]             1.42 [1.38–1.53]    +55.9%
+    group_calc                           0.44 [0.43–0.44]             0.93 [0.93–0.95]   +112.0%
+  heatmap step                        10.85 [10.81–10.89]          10.17 [10.12–10.41]     -6.3%
+  histogram step                      22.30 [22.24–23.01]          22.62 [22.54–22.66]     +1.4%
+  read files (untouched)           102.29 [102.13–102.76]       101.83 [101.60–101.88]     -0.5%
+  total                            136.85 [136.18–137.10]       135.94 [135.83–136.47]     -0.7%
+```
+
+The heatmap step is now faster than the base; the histogram step is 0.32 s
+(1.4 %) slower on 7.75 million values; the total is 0.7 % faster.
+
+**Before/after benchmarks**, three interleaved rounds each, `release/0.19.0`
+at `a585f97` and the branch, both from worktrees side by side under
+`.claude/worktrees/` (medians with ranges; memory in MB, time in s):
+
+```
+== single-day-access-log-standard
+  MEMORY:consolidation_clusters                                   0.00 [0.00–0.00] ->      0.00 [0.00–0.00] MB    +0.0%
+  MEMORY:log_analysis                                            24.79 [24.79–24.79] ->     24.79 [24.79–24.79] MB    +0.0%
+  MEMORY:log_messages                                            27.48 [27.48–27.48] ->     27.47 [27.47–27.47] MB    -0.0%
+  MEMORY:rss_peak                                               105.78 [105.73–105.82] ->    100.81 [100.81–101.50] MB    -4.7%
+  MEMORY:unattributed                                            51.96 [51.88–52.06] ->     46.98 [46.95–47.69] MB    -9.6%
+  TIMING:finalize/calculate_statistics                            0.10 [0.10–0.10] ->      0.08 [0.08–0.08] s   -18.2%
+  TIMING:finalize/calculate_statistics/bucket_stats               0.07 [0.07–0.07] ->      0.05 [0.05–0.05] s   -30.0%
+  TIMING:finalize/calculate_statistics/group_calc                 0.02 [0.02–0.02] ->      0.03 [0.03–0.03] s   +17.4%
+  TIMING:parse/read_files                                         8.56 [8.48–8.56] ->      8.52 [8.49–8.54] s    -0.5%
+  TIMING:total                                                    8.68 [8.60–8.68] ->      8.62 [8.60–8.65] s    -0.7%
+== month-single-server-access-logs-top25-consolidate
+  MEMORY:consolidation_clusters                                 220.98 [220.98–220.98] ->    220.98 [220.98–220.98] MB    -0.0%
+  MEMORY:log_analysis                                           254.00 [254.00–254.00] ->    254.00 [254.00–254.00] MB    +0.0%
+  MEMORY:log_messages                                           253.64 [253.64–253.64] ->    172.34 [172.34–172.34] MB   -32.1%
+  MEMORY:rss_peak                                              1224.59 [1056.15–1240.76] ->    903.53 [903.43–905.49] MB   -26.2%
+  MEMORY:unattributed                                           407.68 [239.04–429.98] ->    167.88 [167.74–169.69] MB   -58.8%
+  TIMING:finalize/calculate_statistics                            5.30 [5.29–5.43] ->      3.86 [3.85–3.91] s   -27.1%
+  TIMING:finalize/calculate_statistics/bucket_stats               2.84 [2.83–2.99] ->      1.70 [1.69–1.70] s   -40.2%
+  TIMING:finalize/calculate_statistics/group_calc                 2.45 [2.44–2.46] ->      2.17 [2.15–2.21] s   -11.6%
+  TIMING:finalize/group_similar                                   4.39 [4.38–4.42] ->      4.49 [4.45–4.51] s    +2.2%
+  TIMING:parse/read_files                                       115.89 [115.88–116.15] ->    116.08 [115.33–116.89] s    +0.2%
+  TIMING:total                                                  125.63 [125.59–126.00] ->    124.42 [123.75–125.28] s    -1.0%
+```
+
+Two metrics are worse by more than 1 %. group_calc on the single day,
+0.02 to 0.03 s: releasing the rows not displayed. `finalize/group_similar` on
+the month, 4.39 [4.38–4.42] to 4.49 [4.45–4.51] s: not the change. The only
+change inside consolidation is the cluster's `delete` at the hand-over, and
+the branch against a copy of itself without it, from the same worktree, two
+rounds each, measured 4.38 and 4.42 s with it and 4.39 and 4.39 s without,
+the base's range.
+
+**Harness suite.** 48 of 49 harnesses pass. `validate-message-discard.sh`
+failed one assertion in the gate run (`metrics :: -d durationMs switches
+duration off and removes nothing from lines written durationMS=`); run alone,
+its `metrics` scenario failed once and passed once on the branch and passed
+twice on the base. Cause, pre-existing and in the harness: `run_messages`
+writes each run into a directory named from its label, and the labels
+`dur-durationMS` and `dur-durationMs` name one directory on a case-insensitive
+file system, so the second run's directory holds both runs' CSVs and
+`find … -print -quit` returns whichever the directory lists first. The failing
+run read `…-ddurationMS.csv` from the `dur-durationMs` directory.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 **The pattern.** At a raw array's last use, the computation that needs it in
