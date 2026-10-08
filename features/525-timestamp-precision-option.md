@@ -30,7 +30,10 @@ precision are shown at the finest any of them carries. The shipped code and
 the scenario `truth/several-files` follow the superseded coarsest-file rule of
 § 6.4 (§ 7, *Several files*).
 Reopened 2026-10-08 to fix it, on branch `525-timestamp-precision-option-2`
-off `release/0.19.0`; it blocks #615 (CSV input as a registry entry).
+off `release/0.19.0`; it blocks #615 (CSV input as a registry entry). Part 1,
+the run's precision taken from the finest file, is delivered; part 2, each
+run-index row written at the request clamped to its own file's precision
+(D13), is next.
 The architect's decisions are § 4 (D1 to D23); no element of the run index's
 design remains **proposed**. A design element that no decision settles is
 implementation detail and is marked **proposed**.
@@ -819,6 +822,19 @@ takes the finest precision any processed file carries, never the coarsest, so
 one file carrying less does not lower the run. The notice prints only when the
 request is finer than every processed file carries, naming what they carry.
 
+**Where a file's precision comes from.** The architect, 2026-10-08: "The
+tool's use requires lines to match for anything to happen. If there are no
+lines matched, nothing happens. If there are no patterns matched, there are no
+lines matched. Normally, the precision comes from the timestamp expressed in
+the timestamp format. [...] the initial scan of the file to get a sample of
+the file and lock in the format for the file should also be doing a precision
+scan to validate that the precision level is actually coming from the file".
+A file's precision is read from the detection sample that settles its format;
+a file whose sample matches no format puts no line on the timeline, so it has
+no precision to count and plays no part in the run's. CSV input becomes a
+source through the same sample under #615 (CSV input as a registry entry),
+whose D17 reads it from the rows its block is validated on.
+
 **The notice.** One stderr line when the resolved precision is coarser than the
 requested one, naming the precision used and what was found, in plain words
 (proposed text): "Note: timestamps are shown to the millisecond: microsecond
@@ -1053,15 +1069,15 @@ directory, and is shaped to the assertion that reads it.
   are accepted from this drop, in any case. `-tp ns` on the nine-digit set
   renders six fractional digits and the notice names microsecond and the
   six-digit limit. *Assertable.*
-- [ ] **Several files (D4, amended 2026-10-08).** `-tp ms` over the
+- [x] **Several files (D4, amended 2026-10-08).** `-tp ms` over the
   three-digit set and the whole-second fixture together renders at millisecond
   precision, with no notice; `-tp us` over the same pair renders at millisecond
-  precision, the notice naming what the files carry. *Assertable.* Not met:
-  the implementation lowers the run to the coarsest file
-  (`resolve_timestamp_precision` ::
-  `my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;`),
-  and the scenario `truth/several-files` of
-  `tests/validate-timestamp-precision.sh` asserts the superseded rule.
+  precision, the notice naming what the files carry. *Assertable.* Met
+  2026-10-08 on `525-timestamp-precision-option-2`: `resolve_timestamp_precision`
+  takes the finest (`my $limit = %file_precision ? $finest->(values %file_precision) : undef;`);
+  the scenario `truth/several-files` of `tests/validate-timestamp-precision.sh`
+  asserts both runs and failed on the unfixed code, all four assertions with
+  the expected diagnostic.
 - [x] **The deprecated switches follow the rule (D4).** `-ms` on the
   whole-second fixture renders at second precision with the notice; the
   regression golden that runs `-ms` over a whole-second access log is

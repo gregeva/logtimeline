@@ -13891,12 +13891,14 @@ sub gc_heap_size_bytes {
 # fixed one, gives its declared precision; a variable-length one gives the
 # precision of the most fractional digits among the detection sample's
 # timestamps. A file whose precision cannot be read (not sampled, CSV input,
-# no format recognised in the sample) sets no limit. The run takes the
-# coarsest file's, so no file's timestamps print a digit they never carried;
-# a behavioural notice says what was shown and why, and the runtime-config
-# row carries the request in its clamp annotation.
+# no format recognised in the sample) sets no limit. The request gives way
+# only to the finest precision any processed file carries, so a file carrying
+# less than another never lowers the run; a behavioural notice says what was
+# shown and why, and the runtime-config row carries the request in its clamp
+# annotation.
 sub resolve_timestamp_precision {
     my $coarsest = sub { (sort { $time_unit_step{$b}{ms} <=> $time_unit_step{$a}{ms} } @_)[0] };
+    my $finest   = sub { (sort { $time_unit_step{$a}{ms} <=> $time_unit_step{$b}{ms} } @_)[0] };
     my $name     = sub { (my $n = $time_unit_step{ $_[0] }{long}) =~ s/s$//; $n };
     my $asked    = $timestamp_precision;
     my %file_precision;
@@ -13913,7 +13915,7 @@ sub resolve_timestamp_precision {
         }
         $file_precision{$file} = $coarsest->(@found) if @found;
     }
-    my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;
+    my $limit = %file_precision ? $finest->(values %file_precision) : undef;
     return if !defined $limit || $time_unit_step{$timestamp_precision}{ms} >= $time_unit_step{$limit}{ms};
 
     my $carry = sub { $_[0] eq 's' ? 'whole seconds' : $time_unit_step{ $_[0] }{long} };

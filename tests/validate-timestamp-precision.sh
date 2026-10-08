@@ -840,7 +840,7 @@ fi
 # ---------------------------------------------------------------------------
 # The precision the log carries (D4, D10)
 # ---------------------------------------------------------------------------
-CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; several files take the coarsest; a file whose precision cannot be read sets no limit)'
+CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
 
 # note_lines DIR — the precision notices on the run's stderr.
 note_lines() {
@@ -911,14 +911,25 @@ if scenario_wanted truth/several-files; then
 current_scenario="truth/several-files"
 run_in tsf "${COMMON[@]}" -ni -bs 1440 -tp ms "$THREE" "$ACCESS"
 b=$(heading_bounds "$TMP_DIR/tsf")
-if [[ "$b" =~ ^[0-9-]+\ [0-9:]{8}\|[0-9-]+\ [0-9:]{8}$ ]]; then
-    pass_with "a millisecond log beside a whole-second one renders at the second"
+if [[ "$b" =~ ^[0-9-]+\ [0-9:]{8}\.[0-9]{3}\|[0-9-]+\ [0-9:]{8}\.[0-9]{3}$ ]]; then
+    pass_with "a millisecond log beside a whole-second one renders at the millisecond asked for"
 else
-    fail_with "a millisecond log beside a whole-second one renders at the second" "the run takes the coarsest precision its files carry" \
+    fail_with "a millisecond log beside a whole-second one renders at the millisecond asked for" \
+        "the request gives way only to the finest precision any processed file carries; a file carrying less does not lower the run" \
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
 fi
-expect_note "the notice names each file's precision" "$TMP_DIR/tsf" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
+expect_note "a request one of the files carries: no notice" "$TMP_DIR/tsf" ""
+run_in tsf-us "${COMMON[@]}" -ni -bs 1440 -tp us "$THREE" "$ACCESS"
+b=$(heading_bounds "$TMP_DIR/tsf-us")
+if [[ "$b" =~ ^[0-9-]+\ [0-9:]{8}\.[0-9]{3}\|[0-9-]+\ [0-9:]{8}\.[0-9]{3}$ ]]; then
+    pass_with "a request finer than every file carries renders at the finest any of them carries"
+else
+    fail_with "a request finer than every file carries renders at the finest any of them carries" \
+        "the request gives way to the finest precision any processed file carries, never the coarsest" \
+        'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
+fi
+expect_note "a request finer than every file carries: the notice names each file's precision" "$TMP_DIR/tsf-us" \
+    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
 fi
 
 if scenario_wanted truth/deprecated-switch; then

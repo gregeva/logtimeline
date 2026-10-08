@@ -443,16 +443,15 @@ D23); `features/524-bucket-size-unit.md` D4 (width and precision separate);
 
 **Status.** Needs refinement, on two counts.
 
-- *A run over several files.* The implementation lowers the whole run, every
-  rendering and every index row, to the coarsest precision among its files
+- *A run over several files.* The run's precision is the request clamped to
+  the finest precision any processed file carries
   (`resolve_timestamp_precision` ::
-  `my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;`),
-  and the scenario `truth/several-files` of
-  `tests/validate-timestamp-precision.sh` asserts it (`-tp ms` over a
-  millisecond log and a whole-second access log renders the run at the
-  second). That was a proposed rule of #525, implemented and never locked;
-  rule 4 as amended takes the finest precision any processed file carries, so
-  that run renders at the millisecond with no notice.
+  `my $limit = %file_precision ? $finest->(values %file_precision) : undef;`).
+  The run index still writes every file's row at that one run precision
+  (`write_index_file` ::
+  `my $index_precision = index_timestamp_precision($timestamp_precision);`),
+  where rule 6 writes each row at the request clamped to its own file's
+  precision; refined by #525, reopened for it.
 - *CSV input.* It reads its timestamps outside the read gate, in two inline
   arms of `read_and_process_logs`: the ISO arm
   (`} elsif (!$csv_epoch_timestamp && $match_type == 13) {`) always reads up
