@@ -5162,39 +5162,51 @@ sub format_entry_block_src {
     # sees the message as the block leaves it.
     push @body, $spec->{_cls_src};
 
-    # Inline timestamp handling (D31 taken to its P8 conclusion: the
-    # closure-call overhead disappears when the parse is inlined into the
-    # per-format block). Fractional handling first — after the tz-chop
-    # transforms — so the %timestamp_date_cache key excludes offset and
-    # fraction; the declared frac contract selects the variant:
-    #   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
-    #             reads, no regex, no exponent math
-    #   none    — layout never carries a fraction: constant zero, no scan
-    #   generic — variable/unguaranteed shape: the original s/// strip
-    # A run that reads no sub-second part ($opts->{capture_fraction} false)
-    # still strips the fraction for the date key and the layout parse, but
-    # neither reads nor converts it.
-    # Then the layout parse, fronted by the last-seen memo: the date's
-    # midnight epoch from %timestamp_date_cache (one timegm() per distinct
-    # day) plus the time of day as arithmetic, as compile_format_time_parser.
+    # The timestamp: fraction under the read gate, then the last-seen memo
+    # fronting the layout parse (format_timestamp_src).
+    push @body, format_timestamp_src($spec, $opts);
+
+    return ($aux_decl, $cond_src, join("\n", @body), \@aux);
+}
+
+# Inline timestamp handling (D31 taken to its P8 conclusion: the
+# closure-call overhead disappears when the parse is inlined into the
+# per-format block). Fractional handling first — after the tz-chop
+# transforms — so the %timestamp_date_cache key excludes offset and
+# fraction; the declared frac contract selects the variant:
+#   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
+#             reads, no regex, no exponent math
+#   none    — layout never carries a fraction: constant zero, no scan
+#   generic — variable/unguaranteed shape: the original s/// strip
+# A run that reads no sub-second part ($opts->{capture_fraction} false)
+# still strips the fraction for the date key and the layout parse, but
+# neither reads nor converts it.
+# Then the layout parse, fronted by the last-seen memo: the date's
+# midnight epoch from %timestamp_date_cache (one timegm() per distinct
+# day) plus the time of day as arithmetic, as compile_format_time_parser.
+# Returns the source pieces in order: the fraction handling, then the memo
+# fronting the layout parse.
+sub format_timestamp_src {
+    my ($spec, $opts) = @_;
+    my @src;
     my $frac = $spec->{time}{frac} // 'generic';
     my $capture = $opts->{capture_fraction} // 1;
     my $ns      = $opts->{capture_ns};
     if ($frac eq 'fixed3') {
         die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
             unless $spec->{pattern_src} =~ /\\\.\\d\{3\}|\[\.,\]\\d\{3\}/;
-        push @body, $ns      ? q{$fractional_ms = $fraction_digits = substr($timestamp_str, 20, 3);
+        push @src, $ns      ? q{$fractional_ms = $fraction_digits = substr($timestamp_str, 20, 3);
 substr($timestamp_str, 19) = '';}
                   : $capture ? q{$fractional_ms = substr($timestamp_str, 20, 3);
 substr($timestamp_str, 19) = '';}
                              : q{$fractional_ms = 0;
 substr($timestamp_str, 19) = '';};
     } elsif ($frac eq 'none') {
-        push @body, $ns ? q{$fractional_ms = 0; $fraction_digits = '';} : q{$fractional_ms = 0;};
+        push @src, $ns ? q{$fractional_ms = 0; $fraction_digits = '';} : q{$fractional_ms = 0;};
     } else {
         # The strip reads up to nine digits, so a precision coarser than the
         # log's rounds from all of them; under nanosecond it keeps them too.
-        push @body, $ns      ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); $fraction_digits = $2; } else { $fractional_ms = 0; $fraction_digits = ''; }}
+        push @src, $ns      ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); $fraction_digits = $2; } else { $fractional_ms = 0; $fraction_digits = ''; }}
                   : $capture ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }}
                              : q{$timestamp_str =~ s/(?<=:\d{2}:\d{2})[.,]\d{1,9}//; $fractional_ms = 0;};
     }
@@ -5235,12 +5247,11 @@ $prev_src    \$timestamp = \$format_last_ts_epoch = $compute;
 $mono_src}}
         : qq{\$timestamp = \$format_last_ts_epoch = $compute;
     \$format_last_ts_str = \$timestamp_str;};
-    push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
+    push @src, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 else {
     $miss_src
 }};
-
-    return ($aux_decl, $cond_src, join("\n", @body), \@aux);
+    return @src;
 }
 
 # Emit the inline guard condition for a scan block (D28), or '' when the

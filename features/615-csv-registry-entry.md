@@ -1298,6 +1298,29 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
 | 4 | the `-ucs` and `-ucm` rows in `--help` and `docs/usage.md` (D14), with their behaviour scenarios | AC11 (the `-ucs` and `-ucm` rows say what the options do) |
 | 5 | the closures, the `FR_TIME_PARSE` slot and its renumbering (D4); records trued up (§ 10) | AC3 (one parse text) |
 
+**Drop 2, as delivered (2026-10-08).**
+
+- **Named CSV selection.** `network-latency-csv` was added to
+  `tests/baseline/run-benchmark.sh` in a tier of its own, `named`, which
+  `quick`, `full`, `xl` and `all` never run. Its base option is
+  `-udm latency_ms`, and `tests/baseline/README.md` says so in its tier table
+  and boundary notes.
+- **Before captures.** Both were taken in this branch's worktree on `ltl` at
+  the base commit (485e533, version `0.19.0`), before any change to `ltl`,
+  into `tests/baseline/results/615-before.tsv`:
+  `single-day-access-log-standard`, and `network-latency-csv-standard`
+  (`TIMING parse/read_files` 1.888 s, peak memory 43.2 MB).
+- **Emitter split (AC4, the byte-identical part).** The timestamp part of
+  `format_entry_block_src` (the fraction under the read gate, then the memo
+  fronting the layout parse) is now its own sub, `format_timestamp_src`, which
+  `format_entry_block_src` calls. `prototype/615-csv-generated-block/dump-entry-src.pl`
+  dumps every scanned entry's generated source as `format_entry_block_src`
+  returns it: 30 entries under four compile-option combinations (gate closed,
+  gate open, nanosecond, and gate open with the query string kept), 120
+  sources. The dump on the base commit's `ltl` and on the split's are
+  byte-identical (SHA-256 `9901d453…fa330e7` for both). The other half of
+  AC4, the CSV block coming from the same sub, is drop 3's.
+
 **Merge gate.** The full harness suite, `CI=1 ./tests/validate-csv-output.sh`
 then `CI=1 ./tests/validate-statistics.sh` then the rest, on the commit being
 merged; the before/after benchmark on `single-day-access-log-standard` and on the
