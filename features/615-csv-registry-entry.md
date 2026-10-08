@@ -1568,6 +1568,37 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
   inline arms, which no longer exist on the branch; the prototype README
   says they run against 485e533.
 
+**Completion gate (2026-10-08), on 08ac4e4, `$version_number` 0.19.0.**
+
+- **After benchmark, first.** Both cases, run in this worktree against the
+  `before` captures of drop 2:
+
+  | Case | Metric | Before | After | Change |
+  |---|---|---|---|---|
+  | `network-latency-csv-standard` | `TIMING/total` | 1.9 s | 1.8 s | −155 ms (−8.1%) |
+  | `network-latency-csv-standard` | `MEMORY/rss_peak` | 41.2 MB | 41.5 MB | +240 KB (0.6%) |
+  | `single-day-access-log-standard` | `TIMING/total` | 8.9 s | 9.1 s | +153 ms (+1.7%), one run |
+
+  The access-log case's single run was above the 1% threshold, so it was
+  run five more times, interleaved and order-balanced. The base commit's
+  `ltl` was run from the `release/0.19.0` worktree beside this one; that
+  worktree's `ltl` is identical to 485e533.
+
+  | `single-day-access-log-standard` | Base, median (range) | Branch, median (range) |
+  |---|---|---|
+  | `parse/read_files` | 8.722 s (8.416–8.874) | 8.636 s (8.440–8.851) |
+  | `total` | 8.826 s (8.514–8.974) | 8.742 s (8.538–8.955) |
+
+  No regression: the branch's median is 1.0% below the base's, and the
+  ranges overlap. The +1.7% was one run's variation. This agrees with
+  scanned formats' generated source being byte-identical (drop 2, rechecked
+  in drop 3).
+- **Full harness suite, after.** `CI=1 validate-csv-output.sh` (42 pass),
+  then `CI=1 validate-statistics.sh` (25 of 25 scenarios), then the other 47
+  `tests/validate-*.sh`. All 49 exit 0, each with its assertions run and
+  none failing.
+- `tests/validate-help-content.sh` passes, 94 assertions.
+
 **Merge gate.** The full harness suite, `CI=1 ./tests/validate-csv-output.sh`
 then `CI=1 ./tests/validate-statistics.sh` then the rest, on the commit being
 merged; the before/after benchmark on `single-day-access-log-standard` and on the
