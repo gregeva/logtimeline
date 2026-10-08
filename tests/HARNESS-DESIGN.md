@@ -675,6 +675,8 @@ A harness that invokes `ltl` with `-o` runs it in a directory the harness create
 
 **A product found and not written is a fail-fast diagnosis, not a cleanup.** When a harness finds an `ltl -o` product it did not write in its working directory, it fails naming the file, before any other action. The guard sits before any sweep, because destruction otherwise happens on green runs too. `.gitignore` covers all three product classes, so a leak never appears in `git status` and never reaches the session-start outstanding-state sweep: the harness is the only place it can surface.
 
+**One directory per run, claimed, never reused.** A harness that names each run's directory from a label and then finds the run's products by searching that directory gets the wrong file whenever two runs share it. Two labels that differ only in case (`d-bytes` and `d-Bytes`) name one directory on a case-insensitive file system, the macOS default, and `find … -print -quit` returns whichever file the directory lists first: the scenario fails now and then, and passes now and then on the other run's product. A run helper creates its directory through `claim_run_dir()` (`tests/lib/run-dir.sh`), which fails, naming the directory, when it already exists, so a collision fails on every run and every file system. Labels that compare spellings name each run's role (`lower-`, `upper-`, `spelling-1-`), never the spelling alone.
+
 Same failure class as § *Cached capture artifacts expire* (Issue #448): an artifact read back without establishing which run produced it.
 
 ## Colour rendering is controlled, never inherited

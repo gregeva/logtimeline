@@ -43,6 +43,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/run-dir.sh
+source "$SCRIPT_DIR/lib/run-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -176,7 +178,10 @@ RUN_DIR=""; RUN_OUT=""; MSG_CSV=""; STATS_CSV=""
 run_messages() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; MSG_CSV=""; STATS_CSV=""
     local rc
     set +e
@@ -896,9 +901,10 @@ scenario_name_vocabulary() {
     # Criterion 5 (D15): a built-in metric name in any case is the metric.
     run_messages x-bytes -x bytes "$VOCABULARY_FIXTURE" || return 0
     local bytes_csv="$MSG_CSV" bytes_stats="$STATS_CSV"
-    local spelling
+    local spelling n=0
     for spelling in Bytes BYTES; do
-        run_messages "x-$spelling" -x "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
+        n=$((n + 1))
+        run_messages "x-spelling-$n-$spelling" -x "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
         assert_command \
             command     "check_same_csv '$bytes_csv' '$MSG_CSV' 'messages' && check_same_csv '$bytes_stats' '$STATS_CSV' 'statistics'" \
             label       "-x $spelling gives the CSVs -x bytes gives" \
@@ -1003,9 +1009,9 @@ scenario_field_names() {
     local case fixture lower upper
     for case in "$OBJECT_FIXTURE|thread|Thread" "$USERS_FIXTURE|user|USER" "$USERS_FIXTURE|session|Session" "$OBJECT_FIXTURE|object|Object" "$VOCABULARY_FIXTURE|query-string|Query-String"; do
         IFS='|' read -r fixture lower upper <<< "$case"
-        run_messages "case-$lower" -x "$lower" "$fixture" || return 0
+        run_messages "case-lower-$lower" -x "$lower" "$fixture" || return 0
         local lower_csv="$MSG_CSV"
-        run_messages "case-$upper" -x "$upper" -V runtime-config "$fixture" || return 0
+        run_messages "case-upper-$upper" -x "$upper" -V runtime-config "$fixture" || return 0
         assert_command \
             command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'expose: $lower' '$RUN_OUT'" \
             label       "-x $upper is -x $lower, listed as $lower" \

@@ -412,6 +412,11 @@ my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
 my $bytes_observed = 0;
 my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
+# -mem release (hidden): each message row's durations array is released after
+# its last use, the displayed rows' after their statistics and the others' at
+# the selection, at the cost of the time to free them. Off by default: the rows
+# keep their data, unsorted, for the rest of the run (features/680 § 5).
+my $memory_release_after_use = 0;
 my $show_timing = 0;   # -t, --timing: per-stage timing rows in the summary
 my $explain_arg;   # --explain [<topic>]: undef = not given; '' = bare; non-empty = topic name (Issue #261)
 my ( $filter_duration_min, $filter_duration_max );
@@ -12118,7 +12123,9 @@ sub group_similar_messages {
                 $entry->{duration_count}     = $cluster->{duration_count};
                 $entry->{total_duration}     = $cluster->{total_duration};
                 $entry->{sum_of_squares}     = $cluster->{sum_of_squares};
-                $entry->{durations}          = $cluster->{durations} // [];
+                # The cluster hands its array over and keeps no reference, so
+                # releasing the row's array after its statistics frees it.
+                $entry->{durations}          = delete $cluster->{durations} // [];
                 $entry->{min}                = $cluster->{min} if defined $cluster->{min};
                 $entry->{max}                = $cluster->{max} if defined $cluster->{max};
 
@@ -15883,6 +15890,8 @@ sub adapt_to_command_line_options {
         $show_memory = 1;
         if ($memory_usage_operand eq 'debug') {
             $show_memory_debug = 1;
+        } elsif ($memory_usage_operand eq 'release') {
+            $memory_release_after_use = 1;
         } elsif ($memory_usage_operand ne '') {
             unshift @ARGV, $memory_usage_operand;
         }
@@ -18284,16 +18293,31 @@ sub calculate_heatmap_buckets_exact {
 
     # Distribute raw values into histogram buckets and calculate percentiles
     foreach my $bucket (keys %heatmap_raw) {
-        # Sort values to calculate percentiles
-        my @sorted_values = sort { $a <=> $b } @{$heatmap_raw{$bucket}};
-        my $count = scalar @sorted_values;
+        my $bucket_values = $heatmap_raw{$bucket};
+
+        # Each value is counted into its range before the sort, in the order
+        # the read stored it: a pass in sorted order over values sorted in
+        # place visits scalars scattered through memory (features/680 D9).
+        foreach my $value (@$bucket_values) {
+            my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
+            $heatmap_data{$bucket}{$range_index}++;
+
+            # Track max density for color normalization
+            $heatmap_max_density = $heatmap_data{$bucket}{$range_index}
+                if $heatmap_data{$bucket}{$range_index} > $heatmap_max_density;
+        }
+
+        # The bucket's values are sorted in place at their last use, for the
+        # percentiles only; the bucket is deleted below.
+        my $sorted_values = sort_numeric_in_place($bucket_values);
+        my $count = scalar @$sorted_values;
 
         if ($count > 0) {
             # Calculate percentile values (P50, P95, P99, P99.9)
-            my $p50_value  = $sorted_values[int($count * 0.50)];
-            my $p95_value  = $sorted_values[int($count * 0.95)];
-            my $p99_value  = $sorted_values[int($count * 0.99)];
-            my $p999_value = $sorted_values[int($count * 0.999)] // $sorted_values[-1];
+            my $p50_value  = $sorted_values->[int($count * 0.50)];
+            my $p95_value  = $sorted_values->[int($count * 0.95)];
+            my $p99_value  = $sorted_values->[int($count * 0.99)];
+            my $p999_value = $sorted_values->[int($count * 0.999)] // $sorted_values->[-1];
 
             # Convert percentile values to bucket indices
             $heatmap_percentiles{$bucket} = {
@@ -18308,20 +18332,11 @@ sub calculate_heatmap_buckets_exact {
                 my %values;
                 for my $pair (@percentile_ladder) {
                     my ($name, $q) = @$pair;
-                    $values{$name} = $sorted_values[int($count * $q)] // $sorted_values[-1];
+                    $values{$name} = $sorted_values->[int($count * $q)] // $sorted_values->[-1];
                 }
                 $heatmap_percentiles{$bucket}{values}      = \%values;
                 $heatmap_percentiles{$bucket}{occurrences} = $count;
             }
-        }
-
-        foreach my $value (@sorted_values) {
-            my $range_index = find_heatmap_bucket($value, $heatmap_bucket_count);
-            $heatmap_data{$bucket}{$range_index}++;
-
-            # Track max density for color normalization
-            $heatmap_max_density = $heatmap_data{$bucket}{$range_index}
-                if $heatmap_data{$bucket}{$range_index} > $heatmap_max_density;
         }
 
         # Process highlighted values
@@ -18614,31 +18629,12 @@ sub calculate_histogram_buckets_exact {
 
         push @metrics_with_data, $metric;
 
-        # Sort values for percentile calculation
-        my @sorted = sort { $a <=> $b } @$values_ref;
-        my $n = scalar @sorted;
-
-        # Calculate percentiles - comprehensive set for dynamic legend display
-        $histogram_stats{$metric} = {
-            min    => $sorted[0],
-            max    => $sorted[-1],
-            count  => $n,
-            p1     => $sorted[int($n * 0.01)],
-            p5     => $sorted[int($n * 0.05)],
-            p10    => $sorted[int($n * 0.10)],
-            p25    => $sorted[int($n * 0.25)],
-            p50    => $sorted[int($n * 0.50)],
-            p75    => $sorted[int($n * 0.75)],
-            p90    => $sorted[int($n * 0.90)],
-            p95    => $sorted[int($n * 0.95)],
-            p99    => $sorted[int($n * 0.99)],
-            p999   => $sorted[int($n * 0.999)] // $sorted[-1],
-            p9999  => $sorted[int($n * 0.9999)] // $sorted[-1],
-            p99999 => $sorted[int($n * 0.99999)] // $sorted[-1],
-        };
-
-        my $min = $sorted[0];
-        my $max = $sorted[-1];
+        # The range and the bucket counts come from passes over the values in
+        # the order the read stored them, before the sort: a pass in sorted
+        # order over values sorted in place visits scalars scattered through
+        # memory (features/680 D9).
+        my $min = min(@$values_ref);
+        my $max = max(@$values_ref);
 
         # Handle edge case: all values identical
         if ($min == $max) {
@@ -18653,8 +18649,6 @@ sub calculate_histogram_buckets_exact {
 
         # Calculate bucket count using HdrHistogram approach
         my ($bucket_count, $decades) = calculate_histogram_bucket_count($min, $max);
-        $histogram_stats{$metric}{bucket_count} = $bucket_count;
-        $histogram_stats{$metric}{decades} = $decades;
 
         # Calculate logarithmic boundaries
         @{$histogram_boundaries{$metric}} = ();
@@ -18667,10 +18661,36 @@ sub calculate_histogram_buckets_exact {
         @{$histogram_buckets{$metric}} = (0) x $bucket_count;
 
         # Assign values to buckets using binary search
-        for my $value (@sorted) {
+        for my $value (@$values_ref) {
             my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
             $histogram_buckets{$metric}[$bucket_idx]++;
         }
+
+        # The values are sorted in place at their last use, for the
+        # percentiles only; the array is emptied below.
+        my $sorted = sort_numeric_in_place($values_ref);
+        my $n = scalar @$sorted;
+
+        # Calculate percentiles - comprehensive set for dynamic legend display
+        $histogram_stats{$metric} = {
+            min    => $sorted->[0],
+            max    => $sorted->[-1],
+            count  => $n,
+            p1     => $sorted->[int($n * 0.01)],
+            p5     => $sorted->[int($n * 0.05)],
+            p10    => $sorted->[int($n * 0.10)],
+            p25    => $sorted->[int($n * 0.25)],
+            p50    => $sorted->[int($n * 0.50)],
+            p75    => $sorted->[int($n * 0.75)],
+            p90    => $sorted->[int($n * 0.90)],
+            p95    => $sorted->[int($n * 0.95)],
+            p99    => $sorted->[int($n * 0.99)],
+            p999   => $sorted->[int($n * 0.999)] // $sorted->[-1],
+            p9999  => $sorted->[int($n * 0.9999)] // $sorted->[-1],
+            p99999 => $sorted->[int($n * 0.99999)] // $sorted->[-1],
+            bucket_count => $bucket_count,
+            decades      => $decades,
+        };
 
         # Free memory - raw values no longer needed
         @{$histogram_values{$metric}} = ();
@@ -18681,34 +18701,35 @@ sub calculate_histogram_buckets_exact {
             # Initialize highlight bucket counts
             @{$histogram_buckets_hl{$metric}} = (0) x $bucket_count;
 
-            # Sort highlighted values for percentile calculation
-            my @sorted_hl = sort { $a <=> $b } @$hl_values_ref;
-            my $n_hl = scalar @sorted_hl;
-
-            # Calculate highlight percentiles
-            $histogram_stats_hl{$metric} = {
-                min    => $sorted_hl[0],
-                max    => $sorted_hl[-1],
-                count  => $n_hl,
-                p1     => $sorted_hl[int($n_hl * 0.01)],
-                p5     => $sorted_hl[int($n_hl * 0.05)],
-                p10    => $sorted_hl[int($n_hl * 0.10)],
-                p25    => $sorted_hl[int($n_hl * 0.25)],
-                p50    => $sorted_hl[int($n_hl * 0.50)],
-                p75    => $sorted_hl[int($n_hl * 0.75)],
-                p90    => $sorted_hl[int($n_hl * 0.90)],
-                p95    => $sorted_hl[int($n_hl * 0.95)],
-                p99    => $sorted_hl[int($n_hl * 0.99)],
-                p999   => $sorted_hl[int($n_hl * 0.999)] // $sorted_hl[-1],
-                p9999  => $sorted_hl[int($n_hl * 0.9999)] // $sorted_hl[-1],
-                p99999 => $sorted_hl[int($n_hl * 0.99999)] // $sorted_hl[-1],
-            };
-
             # Assign highlighted values to buckets using same boundaries
-            for my $value (@sorted_hl) {
+            for my $value (@$hl_values_ref) {
                 my $bucket_idx = find_histogram_bucket_index($value, $histogram_boundaries{$metric});
                 $histogram_buckets_hl{$metric}[$bucket_idx]++;
             }
+
+            # Counted before the sort and sorted in place for the percentiles,
+            # as above.
+            my $sorted_hl = sort_numeric_in_place($hl_values_ref);
+            my $n_hl = scalar @$sorted_hl;
+
+            # Calculate highlight percentiles
+            $histogram_stats_hl{$metric} = {
+                min    => $sorted_hl->[0],
+                max    => $sorted_hl->[-1],
+                count  => $n_hl,
+                p1     => $sorted_hl->[int($n_hl * 0.01)],
+                p5     => $sorted_hl->[int($n_hl * 0.05)],
+                p10    => $sorted_hl->[int($n_hl * 0.10)],
+                p25    => $sorted_hl->[int($n_hl * 0.25)],
+                p50    => $sorted_hl->[int($n_hl * 0.50)],
+                p75    => $sorted_hl->[int($n_hl * 0.75)],
+                p90    => $sorted_hl->[int($n_hl * 0.90)],
+                p95    => $sorted_hl->[int($n_hl * 0.95)],
+                p99    => $sorted_hl->[int($n_hl * 0.99)],
+                p999   => $sorted_hl->[int($n_hl * 0.999)] // $sorted_hl->[-1],
+                p9999  => $sorted_hl->[int($n_hl * 0.9999)] // $sorted_hl->[-1],
+                p99999 => $sorted_hl->[int($n_hl * 0.99999)] // $sorted_hl->[-1],
+            };
         }
 
         # Free highlight memory - raw values no longer needed
@@ -19064,18 +19085,18 @@ sub calculate_all_statistics {
         $aggregated_data->{sum_of_squares} += $log_analysis{$bucket}{sum_of_squares};
         # Issue #289: under -bdm bin no durations[] array was collected (the bin-counter
         # partition + sidecars carry the data). Skip the aggregation; the bin consumer
-        # reads the sidecars off $log_analysis{$bucket} directly.
-        push @{$aggregated_data->{durations}}, @{$log_analysis{$bucket}{durations}}
+        # reads the sidecars off $log_analysis{$bucket} directly. The bucket's
+        # array is taken out of the store, its last use: under raw, statistics
+        # sort it into a fresh copy and both are freed with the working record.
+        my $bucket_durations = delete $log_analysis{$bucket}{durations};
+        $aggregated_data->{durations} = $bucket_durations
             unless $bucket_stats_capture_mode eq 'bin';
+        $aggregated_data->{durations_into_copy} = 1;
 
         # Aggregate min/max across buckets
         $aggregated_data->{count_min} = $log_analysis{$bucket}{count_min} if defined $log_analysis{$bucket}{count_min} && ( !defined $aggregated_data->{count_min} || $log_analysis{$bucket}{count_min} < $aggregated_data->{count_min} );
         $aggregated_data->{count_max} = $log_analysis{$bucket}{count_max} if defined $log_analysis{$bucket}{count_max} && ( !defined $aggregated_data->{count_max} || $log_analysis{$bucket}{count_max} > $aggregated_data->{count_max} );
 
-        # free up the memory from the data structure as it is no longer needed
-        undef $log_analysis{$bucket}{durations};
-        delete $log_analysis{$bucket}{durations};
-    
         # The duration statistics are merged into the bucket's projection only
         # when there are durations to describe: demand (≥1 active consumer of
         # per-bucket statistics) and observation (≥1 duration value seen in
@@ -19229,6 +19250,9 @@ sub calculate_all_statistics {
         foreach my $category (sort keys %log_messages) {
             # Collect and sort the log keys based on the count within each log_key
             my (@sorted_log_keys, @top_keys);
+            # The displayed keys whose durations the ranking pre-pass has
+            # already sorted, so group_calc does not sort them again.
+            my %presorted;
 
             # #417 sub-stage boundary: per-category population (walk/sort denominator).
             $stats_population_messages += scalar keys %{$log_messages{$category}};
@@ -19373,7 +19397,7 @@ sub calculate_all_statistics {
                 };
                 my $dm = choose_data_model('message-stats') // 'raw';
 
-                my (%sort_value, @fill_block);
+                my (%sort_value, %demoted_sorted, @fill_block);
                 my ($demoted, $population_calls) = (0, 0);
                 # #417 sub-stage boundary: population_walk (eligibility +
                 # per-key sort-statistic computation over the whole store).
@@ -19399,8 +19423,9 @@ sub calculate_all_statistics {
                         );
                     } else {
                         # The durations arrayref is aliased, not copied:
-                        # calculate_statistics sorts into its own copy and
-                        # never mutates its input.
+                        # calculate_statistics sorts it in place, once, and a
+                        # displayed key's group_calc reads that order without
+                        # sorting it again (%presorted).
                         $stats = calculate_statistics({
                             occurrences    => $entry->{occurrences},
                             duration_count => $entry->{duration_count},
@@ -19415,6 +19440,7 @@ sub calculate_all_statistics {
                         $sort_value{$log_key} = $value;
                     } else {
                         $demoted++;
+                        $demoted_sorted{$log_key} = 1 if $dm ne 'bin';
                         push @fill_block, $log_key;
                     }
                 }
@@ -19478,6 +19504,8 @@ sub calculate_all_statistics {
                 $sort_defined_keys += scalar keys %sort_value;
                 $message_key_order{$category} = \@sorted_log_keys;
                 @top_keys = @sorted_log_keys[0 .. min($#sorted_log_keys, $top_n_messages - 1)];
+                %presorted = map { $_ => 1 } grep { exists $sort_value{$_} || $demoted_sorted{$_} } @top_keys
+                    if $dm ne 'bin';
                 $elapsed_stats_sort_selection += tv_interval($t0_sort_selection);
 
                 if ($stats_demand_telemetry_active) {
@@ -19494,14 +19522,27 @@ sub calculate_all_statistics {
             # #417 sub-stage boundary: group_calc (full statistics for the
             # keys that won a display slot, plus per-message UDM means).
             my $t0_group_calc = [gettimeofday];
+            # Under -mem release a key not displayed, which has no reader of its
+            # durations left, has its array released now, and a displayed key's
+            # array is taken out of the store below, for its statistics, and
+            # freed after them. By default every key keeps its array.
+            if ($memory_release_after_use) {
+                my %displayed;
+                @displayed{@top_keys} = ();
+                while (my ($log_key, $entry) = each %{$log_messages{$category}}) {
+                    delete $entry->{durations} unless exists $displayed{$log_key};
+                }
+            }
             foreach my $log_key (@top_keys) {
                 memory_debug_sample("stats_top_keys") if $show_memory_debug && ++$memory_debug_key_samples % 10000 == 0;
                 my $aggregated_data = {};
+                my $durations = $memory_release_after_use
+                    ? delete $log_messages{$category}{$log_key}{durations}
+                    : $log_messages{$category}{$log_key}{durations};
 
                 next if !defined( $log_messages{$category}{$log_key}{occurrences} );
 
                 $aggregated_data->{occurrences} += $log_messages{$category}{$log_key}{occurrences};
-                $aggregated_data->{total_bytes} += $log_messages{$category}{$log_key}{total_bytes} if $log_messages{$category}{$log_key}{bytes_occurrences};
 
                 # total_duration is initialized to 0 for every message key, so
                 # "defined" cannot distinguish "no duration ever observed" from
@@ -19518,11 +19559,16 @@ sub calculate_all_statistics {
                     # Issue #287 Commit 5: under -mdm bin the per-key durations[] no
                     # longer exists. calculate_statistics_bin reads sidecars +
                     # %log_messages_counters{...} entry directly, ignoring
-                    # $aggregated_data->{durations} — so the push is a no-op under
-                    # bin even if the source were present, and the absent field
-                    # would auto-vivify it as an empty arrayref. Skip the push.
-                    push @{$aggregated_data->{durations}}, @{$log_messages{$category}{$log_key}{durations}}
+                    # $aggregated_data->{durations}. Under raw the key's array
+                    # is read where it is: the ranking pre-pass may already have
+                    # sorted it, and otherwise statistics sort a copy and leave
+                    # the store untouched, unless -mem release took the array
+                    # out of the store, when it is sorted in place and freed
+                    # with the working record.
+                    $aggregated_data->{durations} = $durations
                         unless $message_stats_capture_mode eq 'bin';
+                    $aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};
+                    $aggregated_data->{durations_in_store} = 1 unless $memory_release_after_use;
                 } elsif ( !$duration_observed ) {
                     # No duration was ever observed for this key, including
                     # every key under -od: clear the 0-initialized accumulator
@@ -19569,8 +19615,6 @@ sub calculate_all_statistics {
                     }
                 }
 
-                $log_messages{$category}{$log_key}{total_bytes} = $aggregated_data->{total_bytes} if defined $aggregated_data->{total_bytes};
-
                 $log_messages{$category}{$log_key}{count_mean} = mean_of( $log_messages{$category}{$log_key}{count_sum}, $log_messages{$category}{$log_key}{count_occurrences} );
                 # The bytes mean is stored precise and rounded only by the CSV
                 # formatter (#616 D6); under -so bytes_mean the sort pre-pass has
@@ -19590,10 +19634,6 @@ sub calculate_all_statistics {
                     my $sum = $log_messages{$category}{$log_key}{"udm_${name}_sum"};
                     $log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );
                 }
-
-                # 2026-01-04 TO DO: free up the memory from the data structure as it is no longer needed (don't think that below logic was actually working as intended)
-                # undef $log_messages{$category}{$log_key}{durations};
-                # delete $log_messages{$category}{$log_key}{durations};
             }
             $elapsed_stats_group_calc += tv_interval($t0_group_calc);
         # }
@@ -19781,6 +19821,20 @@ sub derive_moment_statistics {
 # statistic fields the caller stores. Fields whose value is legitimately
 # undefined under demand (std_dev at n<2, shape moments at n<4 or degenerate
 # m2) are present-with-undef, matching the pre-#305 contract.
+# Sorts an array of raw values ascending, in place, and returns it. Perl sorts
+# in place only when the result is assigned back to the same named array, so
+# the arrayref is aliased to one: no copy of the values is made. A numeric sort
+# enlarges every value of an array holding a non-integer, so it is called only
+# on an array its caller owns at that moment, at the array's last use or for a
+# later reader of the order (docs/architecture-patterns.md, Raw value arrays).
+sub sort_numeric_in_place {
+    my ($values) = @_;
+    our @values_in_place;
+    local *values_in_place = $values;
+    @values_in_place = sort { $a <=> $b } @values_in_place;
+    return $values;
+}
+
 sub calculate_statistics {
     my ($bucket_data, $demand) = @_;
     # Telemetry handle for -V statistics-demand: undef (zero-cost) unless the
@@ -19793,11 +19847,31 @@ sub calculate_statistics {
     # The observation count is the gate (#616 D9): no timed line, no statistic.
     return unless ($bucket_data->{duration_count} // 0) > 0;
 
-    my @sorted = sort { $a <=> $b } @{$bucket_data->{durations}};
+    # The array is sorted once. One the ranking pre-pass already sorted arrives
+    # marked durations_sorted and is read as it is. A time bucket's, taken out
+    # of its store and freed right after (durations_into_copy), is sorted into
+    # a freshly allocated array: sorted in place and then freed, its scalars
+    # would return to the free lists in sorted order, scattered through memory,
+    # and the displayed rows' arrays allocated next from them would be scattered
+    # too, slowing every pass over them. One that stays in its store
+    # (durations_in_store) is copied and the copy sorted in place, so the
+    # stored values are neither reordered nor enlarged. One the caller owns
+    # otherwise is sorted in place.
+    my $values = $bucket_data->{durations};
+    if ($bucket_data->{durations_sorted}) {
+        # already in order
+    } elsif ($bucket_data->{durations_into_copy}) {
+        $values = [ sort { $a <=> $b } @$values ];
+    } else {
+        $values = [ @$values ] if $bucket_data->{durations_in_store};
+        sort_numeric_in_place($values);
+    }
+    our @sorted;
+    local *sorted = $values;
     my $duration_count = scalar @sorted;
 
-    my $min = min(@sorted);
-    my $max = max(@sorted);
+    my $min = $sorted[0];
+    my $max = $sorted[-1];
     # The shape group's moment sums come from one pass over the samples about
     # the mean: the dominant per-key cost of this function, run only under
     # shape demand at n >= 4 (#305).

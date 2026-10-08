@@ -404,6 +404,75 @@ per-message bytes mean and the run index's means as sites.
 
 ---
 
+## Raw value arrays: sorted once, at their last use, in the form measured for each store
+
+**Definition.** A store of raw values under the raw data model (a time bucket's
+durations, a message row's durations, the heatmap's per-bucket values, the
+histogram's per-metric values and their highlight twins) is sorted once, by the
+computation that needs it in order, after consolidation has returned, when the
+arrays are final. The form of the sort is chosen per store, from measurement:
+
+| Store | Sorted how | Why (measured, `features/680-statistics-duration-copies.md` § 4) |
+|---|---|---|
+| Time bucket | taken out of its store, sorted into a fresh array, both freed after the bucket's statistics | sorted in place and then freed, its scalars return to Perl's free lists in sorted order, scattered through memory; the displayed rows' arrays allocated next come from those lists, and every pass over them misses the cache (§ 4.12) |
+| Displayed message row, by default | copied, the copy sorted in place, the store untouched | the store keeps every row's data, neither reordered nor enlarged, for a later reader (an interactive re-ranking of the message table); sorting the copy into a second fresh array is slower and costs a second copy (§ 4.12) |
+| Displayed message row, under `-mem release` | taken out of its store, sorted in place, freed after its statistics | releasing it is the mode's purpose |
+| Message row under `-so` on a statistic | sorted in place in its store by the ranking pre-pass; the displayed rows' statistics read that order without sorting again | the values are sorted once and the messages ranked once |
+| Heatmap bucket, histogram metric | counted over the unsorted values, then sorted in place for the percentiles, then deleted or emptied | the count needs no order, and a pass in sorted order over values sorted in place visits scalars scattered through memory (§ 4.8); in place, the histogram's whole-run array is not doubled |
+
+In-place sorts go through one helper, `sort_numeric_in_place($arrayref)`: the
+array is aliased to a named array and assigned back to itself, the only form
+Perl sorts in place. A message row's array is released after its last use only
+under `-mem release`; every other store releases its array after its
+computation. A consolidation cluster hands its array to the row it becomes and
+keeps no reference.
+
+**Intended uses.** Any new statistic, percentile or distribution computed from
+a raw store: sort once, at the last use, in the form the table gives for a store
+of that kind, and measure before choosing another. A pass that does not need the
+order runs before the sort.
+
+**Reasoning.** Each form above was settled by measurement, and each obvious
+alternative was measured to cost something:
+- `sort { $a <=> $b } @$ref` reads the stored scalars and builds a second array,
+  two arrays of the values at once; with a working copy made first, three.
+- Perl's numeric sort converts every scalar of an array holding a non-integer
+  to a larger type (24 to 56 bytes) and never converts it back, so sorting an
+  array that stays in its store, in place or into a copy, leaves the store
+  larger.
+- After an in-place sort, neighbouring elements point to scalars in the order
+  the read allocated them, so a pass in sorted order is up to five times slower
+  than over a freshly allocated sorted array.
+- An array sorted in place and then freed leaves the free lists in sorted,
+  scattered order, and what is allocated next inherits the scatter.
+- Releasing every message row's array after its last use costs the time to free
+  millions of values and lowers the peak only when a raw heatmap or histogram
+  runs after statistics, so it is opt-in.
+
+**Consumption sites.**
+- `sort_numeric_in_place` :: `@values_in_place = sort { $a <=> $b } @values_in_place;` (the helper)
+- `calculate_statistics` :: `$values = [ sort { $a <=> $b } @$values ];` (a time bucket's array, into a fresh array)
+- `calculate_statistics` :: `$values = [ @$values ] if $bucket_data->{durations_in_store};` (an array that stays in its store: the copy is sorted)
+- `calculate_statistics` :: `sort_numeric_in_place($values);`
+- `calculate_all_statistics` :: `my $bucket_durations = delete $log_analysis{$bucket}{durations};` (a time bucket's array taken out of the store)
+- `calculate_all_statistics` :: `$aggregated_data->{durations_into_copy} = 1;` (the time bucket's form)
+- `calculate_all_statistics` :: `? delete $log_messages{$category}{$log_key}{durations}` (a displayed row's array taken out of the store, under `-mem release`)
+- `calculate_all_statistics` :: `delete $entry->{durations} unless exists $displayed{$log_key};` (rows not displayed, released at the selection, under `-mem release`)
+- `calculate_all_statistics` :: `$aggregated_data->{durations_sorted} = 1 if $presorted{$log_key};` (the ranking pre-pass's order reused)
+- `group_similar_messages` :: `$entry->{durations}          = delete $cluster->{durations} // [];` (a cluster hands its array to its row)
+- `calculate_heatmap_buckets_exact` :: `my $sorted_values = sort_numeric_in_place($bucket_values);` (after the range count over the unsorted values)
+- `calculate_histogram_buckets_exact` :: `my $sorted = sort_numeric_in_place($values_ref);` and its highlight twin (after the range and the bucket count over the unsorted values)
+
+**Owning record.** `features/680-statistics-duration-copies.md` § 2 (the
+resource guidelines), § 4 (the measurements behind each form), § 5 (the
+decisions). Cross-reference: *Data-model selectors resolved once per surface*,
+which decides whether a surface holds raw values at all; #354, whose promotion
+of large messages to a bin partition removes their raw arrays.
+
+**Status.** Established.
+
+---
+
 ## Statistics-group consumer registry
 
 **Definition.** `@STAT_CONSUMERS` declares each output surface with the store it
