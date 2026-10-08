@@ -47,6 +47,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/run-dir.sh
+source "$SCRIPT_DIR/lib/run-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (HARNESS-DESIGN.md section Colour rendering is controlled, never
@@ -150,7 +152,10 @@ RUN_DIR=""; RUN_OUT=""; RUN_ERR=""; MSG_CSV=""; STATS_CSV=""
 run_messages() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"; MSG_CSV=""; STATS_CSV=""
     local rc
     set +e
@@ -786,7 +791,7 @@ scenario_metrics() {
         produced_by "$PRODUCED_RESOLVE" \
         contract    "$CONTRACT_613 D12; criterion 11"
 
-    run_messages dur-durationMS -d durationMS "$METRICS_FIXTURE" || return 0
+    run_messages dur-key-as-written -d durationMS "$METRICS_FIXTURE" || return 0
     assert_command \
         command     "check_no_key_matches '$MSG_CSV' 'durationMS|  |[?]&' && check_some_key_matches '$MSG_CSV' 'executed bytes=[?]'" \
         label       '-d durationMS removes the pair whole, leaving no doubled space' \
@@ -809,7 +814,7 @@ scenario_metrics() {
     # The switch-off is taken from the keys the probe declares, so durationMs
     # switches duration off even on lines written durationMS=, and removes
     # nothing from them (613 section 5.3).
-    run_messages dur-durationMs -d durationMs "$METRICS_FIXTURE" || return 0
+    run_messages dur-key-other-case -d durationMs "$METRICS_FIXTURE" || return 0
     assert_command \
         command     "check_same_csv '$od_msg' '$MSG_CSV' 'messages' && check_same_csv '$od_stats' '$STATS_CSV' 'statistics'" \
         label       '-d durationMs switches duration off and removes nothing from lines written durationMS=' \
@@ -984,9 +989,9 @@ scenario_name_vocabulary() {
     local pair name spelling
     for pair in bytes:Bytes duration:DURATION; do
         name="${pair%%:*}"; spelling="${pair##*:}"
-        run_messages "d-$name" -d "$name" "$VOCABULARY_FIXTURE" || return 0
+        run_messages "d-lower-$name" -d "$name" "$VOCABULARY_FIXTURE" || return 0
         local lower_msg="$MSG_CSV" lower_stats="$STATS_CSV"
-        run_messages "d-$spelling" -d "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
+        run_messages "d-spelled-$spelling" -d "$spelling" -V runtime-config "$VOCABULARY_FIXTURE" || return 0
         assert_command \
             command     "check_same_csv '$lower_msg' '$MSG_CSV' 'messages' && check_same_csv '$lower_stats' '$STATS_CSV' 'statistics'" \
             label       "-d $spelling gives the CSVs -d $name gives" \
@@ -1076,9 +1081,9 @@ scenario_field_identifier_names() {
     local case fixture lower upper extra
     for case in "$OBJECT_FIXTURE|object|Object|" "$USERS_FIXTURE|session|Session|" "$VOCABULARY_FIXTURE|query-string|Query-String|-xqs" "$DISCARD_FIXTURE|uuid|UUID|" "$DISCARD_FIXTURE|ip|IP|"; do
         IFS='|' read -r fixture lower upper extra <<< "$case"
-        run_messages "case-$lower" $extra -d "$lower" "$fixture" || return 0
+        run_messages "case-lower-$lower" $extra -d "$lower" "$fixture" || return 0
         local lower_csv="$MSG_CSV"
-        run_messages "case-$upper" $extra -d "$upper" -V runtime-config "$fixture" || return 0
+        run_messages "case-upper-$upper" $extra -d "$upper" -V runtime-config "$fixture" || return 0
         assert_command \
             command     "check_same_csv '$lower_csv' '$MSG_CSV' 'messages' && grep -qx 'discard: $lower' '$RUN_OUT'" \
             label       "-d $upper is -d $lower, listed as $lower" \

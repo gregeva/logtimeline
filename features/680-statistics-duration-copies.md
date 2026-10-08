@@ -637,6 +637,21 @@ pre-existing cause in the harness: the `dur-durationMs` run's check read
 `…-ddurationMS.csv`, written by the `dur-durationMS` run into the same directory
 on a case-insensitive file system.
 
+**Harness fixed** (10:06 to 10:12, 2026-10-08). Every run helper of the
+`validate-message-discard.sh`, `validate-message-expose.sh` and
+`validate-message-mask.sh` harnesses now claims its run directory through
+`claim_run_dir()` (`tests/lib/run-dir.sh`), which fails, naming the directory,
+when a run would write into a directory that already exists under any spelling.
+Run with the old labels, the `metrics` scenario fails on that check every time
+instead of now and then. The check found four more runs that differed from an
+earlier run's label only in case: the built-in metric spelled `Bytes` and the
+field names spelled `Object` in the discard harness, the same metric and
+`Thread` in the expose harness. Those had passed only because each run happened
+to find its own file. Labels now name the run's role (`lower-`, `upper-`,
+`spelled-`, `spelling-N-`, `key-as-written`, `key-other-case`). Results:
+discard 82 passed, 0 failed; expose 62 passed, 0 failed; mask 27 passed,
+0 failed.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 ### 5.0 Scope as locked after the release costs were measured (2026-10-07)

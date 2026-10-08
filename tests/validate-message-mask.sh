@@ -48,6 +48,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/run-dir.sh
+source "$SCRIPT_DIR/lib/run-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -176,7 +178,10 @@ RUN_DIR=""; RUN_OUT=""; RUN_ERR=""; MSG_CSV=""
 run_messages() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"; MSG_CSV=""
     local rc
     set +e
@@ -214,7 +219,10 @@ RUN_EXIT=0
 run_expect_error() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"
     set +e
     ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe "$@" > run.out 2> run.err )
@@ -756,7 +764,7 @@ scenario_unknown_name() {
     current_scenario="unknown-name"
     echo "[$current_scenario]"
 
-    run_expect_error foo -m foo "$FIXTURE"
+    run_expect_error foo -m foo "$FIXTURE" || return 0
     assert_command \
         command     "[[ $RUN_EXIT -ne 0 ]] && grep -q 'foo' '$RUN_ERR' && grep -q 'uuid' '$RUN_ERR' && grep -qw 'ip' '$RUN_ERR' && grep -qw 'ipv4' '$RUN_ERR' && grep -qw 'ipv6' '$RUN_ERR' && echo \"exit $RUN_EXIT, accepted values named\"" \
         label       '-m foo exits non-zero and the error names uuid, ip, ipv4 and ipv6' \
