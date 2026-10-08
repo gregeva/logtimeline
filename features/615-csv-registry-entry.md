@@ -16,7 +16,9 @@ timestamp-precision pattern as every input does) were locked in reply. #525
 was reopened the same day for its several-files rule (a run gives way only to
 the finest precision any processed file carries), merged in PR #691, and this
 branch rebased onto `release/0.19.0` at 485e533. Drop 1, the prototype, was
-measured the same day; its findings are § 8a.
+measured the same day; its findings are § 8a. Drops 2 and 3 were delivered
+the same day (§ 9): CSV input is read through the block generated from each
+file's header.
 
 The design is locked in outline by the architect (§ 4: D1 to D6 from stage 5 of
 the redundant-logic-surfaces review, 2026-09-27; D7 to D15 in reply to this
@@ -1320,6 +1322,141 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
   sources. The dump on the base commit's `ltl` and on the split's are
   byte-identical (SHA-256 `9901d453…fa330e7` for both). The other half of
   AC4, the CSV block coming from the same sub, is drop 3's.
+
+**Drop 3, as delivered (2026-10-08).**
+
+- **The block.** `csv_block_shape` records a header's shape: layout,
+  separator, timestamp column, each `-udm` metric's column (-1 where the
+  header has none) and the `-ucm` columns. `csv_block_src` generates the
+  block's source from that shape, with its timestamp text from
+  `format_timestamp_src` (AC4's second half). `format_timestamp_src` gains
+  two layouts:
+  - `csv_ddmm`: the `csv` layout read day first, with the day-first offsets
+    and the unguarded parse (D7).
+  - `csv_epoch`: no memo (D1 as amended). Its `-du` scale is folded in as a
+    constant, and its fraction follows the read gate: digits as written
+    under `-tp ns` (none when `-du` scales the value), from the number when
+    the gate is open, none when it is closed.
+  - Every scanned entry's generated source is still byte-identical to the
+    base commit's: the dump of § 9's drop 2, re-run on this drop, has
+    SHA-256 `9901d453…`, unchanged.
+- **The constants (AC5).** `prototype/615-csv-generated-block/dump-csv-block.pl`
+  dumps the block for one header. For `size,host,timestamp,latency` read
+  with `-udm latency -udm size::sum -udm absent -ucm host`, it prints the
+  signature `csv:csv:sep=comma:ts=2:udm=3/0/-1:msg=1`, and the source:
+  - reads `$f[2]` for the timestamp;
+  - reads `$f[3]` and `$f[0]` for the two metrics, and sets the third,
+    which the header does not carry, to no value;
+  - takes `$f[1]` for the message.
+- **The validation (D9, D15).**
+  - **Rows.** A run with `-udm` keeps the detection sample's lines for CSV
+    confirmation at line 2. The rows validated are those lines less the
+    header and blank lines. A CSV file releases them at line 2; a file that
+    is not CSV holds them, at most the three 8 KiB parts, until it ends,
+    since releasing them sooner would add a test to every line.
+  - **Wiring.** A placed row must give, at each compiled position, the
+    value the header's column map names: the timestamp to the second, each
+    metric, the message.
+  - **Date order.** A parse that croaks is a date failure, answered with
+    the other order. When both orders fail, the month-first block is
+    generated again and serves the file.
+  - **A wiring failure** stops the run before line 2, with `ltl: format
+    registry: the CSV block for <file> reads a sampled row's values from
+    other columns than its header names (produced_by csv_block_src())`.
+  - **State.** Validation runs under the snapshot and restore of a mid-run
+    compile.
+  - The § 5.6 elements marked proposed are implemented as written there.
+- **One block alive (D11).** The block is the one `csv:` signature in
+  `%format_scan_sub_cache`; generating another deletes it. It counts in:
+  - `scan_subs_compiled`, at every generation;
+  - `scan_sub_cache_hits`, when the live block passes a same-shape file's
+    rows;
+  - `scan_subs_rss_bytes`;
+  - `TIMING detect/scan_sub_compile`, its validation inside the timer, as a
+    scan sub's is.
+  - The memo and the date cache are cleared at each CSV confirmation, and
+    again when a file read day first ends.
+- **The read loop.** Both inline arms call the block. Removed with them:
+  - the epoch arm and the ISO arm;
+  - `csv_timestamp_placeable`, `$csv_epoch_timestamp` and the per-line
+    `my @csv_fields`;
+  - the shared capture's per-metric column lookup: the capture now reads
+    `$csv_udm_values[$config_idx]`.
+
+  The file's kind (epoch or ISO) is read once, from line 2, in
+  `csv_block_for_file`.
+- **Precision evidence (D17).** `csv_block_for_file` records the `csv`
+  entry in the file's detection sample: the rows placed under `formats`,
+  the most fraction digits under `frac_digits`, and an epoch file's `-du`
+  unit under `frac_unit`. `resolve_timestamp_precision` passes that unit to
+  `fraction_precision`, seconds without it. The `-V format-detection`
+  listing `sample_formats` names scanned entries only, so it is unchanged.
+- **Same output (AC1, AC2).** `wholerun.sh parity` was run with `LTL_A`
+  set to the base commit's `ltl` (485e533) and `LTL_B` to this drop's: the
+  nineteen runs of § 8a. The STATS CSV, the MESSAGES CSV, `-V
+  filter-summary` and `-V format-detection` are identical, except for one
+  STATS file: the fractional epoch fixture at `-tp ns`. There the labels
+  are now shown to the microsecond, with the precision notice, because the
+  file's six digits now bound the run (D17). The YAML export differs in its
+  version line; at `-tp ns`, the export and the index row differ in the
+  D16 cases § 8a lists, with the same values.
+- **The date-order fixtures.**
+  - The day-first file reads all 2,000 rows (3 compiles); the base aborts
+    at row 669.
+  - A February 30 row in the sample, and a month-13 row outside it, abort
+    on both commits. The abort message now names the generated block
+    (`at (eval N) line 14.`) where the base named an `ltl` line.
+  - An unplaceable line 2, an epoch file with text and ISO rows, and a run
+    under `--detection-window=3` give the same `-V filter-summary`
+    accounting on both commits.
+- **Harnesses.**
+  - `tests/validate-csv-input.sh`: eight scenarios, 13 assertions, the
+    expected values derived by hand from the fixtures:
+    - `block-iso`, `block-epoch`, `block-message-columns`: AC1;
+    - `block-fraction-digits`: D16;
+    - `block-column-order`: AC5;
+    - `day-first-sampled`: AC6 (a) and (c), on a 30,812-byte file;
+    - `day-first-small`: AC6 (b) and (c);
+    - `day-first-then-month-first`: AC6 (e).
+  - `tests/validate-format-registry.sh`: four scenarios, nine assertions:
+    - `csv-pinned`, `csv-same-shape`, `csv-different-shape`: AC5 and AC7;
+    - `csv-day-first`: AC6 (d).
+
+    The `asserts` text of the `csv` inventory line and of the election
+    invariants is restated.
+  - `tests/validate-timestamp-precision.sh`:
+    - `truth/csv-file`: AC12, eight assertions;
+    - `truth/unknown-precision`: its label restated, since its CSV is read
+      without `-udm` and so is not read as CSV;
+    - `capture/generator`: re-pointed at `format_timestamp_src`. Drop 2's
+      split broke it: it sliced `format_entry_block_src`, which no longer
+      holds the fraction text, and drop 2 ran no harness.
+  - `produced_by` fields naming the removed `csv_timestamp_placeable` are
+    corrected in `tests/validate-csv-input.sh` and
+    `tests/validate-filter-summary.sh`.
+- **Sabotage proofs** (`tests/HARNESS-DESIGN.md` § Proving a new assertion
+  can fail):
+  - **The base commit's `ltl`** fails every assertion of new behaviour: the
+    day-first scenarios, the nine digits, the CSV precision, the compile
+    counts. It passes the same-output ones.
+  - **A copy whose block reads each metric one column to the right** stops
+    before line 2 with the wiring diagnostic.
+  - **The same copy with that stop removed** fails `block-iso`'s value
+    assertion.
+  - **A copy whose block reads the timestamp one column to the right**
+    stops with the wiring diagnostic.
+- **Harnesses run on this drop:** `csv-input` 28, `format-registry` 56,
+  `timestamp-precision` 94, `filter-summary` 87, `udm-specs` 244,
+  `section-layout` 176, `format-detection` 453, `verbose-content-shape` 1
+  and `scenario-selector` 26 assertions, all passing.
+- **Correction to AC7.** "Two CSV files of the same header shape report
+  the same compile count as one file and one more cache hit" reads two
+  more cache hits as measured: the second file's scan order, resolved again
+  before its first line, is a hit of its own. Two files of different
+  shapes add one, the scan order.
+- **Contract.** `features/log-format-registry.md` § `-V format-registry`
+  section-contract and `tests/HARNESS-DESIGN.md` § Reserved section names
+  are restated to count the CSV block (§ 5.7), with the signature's form.
 
 **Merge gate.** The full harness suite, `CI=1 ./tests/validate-csv-output.sh`
 then `CI=1 ./tests/validate-statistics.sh` then the rest, on the commit being

@@ -58,6 +58,7 @@ scenario_register \
     truth/deprecated-switch \
     truth/narrower-width \
     truth/unknown-precision \
+    truth/csv-file \
     truth/structure
 SCENARIO_USAGE_NOTE='Contract: features/525-timestamp-precision-option.md § 7 (Acceptance criteria)'
 scenario_parse_args "$@"
@@ -123,8 +124,13 @@ printf '%s\n' \
 printf '%s\n' \
     '2026-01-26 10:00:01,12 [main] INFO  com.example.Service - first line' \
     '2026-01-26 10:00:02,45 [main] INFO  com.example.Service - second line' > "$TWO"
-# CSVMS is CSV input with millisecond timestamps, a file detection does not sample.
+# CSVMS is CSV input with millisecond timestamps; CSVS the same with whole
+# seconds; CSVEPOCH epoch milliseconds with no fraction, read with -du ms.
+CSVS="$TMP_DIR/seconds.csv"
+CSVEPOCH="$TMP_DIR/epoch-ms.csv"
 printf 'timestamp,latency\n2026-06-01 10:00:05.123,12\n2026-06-01 10:01:05.456,34\n' > "$CSVMS"
+printf 'timestamp,latency\n2026-06-01 10:00:05,12\n2026-06-01 10:01:05,34\n' > "$CSVS"
+printf 'timestamp,latency\n1771078373123,12\n1771078433456,34\n' > "$CSVEPOCH"
 
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the assertions read the timeline labels, the summary heading's bounds, the
@@ -758,7 +764,7 @@ fi
 
 if scenario_wanted capture/generator; then
 current_scenario="capture/generator"
-gen=$(perl -ne '$in = 1 if /^sub format_entry_block_src\b/; $in = 0 if $in && /^}/; print if $in' "$LTL")
+gen=$(perl -ne '$in = 1 if /^sub format_timestamp_src\b/; $in = 0 if $in && /^}/; print if $in' "$LTL")
 fixed=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{\$fractional_ms = substr\(\$timestamp_str, 20, 3\);' || true)
 generic=$(printf '%s' "$gen" | grep -cE '\$capture \? q\{if \(\$timestamp_str =~ s/.*10 \*\* \(3 - length' || true)
 ungated=$(printf '%s' "$gen" | grep -E 'fractional_ms = substr|fractional_ms = \$fraction_digits = substr|10 \*\* \(3 - length' | grep -cvE '(\$capture|\$ns)[[:space:]]+\? q\{' || true)
@@ -767,8 +773,8 @@ if [[ "$fixed" == 1 && "$generic" == 1 && "$ungated" == 0 && "$opts" == 1 ]]; th
     pass_with "the scan block carries the fraction arithmetic only when the gate is open"
 else
     fail_with "the scan block carries the fraction arithmetic only when the gate is open" \
-        "format_entry_block_src emits the fixed-three-digit read and the variable-length conversion only under the compile option the run's gate sets; a closed gate strips the fraction without reading or converting it" \
-        'format_entry_block_src() and build_format_registry() in ltl' "$CONTRACT_D11_GATE" \
+        "format_timestamp_src emits the fixed-three-digit read and the variable-length conversion only under the compile option the run's gate sets; a closed gate strips the fraction without reading or converting it" \
+        'format_timestamp_src() (the timestamp part of every generated block, the CSV block included) and build_format_registry() in ltl' "$CONTRACT_D11_GATE" \
         "gated fixed3: $fixed" "gated generic: $generic" "ungated arithmetic lines: $ungated" "compile option set from the gate: $opts"
 fi
 fi
@@ -956,7 +962,48 @@ fi
 if scenario_wanted truth/unknown-precision; then
 current_scenario="truth/unknown-precision"
 run_in tup "${COMMON[@]}" -ni -bs 1440 -tp us "$CSVMS"
-expect_note "CSV input, whose precision detection does not read, sets no limit" "$TMP_DIR/tup" ""
+expect_note "a file no format recognises (CSV content read without -udm) sets no limit" "$TMP_DIR/tup" ""
+fi
+
+# A CSV file is one of the run's processed files: its precision is read from
+# the rows its block is validated on, and the clamp treats it as any file
+# (features/615-csv-registry-entry.md D17, AC12).
+CONTRACT_D17='features/615-csv-registry-entry.md D17 (a CSV file takes part in the timestamp-precision pattern as every input does: its precision read from the rows its block is validated on) and AC12'
+if scenario_wanted truth/csv-file; then
+current_scenario="truth/csv-file"
+# expect_precision LABEL DIR BOUNDS ROW — the heading's bounds and the
+# runtime-config precision row.
+expect_precision() {
+    local label="$1" dir="$2" want_b="$3" want_row="$4" b row
+    b=$(heading_bounds "$dir")
+    row=$(grep -E '^timestamp_precision: ' "$dir/out.txt" || echo 'MISSING-ANCHOR:timestamp_precision')
+    if [[ "$b" == "$want_b" && "$row" == "$want_row" ]]; then
+        pass_with "$label"
+    else
+        fail_with "$label" "a CSV file's timestamps bound the precision shown as a scanned log's do" \
+            'csv_block_for_file() (the evidence) and resolve_timestamp_precision() in ltl' "$CONTRACT_D17; $CONTRACT_D4_CLAMP" \
+            "heading: $b (want $want_b)" "runtime-config: $row (want $want_row)"
+    fi
+}
+run_in tcf-ns "${COMMON[@]}" -ni -bs 1440 -tp ns -V runtime-config -udm latency "$CSVMS"
+expect_precision "-tp ns on a CSV whose timestamps carry three digits shows them to the millisecond" "$TMP_DIR/tcf-ns" \
+    "2026-06-01 10:00:05.123|2026-06-01 10:01:05.456" "timestamp_precision: ms; clamped from ns"
+expect_note "-tp ns on a millisecond CSV: the notice a scanned log gets" "$TMP_DIR/tcf-ns" \
+    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+run_in tcf-s "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$CSVS"
+expect_precision "-tp ms on a whole-second CSV alone shows it to the second" "$TMP_DIR/tcf-s" \
+    "2026-06-01 10:00:05|2026-06-01 10:01:05" "timestamp_precision: s; clamped from ms"
+expect_note "-tp ms on a whole-second CSV: the notice names whole seconds" "$TMP_DIR/tcf-s" \
+    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+run_in tcf-mixed "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$THREE" "$CSVS"
+expect_precision "-tp ms over a millisecond log and a whole-second CSV shows the run to the millisecond" "$TMP_DIR/tcf-mixed" \
+    "2026-01-26 10:00:01.123|2026-06-01 10:01:05.000" "timestamp_precision: ms"
+expect_note "a whole-second CSV beside a millisecond log: no notice" "$TMP_DIR/tcf-mixed" ""
+run_in tcf-epoch "${COMMON[@]}" -ni -bs 1440 -tp ns -du ms -V runtime-config -udm latency "$CSVEPOCH"
+expect_precision "an epoch CSV read with -du ms and no fraction carries the millisecond" "$TMP_DIR/tcf-epoch" \
+    "2026-02-14 14:12:53.123|2026-02-14 14:13:53.456" "timestamp_precision: ms; clamped from ns"
+expect_note "an epoch CSV in milliseconds: the notice names milliseconds" "$TMP_DIR/tcf-epoch" \
+    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/structure; then

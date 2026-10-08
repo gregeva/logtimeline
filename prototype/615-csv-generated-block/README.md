@@ -20,6 +20,10 @@ file cost?
 | `csv-block.pl --mode parity\|timing\|perfile\|src --file F -- <ltl options>` | evaluates `ltl` up to `## MAIN ##` and drives its subs; slices arm A out of `read_and_process_logs()` verbatim; generates arm B from the header through the timestamp part of `format_entry_block_src()` |
 | `parity.sh FIXTURE_DIR` | the parity battery: every correctness fixture at `-tp m`, `s`, `ms`, `us`, `ns` and with `-o`, plus the metric, message and date-order cases |
 | `timing.sh FIXTURE_DIR [ROUNDS]` | per-row cost of A, B and B-no-memo at each family, density, metric count, size and read-gate state; then the per-file cost of generation and validation |
+| `patch-ltl.pl OUT_PATH` | writes a scratch copy of `ltl` whose read loop serves CSV rows through arm B, for the whole-run measures |
+| `wholerun.sh parity\|timing FIXTURE_DIR WORK_DIR [RUNS]` | whole runs of two `ltl` copies compared: every file a run writes and the `-V filter-summary` and `-V format-detection` sections, or `TIMING parse/read_files`; `LTL_A` and `LTL_B` name the two copies (by default `ltl` and the patched copy; at delivery, the base commit's and the branch's) |
+| `dump-entry-src.pl LTL_PATH` | every scanned entry's generated source under four compile-option combinations, to diff two commits (AC4) |
+| `dump-csv-block.pl LTL_PATH CSV_FILE LAYOUT [ltl options]` | the CSV block a header instantiates, to read the column positions compiled into it (AC5) |
 
 ## Arms
 

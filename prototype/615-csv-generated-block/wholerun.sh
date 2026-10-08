@@ -13,6 +13,9 @@
 #
 # Usage: wholerun.sh parity FIXTURE_DIR WORK_DIR > parity-wholerun.tsv
 #        wholerun.sh timing FIXTURE_DIR WORK_DIR [RUNS] > timing-wholerun.tsv
+#
+# LTL_A and LTL_B name other arms: at delivery, the base commit's ltl and the
+# branch's, with no patched copy written.
 
 set -u
 MODE="${1:?parity|timing}"
@@ -21,10 +24,12 @@ WORK="${3:?work directory}"
 RUNS="${4:-5}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-LTL_A="$REPO/ltl"
-LTL_B="$WORK/ltl-615b"
 mkdir -p "$WORK"
-perl "$HERE/patch-ltl.pl" "$LTL_B" 2>/dev/null || { echo "patch failed" >&2; exit 1; }
+LTL_A="${LTL_A:-$REPO/ltl}"
+if [[ -z ${LTL_B:-} ]]; then
+    LTL_B="$WORK/ltl-615b"
+    perl "$HERE/patch-ltl.pl" "$LTL_B" 2>/dev/null || { echo "patch failed" >&2; exit 1; }
+fi
 
 section() {   # name file -> the section's body
     awk -v n="$1" '$0 == "=== " n " ===" {on=1; next} $0 == "=== END " n " ===" {on=0} on' "$2"
