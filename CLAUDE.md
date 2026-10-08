@@ -114,8 +114,12 @@ about anything else, these still hold.
       same sentence, or is rewritten to name the thing.
 - [ ] First sentence is the verdict and its scope: caused by this work,
       pre-existing, or environmental. Evidence follows.
-- [ ] A decision being asked for is stated in what it means: what the tool will
-      do, will not do, and the consequence. The sentence stands without its IDs.
+- [ ] A decision being asked for is presented, never just requested: the
+      situation in a concise explanation; a diagram or flowchart of the code
+      path or flow concerned, named by its sub, and a table of the options;
+      the architectural constraints and trade-offs; each option precise about
+      what the tool will do, will not do, and the consequence. The sentence
+      stands without its IDs.
 - [ ] Nothing the architect has not read is narrated in order to be argued
       against. No retracted framings, no self-orienting context.
 - [ ] One question at a time. A clarification gets a short explanation plus a
