@@ -16,9 +16,9 @@ timestamp-precision pattern as every input does) were locked in reply. #525
 was reopened the same day for its several-files rule (a run gives way only to
 the finest precision any processed file carries), merged in PR #691, and this
 branch rebased onto `release/0.19.0` at 485e533. Drop 1, the prototype, was
-measured the same day; its findings are § 8a. Drops 2 and 3 were delivered
+measured the same day; its findings are § 8a. Drops 2 to 5 were delivered
 the same day (§ 9): CSV input is read through the block generated from each
-file's header.
+file's header, and the uncalled parse closures are gone.
 
 The design is locked in outline by the architect (§ 4: D1 to D6 from stage 5 of
 the redundant-logic-surfaces review, 2026-09-27; D7 to D15 in reply to this
@@ -1515,6 +1515,58 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
   assertions.
 - The day-first sentence beside the CSV rows of `docs/usage.md` (§ 5.9,
   D15) belongs to the records of drop 5.
+
+**Drop 5, as delivered (2026-10-08).**
+
+- **What goes (D4).** `compile_format_time_parser` and its per-entry
+  construction in `build_format_registry` are removed, with the
+  `FR_TIME_PARSE` slot. The later slot constants move down by one
+  (`FR_ANC_SET` 17 to `FR_BYTE_NOTATION` 29); #608 (the byte ladder) had
+  already landed its byte-notation slot, so this issue, landing second,
+  rebased them. `%format_month_map` stays, read by the emitted Apache and
+  asctime parses, with its comment restated.
+- **One parse text (AC3)**, by `grep -cF` in `ltl` at this drop:
+
+  | Text | Count | Where |
+  |---|---|---|
+  | `timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2)` (the ISO parse) | 1 | `format_timestamp_src` |
+  | `[.,](\d{1,9})/$1/` (the fractional strip) | 2 | `format_timestamp_src`, its nanosecond and open-gate variants |
+  | `int($timestamp_str)` and `int($epoch_val)` (the epoch parse) | 1 each | `format_timestamp_src`, without and with `-du` |
+  | `compile_format_time_parser`, `FR_TIME_PARSE`, `csv_epoch_timestamp`, `csv_timestamp_placeable`, `csv_udm_col_indices[$config_idx]`, `my @csv_fields` | 0 | |
+
+  Other `timegm(` sites remain outside this issue's scope:
+  - `format_sample_probes`, which reads sampled dates under both orders for
+    variant selection;
+  - `iso_timestamp_parts` and `calculate_start_end_filter_timestamps`, the
+    `-st`/`-et` parser with its own six-digit strip. § 2 places that parser
+    with #611 (the timestamp acceptance pattern).
+- **Records (§ 10).**
+  - `features/log-format-registry.md`: D31 annotated (its closure form
+    retired), D32 annotated (CSV data lines read by the generated block),
+    N10 naming `format_timestamp_src` and the day-first CSV layout.
+  - `features/58-format-registry-staged-detection.md`: D31 and D32 annotated
+    the same way; P9's "split-based extraction closure" annotated as built.
+  - `features/user-defined-metrics.md` § CSV Columnar Input: the block, the
+    `-ucs`/`-ucm` wording, the date order (D9, D15, D18), the capture rules
+    and precision (D16, D17).
+  - `docs/architecture-patterns.md`, at this issue's tokens:
+    - *Declarative format registry*: the closure site removed, the CSV
+      site and the template paragraph added, and the parse-text refinement
+      closed (the cache-bypass refinement, #620, kept).
+    - *Generated code compiled from source strings*: the CSV block as its
+      fourth instance.
+    - *One resolution surface per vocabulary*: #615 dropped from the status
+      line.
+    - *Timestamp precision*: the CSV refinement closed and the CSV sites
+      added.
+    - The read-gate snippet's sub is corrected to `format_timestamp_src` in
+      two entries, since drop 2 moved it.
+  - `docs/usage.md`: the day-first sentence beside the CSV rows (§ 5.9, D15).
+  - The audit report's review-progress line, the release notes and the
+    completion comment come with the merge.
+- **Prototype instruments.** `csv-block.pl` and `patch-ltl.pl` slice the
+  inline arms, which no longer exist on the branch; the prototype README
+  says they run against 485e533.
 
 **Merge gate.** The full harness suite, `CI=1 ./tests/validate-csv-output.sh`
 then `CI=1 ./tests/validate-statistics.sh` then the rest, on the commit being

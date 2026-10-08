@@ -747,45 +747,43 @@ use constant {
     FR_EVENT_PAIRS     => 14,  # reserved slot — validated empty in this drop (D23)
     FR_SAMPLES         => 15,  # sample lines (load-time executable self-tests)
     FR_ANCESTORS       => 16,  # derived pinned-ancestor names (D26 constraints)
-    FR_TIME_PARSE      => 17,  # compiled timestamp-parse closure for the entry's
-                               # declared layout (D31; shares %timestamp_date_cache)
-    FR_ANC_SET         => 18,  # FR_ANCESTORS as a name-set hashref — the hot
+    FR_ANC_SET         => 17,  # FR_ANCESTORS as a name-set hashref — the hot
                                # loop's O(ancestors) already-optimal check must
                                # not rebuild a hash per line (P3 lean-loop)
-    FR_MATCHES         => 19,  # run-total matched-line count for this entry
+    FR_MATCHES         => 18,  # run-total matched-line count for this entry
                                # (scan telemetry; -V format-detection / scan)
-    FR_GROUP           => 20,  # variant-group key (D47/F1); an entry without
+    FR_GROUP           => 19,  # variant-group key (D47/F1); an entry without
                                # variants is a group of one keyed by its name.
                                # Ordering constraints and promotion closures
                                # are keyed by group, never by member.
-    FR_GROUP_DEFAULT   => 21,  # 1 = the member occupying the group's scan
+    FR_GROUP_DEFAULT   => 20,  # 1 = the member occupying the group's scan
                                # slot when no evidence selects another
-    FR_FILENAME        => 22,  # filename evidence (D45): { matcher, stem, date,
+    FR_FILENAME        => 21,  # filename evidence (D45): { matcher, stem, date,
                                # index, ext, placement } or undef
-    FR_FILENAME_SAMPLES=> 23,  # producer-true names the matcher must accept
-    FR_EVENT_LEDGER    => 24,  # 1 = event ledger: maximal coverage of the
+    FR_FILENAME_SAMPLES=> 22,  # producer-true names the matcher must accept
+    FR_EVENT_LEDGER    => 23,  # 1 = event ledger: maximal coverage of the
                                # operations the format describes (#453 R8)
-    FR_CLASSIFY        => 25,  # write-direct classification closure (sets
+    FR_CLASSIFY        => 24,  # write-direct classification closure (sets
                                # $line_outcome / $line_cls_sig from the record
                                # lexicals) — the CSV path's call shape (D29);
                                # undef on scanned entries, whose blocks inline it
-    FR_CLS_SIG         => 26,  # criteria-signature id of the entry's resolved
+    FR_CLS_SIG         => 25,  # criteria-signature id of the entry's resolved
                                # classification (0 = declines) (D32)
-    FR_PCT_QUALIFYING  => 27,  # 1 = lines from this entry qualify for the
+    FR_PCT_QUALIFYING  => 26,  # 1 = lines from this entry qualify for the
                                # success/failure percentage surfaces (#452 D2/D4):
                                # both outcomes declared, and the entry is an
                                # event ledger or the columns were explicitly
                                # enabled; folded at build time so the include
                                # point pays one array lookup per line
-    FR_CLS_BOTH        => 28,  # 1 = the entry's resolved classification
+    FR_CLS_BOTH        => 27,  # 1 = the entry's resolved classification
                                # declares both outcomes (#452 D4 usability
                                # floor, unfolded — column visibility reads it
                                # per file, independent of the run mode)
-    FR_LEVELS          => 29,  # [ level names this entry emits ] or undef when
+    FR_LEVELS          => 28,  # [ level names this entry emits ] or undef when
                                # the entry declares none; joined into the run's
                                # category vocabulary when the entry first binds
                                # a file, never consulted per line
-    FR_BYTE_NOTATION   => 30,  # the byte notation the format declares ('si' or
+    FR_BYTE_NOTATION   => 29,  # the byte notation the format declares ('si' or
                                # 'iec'), or undef when it declares none; read
                                # once per run by resolve_byte_notation()
 };
@@ -4233,52 +4231,9 @@ sub timestamp_date_cache_restore {
     return;
 }
 
-# Timestamp-parse closures per declared layout family (D31), each reading
-# the date's midnight from the cache above. The iso parser serves every
-# iso_* layout (fixed substr offsets); apache_clf parses the
-# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon;
-# asctime parses the C library's `Mmm dd HH:MM:SS yyyy` order (the weekday
-# that leads it is matched by the pattern and not captured), keyed on
-# `Mmm dd yyyy`, a form neither of the other two keys can take.
+# Month names to numbers, read by the Apache and asctime parses
+# format_timestamp_src() emits.
 my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
-sub compile_format_time_parser {
-    my ($layout) = @_;
-    if ($layout eq 'asctime') {
-        return sub {
-            my $ts = $_[0];
-            my $date = substr($ts, 0, 7) . substr($ts, 16, 4);
-            my $midnight = $timestamp_date_cache{$date}
-                // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($ts, 4, 2), $format_month_map{ substr($ts, 0, 3) } - 1, substr($ts, 16, 4) ) );
-            return $midnight + substr($ts, 7, 2) * 3600 + substr($ts, 10, 2) * 60 + substr($ts, 13, 2);
-        };
-    }
-    if ($layout eq 'apache_clf') {
-        return sub {
-            my $ts = $_[0];
-            my $colon = index($ts, ':');
-            my $midnight = $timestamp_date_cache{substr($ts, 0, $colon)} // do {
-                my ($day, $month_str, $year) = $ts =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/;
-                timestamp_date_cache_add( substr($ts, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) );
-            };
-            return $midnight + substr($ts, $colon + 1, 2) * 3600 + substr($ts, $colon + 4, 2) * 60 + substr($ts, $colon + 7, 2);
-        };
-    }
-    # Every iso_* layout (and csv's ISO fallback path) uses the fixed-offset
-    # substr extraction. iso_ms_ddmm reads the two date fields in the other
-    # order (yyyy-dd-MM, the Integration Runtime encoder, #385); everything
-    # else is identical.
-    my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
-    return sub {
-        my $ts = $_[0];
-        my $midnight = $timestamp_date_cache{substr($ts, 0, 10)} // timestamp_date_cache_add( substr($ts, 0, 10), timegm(
-            0, 0, 0,
-            substr($ts, $day_off, 2),      # day
-            substr($ts, $month_off, 2) - 1,# month (0-11)
-            substr($ts, 0, 4),             # year
-        ) );
-        return $midnight + substr($ts, 11, 2) * 3600 + substr($ts, 14, 2) * 60 + substr($ts, 17, 2);
-    };
-}
 
 # Filename evidence (D45/I4): an entry declares optional name components —
 # stem (pattern; OR-able), date layout, rotation index form, extension —
@@ -5187,7 +5142,7 @@ sub format_entry_block_src {
 # neither reads nor converts it.
 # Then the layout parse, fronted by the last-seen memo: the date's
 # midnight epoch from %timestamp_date_cache (one timegm() per distinct
-# day) plus the time of day as arithmetic, as compile_format_time_parser.
+# day) plus the time of day as arithmetic.
 # Returns the source pieces in order: the fraction handling, then the memo
 # fronting the layout parse.
 # Two layouts belong to the CSV block (csv_block_src). csv_ddmm is the csv
@@ -5976,7 +5931,6 @@ sub build_format_registry {
         $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
         $entry->[FR_SAMPLES]         = $spec->{samples};
         $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{group} } // [];
-        $entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );
         $entry->[FR_ANC_SET]         = { map { $_ => 1 } @{ $entry->[FR_ANCESTORS] } };
         $entry->[FR_MATCHES]         = 0;
         $entry->[FR_GROUP]           = $spec->{group};

@@ -41,6 +41,12 @@ file cost?
 The fixtures are generated into a scratch directory, never committed: the
 performance fixtures at 1M rows are about 65 MB each.
 
+`csv-block.pl` and `patch-ltl.pl` slice the inline CSV arms out of `ltl` by
+anchor lines, so they run against the `ltl` of the commit the prototype
+measured (485e533); from drop 3 on the arms are gone from the branch.
+`wholerun.sh` with `LTL_A` and `LTL_B`, `dump-entry-src.pl` and
+`dump-csv-block.pl` run against any commit.
+
 ## Running
 
 ```bash

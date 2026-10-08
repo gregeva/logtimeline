@@ -271,11 +271,11 @@ Added IEC binary units and case-insensitive unit matching.
 
 ### CSV Columnar Input — DONE
 
-When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from the first line (header row), maps UDM metric names to column headers, and extracts values directly by column index instead of regex matching.
+When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from the first line (header row), maps UDM metric names to column headers, and extracts values directly by column index instead of regex matching. The header builds the routine that reads every row: a block generated from it, with the timestamp, metric and message columns compiled in, its timestamp parse emitted by the same source as every scanned format's, validated on rows sampled from the front, middle and end of the file before it reads line 2, one block alive at a time (`features/615-csv-registry-entry.md` D1, D9, D10, D11).
 
 **Options:**
-- `-ucm "col1 col2"` — specify CSV columns to use as the message grouping key (space-separated names, repeatable flag)
-- `-ucs ","` — override auto-detected separator (auto-detects `,`, `;`, `\t`)
+- `-ucm "col1 col2"` — name the CSV header columns whose values form the message (space-separated names, repeatable flag); without it, a fixed label
+- `-ucs ","` — set the delimiter, overriding the one detected from the header (auto-detects `,`, `;`, `\t`), with or without `-ucm` (#615 D14)
 
 **Behavior:**
 - CSV detection only triggers when `-udm` is present and the first line looks like a header (has separators)
@@ -284,7 +284,9 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - All transforms (`delta`, `idelta`) and aggregations (`min`, `max`, `avg`) work with CSV input
 - CSV lines use fixed category `DATA` (no log levels in CSV)
 - Without `-ucm`, all CSV rows group under a single "CSV data" message
-- A row is placed on the timeline only when its timestamp column holds epoch seconds (when the file's first data row did) or an ISO `YYYY-MM-DD HH:MM:SS` date and time. Any other row is a line no format matched: read, counted as unmatched, never reported, and never passed to the metric capture or the date parse (`csv_timestamp_placeable()`; #640 D1, `features/640-csv-unplaced-rows-silent.md`). The date-parse guard is what keeps a quoted-timestamp CSV from a previous `ltl -o` run, swept into a multi-file glob, from dying with `Month '-1' out of range` (Issue #328). A CSV none of whose rows is placed shows as nothing matched.
+- A row is placed on the timeline only when its timestamp column holds epoch seconds (when the file's first data row did) or an ISO `YYYY-MM-DD HH:MM:SS` date and time. Any other row is a line no format matched: read, counted as unmatched, never reported, and never passed to the metric capture or the date parse (the shape test of the file's block, `csv_block_src()`; #640 D1, `features/640-csv-unplaced-rows-silent.md`). The date-parse guard is what keeps a quoted-timestamp CSV from a previous `ltl -o` run, swept into a multi-file glob, from dying with `Month '-1' out of range` (Issue #328). A CSV none of whose rows is placed shows as nothing matched.
+- A file's dates are read year, month, day; or year, day, month when the file's own sampled rows are real dates only that way, settled once per file, starting month first whatever file came before it (#615 D9, D15, D18). A row impossible under the order the file is read with ends the run, as before (#615 D7).
+- A CSV timestamp is read under the run's standard capture rules: its fraction only when the run uses one, up to nine digits, kept as written under `-tp ns`; and a CSV file bounds the precision `-tp` shows as any log file does (#615 D16, D17).
 - A metric whose column is missing from the header of CSV files whose rows matched is reported once per run, after the read, with the count of such files and never their names: `Note: -udm '<spec>': no column named '<name>' in the header of N CSV file(s)` (`emit_udm_csv_unbound_notices()`; #640 D1).
 - Covered by `tests/validate-csv-input.sh`.
 
