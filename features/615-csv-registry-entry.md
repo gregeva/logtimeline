@@ -314,6 +314,12 @@ this document is numbered Dxx.
   own arm; a CSV file is never interleaved with scanned lines, so it need not
   sit inside the shared scan sub. *Locked by the architect 2026-09-27, stage 5
   of the redundant-logic-surfaces review (#342) (the issue body's first lock).*
+  **Amended by the architect 2026-10-08, after the prototype (§ 8a): an epoch
+  CSV block carries no memo** ("yes, amend D1: no memo for epoch CSV"). The
+  memo was measured costing 46 to 101 ns per row on epoch CSV at one row per
+  second and saving nothing at ten rows per second, because a hit saves only
+  turning the whole-second text into a number. An ISO CSV block keeps the
+  emitter's memo exactly as the scanned formats have it.
 - **D2 — The registry's existing compile-and-cache mechanism is reused.** The
   registry's existing on-demand compile and signature cache is the mechanism,
   keyed per file instead of per scan order. *Locked by the architect 2026-09-27,
@@ -557,7 +563,8 @@ instantiation. For every scanned entry the generated source is byte-identical
 before and after the split; that is the proof the split changed nothing on the
 hot path of scanned formats (criterion AC4, the byte-identical dump).
 
-The epoch parse becomes a layout the same emitter produces: the `-du` scaling
+The epoch parse becomes a layout the same emitter produces, with no memo (D1 as
+amended 2026-10-08): the `-du` scaling
 (`read_and_process_logs` :: `my $step = $time_unit_step{$duration_unit_override};`)
 is a run constant and is folded into the emitted text at generation, as the
 query-string option already is (`format_entry_block_src` ::
@@ -598,7 +605,8 @@ one does. The layout's name is an implementation detail.
   (proposed).
 - **The block covers the whole data-line sequence** (the audit's finding on the
   CSV data-line sequence written twice): the split on the separator, the
-  timestamp field's trim, the fraction and layout parse with memo, each named
+  timestamp field's trim, the fraction and layout parse (with the memo for ISO,
+  without it for epoch: D1 as amended), each named
   metric's raw value read at its compiled position (trimmed, an empty or missing
   field giving no value, as today), the message from the `-ucm` columns or the
   fixed label, the `DATA` category, the reset of the record fields CSV does not
@@ -894,7 +902,8 @@ mechanism to reuse, the criterion names it.
       two-row fixtures generated inline, `-bs 1440 -oe -ni`, the counts read
       from paired runs of one and two files; the release of the evicted block is
       read from the cache listing, not from memory.
-- [ ] **AC8. The memo is carried** (D1 includes the memo). Rows repeating a
+- [ ] **AC8. The memo is carried by an ISO CSV block, and not by an epoch CSV
+      block** (D1 as amended 2026-10-08). In an ISO CSV, rows repeating a
       timestamp string reuse the previous epoch. **Unassertable as behaviour**:
       the memo is invisible in output by design. Its effect is measured by the
       prototype's several-rows-per-second fixtures (§ 8).
@@ -1268,6 +1277,11 @@ families:
 - on ISO at one row per second: 31 to 50 ns, about 1%.
 
 B remains 3 to 11% below A on both with the memo in.
+
+**Decision (2026-10-08).** The architect amended D1: an epoch CSV block
+carries no memo, and an ISO CSV block keeps the emitter's memo as the scanned
+formats have it. On the families measured, that takes the epoch figures to
+the B-no-memo column above and leaves the ISO figures as B.
 
 ---
 
