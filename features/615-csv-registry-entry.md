@@ -517,8 +517,11 @@ Cited by sub plus an in-body snippet.
 Measured constant (captured runs, this machine, three runs each): today's
 whole-run read cost of CSV input on a network-latency CSV whose first column is
 an epoch timestamp with a six-digit fraction (166,912 rows, `-udm` on one
-column, `-bs 1440 -oe -n 1 -ni`) is `TIMING parse/read_files` median 1.725 s
-(1.674 to 1.743 s), about 10.3 µs per row. The timestamp arm is a small share of
+column, `-bs 1440 -oe -n 1 -ni`) is `TIMING parse/read_files` median 1.812 s
+(1.805 to 1.816 s), about 10.9 µs per row, re-measured 2026-10-08 on
+`release/0.19.0` at 485e533 because the code had moved since the specification
+(2026-09-28: median 1.725 s, 1.674 to 1.743 s, 10.3 µs per row; 5% higher now,
+the arms' shape unchanged). The timestamp arm is a small share of
 that, so a whole-run comparison alone cannot resolve the difference between two
 arm shapes (§ 8).
 
