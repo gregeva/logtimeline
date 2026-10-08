@@ -272,12 +272,13 @@ snippet of § 5.1 and by reading the subs; nothing run):
    up to six digits on every row and always keeps them as text
    (`read_and_process_logs` :: `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {`);
    the epoch arm always takes the fraction from the floating value and never
-   keeps text digits (`$fraction_digits = '';`). A CSV file also contributes
-   nothing to the precision `resolve_timestamp_precision` lowers from the
-   detection sample, which reads only scanned formats' digit counts. The rule is
-   written up as `docs/architecture-patterns.md` § *Timestamp read gate: the
-   parse reads the precision its consumers need*. Settled by D16 (the read
-   gate) and D17 (the precision lowered from the CSV's own sampled rows).
+   keeps text digits (`$fraction_digits = '';`). A CSV file is also no source of
+   its file's true precision: `resolve_timestamp_precision` reads digit counts
+   the detection sample takes only for lines a scanned entry matched. The
+   rules are written up as `docs/architecture-patterns.md` § *Timestamp
+   precision: requested by the user, bounded by what each file carries*.
+   Settled by D16 (the read gate) and D17 (a CSV file's sampled rows are its
+   precision evidence).
 10. **#640 D1 has landed on `release/0.19.0`; D8 is today's behaviour.** Looked
     for: the ISO shape check of § 3 item 4
     (`if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {`).
@@ -423,7 +424,7 @@ this document is numbered Dxx.
   rules.** The CSV block takes its fraction handling from the emitter under the
   same compile options as every scanned format: the fraction is read only when
   the read gate is open, up to nine digits, and kept as written only under
-  `-tp ns` (`docs/architecture-patterns.md` § *Timestamp read gate*; owning
+  `-tp ns` (`docs/architecture-patterns.md` § *Timestamp precision*, rule 3; owning
   record `features/525-timestamp-precision-option.md` D4, D21, D23). There is
   no CSV-specific digit count: the default is the emitter's, and `-tp`
   controls it. The epoch layout follows the same gate. Where this reads digits
@@ -431,17 +432,21 @@ this document is numbered Dxx.
   match. *Locked by the architect 2026-10-08 ("yes, you should align to the
   standard capture rules and reference the read pattern and write it up").*
 - **D17 — A CSV file takes part in the timestamp-precision pattern as every
-  input does.** The precision a run shows is never finer than its files'
-  timestamps carry (`features/525-timestamp-precision-option.md` D4), and a CSV
-  file's timestamps count toward that limit as a scanned file's do: the rows
-  D9 validates on are the evidence of the digits it carries, so `-tp ns` on a
-  CSV whose timestamps carry three fraction digits is shown to the
-  millisecond with the same notice a scanned log gets. The command-line
-  options that act on the pattern act on a CSV file the same way: `-tp`, a
-  sub-second `-bs` width, a `-st`/`-et` bound with a fraction and `-o` open the
-  read gate (D16), and `-tp` is lowered by the same rule. *Locked by the
+  input does.** A CSV file is one of the execution's processed files, and
+  every rule of `docs/architecture-patterns.md` § *Timestamp precision*
+  applies to it as to a scanned file. Its true precision is read from the
+  rows D9 validates on: the unit its timestamp field states (an ISO clock time
+  states the second; an epoch value states its unit, #525's D10)
+  and the fraction digits those rows carry. It bounds the user's `-tp` only as
+  rule 4 says (`features/525-timestamp-precision-option.md` D4 as amended
+  2026-10-08): the request gives way only to the finest precision any
+  processed file carries, so a CSV carrying less than another processed file
+  does not lower the run. The command-line options that act on the pattern
+  act on a CSV file the same way: `-tp`, a width that is not a whole number of
+  seconds, a `-st`/`-et` bound with a fraction and `-o` (D16). *Locked by the
   architect 2026-10-08 ("this should be a common pattern [and] the command
-  line options that influence this pattern should also be the same").*
+  line options that influence this pattern should also be the same"); the
+  several-files reading is his amendment of #525's D4 the same day.*
 
 **Where D7 and D9 meet (settled by D15).** D9 decides the file's date order
 once, from the sampled rows, before any row is read; D7 governs a row whose date
@@ -669,7 +674,7 @@ layout. How:
   rows come from the fallback D53 names for such input, the held-line window, as
   detection's evidence does (proposed).
 - **The file's precision evidence (D17).** `resolve_timestamp_precision`
-  runs after the read and lowers the run's precision from each file's sample
+  runs after the read and resolves the run's precision from each file's sample
   conclusions in `%format_detection_sample` (`formats`, and `frac_digits` per
   entry, which `sample_file_for_detection` counts only for lines a scanned
   entry matched). The validation records the same two conclusions for the
@@ -757,13 +762,14 @@ one block alive at a time".
   | `ns` | same | digits seven to nine shown, where today they read as zeros after the sixth | the digits are taken as written, where today they come from the floating value (about 238 ns resolution) |
 
   The second and third columns are user-visible changes at `us` and `ns`.
-- **A CSV file lowers `-tp` to the precision it carries (D17).** Today a CSV
-  file never lowers it: `-tp ns` on a CSV whose timestamps carry three
-  fraction digits prints nanosecond labels padded with six zeros, and `-tp ms`
-  on whole-second CSV timestamps prints `.000`, with no notice. After, both
-  are lowered to what the file carries, with the notice a scanned log prints
-  (`Note: timestamps are shown to the ...`), and the runtime-config row
-  carries the clamp annotation. A user-visible change.
+- **A CSV file is a source of its file's precision (D17).** Today a CSV file
+  carries no precision evidence, so a run over CSV input alone never gives way
+  to what its timestamps carry: `-tp ns` on a CSV whose timestamps carry three
+  fraction digits prints nanosecond labels padded with six zeros, with no
+  notice. After, that run is shown to the millisecond with the notice a
+  scanned log gets. Beside other files, a CSV counts as one processed file
+  under rule 4 of the pattern: it never lowers a run that another file
+  carries finer. A user-visible change.
 - **Telemetry.** The compile counts of § 5.7, and the `TIMING
   detect/scan_sub_compile` row on CSV runs, which now includes one small compile
   per header shape.
@@ -907,15 +913,18 @@ mechanism to reuse, the criterion names it.
       **Assertable**: `tests/validate-help-content.sh` for the parity; the three
       behaviours as scenarios in `tests/validate-csv-input.sh`.
 
-- [ ] **AC12. A CSV file lowers the timestamp precision to what it carries**
-      (D17). `-tp ns` on an ISO CSV whose timestamps carry three fraction
-      digits shows them to the millisecond and prints the notice a scanned log
-      prints; `-tp ms` on a whole-second CSV shows them to the second; `-tp ms`
-      on two files, a scanned log carrying three digits and a whole-second CSV,
-      names both in the notice and shows the coarser. **Assertable**: scenarios
-      in `tests/validate-timestamp-precision.sh` beside its `truth/*`
-      scenarios, fixtures generated inline, the notice read from stderr and the
-      precision from the runtime-config row.
+- [ ] **AC12. A CSV file is a source of its file's precision** (D17).
+      `-tp ns` on an ISO CSV whose timestamps carry three fraction digits
+      shows them to the millisecond and prints the notice a scanned log
+      prints; `-tp ms` on a whole-second CSV alone shows them to the second;
+      `-tp ms` over a millisecond application log and a whole-second CSV shows
+      the run to the millisecond with no notice (rule 4, the finest any
+      processed file carries); an epoch CSV read with `-du ms` and no fraction
+      carries the millisecond. **Assertable**: scenarios in
+      `tests/validate-timestamp-precision.sh` beside its `truth/*`
+      scenarios, fixtures generated inline, the notice read from stderr and
+      the precision from the runtime-config row. The mixed-file case passes
+      only once the several-files rule of #525's amended D4 is implemented.
 
 Triage: eleven assertable, one unassertable (AC8, output-invisible by design, its
 cost measured instead), none unknown. The prototype is a cost prototype
@@ -950,7 +959,7 @@ variables and move on CSV runs; attributed in the completion comment.
 | `tests/validate-csv-input.sh` | new scenarios for AC1 (same output for a month-first or epoch CSV), AC5 (the header builds the routine: the metric values), AC6 (validation on sampled rows with the day-first retry: a to c, and e) and AC11 (the `-ucs` and `-ucm` rows say what the options do: the behaviours) | the CSV Columnar Input contract names the values; D9, D14 and D15 are the new contract lines; nothing existing changes |
 | `tests/validate-format-registry.sh` | new scenarios for AC5 (the header builds the routine: the compile count), AC6 (d) (the day-first signature listed) and AC7 (one CSV block alive, counted by the existing counters); the `asserts` text of the election invariants and of the inventory assertion that says `csv` is outside the compiled scan restated to include the CSV block | D11 restates the invariants; the keys and the `role=stateful` value are unchanged (`tests/HARNESS-DESIGN.md` § Stability contract) |
 | `tests/validate-help-content.sh` | nothing in the harness; it checks the corrected rows agree (AC11, the `-ucs` and `-ucm` rows say what the options do) | the rows change on both surfaces in one commit |
-| `tests/validate-timestamp-precision.sh` | new scenarios for AC12 (a CSV file lowers the timestamp precision to what it carries) | D17 extends `features/525-timestamp-precision-option.md` D4's contract to CSV input; the notice's wording is unchanged |
+| `tests/validate-timestamp-precision.sh` | new scenarios for AC12 (a CSV file is a source of its file's precision) | D17 brings CSV input under `features/525-timestamp-precision-option.md` D4 as amended 2026-10-08; the notice's wording is unchanged |
 | `tests/validate-filter-summary.sh` | nothing | the unparseable-row accounting is as #640 D1 leaves it (D8) |
 | `tests/validate-format-detection.sh` | nothing | `format: csv`, `match_type: 13` and `event_ledger: no` are unchanged; CSV rows stay outside `scan_attempts` |
 
@@ -1065,7 +1074,7 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
 | 0 | this specification, agreed with the architect; the issue comments and native edge of § 10's first table | the design and criteria are the architect's |
 | 1 | the prototype (§ 8), findings and the architect's decisions recorded here; no `ltl` change | the generated block's cost and parity, before the design is fixed (D3) |
 | 2 | the named CSV selection added to the benchmark runner, and both before captures taken on the base commit's `ltl`; then the emitter split (§ 5.3), scanned formats' generated source byte-identical | AC4 (scanned entries' generated source byte-identical across the split); no scanned-format behaviour changes |
-| 3 | the CSV template, header-built block, validation on sampled rows with the day-first retry, one-block eviction and counters; the two inline arms and the shared capture's CSV lookup replaced; the `-V format-registry` contract, harness scenarios and reserved-names entry in the same commit | AC1 (same output for a month-first or epoch CSV), AC2 (today's bad-row behaviour), AC5 (the header builds the routine), AC6 (validation on sampled rows with the day-first retry), AC7 (one CSV block alive, counted by the existing counters), AC12 (a CSV file lowers the timestamp precision to what it carries) |
+| 3 | the CSV template, header-built block, validation on sampled rows with the day-first retry, one-block eviction and counters; the two inline arms and the shared capture's CSV lookup replaced; the `-V format-registry` contract, harness scenarios and reserved-names entry in the same commit | AC1 (same output for a month-first or epoch CSV), AC2 (today's bad-row behaviour), AC5 (the header builds the routine), AC6 (validation on sampled rows with the day-first retry), AC7 (one CSV block alive, counted by the existing counters), AC12 (a CSV file is a source of its file's precision) |
 | 4 | the `-ucs` and `-ucm` rows in `--help` and `docs/usage.md` (D14), with their behaviour scenarios | AC11 (the `-ucs` and `-ucm` rows say what the options do) |
 | 5 | the closures, the `FR_TIME_PARSE` slot and its renumbering (D4); records trued up (§ 10) | AC3 (one parse text) |
 
@@ -1096,7 +1105,7 @@ named CSV case; `tests/validate-help-content.sh`; `$version_number` stamped
 | `features/log-format-registry.md` | D31 (the time contract compiled to per-layout closures) annotated: its closure form is retired by this issue's D4 (the uncalled closures go), the parse living in the emitted source; D32 (CSV stays a per-file stage outside the scan array) unchanged, with a line that its data-line handling is now a per-file generated block built from the header, validated on the sampled rows, one alive at a time; the `-V format-registry` section-contract (§ 5.7: what the counts include, the restated invariants, the `csv` entry sentence); N10 (the day-first ISO layout) no longer names `compile_format_time_parser`, and names the day-first CSV layout beside it |
 | `features/58-format-registry-staged-detection.md` | D31 (per-layout parse closures) cross-referenced as above; P9's description of the `csv` entry ("split-based extraction closure") checked against the block |
 | `features/user-defined-metrics.md` § CSV Columnar Input | CSV rows are parsed by the block generated from the header, which reads each metric's value at its column; a file whose dates read as real only day first is read day first; the skip-and-warn wording stays |
-| `docs/architecture-patterns.md` | only this issue's tokens in shared lines (§ 5.10): *Declarative format registry*, the time-parse closure site removed, the CSV site and template paragraph added, the parse-text refinement closed; *One resolution surface per vocabulary*, #615 dropped from the status line's list; *Generated code compiled from source strings*, the fourth instance; *Timestamp read gate*, the CSV refinement closed and the CSV block added as a consumption site (D16) |
+| `docs/architecture-patterns.md` | only this issue's tokens in shared lines (§ 5.10): *Declarative format registry*, the time-parse closure site removed, the CSV site and template paragraph added, the parse-text refinement closed; *One resolution surface per vocabulary*, #615 dropped from the status line's list; *Generated code compiled from source strings*, the fourth instance; *Timestamp precision*, the CSV refinement closed and the CSV block added as a consumption site (D16, D17) |
 | `tests/HARNESS-DESIGN.md` § Reserved section names | the `format-registry` description gains the CSV block |
 | `tests/baseline/run-benchmark.sh`, `tests/baseline/README.md` | the named CSV selection and its note in the shared boundary-notes section (D12) |
 | `docs/usage.md`, `--help` | the `-ucs` and `-ucm` rows (D14); the day-first sentence beside the CSV rows (§ 5.9, D15) |
