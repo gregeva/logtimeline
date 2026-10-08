@@ -102,7 +102,7 @@ Phase 1 begins only on explicit instruction. Filing a requirement
    new or changed data model, (b) a new code path, feature or capability in the
    hot path, where the most performant way to build it has to be found, (c) anything impactful by execution frequency × per-execution
    cost, (d) a key requirement whose verification method is unknown. A smaller
-   hot-path change needs no prototype: the before/after benchmark (§ 3 (b)),
+   hot-path change needs no prototype: the before/after benchmark (§ 3 (a)),
    always required for hot-path work, is its evidence. Research
    grounds the prototype; the prototype compares candidates at staged scale
    against the current code as baseline; exit requires measured justification
@@ -130,33 +130,24 @@ Phase 1 begins only on explicit instruction. Filing a requirement
 
 The work is not done, and no PR is opened, until the gate passes **on the
 commit being merged**. A gate run that predates the last amend does not count,
-and an added commit re-applies the scope test.
+and an added commit re-applies the scope test. The `after` benchmark runs
+first, then the full harness suite.
 
 ### Scope test, applied to the diff
 
-| The diff touches | Full harness suite | Before/after benchmark |
+| The diff touches | Before/after benchmark | Full harness suite |
 |---|---|---|
 | Any executable line of `ltl` | required | required |
-| `ltl` comments or whitespace only (`git diff -w` shows only comment lines) | skip; run `perl -c ltl`; say "comment-only" in the commit message | skip |
-| Any `tests/validate-*.sh`, `tests/lib/`, or a fixture or expectation a harness reads | required (what "passing" means changed) | required |
-| Only `tests/baseline/`, `build/`, `features/`, `docs/`, `releases/`, `patterns/`, `CLAUDE.md` | skip, and record the skip in the completion comment | skip |
+| `ltl` comments or whitespace only (`git diff -w` shows only comment lines) | skip | skip; run `perl -c ltl`; say "comment-only" in the commit message |
+| Any `tests/validate-*.sh`, `tests/lib/`, or a fixture or expectation a harness reads | required | required (what "passing" means changed) |
+| Only `tests/baseline/`, `build/`, `features/`, `docs/`, `releases/`, `patterns/`, `CLAUDE.md` | skip | skip, and record the skip in the completion comment |
 | An exempt path **and** any required path, same commit | required | required |
 
 The test is about what could change behaviour or an assertion, never about how
 significant the change feels. "The harnesses this change touches" is not a
 row in this table.
 
-### (a) The complete harness suite
-
-Every `tests/validate-*.sh` exits 0, and each summary line shows assertions
-actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
-`CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
-each harness's output once to a scratch file and inspect the file.
-
-While working a single harness, the check is that harness. The full suite runs
-once, here.
-
-### (b) Before/after benchmark on this machine
+### (a) Before/after benchmark on this machine, first
 
 ```bash
 # version restored to X.Y.Z first
@@ -173,6 +164,16 @@ and is investigated, so the change is as optimized as it can be (one run is not
 a median of 3).
 Delete both TSVs afterwards. The `full`, `xl` and `all` tiers and the XL file
 selections are release instruments and are never run during issue work.
+
+### (b) The complete harness suite, after the benchmark
+
+Every `tests/validate-*.sh` exits 0, and each summary line shows assertions
+actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
+`CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
+each harness's output once to a scratch file and inspect the file.
+
+While working a single harness, the check is that harness. The full suite runs
+once, here.
 
 ## 4. Merge and close
 

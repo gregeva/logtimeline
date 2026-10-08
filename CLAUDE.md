@@ -27,7 +27,7 @@ about anything else, these still hold.
    hand-forwards go into the owning `features/*.md` first; the issue comment
    points at it. A decision recorded only on a closed PR is invisible.
 5. **The completion gate runs before the PR, whole and on this machine.** The
-   full harness suite plus a before/after benchmark, per the scope table in
+   `after` benchmark first, then the full harness suite, per the scope table in
    `docs/process/workflow.md` § 3. Not a subset, not against a released baseline,
    not after the merge.
 6. **Capture once, inspect the file.** Any output looked at more than once is
@@ -281,8 +281,8 @@ about anything else, these still hold.
 
 ### Before opening a PR
 
-- [ ] Scope test applied to the diff (`docs/process/workflow.md` § 3): full suite
-      and before/after benchmark, or a recorded skip.
+- [ ] Scope test applied to the diff (`docs/process/workflow.md` § 3): the `after`
+      benchmark, then the full suite, or a recorded skip.
 - [ ] `$version_number` restored to `X.Y.Z` before the gate ran.
 - [ ] The gate ran on the commit being merged; an amend re-runs it.
 - [ ] `--help` and `docs/usage.md` agree (`tests/validate-help-content.sh`).
@@ -407,9 +407,9 @@ export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnes
 perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                   # its scenario names
 ./tests/validate-<name>.sh --scenario <name>        # one scenario while iterating
-# Full suite (completion gate only): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
-./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after
+./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after, first in the gate
 ./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
+# Full suite (completion gate only, after the benchmark): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
 ./tests/cleanup-test-artifacts.sh                   # the only sanctioned cleanup
 ```
 

@@ -42,7 +42,7 @@ ones. Two independent defects, one issue, per the architect's decision below.
 
 ## Motivating consumer
 
-The completion gate's chained harness order (`docs/process/workflow.md` § 3 (a):
+The completion gate's chained harness order (`docs/process/workflow.md` § 3 (b):
 `CI=1 ./tests/validate-csv-output.sh`, then
 `CI=1 ./tests/validate-statistics.sh`, then the rest, with no intervening
 cleanup). Every issue whose gate runs the full suite runs
@@ -580,7 +580,7 @@ investigation, so no ordering claim is made about them beyond the absence of any
 edge.
 
 One sequencing point, a convenience argument rather than a dependency: while
-this issue is open, the gate order in `docs/process/workflow.md` § 3 (a) can
+this issue is open, the gate order in `docs/process/workflow.md` § 3 (b) can
 leave `-o` products in the repository root, so any issue whose completion gate
 runs the full suite may see `tests/validate-aggregate-export.sh` fail for a
 reason unrelated to its own change. Landing this first removes that noise from

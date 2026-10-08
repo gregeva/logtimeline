@@ -143,7 +143,7 @@ options.
 | 12 | The thread cut is 20 and the object cut is 25, with no reason on record | **Holds.** Both came in one commit ("Truncate message object and thread names in message stats") with no stated reason. The thread keeps its first 20 characters and the object keeps its last 25. `my $max_object_length = 25;` is re-declared for every retained message. They are recorded as having no reason on record (D5). |
 | 13 | `docs/architecture-patterns.md` § Hot-loop discipline says #620 refines the key length recomputed per line | **The owner is this issue.** #620's body says "the key cut is #619". This issue corrects the status line by adding its own token and changing nothing else in it. |
 | 14 | #174 was closed as not planned on 2026-09-28 | **Closed 2026-09-27** (20:46 UTC). The closing comment is in the architect's terms and points the unread counter to this issue. |
-| 15 | The completion gate's benchmark case would show the moved CONFIG line | **It would not.** `docs/process/workflow.md` § 3 (b) names `single-day-access-log-standard`, which runs neither `-o` nor `-g`. `compare-results.sh summary` does not print CONFIG rows. `detailed` does print them, and it labels a 200 to 350 step as `REGRESS +75.0%`. The gate is widened to four cases (D6). |
+| 15 | The completion gate's benchmark case would show the moved CONFIG line | **It would not.** `docs/process/workflow.md` § 3 (a) names `single-day-access-log-standard`, which runs neither `-o` nor `-g`. `compare-results.sh summary` does not print CONFIG rows. `detailed` does print them, and it labels a 200 to 350 step as `REGRESS +75.0%`. The gate is widened to four cases (D6). |
 | 16 | (not in the issue) The bucket-key split has one caller per path | **A third, dead copy exists.** `partition_consolidation_keys` builds the same buckets as the loops in `run_consolidation_pass` and `process_final_pass_window`, and nothing calls it. It is removed with the partition (D8, the partition removed as dead code). |
 
 ---
@@ -752,7 +752,7 @@ accounts for every occurrence and its data exactly once (§ 11.17 shows today's
       `top25-consolidate`,
       `heatmap-histogram-consolidate` and `heatmap-histogram-export`, and stays
       200 on `standard`. Every other metric, memory included, stays within 1 %,
-      the regression threshold of `docs/process/workflow.md` § 3 (b). A memory
+      the regression threshold of `docs/process/workflow.md` § 3 (a). A memory
       movement on the `-g` cases beyond it is not pre-accepted: the findings
       report gives it with its attribution (the carried grouping key, the
       removed unread key-to-group map) for the architect's disposition (D2).
@@ -1470,7 +1470,7 @@ end to end with a Perl stand-in for its C loop.
 
 **Full harness suite:** all 44 `tests/validate-*.sh` exit 0, each with
 assertions run and none failing, run in the order of `docs/process/workflow.md`
-§ 3 (a) with `CI=1`; the statistics-drift suite passes 25 of 25 scenarios, the
+§ 3 (b) with `CI=1`; the statistics-drift suite passes 25 of 25 scenarios, the
 regression goldens pass unchanged, `validate-message-grouping.sh` passes 34
 assertions. AC4 (no expectation changed except through the final-pass fix)
 holds: the only expectations changed on the branch are those of § 11.10.

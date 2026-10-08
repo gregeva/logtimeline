@@ -10,7 +10,7 @@ feature doc — not code that later becomes the implementation.
 
 Every change to the hot path is taken carefully and proven not to regress: a
 before/after benchmark on this machine is required whenever the work adds cost
-per line or per key (`docs/process/workflow.md` § 3 (b)). For a small change to
+per line or per key (`docs/process/workflow.md` § 3 (a)). For a small change to
 an existing path, such as a test, a cleared value or a substitution, that
 comparison is the evidence, and no prototype is needed.
 
