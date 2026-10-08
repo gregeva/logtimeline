@@ -12,8 +12,10 @@ timestamp formatter, then a single timestamp-precision option), #605 (units on
 inputs) and #640 (CSV rows with an unplaceable timestamp read silently) landed:
 § 3 items 9 to 11 record what moved, and D16 (a CSV timestamp is read under the
 run's standard capture rules) and D17 (a CSV file takes part in the
-timestamp-precision pattern as every input does) were locked in reply. Next:
-the prototype (drop 1).
+timestamp-precision pattern as every input does) were locked in reply. #525
+was reopened the same day for its several-files rule (a run gives way only to
+the finest precision any processed file carries), merged in PR #691, and this
+branch rebased onto `release/0.19.0` at 485e533. Next: the prototype (drop 1).
 
 The design is locked in outline by the architect (§ 4: D1 to D6 from stage 5 of
 the redundant-logic-surfaces review, 2026-09-27; D7 to D15 in reply to this
@@ -923,8 +925,8 @@ mechanism to reuse, the criterion names it.
       carries the millisecond. **Assertable**: scenarios in
       `tests/validate-timestamp-precision.sh` beside its `truth/*`
       scenarios, fixtures generated inline, the notice read from stderr and
-      the precision from the runtime-config row. The mixed-file case passes
-      only once the several-files rule of #525's amended D4 is implemented.
+      the precision from the runtime-config row. The mixed-file case rests on
+      the several-files rule of #525's amended D4, merged 2026-10-08 (PR #691).
 
 Triage: eleven assertable, one unassertable (AC8, output-invisible by design, its
 cost measured instead), none unknown. The prototype is a cost prototype
