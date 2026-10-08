@@ -30,10 +30,9 @@ precision are shown at the finest any of them carries. The shipped code and
 the scenario `truth/several-files` follow the superseded coarsest-file rule of
 § 6.4 (§ 7, *Several files*).
 Reopened 2026-10-08 to fix it, on branch `525-timestamp-precision-option-2`
-off `release/0.19.0`; it blocks #615 (CSV input as a registry entry). Part 1,
-the run's precision taken from the finest file, is delivered; part 2, each
-run-index row written at the request clamped to its own file's precision
-(D13), is next.
+off `release/0.19.0`; it blocks #615 (CSV input as a registry entry). The
+run's precision is now taken from the finest file. The run index is unchanged
+(§ 6.4, *The run index across several files*).
 The architect's decisions are § 4 (D1 to D23); no element of the run index's
 design remains **proposed**. A design element that no decision settles is
 implementation detail and is marked **proposed**.
@@ -834,6 +833,14 @@ a file whose sample matches no format puts no line on the timeline, so it has
 no precision to count and plays no part in the run's. CSV input becomes a
 source through the same sample under #615 (CSV input as a registry entry),
 whose D17 reads it from the rows its block is validated on.
+
+**The run index across several files.** Unchanged: every row is written at
+the run's resolved precision, as D13 is implemented. The architect,
+2026-10-08: "The run index should not change. The point of the run index is to
+indicate the same execution on the same file and the same selection. [...] As
+long as it is the same file and same selection, the timestamp precision
+detected in it will be the same as well. It doesn't matter If the timestamp
+precision provided in the command line option matches the contents."
 
 **The notice.** One stderr line when the resolved precision is coarser than the
 requested one, naming the precision used and what was found, in plain words

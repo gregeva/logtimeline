@@ -397,7 +397,7 @@ rendered and written under six rules, each locked in the owning record:
    carrying into the second, minute and date; minute and second truncate
    (D1, D7, D8).
 6. **The run index states each row's precision.** Each row's timestamps are
-   written at the precision the run resolved for it, stated in `ts_precision`
+   written at the run's resolved precision, stated in `ts_precision`
    (`m` at minute, over whole-second strings); drift compares as numbers, at
    the run's precision or the row's when that is coarser, and an older row
    with `-` is read at the precision its digits carry (D13, D15 to D19).
@@ -441,17 +441,12 @@ fixed three-digit format (`features/525-timestamp-precision-option.md` § 1,
 D23); `features/524-bucket-size-unit.md` D4 (width and precision separate);
 `features/617-width-to-format-rule.md` D4, D16.
 
-**Status.** Needs refinement, on two counts.
+**Status.** Needs refinement for CSV input. A run over several files takes
+the finest precision any processed file carries
+(`resolve_timestamp_precision` ::
+`my $limit = %file_precision ? $finest->(values %file_precision) : undef;`),
+fixed under #525 reopened.
 
-- *A run over several files.* The run's precision is the request clamped to
-  the finest precision any processed file carries
-  (`resolve_timestamp_precision` ::
-  `my $limit = %file_precision ? $finest->(values %file_precision) : undef;`).
-  The run index still writes every file's row at that one run precision
-  (`write_index_file` ::
-  `my $index_precision = index_timestamp_precision($timestamp_precision);`),
-  where rule 6 writes each row at the request clamped to its own file's
-  precision; refined by #525, reopened for it.
 - *CSV input.* It reads its timestamps outside the read gate, in two inline
   arms of `read_and_process_logs`: the ISO arm
   (`} elsif (!$csv_epoch_timestamp && $match_type == 13) {`) always reads up
