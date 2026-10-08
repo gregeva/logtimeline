@@ -154,20 +154,26 @@ startup rather than on line one of a real file (D24).
 - `pipeline_detect` :: `build_format_registry();`
 - `format_scan_sub_resolve` :: `$format_scan_sub_cache_hits++ if exists $format_scan_sub_cache{$sig};`
 - `read_and_process_logs` :: `if ( $line_entry = $format_scan_sub->($_) ) {`
-- `build_format_registry` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );`
 - `format_entry_block_src` :: `if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }` (a run option folded into the generated code).
-- `format_entry_block_src` :: `my $capture = $opts->{capture_fraction} // 1;` (the timestamp read gate folded into the generated code; entry *Timestamp precision: requested by the user, bounded by what each file carries*, rule 3).
+- `format_timestamp_src` :: `my $capture = $opts->{capture_fraction} // 1;` (the timestamp read gate folded into the generated code; entry *Timestamp precision: requested by the user, bounded by what each file carries*, rule 3).
+- `csv_block_for_file` :: `my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');` (the CSV template instantiated per header shape).
 
 **Owning record.** `features/log-format-registry.md` (system of record; D31,
 D39, D60) and `features/58-format-registry-staged-detection.md`; CLAUDE.md §
 Architecture, *Format recognition*.
 
-**Status.** Established. Two refinements on record from the audit: the time
-parse exists as the generated source strings and again as closures in
-`compile_format_time_parser`, tied by a comment (item 3, F3.1); and
+**Template entries.** An entry whose field positions come from the input
+rather than from its spec is a template: its block is generated per input
+shape through the same emitter and cache, validated on the input's own
+sampled rows before it serves a line, one instance alive at a time. The `csv`
+entry is the one instance (`features/615-csv-registry-entry.md` D1, D9, D10,
+D11): each CSV file's header builds its block. A pattern entry of its own
+waits for the second consumer, user-declared formats (#387).
+
+**Status.** Established. One refinement on record from the audit:
 `format_registry_set_occupant` does its own cache lookup instead of calling
 `format_scan_sub_resolve`, so occupant swaps bypass the cache-hit telemetry
-(item 8, F8.1). The time parse is #615 (CSV as a header-instantiated entry, one generated parse); the cache bypass is #620.
+(item 8, F8.1). The cache bypass is #620.
 
 ---
 
@@ -175,8 +181,8 @@ parse exists as the generated source strings and again as closures in
 
 **Definition.** A sub builds Perl source text from declarations and `eval`s it
 into a closure or a sub, once per distinct configuration, and validates the
-result before use. The registry's scan sub, classifier and extractor are the
-three instances.
+result before use. The registry's scan sub, classifier and extractor, and the
+block each CSV file's header instantiates, are the four instances.
 
 **Intended uses.** A per-line path whose shape depends on run-scoped or
 per-item configuration, where a per-line test of that configuration would
@@ -193,14 +199,15 @@ for options a run did not name.
 - `compile_format_scan_sub` :: `my $sub = eval $src;`
 - `compile_format_classifier` :: `my $closure = eval $src;`
 - `compile_format_extractor` :: `my $closure = eval $src;`
+- `compile_csv_block` :: `my $block = eval $src;` (the per-file CSV block, validated on the file's sampled rows by `csv_validate_block`).
 - `format_validate_scan_sub` :: `my $saved_cache = timestamp_date_cache_snapshot();` (validation of the generated sub against sample lines, with run state saved and restored).
 
 **Owning record.** `features/log-format-registry.md` D39 and D40 (scan-sub
 generation and ordering) and D60 (zero generation at startup; generation at
 election, promotion, occupant swap or pin).
 
-**Status.** Established for the three sites. Whether the per-line loop body of
-`read_and_process_logs` becomes a fourth is the audit's item 8 question,
+**Status.** Established for the four sites. Whether the per-line loop body of
+`read_and_process_logs` becomes a fifth is the audit's item 8 question,
 measured in drop 2. The per-line loop body as a switchable generated variant is #621, not planned, after #620.
 
 ---
@@ -429,9 +436,10 @@ fixed three-digit format (`features/525-timestamp-precision-option.md` § 1,
 - `adapt_to_command_line_options` :: `$timestamp_capture_ns = $timestamp_precision eq 'ns' ? 1 : 0;` (rule 3)
 - `adapt_to_terminal_settings` :: `$timestamp_capture_fraction =` (rule 3)
 - `build_format_registry` :: `capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns` (rule 3, the compile options)
-- `format_entry_block_src` :: `my $capture = $opts->{capture_fraction} // 1;` (rule 3)
+- `format_timestamp_src` :: `my $capture = $opts->{capture_fraction} // 1;` (rule 3; every generated block's timestamp, the CSV block's included)
 - `read_and_process_logs` :: `if ($timestamp_capture_ns) {` (rule 3, the exact bounds)
 - `sample_file_for_detection` :: `my $digits = $c[$o] =~ /:\d{2}:\d{2}[.,](\d+)/ ? length $1 : 0;` (rule 4, the digits a file carries)
+- `csv_validate_block` :: `my $d = ($ts =~ /:\d{2}:\d{2}[.,](\d+)/ || $ts =~ /^\d+\.(\d+)$/) ? length $1 : 0;` (rule 4, the digits a CSV file carries)
 - `resolve_timestamp_precision` :: `push @found, fraction_precision(` (rule 4, through the ladder)
 - `format_timestamp` :: `my $ticks = timestamp_ticks($epoch, $opt{precision}, $opt{exact});` (rule 5)
 - `write_index_file` :: `my $index_precision = index_timestamp_precision($timestamp_precision);` (rule 6)
@@ -441,22 +449,12 @@ fixed three-digit format (`features/525-timestamp-precision-option.md` § 1,
 D23); `features/524-bucket-size-unit.md` D4 (width and precision separate);
 `features/617-width-to-format-rule.md` D4, D16.
 
-**Status.** Needs refinement for CSV input. A run over several files takes
-the finest precision any processed file carries
-(`resolve_timestamp_precision` ::
+**Status.** Established. A run over several files takes the finest
+precision any processed file carries (`resolve_timestamp_precision` ::
 `my $limit = %file_precision ? $finest->(values %file_precision) : undef;`),
-fixed under #525 reopened.
-
-- *CSV input.* It reads its timestamps outside the read gate, in two inline
-  arms of `read_and_process_logs`: the ISO arm
-  (`} elsif (!$csv_epoch_timestamp && $match_type == 13) {`) always reads up
-  to six digits and keeps them as text; the epoch arm
-  (`$timestamp = int($epoch_val);`) always takes the fraction from the
-  floating value. And it is no source of its file's precision: the digit
-  count is taken only for lines a scanned entry matched. Refined by #615 (CSV
-  as a header-instantiated registry entry): D16, the CSV block reads under
-  the read gate; D17, the rows its validation samples are its file's
-  precision evidence.
+fixed under #525 reopened. CSV input reads its timestamps under the read gate
+through the CSV block, and the rows that block is validated on are its
+file's precision evidence (`features/615-csv-registry-entry.md` D16, D17).
 
 ---
 
@@ -706,7 +704,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #615, #616 and #618, each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*); #605 closed the copies of the bound set and the number-and-unit split (entry *Quantity units*).
+**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #616 and #618, each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*); #605 closed the copies of the bound set and the number-and-unit split (entry *Quantity units*).
 
 ---
 

@@ -15,10 +15,11 @@ into a TSV; `compare-results.sh` reports one TSV against another. A captured TSV
 | `quick` | one test | smoke |
 | `full` | the five standard file selections × all scenarios (55 tests) | development |
 | `xl` | the two extra-large selections (1.5 GB and 7.6 GB) × all scenarios | release |
-| `all` | everything (77 tests) | release |
+| `all` | every tier above (77 tests); not the named selections | release |
 
 A single selection can be named directly — `run-benchmark.sh single-day-access-log-standard`
-— which is what the per-feature completion gate uses.
+— which is what the per-feature completion gate uses. A selection in the `named` tier
+runs only this way: no tier includes it.
 
 ## Same-machine comparability
 
@@ -109,6 +110,13 @@ boundary: the keys are the same length on both sides, and only the report change
 whether the run read the sub-second part of its timestamps (1) or skipped it (0). Every
 standard scenario reads 0 except `heatmap-histogram-export` (`-o`), which reads 1.
 **Expect `compare-results.sh` to list it under New In This Version** across that boundary.
+
+**`network-latency-csv` is a named selection from release 0.19.0 (#615).** It reads a
+CSV file through `-udm` (166,912 rows, an epoch timestamp with a six-digit fraction, one
+metric column) and belongs to no tier, so `quick`, `full`, `xl` and `all` never run it
+and no release baseline carries it. Name the test to run it:
+`run-benchmark.sh network-latency-csv-standard`. Its series starts with the captures of
+the change that added it, so there is nothing earlier to compare against.
 
 ## Results naming
 

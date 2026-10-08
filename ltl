@@ -663,7 +663,11 @@ my $udm_number_re = qr/-?\d+(?:\.\d+)?/;
 my ( $csv_separator_override, @udm_csv_message_col_names );
 my ( $csv_detected, $csv_separator, $csv_timestamp_col, %csv_col_index );
 my ( @csv_udm_col_indices, @csv_message_col_indices );
-my $csv_epoch_timestamp = 0;  # 1 if CSV timestamp column contains epoch values
+# The CSV block serving the current CSV file (csv_block_for_file), the one
+# CSV block alive in the run with its shape (layout, columns, signature),
+# and the -udm values it read from the row, by -udm position, for the shared
+# metric capture.
+my ( $csv_block, $csv_block_live, @csv_udm_values );
 
 # Pattern file filter options (Issue #19)
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
@@ -743,45 +747,43 @@ use constant {
     FR_EVENT_PAIRS     => 14,  # reserved slot — validated empty in this drop (D23)
     FR_SAMPLES         => 15,  # sample lines (load-time executable self-tests)
     FR_ANCESTORS       => 16,  # derived pinned-ancestor names (D26 constraints)
-    FR_TIME_PARSE      => 17,  # compiled timestamp-parse closure for the entry's
-                               # declared layout (D31; shares %timestamp_date_cache)
-    FR_ANC_SET         => 18,  # FR_ANCESTORS as a name-set hashref — the hot
+    FR_ANC_SET         => 17,  # FR_ANCESTORS as a name-set hashref — the hot
                                # loop's O(ancestors) already-optimal check must
                                # not rebuild a hash per line (P3 lean-loop)
-    FR_MATCHES         => 19,  # run-total matched-line count for this entry
+    FR_MATCHES         => 18,  # run-total matched-line count for this entry
                                # (scan telemetry; -V format-detection / scan)
-    FR_GROUP           => 20,  # variant-group key (D47/F1); an entry without
+    FR_GROUP           => 19,  # variant-group key (D47/F1); an entry without
                                # variants is a group of one keyed by its name.
                                # Ordering constraints and promotion closures
                                # are keyed by group, never by member.
-    FR_GROUP_DEFAULT   => 21,  # 1 = the member occupying the group's scan
+    FR_GROUP_DEFAULT   => 20,  # 1 = the member occupying the group's scan
                                # slot when no evidence selects another
-    FR_FILENAME        => 22,  # filename evidence (D45): { matcher, stem, date,
+    FR_FILENAME        => 21,  # filename evidence (D45): { matcher, stem, date,
                                # index, ext, placement } or undef
-    FR_FILENAME_SAMPLES=> 23,  # producer-true names the matcher must accept
-    FR_EVENT_LEDGER    => 24,  # 1 = event ledger: maximal coverage of the
+    FR_FILENAME_SAMPLES=> 22,  # producer-true names the matcher must accept
+    FR_EVENT_LEDGER    => 23,  # 1 = event ledger: maximal coverage of the
                                # operations the format describes (#453 R8)
-    FR_CLASSIFY        => 25,  # write-direct classification closure (sets
+    FR_CLASSIFY        => 24,  # write-direct classification closure (sets
                                # $line_outcome / $line_cls_sig from the record
                                # lexicals) — the CSV path's call shape (D29);
                                # undef on scanned entries, whose blocks inline it
-    FR_CLS_SIG         => 26,  # criteria-signature id of the entry's resolved
+    FR_CLS_SIG         => 25,  # criteria-signature id of the entry's resolved
                                # classification (0 = declines) (D32)
-    FR_PCT_QUALIFYING  => 27,  # 1 = lines from this entry qualify for the
+    FR_PCT_QUALIFYING  => 26,  # 1 = lines from this entry qualify for the
                                # success/failure percentage surfaces (#452 D2/D4):
                                # both outcomes declared, and the entry is an
                                # event ledger or the columns were explicitly
                                # enabled; folded at build time so the include
                                # point pays one array lookup per line
-    FR_CLS_BOTH        => 28,  # 1 = the entry's resolved classification
+    FR_CLS_BOTH        => 27,  # 1 = the entry's resolved classification
                                # declares both outcomes (#452 D4 usability
                                # floor, unfolded — column visibility reads it
                                # per file, independent of the run mode)
-    FR_LEVELS          => 29,  # [ level names this entry emits ] or undef when
+    FR_LEVELS          => 28,  # [ level names this entry emits ] or undef when
                                # the entry declares none; joined into the run's
                                # category vocabulary when the entry first binds
                                # a file, never consulted per line
-    FR_BYTE_NOTATION   => 30,  # the byte notation the format declares ('si' or
+    FR_BYTE_NOTATION   => 29,  # the byte notation the format declares ('si' or
                                # 'iec'), or undef when it declares none; read
                                # once per run by resolve_byte_notation()
 };
@@ -4229,52 +4231,9 @@ sub timestamp_date_cache_restore {
     return;
 }
 
-# Timestamp-parse closures per declared layout family (D31), each reading
-# the date's midnight from the cache above. The iso parser serves every
-# iso_* layout (fixed substr offsets); apache_clf parses the
-# dd/Mon/yyyy:HH:MM:SS form, keyed on the text before the first colon;
-# asctime parses the C library's `Mmm dd HH:MM:SS yyyy` order (the weekday
-# that leads it is matched by the pattern and not captured), keyed on
-# `Mmm dd yyyy`, a form neither of the other two keys can take.
+# Month names to numbers, read by the Apache and asctime parses
+# format_timestamp_src() emits.
 my %format_month_map = ( Jan => 1, Feb => 2, Mar => 3, Apr => 4, May => 5, Jun => 6, Jul => 7, Aug => 8, Sep => 9, Oct => 10, Nov => 11, Dec => 12 );
-sub compile_format_time_parser {
-    my ($layout) = @_;
-    if ($layout eq 'asctime') {
-        return sub {
-            my $ts = $_[0];
-            my $date = substr($ts, 0, 7) . substr($ts, 16, 4);
-            my $midnight = $timestamp_date_cache{$date}
-                // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($ts, 4, 2), $format_month_map{ substr($ts, 0, 3) } - 1, substr($ts, 16, 4) ) );
-            return $midnight + substr($ts, 7, 2) * 3600 + substr($ts, 10, 2) * 60 + substr($ts, 13, 2);
-        };
-    }
-    if ($layout eq 'apache_clf') {
-        return sub {
-            my $ts = $_[0];
-            my $colon = index($ts, ':');
-            my $midnight = $timestamp_date_cache{substr($ts, 0, $colon)} // do {
-                my ($day, $month_str, $year) = $ts =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/;
-                timestamp_date_cache_add( substr($ts, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) );
-            };
-            return $midnight + substr($ts, $colon + 1, 2) * 3600 + substr($ts, $colon + 4, 2) * 60 + substr($ts, $colon + 7, 2);
-        };
-    }
-    # Every iso_* layout (and csv's ISO fallback path) uses the fixed-offset
-    # substr extraction. iso_ms_ddmm reads the two date fields in the other
-    # order (yyyy-dd-MM, the Integration Runtime encoder, #385); everything
-    # else is identical.
-    my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
-    return sub {
-        my $ts = $_[0];
-        my $midnight = $timestamp_date_cache{substr($ts, 0, 10)} // timestamp_date_cache_add( substr($ts, 0, 10), timegm(
-            0, 0, 0,
-            substr($ts, $day_off, 2),      # day
-            substr($ts, $month_off, 2) - 1,# month (0-11)
-            substr($ts, 0, 4),             # year
-        ) );
-        return $midnight + substr($ts, 11, 2) * 3600 + substr($ts, 14, 2) * 60 + substr($ts, 17, 2);
-    };
-}
 
 # Filename evidence (D45/I4): an entry declares optional name components —
 # stem (pattern; OR-able), date layout, rotation index form, extension —
@@ -5162,45 +5121,82 @@ sub format_entry_block_src {
     # sees the message as the block leaves it.
     push @body, $spec->{_cls_src};
 
-    # Inline timestamp handling (D31 taken to its P8 conclusion: the
-    # closure-call overhead disappears when the parse is inlined into the
-    # per-format block). Fractional handling first — after the tz-chop
-    # transforms — so the %timestamp_date_cache key excludes offset and
-    # fraction; the declared frac contract selects the variant:
-    #   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
-    #             reads, no regex, no exponent math
-    #   none    — layout never carries a fraction: constant zero, no scan
-    #   generic — variable/unguaranteed shape: the original s/// strip
-    # A run that reads no sub-second part ($opts->{capture_fraction} false)
-    # still strips the fraction for the date key and the layout parse, but
-    # neither reads nor converts it.
-    # Then the layout parse, fronted by the last-seen memo: the date's
-    # midnight epoch from %timestamp_date_cache (one timegm() per distinct
-    # day) plus the time of day as arithmetic, as compile_format_time_parser.
+    # The timestamp: fraction under the read gate, then the last-seen memo
+    # fronting the layout parse (format_timestamp_src).
+    push @body, format_timestamp_src($spec, $opts);
+
+    return ($aux_decl, $cond_src, join("\n", @body), \@aux);
+}
+
+# Inline timestamp handling (D31 taken to its P8 conclusion: the
+# closure-call overhead disappears when the parse is inlined into the
+# per-format block). Fractional handling first — after the tz-chop
+# transforms — so the %timestamp_date_cache key excludes offset and
+# fraction; the declared frac contract selects the variant:
+#   fixed3  — pattern-guaranteed SS.mmm tail: fixed-offset substr
+#             reads, no regex, no exponent math
+#   none    — layout never carries a fraction: constant zero, no scan
+#   generic — variable/unguaranteed shape: the original s/// strip
+# A run that reads no sub-second part ($opts->{capture_fraction} false)
+# still strips the fraction for the date key and the layout parse, but
+# neither reads nor converts it.
+# Then the layout parse, fronted by the last-seen memo: the date's
+# midnight epoch from %timestamp_date_cache (one timegm() per distinct
+# day) plus the time of day as arithmetic.
+# Returns the source pieces in order: the fraction handling, then the memo
+# fronting the layout parse.
+# Two layouts belong to the CSV block (csv_block_src). csv_ddmm is the csv
+# layout read day first (yyyy-dd-MM): the day-first offsets, and the
+# unguarded csv parse, which croaks on a date that cannot exist. csv_epoch
+# is a number of seconds, or of the -du unit given as $opts->{epoch_unit},
+# folded in as a constant; it carries no memo, since a hit would save only
+# the number's own conversion. Its fraction follows the read gate: digits
+# as written under nanosecond, from the number when the gate is open.
+sub format_timestamp_src {
+    my ($spec, $opts) = @_;
+    my @src;
     my $frac = $spec->{time}{frac} // 'generic';
     my $capture = $opts->{capture_fraction} // 1;
     my $ns      = $opts->{capture_ns};
+    if (($spec->{time}{layout} // '') eq 'csv_epoch') {
+        if (defined(my $unit = $opts->{epoch_unit})) {
+            my $step  = $time_unit_step{$unit};
+            my $scale = $step->{ms} >= 1000 ? '* ' . sprintf('%.17g', $step->{ms} / 1000)
+                                            : '/ ' . sprintf('%.17g', ($step->{per_ms} // 1) * 1000);
+            # A value scaled from below the second keeps no digits of its own.
+            push @src, "my \$epoch_val = \$timestamp_str $scale;", q{$timestamp = int($epoch_val);},
+                $capture ? q{{ my $frac = $epoch_val - $timestamp; $fractional_ms = $frac > 0 ? $frac * 1000 : 0; }} : q{$fractional_ms = 0;};
+            push @src, q{$fraction_digits = '';} if $ns;
+            return @src;
+        }
+        push @src, q{$timestamp = int($timestamp_str);},
+            $ns      ? q{if ($timestamp_str =~ /\.(\d{1,9})/) { $fractional_ms = $1 * (10 ** (3 - length($1))); $fraction_digits = $1; } else { $fractional_ms = 0; $fraction_digits = ''; }}
+          : $capture ? q{{ my $frac = $timestamp_str - $timestamp; $fractional_ms = $frac > 0 ? $frac * 1000 : 0; }}
+          :            q{$fractional_ms = 0;};
+        return @src;
+    }
     if ($frac eq 'fixed3') {
         die "ltl: format registry: entry '$spec->{name}' declares frac 'fixed3' but its pattern does not guarantee a 3-digit fraction\n"
             unless $spec->{pattern_src} =~ /\\\.\\d\{3\}|\[\.,\]\\d\{3\}/;
-        push @body, $ns      ? q{$fractional_ms = $fraction_digits = substr($timestamp_str, 20, 3);
+        push @src, $ns      ? q{$fractional_ms = $fraction_digits = substr($timestamp_str, 20, 3);
 substr($timestamp_str, 19) = '';}
                   : $capture ? q{$fractional_ms = substr($timestamp_str, 20, 3);
 substr($timestamp_str, 19) = '';}
                              : q{$fractional_ms = 0;
 substr($timestamp_str, 19) = '';};
     } elsif ($frac eq 'none') {
-        push @body, $ns ? q{$fractional_ms = 0; $fraction_digits = '';} : q{$fractional_ms = 0;};
+        push @src, $ns ? q{$fractional_ms = 0; $fraction_digits = '';} : q{$fractional_ms = 0;};
     } else {
         # The strip reads up to nine digits, so a precision coarser than the
         # log's rounds from all of them; under nanosecond it keeps them too.
-        push @body, $ns      ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); $fraction_digits = $2; } else { $fractional_ms = 0; $fraction_digits = ''; }}
+        push @src, $ns      ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); $fraction_digits = $2; } else { $fractional_ms = 0; $fraction_digits = ''; }}
                   : $capture ? q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,9})/$1/) { $fractional_ms = $2 * (10 ** (3 - length($2))); } else { $fractional_ms = 0; }}
                              : q{$timestamp_str =~ s/(?<=:\d{2}:\d{2})[.,]\d{1,9}//; $fractional_ms = 0;};
     }
     my $layout = $spec->{time}{layout} // '';
-    # iso_ms_ddmm (yyyy-dd-MM, #385): the day and month reads swap offsets.
-    my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);
+    # iso_ms_ddmm and csv_ddmm (yyyy-dd-MM, #385): the day and month reads
+    # swap offsets.
+    my ($day_off, $month_off) = ($layout eq 'iso_ms_ddmm' || $layout eq 'csv_ddmm') ? (5, 8) : (8, 5);
     my $compute = ($layout eq 'asctime')
         ? q{do { my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($timestamp_str, 4, 2), $format_month_map{ substr($timestamp_str, 0, 3) } - 1, substr($timestamp_str, 16, 4) ) ); $midnight + substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2) }}
         : ($layout eq 'apache_clf')
@@ -5235,12 +5231,11 @@ $prev_src    \$timestamp = \$format_last_ts_epoch = $compute;
 $mono_src}}
         : qq{\$timestamp = \$format_last_ts_epoch = $compute;
     \$format_last_ts_str = \$timestamp_str;};
-    push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
+    push @src, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 else {
     $miss_src
 }};
-
-    return ($aux_decl, $cond_src, join("\n", @body), \@aux);
+    return @src;
 }
 
 # Emit the inline guard condition for a scan block (D28), or '' when the
@@ -5393,6 +5388,199 @@ sub format_validate_scan_sub {
       $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
     timestamp_date_cache_restore($saved_cache);
     return;
+}
+
+# The CSV template instantiated (features/615-csv-registry-entry.md D1, D10):
+# the csv entry is a template whose field positions come from each file's
+# header, so its per-line block is generated per header shape at CSV
+# confirmation, through the scanned formats' timestamp emitter, and called as
+# the file's own arm. The header reader (detect_and_parse_csv_header) has
+# resolved the separator, the timestamp column and the -udm and -ucm columns;
+# the shape compiles them in as constants, with the file's timestamp kind
+# and date order as the layout:
+#   csv        ISO, month first
+#   csv_ddmm   ISO, day first (the file's sampled rows are real dates only so)
+#   csv_epoch  a number of seconds, or of the -du unit
+# Signature: 'csv:' then the layout, the separator, the timestamp column, each
+# -udm metric's column (-1 when the header has none) and the -ucm columns,
+# free of ';' so it lists among the scan orders in compiled_orders.
+sub csv_block_shape {
+    my ($layout) = @_;
+    my $sep = $csv_separator eq ',' ? 'comma' : $csv_separator eq ';' ? 'semicolon' : $csv_separator eq "\t" ? 'tab'
+            : 'x' . unpack('H*', $csv_separator);
+    my $shape = { layout => $layout, sep => $csv_separator, ts => $csv_timestamp_col,
+                  metrics => [ @csv_udm_col_indices ], msg => [ @csv_message_col_indices ] };
+    $shape->{sig} = "csv:$layout:sep=$sep:ts=$csv_timestamp_col:udm=" . (join('/', @csv_udm_col_indices) || '-')
+                  . ':msg=' . (join('/', @csv_message_col_indices) || '-');
+    return $shape;
+}
+
+# The block's source: split the row once; the timestamp field, trimmed; a row
+# whose timestamp is not of the file's kind returns 0, placing nothing and
+# leaving the record as it stands (#640 D1); then each -udm value at its
+# position into @csv_udm_values (trimmed, an empty or missing field giving no
+# value), the message from the -ucm columns or a fixed label, the DATA
+# category, the record fields CSV does not produce, the csv entry's
+# classification, and the timestamp from format_timestamp_src(). Returns 1.
+sub csv_block_src {
+    my ($shape) = @_;
+    my $sep = quotemeta $shape->{sep};
+    my @s = ( "my \@f = split(/$sep/, \$_[0], -1);",
+              "\$timestamp_str = \$f[$shape->{ts}];",
+              q{$timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;},
+              $shape->{layout} eq 'csv_epoch'
+                ? q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d+(?:\.\d+)?$/;}
+                : q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;} );
+    my @m = @{ $shape->{metrics} };
+    for my $i (0 .. $#m) {
+        push @s, $m[$i] < 0
+            ? "\$csv_udm_values[$i] = undef;"
+            : "if (defined \$f[$m[$i]]) { \$f[$m[$i]] =~ s/^\\s+|\\s+\$//g; \$csv_udm_values[$i] = \$f[$m[$i]] ne '' ? \$f[$m[$i]] : undef; } else { \$csv_udm_values[$i] = undef; }";
+    }
+    my @mc = @{ $shape->{msg} };
+    push @s, @mc > 1  ? '$message = join(\' \', map { (defined $_ ? $_ : \'\') =~ s/^\s+|\s+$//gr } @f[' . join(',', @mc) . ']);'
+           : @mc == 1 ? "\$message = (defined \$f[$mc[0]] ? \$f[$mc[0]] : '') =~ s/^\\s+|\\s+\$//gr;"
+           :            '$message = "CSV data";';
+    push @s, q{$category_bucket = "DATA"; $metrics_observed = 1;},
+             q{( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6; ( $bytes, $duration ) = ( undef, undef ); $status_code = 0;},
+             $format_registry_spec{csv}{_cls_src};
+    my $spec = { %{ $format_registry_spec{csv} } };
+    $spec->{time} = { %{ $spec->{time} }, layout => $shape->{layout} };
+    push @s, format_timestamp_src($spec, { %$format_registry_opts, epoch_unit => $duration_unit_override }), 'return 1;';
+    return "sub {\n" . join("\n", @s) . "\n}";
+}
+
+# Generate and compile one CSV block and validate it on the file's sampled
+# rows, counted and timed as a scan sub is, its validation inside the timer
+# (D11: the existing counters count CSV blocks); the block is made the one
+# CSV signature in the cache: the block it replaces is deleted from the cache
+# and from every reference, so a run holds at most the scan sub and one CSV
+# block. Returns the shape, carrying the block, then csv_validate_block()'s
+# verdict, rows placed and fraction digits.
+sub compile_csv_block {
+    my ($shape, $rows) = @_;
+    csv_block_evict();
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
+    my $compile_start = [gettimeofday];
+    my $src = csv_block_src($shape);
+    my $block = eval $src;
+    $format_scan_subs_compiled++;
+    die "ltl: format registry: CSV block codegen failed: $@\nGENERATED SOURCE:\n$src\n"
+        if $@ || ref $block ne 'CODE';
+    my @verdict = csv_validate_block($block, $rows);
+    $elapsed_detect_scan_sub_compile += tv_interval($compile_start);
+    if (defined $rss_before) {
+        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        $format_scan_subs_rss += $delta if $delta > 0;
+    }
+    $shape->{block} = $format_scan_sub_cache{ $shape->{sig} } = $block;
+    $csv_block_live = $shape;
+    return ($shape, @verdict);
+}
+sub csv_block_evict {
+    return unless $csv_block_live;
+    delete $format_scan_sub_cache{ $csv_block_live->{sig} };
+    $csv_block = $csv_block_live = undef;
+    return;
+}
+
+# D9: a CSV block is proven on the file's own rows, sampled from its front,
+# middle and end parts, before it serves line 2. Every row the block places
+# must carry, at each compiled position, the value the header's column map
+# names for it (the timestamp to the second, each -udm metric, the message);
+# a row it does not place is no failure, rows being handled one by one
+# (#640 D1). An ISO row whose date
+# cannot exist under the block's order stops the block (the parse croaks):
+# a date failure, which the caller answers with the other order. Runs under
+# the snapshot and restore a mid-run compile requires: the record lexicals,
+# the memo and the date cache are left as they were.
+# Returns the verdict ('ok', 'date' or 'wiring'), the rows placed, and the
+# most fraction digits among their timestamps (the file's precision evidence,
+# D17).
+sub csv_validate_block {
+    my ($block, $rows) = @_;
+    my @saved_record = ( $timestamp_str, $category_bucket, $object, $instance, $user,
+                         $session, $platform, $thread, $message, $bytes, $duration,
+                         $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
+                         $line_outcome, $line_cls_sig,
+                         $format_last_ts_str, $format_last_ts_epoch );
+    my $saved_cache = timestamp_date_cache_snapshot();
+    my ($verdict, $placed, $digits) = ('ok', 0, 0);
+    ROW: for my $row (@$rows) {
+        my $ok = eval { $block->($row) };
+        if (!defined $ok) { $verdict = 'date'; last; }
+        next unless $ok;
+        $placed++;
+        my @f = split(/\Q$csv_separator\E/, $row, -1);
+        for my $i (0 .. $#csv_udm_col_indices) {
+            my $c = $csv_udm_col_indices[$i];
+            my $want = $c >= 0 && $c < @f ? ($f[$c] =~ s/^\s+|\s+$//gr) : '';
+            $want = undef if $want eq '';
+            next if !defined $want && !defined $csv_udm_values[$i];
+            if (!defined $want || !defined $csv_udm_values[$i] || $want ne $csv_udm_values[$i]) { $verdict = 'wiring'; last ROW; }
+        }
+        my $want_message = @csv_message_col_indices
+            ? join(' ', map { ($_ < @f ? $f[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices)
+            : 'CSV data';
+        if ($message ne $want_message) { $verdict = 'wiring'; last; }
+        my $ts = ($f[$csv_timestamp_col] // '') =~ s/^\s+|\s+$//gr;
+        if (substr($timestamp_str, 0, 19) ne substr($ts, 0, 19)) { $verdict = 'wiring'; last; }
+        my $d = ($ts =~ /:\d{2}:\d{2}[.,](\d+)/ || $ts =~ /^\d+\.(\d+)$/) ? length $1 : 0;
+        $digits = $d if $d > $digits;
+    }
+    ( $timestamp_str, $category_bucket, $object, $instance, $user,
+      $session, $platform, $thread, $message, $bytes, $duration,
+      $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
+      $line_outcome, $line_cls_sig,
+      $format_last_ts_str, $format_last_ts_epoch ) = @saved_record;
+    timestamp_date_cache_restore($saved_cache);
+    return ($verdict, $placed, $digits);
+}
+
+# CSV confirmation (D2, D9, D11, D15, D18): the block for this file. The
+# file's timestamp kind is read from line 2's timestamp field (epoch when it
+# is a number). An ISO file's date order is settled from its own sampled
+# rows, starting month first whatever file came before it (D18): month
+# first, then on a date failure day first, then, when both fail, month first
+# again, so a row impossible under that order stops the run as it reaches it
+# (D7). At each order, the live block serves when it was built for this
+# header and that order and passes the rows (a cache hit); otherwise the
+# block is generated, a compile that replaces the block before it. A wiring
+# failure stops the run here, before line 2 is processed. The memo and the
+# date cache are cleared for the file (N3).
+# Records the file's precision evidence (D17) in its detection sample, as
+# the sample records a scanned format's: the rows placed under formats, the
+# most fraction digits under frac_digits, and an epoch file's unit.
+# Returns the block.
+sub csv_block_for_file {
+    my ($file, $line2_ts, $rows) = @_;
+    my $kind = (defined $line2_ts && $line2_ts =~ /^\d+(\.\d+)?$/) ? 'epoch' : 'iso';
+    my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');
+    my ($verdict, $placed, $digits, $served);
+    for my $layout (@order) {
+        my $shape = csv_block_shape($layout);
+        if ($csv_block_live && $csv_block_live->{sig} eq $shape->{sig}) {
+            $shape = $csv_block_live;
+            ($verdict, $placed, $digits) = csv_validate_block($shape->{block}, $rows);
+            $format_scan_sub_cache_hits++ if $verdict eq 'ok';
+        } else {
+            ($shape, $verdict, $placed, $digits) = compile_csv_block($shape, $rows);
+        }
+        if ($verdict ne 'date') { $served = $shape; last; }
+    }
+    die "ltl: format registry: the CSV block for $file reads a sampled row's values from other columns than its header names (produced_by csv_block_src())\n"
+        if $verdict eq 'wiring';
+    $served //= $csv_block_live->{layout} eq $order[0] ? $csv_block_live
+              : (compile_csv_block(csv_block_shape($order[0]), []))[0];
+    timestamp_date_cache_clear();
+    ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+    if (my $sample = $format_detection_sample{$file}) {
+        $sample->{formats}{csv}     = $placed // 0;
+        $sample->{frac_digits}{csv} = $digits // 0;
+        $sample->{frac_unit}{csv}   = time_unit_canonical($duration_unit_override)
+            if $kind eq 'epoch' && defined $duration_unit_override;
+    }
+    return $csv_block = $served->{block};
 }
 
 # Cross-shadow constraint derivation (D24/D26): every entry's samples are
@@ -5743,7 +5931,6 @@ sub build_format_registry {
         $entry->[FR_EVENT_PAIRS]     = $spec->{event_pairs};
         $entry->[FR_SAMPLES]         = $spec->{samples};
         $entry->[FR_ANCESTORS]       = $ancestors->{ $spec->{group} } // [];
-        $entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );
         $entry->[FR_ANC_SET]         = { map { $_ => 1 } @{ $entry->[FR_ANCESTORS] } };
         $entry->[FR_MATCHES]         = 0;
         $entry->[FR_GROUP]           = $spec->{group};
@@ -6280,9 +6467,11 @@ sub emit_format_registry_verbose {
     # Compile state: how much codegen this run paid for. Under elevation by
     # election (D60) nothing is compiled at startup — a single-format run
     # compiles the one order it scans with, a pinned run exactly one, and
-    # an invalid -lf none at all. scan_subs_rss_bytes is the accumulated
-    # compile-boundary RSS delta (D62), 0 when unarmed; read against the
-    # count it gives the per-sub cost.
+    # an invalid -lf none at all. A CSV file adds the block generated from
+    # its header (#615 D11), one alive at a time, listed by its signature.
+    # scan_subs_rss_bytes is the accumulated compile-boundary RSS delta
+    # (D62), 0 when unarmed; read against the count it gives the per-sub
+    # cost.
     push @verbose_output, "scan_subs_compiled: $format_scan_subs_compiled";
     push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";
     push @verbose_output, "scan_subs_rss_bytes: $format_scan_subs_rss";
@@ -11014,8 +11203,8 @@ sub print_help {
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. For sum, min, max, mean, delta and idelta the value must be a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2; any other value (12abc, 1,000, an empty capture) is skipped, and the lines skipped are reported. Capture the whole value, e.g. (\\S+), and let it be checked: (\\d+) reads 1 from 1.5 or 1e3, and \\D* before the capture drops a minus sign, with no notice. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
-    $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
-    $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
+    $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Name the CSV header columns whose values form the message (default: a fixed label)");
+    $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter, overriding the one detected from the header (comma, semicolon or tab)");
 
     # Thread Pool Activity
     $out .= help_subheading("Thread Pool Activity");
@@ -11579,19 +11768,6 @@ sub parse_udm_configs {
 
     # Add UDM metric names to graph columns
     push @graph_columns, map { "udm_$_->{name}" } @udm_configs;
-}
-
-# A CSV row is placed on the timeline only when its timestamp column holds
-# epoch seconds (when the file's first data row did) or an ISO date and time;
-# any other row is a line no format matched, read silently (Issue #640 D1).
-# Checked before the row counts as a match, so it never reaches the metric
-# capture or the date parse (Issue #328).
-sub csv_timestamp_placeable {
-    my ($timestamp_str) = @_;
-    return 0 unless defined $timestamp_str;
-    return $csv_epoch_timestamp
-        ? $timestamp_str =~ /^\d+(?:\.\d+)?$/
-        : $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;
 }
 
 # CSV header detection and column mapping for UDM (Issue #22)
@@ -13890,8 +14066,9 @@ sub gc_heap_size_bytes {
 # coarsest of its sampled formats': a format without a fraction, or with a
 # fixed one, gives its declared precision; a variable-length one gives the
 # precision of the most fractional digits among the detection sample's
-# timestamps. A file whose precision cannot be read (not sampled, CSV input,
-# no format recognised in the sample) sets no limit. The request gives way
+# timestamps, a CSV file's among the rows its block was validated on, in the
+# unit an epoch CSV is read in. A file whose precision cannot be read (not
+# sampled, no format recognised in the sample) sets no limit. The request gives way
 # only to the finest precision any processed file carries, so a file carrying
 # less than another never lowers the run; a behavioural notice says what was
 # shown and why, and the runtime-config row carries the request in its clamp
@@ -13908,7 +14085,7 @@ sub resolve_timestamp_precision {
         for my $name (keys %{ $sample->{formats} // {} }) {
             my $time = $format_registry_spec{$name} && $format_registry_spec{$name}{time} or next;
             if (($time->{frac} // 'generic') eq 'generic') {
-                push @found, fraction_precision('s', $sample->{frac_digits}{$name}) if defined $sample->{frac_digits}{$name};
+                push @found, fraction_precision($sample->{frac_unit}{$name} // 's', $sample->{frac_digits}{$name}) if defined $sample->{frac_digits}{$name};
             } elsif (defined $time->{precision}) {
                 push @found, $time->{precision};
             }
@@ -16654,11 +16831,11 @@ sub read_and_process_logs {
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
-        $csv_epoch_timestamp = 0;
         %csv_col_index = ();
         @csv_udm_col_indices = ();
         @csv_message_col_indices = ();
         my $potential_csv_header;
+        my $csv_sample_lines;   # the detection sample's lines, for CSV confirmation (#615 D9)
 
         # Detection evidence (D53, dual process). Primary: the read-only
         # sample of the file, taken before its first line is processed;
@@ -16685,7 +16862,14 @@ sub read_and_process_logs {
             # before its first line is gated.
             format_seat_declared_levels( $format_registry_entry{$_} )
                 for keys %{ $sample->{formats} };
-            delete $sample->{lines};   # conclusions are retained, lines are not (#17 attaches here)
+            # Conclusions are retained, lines are not (#17 attaches here),
+            # except that a run with -udm keeps them for CSV confirmation at
+            # line 2, where they are the rows a CSV block is validated on
+            # (#615 D9). A file that is not CSV holds them, at most the three
+            # sample parts, until it ends: releasing them sooner would add a
+            # test to every line.
+            $csv_sample_lines = delete $sample->{lines};
+            $csv_sample_lines = undef unless @udm_configs;
             $format_detection_sample{$in_file} = $sample;
         }
         # Whatever the evidence decided — an election, a variant swap, or
@@ -16782,7 +16966,6 @@ sub read_and_process_logs {
             my ( $occurrences, $count ) = ( undef, undef );
             my ( $threadname );
             my $line_entry;                                 # winning registry entry for this line (drives timestamp-parse dispatch)
-            my @csv_fields;
             $total_lines_read++;
             memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;
 
@@ -16809,39 +16992,17 @@ sub read_and_process_logs {
             }
 
             ## CSV data line (only after CSV confirmed via two-line validation) ##
+            # The file's own block, generated from its header (D1, D10): the
+            # record, the -udm values and the timestamp, or 0 for a row whose
+            # timestamp is not of the file's kind, which is unmatched (#640 D1).
             if ($csv_detected) {
-                @csv_fields = split(/\Q$csv_separator\E/, $_, -1);
-                $timestamp_str = $csv_fields[$csv_timestamp_col];
-                $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
-
-                # Detect epoch timestamps on first data line
-                if ($line_number == 2 && defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {
-                    $csv_epoch_timestamp = 1;
-                }
-
-                unless (csv_timestamp_placeable($timestamp_str)) {
+                unless ($csv_block->($_)) {
                     note_unmatched_line($in_file);
                     next;
                 }
-
-                # Build message from -ucm columns or default label
-                if (@csv_message_col_indices) {
-                    $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
-                } else {
-                    $message = "CSV data";
-                }
-
-                $category_bucket = "DATA";
                 $is_line_match = 1;
-                $metrics_observed = 1;
                 $match_type = 13;
                 $line_entry = $format_registry_entry{csv};
-                # Record lexicals the CSV path does not produce: reset
-                # explicitly (the scan's closures never ran for this line).
-                ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
-                ( $bytes, $duration ) = ( undef, undef );
-                $status_code = 0;
-                $line_entry->[FR_CLASSIFY]->($_);
 
             ## Registry scan (#58): recognition + extraction in one step ##
             # Pinned-closure MTF over the compiled registry entries, cheap
@@ -16906,35 +17067,22 @@ sub read_and_process_logs {
                         my @data_fields = split(/\Q$csv_separator\E/, $_, -1);
                         my $header_count = scalar keys %csv_col_index;
                         if (scalar @data_fields >= $header_count * 0.8) {
-                            # Confirmed CSV — process line 2 as data
-                            @csv_fields = @data_fields;
-                            $timestamp_str = $csv_fields[$csv_timestamp_col];
-                            $timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;
-
-                            if (defined $timestamp_str && $timestamp_str =~ /^\d+(\.\d+)?$/) {
-                                $csv_epoch_timestamp = 1;
-                            }
-
-                            unless (csv_timestamp_placeable($timestamp_str)) {
+                            # Confirmed CSV: the block for this header, validated
+                            # on the sample's rows (D9), processes line 2 as data.
+                            my $line2_ts = $data_fields[$csv_timestamp_col];
+                            $line2_ts =~ s/^\s+|\s+$//g if defined $line2_ts;
+                            my @rows = $csv_sample_lines
+                                ? grep { $_ ne '' && $_ ne $potential_csv_header } @$csv_sample_lines
+                                : ($_);
+                            $csv_sample_lines = undef;
+                            csv_block_for_file($in_file, $line2_ts, \@rows);
+                            unless ($csv_block->($_)) {
                                 note_unmatched_line($in_file);
                                 next;
                             }
-
-                            if (@csv_message_col_indices) {
-                                $message = join(' ', map { ($_ < @csv_fields ? $csv_fields[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices);
-                            } else {
-                                $message = "CSV data";
-                            }
-
-                            $category_bucket = "DATA";
                             $is_line_match = 1;
-                            $metrics_observed = 1;
                             $match_type = 13;
                             $line_entry = $format_registry_entry{csv};
-                            ( $object, $instance, $user, $session, $platform, $thread ) = ("") x 6;
-                            ( $bytes, $duration ) = ( undef, undef );
-                            $status_code = 0;
-                            $line_entry->[FR_CLASSIFY]->($_);
                         } else {
                             # Field count mismatch — not CSV, reset
                             $csv_detected = 0;
@@ -17009,13 +17157,8 @@ sub read_and_process_logs {
                     my $matched_value;
 
                     if ($match_type == 13) {
-                        # CSV: extract by column index
-                        my $col_idx = $csv_udm_col_indices[$config_idx];
-                        if (defined $col_idx && $col_idx >= 0 && $col_idx < scalar @csv_fields) {
-                            my $val = $csv_fields[$col_idx];
-                            $val =~ s/^\s+|\s+$//g;
-                            $matched_value = $val if $val ne '';
-                        }
+                        # CSV: the value the file's block read at the metric's column
+                        $matched_value = $csv_udm_values[$config_idx];
                     } else {
                         # Regex: existing pattern matching
                         foreach my $pattern (@{$config->{patterns}}) {
@@ -17148,28 +17291,10 @@ sub read_and_process_logs {
                     }
                 }
 
-                # Scan-matched lines arrive with $timestamp and
-                # $fractional_ms already set by their generated block
-                # (fractional strip + inline layout parse, D31/P8); only
-                # the CSV paths — outside the scan array (D32) — handle
-                # their timestamps here.
-                if ($csv_epoch_timestamp) {
-                    # Epoch timestamp: value is already epoch seconds (or other unit via -du)
-                    my $epoch_val = $timestamp_str;
-                    if (defined $duration_unit_override) {
-                        # To seconds through the ladder: one multiply for the
-                        # second and above (x1 for seconds), one division below
-                        my $step = $time_unit_step{$duration_unit_override};
-                        $epoch_val = $step->{ms} >= 1000
-                            ? $epoch_val * ($step->{ms} / 1000)
-                            : $epoch_val / (($step->{per_ms} // 1) * 1000);
-                    }
-                    $timestamp = int($epoch_val);
-                    my $frac = $epoch_val - $timestamp;
-                    $fractional_ms = $frac > 0 ? $frac * 1000 : 0;
-                    $fraction_digits = '';
-                }
-
+                # Every matched line arrives with $timestamp and
+                # $fractional_ms set by its generated block (fractional
+                # strip + inline layout parse, D31/P8), a CSV row by its
+                # file's block.
                 unless (exists $log_level_set{$category_bucket}) {				# this condition importantly only continues if the read/parsed log category is one of the ones defined
                     # The reject branch, and only the reject branch: keep the
                     # token, the format that produced it and the count of lines
@@ -17181,20 +17306,6 @@ sub read_and_process_logs {
                     $unregistered_level_lines++;
                     $excluded_other++;
                     next;
-                } elsif (!$csv_epoch_timestamp && $match_type == 13) {
-                    # Extract milliseconds if present (supports . or , separator, 1-6 digits)
-                    if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
-                        # Normalize to milliseconds (e.g., .1 = 100ms, .12 = 120ms, .123 = 123ms, .123456 = 123.456ms)
-                        $fractional_ms = $2 * (10 ** (3 - length($2)));
-                        $fraction_digits = $2;
-                    } else {
-                        $fractional_ms = 0;
-                        $fraction_digits = '';
-                    }
-                    # Declarative time contract (D31): the csv entry's
-                    # compiled layout parser, sharing %timestamp_date_cache
-                    # (post-chop, post-fractional-strip date key).
-                    $timestamp = $line_entry->[FR_TIME_PARSE]->($timestamp_str);
                 }
 
                 # Add fractional milliseconds to epoch for precision filtering
@@ -18135,6 +18246,13 @@ sub read_and_process_logs {
         }
 
         close $fh;
+
+        # A file read day first leaves no day-first reading behind: the memo
+        # and the date cache are keyed by the timestamp text alone (N3).
+        if ($csv_detected && $csv_block_live && $csv_block_live->{layout} eq 'csv_ddmm') {
+            timestamp_date_cache_clear();
+            ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
+        }
 
         # The file's contribution to the overall figure rolls from its live
         # handle position to its whole size the moment it closes (#446 D2/D3).

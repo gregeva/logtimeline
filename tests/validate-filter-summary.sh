@@ -366,11 +366,11 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
     out=$(run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean)
     assert_line "$out" pattern '^excluded_other: 0$' \
         asserts 'A CSV row whose timestamp is neither epoch nor ISO is never matched, so no exclusion cause counts it' \
-        produced_by 'csv_timestamp_placeable() in ltl, tested before the csv row counts as a match in read_and_process_logs()' \
+        produced_by 'the shape test of the CSV block csv_block_src() generates, before the csv row counts as a match in read_and_process_logs() in ltl' \
         contract 'features/640-csv-unplaced-rows-silent.md D1 (a CSV row without a parsable timestamp is read and not matched)'
     assert_line "$out" pattern '^lines_unmatched: 2$' \
         asserts 'The CSV header line (metadata, D22) and the row whose timestamp cannot be placed (640 D1) both count as unmatched' \
-        produced_by 'note_unmatched_line() in ltl, called at the CSV header stash and for a csv row csv_timestamp_placeable() refuses' \
+        produced_by 'note_unmatched_line() in ltl, called at the CSV header stash and for a csv row its block does not place' \
         contract 'features/503-yaml-aggregate-export.md D22 (a CSV file first line is metadata and counts as unmatched); features/640-csv-unplaced-rows-silent.md D1'
     assert_line "$out" pattern '^lines_included: 2$' \
         asserts 'The two well-formed rows are included' \

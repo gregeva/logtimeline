@@ -433,8 +433,10 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | Option | Description |
 |--------|-------------|
 | `-udm, --user-defined-metrics <spec>` | Extract a custom metric from each log line (see format below). Patterns match against the whole raw line, not only the message. A metric that produces nothing is reported after the read, with how its spec was read |
-| `-ucm, --udm-csv-message <cols>` | Treat the message field as CSV and name the columns for use with `-udm` |
-| `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter when using `-ucm` (default: comma) |
+| `-ucm, --udm-csv-message <cols>` | Name the CSV header columns whose values form the message (default: a fixed label) |
+| `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter, overriding the one detected from the header (comma, semicolon or tab) |
+
+A CSV file read with `-udm` takes its column names from its header row. Its dates are read year, month, day, or year, day, month when the file's own rows are real dates only that way.
 
 **UDM spec format:** `name[:unit[:function]][:key|:/regex/]`
 

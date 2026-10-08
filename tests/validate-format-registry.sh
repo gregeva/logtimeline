@@ -15,7 +15,11 @@
 # The election invariants are the load-bearing assertions: under D60 no
 # codegen happens at startup, so a single-format file compiles at most two
 # subs, `-lf` compiles exactly one, and an invalid `-lf` compiles none —
-# it errors before any codegen. A regression that restored eager
+# it errors before any codegen. A CSV file adds the block generated from its
+# header, counted by the same counters, one alive at a time
+# (features/615-csv-registry-entry.md D11): a run pinned to csv compiles its
+# scan sub and one block; a second file of the same header shape is a cache
+# hit; one of another shape is one more compile, and replaces the first. A regression that restored eager
 # precompilation would put ~28 compiles and ~20 MB back on every run and
 # these assertions are what catches it.
 #
@@ -258,7 +262,7 @@ scenario_inventory() {
 
     assert_line "$out" \
         pattern     '^  entry: csv slug=csv group=csv default=yes role=stateful$' \
-        asserts     'CSV is a registry entry but carries the stateful role, marking it as the per-file path outside the generated scan (D32)' \
+        asserts     'CSV is a registry entry but carries the stateful role: it is not scanned (D32); its block is compiled per header shape, one alive at a time (#615 D11)' \
         produced_by 'emit_format_registry_verbose() in ltl (role from FR_SCANNED)' \
         contract    'features/log-format-registry.md section -V format-registry section-contract'
 
@@ -359,7 +363,7 @@ scenario_election_single_format() {
         key         'scan_subs_compiled' \
         max         2 \
         min         1 \
-        asserts     'A single-format file compiles at most two scan subs: nothing is generated at startup, and election fronts the format the evidence named before line 1' \
+        asserts     'A single-format scanned file compiles at most two subs (it has no CSV block): nothing is generated at startup, and election fronts the format the evidence named before line 1' \
         produced_by 'compile_format_scan_sub() in ltl increments the counter; election is format_elect_scan_front(), resolution format_scan_sub_resolve()' \
         contract    'features/log-format-registry.md D60 elevation by election - a regression to eager precompilation (D40) puts ~28 compiles and ~20 MB back on every run, and this ceiling is what catches it'
 
@@ -414,7 +418,7 @@ scenario_election_pinned() {
 
     assert_line "$out" \
         pattern     '^scan_subs_compiled: 1$' \
-        asserts     'A pinned run compiles exactly one scan sub: the pin restricts the scan to a single entry, and that one order is the only codegen the run pays for' \
+        asserts     'A run pinned to a scanned format compiles exactly one sub: the pin restricts the scan to a single entry, and that one order is the only codegen the run pays for' \
         produced_by 'apply_format_pin() in ltl calls format_scan_sub_resolve() once; counter incremented in compile_format_scan_sub()' \
         contract    'features/log-format-registry.md D60 compile point 3 - before #413 the pin compiled its sub on top of a fully precompiled registry, saving nothing'
 
@@ -550,6 +554,116 @@ scenario_unarmed_run() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Scenarios: the CSV block (features/615-csv-registry-entry.md D11, AC5, AC6
+# (d), AC7). Two-row CSV fixtures generated inline; the counts are read from
+# runs of one file and of two.
+# ---------------------------------------------------------------------------
+CONTRACT_615='features/615-csv-registry-entry.md D11 (at most one CSV block alive; the existing compile and cache-hit counters count it) and section 5.7; features/log-format-registry.md section -V format-registry section-contract'
+write_csv_fixtures() {
+    printf 'timestamp,latency,size\n2026-06-01 10:00:05,12,100\n2026-06-01 10:01:05,34,200\n' > "$TMP_DIR/a-first.csv"
+    printf 'timestamp,latency,size\n2026-06-01 11:00:05,56,300\n2026-06-01 11:01:05,78,400\n' > "$TMP_DIR/b-same.csv"
+    printf 'size,timestamp,latency\n100,2026-06-01 10:00:05,12\n200,2026-06-01 10:01:05,34\n' > "$TMP_DIR/b-reordered.csv"
+    printf 'timestamp,latency\n2025-13-01 10:00:05,12\n2025-14-01 10:01:05,34\n' > "$TMP_DIR/day-first.csv"
+}
+
+scenario_csv_pinned() {
+    current_scenario="csv-pinned"
+    echo "[$current_scenario]"
+    write_csv_fixtures
+    local out
+    out=$(run_format_registry "$TMP_DIR/a-first.csv" -lf csv -udm latency)
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^scan_subs_compiled: 2$' \
+        asserts     'A run pinned to csv compiles its scan sub (the pin leaves no scanned entry in it) and one CSV block, generated from the header at CSV confirmation' \
+        produced_by 'apply_format_pin() and compile_format_scan_sub() for the scan sub; csv_block_for_file() and compile_csv_block() for the block' \
+        contract    "$CONTRACT_615; AC7"
+    assert_line "$out" \
+        pattern     '^compiled_orders: ;csv:csv:sep=comma:ts=0:udm=1:msg=-$' \
+        asserts     'The cache lists the CSV block by its signature (layout, separator, timestamp column, each -udm column, the -ucm columns) after the empty scan order the pin leaves, whose signature is empty' \
+        produced_by 'csv_block_shape() in ltl; emitted by emit_format_registry_verbose() from the keys of %format_scan_sub_cache' \
+        contract    "$CONTRACT_615; section 5.4 (the signature)"
+}
+
+scenario_csv_same_shape() {
+    current_scenario="csv-same-shape"
+    echo "[$current_scenario]"
+    write_csv_fixtures
+    local one two
+    one=$(run_format_registry "$TMP_DIR/a-first.csv" -udm latency)
+    check_capture_warnings "$one"
+    two=$(run_format_registry "$TMP_DIR/b-same.csv" -udm latency "$TMP_DIR/a-first.csv")
+    check_capture_warnings "$two"
+    assert_line "$one" \
+        pattern     '^scan_subs_compiled: 2$' \
+        asserts     'One CSV file compiles the scan sub its first line is scanned with and one CSV block' \
+        produced_by 'format_scan_sub_resolve() and compile_csv_block() in ltl' \
+        contract    "$CONTRACT_615; AC7"
+    assert_line "$two" \
+        pattern     '^scan_subs_compiled: 2$' \
+        asserts     'A second CSV file of the same header shape compiles nothing: the live block, validated on its sampled rows, serves it' \
+        produced_by 'csv_block_for_file() in ltl (the live block validated first)' \
+        contract    "$CONTRACT_615; AC7"
+    assert_line "$two" \
+        pattern     '^scan_sub_cache_hits: 2$' \
+        asserts     'The second file adds two cache hits: its scan order, resolved again before its first line, and the live CSV block that serves it' \
+        produced_by 'format_scan_sub_resolve() and csv_block_for_file() in ltl, both counting $format_scan_sub_cache_hits' \
+        contract    "$CONTRACT_615; AC7"
+}
+
+scenario_csv_different_shape() {
+    current_scenario="csv-different-shape"
+    echo "[$current_scenario]"
+    write_csv_fixtures
+    local out
+    out=$(run_format_registry "$TMP_DIR/b-reordered.csv" -udm latency "$TMP_DIR/a-first.csv")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^scan_subs_compiled: 3$' \
+        asserts     'Two CSV files with the same columns in another order compile two blocks: the header builds the routine, so its column positions are part of the block' \
+        produced_by 'csv_block_shape() and compile_csv_block() in ltl' \
+        contract    "$CONTRACT_615; D10 (the header builds the routine); AC5, AC7"
+    assert_line "$out" \
+        pattern     '^scan_sub_cache_hits: 1$' \
+        asserts     'The second file adds one cache hit, its scan order; the CSV block it needs is not in the cache' \
+        produced_by 'format_scan_sub_resolve() and csv_block_for_file() in ltl' \
+        contract    "$CONTRACT_615; AC7"
+    assert_line "$out" \
+        pattern     '^compiled_orders: csv:csv:sep=comma:ts=1:udm=2:msg=-;[^;]+$' \
+        asserts     'The cache holds one CSV signature, the second file one (timestamp in column 1, the metric in column 2): the first block was deleted when the second was generated' \
+        produced_by 'compile_csv_block() and csv_block_evict() in ltl' \
+        contract    "$CONTRACT_615; AC7"
+}
+
+scenario_csv_day_first() {
+    current_scenario="csv-day-first"
+    echo "[$current_scenario]"
+    write_csv_fixtures
+    local out
+    out=$(run_format_registry "$TMP_DIR/day-first.csv" -udm latency)
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^compiled_orders: csv:csv_ddmm:sep=comma:ts=0:udm=1:msg=-;[^;]+$' \
+        asserts     'A CSV file whose sampled dates are real only read day first is served by the day-first block, the one CSV signature in the cache' \
+        produced_by 'csv_block_for_file() in ltl (the day-first retry after the month-first block fails validation)' \
+        contract    'features/615-csv-registry-entry.md D9 (validation on the sampled rows with the day-first retry), D15, AC6 (d)'
+    assert_line "$out" \
+        pattern     '^scan_subs_compiled: 3$' \
+        asserts     'The day-first retry is a compile of its own: the scan sub, the month-first block that failed, then the day-first block' \
+        produced_by 'csv_block_for_file() and compile_csv_block() in ltl' \
+        contract    "$CONTRACT_615; section 5.7 (every generation is counted)"
+    cp "$TMP_DIR/day-first.csv" "$TMP_DIR/day-first-2.csv"
+    local pair
+    pair=$(run_format_registry "$TMP_DIR/day-first-2.csv" -udm latency "$TMP_DIR/day-first.csv")
+    check_capture_warnings "$pair"
+    assert_line "$pair" \
+        pattern     '^scan_subs_compiled: 5$' \
+        asserts     'A second day-first file is settled month first again: its month-first block fails and its day-first block is generated anew, two compiles more than one file' \
+        produced_by 'csv_block_for_file() in ltl (month first tried first, whatever file came before)' \
+        contract    'features/615-csv-registry-entry.md D18 (every CSV file date order is settled starting month first, whatever file came before it; the cost is these two compiles)'
+}
+
 echo "=== validate-format-registry.sh ==="
 echo ""
 
@@ -560,7 +674,11 @@ scenario_register inventory \
                   election-pinned \
                   invalid-pin-no-codegen \
                   benchmark-data-reemission \
-                  unarmed-measurement
+                  unarmed-measurement \
+                  csv-pinned \
+                  csv-same-shape \
+                  csv-different-shape \
+                  csv-day-first
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -573,6 +691,10 @@ while read -r _scenario; do
         invalid-pin-no-codegen   ) scenario_invalid_pin_no_codegen ;;
         benchmark-data-reemission) scenario_benchmark_data_reemission ;;
         unarmed-measurement      ) scenario_unarmed_run ;;
+        csv-pinned               ) scenario_csv_pinned ;;
+        csv-same-shape           ) scenario_csv_same_shape ;;
+        csv-different-shape      ) scenario_csv_different_shape ;;
+        csv-day-first            ) scenario_csv_day_first ;;
     esac
     echo ""
 done < <(scenario_selected)
