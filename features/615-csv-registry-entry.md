@@ -15,7 +15,8 @@ run's standard capture rules) and D17 (a CSV file takes part in the
 timestamp-precision pattern as every input does) were locked in reply. #525
 was reopened the same day for its several-files rule (a run gives way only to
 the finest precision any processed file carries), merged in PR #691, and this
-branch rebased onto `release/0.19.0` at 485e533. Next: the prototype (drop 1).
+branch rebased onto `release/0.19.0` at 485e533. Drop 1, the prototype, was
+measured the same day; its findings are § 8a.
 
 The design is locked in outline by the architect (§ 4: D1 to D6 from stage 5 of
 the redundant-logic-surfaces review, 2026-09-27; D7 to D15 in reply to this
@@ -1067,6 +1068,206 @@ case.
   with D1 (which includes the memo), not removed.
 - **Record.** Findings and the decision into this document as a section of its
   own. The driver and generator live under `prototype/615-csv-generated-block/`.
+
+---
+
+## 8a. Prototype findings (drop 1, 2026-10-08)
+
+Measured on `release/0.19.0` at 485e533, one machine (Apple M1 Pro, Perl
+5.44), with the instruments in `prototype/615-csv-generated-block/` (its
+README says how to run them). The fixtures are generated to the two
+specimens' row shapes (§ 8) into a scratch directory.
+
+**How the arms were built.** Arm A is the production read loop's own text,
+sliced from `read_and_process_logs` by anchor lines: the per-line
+declarations, the steady CSV arm, the shared metric capture, the epoch arm,
+the category gate and the ISO arm with its closure call. Arm B is the same
+loop with the steady arm replaced by a call to the block generated for the
+header shape, and the capture's CSV branch replaced by
+`$matched_value = $csv_udm_values[$config_idx];`. B's ISO timestamp text is
+the timestamp part of `format_entry_block_src`, sliced verbatim and called
+as the proposed split (§ 5.3) would call it; the day-first layout takes the
+day-first offsets the way `iso_ms_ddmm` does. B's epoch layout is prototype
+text written to § 5.3: fraction from the floating value when the gate is
+open, digits from the text under nanosecond, the `-du` scaling folded in as
+a constant. For the whole-run measures, `patch-ltl.pl` writes a copy of `ltl`
+(in scratch, never committed) whose read loop runs B: the block is
+instantiated at CSV confirmation, validated on the detection sample's rows
+(kept until line 2), and both inline arms are removed.
+
+### Parity (correctness first)
+
+**Per row** (`parity.sh`). The output of A and B is compared row by row:
+epoch seconds, fractional milliseconds, the fraction digits under
+nanosecond, every metric value, the message, the category and the
+classification outcome. Fifteen correctness fixtures of 2,000 rows each
+were run at `-tp m`, `s`, `ms`, `us` and `ns` and with `-o`. Every value of
+B was also checked against values derived by hand from the fixture text by
+a separate calendar routine that shares no code with `ltl`.
+
+- **Identical everywhere identity is required.** With the fraction left out
+  of the comparison, A and B agree on every row of every month-first and
+  epoch fixture at every precision: the ISO, `T`-separator, semicolon and
+  epoch shapes, `-du ms`, one and three metrics, a metric the header does
+  not carry, `-ucm`, and the bad-row fixtures. A row whose timestamp is
+  text, empty, or of the other kind is unmatched in both arms (63 and 46
+  rows), and a `delta` metric's values agree row for row, so a skipped row
+  sets no baseline in either arm (D8). B and B-no-memo agree on every row.
+- **With the read gate open** (`ms`, `us` and `-o`), the whole row is
+  identical on every fixture whose fractions carry up to six digits, ISO
+  and epoch alike.
+- **Differences, each by design and each equal to the hand-derived value:**
+
+  | Case | A | B |
+  |---|---|---|
+  | gate closed (`m`, `s`), any fraction | reads the fraction | fraction 0, as every scanned format (D16) |
+  | ISO with 7 to 9 fraction digits, gate open | first six digits | up to nine digits: 1,926 of 2,000 rows differ in the fraction |
+  | epoch with a fraction, `ns` | digits from the floating value | digits as written in the text |
+  | ISO with 7 to 9 digits, `ns` | the digits held are the first six | all nine |
+
+- **Date order and aborts (D7, D9, D15).**
+  - *Day-first file* (yyyy-dd-MM; ambiguous dates at the front, days above
+    12 in the middle and end parts). Month-first validation fails, B
+    re-instantiates day first (2 compiles) and reads all 2,000 rows, each
+    equal to the hand-derived day-first value. A aborts at row 669 on
+    `Month '12' out of range` (month 13), as today.
+  - *A February 30 row inside the end part of the sample.* Validation fails
+    month first and day first, and B falls back to month first (3 compiles).
+    Both arms abort at the same row.
+  - *A month-13 row outside the sample.* Validation passes month first (1
+    compile), and both arms abort at the same row (row 502).
+
+**Whole run** (`wholerun.sh parity`; `ltl` against the patched copy, each run
+`-bs 1 -o -V`, in its own directory). Nineteen runs: the fixtures above,
+three without `-ni` (so the index is written) and four at `-tp ns`.
+
+- The STATS CSV, the MESSAGES CSV, the `-V filter-summary` section and the
+  `-V format-detection` section are byte-identical in all nineteen runs.
+- Neither arm printed a runtime warning.
+- The YAML export and the index row are identical once the wall-clock fields
+  are left out (`generated_at`, `total_time`, `max_memory_used`, and the
+  index's entry date, read rate, memory and processing time), except in
+  these D16 cases:
+  - the export's `duration_seconds` for the ISO file with 7 to 9 digits
+    (`666.915688037872` in A, `666.915687561035` in B);
+  - at `ns`, the export's `start` and `end` and the index row's first and
+    last timestamps: digits seven to nine (`06:40:00.063566000` in A,
+    `06:40:00.063566800` in B, the fixture's text); epoch digits as written
+    (`.916025877` in A from the float, `.916025874` in B, the text).
+
+### Cost per row
+
+`timing.sh`: the arm loop over the rows held in memory, so file reading is
+left out. Each figure is the median of five rounds, with the three arms run
+in a rotated order each round, in nanoseconds per row (range in brackets).
+Below 200k rows a pass repeats the rows until it covers at least 200k.
+"Closed" is the default minute precision, "open" is `-tp ms`. Shown at 1M
+rows. Across all 64 configurations (four sizes) B's median is below A's by
+38 to 845 ns per row.
+
+| Fixture (1M rows) | Metrics | Gate | A | B | B-no-memo | B − A | Memo (B − B-no-memo) |
+|---|---|---|---|---|---|---|---|
+| epoch, 1 row/s | 1 | closed | 3565 (3541–3584) | 3242 (3236–3359) | 3196 (3193–3206) | −323 (−9.1%) | +46 |
+| epoch, 1 row/s | 3 | closed | 5131 (5097–5260) | 4705 (4682–4806) | 4604 (4596–4646) | −426 (−8.3%) | +101 |
+| epoch, 1 row/s | 1 | open | 3574 (3536–3612) | 3467 (3454–3479) | 3394 (3384–3414) | −107 (−3.0%) | +73 |
+| epoch, 1 row/s | 3 | open | 5122 (5106–5248) | 4869 (4864–4875) | 4799 (4796–4820) | −253 (−4.9%) | +70 |
+| epoch, 10 rows/s | 1 | closed | 3531 (3527–3562) | 3195 (3188–3244) | 3193 (3184–4006) | −336 (−9.5%) | +2 |
+| epoch, 10 rows/s | 3 | closed | 5126 (5111–5369) | 4630 (4614–4712) | 4606 (4599–4672) | −496 (−9.7%) | +24 |
+| epoch, 10 rows/s | 1 | open | 3572 (3560–3704) | 3416 (3393–3435) | 3419 (3372–3456) | −156 (−4.4%) | −3 |
+| epoch, 10 rows/s | 3 | open | 5145 (5122–5170) | 4793 (4784–4811) | 4821 (4791–4832) | −352 (−6.8%) | −28 |
+| ISO, 1 row/s | 1 | closed | 3779 (3769–3891) | 3404 (3385–3454) | 3373 (3353–3474) | −375 (−9.9%) | +31 |
+| ISO, 1 row/s | 3 | closed | 5671 (5653–5758) | 5062 (5041–5238) | 5028 (5019–5316) | −609 (−10.7%) | +34 |
+| ISO, 1 row/s | 1 | open | 3817 (3808–3849) | 3397 (3391–3420) | 3366 (3352–3383) | −420 (−11.0%) | +31 |
+| ISO, 1 row/s | 3 | open | 5565 (5541–5618) | 5054 (5024–5083) | 5004 (4982–5114) | −511 (−9.2%) | +50 |
+| ISO, 10 rows/s | 1 | closed | 3760 (3742–4005) | 3151 (3124–3186) | 3353 (3323–3524) | −609 (−16.2%) | −202 |
+| ISO, 10 rows/s | 3 | closed | 5570 (5523–5675) | 4811 (4777–4905) | 5076 (5064–5981) | −759 (−13.6%) | −265 |
+| ISO, 10 rows/s | 1 | open | 3790 (3762–3846) | 3145 (3124–3175) | 3346 (3310–3388) | −645 (−17.0%) | −201 |
+| ISO, 10 rows/s | 3 | open | 5582 (5572–5595) | 4831 (4814–4836) | 5020 (5001–5042) | −751 (−13.5%) | −189 |
+
+B's median is below A's on every family, density, metric count, gate state
+and size. At 1M rows every B range lies below the A range of the same row.
+At the smaller sizes four of the 48 configurations overlap:
+- the epoch family at one row per second, one metric, gate open, at 1k and
+  10k: medians −120 and −38 ns, B's range reaching into A's;
+- the ISO family at one row per second, one metric, at 10k: one slow round
+  in B each (maxima 7,412 and 4,019 ns, medians −336 and −360 ns).
+
+Where the saving comes from:
+
+- **The removed per-row work.** A passes the row through
+  `csv_timestamp_placeable`, a sub call that tests the epoch flag and runs
+  the shape regex. Its capture looks up each metric's column through
+  `@csv_udm_col_indices` with three bounds tests, and it tests the epoch
+  flag twice more. Its ISO arm calls the parse closure, a sub call with
+  `my $ts` copied. B tests the shape inline, reads each metric at a
+  compiled position, and parses inline. With three metrics B saves 100 to
+  250 ns more per row than with one: the capture's per-metric lookup.
+- **With the gate open, the epoch saving is smaller** (−107 against −323 ns
+  at one row per second). B then computes the fraction and strips it from
+  the text for the memo key, which A does not do.
+- **The memo.** On ISO at ten rows per second it saves 189 to 265 ns per
+  row: one string compare replaces the date-cache lookup and the
+  time-of-day arithmetic. On ISO at one row per second it misses on every
+  row and costs 31 to 50 ns (about 1% of B). On epoch at one row per second
+  it costs 46 to 101 ns (1.3 to 2.1% of B). On epoch at ten rows per second
+  it is between −28 and +24 ns, inside the range. On epoch it cannot pay at
+  any density: on a hit it saves only the numeric conversion of the
+  whole-second text, which costs no more than the string compare it
+  replaces, and on a miss it adds the compare and two stores.
+
+### Whole run
+
+`wholerun.sh timing`: `TIMING parse/read_files` of `-V benchmark-data`,
+one metric, `-bs 1440 -oe -n 1 -ni`, five runs per arm with alternating
+order, in seconds.
+
+| Input | A | B | B − A |
+|---|---|---|---|
+| epoch, 1 row/s, 1M rows | 10.819 (10.750–11.030) | 10.403 (10.304–10.411) | −0.416 (−3.8%) |
+| epoch, 10 rows/s, 1M rows | 10.764 (10.674–10.849) | 10.268 (10.153–10.315) | −0.496 (−4.6%) |
+| ISO, 1 row/s, 1M rows | 11.237 (11.180–11.261) | 10.691 (10.538–10.747) | −0.546 (−4.9%) |
+| ISO, 10 rows/s, 1M rows | 11.148 (11.094–11.392) | 10.282 (10.198–11.191) | −0.866 (−7.8%) |
+| network-latency CSV (corpus, 166,912 rows) | 1.798 (1.783–1.810) | 1.691 (1.683–1.700) | −0.107 (−6.0%) |
+
+The whole-run savings agree with the per-row ones (for example, −323 ns per
+row on the epoch family at one row per second, against −416 ms over a
+million rows). On the network-latency CSV A's median, 1.798 s, matches
+§ 5.1's re-measure of 1.812 s.
+
+### Per file
+
+`csv-block.pl --mode perfile`, median of 21 runs (range), in microseconds.
+"Instantiate" covers generating and compiling the block, then validating
+it on the sample's rows under the snapshot and restore, with any day-first
+retry.
+
+| File | Metrics | Sample rows | Outcome | Compiles | Generate + compile | Instantiate |
+|---|---|---|---|---|---|---|
+| epoch | 1 | 394 | validated | 1 | 159 (155–289) | 1,470 (1,453–1,569) |
+| epoch | 3 | 394 | validated | 1 | 215 (212–296) | 2,044 (2,030–2,227) |
+| ISO | 1 | 361 | month first | 1 | 216 (211–304) | 1,445 (1,433–1,505) |
+| ISO | 3 | 361 | month first | 1 | 270 (268–360) | 2,049 (2,038–2,129) |
+| ISO, day-first | 1 | 362 | day first after retry | 2 | 213 (211–319) | 2,115 (2,092–2,232) |
+| ISO, February 30 in the sample | 1 | 362 | month first after both fail | 3 | 213 (211–312) | 2,719 (2,699–2,873) |
+
+That is 1.4 to 2.7 ms per CSV file, paid once: 0.1% of the network-latency
+CSV's 1.69 s read. Validation is most of it, about 3.4 µs per sampled row
+for one metric; how that splits between the snapshot and restore, the block
+call and the wiring check was not measured.
+
+### Exit criterion
+
+Met. Parity holds everywhere it is required, row by row and run by run, and
+B is at or below A on every family and density: below beyond the run-to-run
+range at 1M rows and in the whole run, and within it in the four small-size
+configurations named above. One
+finding remains before the design is fixed: a memo that costs on a family
+is a conflict with D1 (which includes the memo), and the memo costs on two
+families:
+- on epoch at one row per second: 46 to 101 ns, 1.3 to 2.1% of B;
+- on ISO at one row per second: 31 to 50 ns, about 1%.
+
+B remains 3 to 11% below A on both with the memo in.
 
 ---
 
