@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0-680";
+my $version_number = "0.19.0";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -19087,10 +19087,11 @@ sub calculate_all_statistics {
         # partition + sidecars carry the data). Skip the aggregation; the bin consumer
         # reads the sidecars off $log_analysis{$bucket} directly. The bucket's
         # array is taken out of the store, its last use: under raw, statistics
-        # sort it in place and it is freed with the working record.
+        # sort it into a fresh copy and both are freed with the working record.
         my $bucket_durations = delete $log_analysis{$bucket}{durations};
         $aggregated_data->{durations} = $bucket_durations
             unless $bucket_stats_capture_mode eq 'bin';
+        $aggregated_data->{durations_into_copy} = 1;
 
         # Aggregate min/max across buckets
         $aggregated_data->{count_min} = $log_analysis{$bucket}{count_min} if defined $log_analysis{$bucket}{count_min} && ( !defined $aggregated_data->{count_min} || $log_analysis{$bucket}{count_min} < $aggregated_data->{count_min} );
@@ -19847,12 +19848,21 @@ sub calculate_statistics {
     return unless ($bucket_data->{duration_count} // 0) > 0;
 
     # The array is sorted once. One the ranking pre-pass already sorted arrives
-    # marked durations_sorted and is read as it is. One the caller owns (taken
-    # out of its store, or sorted for a reader of the order) is sorted in place.
-    # One that stays in its store (durations_in_store) is copied and the copy
-    # sorted, so the stored values are neither reordered nor enlarged.
+    # marked durations_sorted and is read as it is. A time bucket's, taken out
+    # of its store and freed right after (durations_into_copy), is sorted into
+    # a freshly allocated array: sorted in place and then freed, its scalars
+    # would return to the free lists in sorted order, scattered through memory,
+    # and the displayed rows' arrays allocated next from them would be scattered
+    # too, slowing every pass over them. One that stays in its store
+    # (durations_in_store) is copied and the copy sorted in place, so the
+    # stored values are neither reordered nor enlarged. One the caller owns
+    # otherwise is sorted in place.
     my $values = $bucket_data->{durations};
-    if (!$bucket_data->{durations_sorted}) {
+    if ($bucket_data->{durations_sorted}) {
+        # already in order
+    } elsif ($bucket_data->{durations_into_copy}) {
+        $values = [ sort { $a <=> $b } @$values ];
+    } else {
         $values = [ @$values ] if $bucket_data->{durations_in_store};
         sort_numeric_in_place($values);
     }

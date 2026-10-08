@@ -586,8 +586,12 @@ of the month), time-bucket statistics are 36 % faster than the base instead of
 45 %, displayed-row statistics are 7 % faster than the base instead of 19 %
 slower, and the total is the lowest of the four.
 
-This contradicts D1 as locked (time buckets sorted in place) and is brought to
-the architect; it is not implemented.
+This contradicted D1 as first locked (time buckets sorted in place). **D1
+revised by the architect on 2026-10-08**: the in-place sort of the time
+buckets is proven worse by this measurement, and each bucket's array, taken out
+of its store, is sorted into a freshly allocated array
+(`calculate_statistics`, `durations_into_copy`). The reasoning is recorded
+with the pattern in `docs/architecture-patterns.md`.
 
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
@@ -603,7 +607,7 @@ where it differs from D2 to D4 below.
 | | Default | `-mem release` |
 |---|---|---|
 | No working copy before statistics (D1) | yes | yes |
-| Time buckets taken out of the store, sorted in place (D1) | yes | yes |
+| Time buckets taken out of the store, sorted into a fresh array (D1, revised 2026-10-08) | yes | yes |
 | Heatmap and histogram raw: count first, then sort in place for percentiles (D5, D6, D9) | yes | yes |
 | `total_bytes` write-back (D7) | removed | removed |
 | A cluster hands its array to its row and keeps no reference (D4) | yes | yes |
@@ -634,7 +638,7 @@ unless the caller states the array is already sorted.
 
 | | Store | Sorted | By | Released |
 |---|---|---|---|---|
-| D1 | Time buckets | once, in place | bucket statistics, after taking the array out of the bucket | when the bucket's statistics are done |
+| D1 | Time buckets | once, into a freshly allocated array (revised 2026-10-08) | bucket statistics, after taking the array out of the bucket | the taken-out array and the sorted one, when the bucket's statistics are done |
 | D2 | Message rows, no `-so` on a statistic | once, in place | group_calc, after taking the array out of the row | when the row's statistics are done; a row not displayed, once the selection is made |
 | D3 | Message rows, `-so` on a statistic | once, in place in the store | the ranking step, which needs every row's statistic before it can rank the messages | a row not displayed, once the selection is made; a displayed row, after group_calc computes its full statistics from the sorted array without sorting it again |
 | D4 | Consolidation clusters: the cluster structure, consolidation's working store | not in that structure: at the final pass each cluster becomes a consolidated row in the message store, sorted, given statistics and ranked by D2 or D3 like any message | (the final pass) | the cluster structure hands its array to the row and keeps no reference, so releasing the row's array frees it |
