@@ -593,6 +593,50 @@ of its store, is sorted into a freshly allocated array
 (`calculate_statistics`, `durations_into_copy`). The reasoning is recorded
 with the pattern in `docs/architecture-patterns.md`.
 
+### 4.13 Completion gate on `a3349de` (D1 revised, version `0.19.0`)
+
+**Fix validation**, the grouped, top-25 and `-so p99` month scenarios of
+§ 4.11, two interleaved rounds (stopped there): displayed-row statistics on the
+grouped run 2.48–2.52 s on the base, 2.34–2.42 s on the branch (§ 4.11 measured
++22.6 % with the time buckets sorted in place); peak resident size lower than
+the base in all three.
+
+**Before/after benchmark**, three interleaved rounds each, `release/0.19.0` at
+`a585f97` and the branch, worktrees side by side (memory in MB, time in s); no
+metric is worse by more than 1 %:
+
+```
+== single-day-access-log-standard  (base total 8.92 s)
+  metric                                                          base median [range]      branch median [range]   change  % of run
+  MEMORY:consolidation_clusters                                      0.00 [0.00–0.00]           0.00 [0.00–0.00]    +0.0%          
+  MEMORY:log_analysis                                             24.79 [24.79–24.79]        24.79 [24.79–24.79]    +0.0%          
+  MEMORY:log_messages                                             27.68 [27.48–27.68]        27.68 [27.48–27.68]    +0.0%          
+  MEMORY:rss_peak                                              105.79 [105.78–106.14]     103.15 [102.92–103.22]    -2.5%          
+  TIMING:finalize/calculate_statistics                               0.10 [0.10–0.11]           0.07 [0.07–0.08]   -27.2%    -0.31%
+  TIMING:finalize/calculate_statistics/bucket_stats                  0.07 [0.07–0.07]           0.05 [0.05–0.05]   -28.8%    -0.24%
+  TIMING:finalize/calculate_statistics/group_calc                    0.02 [0.02–0.03]           0.02 [0.02–0.02]   -25.0%    -0.07%
+  TIMING:parse/read_files                                           8.79 [8.52–10.35]           8.56 [8.47–8.69]    -2.7%    -2.61%
+  TIMING:total                                                      8.92 [8.64–10.48]           8.65 [8.57–8.79]    -3.0%    -2.97%
+== month-single-server-access-logs-top25-consolidate  (base total 128.98 s)
+  metric                                                          base median [range]      branch median [range]   change  % of run
+  MEMORY:consolidation_clusters                                220.98 [220.98–220.98]     220.98 [220.98–220.98]    -0.0%          
+  MEMORY:log_analysis                                          254.00 [254.00–254.00]     254.00 [254.00–254.00]    +0.0%          
+  MEMORY:log_messages                                          253.64 [253.59–253.64]     253.64 [253.64–253.64]    +0.0%          
+  MEMORY:rss_peak                                          1,132.97 [1,009.27–1,211.33]   996.95 [858.72–1,016.81]   -12.0%          
+  TIMING:finalize/calculate_statistics                               5.58 [5.57–5.74]           4.92 [4.43–5.15]   -11.9%    -0.51%
+  TIMING:finalize/calculate_statistics/bucket_stats                  3.07 [2.94–3.10]           2.05 [2.03–2.35]   -33.1%    -0.79%
+  TIMING:finalize/calculate_statistics/group_calc                    2.62 [2.50–2.63]           2.56 [2.40–3.09]    -2.3%    -0.05%
+  TIMING:finalize/group_similar                                      4.52 [4.43–4.62]           4.53 [4.41–4.90]    +0.1%    +0.00%
+  TIMING:parse/read_files                                      118.86 [116.80–119.46]     117.59 [117.43–118.21]    -1.1%    -0.99%
+  TIMING:total                                                 128.98 [127.00–129.69]     127.30 [126.30–128.06]    -1.3%    -1.31%
+```
+
+**Harness suite** (08:50:59 to 09:05:08, 2026-10-08): 48 of 49 harnesses pass.
+`validate-message-discard.sh` fails the same assertion as in § 4.9, for the same
+pre-existing cause in the harness: the `dur-durationMs` run's check read
+`…-ddurationMS.csv`, written by the `dur-durationMS` run into the same directory
+on a case-insensitive file system.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 ### 5.0 Scope as locked after the release costs were measured (2026-10-07)
