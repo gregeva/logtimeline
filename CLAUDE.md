@@ -54,7 +54,10 @@ about anything else, these still hold.
 - **Ask when the readings diverge; execute when the process is settled.** A
   step inside a named workflow (`docs/process/*.md`) runs without asking, as
   part of the step that causes it. Anything outside a named workflow waits for
-  direction. Starting new work always waits.
+  direction. Starting new work always waits. Once an issue's work has started,
+  the drops of its agreed delivery plan, then its completion gate, PR, merge
+  and close-out, run in sequence without asking between them; the run stops
+  only for a decision that is the architect's, a failure, or a finding.
 - **No unsolicited implementation.** No production code, no "here is what it
   would look like", until asked.
 - **Short and plain.** Lead with the outcome. Plain words over internal jargon.
