@@ -51,7 +51,9 @@ scenario_register csv-input \
                   day-first-sampled \
                   day-first-small \
                   day-first-then-month-first \
-                  day-first-then-ambiguous
+                  day-first-then-ambiguous \
+                  separator-detected \
+                  separator-option
 scenario_parse_args "$@"
 
 TMP_DIR=$(mktemp -d)
@@ -500,6 +502,45 @@ if scenario_wanted day-first-then-ambiguous; then
         asserts     'Every CSV file date order is settled starting month first, whatever file came before it' \
         produced_by 'csv_block_for_file() in ltl (month first tried first, the live block reused only for the order being tried)' \
         contract    'features/615-csv-registry-entry.md D18 and AC6 (f)'
+fi
+
+# --- The delimiter, detected or given (D14, AC11) ----------------------------
+# Detected from the header among comma, semicolon and tab, with no -ucs and no
+# -ucm; -ucs overrides it without -ucm. By hand: latency 12 at 10:00, 34 at
+# 10:01.
+CONTRACT_D14='features/615-csv-registry-entry.md D14 (the delimiter is auto-detected, comma, semicolon or tab, and -ucs overrides it with or without -ucm) and AC11'
+if scenario_wanted separator-detected; then
+    current_scenario=separator-detected
+    printf 'timestamp;latency\n2026-06-01 10:00:05;12\n2026-06-01 10:01:05;34\n' > "$TMP_DIR/sep-semicolon.csv"
+    printf 'timestamp\tlatency\n2026-06-01 10:00:05\t12\n2026-06-01 10:01:05\t34\n' > "$TMP_DIR/sep-tab.csv"
+    for k in semicolon tab; do
+        run_o "sep-$k" -bs 1 -udm latency "$TMP_DIR/sep-$k.csv"
+        assert_command \
+            command     "[[ \"\$(stats_rows '$TMP_DIR/sep-$k' latency_mean)\" == '2026-06-01 10:00|12;2026-06-01 10:01|34;' ]]" \
+            label       "a $k-separated CSV read with no -ucs and no -ucm is split on its $k" \
+            asserts     'The delimiter is detected from the header, among comma, semicolon and tab' \
+            produced_by 'detect_and_parse_csv_header() in ltl' \
+            contract    "$CONTRACT_D14"
+    done
+fi
+
+if scenario_wanted separator-option; then
+    current_scenario=separator-option
+    printf 'timestamp|latency\n2026-06-01 10:00:05|12\n2026-06-01 10:01:05|34\n' > "$TMP_DIR/sep-pipe.csv"
+    run_o sep-pipe-given -bs 1 -udm latency -ucs '|' "$TMP_DIR/sep-pipe.csv"
+    assert_command \
+        command     "[[ \"\$(stats_rows '$TMP_DIR/sep-pipe-given' latency_mean)\" == '2026-06-01 10:00|12;2026-06-01 10:01|34;' ]]" \
+        label       'a |-separated CSV read with -ucs and no -ucm is split on |' \
+        asserts     '-ucs sets the delimiter without -ucm' \
+        produced_by 'detect_and_parse_csv_header() in ltl (the -ucs override)' \
+        contract    "$CONTRACT_D14"
+    run_o sep-pipe-none -bs 1 -V filter-summary -udm latency "$TMP_DIR/sep-pipe.csv"
+    assert_command \
+        command     "grep -aqx 'lines_unmatched: 3' '$TMP_DIR/sep-pipe-none/out.txt' && grep -aqx 'lines_included: 0' '$TMP_DIR/sep-pipe-none/out.txt'" \
+        label       'the same file without -ucs is not read as CSV: all 3 lines unmatched' \
+        asserts     'Only comma, semicolon and tab are detected; any other delimiter needs -ucs' \
+        produced_by 'detect_and_parse_csv_header() in ltl' \
+        contract    "$CONTRACT_D14"
 fi
 
 echo ""

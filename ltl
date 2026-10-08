@@ -11249,8 +11249,8 @@ sub print_help {
     $out .= help_opt("      /regex/",                "Custom extraction pattern, recognised by its slashes at the end of the spec (rows:/.../ and rows:::/.../ read the same). A capture group narrows the value; without one the whole match is the value. For sum, min, max, mean, delta and idelta the value must be a number written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2; any other value (12abc, 1,000, an empty capture) is skipped, and the lines skipped are reported. Capture the whole value, e.g. (\\S+), and let it be checked: (\\d+) reads 1 from 1.5 or 1e3, and \\D* before the capture drops a minus sign, with no notice. Overrides default name/key matching.");
     $out .= help_opt("", "When two metrics share a name, each name gains what tells them apart (its function, its unit), so -udm rows -udm rows::delta labels its columns rows:sum and rows:delta. Two specs that a name cannot tell apart are reported and one is skipped: give them different names.");
     $out .= help_opt("", "Counting aggregations count extracted values per time bucket instead of doing arithmetic on them, and work on text tokens (IDs, usernames, class names): count = occurrences, distinct = unique values, ratio = occurrences per unique value (repetition factor), rate/drate = occurrences/unique values per rate unit (see -ru). Without a /regex/, an extracted value ends at whitespace or any of , ; \" ' ] ) & ?");
-    $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Treat the message field as CSV and name the columns for use with -udm");
-    $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter when using -ucm (default: comma)");
+    $out .= help_opt("-ucm, --udm-csv-message <cols>",  "Name the CSV header columns whose values form the message (default: a fixed label)");
+    $out .= help_opt("-ucs, --udm-csv-separator <sep>", "Set the CSV field delimiter, overriding the one detected from the header (comma, semicolon or tab)");
 
     # Thread Pool Activity
     $out .= help_subheading("Thread Pool Activity");

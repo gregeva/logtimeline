@@ -1490,6 +1490,32 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
   section-contract and `tests/HARNESS-DESIGN.md` § Reserved section names
   are restated to count the CSV block (§ 5.7), with the signature's form.
 
+**Drop 4, as delivered (2026-10-08).**
+
+- **The rows (D14).** `print_help()` in `ltl` and `docs/usage.md` carry the
+  same two descriptions, the wording proposed in § 5.9:
+
+  | Option | Before | After |
+  |---|---|---|
+  | `-ucm` | Treat the message field as CSV and name the columns for use with `-udm` | Name the CSV header columns whose values form the message (default: a fixed label) |
+  | `-ucs` | Set the CSV field delimiter when using `-ucm` (default: comma) | Set the CSV field delimiter, overriding the one detected from the header (comma, semicolon or tab) |
+
+  `tests/validate-help-content.sh` passes, 94 assertions.
+- **The behaviours (AC11).** Two scenarios in `tests/validate-csv-input.sh`,
+  with the expected values derived by hand:
+  - `separator-detected`: a semicolon-separated and a tab-separated CSV,
+    read with no `-ucs` and no `-ucm`, are split on their own delimiter.
+  - `separator-option`: a `|`-separated CSV is split on `|` with `-ucs '|'`
+    and no `-ucm`; without `-ucs` all three of its lines are unmatched.
+
+  The third behaviour, the `-ucm` columns forming the message, is drop 3's
+  `block-message-columns`. The harness passes, 33 assertions.
+- **Sabotage proofs.** An `ltl` copy that ignores `-ucs` fails the `-ucs`
+  assertion, and a copy that detects only the comma fails both detection
+  assertions.
+- The day-first sentence beside the CSV rows of `docs/usage.md` (§ 5.9,
+  D15) belongs to the records of drop 5.
+
 **Merge gate.** The full harness suite, `CI=1 ./tests/validate-csv-output.sh`
 then `CI=1 ./tests/validate-statistics.sh` then the rest, on the commit being
 merged; the before/after benchmark on `single-day-access-log-standard` and on the
