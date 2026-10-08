@@ -7,6 +7,12 @@ Specification agreed with the architect 2026-09-28 on branch
 Issue #615 (CSV input as a header-instantiated registry entry) is labelled
 `status: in progress`. Nothing in `ltl` has changed on the branch.
 
+Re-audited 2026-10-08 against `release/0.19.0` at 8230949, after #525 (one
+timestamp formatter, then a single timestamp-precision option), #605 (units on
+inputs) and #640 (CSV rows with an unplaceable timestamp read silently) landed:
+§ 3 items 9 to 11 record what moved, and D16 (a CSV timestamp is read under the
+run's standard capture rules) was locked in reply. Next: the prototype (drop 1).
+
 The design is locked in outline by the architect (§ 4: D1 to D6 from stage 5 of
 the redundant-logic-surfaces review, 2026-09-27; D7 to D15 in reply to this
 specification's questions, 2026-09-28). It stays prototype-gated (D3, a
@@ -247,6 +253,42 @@ texts are identical today (substring offsets, argument order, arithmetic); the
 fractional strip is the same regex and normalisation in both places; the CSV ISO
 arm goes to the date cache with no memo and the epoch arm uses neither.
 
+**Re-audit of 2026-10-08** (`release/0.19.0` at 8230949, by `grep -F` on every
+snippet of § 5.1 and by reading the subs; nothing run):
+
+9. **The fractional strip is no longer the same in both places; the inline CSV
+   arms read outside the run's capture rules.** Looked for: the claim above that
+   the strip is the same regex and normalisation in the generated source and the
+   CSV ISO arm. Found: #525 (single timestamp-precision option) gave the emitter
+   a read gate, two booleans settled once and passed as compile options
+   (`build_format_registry` ::
+   `capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns`).
+   The generic strip now reads up to nine digits when the gate is open, strips
+   without reading when it is closed, and keeps the digits as text only under
+   `-tp ns` (`format_entry_block_src` ::
+   `my $capture = $opts->{capture_fraction} // 1;`). The CSV ISO arm still reads
+   up to six digits on every row and always keeps them as text
+   (`read_and_process_logs` :: `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {`);
+   the epoch arm always takes the fraction from the floating value and never
+   keeps text digits (`$fraction_digits = '';`). A CSV file also contributes
+   nothing to the precision `resolve_timestamp_precision` lowers from the
+   detection sample, which reads only scanned formats' digit counts. The rule is
+   written up as `docs/architecture-patterns.md` § *Timestamp read gate: the
+   parse reads the precision its consumers need*. Settled by D16.
+10. **#640 D1 has landed on `release/0.19.0`; D8 is today's behaviour.** Looked
+    for: the ISO shape check of § 3 item 4
+    (`if (!defined $timestamp_str || $timestamp_str !~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/) {`).
+    Found: absent; both CSV arms now call `csv_timestamp_placeable` before the
+    message, the category and the metric capture
+    (`read_and_process_logs` :: `unless (csv_timestamp_placeable($timestamp_str)) {`),
+    and a row that fails it is counted by `note_unmatched_line` and leaves the
+    loop. The four-row case of item 4 therefore reads 165 on the base commit,
+    not 70; AC2's 165 is a parity expectation, not a change this issue makes.
+11. **One § 5.1 snippet no longer matches.** `my $compute = ($layout eq 'apache_clf')`
+    is now the second arm of a chain that starts
+    `my $compute = ($layout eq 'asctime')`; § 5.1 is trued up. The other
+    snippets of § 5.1 match as written.
+
 ---
 
 ## 4. Locked decisions
@@ -372,6 +414,20 @@ this document is numbered Dxx.
   2026-09-28 ("yes I lock the reading about user-visible change getting a
   release note line").*
 
+**In reply to the re-audit (2026-10-08).**
+
+- **D16 — A CSV file's timestamp is read under the run's standard capture
+  rules.** The CSV block takes its fraction handling from the emitter under the
+  same compile options as every scanned format: the fraction is read only when
+  the read gate is open, up to nine digits, and kept as written only under
+  `-tp ns` (`docs/architecture-patterns.md` § *Timestamp read gate*; owning
+  record `features/525-timestamp-precision-option.md` D4, D21, D23). There is
+  no CSV-specific digit count: the default is the emitter's, and `-tp`
+  controls it. The epoch layout follows the same gate. Where this reads digits
+  the inline arms dropped, the output changes (§ 5.9); AC1 is restated to
+  match. *Locked by the architect 2026-10-08 ("yes, you should align to the
+  standard capture rules and reference the read pattern and write it up").*
+
 **Where D7 and D9 meet (settled by D15).** D9 decides the file's date order
 once, from the sampled rows, before any row is read; D7 governs a row whose date
 cannot exist under the order the file is read with. So a file whose sampled rows
@@ -392,6 +448,7 @@ Standing decisions this work must keep (not re-locked here, owned elsewhere):
 | `features/log-format-registry.md` | trap F11 of the lazy scan-sub compilation record (a mid-run compile disturbs nothing of the run's state) | validating the CSV block snapshots and restores the record lexicals, the memo and the date cache |
 | `features/log-format-registry.md` | N3 (the date cache is keyed by date string alone; an occupant change clears it and the memo) | the CSV block clears the memo and the date cache at instantiation, and a day-first CSV block leaves no day-first reading behind (§ 5.4) |
 | `features/58-format-registry-staged-detection.md` | A6 and P8 (the fast path's exact semantics and the date cache's parity) | per-row epoch, fractional milliseconds, cache keys and the index precision hint stay identical for a month-first file |
+| `features/525-timestamp-precision-option.md` | D4 (the precision printed never goes below what the file contains), D21 (the read gate is decided per consumer, the export among them), D23 (nanosecond carried by exact bounds) | the CSV block reads its fraction under the same gate and compile options as the scanned blocks (D16) |
 | `features/user-defined-metrics.md` | § CSV Columnar Input (a row whose timestamp is neither epoch nor ISO is an unmatched line, silently, per #640 D1) and § Epoch timestamps (epoch detected on the first data row; `-du` sets its unit) | kept as they are (D7, D8); #611 (the timestamp acceptance pattern) owns any change |
 
 D31 of the format registry (the time contract compiled to per-layout parse
@@ -413,8 +470,10 @@ Cited by sub plus an in-body snippet.
 
 | Site | Snippet | Today |
 |---|---|---|
-| `format_entry_block_src` | `my $compute = ($layout eq 'apache_clf')` | the live parse for every scanned format, emitted as source text into each block: fraction handling by the declared `frac`, then the memo, then the layout parse on a memo miss |
-| `format_entry_block_src` | `push @body, q{if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/)` | the generic fractional strip |
+| `format_entry_block_src` | `my $compute = ($layout eq 'asctime')` | the live parse for every scanned format, emitted as source text into each block: fraction handling by the declared `frac`, then the memo, then the layout parse on a memo miss |
+| `format_entry_block_src` | `my $capture = $opts->{capture_fraction} // 1;` | the read gate's compile options selecting the fraction text: strip without reading, read up to nine digits, or read and keep the digits under nanosecond (§ 3 item 9) |
+| `read_and_process_logs` | `if ($timestamp_str =~ s/(:\d{2}:\d{2})[.,](\d{1,6})/$1/) {` | the CSV ISO arm's own strip: up to six digits, every row, outside the gate |
+| `read_and_process_logs` | `unless (csv_timestamp_placeable($timestamp_str)) {` | the skip of a row whose timestamp is neither epoch nor ISO, in both CSV arms, before the capture (#640 D1; § 3 item 10) |
 | `format_entry_block_src` | `push @body, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }` | the last-seen memo |
 | `format_entry_block_src` | `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` | the emitter's date-order choice: day-first offsets for the day-first ISO layout, month-first for every other |
 | `compile_format_time_parser` | `my ($day_off, $month_off) = $layout eq 'iso_ms_ddmm' ? (5, 8) : (8, 5);` | the closure copy of both parse families, built per entry |
@@ -477,6 +536,12 @@ The epoch parse becomes a layout the same emitter produces: the `-du` scaling
 is a run constant and is folded into the emitted text at generation, as the
 query-string option already is (`format_entry_block_src` ::
 `if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }`).
+Its fraction follows the read gate (D16): closed, the fraction is not read;
+open, it is read from the value; under `-tp ns` the digits after the point
+are kept as written in `$fraction_digits`, as the generic strip keeps them,
+rather than derived from the floating value (proposed; a `-du` scaling of a
+fractional epoch value below the second leaves no text digits to keep, and
+falls back to the floating value).
 
 The day-first CSV reading (D9) is a second CSV layout, day-first and unguarded
 like `csv` (D7): the emitter's date-order choice picks the day-first offsets for
@@ -655,6 +720,16 @@ one block alive at a time".
   The sentence's wording is proposed: a CSV file's dates are read year, month,
   day, or year, day, month when the file's own rows read as real dates only that
   way.
+- **A CSV timestamp is read at the run's precision (D16).** Expected from the
+  code, not yet measured; the prototype's precision matrix (§ 8) measures it:
+
+  | Run's precision | CSV ISO, up to six fraction digits | CSV ISO, seven to nine digits | CSV epoch with a fraction |
+  |---|---|---|---|
+  | minute or second, no sub-second width or bound, no `-o` (gate closed) | same output; the fraction is no longer read | same | same |
+  | `ms`, `us`, or the gate opened by a width, a bound or `-o` | same | digits seven to nine now count, so a microsecond label, a sub-second bucket edge or the export's population duration can differ in its last place | same |
+  | `ns` | same | digits seven to nine shown, where today they read as zeros after the sixth | the digits are taken as written, where today they come from the floating value (about 238 ns resolution) |
+
+  The second and third columns are user-visible changes at `us` and `ns`.
 - **Telemetry.** The compile counts of § 5.7, and the `TIMING
   detect/scan_sub_compile` row on CSV runs, which now includes one small compile
   per header shape.
@@ -695,7 +770,11 @@ mechanism to reuse, the criterion names it.
       a CSV read with `-ucm` give the same bucket timestamps and metric values,
       the same `-V filter-summary` line accounting and the same `-V
       format-detection` per-file counts as before, with stderr clean of runtime
-      warnings. **Assertable**: new
+      warnings, except where the run's precision now reads digits the inline
+      arms dropped (D16, § 5.9): an ISO CSV with seven to nine fraction digits
+      at `us` or `ns` or under an open read gate, and a fractional epoch CSV at
+      `ns`, give the values the emitter's capture rules produce, derived by hand
+      from the fixture text. **Assertable**: new
       scenarios in `tests/validate-csv-input.sh`, fixtures generated inline,
       each run `-ni -bs 1 -o`; the expected bucket rows derived by hand from the
       fixture values, not captured from a run; the runtime-warning check
@@ -893,7 +972,10 @@ case.
 
   Both specimens are too small for the upper sizes (119 and 166,912 rows), so
   the fixtures are generated to their row shapes. A day-first ISO fixture and
-  the bad-row fixtures of AC2 are added for correctness only.
+  the bad-row fixtures of AC2 are added for correctness only. For D16 (a CSV
+  timestamp read under the run's capture rules), an ISO fixture whose
+  fractions carry seven to nine digits and an epoch fixture with a
+  nine-digit fraction are added, also for correctness only.
 - **Measures.** The cost of the timestamp and data-line handling per row,
   metric extraction included, with the rest of the loop excluded, and the
   whole-run `TIMING parse/read_files` at 1M. Medians of at least five
@@ -909,6 +991,15 @@ case.
   month-13 row outside the sample of a file settled month first aborting, the
   epoch text row). On the day-first fixture the arms differ by design (D9,
   D15): A aborts, B reads day first on the dates derived by hand.
+- **The precision matrix (D16).** Every fixture runs at `-tp m`, `s`, `ms`,
+  `us` and `ns`, and with `-o` at the default precision. The read gate's state
+  is read from `CONFIG timestamp_fraction_capture` of `-V benchmark-data`, never
+  assumed. Where the gate and precision cannot see a difference (§ 5.9's first
+  column, and every column with the gate closed), A and B are identical as
+  above. Where they can, the per-row triple differs by design; B's values are
+  checked against values derived by hand from the fixture text, and each
+  difference is reported by precision, fixture and the surface it reaches
+  (bucket label, heading bounds, index row, export).
 - **Exit criterion.** Parity holds everywhere it is required and B is at or
   below A within the run-to-run range on every family and density. If B is
   slower on one beyond the range, the findings (attribution included: the memo,
@@ -960,7 +1051,7 @@ named CSV case; `tests/validate-help-content.sh`; `$version_number` stamped
 | `features/log-format-registry.md` | D31 (the time contract compiled to per-layout closures) annotated: its closure form is retired by this issue's D4 (the uncalled closures go), the parse living in the emitted source; D32 (CSV stays a per-file stage outside the scan array) unchanged, with a line that its data-line handling is now a per-file generated block built from the header, validated on the sampled rows, one alive at a time; the `-V format-registry` section-contract (§ 5.7: what the counts include, the restated invariants, the `csv` entry sentence); N10 (the day-first ISO layout) no longer names `compile_format_time_parser`, and names the day-first CSV layout beside it |
 | `features/58-format-registry-staged-detection.md` | D31 (per-layout parse closures) cross-referenced as above; P9's description of the `csv` entry ("split-based extraction closure") checked against the block |
 | `features/user-defined-metrics.md` § CSV Columnar Input | CSV rows are parsed by the block generated from the header, which reads each metric's value at its column; a file whose dates read as real only day first is read day first; the skip-and-warn wording stays |
-| `docs/architecture-patterns.md` | only this issue's tokens in shared lines (§ 5.10): *Declarative format registry*, the time-parse closure site removed, the CSV site and template paragraph added, the parse-text refinement closed; *One resolution surface per vocabulary*, #615 dropped from the status line's list; *Generated code compiled from source strings*, the fourth instance |
+| `docs/architecture-patterns.md` | only this issue's tokens in shared lines (§ 5.10): *Declarative format registry*, the time-parse closure site removed, the CSV site and template paragraph added, the parse-text refinement closed; *One resolution surface per vocabulary*, #615 dropped from the status line's list; *Generated code compiled from source strings*, the fourth instance; *Timestamp read gate*, the CSV refinement closed and the CSV block added as a consumption site (D16) |
 | `tests/HARNESS-DESIGN.md` § Reserved section names | the `format-registry` description gains the CSV block |
 | `tests/baseline/run-benchmark.sh`, `tests/baseline/README.md` | the named CSV selection and its note in the shared boundary-notes section (D12) |
 | `docs/usage.md`, `--help` | the `-ucs` and `-ucm` rows (D14); the day-first sentence beside the CSV rows (§ 5.9, D15) |
