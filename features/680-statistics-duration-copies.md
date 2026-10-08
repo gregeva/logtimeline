@@ -637,7 +637,7 @@ pre-existing cause in the harness: the `dur-durationMs` run's check read
 `…-ddurationMS.csv`, written by the `dur-durationMS` run into the same directory
 on a case-insensitive file system.
 
-**Harness fixed** (10:06 to 10:12, 2026-10-08). Every run helper of the
+**Harness fixed** (10:06 to 10:08, 2026-10-08). Every run helper of the
 `validate-message-discard.sh`, `validate-message-expose.sh` and
 `validate-message-mask.sh` harnesses now claims its run directory through
 `claim_run_dir()` (`tests/lib/run-dir.sh`), which fails, naming the directory,
