@@ -156,6 +156,7 @@ startup rather than on line one of a real file (D24).
 - `read_and_process_logs` :: `if ( $line_entry = $format_scan_sub->($_) ) {`
 - `build_format_registry` :: `$entry->[FR_TIME_PARSE]      = compile_format_time_parser( $spec->{time}{layout} );`
 - `format_entry_block_src` :: `if ($t eq 'strip_query_string') { next if $opts->{include_query_string}; }` (a run option folded into the generated code).
+- `format_entry_block_src` :: `my $capture = $opts->{capture_fraction} // 1;` (the timestamp read gate folded into the generated code; entry *Timestamp precision: requested by the user, bounded by what each file carries*, rule 3).
 
 **Owning record.** `features/log-format-registry.md` (system of record; D31,
 D39, D60) and `features/58-format-registry-staged-detection.md`; CLAUDE.md §
@@ -355,6 +356,107 @@ beside their totals under the same gate, a total projected only when counted,
 bytes processed only when produced and demanded at each store). Needs
 refinement for the per-line captures #620 gates (session, user and index
 capture).
+
+---
+
+## Timestamp precision: requested by the user, bounded by what each file carries
+
+**Definition.** The precision of a timestamp is the user's request, read,
+rendered and written under six rules, each locked in the owning record:
+
+1. **One request, through the time-unit ladder.** `-tp, --timestamp-precision`
+   names minute, second, millisecond, microsecond or nanosecond, as the
+   ladder's tokens or long spellings (D3, D6, D9). `-s` and `-ms` are
+   deprecated, and either beside a `-tp` of another precision is a usage error
+   (D5, D12).
+2. **Precision is not width.** `-tp` sets how a timestamp is read, stored and
+   rendered, never the bucket width; the bucket key's scale follows `-bs`
+   alone, and at a whole-second width a line counts in the second it was
+   written in (D11, D14, D20; `features/524-bucket-size-unit.md` D4).
+3. **Read at the precision its consumers need.** The parse reads the
+   sub-second part only when a consumer that measures with it is active: a
+   precision finer than the second, a width that is not a whole number of
+   seconds, a `-st`/`-et` bound with a fraction, the aggregate export under
+   `-o`. The decision is settled once and compiled into the generated blocks,
+   never tested per line, and reported only under `-V benchmark-data` (D11,
+   D21, D22). Under `-tp ns` the digits are also kept as written, so exact
+   bounds never pass through a float (D23).
+4. **Never shown finer than the execution's processed files carry.** Each
+   file's true precision is read from the unit its timestamp field states and
+   the fraction digits it carries, through the ladder: a clock time states the
+   second, so `.234` is a millisecond; the duration field's unit plays no
+   part. A request finer than the finest precision any processed file carries
+   gives way to that precision, with a stderr notice naming the precision used
+   and what was found; a file carrying less than another does not lower the
+   run (D4 as amended 2026-10-08, D10). It is the timestamp instance
+   of the rule that a value never renders in a unit smaller than its stated
+   unit (`features/617-width-to-format-rule.md` D4, D16).
+5. **Rendered by one formatter.** Every site that renders or writes a
+   timestamp, the output file-name stamp included, calls `format_timestamp`;
+   the sub-second part is rounded half-up once, at the last digit shown,
+   carrying into the second, minute and date; minute and second truncate
+   (D1, D7, D8).
+6. **The run index states each row's precision.** Each row's timestamps are
+   written at the run's resolved precision, stated in `ts_precision`
+   (`m` at minute, over whole-second strings); drift compares as numbers, at
+   the run's precision or the row's when that is coarser, and an older row
+   with `-` is read at the precision its digits carry (D13, D15 to D19).
+
+Decision labels in this entry are those of
+`features/525-timestamp-precision-option.md` unless another record is named.
+
+**Intended uses.** Any input path that parses a timestamp takes its fraction
+handling from the emitter under the read gate's compile options, and is a
+source of its file's true precision, so every input obeys rules 3 and 4 alike
+and every option that acts on the pattern acts on every input. Any new site
+that renders or writes a timestamp calls `format_timestamp`. A new consumer
+that measures with the sub-second part opens the read gate by joining its
+condition, never by reading the fraction on its own.
+
+**Reasoning.** Before the one formatter the same instant rendered two ways in
+one run (`.122` in the heading, `.123` in the index for a `.123` line), and
+`-ms` on a whole-second log printed `.000` on every label. The read gate is
+decided per consumer, not per rendering: closed without the aggregate export
+as a consumer, the export's population duration was measured between whole
+seconds (`2.666` became `2`). Reading a fraction nobody uses costs a capture
+and an exponent per line: the gate measured −4.0 % `parse/read_files` on a
+generated application log with variable-length fractions, below noise on a
+fixed three-digit format (`features/525-timestamp-precision-option.md` § 1,
+§ 10 step 3d).
+
+**Consumption sites.**
+- `adapt_to_command_line_options` :: `my $canonical = time_unit_canonical($timestamp_precision_option);` (rule 1)
+- `adapt_to_command_line_options` :: `$timestamp_capture_ns = $timestamp_precision eq 'ns' ? 1 : 0;` (rule 3)
+- `adapt_to_terminal_settings` :: `$timestamp_capture_fraction =` (rule 3)
+- `build_format_registry` :: `capture_fraction => $timestamp_capture_fraction, capture_ns => $timestamp_capture_ns` (rule 3, the compile options)
+- `format_entry_block_src` :: `my $capture = $opts->{capture_fraction} // 1;` (rule 3)
+- `read_and_process_logs` :: `if ($timestamp_capture_ns) {` (rule 3, the exact bounds)
+- `sample_file_for_detection` :: `my $digits = $c[$o] =~ /:\d{2}:\d{2}[.,](\d+)/ ? length $1 : 0;` (rule 4, the digits a file carries)
+- `resolve_timestamp_precision` :: `push @found, fraction_precision(` (rule 4, through the ladder)
+- `format_timestamp` :: `my $ticks = timestamp_ticks($epoch, $opt{precision}, $opt{exact});` (rule 5)
+- `write_index_file` :: `my $index_precision = index_timestamp_precision($timestamp_precision);` (rule 6)
+- `detect_index_drift` :: `$live_n    = timestamp_ticks($live_v, $precision, $live_exact);` (rule 6, as numbers)
+
+**Owning record.** `features/525-timestamp-precision-option.md` § 4 (D1 to
+D23); `features/524-bucket-size-unit.md` D4 (width and precision separate);
+`features/617-width-to-format-rule.md` D4, D16.
+
+**Status.** Needs refinement for CSV input. A run over several files takes
+the finest precision any processed file carries
+(`resolve_timestamp_precision` ::
+`my $limit = %file_precision ? $finest->(values %file_precision) : undef;`),
+fixed under #525 reopened.
+
+- *CSV input.* It reads its timestamps outside the read gate, in two inline
+  arms of `read_and_process_logs`: the ISO arm
+  (`} elsif (!$csv_epoch_timestamp && $match_type == 13) {`) always reads up
+  to six digits and keeps them as text; the epoch arm
+  (`$timestamp = int($epoch_val);`) always takes the fraction from the
+  floating value. And it is no source of its file's precision: the digit
+  count is taken only for lines a scanned entry matched. Refined by #615 (CSV
+  as a header-instantiated registry entry): D16, the CSV block reads under
+  the read gate; D17, the rows its validation samples are its file's
+  precision evidence.
 
 ---
 
