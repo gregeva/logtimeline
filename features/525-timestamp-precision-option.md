@@ -24,6 +24,13 @@ whole-second width a line counts in the second it was written in), D21 (the
 aggregate export needs the sub-second part, so the capture gate opens for it)
 D22 (the capture decision is reported only under `-V benchmark-data`) and
 D23 (nanosecond carried by exact bounds, today's per-line updates untouched).
+Amended 2026-10-08, after the issue closed: D4's criterion reads "the
+execution's processed files", not "a file", so several files of different
+precision are shown at the finest any of them carries. The shipped code and
+the scenario `truth/several-files` follow the superseded coarsest-file rule of
+§ 6.4 (§ 7, *Several files*).
+Reopened 2026-10-08 to fix it, on branch `525-timestamp-precision-option-2`
+off `release/0.19.0`; it blocks #615 (CSV input as a registry entry).
 The architect's decisions are § 4 (D1 to D23); no element of the run index's
 design remains **proposed**. A design element that no decision settles is
 implementation detail and is marked **proposed**.
@@ -296,6 +303,16 @@ Only the architect's decisions are numbered here.
   requested); if #386 (format data model: per-format analysis precision) lands
   first, it supplies the model and this drop reads it. Locked by the architect
   2026-09-29.
+  *Amended by the architect 2026-10-08:* the criterion reads "the execution's
+  processed files", not "a file". The request gives way only to the finest
+  precision any of the run's processed files carries: `-tp ms` over a file
+  carrying milliseconds and a file carrying whole seconds is shown to the
+  millisecond, and the notice prints only when the request is finer than every
+  processed file carries. In the architect's words: "What a user has specified
+  is one thing, and what the [...] file specifies is another thing. And keep
+  in mind that we can have multiple files being read in a single execution. So
+  one of the files might have a higher time precision and another one a lower
+  time precision." This supersedes § 6.4's *A run over several files*.
 
 - **D5. `-s` and `-ms` are deprecated.** The architect: "first, they should be
   marked as deprecated, with a GitHub issue created to deprecate them completely
@@ -797,10 +814,10 @@ give second, since the next step down would print a digit the file never
 carried. The resolved precision is capped at microsecond until the final drop
 (D4), because the parse keeps six digits.
 
-**A run over several files (proposed).** The timeline is one run-wide
-rendering, so the run takes the finest precision every file provides (the
-coarsest of the files' true precisions); no file's timestamps then print a digit
-it did not carry. The notice names each file's precision when they differ.
+**A run over several files.** Settled by D4 as amended 2026-10-08: the run
+takes the finest precision any processed file carries, never the coarsest, so
+one file carrying less does not lower the run. The notice prints only when the
+request is finer than every processed file carries, naming what they carry.
 
 **The notice.** One stderr line when the resolved precision is coarser than the
 requested one, naming the precision used and what was found, in plain words
@@ -1036,9 +1053,15 @@ directory, and is shaped to the assertion that reads it.
   are accepted from this drop, in any case. `-tp ns` on the nine-digit set
   renders six fractional digits and the notice names microsecond and the
   six-digit limit. *Assertable.*
-- [x] **Several files (proposed rule, § 6.4).** `-tp ms` over the three-digit
-  set and the whole-second fixture together renders at second precision, the
-  notice naming each file's precision. *Assertable.*
+- [ ] **Several files (D4, amended 2026-10-08).** `-tp ms` over the
+  three-digit set and the whole-second fixture together renders at millisecond
+  precision, with no notice; `-tp us` over the same pair renders at millisecond
+  precision, the notice naming what the files carry. *Assertable.* Not met:
+  the implementation lowers the run to the coarsest file
+  (`resolve_timestamp_precision` ::
+  `my $limit = %file_precision ? $coarsest->(values %file_precision) : undef;`),
+  and the scenario `truth/several-files` of
+  `tests/validate-timestamp-precision.sh` asserts the superseded rule.
 - [x] **The deprecated switches follow the rule (D4).** `-ms` on the
   whole-second fixture renders at second precision with the notice; the
   regression golden that runs `-ms` over a whole-second access log is
@@ -1386,7 +1409,9 @@ millisecond, not the microsecond.
 Proposed and implemented (§ 6.4): a fraction whose length is not a multiple
 of three covers the steps its digits complete (four digits, `.9996`, are the
 millisecond; two are the second); several files take the coarsest, the note
-naming each file's precision; a width finer than the resolved precision adds
+naming each file's precision (superseded by D4's amendment of 2026-10-08: the
+finest any processed file carries; the code and its scenario follow the
+superseded rule); a width finer than the resolved precision adds
 "at a bucket width below a second, only the buckets that start on a whole
 second can hold a line". Proposed in the plan, not settled by a decision: a
 file whose precision cannot be read sets no limit (CSV input, which detection
