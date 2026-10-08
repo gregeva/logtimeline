@@ -5582,15 +5582,17 @@ sub csv_validate_block {
     return ($verdict, $placed, $digits);
 }
 
-# CSV confirmation (D2, D9, D11, D15): the block for this file. The file's
-# timestamp kind is read from line 2's timestamp field (epoch when it is a
-# number). A live block of the same shape is validated first and serves the
-# file when the sampled rows pass (a cache hit). Otherwise an ISO file is
-# generated month first, then on a date failure day first, then, when both
-# fail, month first again, so a row impossible under that order stops the run
-# as it reaches it (D7); each generation is a compile, and each replaces the
-# block before it. A wiring failure stops the run here, before line 2 is
-# processed. The memo and the date cache are cleared for the file (N3).
+# CSV confirmation (D2, D9, D11, D15, D18): the block for this file. The
+# file's timestamp kind is read from line 2's timestamp field (epoch when it
+# is a number). An ISO file's date order is settled from its own sampled
+# rows, starting month first whatever file came before it (D18): month
+# first, then on a date failure day first, then, when both fail, month first
+# again, so a row impossible under that order stops the run as it reaches it
+# (D7). At each order, the live block serves when it was built for this
+# header and that order and passes the rows (a cache hit); otherwise the
+# block is generated, a compile that replaces the block before it. A wiring
+# failure stops the run here, before line 2 is processed. The memo and the
+# date cache are cleared for the file (N3).
 # Records the file's precision evidence (D17) in its detection sample, as
 # the sample records a scanned format's: the rows placed under formats, the
 # most fraction digits under frac_digits, and an epoch file's unit.
@@ -5599,23 +5601,21 @@ sub csv_block_for_file {
     my ($file, $line2_ts, $rows) = @_;
     my $kind = (defined $line2_ts && $line2_ts =~ /^\d+(\.\d+)?$/) ? 'epoch' : 'iso';
     my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');
-    my @layouts = @order;
-    my ($verdict, $placed, $digits);
-    my $served;
-    my $live = $csv_block_live;
-    my $live_shape = $live ? csv_block_shape($live->{layout}) : undef;
-    if ($live && $live_shape->{sig} eq $live->{sig} && grep { $_ eq $live->{layout} } @layouts) {
-        ($verdict, $placed, $digits) = csv_validate_block($live->{block}, $rows);
-        if ($verdict eq 'ok') { $served = $live; $format_scan_sub_cache_hits++; }
-        @layouts = grep { $_ ne $live->{layout} } @layouts if $verdict eq 'date';
-    }
-    for my $layout ($served || ($verdict // '') eq 'wiring' ? () : @layouts) {
-        (my $shape, $verdict, $placed, $digits) = compile_csv_block(csv_block_shape($layout), $rows);
+    my ($verdict, $placed, $digits, $served);
+    for my $layout (@order) {
+        my $shape = csv_block_shape($layout);
+        if ($csv_block_live && $csv_block_live->{sig} eq $shape->{sig}) {
+            $shape = $csv_block_live;
+            ($verdict, $placed, $digits) = csv_validate_block($shape->{block}, $rows);
+            $format_scan_sub_cache_hits++ if $verdict eq 'ok';
+        } else {
+            ($shape, $verdict, $placed, $digits) = compile_csv_block($shape, $rows);
+        }
         if ($verdict ne 'date') { $served = $shape; last; }
     }
     die "ltl: format registry: the CSV block for $file reads a sampled row's values from other columns than its header names (produced_by csv_block_src())\n"
         if $verdict eq 'wiring';
-    $served //= ($csv_block_live && $csv_block_live->{layout} eq $order[0]) ? $csv_block_live
+    $served //= $csv_block_live->{layout} eq $order[0] ? $csv_block_live
               : (compile_csv_block(csv_block_shape($order[0]), []))[0];
     timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );

@@ -653,6 +653,15 @@ scenario_csv_day_first() {
         asserts     'The day-first retry is a compile of its own: the scan sub, the month-first block that failed, then the day-first block' \
         produced_by 'csv_block_for_file() and compile_csv_block() in ltl' \
         contract    "$CONTRACT_615; section 5.7 (every generation is counted)"
+    cp "$TMP_DIR/day-first.csv" "$TMP_DIR/day-first-2.csv"
+    local pair
+    pair=$(run_format_registry "$TMP_DIR/day-first-2.csv" -udm latency "$TMP_DIR/day-first.csv")
+    check_capture_warnings "$pair"
+    assert_line "$pair" \
+        pattern     '^scan_subs_compiled: 5$' \
+        asserts     'A second day-first file is settled month first again: its month-first block fails and its day-first block is generated anew, two compiles more than one file' \
+        produced_by 'csv_block_for_file() in ltl (month first tried first, whatever file came before)' \
+        contract    'features/615-csv-registry-entry.md D18 (every CSV file date order is settled starting month first, whatever file came before it; the cost is these two compiles)'
 }
 
 echo "=== validate-format-registry.sh ==="

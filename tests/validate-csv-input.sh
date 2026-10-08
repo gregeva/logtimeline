@@ -50,7 +50,8 @@ scenario_register csv-input \
                   block-column-order \
                   day-first-sampled \
                   day-first-small \
-                  day-first-then-month-first
+                  day-first-then-month-first \
+                  day-first-then-ambiguous
 scenario_parse_args "$@"
 
 TMP_DIR=$(mktemp -d)
@@ -482,6 +483,23 @@ if scenario_wanted day-first-then-month-first; then
         asserts     'The live day-first block fails the second file sampled rows, and a month-first block replaces it' \
         produced_by 'csv_block_for_file() in ltl (the live block validated first, then the other order)' \
         contract    'features/615-csv-registry-entry.md D9, D11 and AC6 (e)'
+fi
+
+# --- An ambiguous file after a day-first one with the same header (D18) ------
+# Every date of the second file (2025-05-03) is real in both orders: it is
+# read month first, 3 May, as it would be on its own, not day first (5 March)
+# because the file before it was.
+if scenario_wanted day-first-then-ambiguous; then
+    current_scenario=day-first-then-ambiguous
+    printf 'timestamp,v\n2025-13-01 10:00:05,5\n' > "$TMP_DIR/c-dayfirst.csv"
+    printf 'timestamp,v\n2025-05-03 10:00:05,7\n' > "$TMP_DIR/d-ambiguous.csv"
+    run_o dayfirst-ambiguous -bs 1440 -oe -udm v "$TMP_DIR/c-dayfirst.csv" "$TMP_DIR/d-ambiguous.csv"
+    assert_command \
+        command     "[[ \$(cat '$TMP_DIR/dayfirst-ambiguous/rc') == 0 && \"\$(stats_rows '$TMP_DIR/dayfirst-ambiguous' v_sum)\" == '2025-01-13 00:00|5;2025-05-03 00:00|7;' ]]" \
+        label       'the ambiguous second file is read month first: 13 January from the first, 3 May from the second' \
+        asserts     'Every CSV file date order is settled starting month first, whatever file came before it' \
+        produced_by 'csv_block_for_file() in ltl (month first tried first, the live block reused only for the order being tried)' \
+        contract    'features/615-csv-registry-entry.md D18 and AC6 (f)'
 fi
 
 echo ""

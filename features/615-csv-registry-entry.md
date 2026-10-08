@@ -459,6 +459,22 @@ this document is numbered Dxx.
   line options that influence this pattern should also be the same"); the
   several-files reading is his amendment of #525's D4 the same day.*
 
+**After drop 3 (2026-10-08).**
+
+- **D18 — Every CSV file's date order is settled starting month first,
+  whatever file came before it.** A file is read day first only when its own
+  sampled rows are real dates only that way. The block kept in memory from
+  an earlier file is reused only for the date order being tried, so a file
+  whose dates are all ambiguous (day and month both 12 or less) is read
+  month first, as it would be on its own, even after a day-first file with
+  the same header. The cost: when day-first files with the same header
+  follow each other, each one generates a month-first block that fails and
+  then a day-first block, two compiles, about 2 ms per file (§ 8a, per
+  file). This replaces § 5.4's earlier reading, under which the block in
+  memory was tried first in whatever order it had, and an ambiguous file
+  read after a day-first one was read day first. *Locked by the architect
+  2026-10-08 ("Yes for Option B").*
+
 **Where D7 and D9 meet (settled by D15).** D9 decides the file's date order
 once, from the sampled rows, before any row is read; D7 governs a row whose date
 cannot exist under the order the file is read with. So a file whose sampled rows
@@ -548,10 +564,11 @@ line 1   stash as potential header                            (unchanged, D32)
 line 2   scan fails, header validates, field count validates  (unchanged, D32)
          -> header shape = (separator, timestamp column, timestamp kind,
                             each metric's column, message columns)  (D10)
-         -> block = live CSV block if same shape                (D2, D11: cache hit)
-                    // else generate month first                (D1)
-         -> validate the block on this file's sampled rows, hit or compile  (D9)
-            date failure -> evict, generate day first, validate again  (D9, D11)
+         -> month first: the live CSV block if built for this shape
+            and order (D2, D11: cache hit), else generate it   (D1, D18)
+         -> validate the block on this file's sampled rows      (D9)
+            date failure -> day first: the live block if built for it,
+            else evict and generate it, validate again         (D9, D11, D18)
          -> block(line 2)
 line 3+  block(line)                                            (the file's arm)
 ```
@@ -600,9 +617,11 @@ one does. The layout's name is an implementation detail.
   ISO, as § Epoch timestamps of the user-defined-metrics record specifies), each
   `-udm` metric's column position (none for a metric the header does not
   carry), and the `-ucm` message columns. It is known at line 2. The cache
-  signature is that shape plus the date order the validation settles; a file
-  whose header matches the live block's is validated with the live block first,
-  and is served by it (a cache hit) when its sampled rows pass. The signature is
+  signature is that shape plus the date order. A file's order is settled
+  starting month first whatever file came before it (D18): at each order
+  tried, a live block built for the same header and that order is validated
+  on the file's sampled rows and serves the file (a cache hit) when they
+  pass. The signature is
   prefixed `csv:` so it is told apart from a scan order in the cache's listing
   (proposed).
 - **The block covers the whole data-line sequence** (the audit's finding on the
@@ -885,8 +904,10 @@ mechanism to reuse, the criterion names it.
       replayed, nothing lost. (d) `compiled_orders` shows the day-first
       signature. (e) A month-first CSV read after a day-first CSV with the same
       header is read month first: the live day-first block fails the second
-      file's sampled rows, and a month-first block replaces it. **Assertable**:
-      scenarios in `tests/validate-csv-input.sh` (a to c, and e) and
+      file's sampled rows, and a month-first block replaces it. (f) A CSV
+      whose dates are all ambiguous, read after a day-first CSV with the same
+      header, is read month first (D18). **Assertable**:
+      scenarios in `tests/validate-csv-input.sh` (a to c, e and f) and
       `tests/validate-format-registry.sh` (d), fixtures generated inline, (a)
       above 24 KiB. A block whose compiled position disagrees with the header's
       column map on a sampled row stops the run before line 2 with the
@@ -895,10 +916,12 @@ mechanism to reuse, the criterion names it.
       fail), recorded here; the gate itself runs on every CSV run.
 - [ ] **AC7. At most one CSV block alive; the existing counters count it** (D11,
       and D2's registry cache). A run pinned to `csv` reports `scan_subs_compiled:
-      2`; two CSV files of the same header shape report the same compile count
-      as one file and one more cache hit; two of different shapes report one
-      more compile, and `compiled_orders` lists one CSV signature, the second
-      file's. The existing invariant assertions (a single-format file at most
+      2`; two month-first CSV files of the same header shape report the same
+      compile count as one file and two more cache hits (the second file's
+      scan order and the CSV block); two of different shapes report one more
+      compile and one more cache hit (the scan order), and `compiled_orders`
+      lists one CSV signature, the second file's. Two day-first files of the
+      same header shape report two more compiles than one (D18). The existing invariant assertions (a single-format file at most
       two, a pinned run exactly one) are restated to say what they count.
       **Assertable**: new scenarios in `tests/validate-format-registry.sh`,
       two-row fixtures generated inline, `-bs 1440 -oe -ni`, the counts read
@@ -1449,11 +1472,20 @@ Each drop is a commit and a push on the issue branch. One PR at the end.
   `timestamp-precision` 94, `filter-summary` 87, `udm-specs` 244,
   `section-layout` 176, `format-detection` 453, `verbose-content-shape` 1
   and `scenario-selector` 26 assertions, all passing.
-- **Correction to AC7.** "Two CSV files of the same header shape report
-  the same compile count as one file and one more cache hit" reads two
-  more cache hits as measured: the second file's scan order, resolved again
-  before its first line, is a hit of its own. Two files of different
-  shapes add one, the scan order.
+- **Correction to AC7** (agreed by the architect 2026-10-08). "Two CSV
+  files of the same header shape report the same compile count as one file
+  and one more cache hit" reads two more cache hits as measured: the second
+  file's scan order, resolved again before its first line, is a hit of its
+  own. Two files of different shapes add one, the scan order. AC7 is
+  restated to match.
+- **D18 applied after the drop.** As delivered in d0b11d0,
+  `csv_block_for_file` validated the block in memory first, in whatever
+  date order it had. It now tries month first, then day first, reusing the
+  block in memory only for the order being tried.
+  `day-first-then-ambiguous` in `tests/validate-csv-input.sh` (AC6 (f)) and
+  a second run in `csv-day-first` in `tests/validate-format-registry.sh`
+  (two day-first files: `scan_subs_compiled: 5`) assert it; both fail on
+  d0b11d0's `ltl` and pass on this one.
 - **Contract.** `features/log-format-registry.md` § `-V format-registry`
   section-contract and `tests/HARNESS-DESIGN.md` § Reserved section names
   are restated to count the CSV block (§ 5.7), with the signature's form.
