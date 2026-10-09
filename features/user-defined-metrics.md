@@ -161,7 +161,7 @@ Counting aggregations get a single token-capture pattern:
 | Delta on raw vs converted | Delta on raw, then convert | Preserves counter semantics |
 | Column key prefix | `udm_` prefix internally | Avoids collision with existing keys; stripped for display headers |
 | CSV column naming | `name[_unit]_stat` | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined, as its canonical ladder token in that token's case (e.g., `latency_ms_min`, `w_m_max` for `-udm w:minutes:max`, `resp_kB_max` for any spelling of `kB`, `resp_KiB_max`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
-| Unit auto-detection | Not implemented | Users declare units explicitly |
+| Unit auto-detection | Not implemented | Users declare units explicitly; #694 adds `auto`, an opt-in that reads type and magnitude from each line (§ A metric's unit read from each line) |
 | Non-access-log support | Set `$is_access_log = 1` when UDM values captured | Follows count metric precedent (line 1593); enables storage in time-bucket and per-message blocks |
 | Latency stats suppression | `$durations_observed` only set when a duration value is observed | Prevents empty or fabricated-zero P50/P95/P99/P999 columns when the source carries no durations (bytes/count alone do not activate latency surfaces; issue #345) |
 | Default aggregation | `sum` | Consistent with pre-aggregation behavior; `delta` without explicit aggregation means `sum(delta)` |
@@ -1164,6 +1164,45 @@ negated character class already evaluated on the same lines.
 An executable line of `ltl` changes: full harness suite and before/after
 `single-day-access-log-standard` benchmark (before captured on the release
 branch head, 2026-09-15).
+
+## A metric's unit read from each line: `auto` (Issue #694)
+
+### Status
+- **Issue**: #694 (a user-defined metric reads each value's unit from its line, time and byte sizes)
+- **Phase**: Filed 2026-10-09, backlog; decisions below locked by the architect at filing. Acceptance criteria not yet derived.
+
+### Motivating consumer
+
+A performance baseline of a long-running batch process: counting each event
+type per bucket, when it occurs, and the total time it takes, from INFO lines
+of the form `Batch submitted in <value> <unit>`. Applications that write a
+measurement as a value followed by a unit often choose the unit by magnitude:
+`850 ms`, `1.2 s`, `3 min`; `512 KB`, `1.5 MB`, `2 GB`.
+
+### Problem (measured 2026-10-09)
+
+The unit field is a placeholder configured once for the whole run. It carries
+two dimensions: the type of the value (time, bytes, or a plain number) and its
+magnitude. Every value the metric extracts is read through that one setting.
+On a synthetic log carrying `Batch submitted in 850 ms`, `… 1.2 s` and
+`… 3 min`, run on 0.19.0 with `-V -bs 1440 -oe`, `-V udm-specs` reports:
+
+| Spec | Produced |
+|---|---|
+| `batch_submit:ms:sum:/Batch submitted in (\S+) ms/` | `occurrences=1 sum=850`: the lines in other units do not match |
+| `batch_submit:ms:sum:/Batch submitted in (\S+)/` | `occurrences=3 sum=854.2`: every value read as milliseconds |
+| `batch_submit:ms:sum:/Batch submitted in (\S+ ?\S+)/` | `occurrences=0 skipped=3`: the capture with its unit is not a number |
+
+The correct total is 182,050 ms.
+
+### Decisions (architect, 2026-10-09)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — `auto` in the unit field takes type and magnitude from each line | `-udm 'batch_submit:auto:mean:/\] Batch submitted in (\S+ ?\S+)/'`: the capture group takes the value with its unit, and `auto` classifies what it captured. A metric without `auto` behaves exactly as today. | The placeholder's two dimensions are read per value instead of once per run, so one metric reads lines in microseconds and milliseconds alike. |
+| D2 — Type is resolved bytes, then time, then count | The indication captured with the value is looked for first as a byte unit, then as a time unit; a value carrying either is read as that type in that magnitude. Anything else is a count, and a count has no unit (`12 widgets` is the count 12). How counts are rendered is outside this issue. | A unit the byte and time ladders do not know is not an error: it is what a count looks like. |
+| D3 — A value with no unit is a count, as today | Read exactly as it is today when the unit field is left empty. | No evidence of a type means no type is assumed. |
+| D4 — The extraction without a pattern reads the unit too, only under `auto` | `-udm my_key:auto:delta` reads `my_key=1.2ms`. Never on by default. | Reading a unit off the default `name=value` extraction risks parsing errors, so it is the user's explicit opt-in. The `/regex/` capture is the primary case. |
 
 ## Future Enhancements (Out of Scope)
 

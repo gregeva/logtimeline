@@ -870,6 +870,34 @@ Record: `features/656-gc-log-tagless-decorations.md` (findings, D1-D10, acceptan
 - **The tagged entry's level bracket admits padding** (D1 as amended): `\[info\s*\]`, as the tag bracket already did; the tagged corpus reads the same 3,865,527 lines with the same tuples.
 - Counts that moved: `entries` 27 to 31, `scanned_entries` 25 to 29, `scan_slots` and the `format-detection / scan` `entries` 24 to 28; the four slots sit after `mt6` in `static_order`, ahead of the connector slots at the tail.
 
+## Java and ECS logging layouts named by their source (#695, #696, #687)
+
+Filed 2026-10-09, backlog; the decisions below were locked by the architect at filing. Not started.
+
+### Findings: what each library and framework writes (2026-10-09, read from each project's source)
+
+| Source | Pattern | Example |
+|---|---|---|
+| Logback 1.3 and later, built-in default (`BasicConfigurator` → `TTLLLayout`) | `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -%kvp- %msg%n`, level unpadded in the layout's code | `16:08:16.276 [main] INFO c.e.Demo -- Started` |
+| Logback up to 1.2, built-in default; Log4j2 `DefaultConfiguration.DEFAULT_PATTERN`, every version | `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n` | `16:08:16.276 [main] INFO  c.e.Demo - Started` |
+| Products' own configuration (ThingWorx Connection Server, Integration Runtime with `yyyy-dd-MM`, a Windchill plugin's `logback-spring.xml`) | `%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n` | `2026-03-18 16:08:16.276 [main] INFO  c.e.Demo - Started` |
+| Spring Boot 2.x default (`defaults.xml` `FILE_LOG_PATTERN`) | `%d{yyyy-MM-dd HH:mm:ss.SSS} %5p ${PID} --- [%t] %-40.40logger{39} : %m%n` | `2026-03-18 16:08:16.276  INFO 4488 --- [main] c.e.Demo : Started` |
+| Spring Boot 3.x and 4.x default | `%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p ${PID} --- [%t] %-40.40logger{39} : %m%n`; the application name in brackets before the thread by 3.3, the application group by 3.5, trace and span IDs when tracing is on | `2026-03-18T16:08:16.276+01:00  INFO 4488 --- [demo] [main] c.e.Demo : Started` |
+| Log4j2 `JsonTemplateLayout` with `EcsLayout.json`; Elastic's `ecs-logging-java` encoders | ECS JSON with dotted keys | `{"@timestamp":…,"log.level":"INFO","message":…,"process.thread.name":…,"log.logger":…}` |
+| Spring Boot 3.5 and later, built-in ECS structured logging | ECS JSON with nested objects | `{"@timestamp":…,"log":{"level":"INFO","logger":…},"process":{"thread":{"name":…}},"message":…}` |
+
+- The full-date TTLL line identifies the layout, not whether Logback or Log4j2 wrote it, nor whether Spring Boot is involved. Only the file name identifies the producer.
+- On 0.19.0 every log in the full-date TTLL shape is reported as `connection_server_standard`.
+- On 0.19.0 synthetic Spring Boot 2.x and 3.x default lines bind `thingworx_rac_client` and none is included: its pattern accepts any text between the timestamp and the first bracket and reads the thread bracket as the level. The two time-only shapes bind nothing.
+
+### Locked decisions (architect, 2026-10-09)
+
+- **D65 — The full-date TTLL shape is a generic entry with producers as its variants (#695).** The group is `java_ttll`; its default is `java_ttll_datetime`, reported for a file whose name identifies no producer. The members, each selected by file-name evidence (D45, D47): `thingworx_connection_server` (replacing `connection_server_standard`), `thingworx_integration_runtime` (replacing `integration_runtime_standard`), and `windchill_ai_parts_rationalization` (new; files named `${appName}-${serverPort}-${PID}-%d{yyyyMMdd}-%i.log`). Neither library is named, because both write the layout; `datetime` separates it from the time-only defaults.
+- **D66 — The default shapes are entries named by their source (#696).** `spring_boot_2`; `spring_boot_3` (4.x keeps the 3.x shape); `java_ttll_time` for the Log4j2 and Logback-up-to-1.2 default, naming no library because both write it; `logback_ttll_kvp` for Logback 1.3 and later, the only writer of the `-kvp-` separator.
+- **D67 — A time-only log takes its date from its file name, or has none (#696).** No date is assumed. A file's modification time is never evidence of its date, because collecting, moving or copying a log changes it. Without a date, output leaves the date out, as the profile view (`-pr`) already does.
+- **D68 — Spring Boot lines are never claimed by `thingworx_rac_client` (#696).** A requirement only: the RAC client entry is not a variant of the Spring Boot shape (its own lines are `[timestamp] [LEVEL] message`), and its structure is unchanged by this work.
+- **D69 — ECS only, dotted and nested as two entries (#687).** The group is `elastic_common_schema`; its default is `elastic_common_schema_json`, the dotted-key form, with `windchill_ai_assistant` as a variant selected by file-name evidence (files named `${appName}-%d{yyyyMMdd}-${serverPort}-${startTime}-${pid}-%i.log`). The nested-object form is its own entry, `elastic_common_schema_nested_json`. JSON lines from other encoders are out of scope. The bare abbreviation `ecs` was rejected as a name because it says nothing.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `metrics_observed:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes, with one exception: the per-file key `metrics_observed: yes|no` was renamed from `is_access_log:` under #453 (D18) with byte-identical semantics — any line of the file observed a metric, or the format is statistics-eligible. The `format-detection / classification` sub-section and the `event_ledger:` per-file key are owned by `features/453-success-failure-classification-event-ledger.md` § *`-V` section-contract changes*. Everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
@@ -1035,6 +1063,10 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 [Issue #23: Log Format Registry - Refactor core parsing architecture](https://github.com/gregeva/logtimeline/issues/23)
 
 ## Design Decisions Log
+
+### 2026-10-09: Java and ECS logging layouts named by their source — D65–D69
+
+Architect-locked at filing of #695, #696 and #687 (see § Java and ECS logging layouts named by their source): D65 the full-date TTLL shape becomes the generic `java_ttll_datetime` heading the `java_ttll` group, with the Connection Server, Integration Runtime and AI Parts Rationalization plugin as file-name-selected members; D66 the Spring Boot, Log4j2 and Logback default shapes become entries named by source; D67 a time-only log's date comes from its file name or not at all; D68 Spring Boot lines are never claimed by the ThingWorx RAC client entry; D69 ECS JSON only, dotted and nested as two entries in the `elastic_common_schema` group, the AI Assistant plugin a member of the dotted one.
 
 ### 2026-08-24: #413 — lazy scan-sub compilation (elevation by election), D60–D64
 
