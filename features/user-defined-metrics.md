@@ -1325,6 +1325,12 @@ An executable line of `ltl` changes (the `udm_note` strings), so the
 harness suite. The before run was captured on the release branch head
 `9d0589f`, 2026-10-09.
 
+Passed on `ac85f01`, 2026-10-09. Benchmark, one before run against three
+after runs: total 8.7 s before, 8.6 s on each after run (−0.8%, −1.3%, −1.3%).
+Peak RSS was 99.8 MB before and 101.2, 99.9 and 98.2 MB after, a median of 99.9 MB:
+run-to-run spread, not a regression. Full suite: 49 harnesses, every one
+exiting 0 with its assertions run, and no runtime warning on stderr.
+
 ### Release note
 
 Bug Fixes: "Correct the `--help` and usage descriptions of `delta` and
