@@ -636,6 +636,18 @@ scenario_G_udm_function_list_parity() {
         asserts     'The docs/usage.md UDM function row mirrors the --help counting keyword list (the two surfaces must agree per the documentation-alignment rule)' \
         produced_by 'docs/usage.md UDM spec table - manually maintained alongside print_help()' \
         contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)'
+
+    assert_line "$help_out" \
+        pattern     'Transforms: delta \(keeps negative differences\), idelta \(drops negative differences, as at a counter reset\)\.' \
+        asserts     'The --help -udm function line describes delta as keeping a negative difference and idelta as dropping it, as the transform applies them' \
+        produced_by 'print_help() in ltl (User-Defined Metrics subheading, function row, udm_note of the delta and idelta rows of @statistic_names)' \
+        contract    'features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 and acceptance criterion 1'
+
+    assert_line "$USAGE_MD" \
+        pattern     'Transforms:\*\* `delta` \(keeps negative differences\), `idelta` \(drops negative differences, as at a counter reset\)' \
+        asserts     'The docs/usage.md UDM function row describes delta and idelta as --help does' \
+        produced_by 'docs/usage.md UDM spec table - manually maintained alongside print_help()' \
+        contract    'features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 and acceptance criterion 2'
 }
 
 # Unit-list parity (issue #608, one byte-unit ladder, D8): a help row that

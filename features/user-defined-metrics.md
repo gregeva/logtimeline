@@ -1213,7 +1213,7 @@ The correct total is 182,050 ms.
 - **Issue**: #698 (`--help` and usage.md describe delta as clamped and idelta as unclamped, the opposite of what ltl does)
 - **Branch**: `698-delta-idelta-descriptions`
 - **Target release**: v0.19.0
-- **Phase**: Specification 2026-10-09; D1 locked, acceptance criteria written for review
+- **Phase**: Implemented 2026-10-09; acceptance criteria passing
 
 ### Motivating consumer
 

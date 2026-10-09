@@ -68,6 +68,13 @@ NN_SPEC='v::sum:/v=(\S*)/'
 # docs/usage.md teach.
 FORMS_FIXTURE="$REPO_DIR/tests/fixtures/udm-number-forms.txt"
 FORMS_SPEC='q::sum:/queue size[\s:=]*(\S+)/'
+# A log4j application log, four lines one minute apart, each carrying a
+# cumulative counter "COMPLETED: <value>" that resets between its second and
+# third readings: 5, 8, 2, 10. The first reading seeds the state, so the
+# differences are 3, -6, 8. Under delta all three are recorded (sum 5, min -6,
+# max 8); under idelta the -6 is dropped and not counted (sum 11 over 2).
+RESET_FIXTURE="$REPO_DIR/tests/fixtures/udm-counter-reset.txt"
+CONTRACT_698='features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 (delta keeps a negative difference, idelta drops it) and acceptance criterion 3; section Functions, Transforms'
 CONTRACT_638='features/638-udm-non-numeric-capture.md section Decisions D1 (a capture that is not entirely a number is skipped for a numeric aggregation), D6 (the written forms of a number that are accepted), D3 (a partly skipped /regex/ metric is reported with its share), D4 (the skipped figure exists only once something is skipped), D5 (-V udm-specs reports what the run did) and section Acceptance criteria'
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -82,7 +89,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$BYTE_FIXTURE" "$CONT_FIXTURE" "$NN_FIXTURE" "$FORMS_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$BYTE_FIXTURE" "$CONT_FIXTURE" "$NN_FIXTURE" "$FORMS_FIXTURE" "$RESET_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -489,6 +496,37 @@ scenario_delta_single_match() {
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
     rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: delta-counter-reset — a counter that resets (5, 8, 2, 10): delta
+# records every difference, the negative one included; idelta drops the
+# negative difference, which is then neither summed nor counted.
+# ---------------------------------------------------------------------------
+scenario_delta_counter_reset() {
+    current_scenario="delta-counter-reset"
+    echo "[$current_scenario]"
+    local fn out
+    for fn in delta idelta; do
+        out="$TMP_DIR/reset-$fn.out"
+        run_nn "$out" -udm "completed::$fn:/COMPLETED: (\S+)/" "$RESET_FIXTURE"
+        check_capture_warnings "$out"
+        assert_section_present "$out"
+    done
+
+    assert_command \
+        command     "produced_is '$TMP_DIR/reset-delta.out' completed '  produced: occurrences=3 buckets=1 sum=5 min=-6 max=8'" \
+        label       'delta over 5 8 2 10 records 3 -6 8' \
+        asserts     'delta keeps a negative difference: the reset is recorded and counted' \
+        produced_by 'read_and_process_logs() (delta/idelta transform) + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_698"
+    assert_command \
+        command     "produced_is '$TMP_DIR/reset-idelta.out' completed '  produced: occurrences=2 buckets=1 sum=11 min=3 max=8'" \
+        label       'idelta over 5 8 2 10 records 3 8' \
+        asserts     'idelta drops a negative difference: the reset is neither summed nor counted' \
+        produced_by 'read_and_process_logs() (delta/idelta transform) + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_698"
+    rm -f "$TMP_DIR"/reset-*.out "$TMP_DIR"/reset-*.out.stderr
 }
 
 # ---------------------------------------------------------------------------
@@ -1621,6 +1659,7 @@ scenario_register milliseconds-replacement \
                   absent-field \
                   parse-time-rejections \
                   delta-single-match \
+                  delta-counter-reset \
                   no-udm \
                   collision-transform \
                   collision-unit \
@@ -1659,6 +1698,7 @@ while read -r _scenario; do
         absent-field               ) scenario_absent_field ;;
         parse-time-rejections      ) scenario_parse_time_rejections ;;
         delta-single-match         ) scenario_delta_single_match ;;
+        delta-counter-reset        ) scenario_delta_counter_reset ;;
         no-udm                     ) scenario_no_udm ;;
         collision-transform        ) scenario_collision_transform ;;
         collision-unit             ) scenario_collision_unit ;;
