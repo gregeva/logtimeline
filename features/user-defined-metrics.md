@@ -53,6 +53,7 @@ invalid-function warning and the `--help` function row list them from it.
 - **`idelta`**: Like delta but discards negative values (counter resets). "Increase delta."
 
 Delta state is reset between files to avoid spurious deltas at file boundaries.
+#697 (delta and idelta carry the previous value across files) reopens this: the reset drops the first reading of every file and makes a single-reading file produce nothing; why the reset exists, and what boundary is correct, is to be investigated there.
 
 #### Aggregations (applied per time bucket)
 
@@ -157,7 +158,7 @@ Counting aggregations get a single token-capture pattern:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Stats model | Count-style (min/max/mean/sum) | Avoids memory cost of storing individual values; percentiles deferred to #23 |
-| Delta state | Reset between files | Avoids spurious deltas at file boundaries |
+| Delta state | Reset between files | Avoids spurious deltas at file boundaries. Reopened by #697 (delta and idelta carry the previous value across files): a counter split over rotated files loses each file's first increment |
 | Delta on raw vs converted | Delta on raw, then convert | Preserves counter semantics |
 | Column key prefix | `udm_` prefix internally | Avoids collision with existing keys; stripped for display headers |
 | CSV column naming | `name[_unit]_stat` | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined, as its canonical ladder token in that token's case (e.g., `latency_ms_min`, `w_m_max` for `-udm w:minutes:max`, `resp_kB_max` for any spelling of `kB`, `resp_KiB_max`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
