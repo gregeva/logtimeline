@@ -468,8 +468,8 @@ my @statistic_names = (
     { name => 'ratio',           key => 'ratio',           udm => 'counting',    udm_position => 7 },
     { name => 'rate',            key => 'rate',            udm => 'counting',    udm_position => 8 },
     { name => 'drate',           key => 'drate',           udm => 'counting',    udm_position => 9 },
-    { name => 'delta',           key => 'delta',           udm => 'transform',   udm_position => 10, udm_note => 'clamped >=0' },
-    { name => 'idelta',          key => 'idelta',          udm => 'transform',   udm_position => 11, udm_note => 'unclamped' },
+    { name => 'delta',           key => 'delta',           udm => 'transform',   udm_position => 10, udm_note => 'keeps negative differences' },
+    { name => 'idelta',          key => 'idelta',          udm => 'transform',   udm_position => 11, udm_note => 'drops negative differences, as at a counter reset' },
 );
 $_->{aliases} //= [] for @statistic_names;
 # Every spelling a statistic row is typed under, lower-cased: its name, its

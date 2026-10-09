@@ -52,6 +52,8 @@ invalid-function warning and the `--help` function row list them from it.
 - **`delta`**: Computes difference between consecutive values. Useful for monotonic counters.
 - **`idelta`**: Like delta but discards negative values (counter resets). "Increase delta."
 
+How `--help` and `docs/usage.md` describe the two: § `delta` and `idelta` described the wrong way round (Issue #698).
+
 Delta state is reset between files to avoid spurious deltas at file boundaries.
 #697 (delta and idelta carry the previous value across files) reopens this: the reset drops the first reading of every file and makes a single-reading file produce nothing; why the reset exists, and what boundary is correct, is to be investigated there.
 
@@ -1204,6 +1206,135 @@ The correct total is 182,050 ms.
 | D2 — Type is resolved bytes, then time, then count | The indication captured with the value is looked for first as a byte unit, then as a time unit; a value carrying either is read as that type in that magnitude. Anything else is a count, and a count has no unit (`12 widgets` is the count 12). How counts are rendered is outside this issue. | A unit the byte and time ladders do not know is not an error: it is what a count looks like. |
 | D3 — A value with no unit is a count, as today | Read exactly as it is today when the unit field is left empty. | No evidence of a type means no type is assumed. |
 | D4 — The extraction without a pattern reads the unit too, only under `auto` | `-udm my_key:auto:delta` reads `my_key=1.2ms`. Never on by default. | Reading a unit off the default `name=value` extraction risks parsing errors, so it is the user's explicit opt-in. The `/regex/` capture is the primary case. |
+
+## `delta` and `idelta` described the wrong way round (Issue #698)
+
+### Status
+- **Issue**: #698 (`--help` and usage.md describe delta as clamped and idelta as unclamped, the opposite of what ltl does)
+- **Branch**: `698-delta-idelta-descriptions`
+- **Target release**: v0.19.0
+- **Phase**: Implemented 2026-10-09; acceptance criteria passing
+
+### Motivating consumer
+
+A user tracking a cumulative counter that an application restarts from zero,
+such as jobs processed since start-up, who wants the work done per bucket.
+They read `--help` to choose the transform that absorbs the reset. Following
+it, they choose `delta`, receive the negative difference at every reset, and
+the bucket totals are understated.
+
+### Problem (measured 2026-10-09)
+
+The two user surfaces describe the transforms the wrong way round:
+
+- `--help`, function row: `Transforms: delta (clamped >=0), idelta (unclamped).`
+  The notes are the `udm_note` fields of the `delta` and `idelta` rows of
+  `@statistic_names`, which `print_help()` reads through `$udm_function_row`.
+  Nothing else reads `udm_note`.
+- `docs/usage.md`, User-Defined Metrics, `function` row:
+  ``**Transforms:** `delta` (clamped ≥0), `idelta` (unclamped)``, maintained by hand.
+
+What ltl does is the per-line transform in `read_and_process_logs()`
+(`# Apply delta/idelta transform on raw value before conversion`). The
+difference is this reading minus the previous one. `delta` records every
+difference. `idelta` skips a negative difference: it is neither recorded nor
+counted. "Clamped" is therefore wrong for either transform: a clamped
+difference would be recorded as 0 and counted. § Functions → Transforms above
+describes the behaviour correctly.
+
+The input is a Java application log line carrying a cumulative counter that
+resets between its second and third readings (5, 8, 2, 10), one reading per
+line. On 0.19.0, `-ni -bs 1440 -oe -V udm-specs` with
+`-udm 'completed::<function>:/COMPLETED: (\S+)/'` reports:
+
+| Function | `produced:` | Differences recorded |
+|---|---|---|
+| `delta` | `occurrences=3 buckets=1 sum=5 min=-6 max=8` | 3, −6, 8: the negative difference is kept |
+| `idelta` | `occurrences=2 buckets=1 sum=11 min=3 max=8` | 3, 8: the negative difference is dropped |
+
+The first reading seeds the state and records nothing. That is the subject of
+#697 (delta and idelta carry the previous value across files). This issue's
+wording does not describe it. #697 does not gate this issue: the descriptions
+are wrong whatever #697 decides.
+
+### Decisions (architect, 2026-10-09)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — Describe each transform by what it does with a negative difference | `--help`: `Transforms: delta (keeps negative differences), idelta (drops negative differences, as at a counter reset).` `docs/usage.md`: ``**Transforms:** `delta` (keeps negative differences), `idelta` (drops negative differences, as at a counter reset)`` | A negative difference is the only case where the two transforms differ. "Drops" is exact where "clamped" is not, because a dropped difference is not counted. The counter reset is named because it is the reason to choose `idelta`. |
+
+Unchanged: the transform itself, the combined forms
+(`sum(delta)`, `mean(delta)`, `max(idelta)`), and the rest of the function row.
+
+### Surfaces touched
+
+| Surface | Change |
+|---|---|
+| `ltl`, `@statistic_names`, the `delta` and `idelta` rows | `udm_note` carries the D1 `--help` notes |
+| `docs/usage.md`, User-Defined Metrics, `function` row | the D1 `usage.md` notes |
+| `tests/validate-help-content.sh`, `scenario_G_udm_function_list_parity()` | two assertions added (criteria 1 and 2) |
+| `tests/validate-udm-specs.sh` | a new scenario `delta-counter-reset` (criterion 3) |
+| `tests/fixtures/udm-counter-reset.txt` | new fixture |
+
+### Acceptance criteria
+
+All three are assertable.
+
+1. **`--help` describes the transforms as ltl applies them.** `--terminal-width 400 --help`
+   carries `Transforms: delta (keeps negative differences), idelta (drops negative differences, as at a counter reset).`
+   on the `-udm` function row. Assertion: `assert_line` in
+   `scenario_G_udm_function_list_parity()`, `produced_by` `print_help()`
+   (User-Defined Metrics subheading, function row), contract D1. Fails on the
+   current code.
+2. **`docs/usage.md` agrees with `--help`.** The User-Defined Metrics `function`
+   row carries ``**Transforms:** `delta` (keeps negative differences), `idelta` (drops negative differences, as at a counter reset)``.
+   Assertion: `assert_line` on `$USAGE_MD` in the same scenario, `produced_by`
+   the docs/usage.md UDM spec table, contract D1 and the help/usage alignment
+   rule. Fails on the current code.
+3. **The behaviour the two surfaces now describe is pinned.** On a counter that
+   resets (5, 8, 2, 10), `-udm 'completed::delta:/COMPLETED: (\S+)/'` reports
+   `  produced: occurrences=3 buckets=1 sum=5 min=-6 max=8` and
+   `-udm 'completed::idelta:/COMPLETED: (\S+)/'` reports
+   `  produced: occurrences=2 buckets=1 sum=11 min=3 max=8` on `-V udm-specs`.
+   Assertion: a new `validate-udm-specs.sh` scenario `delta-counter-reset`,
+   using `run_nn` (`-ni -bs 1440 -oe -V udm-specs`) and `produced_is`. It
+   checks stderr for runtime warnings. `produced_by` is
+   `read_and_process_logs()` (delta/idelta transform) + `derive_udm_production()`,
+   and the contract is D1 together with § Functions → Transforms. It passes on
+   the current code by design: it locks the behaviour against a later change
+   such as #697. Before it is trusted, it is shown to fail by swapping the two
+   expected `produced:` lines.
+
+Fixture: `tests/fixtures/udm-counter-reset.txt`, four lines, one bucket,
+in the line shape the other `udm-*` fixtures use
+(`2026-01-26 10:00:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 5`).
+It is read as a method server log with no format notice and no stderr, and it
+gives the same `produced:` lines as the measurement above. The shape in the
+issue body is read as a connection server log, and that run prints a notice
+that the format is ambiguous between two producers.
+
+### Prototype triggers
+
+None. No data model change and no per-line cost: the change is two help strings
+and a documentation row.
+
+### Completion gate scope
+
+An executable line of `ltl` changes (the `udm_note` strings), so the
+`single-day-access-log-standard` before/after benchmark runs, then the full
+harness suite. The before run was captured on the release branch head
+`9d0589f`, 2026-10-09.
+
+Passed on `ac85f01`, 2026-10-09. Benchmark, one before run against three
+after runs: total 8.7 s before, 8.6 s on each after run (−0.8%, −1.3%, −1.3%).
+Peak RSS was 99.8 MB before and 101.2, 99.9 and 98.2 MB after, a median of 99.9 MB:
+run-to-run spread, not a regression. Full suite: 49 harnesses, every one
+exiting 0 with its assertions run, and no runtime warning on stderr.
+
+### Release note
+
+Bug Fixes: "Correct the `--help` and usage descriptions of `delta` and
+`idelta`: `delta` keeps negative differences, `idelta` drops them (#698)."
 
 ## Future Enhancements (Out of Scope)
 

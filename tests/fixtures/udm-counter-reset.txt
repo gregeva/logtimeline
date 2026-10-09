@@ -1,0 +1,4 @@
+2026-01-26 10:00:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 5
+2026-01-26 10:01:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 8
+2026-01-26 10:02:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 2
+2026-01-26 10:03:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 10
