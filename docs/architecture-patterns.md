@@ -52,7 +52,7 @@ the errors and help rows read cannot disagree with the parser.
 - `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };` over `@mask_identifiers` (each name and the `%mask_patterns` entries it covers, `ip` among them) and `@mask_order`; `resolve_discard_names` reads the same table, and the `-m` error interpolates `$mask_identifier_list` (#613 D7).
 - `resolve_message_name` :: `if ( my $field = $message_field{ lc $name } ) {` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them), the one resolution `resolve_expose_names` and `resolve_discard_names` share; `@cleared_fields` is its view for the field-clearing flag (#613 D6).
 - `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;` over `%explain_topics`.
-- `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $name;` over `@output_sections`, `@visibility_columns` and their alias tables.
+- `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $column_of_plural{$name} // $name;` over `@output_sections`, `@visibility_columns`, their alias tables and the plural names of the Sessions and Users columns.
 - `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
 - `bpd_for_surface` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];` over `%TIER_BPD`.
 - `column_total_field` :: `return $column_total_field{$column} // $column;` over `%column_total_field`, read by the bar scaling in `normalize_data_for_output` and the timeline cell in `print_bar_graph`.

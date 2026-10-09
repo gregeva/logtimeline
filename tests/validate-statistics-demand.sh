@@ -234,7 +234,8 @@ scenario_register scenario-1-terminal-only-default \
                   scenario-13-retained-duration-representation \
                   scenario-14-retained-durations-are-numbers \
                   scenario-15-exported-spelling-on-fractional-durations \
-                  scenario-16-sort-on-statistic-aliases
+                  scenario-16-sort-on-statistic-aliases \
+                  scenario-17-heatmap-show-stats-demand
 scenario_parse_args "$@"
 
 if scenario_wanted scenario-1-terminal-only-default; then
@@ -607,7 +608,7 @@ if body=$(extract_section "$out"); then
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
         pattern     '^  store_demand: no$' \
-        asserts     'With the heatmap replacing the timeline latency column and no CSV active, the bucket store has no consumer and store demand is 0' \
+        asserts     'With the timeline latency column hidden by default under the heatmap and no CSV active, the bucket store has no consumer and store demand is 0' \
         produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution, #349)' \
         contract    "$CONTRACT"
     for group in terminal_core csv_body extended_percentiles shape_moments; do
@@ -1100,6 +1101,49 @@ for pair in mean:avg:mean std_dev:stddev:std_dev; do
         produced_by 'adapt_to_command_line_options() and print_message_summary() in ltl' \
         contract    "$ALIAS_CONTRACT"
 done
+echo
+fi
+
+############################################################
+# Under the heatmap the timeline latency column is hidden by default, not
+# removed: --show stats brings it back, and with it the bucket store's demand
+# from that column; -o raises the demand from the STATS CSV alone. Scenario 4
+# holds the default (no demand). -hi title,options,messages,summary -bs 1440
+# -oe: only the statistics-demand section is read.
+if scenario_wanted scenario-17-heatmap-show-stats-demand; then
+current_scenario="scenario-17-heatmap-show-stats-demand"
+echo "--- $current_scenario ---"
+HEATMAP_CONTRACT='features/597-section-visibility.md § D27 (-hm hides the statistics column by default; per-bucket statistics are computed under -hm only when it is shown or the STATS CSV asks)'
+shown=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -hi title,options,messages,summary -hm duration --show stats)
+check_capture_warnings "$shown"
+csv=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -hi title,options,messages,summary -hm duration -o)
+check_capture_warnings "$csv"
+if body=$(extract_section "$shown"); then
+    sb=$(extract_store "$body" bucket)
+    assert_line "$sb" \
+        pattern     '^  store_demand: yes$' \
+        asserts     'With -hm and --show stats the timeline latency column is shown, so the bucket store is demanded' \
+        produced_by 'adapt_to_command_line_options() in ltl ($bucket_duration_stats_demand reads $hide_stats alone)' \
+        contract    "$HEATMAP_CONTRACT"
+    assert_line "$sb" \
+        pattern     '^  group: terminal_core demanded=yes consumers=.*timeline-latency-column' \
+        asserts     'The shown latency column is the consumer raising terminal_core on the bucket store under -hm' \
+        produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS timeline-latency-column active on !$hide_stats)' \
+        contract    "$HEATMAP_CONTRACT"
+fi
+if body=$(extract_section "$csv"); then
+    sb=$(extract_store "$body" bucket)
+    assert_line "$sb" \
+        pattern     '^  store_demand: yes$' \
+        asserts     'With -hm and -o the STATS CSV demands the bucket store though the latency column stays hidden' \
+        produced_by 'adapt_to_command_line_options() in ltl (store-level demand resolution)' \
+        contract    "$HEATMAP_CONTRACT"
+    assert_line "$sb" \
+        pattern     '^  group: terminal_core demanded=yes consumers=stats-csv$' \
+        asserts     'Under -hm -o terminal_core is raised by the STATS CSV alone: the hidden latency column raises no demand' \
+        produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS timeline-latency-column inactive while $hide_stats)' \
+        contract    "$HEATMAP_CONTRACT"
+fi
 echo
 fi
 

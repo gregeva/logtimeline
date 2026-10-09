@@ -812,9 +812,9 @@ scenario_J_unit_list_parity() {
 CONTRACT_NAME_LISTS='features/613-one-name-vocabulary.md D5 (one built-in metric table every list derives from), D8 (one statistic-name table) and D10 (every error and help row naming a vocabulary derives it from the table it validates against); criterion 19'
 NAME_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
 
-# "legend (leg), occurrences (occ)" -> "`legend` (`leg`), `occurrences` (`occ`)"
+# "legend (leg), session or sessions (ses)" -> "`legend` (`leg`), `session` or `sessions` (`ses`)"
 backticked_aliased_list() {
-    sed -E 's/([a-z-]+) \(([a-z]+)\)/`\1` (`\2`)/g' <<< "$1"
+    sed -E 's/([a-z-]+) or ([a-z-]+) \(([a-z]+)\)/`\1` or `\2` (`\3`)/g; s/([a-z-]+) \(([a-z]+)\)/`\1` (`\2`)/g' <<< "$1"
 }
 
 scenario_K_name_list_parity() {

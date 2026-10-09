@@ -122,7 +122,7 @@ A filter or highlight bound accepts a fraction and applies it as written: `-dmin
 
 ### Recording & Processing
 
-These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. The deprecated `-os` is the exception: it only hides the statistics panel (like `-hst, --hide-stats`), and statistics are still computed for any other active consumer — with `-o`, the STATS CSV carries its statistics columns regardless of `-os`/`-hst`. Use `-ic` to opt in to count tracking, which is off by default.
+These options control which metrics logtimeline extracts and computes during processing. By default, it detects and processes everything it finds — durations, byte sizes, and counts. The omit options suppress extraction entirely, so the data is never computed and the corresponding columns do not appear. The deprecated `-os` is the exception: it only hides the statistics and heatmap columns (like `-hst, --hide-stats`), and statistics are still computed for any other active consumer — with `-o`, the STATS CSV carries its statistics columns regardless of `-os`/`-hst`. Use `-ic` to opt in to count tracking, which is off by default.
 
 | Option | Description |
 |--------|-------------|
@@ -190,9 +190,9 @@ Each category row shows its share of the lines included beside its total — `2 
 | `-o, --output-csv` | Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content (see *Aggregate export* below). The YAML file's name carries no argument text; which blocks it holds follows the run's options (`-hg` for population-wide percentiles, `-hm` for per-bucket heatmap percentiles) |
 | `-cp, --csv-precision <mode>` | Control CSV decimal precision: `default` (per-family decimals derived from the source's duration unit), `full` (raw precise floats), or an integer N (cap all numeric columns at N decimals) |
 | `-osum, --omit-summary` | Hide the run summary printed at the end of the output |
-| `-hi, --hide <column>` | Hide a timeline column: `legend` (`leg`), `occurrences` (`occ`), `duration` (`dur`), `bytes` (`byt`), `count` (`cnt`), `session` (`ses`), `user` (`usr`), `classification` (`cls`), `stats` (`stat`), `values` (`val`), `rate` (`rt`), or a `-udm` metric by its column heading; values are the numbers on the bars and rate the rates in the legend; a comma-separated list, or the option repeated |
+| `-hi, --hide <column>` | Hide a timeline column: `legend` (`leg`), `occurrences` (`occ`), `duration` (`dur`), `bytes` (`byt`), `count` (`cnt`), `session` or `sessions` (`ses`), `user` or `users` (`usr`), `classification` (`cls`), `stats` (`stat`), `heatmap` (`hm`), `values` (`val`), `rate` (`rt`), or a `-udm` metric by its column heading; values are the numbers on the bars and rate the rates in the legend; a comma-separated list, or the option repeated |
 | `-hi, --hide <section>` | Hide a section of the output: `title`, `progress`, `timeline` (`tl`), `histogram` (`hg`), `options` (`opt`), `messages` (`msg`), `threadpools` (`tp`) or `summary` (`sum`); sections and columns mix in one list |
-| `-sh, --show <column>` | Show a column a `--hide` turned off; `classification` also shows the success and failure percentages for a format that is not an event ledger |
+| `-sh, --show <column>` | Show a column a `--hide` turned off; `stats` also shows the latency statistics beside the heatmap; `classification` also shows the success and failure percentages for a format that is not an event ledger |
 | `-sh, --show <section>` | Show a section a `--hide` turned off, such as one hidden in `LTL_CONFIG`; the later of the two wins |
 | `-sm, --summary-mono` | Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours |
 | `-sbo, --summary-bar-off` | Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays) |
@@ -208,7 +208,7 @@ Each category row shows its share of the lines included beside its total — `2 
 | `-hu, --hide-user` | Hide the Users column that automatically appears when user names are found in the log data |
 | `-hcl, --hide-classification` | Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs |
 | `-scl, --show-classification` | Show the success and failure percentage columns for a format that declares both classifications without being an event ledger |
-| `-hst, --hide-stats` | Hide the latency statistics or heatmap column |
+| `-hst, --hide-stats` | Hide the latency statistics and heatmap columns |
 | `-lbg, --light-background` | Use pale-to-bright color gradients suited for light/white terminal backgrounds |
 | `-dbg, --dark-background` | Force dark-background color gradients; overrides `-lbg` and disables auto-detect |
 | `-nah, --no-auto-hide` | Disable automatic column hiding at narrow terminal widths (squeeze all columns instead) |
@@ -394,7 +394,7 @@ Heatmap mode replaces the per-bucket latency statistics with a color-intensity v
 
 | Option | Description |
 |--------|-------------|
-| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
+| `-hm, --heatmap [metric]` | Replace statistics with a color-intensity histogram showing value distribution per time bucket; `--show stats` keeps both (`duration`, `bytes`, `count`, or a `-udm` metric name; UDM names are case-sensitive) |
 | `-hmw, --heatmap-width <N>` | Number of columns for the heatmap display (default: 52) |
 
 ```bash

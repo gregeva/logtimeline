@@ -170,7 +170,7 @@ Based on research from industry leaders in observability and SRE:
 - [x] `-hm` and `--heatmap` command line options are recognized
 - [x] Default metric is `duration` when no metric specified
 - [x] `bytes` and `count` metrics work when specified
-- [x] Heatmap replaces latency statistics column (not shown together)
+- [x] Heatmap takes the latency statistics column's place by default; `--show stats` shows both (`features/597-section-visibility.md` D27)
 - [x] Column heading changes to "heatmap [duration]", "heatmap [bytes]", or "heatmap [count]"
 - [x] Heatmap cells show density with block characters
 - [x] Color gradient reflects density (dark=low, bright=high)

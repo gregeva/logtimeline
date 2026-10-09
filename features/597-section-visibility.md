@@ -593,6 +593,57 @@ to `ltl` at a time:
 - the STATS CSV check, with a hidden metric left out of the CSV columns;
 - the refusal before the title, with the early pass deferring every name.
 
+**Step 6, the statistics and heatmap columns and the plural names (D26 to D28,
+#692).** Each column is now built, shown, sized and fed on its own condition:
+`build_column_layout()` builds the statistics column whenever durations are
+observed and not hidden, at its own width of 52, and the heatmap at
+`$heatmap_width`, visible on `$hide_heatmap`; the statistics demand in
+`@STAT_CONSUMERS` and `$bucket_duration_stats_demand` reads `$hide_stats` alone.
+`apply_output_visibility()` hides `stats` ahead of every option when `-hm` is on,
+and runs again if the heatmap is switched off after the metrics are parsed (a
+counting `-udm` metric), so the statistics column is not left hidden by a heatmap
+that does not render. `-hst` and `-os` push `hide stats,heatmap`. Where both
+columns render, a bucket with no duration statistics pads the statistics cell so
+the heatmap keeps its place, and `print_heatmap_footer_scale()` steps over the
+statistics column so the scale sits under the heatmap. `print_bar_graph()` prints
+the scale only when the heatmap column is in the layout. `session` and `user` take
+`sessions` and `users` through `%column_plural_name`, and `visibility_column_list()`
+lists both spellings.
+
+Found while measuring: the overflow reported with `--hide stats` also happened
+with no visibility option at all, wherever the layout auto-hid the heatmap for
+want of width. Measured against the base commit's tool on the access log with a
+spread of durations and the one carrying sessions and users, at 100, 160 and 240
+columns, under `-hm duration`, `-hm bytes`, a highlight, `-hg duration`, no `-hm`,
+`-hst` and `-hd`: the only difference in 42 runs was at 100 columns, where the
+heatmap is auto-hidden and the base tool printed its scale after a full rule, a
+154-column row. Six regression captures (`heatmap-duration-w80`, `-w100`,
+`heatmap-count-w100`, each with its `-bin` twin) froze that row. Re-captured, each
+differs from the committed one in that row only, now a plain rule of exactly the
+terminal width; the other 68 re-capture byte for byte. Four of them were
+registered in `tests/rendered-output/soft-wrap-known-failures.tsv` under #497
+(output lines exceed the terminal width and soft-wrap) as "heatmap width is a
+fixed default added to a terminal budget that cannot hold it"; the regression
+harness reported them as no longer overflowing, and the entries are removed.
+
+`tests/validate-section-layout.sh` gains `stats-and-heatmap-columns` (8
+assertions) and `plural-column-names` (2), and `unknown-name-refused` one
+assertion on the listed names; `tests/validate-statistics-demand.sh` gains
+`scenario-17-heatmap-show-stats-demand` (4), and its heatmap scenario's wording
+follows D27. `tests/validate-help-content.sh` backticks both spellings of a
+column name when it derives the `docs/usage.md` row from the error's list. Shown
+to fail, one change to `ltl` at a time:
+- the scale printed whenever `-hm` is on: the run's soft-wrap check fails at 160
+  columns before the scale assertion is reached;
+- `-hst`, then `-os`, pushing `stats` alone: the `-hst` and `-os` checks;
+- `-hm` not hiding `stats`: the default check at 280 columns;
+- the footer not stepping over the statistics column, and the statistics column
+  removed under `-hm`: the both-columns check;
+- the heatmap visible on `$hide_stats`: the default and `--show` checks;
+- the plural lookup removed: the plural scenario's runs exit 1;
+- the plural spelling dropped from the list: the listed-names check;
+- the latency consumer inactive under `-hm`: the demand scenario's consumer check.
+
 ## Open questions
 
 None.
@@ -683,41 +734,43 @@ D28, #692), asserted in `tests/validate-section-layout.sh` unless another
 harness is named. Every run pins `--terminal-width`; inputs are the access log
 carrying sessions and users and the access log with a spread of durations.
 
-- [ ] `-hm duration` with no visibility option renders standard output
+- [x] `-hm duration` with no visibility option renders standard output
       byte-identical to the base commit's tool (D27: the default is unchanged);
       the regression goldens that carry `-hm` pass unchanged
-      (`tests/validate-regression.sh`).
-- [ ] `-hm duration --hide stats` renders the heatmap column, its heading, and
+      (`tests/validate-regression.sh`). Met everywhere the heatmap renders; where
+      the layout auto-hides it for want of width, the scale it printed after the
+      rule is gone, and six goldens changed in that row only (Step 6).
+- [x] `-hm duration --hide stats` renders the heatmap column, its heading, and
       its scale on the closing rule (D26).
-- [ ] `-hm duration --hide heatmap`, and `--hide hm`, render no heatmap heading,
+- [x] `-hm duration --hide heatmap`, and `--hide hm`, render no heatmap heading,
       and the closing rule is exactly the terminal width with no scale label on
       it (D26, the reported overflow).
-- [ ] `-hm duration -hst` gives standard output and standard error
+- [x] `-hm duration -hst` gives standard output and standard error
       byte-identical to `-hm duration --hide stats,heatmap`; without `-hm`,
       `-hst` remains byte-identical to `--hide stats` (D26).
-- [ ] `-hm duration -os` hides both columns as `-hst` does, with the deprecation
+- [x] `-hm duration -os` hides both columns as `-hst` does, with the deprecation
       notice on standard error (D26: a released option does not change).
-- [ ] `-hm duration --show stats` renders both headings, `latency statistics`
+- [x] `-hm duration --show stats` renders both headings, `latency statistics`
       and the heatmap's, the closing rule exactly the terminal width with the
       scale under the heatmap (D27).
-- [ ] `-hm duration --show stats` at a width too narrow for both drops the
+- [x] `-hm duration --show stats` at a width too narrow for both drops the
       statistics column first and keeps the heatmap (the layout's existing
       auto-hide order).
-- [ ] `--show heatmap` after `--hide heatmap`, and `--show stats` after
+- [x] `--show heatmap` after `--hide heatmap`, and `--show stats` after
       `--hide stats` without `-hm`, render the column again; a `--hide heatmap`
       in `LTL_CONFIG` is undone by `--show heatmap` on the command line (D19,
       D27).
-- [ ] `-V` reports `bucket_duration_stats_demand: no` under `-hm duration`, and
+- [x] `-V` reports `bucket_duration_stats_demand: no` under `-hm duration`, and
       `yes` under `-hm duration --show stats` and under `-hm duration -o`
       (D27; `tests/validate-statistics-demand.sh`).
-- [ ] `--hide sessions` and `--hide users` remove the Sessions and Users
+- [x] `--hide sessions` and `--hide users` remove the Sessions and Users
       headings, byte-identical to `--hide session` and `--hide user`; `--show`
       in either spelling undoes `--hide` in the other (D28).
-- [ ] The unknown-name error, the `--hide` help row and `docs/usage.md` list
+- [x] The unknown-name error, the `--hide` help row and `docs/usage.md` list
       `heatmap` (`hm`), `session` or `sessions` (`ses`) and `user` or `users`
       (`usr`); the `-hst` help row reads as hiding both columns, and `--help`
       and `docs/usage.md` agree (`tests/validate-help-content.sh`).
-- [ ] No ` at <file> line <N>` on standard error in any run above
+- [x] No ` at <file> line <N>` on standard error in any run above
       (`tests/lib/runtime-warnings.sh`).
 
 Unchanged by D26 to D28: `--hide heatmap` hides the column only; the heatmap's
