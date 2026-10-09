@@ -238,7 +238,7 @@ becomes `--hide X`:
 | `session` | the Sessions column | `-hses, --hide-session` |
 | `user` | the Users column | `-hu, --hide-user` |
 | `classification` | the success and failure percentage columns | `-hcl, --hide-classification`, `-scl, --show-classification` |
-| `stats` | the latency statistics column, or the heatmap under `-hm` | `-hst, --hide-stats` |
+| `stats` | the latency statistics column; the heatmap column is `heatmap` (D26) | `-hst, --hide-stats` |
 | `values` | the numbers on the bars | `-ov, --omit-values` |
 | `rate` | the rate in the legend | `-or, --omit-rate` |
 
@@ -288,6 +288,48 @@ as the section aliases are (D11):
 | `stats` | `stat` |
 | `values` | `val` |
 | `rate` | `rt` |
+
+**D26: the statistics column and the heatmap column are hidden separately**
+(architect, 2026-10-09, #692: `--hide stats` hid the heatmap). `stats` hides the
+latency statistics column only. A new value `heatmap`, alias `hm`, hides the
+heatmap column only. `-hst, --hide-stats` keeps hiding both, as
+`--hide stats,heatmap`, so the released option does not change until #601
+(deprecate the options that `--hide` and `--show` duplicate) removes it; this is
+the one old option that is a list of values rather than one (an exception to D22).
+The heatmap's scale on the timeline's closing rule prints only when the heatmap
+column is rendered.
+
+## Finding: `--hide` against the timeline's two right-hand columns (#692)
+
+Read on `release/0.19.0` on 2026-10-09. The statistics column and the heatmap
+predate the column layout: they were one fixed right-hand pane, and `-hm` swapped
+what was drawn in it. The layout made them two columns, but every site still
+treats them as one slot:
+
+| Site | Condition |
+|---|---|
+| `build_column_layout()`, statistics column | `!$hide_stats && !$heatmap_enabled` (`-hm` removes it) |
+| `build_column_layout()`, both columns | `visible => $hide_stats ? 0 : 1` (one flag hides either) |
+| `build_column_layout()`, heatmap width | the heatmap's width is held in `$latency_w` |
+| `@STAT_CONSUMERS`, `timeline-latency-column` | `!$hide_stats && !$heatmap_enabled` |
+| demand resolution, `$bucket_duration_stats_demand` | `(!$hide_stats && !$heatmap_enabled)` |
+| `print_bar_graph()`, closing rule | `if ($heatmap_enabled) { print_heatmap_footer_scale() }`, whatever the column's visibility |
+
+Measured on an access log carrying sessions and users, at `--terminal-width 200`
+with `-hm duration -hi stat`: the heatmap column is not drawn, and the closing
+rule prints the full 200 columns and then the heatmap's scale after it, a row
+some 255 columns wide.
+
+The names `--hide` accepts against the headings the timeline prints, same input:
+
+| Heading | Accepted | Refused |
+|---|---|---|
+| `legend`, `occurrences`, `duration`, `bytes`, `count` | the name and its alias | |
+| `sessions` | `session`, `ses` | `sessions` |
+| `users` | `user`, `usr` | `users` |
+| `success failure` | `classification`, `cls` | |
+| `latency statistics` | `stats`, `stat` | |
+| `heatmap [duration]` | only through `stats` | `heatmap` |
 
 ## Finding: the render code the decisions act on
 
