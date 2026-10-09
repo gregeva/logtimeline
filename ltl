@@ -148,7 +148,7 @@ my %message_field   = map { $_->{name} => $_ } @message_fields;
 my @cleared_fields  = map { $_->{name} } grep { $_->{discard} eq 'clear' } @message_fields;
 my $exposed_field_list = join_with_or( map { $_->{name} } grep { $_->{expose} } @message_fields );   # thread, session, user, object or query-string
 my $cleared_field_list = join_with_or(@cleared_fields);                                               # thread, session, user or object
-my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+my ( $hide_session, $hide_user, $hide_occurrences, $hide_legend, $hide_duration, $hide_bytes, $hide_count, $hide_stats, $hide_heatmap, $session_data_found, $user_data_found ) = ( 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
 my ( $hide_classification, $show_classification ) = ( 0, 0 );   # #452 D8: one option pair governs both percentage columns
 # Contribution bar drawn over the category rows of the run summary (#448).
 # On by default; the variants exist to be judged against real logs.
@@ -539,10 +539,15 @@ my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', m
                         tp => 'threadpools', sum => 'summary', prog => 'progress' );
 # The timeline's columns --hide and --show also name, each the suffix of the
 # option it duplicates, with its fixed alias (#597 D21, D25). A user-defined
-# metric's column is named by its heading (D24).
-my @visibility_columns = ( qw( legend occurrences ), @builtin_metric_names, qw( session user classification stats values rate ) );
+# metric's column is named by its heading (D24). The statistics and heatmap
+# columns are named apart (D26). A column counting distinct values is also
+# named by its heading, in the plural (D28).
+my @visibility_columns = ( qw( legend occurrences ), @builtin_metric_names, qw( session user classification stats heatmap values rate ) );
 my %column_aliases = ( leg => 'legend', occ => 'occurrences', dur => 'duration', byt => 'bytes', cnt => 'count',
-                       ses => 'session', usr => 'user', cls => 'classification', stat => 'stats', val => 'values', rt => 'rate' );
+                       ses => 'session', usr => 'user', cls => 'classification', stat => 'stats', hm => 'heatmap',
+                       val => 'values', rt => 'rate' );
+my %column_plural_name = ( session => 'sessions', user => 'users' );
+my %column_of_plural   = reverse %column_plural_name;
 my @section_visibility_ops;     # [ hide|show, value ] in the order given, LTL_CONFIG first
 my %section_hidden_flag;        # section or part => 1 when turned off
 my %column_visibility;          # column => 'hide' or 'show', the later mention of it
@@ -1430,7 +1435,7 @@ my $stats_demand_telemetry_active = 0;
 # statistic's group to be computed and stored for every sorted key.
 my @STAT_CONSUMERS = (
     { name => 'timeline-latency-column', store => 'bucket',
-      active => sub { !$hide_stats && !$heatmap_enabled },
+      active => sub { !$hide_stats },
       groups => ['terminal_core'] },
     { name => 'stats-csv', store => 'bucket',
       active => sub { $write_messages_to_csv },
@@ -8127,7 +8132,7 @@ sub resolve_visibility_name {
     my $name  = lc $given;
     my $section = $section_aliases{$name} // $name;
     return [ 'section', $section ] if grep { $_ eq $section } @output_sections;
-    my $column = $column_aliases{$name} // $name;
+    my $column = $column_aliases{$name} // $column_of_plural{$name} // $name;
     return [ 'column', $column ] if grep { $_ eq $column } @visibility_columns;
     my $config = udm_config_by_name($given);
     return [ 'metric', $config ] if $config;
@@ -8138,7 +8143,7 @@ sub resolve_visibility_name {
 # the list the --hide help row and the unknown-name error both print.
 sub visibility_column_list {
     my %column_alias_of = reverse %column_aliases;
-    return join ', ', map { "$_ ($column_alias_of{$_})" } @visibility_columns;
+    return join ', ', map { ( $column_plural_name{$_} ? "$_ or $column_plural_name{$_}" : $_ ) . " ($column_alias_of{$_})" } @visibility_columns;
 }
 
 sub column_hidden {
@@ -8158,6 +8163,7 @@ sub apply_output_visibility {
     %section_hidden_flag = ();
     %column_visibility   = ();
     if ($metrics_known) { $_->{hidden} = 0 for @udm_configs }
+    $column_visibility{stats} = 'hide' if $heatmap_enabled;   # -hm hides the statistics column ahead of every option (#692 D27)
     for my $op (@section_visibility_ops) {
         my ( $verb, $value ) = @$op;
         for my $given ( split /,/, $value ) {
@@ -8189,6 +8195,7 @@ sub apply_output_visibility {
     $hide_classification = column_hidden('classification');
     $show_classification = ( $column_visibility{classification} // '' ) eq 'show' ? 1 : 0;   # -scl (D23)
     $hide_stats          = column_hidden('stats');
+    $hide_heatmap        = column_hidden('heatmap');
     $omit_values         = column_hidden('values');
     $omit_rate           = column_hidden('rate');
     return;
@@ -11131,7 +11138,7 @@ sub print_help {
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
     $out .= help_opt("-hi,  --hide <column>",         "Hide a timeline column: " . visibility_column_list() . ", or a -udm metric by its column heading; values are the numbers on the bars and rate the rates in the legend; a comma-separated list, or the option repeated");
     $out .= help_opt("-hi,  --hide <section>",        "Hide a section of the output: title, progress, timeline (tl), histogram (hg), options (opt), messages (msg), threadpools (tp) or summary (sum); sections and columns mix in one list");
-    $out .= help_opt("-sh,  --show <column>",         "Show a column a --hide turned off; classification also shows the success and failure percentages for a format that is not an event ledger");
+    $out .= help_opt("-sh,  --show <column>",         "Show a column a --hide turned off; stats also shows the latency statistics beside the heatmap; classification also shows the success and failure percentages for a format that is not an event ledger");
     $out .= help_opt("-sh,  --show <section>",        "Show a section a --hide turned off, such as one hidden in LTL_CONFIG; the later of the two wins");
     $out .= help_opt("-sm,  --summary-mono",          "Render the run summary table without colour: every row plain, and the contribution bar drawn as a plain fill, so the bar can be judged apart from the category colours");
     $out .= help_opt("-sbo, --summary-bar-off",       "Hide the contribution bar drawn across the category rows of the run summary (the share percentage stays)");
@@ -11147,7 +11154,7 @@ sub print_help {
     $out .= help_opt("-hu,  --hide-user",            "Hide the Users column that automatically appears when user names are found in the log data");
     $out .= help_opt("-hcl, --hide-classification",    "Hide the success and failure percentage columns shown by default for event-ledger formats such as access logs");
     $out .= help_opt("-scl, --show-classification",    "Show the success and failure percentage columns for a format that declares both classifications without being an event ledger");
-    $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics or heatmap column");
+    $out .= help_opt("-hst, --hide-stats",            "Hide the latency statistics and heatmap columns");
     $out .= help_opt("-lbg, --light-background",      "Use pale-to-bright color gradients suited for light/white terminal backgrounds");
     $out .= help_opt("-dbg, --dark-background",       "Force dark-background color gradients (disables auto-detect; wins over -lbg if both given)");
     $out .= help_opt("-nah, --no-auto-hide",          "Disable automatic column hiding at narrow terminal widths (squeeze all columns instead)");
@@ -11164,7 +11171,7 @@ sub print_help {
 
     # Heatmap
     $out .= help_subheading("Heatmap");
-    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket ($builtin_metric_list, or a -udm metric name; UDM names are case-sensitive)");
+    $out .= help_opt("-hm,  --heatmap [metric]",      "Replace statistics with a color-intensity histogram showing value distribution per time bucket; --show stats keeps both ($builtin_metric_list, or a -udm metric name; UDM names are case-sensitive)");
     $out .= help_opt("-hmw, --heatmap-width <N>",     "Number of columns for the heatmap display (default: 52)");
 
     # Histogram
@@ -15859,7 +15866,7 @@ sub adapt_to_command_line_options {
         'verbose|V:s@' => \@verbose_args,   # Issue #226: optional, repeatable section name; bare -V = all sections
         'omit-values|ov' => sub { push @section_visibility_ops, [ 'hide', 'values' ] },
         'precise-values|pv' => \$precise_values,
-        'omit-stats|os' => \$omit_stats,
+        'omit-stats|os' => sub { $omit_stats = 1; push @section_visibility_ops, [ 'hide', 'stats,heatmap' ] },   # as -hst (#692 D26)
         'omit-empty|oe' => \$omit_empty,
         'no-index|ni' => \$no_index,
         'recursive|r' => \$recursive_files,
@@ -15891,7 +15898,7 @@ sub adapt_to_command_line_options {
         'hide-duration|hd' => sub { push @section_visibility_ops, [ 'hide', 'duration' ] },
         'hide-bytes|hb' => sub { push @section_visibility_ops, [ 'hide', 'bytes' ] },
         'hide-count|hc' => sub { push @section_visibility_ops, [ 'hide', 'count' ] },
-        'hide-stats|hst' => sub { push @section_visibility_ops, [ 'hide', 'stats' ] },
+        'hide-stats|hst' => sub { push @section_visibility_ops, [ 'hide', 'stats,heatmap' ] },   # both columns, as released (#692 D26)
         'seconds|s' => \$print_seconds,
         'milliseconds|ms' => \$print_milliseconds,
         'timestamp-precision|tp=s' => \$timestamp_precision_option,
@@ -16455,6 +16462,7 @@ sub adapt_to_command_line_options {
             # A per-line distribution over counting (string) values is meaningless
             print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled\n";
             $heatmap_enabled = 0;
+            apply_output_visibility(1);   # without the heatmap, the statistics column is not hidden by it (#692 D27)
         } elsif ($resolved && $resolved->{kind} eq 'udm') {
             $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
@@ -16494,14 +16502,13 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # -os/--omit-stats is deprecated: it folds into the consumer-side display
-    # toggle. -od/--omit-durations is the producer-side control (durations not
-    # captured at all); -hst/--hide-stats is the consumer-side control (the
-    # statistics panel is not displayed). Statistics capture/computation is
-    # governed by the demand resolution below, not by this flag.
+    # -os/--omit-stats is deprecated: it hides the statistics and heatmap
+    # columns as -hst does, through the visibility options. -od/--omit-durations
+    # is the producer-side control (durations not captured at all).
+    # Statistics capture/computation is governed by the demand resolution
+    # below, not by this flag.
     if ($omit_stats) {
         record_deprecation( spelling => '-os/--omit-stats', advice => 'use -od/--omit-durations to keep durations from being captured, or -hst/--hide-stats to keep the statistics panel from being displayed' );
-        $hide_stats = 1;
     }
 
     # -uuid/--mask-uuid is the deprecated spelling of -m uuid: it masks as
@@ -16549,7 +16556,7 @@ sub adapt_to_command_line_options {
     # stores and gates and create no demand here; -V sections report resolved
     # state truthfully whether or not statistics ran, so they create none either.
     $bucket_duration_stats_demand = ( !$omit_durations && (
-           (!$hide_stats && !$heatmap_enabled)   # timeline latency-statistics column (heatmap replaces it)
+           !$hide_stats                          # timeline latency-statistics column (hidden by default under -hm)
         || $write_messages_to_csv                # STATS CSV statistics columns
     ) ) ? 1 : 0;
     # Both message-store surfaces - the messages-table statistics variant and the
@@ -20252,10 +20259,10 @@ sub initialize_empty_time_windows {
 # Returns an ordered array of column definition hashes.
 sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
-    my $show_latency = $durations_observed && !$omit_durations && !$hide_stats && !$heatmap_enabled;
+    my $show_latency = $durations_observed && !$omit_durations && !$hide_stats;
     my $show_heatmap = $heatmap_enabled;
     my $timestamp_w  = length(format_timestamp(0, precision => $timestamp_precision, shape => 'run'));
-    my $latency_w    = $show_heatmap ? $heatmap_width : 52;
+    my $latency_w    = 52;
 
     my @cols;
 
@@ -20428,7 +20435,7 @@ sub build_column_layout {
             base_width      => $latency_w,
             spacing_before  => 2,
             spacing_after   => 0,
-            visible         => $hide_stats ? 0 : 1,
+            visible         => 1,
             color           => undef,
             hide_order      => 70,
         };
@@ -20441,10 +20448,10 @@ sub build_column_layout {
             type            => 'fixed',
             name            => get_heatmap_column_header(),
             width           => undef,
-            base_width      => $latency_w,
+            base_width      => $heatmap_width,
             spacing_before  => 1,
             spacing_after   => 0,
-            visible         => $hide_stats ? 0 : 1,
+            visible         => $hide_heatmap ? 0 : 1,
             color           => undef,
             hide_order      => 20,
         };
@@ -20670,7 +20677,7 @@ sub cumulative_round_widths {
 # statistics columns. The header push (normalize_data_for_output) and the
 # per-bucket row push (print_bar_graph) MUST both call this so rows always
 # match the header. The CSV is its own render surface: display toggles
-# (-hst, heatmap replacing the terminal statistics row, width auto-hiding)
+# (-hst, the statistics column hidden under -hm, width auto-hiding)
 # do not affect it — only the CSV being active, durations being extracted,
 # and a duration having been observed in the data.
 sub stats_csv_duration_columns_active {
@@ -21284,14 +21291,23 @@ sub print_heatmap_footer_scale {
     }
 
     # Print the leading horizontal line (before heatmap column)
-    # Get heatmap spacing_before from layout to align footer with data rows
+    # Get heatmap spacing_before from layout to align footer with data rows,
+    # and the width of any visible column between the separator and the heatmap
     my $hm_col = (grep { $_->{id} eq 'heatmap' && $_->{visible} } @column_layout)[0];
     my $hm_spacing_before = $hm_col ? $hm_col->{spacing_before} : 1;
+    my $between_width = 0;
+    my $after_separator = 0;
+    for my $col (@column_layout) {
+        last if $col->{id} eq 'heatmap';
+        if ( $col->{id} eq 'sep_graph_stats' ) { $after_separator = 1; next }
+        next unless $after_separator && $col->{visible};
+        $between_width += ($col->{spacing_before} // 0) + ($col->{width} // 0) + ($col->{spacing_after} // 0);
+    }
 
     print "$colors{'bright-black'}";
     print "─" x $pre_heatmap_width;
     print "┴";  # Connection to the column separator (aligns with │ in data rows)
-    print "─" x ($hm_spacing_before);  # Padding characters (align with spacing before heatmap content)
+    print "─" x ($between_width + $hm_spacing_before);  # Padding characters (align with spacing before heatmap content)
 
     # Build the heatmap scale section with embedded labels
     # This is exactly heatmap_content_width characters to align with the data columns
@@ -21727,7 +21743,7 @@ sub print_bar_graph {
                         # DISPLAY only. CSV emission of the proportional-metric columns
                         # moved to the visibility-independent post-loop builder below
                         # (build_proportional_csv_data), so an auto-hidden or
-                        # heatmap-replaced column no longer drops its CSV value or
+                        # hidden column no longer drops its CSV value or
                         # misaligns the row (mirrors the latency-stats block's design).
                         $trend_value = " " . value_text( $log_stats{$bucket}{$field}, metric => timeline_column_metric($key), budget => $column_budget{$key} );
 
@@ -21776,6 +21792,8 @@ sub print_bar_graph {
                         defined $log_stats{$bucket}{p99} ? printf( "$colors{'bright-yellow'}P99:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p99}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 11 );
                         defined $log_stats{$bucket}{p999} ? printf( "$colors{'red'}P999:%-6.6s$colors{'NC'} ", value_text( $log_stats{$bucket}{p999}, metric => 'duration', budget => 'latency cell', width => 6 ) ) : printf( " " x 12 );
                         defined $log_stats{$bucket}{cv} ? printf( "$colors{$cv_color}CV:%-4.4s$colors{'NC'}", value_text( $log_stats{$bucket}{cv}, kind => 'cv', budget => 'cv cell' ) ) : printf ( " " x 7 );
+                    } elsif ( grep { $_->{id} eq 'heatmap' && $_->{visible} } @column_layout ) {
+                        print " " x $col_w;   # the heatmap that follows keeps its place
                     }
 
                 } elsif ($col_id eq 'heatmap') {
@@ -21789,7 +21807,7 @@ sub print_bar_graph {
             # Issue #289: emit the proportional-metric CSV columns independent of
             # @column_layout render visibility. The previous in-loop pushes only
             # fired for VISIBLE columns, so a metric column that was auto-hidden
-            # (narrow terminal) or replaced by the heatmap row silently dropped its
+            # (narrow terminal) or hidden silently dropped its
             # CSV value and shifted every subsequent column. This builder walks
             # @populated_graph_columns in the SAME order as the @output_columns
             # header build (normalize_data_for_output) so header and data stay
@@ -21832,7 +21850,7 @@ sub print_bar_graph {
             # under the same shared predicate (see normalize_data_for_output),
             # so rows always match the header regardless of whether the latency
             # *display column* was auto-hidden by terminal width (Issue #263)
-            # or replaced by the heatmap row on the terminal surface (Issue #289).
+            # or hidden on the terminal surface, as under -hm (Issue #289).
             # The bytes aggregate family (#432), CSV-only like the duration stats
             # below and under its own shared predicate. Pushed ahead of them to match
             # the header order in normalize_data_for_output.
@@ -21868,8 +21886,8 @@ sub print_bar_graph {
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
         }
 
-        # Print footer line - with embedded heatmap scale if enabled
-        if ($heatmap_enabled) {
+        # Print footer line - with the heatmap's scale under the heatmap column when it is rendered
+        if ( grep { $_->{id} eq 'heatmap' && $_->{visible} } @column_layout ) {
             print_heatmap_footer_scale();
         } else {
             print "$colors{'bright-black'}" . "─" x $terminal_width . "$colors{'NC'}\n";

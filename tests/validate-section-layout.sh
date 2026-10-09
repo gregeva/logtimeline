@@ -159,6 +159,51 @@ heading_absent() {
     if grep -qw -- "$2" <<< "$row"; then echo "'$2' is in the header row: $row"; return 1; fi
 }
 
+# The timeline's closing rule of a capture, escape sequences removed: the last
+# row beginning with a rule character (every section printing a rule after the
+# timeline is hidden where this is read). Usage: closing_rule <capture>
+closing_rule() {
+    local rule
+    rule=$("$PERL" "$CHECKER" strip "$1" | sed 's/\x1b\[[0-9;]*m//g' | grep '^─' | tail -1)
+    [[ -n "$rule" ]] || { echo "no rule row in $1"; return 1; }
+    printf '%s\n' "$rule"
+}
+
+# The closing rule is WIDTH columns wide and carries the heatmap's scale (a
+# junction with a value label after it), or does not.
+# Usage: rule_with_scale <capture> <width>; rule_without_scale <capture> <width>
+rule_columns() {
+    closing_rule "$1" | "$PERL" -CS -ne 'chomp; print length'
+}
+rule_with_scale() {
+    local rule width
+    rule=$(closing_rule "$1") || { echo "$rule"; return 1; }
+    width=$(rule_columns "$1")
+    [[ "$width" == "$2" ]] || { echo "closing rule is $width columns, not $2: $rule"; return 1; }
+    grep -qE '┴─+[0-9]' <<< "$rule" || { echo "no scale on the closing rule: $rule"; return 1; }
+}
+rule_without_scale() {
+    local rule width
+    rule=$(closing_rule "$1") || { echo "$rule"; return 1; }
+    width=$(rule_columns "$1")
+    [[ "$width" == "$2" ]] || { echo "closing rule is $width columns, not $2: $rule"; return 1; }
+    if grep -qE '┴|[0-9]' <<< "$rule"; then echo "a scale is on the closing rule: $rule"; return 1; fi
+}
+
+# The closing rule's junction sits under the last column separator of the
+# first bucket row: the separator before the columns right of the bars.
+# Usage: junction_under_separator <capture>
+junction_under_separator() {
+    "$PERL" "$CHECKER" strip "$1" | sed 's/\x1b\[[0-9;]*m//g' | "$PERL" -CS -ne '
+        chomp;
+        $sep = rindex($_, "\x{2502}") if !defined $sep && /\x{2502}/;
+        $junction = index($_, "\x{2534}") if /^\x{2500}/ && /\x{2534}/;
+        END {
+            if (!defined $sep || !defined $junction) { print "separator or junction not found\n"; exit 1 }
+            if ($sep != $junction) { print "junction at column $junction, separator at column $sep\n"; exit 1 }
+        }'
+}
+
 # Two captures print the same bytes on both streams. Usage: same_streams <tag-a> <tag-b>
 same_streams() {
     cmp -s "$TMP_DIR/$1/out" "$TMP_DIR/$2/out" && cmp -s "$TMP_DIR/$1/err" "$TMP_DIR/$2/err"
@@ -283,7 +328,9 @@ scenario_register \
     hide-each-column \
     show-column-after-hide \
     hide-sections-and-columns-list \
-    hide-metric-column
+    hide-metric-column \
+    stats-and-heatmap-columns \
+    plural-column-names
 scenario_parse_args "$@"
 
 echo "Section layout (-V section-layout) against standard output, width $WIDTH"
@@ -630,6 +677,12 @@ if scenario_wanted unknown-name-refused; then
         asserts     'An unknown --hide value is an error that names it and the valid sections and columns, exits 1, and prints nothing on standard output' \
         produced_by 'apply_output_visibility() through print_usage() in ltl, from the pass before the title' \
         contract    'features/597-section-visibility.md § D8, D11, D21'
+    assert_command \
+        command     "grep -qF 'session or sessions (ses), user or users (usr), classification (cls), stats (stat), heatmap (hm)' $(printf '%q' "$TMP_DIR/unknown/err")" \
+        label       'the error lists both spellings of sessions and users, and heatmap apart from stats' \
+        asserts     'The column list names the Sessions and Users columns in the singular and the plural, and the heatmap as its own column with its alias' \
+        produced_by 'visibility_column_list() in ltl, through %column_plural_name and %column_aliases' \
+        contract    'features/597-section-visibility.md § D26, D28'
     set +e
     ( cd "$TMP_DIR/unknown" && "$LTL" --disable-progress -ni -udm rows -udm rows::delta -hi nosuch "$UDM_LOG" > out-udm 2> err-udm )
     rc=$?
@@ -838,6 +891,115 @@ if scenario_wanted hide-metric-column; then
             asserts     'Hiding a user-defined metric column is a display control: -o writes the same STATS CSV' \
             produced_by 'the STATS CSV columns in normalize_data_for_output(), in ltl' \
             contract    'features/597-section-visibility.md § D24, D2'
+    fi
+    echo ""
+fi
+
+# The statistics and heatmap columns are two columns (D26, D27): -hm hides the
+# statistics column by default, --show stats brings it back beside the heatmap,
+# --hide heatmap hides the heatmap alone and its scale with it, and -hst and the
+# deprecated -os hide both. -bs 1440 -oe -n 1: one bucket row; the options row,
+# messages and summary are hidden, so the timeline's closing rule is the last
+# rule printed. 280 columns hold both columns (and, without -hm, the statistics
+# column beside this log's wide legend); at 160 the layout drops the
+# statistics column first.
+if scenario_wanted stats-and-heatmap-columns; then
+    current_scenario=stats-and-heatmap-columns
+    hm_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,messages,summary)
+    if run_ltl hm-default "${hm_args[@]}" -hm duration "$SPREAD_LOG" \
+       && WIDTH=280 run_ltl hm-default-wide "${hm_args[@]}" -hm duration "$SPREAD_LOG" \
+       && run_ltl hm-hide-stats "${hm_args[@]}" -hm duration -hi stats "$SPREAD_LOG"; then
+        assert_command \
+            command     "heading_present $(printf '%q' "$(capture hm-default)") heatmap && heading_absent $(printf '%q' "$(capture hm-default-wide)") statistics && rule_with_scale $(printf '%q' "$(capture hm-default)") $WIDTH" \
+            label       '-hm renders the heatmap and its scale, the statistics column hidden even where it would fit' \
+            asserts     'Under -hm the statistics column is hidden by default, at a width holding both columns too, and the heatmap renders with its scale on a closing rule exactly the terminal width' \
+            produced_by 'apply_output_visibility() hides stats under $heatmap_enabled; build_column_layout() and print_heatmap_footer_scale(), in ltl' \
+            contract    'features/597-section-visibility.md § D27'
+        assert_command \
+            command     "same_streams hm-hide-stats hm-default" \
+            label       '-hm -hi stats keeps the heatmap: it prints what -hm prints' \
+            asserts     '--hide stats hides the statistics column only; under -hm, where that column is already hidden, the heatmap and its scale are unchanged' \
+            produced_by 'apply_output_visibility(): $hide_stats and $hide_heatmap are set apart, in ltl' \
+            contract    'features/597-section-visibility.md § D26'
+    fi
+    if run_ltl hm-hide-heatmap "${hm_args[@]}" -hm duration -hi heatmap "$SPREAD_LOG" \
+       && run_ltl hm-hide-hm "${hm_args[@]}" -hm duration -hi hm "$SPREAD_LOG"; then
+        assert_command \
+            command     "heading_absent $(printf '%q' "$(capture hm-hide-heatmap)") heatmap && rule_without_scale $(printf '%q' "$(capture hm-hide-heatmap)") $WIDTH && same_streams hm-hide-hm hm-hide-heatmap" \
+            label       '-hm -hi heatmap hides the heatmap and its scale; -hi hm is the same' \
+            asserts     'A hidden heatmap leaves no heading and no scale: the closing rule is a plain rule exactly the terminal width; hm is the alias of heatmap' \
+            produced_by 'print_bar_graph() prints the scale only when the heatmap column is in the layout; resolve_visibility_name() through %column_aliases, in ltl' \
+            contract    'features/597-section-visibility.md § D26'
+    fi
+    if run_ltl hm-hst "${hm_args[@]}" -hm duration -hst "$SPREAD_LOG" \
+       && run_ltl hm-hide-both "${hm_args[@]}" -hm duration -hi stats,heatmap "$SPREAD_LOG" \
+       && run_ltl hm-os "${hm_args[@]}" -hm duration -os "$SPREAD_LOG"; then
+        assert_command \
+            command     "same_streams hm-hst hm-hide-both && heading_absent $(printf '%q' "$(capture hm-hst)") heatmap" \
+            label       '-hst under -hm prints what -hi stats,heatmap prints' \
+            asserts     '-hst hides both the statistics and the heatmap columns, as it did before they were named apart' \
+            produced_by 'the hide-stats entry in adapt_to_command_line_options() pushes hide stats,heatmap, in ltl' \
+            contract    'features/597-section-visibility.md § D26'
+        assert_command \
+            command     "cmp -s $(printf '%q' "$(capture hm-os)") $(printf '%q' "$(capture hm-hst)") && grep -qF 'omit-stats is deprecated' $(printf '%q' "$TMP_DIR/hm-os/err")" \
+            label       '-os under -hm hides both columns as -hst does, with its deprecation notice' \
+            asserts     'The deprecated -os prints on standard output what -hst prints, and names its replacement on standard error' \
+            produced_by 'the omit-stats entry in adapt_to_command_line_options() pushes hide stats,heatmap; record_deprecation(), in ltl' \
+            contract    'features/597-section-visibility.md § D26; acceptance criteria'
+    fi
+    if WIDTH=280 run_ltl hm-show-stats "${hm_args[@]}" -hm duration -sh stats "$SPREAD_LOG" \
+       && run_ltl hm-show-stats-narrow "${hm_args[@]}" -hm duration -sh stats "$SPREAD_LOG"; then
+        assert_command \
+            command     "heading_present $(printf '%q' "$(capture hm-show-stats)") statistics && heading_present $(printf '%q' "$(capture hm-show-stats)") heatmap && rule_with_scale $(printf '%q' "$(capture hm-show-stats)") 280 && junction_under_separator $(printf '%q' "$(capture hm-show-stats)")" \
+            label       '-hm -sh stats renders both columns, the scale on a full-width rule' \
+            asserts     '--show stats under -hm renders the statistics column beside the heatmap; the closing rule is exactly the terminal width, its junction under the separator and the scale under the heatmap' \
+            produced_by 'build_column_layout() builds each column on its own condition; print_heatmap_footer_scale() steps over the statistics column, in ltl' \
+            contract    'features/597-section-visibility.md § D27'
+        assert_command \
+            command     "heading_absent $(printf '%q' "$(capture hm-show-stats-narrow)") statistics && heading_present $(printf '%q' "$(capture hm-show-stats-narrow)") heatmap && rule_with_scale $(printf '%q' "$(capture hm-show-stats-narrow)") $WIDTH" \
+            label       "-hm -sh stats at $WIDTH columns drops the statistics column and keeps the heatmap" \
+            asserts     'Where both columns do not fit, the layout drops the statistics column first and the heatmap keeps its scale' \
+            produced_by 'auto_hide_narrow_columns() by hide_order, in ltl' \
+            contract    'features/597-section-visibility.md § D27; acceptance criteria'
+    fi
+    if run_ltl hm-hide-show-heatmap "${hm_args[@]}" -hm duration -hi heatmap -sh hm "$SPREAD_LOG" \
+       && LTL_CONFIG='-hi heatmap' run_ltl hm-env-hide-heatmap "${hm_args[@]}" -hm duration -sh heatmap "$SPREAD_LOG" \
+       && WIDTH=280 run_ltl stats-hide-show "${hm_args[@]}" -hi stats -sh stat "$SPREAD_LOG" \
+       && WIDTH=280 run_ltl stats-hide "${hm_args[@]}" -hi stats "$SPREAD_LOG"; then
+        assert_command \
+            command     "same_streams hm-hide-show-heatmap hm-default && heading_present $(printf '%q' "$(capture hm-env-hide-heatmap)") heatmap && heading_present $(printf '%q' "$(capture stats-hide-show)") statistics && heading_absent $(printf '%q' "$(capture stats-hide)") statistics" \
+            label       '--show undoes --hide for heatmap and stats, LTL_CONFIG first' \
+            asserts     'A heatmap hidden earlier, in LTL_CONFIG or on the command line, is shown by a later --show; without -hm a hidden statistics column is shown by a later --show stats' \
+            produced_by 'apply_output_visibility(): the later mention of a column sets %column_visibility, in ltl' \
+            contract    'features/597-section-visibility.md § D19, D27'
+    fi
+    echo ""
+fi
+
+# The Sessions and Users columns are named in the singular and the plural
+# alike (D28). -hi stats: both headings print in full at this width.
+if scenario_wanted plural-column-names; then
+    current_scenario=plural-column-names
+    pl_args=(--disable-progress -bs 1440 -oe -n 1 -hi options,summary,stats)
+    if run_ltl pl-plain "${pl_args[@]}" "$USERS_LOG" \
+       && run_ltl pl-session "${pl_args[@]}" -hi session "$USERS_LOG" \
+       && run_ltl pl-sessions "${pl_args[@]}" -hi sessions "$USERS_LOG" \
+       && run_ltl pl-user "${pl_args[@]}" -hi user "$USERS_LOG" \
+       && run_ltl pl-users "${pl_args[@]}" -hi users "$USERS_LOG" \
+       && run_ltl pl-users-show-user "${pl_args[@]}" -hi users -sh user "$USERS_LOG" \
+       && run_ltl pl-session-show-sessions "${pl_args[@]}" -hi session -sh sessions "$USERS_LOG"; then
+        assert_command \
+            command     "heading_absent $(printf '%q' "$(capture pl-sessions)") sessions && same_streams pl-sessions pl-session && heading_absent $(printf '%q' "$(capture pl-users)") users && same_streams pl-users pl-user" \
+            label       '-hi sessions and -hi users print what -hi session and -hi user print' \
+            asserts     'The plural, as the column heading reads, names the Sessions and Users columns as the singular does' \
+            produced_by 'resolve_visibility_name() through %column_plural_name, in ltl' \
+            contract    'features/597-section-visibility.md § D28'
+        assert_command \
+            command     "same_streams pl-users-show-user pl-plain && same_streams pl-session-show-sessions pl-plain" \
+            label       '--show in one spelling undoes --hide in the other' \
+            asserts     'The singular and the plural are one column: a --show in either spelling undoes a --hide in the other' \
+            produced_by 'resolve_visibility_name() resolves both to one column key; apply_output_visibility(), in ltl' \
+            contract    'features/597-section-visibility.md § D19, D28'
     fi
     echo ""
 fi
