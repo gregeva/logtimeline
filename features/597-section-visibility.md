@@ -299,6 +299,26 @@ the one old option that is a list of values rather than one (an exception to D22
 The heatmap's scale on the timeline's closing rule prints only when the heatmap
 column is rendered.
 
+**D27: the statistics column and the heatmap are two columns throughout; `-hm`
+hides `stats` by default** (architect, 2026-10-09). Every site that treats them
+as one slot (the finding below) is broken apart, so each column is built, made
+visible, sized and fed by its own condition. `-hm` no longer removes the
+statistics column: it hides it, as a `--hide stats` placed before every other
+visibility option, so a later `--show stats` renders it beside the heatmap. A run
+without `--show stats` renders as today. Per-bucket statistics are computed under
+`-hm` only when the statistics column is shown (or another consumer, the STATS
+CSV, asks for them). `--hide` and `--show` accept the same names and act on the
+same columns: whatever one turns off, the other turns back on.
+
+**D28: the Sessions and Users columns are named in the singular and the plural
+alike** (architect, 2026-10-09, #692: `--hide users` was refused). A line
+carries one session or user; the column totals sessions or users, so both
+spellings are right. `session` and `sessions`, `user` and `users` are each a
+name of the column, not an alias of the other, accepted by `--hide` and `--show`
+and listed together wherever the column names are listed (the `--hide` help
+row, `docs/usage.md`, the unknown-name error), the aliases `ses` and `usr`
+unchanged.
+
 ## Finding: `--hide` against the timeline's two right-hand columns (#692)
 
 Read on `release/0.19.0` on 2026-10-09. The statistics column and the heatmap
@@ -657,3 +677,49 @@ that owns `--hide` and `--show`:
 - [x] `--help` and `docs/usage.md` give each of `-hi` and `-sh` two rows, the
       column use then the section use, and agree (D21;
       `tests/validate-help-content.sh`).
+
+The statistics and heatmap columns, and the Sessions and Users names (D26 to
+D28, #692), asserted in `tests/validate-section-layout.sh` unless another
+harness is named. Every run pins `--terminal-width`; inputs are the access log
+carrying sessions and users and the access log with a spread of durations.
+
+- [ ] `-hm duration` with no visibility option renders standard output
+      byte-identical to the base commit's tool (D27: the default is unchanged);
+      the regression goldens that carry `-hm` pass unchanged
+      (`tests/validate-regression.sh`).
+- [ ] `-hm duration --hide stats` renders the heatmap column, its heading, and
+      its scale on the closing rule (D26).
+- [ ] `-hm duration --hide heatmap`, and `--hide hm`, render no heatmap heading,
+      and the closing rule is exactly the terminal width with no scale label on
+      it (D26, the reported overflow).
+- [ ] `-hm duration -hst` gives standard output and standard error
+      byte-identical to `-hm duration --hide stats,heatmap`; without `-hm`,
+      `-hst` remains byte-identical to `--hide stats` (D26).
+- [ ] `-hm duration -os` hides both columns as `-hst` does, with the deprecation
+      notice on standard error (D26: a released option does not change).
+- [ ] `-hm duration --show stats` renders both headings, `latency statistics`
+      and the heatmap's, the closing rule exactly the terminal width with the
+      scale under the heatmap (D27).
+- [ ] `-hm duration --show stats` at a width too narrow for both drops the
+      statistics column first and keeps the heatmap (the layout's existing
+      auto-hide order).
+- [ ] `--show heatmap` after `--hide heatmap`, and `--show stats` after
+      `--hide stats` without `-hm`, render the column again; a `--hide heatmap`
+      in `LTL_CONFIG` is undone by `--show heatmap` on the command line (D19,
+      D27).
+- [ ] `-V` reports `bucket_duration_stats_demand: no` under `-hm duration`, and
+      `yes` under `-hm duration --show stats` and under `-hm duration -o`
+      (D27; `tests/validate-statistics-demand.sh`).
+- [ ] `--hide sessions` and `--hide users` remove the Sessions and Users
+      headings, byte-identical to `--hide session` and `--hide user`; `--show`
+      in either spelling undoes `--hide` in the other (D28).
+- [ ] The unknown-name error, the `--hide` help row and `docs/usage.md` list
+      `heatmap` (`hm`), `session` or `sessions` (`ses`) and `user` or `users`
+      (`usr`); the `-hst` help row reads as hiding both columns, and `--help`
+      and `docs/usage.md` agree (`tests/validate-help-content.sh`).
+- [ ] No ` at <file> line <N>` on standard error in any run above
+      (`tests/lib/runtime-warnings.sh`).
+
+Unchanged by D26 to D28: `--hide heatmap` hides the column only; the heatmap's
+cells and markers are still computed, as a hidden metric column's values still
+are (D24).
