@@ -399,3 +399,15 @@ the `datetime-warning-stderr` scenario of `validate-section-layout.sh`
 triggered #597 D12's check with `-st 12h`, which is now a usage error (C6).
 The scenario was restated (25b2d38) and the suite re-run whole on that
 commit: 49 harnesses, every one exits 0 with assertions run.
+
+Second gate (branch `611-impossible-dates-2`, after the impossible-date note,
+the revert of the swapped-date change and the epoch digit-count rule), on
+117f8f2, against the release head ccd142f, one run each:
+
+| Case | Metric | before | after |
+|---|---|---|---|
+| `single-day-access-log-standard` | total | 8.4 s | 8.5 s (+0.1%) |
+| | `parse/read_files` | 8.3 s | 8.4 s (+0.1%) |
+| `network-latency-csv-standard` | total | 1.7 s | 1.7 s (−0.4%) |
+
+Full suite: 49 harnesses, every one exits 0 with assertions run.
