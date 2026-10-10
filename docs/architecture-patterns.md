@@ -458,6 +458,57 @@ file's precision evidence (`features/615-csv-registry-entry.md` D16, D17).
 
 ---
 
+## Timestamp acceptance: shape, then date, with one outcome per place
+
+**Definition.** A timestamp is accepted in two steps wherever it is read. Its
+**shape** is one of the forms the place accepts (a format's pattern, a CSV
+file's kind, the documented forms of an option value); its **date** exists,
+resolved once per distinct date by the one resolver on the date cache's miss,
+which returns undef instead of dying. Nothing else calls the time library on
+user input. A shape not accepted is a line not matched, silently. A date that
+cannot exist has one outcome per place:
+
+1. **A line (scanned or CSV).** Under an ISO layout, a component out of range
+   (month > 12, day > 31) is first the layout signal of the date-layout
+   variant group, and a flip re-scans the line. Otherwise the line is not
+   matched: it contributes nothing and the timestamp memo does not move. It
+   is counted per file and format, and the user is told once per run after
+   the read, per format, never per line or per file.
+2. **An option value (`-st`, `-et`).** A usage error naming the accepted
+   forms, before any file is read.
+3. **An index value read back.** Skipped.
+
+An ISO date-time takes either separator (space or `T`) and a fraction after
+`.` or `,` of up to nine digits, on every place that reads one.
+
+**Intended uses.** Any new place that reads a timestamp: a format layout, a
+user-declared format (#387), an option value, a file ltl reads back. It
+takes its date from the resolver and its outcome from the list above, never
+a `timegm`, `strptime` or message of its own.
+
+**Reasoning.** Before the pattern, each place did something of its own: a
+scanned ISO line with month 13 was counted at the previous line's time with a
+note per file, 30 February ended the run from inside the generated scan sub,
+the Apache and asctime layouts and CSV rows ended it on any impossible day,
+and `-st` read `T` as garbage and dropped the time of day. A guard alone
+would trade the loud failure for a quiet wrong answer; the count and the note
+are part of the pattern (`features/log-format-registry.md`, the #385
+mitigation note).
+
+**Consumption sites.** Listed as #611's drops land
+(`features/611-timestamp-acceptance.md` § 7).
+
+**Owning record.** `features/611-timestamp-acceptance.md` § 5;
+`features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no
+per-file note, the layout signal kept); `features/640-csv-unplaced-rows-silent.md`
+D1 (a line without a parsable timestamp is not matched, silently; messages are
+run-level).
+
+**Status.** Being built by #611 (one application-wide timestamp acceptance
+pattern).
+
+---
+
 ## Observation counts and gated means
 
 **Definition.** Every accumulator carries its observation count beside its
