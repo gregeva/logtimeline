@@ -483,6 +483,7 @@ Run-level, one block per run. Every key deterministic; harnesses assert values. 
 === filter-summary ===
 lines_read: N
 lines_unmatched: N
+lines_unmatched_impossible_date: N
 lines_excluded: N
 excluded_time_window: N
 excluded_profile: N
@@ -496,6 +497,7 @@ lines_highlighted: N
 
 - `lines_read` / `lines_included` — `$total_lines_read` / `$total_lines_included`, unchanged in meaning (the `LINES READ` / `LINES INCLUDED` rows).
 - `lines_unmatched` — the same run total `format-detection / classification` prints as `unmatched_lines`, computed once and read by both.
+- `lines_unmatched_impossible_date` — the part of `lines_unmatched` whose timestamp had an accepted shape but a date that cannot exist (#611, `features/611-timestamp-acceptance.md` C4): the sum of the per-file `impossible_date_lines` of `-V format-detection`, from `timestamp_impossible_total()`. Asserted by the `impossible-date` scenario of `tests/validate-filter-summary.sh`.
 - `lines_excluded` — the sum of the five `excluded_*` counters (D12 causes: the time window; the `-pr` fold; the content and outcome filters `-i/-e/-ipf/-epf/-if/-ef/-is/-es`; the numeric thresholds `-dmin/-dmax/-bmin/-bmax/-cmin/-cmax`, including a line dropped for carrying no value for the filtered metric; other — category outside `%log_level_set`).
 - `lines_highlighted` — `$total_lines_highlighted` (the `HIGHLIGHTED` row); `0` when no highlight is active.
 - CSV cache (`tests/lib/csv-cache.sh`): a cache miss already runs `ltl … -o` in a scratch directory and keeps the two CSVs under deterministic names; it keeps the `.yaml` written beside them the same way and exports its path (`CSV_CACHE_AGGREGATE`), so the oracle-to-file chain above reads the file from the same run as the CSVs it is compared with.

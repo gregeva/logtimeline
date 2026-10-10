@@ -495,8 +495,13 @@ would trade the loud failure for a quiet wrong answer; the count and the note
 are part of the pattern (`features/log-format-registry.md`, the #385
 mitigation note).
 
-**Consumption sites.** Listed as #611's drops land
-(`features/611-timestamp-acceptance.md` § 7).
+**Consumption sites.**
+- `timestamp_date_cache_add` :: `my $midnight = eval { timegm( 0, 0, 0, $day, $month - 1, $year ) } // return undef;` (the one date resolver)
+- `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
+- `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
+- `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
+- `csv_validate_block` :: `if (!defined $ok) { $verdict = 'date'; last; }` (an impossible sampled row is the day-first retry's date failure)
+- `defer_timestamp_impossible_notes` :: `" line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n"` (once per run, per format)
 
 **Owning record.** `features/611-timestamp-acceptance.md` § 5;
 `features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no

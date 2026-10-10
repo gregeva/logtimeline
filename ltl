@@ -870,7 +870,7 @@ my %format_unit_ambiguity_warned;      # file => 1 once it has been recorded as 
 my @format_unit_ambiguity;             # [ entry, consequence, override, [ files ] ] per entry a file fell to by default, in the order met
 my @duration_unit_line_files;          # [ file, slug ] per file bound to a format declaring duration_unit 'line' while -du was given
 my $format_current_file = '';          # file being read (steady-loop probe signals, -V)
-my $format_current_line_ref = \0;      # ref to the read loop's line counter (diagnostics)
+my %timestamp_impossible_lines;        # file => { slug => lines not matched because their date cannot exist }
 
 # Time-unit ladder: the one definition of every time unit the tool reads,
 # validates, converts or names. Each step carries its canonical token, the
@@ -4204,8 +4204,15 @@ sub format_registry_specs {
 # evicts the oldest-stamped entries. A date seen again after eviction is
 # simply re-inserted with a fresh stamp. All of this lives on the cold
 # path (a new date), never per line.
+# The one date resolver of the timestamp acceptance pattern: given the
+# date's year, month (1 to 12) and day, it returns the midnight epoch, or
+# undef when a part is missing (an unknown month name) or the date cannot
+# exist (month 13, 30 February). Nothing is cached for such a date, so
+# the time library never ends the run on a value read from input.
 sub timestamp_date_cache_add {
-    my ($date, $midnight) = @_;
+    my ($date, $year, $month, $day) = @_;
+    return undef unless defined $year && defined $month && defined $day;
+    my $midnight = eval { timegm( 0, 0, 0, $day, $month - 1, $year ) } // return undef;
     $timestamp_date_cache{$date} = $midnight;
     $timestamp_date_cache_added{$date} = ++$timestamp_date_cache_stamp;
     if (keys %timestamp_date_cache > TIMESTAMP_DATE_CACHE_MAX) {
@@ -4483,9 +4490,9 @@ sub select_format_variants {
 # monotonicity violation applies the graded penalty. The group then
 # re-selects; when the best live member changes, it takes the slot (the
 # caller re-scans the line under the new sub) and the flip is counted.
-# An impossible date with no live alternative is reported once per file
-# on stderr (D52/#385) — an intentional diagnostic, never an
-# ` at ... line` suffix. Returns 1 when the occupant changed.
+# Returns 1 when the occupant changed, -1 for an impossible date while the
+# file's first decision is pending (the caller holds the line for the
+# replay to judge), 0 otherwise.
 sub format_probe_signal {
     my ($entry, $kind, $value) = @_;
     return 0 unless $entry;
@@ -4539,10 +4546,7 @@ sub format_probe_signal {
     # While the file's first decision is pending (fallback-window prefill,
     # before the held lines have been scored) the signal only counts: the
     # selection that follows sees the same evidence and decides.
-    if ($kind eq 'impossible_date' && !$flipped && (defined $log_format_pin || %{ $ev->{groups} }) && !$st->{impossible_date_reported}++) {
-        defer_notice( "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
-            . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n" );
-    }
+    return -1 if $kind eq 'impossible_date' && !$flipped && !defined $log_format_pin && !%{ $ev->{groups} };
     return $flipped;
 }
 
@@ -4630,6 +4634,38 @@ sub defer_format_unit_notes {
         defer_notice( "Note: -du $duration_unit_override is not applied to " . join(', ', map { $_->[0] } @duration_unit_line_files)
             . ": " . (@duration_unit_line_files > 1 ? 'their format names' : 'its format names') . " the duration unit on each line ("
             . join(', ', sort keys %slugs) . ")\n" );
+    }
+    return;
+}
+
+# Lines not matched because their date cannot exist (the timestamp acceptance
+# pattern): one file's count, or the run's when no file is named.
+sub timestamp_impossible_total {
+    my ($file) = @_;
+    my $total = 0;
+    for my $f (defined $file ? ($file) : keys %timestamp_impossible_lines) {
+        $total += $_ for values %{ $timestamp_impossible_lines{$f} || {} };
+    }
+    return $total;
+}
+
+# One note per format whose lines were not matched because their date cannot
+# exist, printed once per run after the read with the count, never per line
+# or per file. A format whose variant group has another member names the
+# other member's -lf, since a day and month read the wrong way round is how
+# such lines arise.
+sub defer_timestamp_impossible_notes {
+    my %by_slug;
+    for my $file (keys %timestamp_impossible_lines) {
+        $by_slug{$_} += $timestamp_impossible_lines{$file}{$_} for keys %{ $timestamp_impossible_lines{$file} };
+    }
+    for my $slug (sort keys %by_slug) {
+        my ($entry) = grep { $_->[FR_SLUG] eq $slug } values %format_registry_entry;
+        my $g = $entry && defined $entry->[FR_GROUP] ? $format_variant_groups{ $entry->[FR_GROUP] } : undef;
+        my @others = $g ? grep { $_->[FR_SLUG] ne $slug } map { $format_registry_entry{$_} } @{ $g->{members} } : ();
+        my $hint = @others ? ' - if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) : '';
+        defer_notice( "Note: " . value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
+            . " line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n" );
     }
     return;
 }
@@ -5151,8 +5187,8 @@ sub format_entry_block_src {
 # Returns the source pieces in order: the fraction handling, then the memo
 # fronting the layout parse.
 # Two layouts belong to the CSV block (csv_block_src). csv_ddmm is the csv
-# layout read day first (yyyy-dd-MM): the day-first offsets, and the
-# unguarded csv parse, which croaks on a date that cannot exist. csv_epoch
+# layout read day first (yyyy-dd-MM): the day-first offsets, and no layout
+# signal, the order being settled per file before line 2. csv_epoch
 # is a number of seconds, or of the -du unit given as $opts->{epoch_unit},
 # folded in as a constant; it carries no memo, since a hit would save only
 # the number's own conversion. Its fraction follows the read gate: digits
@@ -5202,43 +5238,58 @@ substr($timestamp_str, 19) = '';};
     # iso_ms_ddmm and csv_ddmm (yyyy-dd-MM, #385): the day and month reads
     # swap offsets.
     my ($day_off, $month_off) = ($layout eq 'iso_ms_ddmm' || $layout eq 'csv_ddmm') ? (5, 8) : (8, 5);
-    my $compute = ($layout eq 'asctime')
-        ? q{do { my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($timestamp_str, 4, 2), $format_month_map{ substr($timestamp_str, 0, 3) } - 1, substr($timestamp_str, 16, 4) ) ); $midnight + substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2) }}
-        : ($layout eq 'apache_clf')
-        ? q{do { my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) ) }; $midnight + substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2) }}
-        : qq{do { my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) ) ); \$midnight + substr(\$timestamp_str, 11, 2) * 3600 + substr(\$timestamp_str, 14, 2) * 60 + substr(\$timestamp_str, 17, 2) }};
+    # Each layout gives the date's midnight (from %timestamp_date_cache, or
+    # the date resolver on its miss: one timegm() per distinct day, undef for
+    # a date that cannot exist) and the time of day as arithmetic.
+    my ($midnight, $time_of_day);
+    if ($layout eq 'asctime') {
+        $midnight    = q{my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, substr($timestamp_str, 16, 4), $format_month_map{ substr($timestamp_str, 0, 3) }, substr($timestamp_str, 4, 2) );};
+        $time_of_day = q{substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2)};
+    } elsif ($layout eq 'apache_clf') {
+        $midnight    = q{my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), $year, $format_month_map{ $month_str // '' }, $day ) };};
+        $time_of_day = q{substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2)};
+    } else {
+        $midnight    = qq{my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), substr(\$timestamp_str, 0, 4), substr(\$timestamp_str, $month_off, 2), substr(\$timestamp_str, $day_off, 2) );};
+        $time_of_day = q{substr($timestamp_str, 11, 2) * 3600 + substr($timestamp_str, 14, 2) * 60 + substr($timestamp_str, 17, 2)};
+    }
     # The memo-miss branch runs once per change of timestamp string between
     # consecutive lines — never once per line on dense streams — so it is
-    # where the steady-loop content probes live
-    # (D52/I2): for ISO layouts, an impossible date component under this
-    # layout (month > 12, day > 31 — the timegm() guard, #385) and a
-    # timestamp earlier than the previous distinct one are reported to
-    # format_probe_signal(), which feeds the one selection mechanism (N5);
-    # when the signal flips the group's occupant, the line is re-scanned
-    # under the new sub. The impossible-date line is carried at the previous
-    # distinct epoch and is memoised but never cached.
-    # The monotonicity probe feeds variant selection, which exists only for
-    # variant-group members; a group of one gets the impossible-date guard
-    # alone (sparse-timestamp streams such as GC logs miss the cache on
-    # nearly every line, so every op here is effectively per line there).
+    # where the steady-loop content probes live (D52/I2). A timestamp earlier
+    # than the previous distinct one is reported to format_probe_signal(),
+    # which feeds the one selection mechanism (N5); the monotonicity probe
+    # feeds variant selection, which exists only for variant-group members.
+    # When the signal flips the group's occupant, the line is re-scanned under
+    # the new sub.
     my $mono_src = defined $spec->{variant_group}
-        ? qq{    return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
+        ? qq{        return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
         : '';
-    my $prev_src = defined $spec->{variant_group} ? "    my \$prev = \$format_last_ts_epoch;\n" : '';
-    my $miss_src = $layout =~ /^iso_/
-        ? qq{if (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) {
-    \$timestamp = \$format_last_ts_epoch // 0;
-    \$format_last_ts_str = \$timestamp_str;
-    return \$format_scan_sub->(\$_[0]) if format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str);
-} else {
-$prev_src    \$timestamp = \$format_last_ts_epoch = $compute;
-    \$format_last_ts_str = \$timestamp_str;
-$mono_src}}
-        : qq{\$timestamp = \$format_last_ts_epoch = $compute;
-    \$format_last_ts_str = \$timestamp_str;};
+    my $prev_src = defined $spec->{variant_group} ? "        my \$prev = \$format_last_ts_epoch;\n" : '';
+    # A date that cannot exist (the timestamp acceptance pattern): under an
+    # ISO layout, a component out of range (month > 12, day > 31) is first
+    # the layout signal (D52 (a)), and a flip re-scans the line. Otherwise
+    # the line is not matched: nothing is recorded, the memo does not move,
+    # and the line is counted for the run's note. While the file's first
+    # decision is pending (the detection-window prefill), a variant-group
+    # member holds the line as matched, so the replay under the decided
+    # occupant judges it.
+    my $slug = $spec->{slug} // $spec->{name};
+    my $impossible_src = '';
+    if ($layout =~ /^iso_/) {
+        $impossible_src .= qq{        my \$signal = (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) ? format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str) : 0;\n}
+                         . qq{        return \$format_scan_sub->(\$_[0]) if \$signal > 0;\n};
+        $impossible_src .= qq{        return ENTRY_PLACEHOLDER if \$signal < 0;\n} if defined $spec->{variant_group};
+    }
+    $impossible_src .= qq{        \$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;\n}
+                     . qq{        return undef;\n};
     push @src, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 else {
-    $miss_src
+    $midnight
+    if (defined \$midnight) {
+$prev_src        \$timestamp = \$format_last_ts_epoch = \$midnight + $time_of_day;
+        \$format_last_ts_str = \$timestamp_str;
+$mono_src    }
+    else {
+$impossible_src    }
 }};
     return @src;
 }
@@ -5495,10 +5546,11 @@ sub csv_block_evict {
 # names for it (the timestamp to the second, each -udm metric, the message);
 # a row it does not place is no failure, rows being handled one by one
 # (#640 D1). An ISO row whose date
-# cannot exist under the block's order stops the block (the parse croaks):
-# a date failure, which the caller answers with the other order. Runs under
-# the snapshot and restore a mid-run compile requires: the record lexicals,
-# the memo and the date cache are left as they were.
+# cannot exist under the block's order makes the block return undef: a date
+# failure, which the caller answers with the other order. Runs under the
+# snapshot and restore a mid-run compile requires: the record lexicals, the
+# memo and the date cache are left as they were, and, validating, the block
+# counts no row for the run's impossible-date note.
 # Returns the verdict ('ok', 'date' or 'wiring'), the rows placed, and the
 # most fraction digits among their timestamps (the file's precision evidence,
 # D17).
@@ -5510,6 +5562,8 @@ sub csv_validate_block {
                          $line_outcome, $line_cls_sig,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
+    my $was_validating = $format_scan_validating;
+    $format_scan_validating = 1;
     my ($verdict, $placed, $digits) = ('ok', 0, 0);
     ROW: for my $row (@$rows) {
         my $ok = eval { $block->($row) };
@@ -5533,6 +5587,7 @@ sub csv_validate_block {
         my $d = ($ts =~ /:\d{2}:\d{2}[.,](\d+)/ || $ts =~ /^\d+\.(\d+)$/) ? length $1 : 0;
         $digits = $d if $d > $digits;
     }
+    $format_scan_validating = $was_validating;
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
       $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
@@ -5547,8 +5602,8 @@ sub csv_validate_block {
 # is a number). An ISO file's date order is settled from its own sampled
 # rows, starting month first whatever file came before it (D18): month
 # first, then on a date failure day first, then, when both fail, month first
-# again, so a row impossible under that order stops the run as it reaches it
-# (D7). At each order, the live block serves when it was built for this
+# again, so a row impossible under that order is not matched as it reaches
+# it (#611). At each order, the live block serves when it was built for this
 # header and that order and passes the rows (a cache hit); otherwise the
 # block is generated, a compile that replaces the block before it. A wiring
 # failure stops the run here, before line 2 is processed. The memo and the
@@ -6327,6 +6382,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  byte_notation: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
+            push @verbose_output, "  impossible_date_lines: " . timestamp_impossible_total($file);
             push @verbose_output, "  first_match_line: -";
             push @verbose_output, "  scan_attempts: 0";
             push @verbose_output, "  scan_failed_attempts: 0";
@@ -6343,6 +6399,7 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  byte_notation: " . ($fdd->{byte_notation} // '-');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
+        push @verbose_output, "  impossible_date_lines: " . timestamp_impossible_total($file);
         push @verbose_output, "  first_match_line: " .
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
         push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
@@ -6976,6 +7033,7 @@ sub emit_filter_summary_verbose {
     push @verbose_output, "=== filter-summary ===";
     push @verbose_output, "lines_read: $total_lines_read";
     push @verbose_output, "lines_unmatched: $total_lines_unmatched";
+    push @verbose_output, "lines_unmatched_impossible_date: " . timestamp_impossible_total();
     push @verbose_output, "lines_excluded: " . lines_excluded_total();
     push @verbose_output, "excluded_time_window: $excluded_time_window";
     push @verbose_output, "excluded_profile: $profile_dropped_samples";
@@ -16811,7 +16869,6 @@ sub read_and_process_logs {
             : ( (-f $in_file) ? (-s $in_file) : 0 );
         $progress_file_index++;
         $format_current_file = $in_file;
-        $format_current_line_ref = \$line_number;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
@@ -18328,6 +18385,7 @@ sub read_and_process_logs {
     # Notices raised while the read was running, held back so they did not
     # print into the progress line's row.
     defer_format_unit_notes();
+    defer_timestamp_impossible_notes();
     flush_deferred_notices();
 
     # Surface the levels the tool did not recognise. A line whose level slot

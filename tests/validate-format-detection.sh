@@ -2375,6 +2375,21 @@ scenario_wgm_filename_family() {
         contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
 }
 
+scenario_impossible_date() {
+    current_scenario="impossible-date"
+    echo "[$current_scenario]"
+    local fx="$REPO_DIR/tests/fixtures"
+    local f name expect out
+    for f in application:2 access:1 connector:1; do
+        name=${f%%:*}; expect=${f#*:}
+        out=$(run_format_detection "$fx/impossible-date-$name.txt"); check_capture_warnings "$out"
+        assert_line "$out" pattern "^  impossible_date_lines: $expect\$" \
+            asserts "The file counts its own lines not matched because their date cannot exist ($expect in impossible-date-$name.txt)" \
+            produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+            contract 'features/611-timestamp-acceptance.md C4, AC1, AC2'
+    done
+}
+
 scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
@@ -2396,10 +2411,18 @@ scenario_format_pin() {
         asserts 'The scan is restricted to the entries carrying the pinned name' \
         produced_by 'apply_format_pin() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 N9'
-    assert_line "$out.stderr" pattern "^Note: .*line [0-9]+: timestamp '[0-9 :-]+' has an impossible date component under the connection_server_standard format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\$" \
-        asserts 'An impossible date under the pinned layout is reported once per file (D52/#385) and never crashes' \
-        produced_by 'format_probe_signal() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    assert_line "$out" pattern '^  impossible_date_lines: 86$' \
+        asserts 'Under the pin to the other date layout, the 86 records whose day token exceeds 12 have a month out of range: each is not matched and counted, and the run continues' \
+        produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C3, C4, AC3'
+    assert_line "$out" pattern '^  matched_lines: 38$' \
+        asserts 'Only the 38 records whose date exists under the pinned layout are matched; no record is kept at the previous line time' \
+        produced_by 'read_and_process_logs() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md AC3'
+    assert_line "$out.stderr" pattern "^Note: 86 line\\(s\\) were not matched because their date cannot exist under the connection_server_standard format's date layout - if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
+        asserts 'The run is told once, with the count and the other member of the date-layout group to pin, never per file or per line' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract 'features/611-timestamp-acceptance.md C5, AC3'
     local out2; out2=$(run_format_detection "$log" -lf thingworx_standard); check_capture_warnings "$out2"
     assert_line "$out2" pattern '^entries: 2$' \
         asserts 'A name carried by two registry entries pins both (N9)' \
@@ -2846,6 +2869,7 @@ scenario_register tomcat9-ms \
                   wgm-client-localtime \
                   unregistered-levels-per-file \
                   format-pin \
+                  impossible-date \
                   byte-notation \
                   apache-mod-jk \
                   apache-mod-jk-microseconds \
@@ -2919,6 +2943,7 @@ while read -r _scenario; do
         wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
+        impossible-date                        ) scenario_impossible_date ;;
         byte-notation                          ) scenario_byte_notation ;;
         apache-mod-jk                          ) scenario_apache_mod_jk ;;
         apache-mod-jk-microseconds             ) scenario_apache_mod_jk_microseconds ;;

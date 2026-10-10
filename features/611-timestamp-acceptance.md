@@ -12,6 +12,17 @@ merged into this issue.
   The situation below was measured on the base commit (8372942) before any
   change. The architect agreed the four-drop delivery of § 7 and directed
   that the drops run in sequence without stopping between them.
+- Drop 1 (46f298f): this record and the pattern entry.
+- Drop 2: the per-line arms (C1 to C5). Measured on the reproductions of § 4:
+  every per-line case runs to exit 0 with the line not matched, counted and
+  noted once; under the wrong `-lf` pin on the Integration Runtime fixture,
+  38 records matched and 86 not matched for an impossible date, where the
+  base code counted those 86 at the previous line's time (124 matched).
+  Harnesses `validate-format-detection.sh` (458), `validate-csv-input.sh`
+  (33), `validate-format-registry.sh` (57), `validate-filter-summary.sh` (109)
+  and `validate-verbose-content-shape.sh` pass. `single-day-access-log-standard`
+  against `611-before`: `parse/read_files` 8.4 s both (+25 ms, +0.3%), total
+  +0.3%, peak RSS −0.2%, one run each; the gate's `after` run is the measure.
 
 ## 1. The motivating consumer
 
@@ -215,27 +226,37 @@ All assertable. Inputs are minimal synthetic fixtures committed as `.txt`
 under `tests/fixtures/`, except AC3, which uses the Integration Runtime
 fixture the detection harness already stages.
 
-- [ ] **AC1** A Thingworx application log of four lines whose third is dated
-      month 13 runs to exit 0: 3 lines matched, 1 unmatched, none placed at
-      another line's time (the bucket of the carried time holds only its own
-      line), `impossible_date_lines: 1`, `lines_unmatched_impossible_date: 1`,
-      and the one run-level note of C5 on stderr; no per-file note.
-- [ ] **AC2** The same with 30 February on the scanned ISO arm, 31 June on an
+- [x] **AC1** A Thingworx application log whose lines include one dated
+      month 13 runs to exit 0 with that line not matched and contributing
+      nothing (`lines_included` counts only the valid lines), counted
+      (`impossible_date_lines`, `lines_unmatched_impossible_date`), and the
+      one run-level note of C5 on stderr; no per-file note. *Asserted by the
+      `impossible-date` scenarios of `validate-filter-summary.sh` and
+      `validate-format-detection.sh`.*
+- [x] **AC2** The same with 30 February on the scanned ISO arm, 31 June on an
       Apache common log access log and 30 February on an Apache mod_jk log
       (asctime): each exits 0 with the line not matched, counted and noted,
-      and nothing on stderr carries ` at <file> line <N>`.
-- [ ] **AC3** The detection signal still fires: the existing
+      and nothing on stderr carries ` at <file> line <N>`. *Same scenarios.*
+- [x] **AC3** The detection signal still fires: the existing
       `validate-format-detection.sh` scenarios for sample elimination and the
       late flip (IF5) pass unchanged; under `-lf` pinned to the wrong member
       of the date-layout group, the lines whose day exceeds 12 are not
       matched and counted, the rest matched, and the note carries the `-lf`
-      hint.
-- [ ] **AC4** A CSV whose middle row is dated 30 February runs to exit 0
+      hint. *The `format-pin` scenario of `validate-format-detection.sh`.*
+- [x] **AC4** A CSV whose middle row is dated 30 February runs to exit 0
       with that row not matched and counted under `csv`; a CSV whose rows are
-      real dates only day first is still read day first (#615 D15).
-- [ ] **AC5** On input with no detection sample (read through the detection
-      window), a line impossible under the layout first chosen and valid
-      under the one the window settles on is matched at its own time.
+      real dates only day first is still read day first (#615 D15). *The
+      `impossible-date` scenario of `validate-filter-summary.sh`; the
+      day-first scenarios of `validate-csv-input.sh`.*
+- [ ] **AC5** *Unassertable from the command line.* On input with no
+      detection sample (read through the detection window), a line impossible
+      under the layout first chosen and valid under the one the window
+      settles on would be matched at its own time. Found in drop 2: a file
+      without a sample is one that is not a regular file, and the file
+      selection keeps regular files only (`@in_files = grep { -f $_ }
+      @in_files;` in `adapt_to_command_line_options`), so no run reaches the
+      pending decision. The hold of C3 is kept, as the existing pending branch
+      of `format_probe_signal()` is, for the window's own design.
 - [ ] **AC6** `-st` and `-et` given as `YYYY-MM-DDTHH:MM:SS` and as
       `YYYY-MM-DD HH:MM:SS` give the same `excluded_time_window` on the same
       input, with a fraction and without.
