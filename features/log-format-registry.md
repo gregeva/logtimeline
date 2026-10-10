@@ -669,8 +669,12 @@ was built decides on one line and cannot move back:
   read raises a score, so the eliminated order never returns. Measured on a
   synthetic Connection Server log whose sampled front, middle and end hold
   days up to the 12th and whose unsampled middle holds 40 lines dated
-  `2024-25-04`: the file switched day first at the first of them (`flips: 1`)
-  and the 600 lines after it dated `2024-04-05` were placed on 4 May.
+  `2024-25-04`: the file switched day first at the first of them (`flips: 1`),
+  and month first was eliminated for the rest of the file, so no later line,
+  whatever its date, could move the order back. (The switch itself is not the
+  defect: the file's 840 lines hold 40 valid only day first, none valid only
+  month first and 800 valid either way, so the evidence favours day first;
+  D70.)
 
 **Cause: Claude built this against the architect's locked design.** On
 2026-08-22, in the interview for #384 (filename provenance evidence and
@@ -695,6 +699,29 @@ order, and a dropped order can never return) fixes the implementation to
 D44, D48 and D53 as locked on 2026-08-22; it makes no new decision beyond
 the architect's amendment of I1 (2026-10-10): probe (a) becomes a weighted
 signal, set by the F7 method, and no longer eliminates an order.
+
+### #704: the day/month order accumulates evidence (2026-10-10)
+
+The fix for the finding above. The implementation follows D44, D48 and D53 as
+locked on 2026-08-22, with I1 as amended by the architect on 2026-10-10: a date
+valid only with day and month swapped is a weighted signal, its weight set by
+the F7 method, and no longer eliminates an order. Branch
+`704-date-order-evidence`.
+
+**Decisions (architect, 2026-10-10)**
+
+- **D70 — #704 is fixed when the mechanism follows D44, not when a given file
+  keeps a given date.** No single line decides a file's day/month order;
+  enough lines move the choice; lines favouring the earlier order move it
+  back. A file whose only distinguishing lines all favour the other order may
+  move to it and stay there: that is the evidence's verdict (D44, a wrong
+  choice is visible or good enough; `-lf` corrects it). Counted on the two
+  reproduction files of the finding above: the 1.2-million-line file holds 12
+  lines valid only day first, none valid only month first and 1,199,988 valid
+  either way; the 840-line file holds 40 valid only day first, none valid only
+  month first and 800 valid either way. In both, every distinguishing line
+  favours day first; month first is held only by the group default's standing
+  credit (1.0). *Locked ("Lock A").*
 
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
