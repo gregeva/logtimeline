@@ -13,10 +13,11 @@ A prototype answers a question before implementation commits to an answer.
 - Every constant is sliced out of `ltl` (pattern:
   `prototype/459-order-independence/extract-subs.sh`); where one must be
   restated, the source symbol is named in a comment beside it.
-- Correct logic is not the finding. The mechanisms of the structures the
-  design relies on (how a scalar is stored, what an operation does to the value
-  it reads, how memory is laid out and reused) are established and checked
-  against the design's intent, in time and in memory.
+- Correct logic is not the finding. How the structures the design relies on
+  behave in Perl is established and checked against the design's intent, in
+  time and in memory: how a scalar is stored (integers read by float
+  arithmetic double in size), how memory is laid out and reused (an in-place
+  sort scatters values, so later passes miss the CPU cache).
 - Scale is staged (1k, 10k, 100k, millions); results are medians with ranges.
 - The exit is a decision recorded as Dxx in the owning feature doc, or for a
   verification-method prototype, a demonstrated assertion that distinguishes
