@@ -496,7 +496,11 @@ are part of the pattern (`features/log-format-registry.md`, the #385
 mitigation note).
 
 **Consumption sites.**
-- `timestamp_date_cache_add` :: `my $midnight = eval { timegm( 0, 0, 0, $day, $month - 1, $year ) } // return undef;` (the one date resolver)
+- `date_midnight` :: `return eval { timegm( 0, 0, 0, $day, $month - 1, $year ) };` (the one date resolver)
+- `timestamp_date_cache_add` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date cache's miss)
+- `format_sample_probes` :: `my $midnight = date_midnight($y, $mo, $dy);` (the detection sample)
+- `iso_timestamp_parts` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date-time forms, either separator: the bounds and the index read-back)
+- `adapt_to_command_line_options` :: `print_usage("Invalid $flag timestamp '$value'. Accepted forms:` (a bound in no accepted form, before any file is read)
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
 - `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)

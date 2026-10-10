@@ -357,6 +357,7 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 scenario_register csv-unparseable-row \
                   impossible-date \
+                  time-window-forms \
                   summary-table-unchanged
 scenario_parse_args "$@"
 
@@ -451,6 +452,49 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         asserts 'A CSV row has the same outcome and note as a scanned line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
+fi
+fi
+
+# --- time window: the accepted forms of a bound, and a bound in none of them ---
+# The same 360 lines precede 12:00 on the fixture day whichever separator the
+# bound is written with; a value in no accepted form, or naming a date that
+# cannot exist, is refused before any file is read.
+if scenario_wanted time-window-forms; then
+current_scenario="time-window-forms"
+if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    FORMS_CONTRACT='features/611-timestamp-acceptance.md C6, C7 (one parser for -st and -et, either separator, a usage error naming the forms); AC6, AC7'
+    for bound in "2025-05-07T12:00:00" "2025-05-07T12:00" "2025-05-07T11:59:59.999"; do
+        out=$(current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound")
+        assert_line "$out" pattern '^excluded_time_window: 360$' \
+            asserts "-st $bound drops the same 360 lines as the space form: the T separator, a bound without seconds and a fraction are read whole" \
+            produced_by 'iso_timestamp_parts() through the -st/-et settlement in adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+        assert_funnel_identities "$out"
+    done
+    for bad in "-st:2025-13-01 00:00:00" "-et:2025-02-30" "-st:yesterday" "-et:25:00"; do
+        flag=${bad%%:*}; value=${bad#*:}
+        err="$TMP_DIR/time-window-forms-bad.stderr"
+        set +e
+        "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 "$flag" "$value" "$FIXTURES/tomcat-access-duration-spread.txt" > "$TMP_DIR/time-window-forms-bad.out" 2> "$err"
+        ec=$?
+        set -e
+        assert_equal "$flag '$value' exits 1" "$ec" 1 \
+            asserts "A $flag value in no accepted form, or naming a date or time that cannot exist, is a usage error" \
+            produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
+            contract "$FORMS_CONTRACT"
+        assert_line "$err" pattern "^.*Error: Invalid $flag timestamp '$value'\\. Accepted forms: YYYY-MM-DD, optionally followed by a space or T and HH:MM\\[:SS\\[\\.fraction\\]\\] \\(an absolute bound\\), or HH:MM\\[:SS\\[\\.fraction\\]\\] alone" \
+            asserts 'The usage error names the value and the accepted forms' \
+            produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
+            contract "$FORMS_CONTRACT"
+        assert_absent "$err" pattern 'Time/Piece|strptime| at .* line [0-9]+' \
+            asserts 'No Perl module text reaches the user' \
+            produced_by 'adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+        assert_absent "$TMP_DIR/time-window-forms-bad.out" pattern 'LINES READ' \
+            asserts 'Nothing is read: the bound is refused before the first file' \
+            produced_by 'adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+    done
 fi
 fi
 

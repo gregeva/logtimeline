@@ -23,6 +23,23 @@ merged into this issue.
   and `validate-verbose-content-shape.sh` pass. `single-day-access-log-standard`
   against `611-before`: `parse/read_files` 8.4 s both (+25 ms, +0.3%), total
   +0.3%, peak RSS −0.2%, one run each; the gate's `after` run is the measure.
+- Drop 3: the bound values and the index read-back (C6, C7, C9). `-st` and
+  `-et` are settled with the options by `iso_timestamp_parts()` (the date
+  forms, now either separator, without seconds, a date alone, a fraction of up
+  to nine digits after `.` or `,`) and a bare-time pattern; the lazy per-file
+  `calculate_start_end_filter_timestamps()` and `Time::Piece` go (the epoch it
+  anchored a bare time to was read by no comparison). Measured on the
+  434-line Tomcat fixture: every space form excludes what it did on the base
+  code (360, 360, 0, 270 for a full time, a bare time, a date alone and a
+  single-digit form); the `T` forms, 0 or 1 on the base code with Perl
+  warnings, now exclude 360. `2025-13-01 00:00:00`, `2025-02-30`, `yesterday`,
+  `25:00`, `12:60`, trailing text and a trailing `Z` exit 1 with the usage
+  error. `date_midnight()` is the one date resolver: the date cache, the
+  bound and index parser and the detection sample's probes call it.
+  Harnesses `validate-index-read-back.sh` (98), `validate-timestamp-precision.sh`
+  (94), `validate-filter-summary.sh` (146), `validate-format-detection.sh`
+  (458), `validate-doc-examples.sh` (51), `validate-udm-specs.sh` (250) and
+  `validate-help-content.sh` (96) pass.
 
 ## 1. The motivating consumer
 
@@ -161,10 +178,10 @@ Accepted forms (C7, C8):
 ### 5.2 Choices
 
 - **C1 — One date resolver on the date cache's miss.**
-  `timestamp_date_cache_add()` takes the date's year, month and day, calls
-  `timegm` under `eval`, caches and returns the midnight epoch, or returns
-  undef (caching nothing) when the date cannot exist or a component is
-  missing (an unknown month name). The emitted parse of every layout reads
+  `date_midnight()` takes the date's year, month and day and returns the
+  midnight epoch from `timegm` under `eval`, or undef when the date cannot
+  exist or a component is missing (an unknown month name);
+  `timestamp_date_cache_add()` calls it, caching nothing for such a date. The emitted parse of every layout reads
   `my $midnight = $timestamp_date_cache{…} // timestamp_date_cache_add(…)`
   and branches on `defined $midnight`. The cheap range test on the memo-miss
   branch goes: the resolver answers it. Cost: an `eval` once per distinct
@@ -257,12 +274,14 @@ fixture the detection harness already stages.
       @in_files;` in `adapt_to_command_line_options`), so no run reaches the
       pending decision. The hold of C3 is kept, as the existing pending branch
       of `format_probe_signal()` is, for the window's own design.
-- [ ] **AC6** `-st` and `-et` given as `YYYY-MM-DDTHH:MM:SS` and as
+- [x] **AC6** `-st` and `-et` given as `YYYY-MM-DDTHH:MM:SS` and as
       `YYYY-MM-DD HH:MM:SS` give the same `excluded_time_window` on the same
-      input, with a fraction and without.
-- [ ] **AC7** `-st` or `-et` given a value in no accepted form, or with an
+      input, with a fraction and without. *The `time-window-forms` scenario
+      of `validate-filter-summary.sh` beside its `time-window-absolute`.*
+- [x] **AC7** `-st` or `-et` given a value in no accepted form, or with an
       impossible date, exits non-zero before reading any file, with a usage
-      error naming the accepted forms; no Perl module text on stderr.
+      error naming the accepted forms; no Perl module text on stderr. *Same
+      scenario.*
 - [ ] **AC8** A CSV with quoted timestamps, one without seconds, ltl's own
       STATS CSV at each of `-tp m`, `s`, `ms`, and a CSV of 13-digit epoch
       milliseconds each place their rows at the instants an unquoted,
