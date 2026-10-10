@@ -4537,7 +4537,7 @@ sub format_probe_signal {
     my $group = $entry->[FR_GROUP];
     my $g = $ev->{groups}{$group};
     my $W = \%format_evidence_weights;
-    my $by_order = ($format_variant_groups{$group}{orders} // 0) > 1;
+    my $by_order = $g && $format_variant_groups{$group}{orders} > 1;
     my $switch_to;
     if ($kind eq 'impossible_date') {
         $st->{impossible_date}++;
