@@ -9,6 +9,10 @@ stored array) regresses peak memory when every row is given statistics on a log
 with non-integer durations (§ 4.4); the design of § 5 replaces it, locked by the
 architect on 2026-10-07 with the acceptance criteria of § 6.
 
+Reopened 2026-10-10, before release: the release benchmark found the message
+store doubled under `-so skewness` (§ 4.14). The fix is delivered on branch
+`680-statistics-duration-copies-2` against AC8 (§ 6).
+
 ## 1. The motivating consumer
 
 Peak memory of a grouped run. Under the raw data model, the statistics step
@@ -652,6 +656,122 @@ to find its own file. Labels now name the run's role (`lower-`, `upper-`,
 discard 82 passed, 0 failed; expose 62 passed, 0 failed; mask 27 passed,
 0 failed.
 
+### 4.14 The shape-moment pass enlarges the stored integers under `-so` on a shape statistic (found at release benchmarking)
+
+**Found** by the release benchmark (`all` tier, `v0.19.0-first` against
+`v0.19.0-second`, `tests/baseline/results/comparison-v0.19.0-first-vs-v0.19.0-second.md`):
+only the `-so skewness` scenarios grew, on three file selections, the growth in
+the message store.
+
+| Case | `log_messages` first → second | `rss_peak` first → second |
+|---|---|---|
+| single-day access log, `-so skewness` | 26.2 → 49.4 MB | 106.9 → 124.3 MB (+16.3 %) |
+| multi-day custom logs, `-so skewness` | | 175.5 → 191.8 MB (+9.3 %) |
+| month, many servers, `-so skewness` | 6,904.7 → 7,786.7 MB | 9,315.3 → 10,156.0 MB (+9.0 %) |
+
+**Attributed** to the merge of this issue: the single-day access log with the
+benchmark's options (`-bs 60 --terminal-width 200 -V benchmark-data -mem`), one
+run each, on the merge's first parent `949df07`, the merge `2507671` and
+`release/0.19.0` at `890ccac`:
+
+| Commit | `log_messages`, no `-so` / `-so p99` / `-so skewness` | `rss_peak`, same |
+|---|---|---|
+| `949df07` (before the merge) | 26.2 / 26.2 / 26.4 MB | 101.0 / 100.2 / 105.9 MB |
+| `2507671` (the merge) | 26.4 / 26.4 / **49.5 MB** | 99.2 / 98.6 / **126.0 MB** |
+| `890ccac` | 26.2 / 26.4 / **49.5 MB** | 100.7 / 98.5 / **125.7 MB** |
+
+**Mechanism.** Under `-so` on a statistic of the shape group (skewness,
+kurtosis, bimodality coefficient), the ranking step passes each row's stored
+array to `calculate_statistics`, which sorts it in place (D3) and then runs the
+shape-moment pass over the sorted values:
+
+```perl
+for my $x (@sorted) {
+    my $d = $x - $mu;
+```
+
+`$mu` is a non-integer, so the subtraction reads each value as a floating-point
+number, and Perl caches that number on the value: an integer becomes an
+integer-and-float scalar, about twice its size, kept in the store to exit. The
+in-place sort compares integers as integers and enlarges nothing, which is why
+`-so p99` is flat. Before the merge, the pass ran over a sorted copy, so the
+enlarged scalars were the copy's and were freed with it. In isolation, on
+100,000 integers: 3.05 MB stored, 3.05 MB after the in-place sort, 6.10 MB
+after the pass. This breaks AC2 (the message store does not grow), which § 6
+did not measure under a shape statistic; D3's accepted enlargement covers the
+sort of non-integer values, not this.
+
+**Fix.** The pass reads each value through an integer addition,
+`(0 + $x) - $mu`: integer plus integer stays an integer and caches nothing on
+the stored value, and a non-integer value is already a float. The value
+subtracted is the same number, so every moment is unchanged and D9's sorted
+order is kept. In isolation, on 3,000,000 integers, one run each: the pass
+0.298 s and the array 183.1 MB afterwards, against 0.288 s and 91.6 MB.
+
+**Why the original gate missed it.** AC2 states an invariant over the message
+store, but it was validated on a chosen list of scenarios, with `-so p99`
+standing for every statistic `-so` accepts. The shape statistics take another
+branch over the same array, and the before/after benchmark ran only
+`single-day-access-log-standard`, although `single-day-access-log-sort-skewness`
+reaches that branch and would have shown +16 % peak memory. The validation of
+AC8 enumerates the paths from the code (§ 6).
+
+### 4.15 Completion gate of the reopened fix (`fe3a3af`, version `0.19.0`)
+
+**AC8, the message store on every path** (single-day access log, benchmark
+options, `log_messages` high-water mark in MB; `949df07` before the original
+merge, `890ccac` the release branch, the fix; one run each):
+
+| Scenario | no `-o`: before merge / release / fix | `-o`: before merge / release / fix |
+|---|---|---|
+| no `-so` | 26.2 / 26.4 / 26.2 | 27.2 / 27.2 / 27.2 |
+| `-so p99` | 26.2 / 26.4 / 26.2 | 27.2 / 27.2 / 27.2 |
+| `-so mean` | 26.4 / 26.4 / 26.4 | 27.2 / 27.2 / 27.2 |
+| `-so p25` | 26.2 / 26.2 / 26.4 | 27.2 / 28.0 / 27.2 |
+| `-so skewness` | 26.2 / **49.5** / 26.2 | 27.2 / **50.3** / 27.2 |
+| `-so kurtosis` | 26.2 / **49.5** / 26.4 | 27.2 / **50.3** / 27.2 |
+| `-so bimodality_coef` | 26.2 / **49.4** / 26.2 | 27.2 / **50.3** / 27.2 |
+| `-g -m uuid`, no `-so` | 26.5 / 26.5 / 26.7 | 27.5 / 27.9 / 27.9 |
+| `-g -m uuid -so p99` | 26.7 / 26.7 / 26.5 | 27.5 / 27.5 / 27.5 |
+| `-g -m uuid -so mean` | 26.7 / 26.7 / 26.7 | 27.9 / 27.9 / 27.5 |
+| `-g -m uuid -so p25` | 26.7 / 26.7 / 26.7 | 27.9 / 27.5 / 27.9 |
+| `-g -m uuid -so skewness` | 26.7 / **47.8** / 26.7 | 27.5 / **48.1** / 27.9 |
+| `-g -m uuid -so kurtosis` | 26.7 / **47.9** / 26.7 | 27.5 / **48.1** / 27.9 |
+| `-g -m uuid -so bimodality_coef` | 26.7 / **47.8** / 26.7 | 27.9 / **48.1** / 27.9 |
+
+The six cells where the fix reads 0.2 to 0.4 MB above the pre-merge commit were
+run three more times on both: each takes the same two values on both commits
+(26.21 or 26.40; 27.51 or 27.89), and the fix's maximum never exceeds the
+pre-merge commit's. That is the granularity of the high-water mark, not growth.
+Under `-n 25 -o`, the rendered table, STATS CSV and MESSAGES CSV of all 14
+scenarios are byte-identical to `890ccac`; no stderr output on any run.
+
+**Before/after benchmark**, three runs each. Standard and sort-skewness:
+`890ccac` then the fix, main checkout. Sort-p99 and export: interleaved, two
+worktrees side by side. Median [range]:
+
+| Test | Metric | `890ccac` | fix | change |
+|---|---|---|---|---|
+| standard | `total` | 8.50 s [8.44–8.52] | 8.45 s [8.41–8.49] | −0.6 % |
+| standard | `rss_peak` | 99.2 MB [98.5–99.4] | 99.0 MB [98.6–99.9] | −0.2 % |
+| sort-skewness | `total` | 8.64 s [8.56–8.67] | 8.64 s [8.60–8.66] | 0.0 % |
+| sort-skewness | `population_walk` | 0.17 s | 0.17 s | −1.7 % |
+| sort-skewness | `log_messages` | 49.35 MB [49.35–49.54] | 26.21 MB [26.21–26.21] | −46.9 % |
+| sort-skewness | `rss_peak` | 125.2 MB [125.1–126.0] | 98.1 MB [97.8–98.2] | −21.6 % |
+| sort-p99 | `total` | 8.52 s [8.44–8.54] | 8.50 s [8.46–8.52] | −0.3 % |
+| sort-p99 | `rss_peak` | 98.1 MB [97.8–98.9] | 99.0 MB [97.5–99.2] | +0.9 % |
+| export | `total` | 10.00 s [10.00–10.06] | 9.99 s [9.99–10.03] | −0.1 % |
+| export | `bucket_stats` | 0.168 s [0.166–0.168] | 0.169 s [0.168–0.170] | +0.6 % |
+| export | `rss_peak` | 71.2 MB [71.2–71.5] | 68.5 MB [68.4–68.8] | −3.8 % |
+
+One metric reads worse by more than 1 %: sort-p99 `population_walk`, 50 ms on
+`890ccac` against 51 ms (50–52) on the fix, at the timer's 1 ms resolution, on
+a run that does not execute the changed line (no shape statistic is demanded
+without `-o` or a shape `-so`).
+
+**Harness suite** (08:19 to 08:36, 2026-10-10, on `fe3a3af`): all 49
+harnesses exit 0, the statistics oracle included.
+
 ## 5. Design (one pattern for every raw store, locked by the architect, 2026-10-07)
 
 ### 5.0 Scope as locked after the release costs were measured (2026-10-07)
@@ -774,6 +894,27 @@ each with `-bs 1440 -m uuid --terminal-width 200 -V benchmark-data -mem`.
 - [ ] **AC6 — No runtime warnings** (assertable): no ` at <file> line <N>` on
   stderr for any run above.
 - [ ] **AC7 — Completion gate** (assertable): the full harness suite passes.
+- [x] **AC8 — The message store does not grow on any path that reads it**
+  (assertable, reopened for § 4.14): AC2 restated over every path, enumerated
+  from the code below. On the single-day access log with the benchmark's
+  options, each scenario records a `log_messages` high-water mark no higher
+  than the merge's first parent `949df07`; under `-n 25 -o` its rendered
+  table, STATS CSV and MESSAGES CSV are byte-identical to `release/0.19.0` at
+  `890ccac` (AC5's normalisation); the before/after benchmark on
+  `single-day-access-log-standard`, `single-day-access-log-sort-skewness`,
+  `single-day-access-log-sort-p99` and
+  `single-day-access-log-heatmap-histogram-export` shows no metric worse by
+  more than 1 % across three runs; AC6 and AC7 hold.
+
+  | Path over a row's stored array | Reads it as | Scenarios |
+  |---|---|---|
+  | Read: values appended | `0 + $duration`, an integer or a float as parsed | every run |
+  | Consolidation merge, cluster handed to its row | values pushed, array handed over | `-g -m uuid` with each `-so` below |
+  | Ranking step, `-so` on a statistic: sort in place, then the sort statistic's group | the store's own array | `-so` one of each group: `p99` (terminal), `mean` (CSV body), `p25` (extended percentiles), `skewness`, `kurtosis`, `bimodality_coef` (shape) |
+  | Displayed row, ranked by the step above: no copy, statistics of every demanded group, shape when a CSV is written | the store's own array | each `-so` above, with and without `-o` |
+  | Displayed row, no `-so`: a copy | a copy | no `-so`, with and without `-o` |
+  | Displayed row under `-mem release`: taken out of the store | owned, freed | out of scope: the store does not keep it |
+  | `-mdm bin` | no array | out of scope |
 
 No new harness: the outputs are asserted by the statistics oracle and the
 existing CSV harnesses, and memory by the measurements above, as
@@ -786,3 +927,7 @@ existing CSV harnesses, and memory by the measurements above, as
   side; the in-place alternative of § 5 measured on the same four.
 - `month-single-server-access-logs-top25-consolidate` before and after, through
   `run-benchmark.sh`.
+- Reopened (AC8): `680-before` and `680-skewness-before` on
+  `single-day-access-log-standard` and `single-day-access-log-sort-skewness`,
+  three runs each, captured on `890ccac` from the main checkout; the `after`
+  runs from the main checkout.

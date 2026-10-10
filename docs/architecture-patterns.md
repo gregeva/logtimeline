@@ -540,6 +540,9 @@ alternative was measured to cost something:
   to a larger type (24 to 56 bytes) and never converts it back, so sorting an
   array that stays in its store, in place or into a copy, leaves the store
   larger.
+- Arithmetic with a non-integer converts an integer scalar it reads the same
+  way, so a pass over values that stay in their store reads each through an
+  integer addition (`0 + $x`), which caches nothing on the stored scalar.
 - After an in-place sort, neighbouring elements point to scalars in the order
   the read allocated them, so a pass in sorted order is up to five times slower
   than over a freshly allocated sorted array.
@@ -554,6 +557,7 @@ alternative was measured to cost something:
 - `calculate_statistics` :: `$values = [ sort { $a <=> $b } @$values ];` (a time bucket's array, into a fresh array)
 - `calculate_statistics` :: `$values = [ @$values ] if $bucket_data->{durations_in_store};` (an array that stays in its store: the copy is sorted)
 - `calculate_statistics` :: `sort_numeric_in_place($values);`
+- `calculate_statistics` :: `my $d = (0 + $x) - $mu;` (the shape-moment pass, over the store's own array under `-so`)
 - `calculate_all_statistics` :: `my $bucket_durations = delete $log_analysis{$bucket}{durations};` (a time bucket's array taken out of the store)
 - `calculate_all_statistics` :: `$aggregated_data->{durations_into_copy} = 1;` (the time bucket's form)
 - `calculate_all_statistics` :: `? delete $log_messages{$category}{$log_key}{durations}` (a displayed row's array taken out of the store, under `-mem release`)

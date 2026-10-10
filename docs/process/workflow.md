@@ -156,6 +156,13 @@ row in this table.
     tests/baseline/results/{issue}-before.tsv tests/baseline/results/{issue}-after.tsv
 ```
 
+`single-day-access-log-standard` is the floor, not the scope. Every benchmark
+test whose options reach the changed code (named `<selection>-<scenario>`
+from the `SCENARIOS` list in `run-benchmark.sh`; a test name runs alone) is
+captured before and after alongside it: a
+change to the statistics behind `-so` runs the `sort-*` tests, one to the
+heatmap the `heatmap*` tests.
+
 The only valid comparison is before-vs-after, same machine, same case, same
 session. A released baseline TSV (`vX.Y.Z.tsv`) was captured on another
 machine for the release stage and proves nothing about a change. Any metric

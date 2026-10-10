@@ -153,6 +153,12 @@ about anything else, these still hold.
 - [ ] Acceptance criteria are derived from the requirements and agreed in the
       feature doc before code (`docs/test-driven-development.md`). An "unknown"
       verification method is prototyping scope, proposed with its cost.
+- [ ] A criterion is only as strong as its validation. One that states an
+      invariant ("the store does not grow", "every output unchanged") is
+      validated on every path that reads or writes what it names, enumerated
+      from the code when the criterion is written and listed beside it; one
+      option never stands for its family. The before/after benchmark adds each
+      benchmark test that reaches the changed code to the standard case.
 - [ ] Hot-path work always gets a before/after benchmark. A prototype
       (`prototype/README.md`) is for a new or changed data model, a new code
       path or capability in the hot path, high frequency × cost, or an unknown
