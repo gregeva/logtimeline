@@ -80,6 +80,22 @@ elaborate suite for something a person would spot immediately.
 The judgement is the architect's, not an implementation detail to be settled
 alone. Bring the options and the cost.
 
+## Testing while developing
+
+The harness scenarios built from the acceptance criteria are not how a change
+is proven while it is written. They assert the criteria once the work is done
+and catch regressions afterwards; they are not a complete set of every case a
+developer must check, and a green harness says nothing about the inputs it
+never runs.
+
+While writing a change, the developer tests it the whole way: runs the tool on
+inputs chosen by critical thinking about what the change touches (the case it
+fixes, the cases around it, edge inputs, the inputs it could break), runs the
+code before the change on the same inputs, and reads the difference. A change
+is committed when those runs show it does what was intended, and not before.
+A case found this way that the acceptance criteria should hold becomes a
+scenario; the rest has done its job.
+
 ## Implementation is done when the criteria pass
 
 That is what "done" means. It is not "the code works as far as I can tell", and

@@ -119,7 +119,14 @@ Phase 1 begins only on explicit instruction. Filing a requirement
    decision stands until the architect changes it; a problem discovered
    mid-implementation is brought with candidate designs, never resolved by
    substitution. Changes agreed as "one at a time, each measured" are delivered
-   one at a time.
+   one at a time. Every change is tested as it is written: `ltl` is run on
+   inputs chosen to exercise it (the case it fixes, the cases around it, the
+   inputs it could break), beside the code before the change on the same
+   inputs, and the difference is read from the captured `-V` output. Once it
+   behaves as intended, it is committed and pushed on the issue branch. The
+   harnesses do not replace this: they assert the acceptance criteria and
+   catch regressions later (`docs/test-driven-development.md` § Testing while
+   developing).
 5. **Testing.** Sample files per `docs/test-logs.md`. A visual surface is
    verified by looking at the rendered output on real data, never by grepping
    escape sequences.

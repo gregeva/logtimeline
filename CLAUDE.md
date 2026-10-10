@@ -279,6 +279,17 @@ about anything else, these still hold.
       same commit, and execute each affected harness to see it assert.
 - [ ] A visual surface is verified by looking at rendered output on real data.
 
+### After each change, before committing it
+
+- [ ] Run `ltl` on inputs chosen by critical thinking to exercise the change:
+      the case it fixes, the cases around it, the inputs it could break. Run
+      the code before the change (`git show <base>:ltl`) on the same inputs,
+      capture both with `-V`, and read the difference. Harnesses guard against
+      regressions later; they are not how a change is proven while it is written.
+- [ ] A drop, a fix or a decision's change is committed and pushed on the
+      issue branch as soon as these runs show it behaves as intended. It is
+      never held back for the completion gate, and the gate is never the test.
+
 ### Before deviating from an instruction, a locked decision, or a written process
 
 - [ ] Did the architect name the mechanism? Then it is the decision; use it or ask.
