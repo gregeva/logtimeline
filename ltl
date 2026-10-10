@@ -823,8 +823,11 @@ my @format_legend_order;         # legend numbers -> format names
 # Evidence weights (D46/I1): one table, fixed per evidence class, the same
 # for every format. Every signal is additive and independent. The group
 # default's standing credit equals the extension weight, so an extension
-# alone ties and ties stay on the default; an impossible date component
-# or a filename-date mismatch eliminates a member outright.
+# alone ties and ties stay on the default. A date valid only in one
+# day/month order is a line of evidence for the members reading that order,
+# never decisive on its own (D44, D70); during the read such lines fill a
+# fading bucket that switches the order at a threshold (D72). A
+# filename-date mismatch eliminates a member outright.
 my %format_evidence_weights = (
     shape              => 1.0,   # the member's pattern matched sampled lines (necessary)
     stem               => 3.0,   # filename stem matched the member's declared stem
@@ -835,6 +838,9 @@ my %format_evidence_weights = (
     field_populated    => 0.5,   # per identity field (user, session, thread) the member declares and the sample populates (#444 D8)
     mono_per_violation => 0.5,   # monotonicity violation per distinct timestamp (comparative)
     mono_cap           => 1.0,   # ceiling on the total monotonicity penalty
+    order_line         => 0.25,  # per line whose date is valid only in the member's day/month order
+    order_switch_lines => 5,     # bucket of lines valid only in the other order that switches the read (D72)
+    order_fade_lines   => 1000,  # lines read over which that bucket halves (D72)
 );
 # Scan telemetry for -V format-detection / scan. The no-match scan is the
 # structural worst case (every entry attempted, nothing matches), so its
@@ -4317,18 +4323,20 @@ sub format_filename_decompose {
 # file position — the D53 sample and the fallback window are
 # interchangeable here). Every ISO-dated line is read under BOTH date
 # layouts: (a) an impossible component (month > 12, or a date timegm()
-# rejects) counts against that layout; (b) a timestamp earlier than the
-# previous one under that layout counts a monotonicity violation; (c) the
-# date the filename declares is compared with the first parsed timestamp.
+# rejects) counts against that layout, and a line valid in one layout only
+# counts for that layout (only); (b) a timestamp earlier than the previous
+# one under that layout counts a monotonicity violation; (c) the date the
+# filename declares is compared with the first parsed timestamp.
 # Silence proves nothing: a file whose dates all sit on or before the 12th
 # is valid under both layouts, and that is recorded as such.
-# Returns { mmdd => { n, oor, viol, fdate }, ddmm => { ... } }.
+# Returns { mmdd => { n, oor, only, viol, fdate }, ddmm => { ... } }.
 sub format_sample_probes {
     my ($lines, $filename_date) = @_;
-    my %res = map { $_ => { n => 0, oor => 0, viol => 0, fdate => undef } } qw(mmdd ddmm);
+    my %res = map { $_ => { n => 0, oor => 0, only => 0, viol => 0, fdate => undef } } qw(mmdd ddmm);
     my (%prev, %first);
     for my $line (@$lines) {
         my ($y, $a, $b, $h, $mi, $sec) = $line =~ /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/ or next;
+        my @valid;
         for my $lay ( [ mmdd => $a, $b ], [ ddmm => $b, $a ] ) {
             my ($k, $mo, $dy) = @$lay;
             my $r = $res{$k};
@@ -4336,11 +4344,13 @@ sub format_sample_probes {
             if ($mo > 12 || $dy > 31) { $r->{oor}++; next }
             my $midnight = date_midnight($y, $mo, $dy);
             if (!defined $midnight) { $r->{oor}++; next }
+            push @valid, $k;
             my $epoch = $midnight + $h * 3600 + $mi * 60 + $sec;
             $r->{viol}++ if defined $prev{$k} && $epoch < $prev{$k};
             $prev{$k} = $epoch;
             $first{$k} //= $epoch;
         }
+        $res{ $valid[0] }{only}++ if @valid == 1;
     }
     if (defined $filename_date && $filename_date =~ /^(\d{4})-?(\d{2})-?(\d{2})$/) {
         my ($fy, $fm, $fd) = ($1, $2, $3);
@@ -4389,7 +4399,8 @@ sub format_filename_evidence {
 # components, the content probes — and select the best live member per
 # group. Ties stay on the default. Confidence is the selected score over
 # the sum of the live members' scores; basis records what decided:
-#   evidence — a non-default signal (stem, filename date, an elimination)
+#   evidence — a non-default signal (stem, filename date, lines dated in
+#              one day/month order only, an elimination)
 #   default  — the standing credit or a tie held the default
 # Returns { group => { selected, basis, confidence, scores, why, live } }
 # plus the filename record and the probe results under 'filename'/'probes'.
@@ -4454,9 +4465,9 @@ sub select_format_variants {
             if (my $lay = format_probe_layout($m)) {
                 my $pr = $probes->{$lay};
                 if ($pr->{n}) {
-                    if ($pr->{oor}) { $eliminated = 1; push @why, "probe-a:oor=$pr->{oor}" }
-                    elsif (($pr->{fdate} // '') eq 'mismatch') { $eliminated = 1; push @why, 'probe-c:mismatch' }
+                    if (($pr->{fdate} // '') eq 'mismatch') { $eliminated = 1; push @why, 'probe-c:mismatch' }
                     else {
+                        if ($pr->{only}) { $sc += $pr->{only} * $W->{order_line}; push @why, "order=$pr->{only}" }
                         if (($pr->{fdate} // '') eq 'match') { $sc += $W->{filename_date}; push @why, 'fdate' }
                         my $pen = $pr->{viol} * $W->{mono_per_violation};
                         $pen = $W->{mono_cap} if $pen > $W->{mono_cap};
@@ -4468,32 +4479,47 @@ sub select_format_variants {
             $live{$name}  = 1 unless $eliminated;
             $why{$name}   = join ',', @why;
         }
-        my $default = $format_variant_groups{$g}{default};
-        my @live = grep { $live{$_} } map { $_->[FR_NAME] } @members;
-        my ($sel, $basis, $conf);
-        if (!@live) {
-            ($sel, $basis, $conf) = ($default, 'default', 0);
+        my $r = { scores => \%score, why => \%why, live => \%live, fields => \%fields, flips => 0 };
+        my $sel = format_variant_rank($r, $g);
+        if (!defined $sel) {
+            @$r{qw(selected basis confidence)} = ($format_variant_groups{$g}{default}, 'default', 0);
         } else {
-            my @rank = sort { $score{$b} <=> $score{$a} || ($b eq $default) <=> ($a eq $default) } @live;
-            $sel = $rank[0];
-            my $tot = 0; $tot += $score{$_} for @live;
-            $conf = $tot > 0 ? $score{$sel} / $tot : 0;
-            my $decided = ($why{$sel} =~ /\b(?:stem|fdate)\b/) || (grep { !$live{$_} && $why{$_} ne 'no-shape' } map { $_->[FR_NAME] } @members);
-            $basis = $decided ? 'evidence' : 'default';
+            my $decided = ($why{$sel} =~ /\b(?:stem|fdate|order)\b/) || (grep { !$live{$_} && $why{$_} ne 'no-shape' } map { $_->[FR_NAME] } @members);
+            @$r{qw(selected basis)} = ($sel, $decided ? 'evidence' : 'default');
         }
-        $out{groups}{$g} = { selected => $sel, basis => $basis, confidence => $conf,
-                             scores => \%score, why => \%why, live => \%live, fields => \%fields, flips => 0 };
+        $out{groups}{$g} = $r;
     }
     return \%out;
 }
 
+# Rank a variant group's live members on their scores (D44/I1): the best
+# live member, ties staying on the group default; the record's confidence is
+# set to the best score over the sum of the live members' scores. Returns
+# undef when no member is live.
+sub format_variant_rank {
+    my ($r, $group) = @_;
+    my $default = $format_variant_groups{$group}{default};
+    my @live = grep { $r->{live}{$_} } @{ $format_variant_groups{$group}{members} };
+    return undef unless @live;
+    my @rank = sort { $r->{scores}{$b} <=> $r->{scores}{$a} || ($b eq $default) <=> ($a eq $default) } @live;
+    my $tot = 0; $tot += $r->{scores}{$_} for @live;
+    $r->{confidence} = $tot > 0 ? $r->{scores}{ $rank[0] } / $tot : 0;
+    return $rank[0];
+}
+
 # Steady-loop probe signal (N5): called from the generated block's
 # timestamp cache-miss branch — once per distinct timestamp, only on the
-# rare events — so it is a cold path. An impossible date component under
-# the entry's layout eliminates the entry from its variant group; a
-# monotonicity violation applies the graded penalty. The group then
-# re-selects; when the best live member changes, it takes the slot (the
-# caller re-scans the line under the new sub) and the flip is counted.
+# rare events — so it is a cold path. In a group whose members read
+# different day/month orders, a date impossible under the entry's layout
+# and valid under another live member's adds one line to that member's
+# bucket, faded first for the lines read since it last moved; at the
+# threshold the member takes the slot, the bucket's lines are credited to
+# its score and every bucket of the group empties (D72). Below it the line
+# stays left out (D71). A date impossible in every layout is no evidence
+# (#611). A monotonicity violation applies the graded penalty; in other
+# groups the group then re-selects, and when the best live member changes it
+# takes the slot. Either way the caller re-scans the line under the new sub
+# and the flip is counted.
 # Returns 1 when the occupant changed, -1 for an impossible date while the
 # file's first decision is pending (the caller holds the line for the
 # replay to judge), 0 otherwise.
@@ -4508,14 +4534,32 @@ sub format_probe_signal {
     my $ev = $format_detection_evidence{$format_current_file} //= { filename => undef, probes => {}, groups => {} };
     my $st = $ev->{steady} //= {};
     my $name = $entry->[FR_NAME];
-    my $g = $ev->{groups}{ $entry->[FR_GROUP] };
+    my $group = $entry->[FR_GROUP];
+    my $g = $ev->{groups}{$group};
     my $W = \%format_evidence_weights;
+    my $by_order = $g && $format_variant_groups{$group}{orders} > 1;
+    my $switch_to;
     if ($kind eq 'impossible_date') {
         $st->{impossible_date}++;
-        if ($g && $g->{live}{$name}) {
-            $g->{live}{$name} = 0;
-            $g->{scores}{$name} = 0;
-            $g->{why}{$name} .= ',steady-a';
+        if ($g && $by_order && (my ($y, $a, $b) = $value =~ /^(\d{4})-(\d{2})-(\d{2})/)) {
+            # $. is the file's line count: the read loop is the only reader
+            # while the generated sub runs.
+            my $at = $.;
+            for my $other (@{ $format_variant_groups{$group}{members} }) {
+                next if $other eq $name || !$g->{live}{$other};
+                my $lay = format_probe_layout( $format_registry_entry{$other} ) or next;
+                my ($mo, $dy) = $lay eq 'ddmm' ? ($b, $a) : ($a, $b);
+                next unless defined date_midnight($y, $mo, $dy);
+                my $bk = $g->{bucket}{$other} //= { lines => 0, at => $at };
+                $bk->{lines} *= 0.5 ** (($at - $bk->{at}) / $W->{order_fade_lines}) if $at > $bk->{at};
+                $bk->{at} = $at;
+                $bk->{lines}++;
+                next unless $bk->{lines} >= $W->{order_switch_lines};
+                $g->{scores}{$other} += $bk->{lines} * $W->{order_line};
+                $g->{why}{$other} .= ',steady-a' unless $g->{why}{$other} =~ /\bsteady-a\b/;
+                $switch_to = $other;
+                last;
+            }
         }
     } else {
         $st->{monotonic_violations}++;
@@ -4532,19 +4576,24 @@ sub format_probe_signal {
     }
     my $flipped = 0;
     if ($g) {
-        my $default = $format_variant_groups{ $entry->[FR_GROUP] }{default};
-        my @live = grep { $g->{live}{$_} } @{ $format_variant_groups{ $entry->[FR_GROUP] }{members} };
-        if (@live) {
-            my @rank = sort { $g->{scores}{$b} <=> $g->{scores}{$a} || ($b eq $default) <=> ($a eq $default) } @live;
-            my $tot = 0; $tot += $g->{scores}{$_} for @live;
-            $g->{confidence} = $tot > 0 ? $g->{scores}{ $rank[0] } / $tot : 0;
-            if ($rank[0] ne $g->{selected}) {
-                $g->{selected} = $rank[0];
-                $g->{basis}    = 'evidence';
-                $g->{flips}++;
-                format_registry_set_occupant( $format_registry_entry{ $rank[0] } );
-                $flipped = 1;
-            }
+        my $best;
+        if ($by_order) {
+            # Only the bucket moves the order; the confidence follows the
+            # occupant's share of the scores.
+            $best = $switch_to;
+            my $sel = $best // $g->{selected};
+            my $tot = 0; $tot += $g->{scores}{$_} for grep { $g->{live}{$_} } @{ $format_variant_groups{$group}{members} };
+            $g->{confidence} = $tot > 0 ? $g->{scores}{$sel} / $tot : 0;
+        } else {
+            $best = format_variant_rank($g, $group);
+        }
+        if (defined $best && $best ne $g->{selected}) {
+            $g->{selected} = $best;
+            $g->{basis}    = 'evidence';
+            $g->{flips}++;
+            delete $g->{bucket};
+            format_registry_set_occupant( $format_registry_entry{$best} );
+            $flipped = 1;
         }
     }
     # While the file's first decision is pending (fallback-window prefill,
@@ -5274,9 +5323,11 @@ substr($timestamp_str, 19) = '';};
     my $prev_src = defined $spec->{variant_group} ? "        my \$prev = \$format_last_ts_epoch;\n" : '';
     # A date that cannot exist (the timestamp acceptance pattern): under an
     # ISO layout, a component out of range (month > 12, day > 31) is first
-    # the layout signal (D52 (a)), and a flip re-scans the line. Otherwise
-    # the line is not matched: nothing is recorded, the memo does not move,
-    # and the line is counted for the run's note. While the file's first
+    # a line for the bucket of a sibling reading the other day/month order
+    # (D72), and a switch re-scans the line. Otherwise the line is not
+    # matched, whether or not the other order reads it (D71): nothing is
+    # recorded, the memo does not move, and the line is counted for the
+    # run's note. While the file's first
     # decision is pending (the detection-window prefill), a variant-group
     # member holds the line as matched, so the replay under the decided
     # occupant judges it.
@@ -6028,7 +6079,11 @@ sub build_format_registry {
     }
     for my $g (grep { @{ $group_members{$_} } > 1 } keys %group_members) {
         my ($slot) = grep { $format_registry[$_][FR_GROUP] eq $g } 0 .. $#format_registry;
-        $format_variant_groups{$g} = { default => $group_default{$g}, members => $group_members{$g}, slot => $slot };
+        # orders: the distinct day/month orders the members read; a group
+        # with more than one counts its lines dated in one order only.
+        my %orders = map { (format_probe_layout( $format_registry_entry{$_} ) // '-') => 1 } @{ $group_members{$g} };
+        $format_variant_groups{$g} = { default => $group_default{$g}, members => $group_members{$g}, slot => $slot,
+                                       orders => scalar keys %orders };
     }
     @format_scan_order = @format_registry;
     %format_registry_spec      = map { $_->{name} => $_ } @specs;

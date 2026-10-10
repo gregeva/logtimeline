@@ -273,6 +273,30 @@ assert_variant_selection() {
         contract 'features/log-format-registry.md section Drop 1.5 I1 (evidence weights)'
 }
 
+# The selected member outscores its sibling on the candidates line, and the
+# sibling scores above zero: a date valid in one day/month order only is
+# weighed, never eliminating (I1 as amended 2026-10-10).
+assert_member_outscores() {
+    local out="$1" selected="$2" other="$3"
+    assert_command \
+        command     "perl -ne 'if (/^  candidates: (.*)/) { %s = map { split /=/ } split /,/, \$1; \$f = 1 } END { exit !(\$f && \$s{$selected} > \$s{$other} && \$s{$other} > 0) }' '$out'" \
+        label       "candidates: $selected outscores $other, which scores above zero" \
+        asserts     "The sample weighs dates valid in one day/month order only: $selected scores higher and $other stays live with a score above zero" \
+        produced_by 'select_format_variants() in ltl (order_line weight per sampled line)' \
+        contract    'features/log-format-registry.md section "#704: the day/month order accumulates evidence", acceptance criterion 5'
+}
+
+# Write a Connection Server log from runs of lines: <date>@<hour>x<count>,
+# one line per second from the hour, so every line carries a new timestamp
+# string and reaches the timestamp memo-miss branch once. Staged as app.log:
+# no name evidence, content alone decides.
+generate_connection_server_runs() {
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    perl -e 'for (@ARGV) { my ($d, $h, $n) = /^(\S+)\@(\d+)x(\d+)$/ or die "bad run $_\n"; printf "%s %02d:%02d:%02d.000 [main] INFO  c.e.Foo - message\n", $d, $h + int($_ / 3600), int($_ / 60) % 60, $_ % 60 for 0 .. $n - 1 }' "$@" > "$dir/app.log"
+    echo "$dir/app.log"
+}
+
 # Helper: stage the first 300 lines of a corpus file under $TMP_DIR. The
 # corpus scenarios assert only which entry bound (slug + match_type), and
 # detection samples the file rather than scanning it, so a 300-line head
@@ -2014,15 +2038,12 @@ scenario_variant_connection_server() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" connection_server_standard mt10 evidence '1\.00'
+    assert_variant_selection "$out" connection_server_standard mt10 evidence '0\.93'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
         asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^  candidates: mt10=[0-9.]+,mt10ir=0\.00$' \
-        asserts 'The Integration Runtime member is eliminated: day tokens > 12 are impossible under yyyy-dd-MM (D52 probe a)' \
-        produced_by 'format_sample_probes() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    assert_member_outscores "$out" mt10 mt10ir
 }
 
 # Neither member of the connection_server group reads a duration from, or
@@ -2032,16 +2053,16 @@ scenario_variant_connection_server() {
 scenario_milliseconds_not_read() {
     current_scenario="milliseconds-not-read"
     echo "[$current_scenario]"
-    local log out member slug fixture staged
+    local log out member slug fixture staged confidence
     for member in mt10ir mt10; do
         if [[ "$member" == mt10ir ]]; then
-            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt
+            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt; confidence='0\.58'
         else
-            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt
+            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt; confidence='0\.75'
         fi
         log=$(stage_fixture "$fixture" "$staged") || return
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
-        assert_variant_selection "$out" "$slug" "$member" evidence '1\.00'
+        assert_variant_selection "$out" "$slug" "$member" evidence "$confidence"
         assert_line "$out" pattern '^  matched_lines: 8$' \
             asserts "Every line of the $slug fixture is recognised" \
             produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
@@ -2058,7 +2079,8 @@ scenario_variant_integration_runtime_named() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.82'
+    assert_member_outscores "$out" mt10ir mt10
     assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
         asserts 'The IntegrationRuntime-<uuid>.log name matches the Integration Runtime stem' \
         produced_by 'format_filename_evidence() in ltl' \
@@ -2078,15 +2100,70 @@ scenario_variant_integration_runtime_unnamed() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt app.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.78'
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'app.log carries no name evidence for any entry' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^  candidates: mt10=0\.00,mt10ir=[0-9.]+$' \
-        asserts 'With no name evidence the sample alone decides: the default is eliminated by impossible months under yyyy-MM-dd (F6)' \
-        produced_by 'format_sample_probes() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 F6'
+    assert_member_outscores "$out" mt10ir mt10
+}
+
+# The day/month order a file is read in (acceptance criteria 1 to 4 of the
+# #704 record): each scenario generates Connection Server lines staged as
+# app.log. `-bs 1440 -oe`: detection assertions only. The files are about
+# 46 KB, so a line past the 150th and before the 420th sits outside every
+# sampled part.
+DATE_ORDER_CONTRACT='features/log-format-registry.md section "#704: the day/month order accumulates evidence", D72'
+assert_date_order() {
+    local out="$1" criterion="$2" selected="$3" flips="$4" impossible="$5" why="$6"
+    assert_line "$out" pattern "^  selected: $selected\$" \
+        asserts "$why: the file ends read by $selected" \
+        produced_by 'format_probe_signal() in ltl (the day/month bucket)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+    assert_line "$out" pattern "^  flips: $flips\$" \
+        asserts "$why: the order switches $flips time(s)" \
+        produced_by 'format_probe_signal() in ltl (the day/month bucket)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+    assert_line "$out" pattern "^  impossible_date_lines: $impossible\$" \
+        asserts "$why: the lines valid only in the order not being read, below the threshold, are left out and counted (D71)" \
+        produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+}
+
+scenario_date_order_one_sampled_line() {
+    current_scenario="date-order-one-sampled-line"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-13-05@9x1 2024-04-05@10x300)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 1 mt10 0 1 'One sampled line valid only day first, every other line valid either way'
+    assert_line "$out.stderr" pattern '^Note: 1 of 301 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout' \
+        asserts 'The left-out line is reported in the run'"'"'s impossible-date note, which names the other order'"'"'s -lf' \
+        produced_by 'the impossible-date note in ltl (timestamp_impossible_lines)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion 1; features/611-timestamp-acceptance.md C4"
+}
+
+scenario_date_order_one_read_line() {
+    current_scenario="date-order-one-read-line"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x220 2024-25-04@10x1 2024-04-05@11x620)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 2 mt10 0 1 'One unsampled line valid only day first'
+}
+
+scenario_date_order_enough_lines() {
+    current_scenario="date-order-enough-lines"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-05@11x600)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 3 mt10ir 1 '([1-9]|[1-3][0-9])' '40 consecutive unsampled lines valid only day first'
+}
+
+scenario_date_order_moves_back() {
+    current_scenario="date-order-moves-back"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-20@11x40 2024-04-05@12x600)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 4 mt10 2 '([1-9]|[1-7][0-9])' '40 unsampled lines valid only day first, then 40 valid only month first'
 }
 
 scenario_unit_tomcat_named() {
@@ -2856,6 +2933,10 @@ scenario_register tomcat9-ms \
                   milliseconds-not-read \
                   variant-integration-runtime-named \
                   variant-integration-runtime-unnamed \
+                  date-order-one-sampled-line \
+                  date-order-one-read-line \
+                  date-order-enough-lines \
+                  date-order-moves-back \
                   unit-tomcat-named \
                   unit-httpd-named \
                   variant-thingworx-rolled \
@@ -2930,6 +3011,10 @@ while read -r _scenario; do
         milliseconds-not-read                  ) scenario_milliseconds_not_read ;;
         variant-integration-runtime-named      ) scenario_variant_integration_runtime_named ;;
         variant-integration-runtime-unnamed    ) scenario_variant_integration_runtime_unnamed ;;
+        date-order-one-sampled-line            ) scenario_date_order_one_sampled_line ;;
+        date-order-one-read-line               ) scenario_date_order_one_read_line ;;
+        date-order-enough-lines                ) scenario_date_order_enough_lines ;;
+        date-order-moves-back                  ) scenario_date_order_moves_back ;;
         unit-tomcat-named                      ) scenario_unit_tomcat_named ;;
         unit-httpd-named                       ) scenario_unit_httpd_named ;;
         variant-thingworx-rolled               ) scenario_variant_thingworx_rolled ;;

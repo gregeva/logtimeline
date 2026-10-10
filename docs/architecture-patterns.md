@@ -469,8 +469,10 @@ user input. A shape not accepted is a line not matched, silently. A date that
 cannot exist has one outcome per place:
 
 1. **A line (scanned or CSV).** Under an ISO layout, a component out of range
-   (month > 12, day > 31) is first the layout signal of the date-layout
-   variant group, and a flip re-scans the line. Otherwise the line is not
+   (month > 12, day > 31) is first a line of evidence for the date-layout
+   variant group's other order, which switches the order once enough such
+   lines have gathered (`features/log-format-registry.md` D72), and a switch
+   re-scans the line. Otherwise the line is not
    matched: it contributes nothing and the timestamp memo does not move. It
    is counted per file and format, and the user is told once per run after
    the read, per format, never per line or per file.
