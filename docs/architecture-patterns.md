@@ -505,7 +505,7 @@ mitigation note).
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
 - `csv_validate_block` :: `if (!defined $ok) { $verdict = 'date'; last; }` (an impossible sampled row is the day-first retry's date failure)
-- `defer_timestamp_impossible_notes` :: `" line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n"` (once per run, per format)
+- `defer_timestamp_impossible_notes` :: `" lines of the $slug format were not matched because their date cannot exist under its date layout$hint\n"` (once per run, per format, the count out of the format's lines)
 
 **Owning record.** `features/611-timestamp-acceptance.md` § 5;
 `features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no

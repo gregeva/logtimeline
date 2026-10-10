@@ -153,6 +153,15 @@ Every call into the time library that can reach user input:
   should not be flipping the detection of the log format"; "Yes, lock it").*
   Supersedes C2 and the hold of C3. Amends `features/log-format-registry.md`
   D52 (a) and N5, whose in-read elimination was Claude's wording, never locked.
+- **D2 — The note gives the count out of the format's lines, and the pin for
+  the other date order.** `Note: <N> of <M> lines of the <format> format were
+  not matched because their date cannot exist under its date layout`, where M
+  is every line the format recognised (matched plus left out), followed for a
+  format with a day-first or month-first sibling by ` - if the day and month
+  are read the wrong way round, use -lf <sibling>`. The share tells a few
+  corrupt lines (2 of 400,000) from a file read in the wrong order (86 of
+  124). *Locked by the architect 2026-10-10 ("Yes, lock C").* Supersedes the
+  wording of C5.
 
 ## 5. Design
 

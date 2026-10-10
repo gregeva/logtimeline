@@ -423,15 +423,15 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         asserts 'The seven valid lines are included and none is placed at another line time: an impossible line contributes nothing' \
         produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
     assert_funnel_identities "$out"
-    assert_line "$out.stderr" pattern "^Note: 2 line\\(s\\) were not matched because their date cannot exist under the thingworx_standard format's date layout\$" \
+    assert_line "$out.stderr" pattern "^Note: 2 of 5 lines of the thingworx_standard format were not matched because their date cannot exist under its date layout\$" \
         asserts 'One note per format after the read, with the count and no file name, line number or value' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the access_common_duration_thread_session format's date layout\$" \
+    assert_line "$out.stderr" pattern "^Note: 1 of 3 lines of the access_common_duration_thread_session format were not matched because their date cannot exist under its date layout\$" \
         asserts 'The Apache common log date has the same outcome and note as the ISO arm' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the apache_mod_jk format's date layout\$" \
+    assert_line "$out.stderr" pattern "^Note: 1 of 3 lines of the apache_mod_jk format were not matched because their date cannot exist under its date layout\$" \
         asserts 'The asctime date has the same outcome and note as the ISO arm' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
@@ -448,7 +448,7 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         asserts 'The two valid rows are included' \
         produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
     assert_funnel_identities "$csv_out"
-    assert_line "$csv_out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the csv format's date layout\$" \
+    assert_line "$csv_out.stderr" pattern "^Note: 1 of 3 lines of the csv format were not matched because their date cannot exist under its date layout\$" \
         asserts 'A CSV row has the same outcome and note as a scanned line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"

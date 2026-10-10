@@ -4640,22 +4640,26 @@ sub timestamp_impossible_total {
 }
 
 # One note per format whose lines were not matched because their date cannot
-# exist, printed once per run after the read with the count, never per line
-# or per file. A format whose variant group has another member names the
-# other member's -lf, since a day and month read the wrong way round is how
-# such lines arise.
+# exist, printed once per run after the read, never per line or per file. It
+# gives the count out of every line the format recognised (those matched plus
+# those left out), so a few corrupt lines read apart from a file read in the
+# wrong day/month order; a format whose variant group has another member
+# names the other member's -lf, the remedy for the second.
 sub defer_timestamp_impossible_notes {
     my %by_slug;
     for my $file (keys %timestamp_impossible_lines) {
         $by_slug{$_} += $timestamp_impossible_lines{$file}{$_} for keys %{ $timestamp_impossible_lines{$file} };
     }
     for my $slug (sort keys %by_slug) {
-        my ($entry) = grep { $_->[FR_SLUG] eq $slug } values %format_registry_entry;
-        my $g = $entry && defined $entry->[FR_GROUP] ? $format_variant_groups{ $entry->[FR_GROUP] } : undef;
+        my @entries = grep { $_->[FR_SLUG] eq $slug } values %format_registry_entry;
+        my $recognised = $by_slug{$slug};
+        $recognised += $_->[FR_MATCHES] // 0 for @entries;
+        my $g = @entries && defined $entries[0][FR_GROUP] ? $format_variant_groups{ $entries[0][FR_GROUP] } : undef;
         my @others = $g ? grep { $_->[FR_SLUG] ne $slug } map { $format_registry_entry{$_} } @{ $g->{members} } : ();
         my $hint = @others ? ' - if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) : '';
         defer_notice( "Note: " . value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
-            . " line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n" );
+            . " of " . value_text( $recognised, kind => 'count', budget => 'notice' )
+            . " lines of the $slug format were not matched because their date cannot exist under its date layout$hint\n" );
     }
     return;
 }
