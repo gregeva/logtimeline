@@ -77,6 +77,25 @@ the current code as the baseline. Exit requires **measured justification**
 (medians with ranges) and lessons learned recorded *before* implementation
 begins.
 
+Code can be logically correct and still work against the structures it runs
+on. A prototype establishes how the structures the design relies on actually
+behave in Perl: how a scalar is stored, what an operation does to the value it
+reads, how memory is laid out, allocated and reused. It then checks that the
+design uses them the way its intent expects. Where the intent and the mechanism
+diverge, the cost lands silently in the back end, and nothing in the source
+shows it. The findings report records these mechanisms, observed with
+`Devel::Peek` and `Devel::Size` and by measuring each store's size and each
+pass's time, not only the process peak.
+
+Two examples, for illustration only:
+
+- Durations stored as integers for integer arithmetic were read by a
+  floating-point subtraction; Perl cached the float on each value, doubling
+  the stored array for the rest of the run.
+- Sorting in place to save a copy's memory scattered the values through
+  memory; later passes missed the CPU cache and ran slower. A sorted copy kept
+  them contiguous.
+
 Two rules that have cost time here when broken:
 
 - **The baseline arm reproduces the production call structure, not just its
