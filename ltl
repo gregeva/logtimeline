@@ -63,7 +63,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-680";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -20006,8 +20006,12 @@ sub calculate_statistics {
     if ($demand->{shape} && $duration_count >= 4) {
         my $mu = mean_of($bucket_data->{total_duration}, $duration_count);
         my ($m2_sum, $m3_sum, $m4_sum) = (0, 0, 0);
+        # @sorted can be the store's own array (the ranking pass under -so). A
+        # stored integer is read through an integer addition: subtracting the
+        # non-integer mean from it directly would cache a float on the stored
+        # scalar and double its size for the rest of the run.
         for my $x (@sorted) {
-            my $d = $x - $mu;
+            my $d = (0 + $x) - $mu;
             my $d2 = $d * $d;
             $m2_sum += $d2;
             $m3_sum += $d2 * $d;
