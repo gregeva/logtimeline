@@ -30,6 +30,10 @@ when filed:
 
 The label drives release-notes classification (`What's New` vs `Bug Fixes`).
 
+A defect in code not yet released is not a new issue: the issue that introduced
+it is reopened (`in progress`), the finding goes into its feature doc, and the
+fix is delivered on that issue.
+
 ## Filing a requirement
 
 When the architect asks for an enhancement request or bug report to be filed,
