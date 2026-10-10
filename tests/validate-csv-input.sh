@@ -233,8 +233,8 @@ fi
 
 # --- The accepted CSV forms place their rows where a plain twin does ---------
 # The reference rows at whole minutes, unquoted with seconds; the same rows
-# quoted, without seconds, quoted with T and no seconds, and as 13-digit epoch
-# milliseconds with no -du. Then ltl's own STATS CSV, at -tp m, s and ms,
+# quoted, without seconds, quoted with T and no seconds, and as epoch
+# milliseconds, microseconds and nanoseconds (13, 16 and 19 digits) with no -du. Then ltl's own STATS CSV, at -tp m, s and ms,
 # read back: each row lands in the minute it names.
 if scenario_wanted accepted-forms; then
     current_scenario=accepted-forms
@@ -243,13 +243,15 @@ if scenario_wanted accepted-forms; then
     printf 'timestamp,latency\n2026-06-01 10:00,12\n2026-06-01 10:00,18\n2026-06-01 10:01,34\n' > "$TMP_DIR/forms-nosec.csv"
     printf 'timestamp,latency\n"2026-06-01T10:00",12\n"2026-06-01T10:00",18\n"2026-06-01T10:01",34\n' > "$TMP_DIR/forms-quoted-t-nosec.csv"
     printf 'timestamp,latency\n1780308000000,12\n1780308000000,18\n1780308060000,34\n' > "$TMP_DIR/forms-epoch-ms.csv"
+    printf 'timestamp,latency\n1780308000000000,12\n1780308000000000,18\n1780308060000000,34\n' > "$TMP_DIR/forms-epoch-us.csv"
+    printf 'timestamp,latency\n1780308000000000000,12\n1780308000000000000,18\n1780308060000000000,34\n' > "$TMP_DIR/forms-epoch-ns.csv"
     want='2026-06-01 10:00|2|15;2026-06-01 10:01|1|34;'
-    for form in ref quoted nosec quoted-t-nosec epoch-ms; do
+    for form in ref quoted nosec quoted-t-nosec epoch-ms epoch-us epoch-ns; do
         run_o "forms-$form" -bs 1 -udm latency "$TMP_DIR/forms-$form.csv"
         assert_command \
             command     "[[ \"\$(stats_rows '$TMP_DIR/forms-$form' latency_occurrences latency_mean)\" == '$want' ]]" \
             label       "the $form form places its rows where the plain twin does" \
-            asserts     'Each accepted CSV timestamp form names the same instants: quoted, without seconds (second 0), T, 13-digit epoch milliseconds read as milliseconds with no -du' \
+            asserts     'Each accepted CSV timestamp form names the same instants: quoted, without seconds (second 0), T, and an epoch read in the unit its digit count states (13 milliseconds, 16 microseconds, 19 nanoseconds) with no -du' \
             produced_by 'csv_block_src() and csv_block_for_file() in ltl (the trim, the seconds, the epoch unit)' \
             contract    "$CONTRACT_611"
     done

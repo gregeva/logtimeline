@@ -502,12 +502,12 @@ mitigation note).
 - `iso_timestamp_parts` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date-time forms, either separator: the bounds and the index read-back)
 - `adapt_to_command_line_options` :: `print_usage("Invalid $flag timestamp '$value'. Accepted forms:` (a bound in no accepted form, before any file is read)
 - `csv_block_src` :: `substr($timestamp_str, 16, 0) = ':00' unless defined $1;` (a CSV timestamp, quoted or not, with or without seconds)
-- `csv_block_for_file` :: `(length($1) == 13 ? 'ms' : undef)` (a 13-digit epoch is milliseconds)
+- `csv_block_for_file` :: `{ 13 => 'ms', 16 => 'us', 19 => 'ns' }->{ length $1 }` (an epoch's unit from its digit count)
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
 - `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
 - `csv_validate_block` :: `if (!defined $ok) { $verdict = 'date'; last; }` (an impossible sampled row is the day-first retry's date failure)
-- `defer_timestamp_impossible_notes` :: `" line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n"` (once per run, per format)
+- `defer_timestamp_impossible_notes` :: `" lines of the $slug format were not matched because their date cannot exist under its date layout$hint\n"` (once per run, per format, the count out of the format's lines)
 
 **Owning record.** `features/611-timestamp-acceptance.md` § 5;
 `features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no

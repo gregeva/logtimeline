@@ -298,7 +298,7 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - Timestamp column must be named `timestamp` (case-insensitive) or defaults to column 0
 - ~~Same metric name with different aggregation functions~~ — Resolved (#99, extended by #482: two `-udm` specs with the same name and aggregation but different transforms collapse into one column): specs sharing a name are separated, each name carrying the fields that differ within the group — the function field then the unit field (e.g. `request_size:min`, `request_size:mean`, `request_size:max`; `rows:sum` and `rows:delta`; `rows` and `rows:s`). The columnar path resolves names through the same rule as the line-oriented path
 
-**Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. A value whose integer part has 13 digits is read in milliseconds (#611 C8); any other in seconds. The `-du` flag overrides the epoch unit (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
+**Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The unit is read from the digits before any fraction: 10 seconds, 13 milliseconds, 16 microseconds, 19 nanoseconds, each the count of digits that unit has from 2001 to 2286 (#611 D3); any other count reads as seconds. The `-du` flag overrides the epoch unit (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
 
 ## Counting Aggregations (Issue #313)
 

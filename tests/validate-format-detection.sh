@@ -2419,7 +2419,7 @@ scenario_format_pin() {
         asserts 'Only the 38 records whose date exists under the pinned layout are matched; no record is kept at the previous line time' \
         produced_by 'read_and_process_logs() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md AC3'
-    assert_line "$out.stderr" pattern "^Note: 86 line\\(s\\) were not matched because their date cannot exist under the connection_server_standard format's date layout - if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
+    assert_line "$out.stderr" pattern "^Note: 86 of 124 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout - if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
         asserts 'The run is told once, with the count and the other member of the date-layout group to pin, never per file or per line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract 'features/611-timestamp-acceptance.md C5, AC3'

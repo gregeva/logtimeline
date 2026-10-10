@@ -40,10 +40,25 @@ merged into this issue.
   (94), `validate-filter-summary.sh` (146), `validate-format-detection.sh`
   (458), `validate-doc-examples.sh` (51), `validate-udm-specs.sh` (250) and
   `validate-help-content.sh` (96) pass.
+- 2026-10-10, after merge, on `611-impossible-dates-2`: a lock recorded as
+  "a date that cannot exist never changes the file's day/month order" was
+  implemented (9b00a36) to stop a date valid with day and month swapped from
+  acting as positive evidence for the other order. That is outside #611 and
+  broke existing detection; it is reverted (D1). The note gives the count out
+  of the format's lines (D2). Tested against the release code on the
+  reproductions of § 4, the Integration Runtime file by its name, renamed,
+  and pinned to the wrong order, and a file with swapped dates outside the
+  sample: identical results, the note's wording apart.
+- 2026-10-10: a CSV epoch's unit is read from its digit count (D3). Tested on
+  the same three instants written as epoch seconds, milliseconds,
+  microseconds and nanoseconds: all land on 14 June 2025 at 10:00:00,
+  10:00:30.250 and 10:01:00 with no `-du`; the release code placed the
+  microsecond and nanosecond files in 1970. `-du ms` still overrides on every
+  file. A 9-digit epoch (before September 2001) still reads as seconds.
 - Drop 4: the CSV forms (C8). The CSV block's trim strips surrounding double
   quotes, a value without seconds reads as second 0, and an epoch file whose
   line-2 integer part has 13 digits is read in milliseconds when `-du` is not
-  given; the shape signature carries the epoch unit, so a seconds block is
+  given (widened to microseconds and nanoseconds by D3); the shape signature carries the epoch unit, so a seconds block is
   never reused for a milliseconds file. Measured on three-row CSVs: quoted,
   seconds-less, quoted `T` seconds-less and 13-digit epoch files place their
   rows at the instants an unquoted full-second twin does; ltl's own STATS CSV
@@ -139,6 +154,37 @@ Every call into the time library that can reach user input:
 | `iso_timestamp_parts()` (index read-back) | `eval { timegm($6, $5, $4, $3, $2 - 1, $1) }` | yes |
 | `format_sample_probes()` (detection sample) | `eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) }` | yes |
 
+## 4a. Locked decisions
+
+- **D1 — #611 concerns impossible dates only; a date valid with day and month
+  swapped is positive evidence, outside #611.** An impossible date cannot
+  exist however its fields are read: the 32nd, 30 February, a 13th month. A
+  date valid only with day and month swapped (`2024-25-04`, 25 April read day
+  first) is not impossible: it is positive evidence that the file uses the
+  other order, handled by format detection exactly as before #611
+  (`features/log-format-registry.md` D44, D52). *Architect, 2026-10-10 ("The
+  issue 611's purpose was only about dates, which are impossible ... You are
+  dragging that into the expected design around positive evidence, which you
+  should not be").* This replaces the lock recorded earlier the same day as
+  "a date that cannot exist never changes the file's day/month order", which
+  Claude worded to cover swapped dates; the change built on that wording
+  (9b00a36) is reverted.
+- **D2 — The note gives the count out of the format's lines, and the pin for
+  the other date order.** `Note: <N> of <M> lines of the <format> format were
+  not matched because their date cannot exist under its date layout`, where M
+  is every line the format recognised (matched plus left out), followed for a
+  format with a day-first or month-first sibling by ` - if the day and month
+  are read the wrong way round, use -lf <sibling>`. The share tells a few
+  corrupt lines (2 of 400,000) from a file read in the wrong order (86 of
+  124). *Locked by the architect 2026-10-10 ("Yes, lock C").* Supersedes the
+  wording of C5.
+- **D3 — A CSV epoch timestamp's unit is read from its digit count.** The
+  digits before any fraction: 10 seconds, 13 milliseconds, 16 microseconds,
+  19 nanoseconds, each unit's digit count for every date from 2001 to 2286;
+  any other count reads as seconds; `-du` names the unit instead. *Locked by
+  the architect 2026-10-10 ("Yes, lock B").* Widens the milliseconds-only
+  rule of C8.
+
 ## 5. Design
 
 Claude's design, 2026-10-10, under the architect's direction to deliver the
@@ -184,7 +230,7 @@ Accepted forms (C7, C8):
 | Every ISO date-time | `YYYY-MM-DD` then a space or `T`, then `HH:MM:SS`, an optional fraction after `.` or `,` of up to nine digits |
 | `-st`, `-et` | an ISO date-time; the same without seconds; a date alone; a bare time `HH:MM[:SS[.fraction]]` (time-of-day window); single-digit month, day and hour as today |
 | CSV, ISO kind | an ISO date-time; the same without seconds; either quoted in double quotes |
-| CSV, epoch kind | epoch seconds, with an optional fraction; a 13-digit integer part is epoch milliseconds; `-du` overrides both |
+| CSV, epoch kind | an epoch number with an optional fraction, its unit read from the digits before the fraction (10 s, 13 ms, 16 µs, 19 ns, D3); `-du` overrides |
 | Index read-back | the option parser's date-time forms (one parser, C9) |
 
 ### 5.2 Choices
@@ -238,9 +284,8 @@ Accepted forms (C7, C8):
 - **C8 — CSV forms.** The ISO kind's trim also strips surrounding double
   quotes; a value without seconds reads as second 0. An epoch file whose
   line-2 integer part has 13 digits is read in milliseconds, the unit carried
-  into the file's precision evidence as `-du ms` would carry it. Microsecond
-  and nanosecond epochs (16 and 19 digits) are not covered: the issue names
-  milliseconds only.
+  into the file's precision evidence as `-du ms` would carry it. Widened by
+  D3: 16 digits read as microseconds, 19 as nanoseconds.
 - **C9 — One date-time parser for options and the index.** `iso_timestamp_parts()`
   becomes the parser of the date-time forms, returning `[ seconds,
   nanoseconds ]`, and the bound parser calls it.
@@ -354,3 +399,15 @@ the `datetime-warning-stderr` scenario of `validate-section-layout.sh`
 triggered #597 D12's check with `-st 12h`, which is now a usage error (C6).
 The scenario was restated (25b2d38) and the suite re-run whole on that
 commit: 49 harnesses, every one exits 0 with assertions run.
+
+Second gate (branch `611-impossible-dates-2`, after the impossible-date note,
+the revert of the swapped-date change and the epoch digit-count rule), on
+117f8f2, against the release head ccd142f, one run each:
+
+| Case | Metric | before | after |
+|---|---|---|---|
+| `single-day-access-log-standard` | total | 8.4 s | 8.5 s (+0.1%) |
+| | `parse/read_files` | 8.3 s | 8.4 s (+0.1%) |
+| `network-latency-csv-standard` | total | 1.7 s | 1.7 s (−0.4%) |
+
+Full suite: 49 harnesses, every one exits 0 with assertions run.
