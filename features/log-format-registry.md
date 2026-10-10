@@ -678,8 +678,8 @@ written by Claude (commits b03d15d and 76ad558, the latter's message calling
 its notes "for strike-or-lock") under headings that attribute them to the
 architect. The architect did not lock them ("I don't see how evidence,
 especially as it is on one line, should be deterministic for the entire
-file", 2026-10-10). They stand in the code until the issue filed for this
-finding resolves them.
+file", 2026-10-10). They stand in the code until #704 (one line decides a
+file's day/month order, and a dropped order can never return) resolves them.
 
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
