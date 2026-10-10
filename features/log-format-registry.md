@@ -812,7 +812,12 @@ evidence; 5 and 6 are existing scenarios.
       `cxserver.1.log`: the same member with `selection_basis: evidence`. The
       confidence falls from 1.00 to its weighted value, recorded here when set,
       and the assertions that the other member scores 0.00 become assertions
-      that it scores lower.
+      that it scores lower. Set 2026-10-10 with `order_line` at 0.25: the
+      Connection Server slice as `cxserver.1.log` 0.93 (Integration Runtime
+      scores 2.50); the Integration Runtime slice named 0.82 and as `app.log`
+      0.78 (Connection Server scores 3.50); the eight-line fixtures of lines
+      carrying "N milliseconds" 0.58 for Integration Runtime and 0.75 for
+      Connection Server.
 - [ ] **6. Every other variant group is unchanged.** Tomcat/httpd units,
       ThingWorx, Windchill method server and the mixed-legend scenarios keep
       their selection, basis and confidence.
