@@ -823,8 +823,9 @@ my @format_legend_order;         # legend numbers -> format names
 # Evidence weights (D46/I1): one table, fixed per evidence class, the same
 # for every format. Every signal is additive and independent. The group
 # default's standing credit equals the extension weight, so an extension
-# alone ties and ties stay on the default; an impossible date component
-# or a filename-date mismatch eliminates a member outright.
+# alone ties and ties stay on the default; an impossible date component in
+# the sample, or a filename-date mismatch, eliminates a member outright
+# before line 1. During the read an impossible date is no signal.
 my %format_evidence_weights = (
     shape              => 1.0,   # the member's pattern matched sampled lines (necessary)
     stem               => 3.0,   # filename stem matched the member's declared stem
@@ -4489,16 +4490,14 @@ sub select_format_variants {
 
 # Steady-loop probe signal (N5): called from the generated block's
 # timestamp cache-miss branch — once per distinct timestamp, only on the
-# rare events — so it is a cold path. An impossible date component under
-# the entry's layout eliminates the entry from its variant group; a
-# monotonicity violation applies the graded penalty. The group then
-# re-selects; when the best live member changes, it takes the slot (the
-# caller re-scans the line under the new sub) and the flip is counted.
-# Returns 1 when the occupant changed, -1 for an impossible date while the
-# file's first decision is pending (the caller holds the line for the
-# replay to judge), 0 otherwise.
+# rare events — so it is a cold path. A monotonicity violation applies the
+# graded penalty. The group then re-selects; when the best live member
+# changes, it takes the slot (the caller re-scans the line under the new
+# sub) and the flip is counted. A date that cannot exist is no signal: the
+# line is not matched (D52 as amended 2026-10-10). Returns 1 when the
+# occupant changed, 0 otherwise.
 sub format_probe_signal {
-    my ($entry, $kind, $value) = @_;
+    my ($entry) = @_;
     return 0 unless $entry;
     # Per-compile validation (D61) runs the registry's own samples through
     # the generated sub; their timestamps are not the file's observations
@@ -4510,24 +4509,15 @@ sub format_probe_signal {
     my $name = $entry->[FR_NAME];
     my $g = $ev->{groups}{ $entry->[FR_GROUP] };
     my $W = \%format_evidence_weights;
-    if ($kind eq 'impossible_date') {
-        $st->{impossible_date}++;
-        if ($g && $g->{live}{$name}) {
-            $g->{live}{$name} = 0;
-            $g->{scores}{$name} = 0;
-            $g->{why}{$name} .= ',steady-a';
-        }
-    } else {
-        $st->{monotonic_violations}++;
-        if ($g && $g->{live}{$name}) {
-            my $pen = $g->{mono_pen}{$name} // 0;
-            if ($pen < $W->{mono_cap}) {
-                my $step = $W->{mono_per_violation};
-                $step = $W->{mono_cap} - $pen if $pen + $step > $W->{mono_cap};
-                $g->{mono_pen}{$name} = $pen + $step;
-                $g->{scores}{$name} -= $step;
-                $g->{why}{$name} .= ',steady-b' if $pen == 0;
-            }
+    $st->{monotonic_violations}++;
+    if ($g && $g->{live}{$name}) {
+        my $pen = $g->{mono_pen}{$name} // 0;
+        if ($pen < $W->{mono_cap}) {
+            my $step = $W->{mono_per_violation};
+            $step = $W->{mono_cap} - $pen if $pen + $step > $W->{mono_cap};
+            $g->{mono_pen}{$name} = $pen + $step;
+            $g->{scores}{$name} -= $step;
+            $g->{why}{$name} .= ',steady-b' if $pen == 0;
         }
     }
     my $flipped = 0;
@@ -4547,10 +4537,6 @@ sub format_probe_signal {
             }
         }
     }
-    # While the file's first decision is pending (fallback-window prefill,
-    # before the held lines have been scored) the signal only counts: the
-    # selection that follows sees the same evidence and decides.
-    return -1 if $kind eq 'impossible_date' && !$flipped && !defined $log_format_pin && !%{ $ev->{groups} };
     return $flipped;
 }
 
@@ -5265,26 +5251,17 @@ substr($timestamp_str, 19) = '';};
     # When the signal flips the group's occupant, the line is re-scanned under
     # the new sub.
     my $mono_src = defined $spec->{variant_group}
-        ? qq{        return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
+        ? qq{        return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER);\n}
         : '';
     my $prev_src = defined $spec->{variant_group} ? "        my \$prev = \$format_last_ts_epoch;\n" : '';
-    # A date that cannot exist (the timestamp acceptance pattern): under an
-    # ISO layout, a component out of range (month > 12, day > 31) is first
-    # the layout signal (D52 (a)), and a flip re-scans the line. Otherwise
-    # the line is not matched: nothing is recorded, the memo does not move,
-    # and the line is counted for the run's note. While the file's first
-    # decision is pending (the detection-window prefill), a variant-group
-    # member holds the line as matched, so the replay under the decided
-    # occupant judges it.
+    # A date that cannot exist (the timestamp acceptance pattern): the line
+    # is not matched, nothing is recorded, the memo does not move, and the
+    # line is counted for the run's note. It never changes the file's
+    # day/month order, which the sample settles before line 1 (D52 as
+    # amended 2026-10-10).
     my $slug = $spec->{slug} // $spec->{name};
-    my $impossible_src = '';
-    if ($layout =~ /^iso_/) {
-        $impossible_src .= qq{        my \$signal = (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) ? format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str) : 0;\n}
-                         . qq{        return \$format_scan_sub->(\$_[0]) if \$signal > 0;\n};
-        $impossible_src .= qq{        return ENTRY_PLACEHOLDER if \$signal < 0;\n} if defined $spec->{variant_group};
-    }
-    $impossible_src .= qq{        \$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;\n}
-                     . qq{        return undef;\n};
+    my $impossible_src = qq{        \$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;\n}
+                       . qq{        return undef;\n};
     push @src, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 else {
     $midnight
@@ -6621,9 +6598,9 @@ sub emit_format_detection_evidence_verbose {
         push @verbose_output, "  selection_basis: $r->{basis}";
         push @verbose_output, sprintf('  confidence: %.2f', $r->{confidence});
         push @verbose_output, "  flips: $r->{flips}";
-        push @verbose_output, sprintf('  probes: sample_out_of_range=%d sample_monotonic_violations=%d out_of_range=%d monotonic_violations=%d filename_date=%s',
+        push @verbose_output, sprintf('  probes: sample_out_of_range=%d sample_monotonic_violations=%d monotonic_violations=%d filename_date=%s',
             $pr ? $pr->{oor} : 0, $pr ? $pr->{viol} : 0,
-            $ev->{steady}{impossible_date} // 0, $ev->{steady}{monotonic_violations} // 0,
+            $ev->{steady}{monotonic_violations} // 0,
             ($pr && $pr->{fdate}) ? $pr->{fdate} : '-');
     }
     # Populated identity fields of the entry the file bound, over the sampled

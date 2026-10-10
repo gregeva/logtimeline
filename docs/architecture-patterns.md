@@ -468,12 +468,11 @@ which returns undef instead of dying. Nothing else calls the time library on
 user input. A shape not accepted is a line not matched, silently. A date that
 cannot exist has one outcome per place:
 
-1. **A line (scanned or CSV).** Under an ISO layout, a component out of range
-   (month > 12, day > 31) is first the layout signal of the date-layout
-   variant group, and a flip re-scans the line. Otherwise the line is not
-   matched: it contributes nothing and the timestamp memo does not move. It
-   is counted per file and format, and the user is told once per run after
-   the read, per format, never per line or per file.
+1. **A line (scanned or CSV).** The line is not matched: it contributes
+   nothing and the timestamp memo does not move. It never changes the file's
+   day/month order, which the sample settles before line 1. It is counted
+   per file and format, and the user is told once per run after the read,
+   per format, never per line or per file.
 2. **An option value (`-st`, `-et`).** A usage error naming the accepted
    forms, before any file is read.
 3. **An index value read back.** Skipped.
@@ -505,13 +504,12 @@ mitigation note).
 - `csv_block_for_file` :: `(length($1) == 13 ? 'ms' : undef)` (a 13-digit epoch is milliseconds)
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
-- `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
 - `csv_validate_block` :: `if (!defined $ok) { $verdict = 'date'; last; }` (an impossible sampled row is the day-first retry's date failure)
 - `defer_timestamp_impossible_notes` :: `" line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n"` (once per run, per format)
 
 **Owning record.** `features/611-timestamp-acceptance.md` § 5;
 `features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no
-per-file note, the layout signal kept); `features/640-csv-unplaced-rows-silent.md`
+per-file note) and 2026-10-10 (no in-read change of the day/month order); `features/640-csv-unplaced-rows-silent.md`
 D1 (a line without a parsable timestamp is not matched, silently; messages are
 run-level).
 

@@ -40,6 +40,10 @@ merged into this issue.
   (94), `validate-filter-summary.sh` (146), `validate-format-detection.sh`
   (458), `validate-doc-examples.sh` (51), `validate-udm-specs.sh` (250) and
   `validate-help-content.sh` (96) pass.
+- 2026-10-10, after merge: D1 locked; the in-read switch of the day/month
+  order on an impossible date is removed (branch `611-impossible-dates-2`).
+  On the synthetic file of D52's 2026-10-10 amendment the release code read
+  600 valid lines a month out; the new code keeps their dates.
 - Drop 4: the CSV forms (C8). The CSV block's trim strips surrounding double
   quotes, a value without seconds reads as second 0, and an epoch file whose
   line-2 integer part has 13 digits is read in milliseconds when `-du` is not
@@ -74,7 +78,7 @@ log, asctime layouts), the CSV block (ISO and epoch), the `-st`/`-et` bound
 values, and the index read-back. Done when the `T` form and the space form
 give the same filtered run, a malformed date on any of these places gives the
 user the same kind of outcome, the run continues where the contract says it
-continues, the inverted-layout detection signal still fires, and no place
+continues, the sample's detection of an inverted layout still decides, and no place
 reaches a library call that can end the run on user input.
 
 ## 3. Contracts the pattern is designed from
@@ -83,7 +87,7 @@ reaches a library call that can end the run on user input.
 |---|---|---|
 | A line is matched only once its timestamp parses; nothing reported per line or per file | #640 D1 (`features/640-csv-unplaced-rows-silent.md`); extended to scanned lines by the architect 2026-09-30 | an unplaceable line is read and not matched; any message is run-level |
 | A line whose date is impossible under every live layout is not matched | `features/log-format-registry.md` D52, amended by the architect 2026-09-30 | the line contributes to no bucket, statistic or metric; counting it at the previous line's time is data corruption |
-| An impossible date is evidence against the current layout | D52 probe (a), N5, IF5 in `features/log-format-registry.md` | the signal reaches variant selection before the line is given up, and a flip re-scans the line |
+| Impossible dates in the sample choose the day/month order | D52 probe (a) in `features/log-format-registry.md`, as amended 2026-10-10 | the sample's comparison before line 1 decides; during the read a date that cannot exist changes nothing (D1) |
 | A CSV file's date order is settled once from its sampled rows | `features/615-csv-registry-entry.md` D9, D15, D18 | a sampled-row date failure still drives the day-first retry |
 | A CSV row impossible under the file's order ends the run | `features/615-csv-registry-entry.md` D7 | locked as a holding position until this issue changes it on the one generated parse |
 | A guard alone is not enough | `features/log-format-registry.md`, the #385 mitigation note | silencing the failure while leaving the rest transposed trades a loud failure for a quiet wrong answer; the user is told |
@@ -139,6 +143,17 @@ Every call into the time library that can reach user input:
 | `iso_timestamp_parts()` (index read-back) | `eval { timegm($6, $5, $4, $3, $2 - 1, $1) }` | yes |
 | `format_sample_probes()` (detection sample) | `eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) }` | yes |
 
+## 4a. Locked decisions
+
+- **D1 — During the read, a date that cannot exist never changes the file's
+  day/month order.** The line is not matched and counted (per file
+  `impossible_date_lines`, run total `lines_unmatched_impossible_date`, one
+  note per format after the read). The order is chosen only from the sample
+  before line 1. *Locked by the architect 2026-10-10 ("an impossible date
+  should not be flipping the detection of the log format"; "Yes, lock it").*
+  Supersedes C2 and the hold of C3. Amends `features/log-format-registry.md`
+  D52 (a) and N5, whose in-read elimination was Claude's wording, never locked.
+
 ## 5. Design
 
 Claude's design, 2026-10-10, under the architect's direction to deliver the
@@ -161,12 +176,9 @@ A timestamp is accepted in two steps, everywhere it is read:
 
 What happens to a date that cannot exist depends on where it was read:
 
-- **Per-line arms (scanned and CSV).** Under an ISO layout, a component out
-  of range (month > 12 or day > 31) is first the layout signal of D52 (a):
-  `format_probe_signal()` eliminates the member, and a flip re-scans the
-  line under the new occupant (C2). With no flip, and for every other
-  impossible date (30 February, 31 June, day or month 00), the line is not
-  matched: it contributes to no bucket, statistic or metric, and the
+- **Per-line arms (scanned and CSV).** A line whose date cannot exist
+  (month 13, 30 February, 31 June, day or month 00) is not matched and never
+  changes the file's day/month order (D1): it contributes to no bucket, statistic or metric, and the
   timestamp memo is left as it was, so the next line is not read at this
   line's time (C3). The line is counted by format (C4).
 - **Option values (`-st`, `-et`).** A value in no accepted form, or whose
@@ -199,7 +211,7 @@ Accepted forms (C7, C8):
   branch goes: the resolver answers it. Cost: an `eval` once per distinct
   date, a `defined` test once per distinct timestamp string; nothing per line
   on a dense stream.
-- **C2 — The layout signal fires on an out-of-range component only.** Month >
+- **C2 — Superseded by D1** (no in-read signal at all). As first built: **the layout signal fires on an out-of-range component only.** Month >
   12 or day > 31 under the entry's layout, as today; D52 (a) is unchanged. A
   date whose components are in range but which does not exist (30 February)
   is not evidence against the layout: under the other order of the group its
@@ -209,10 +221,9 @@ Accepted forms (C7, C8):
   recorded.** The scan sub returns undef from the block, the per-entry
   closure returns false, the CSV block returns undef. The read loop's
   existing no-match path counts the line as unmatched. Neither
-  `$format_last_ts_str` nor `$format_last_ts_epoch` moves. While a file's
-  first decision is pending (the detection-window prefill on input with no
-  sample), the line is held as matched, and the replay under the final
-  occupant decides it, so a flip inside the window still recovers it.
+  `$format_last_ts_str` nor `$format_last_ts_epoch` moves. (The hold of a
+  line while a file's first decision is pending, built in drop 2, is removed
+  under D1.)
 - **C4 — Counted per file and format.** The emitted branch increments
   `$timestamp_impossible_lines{$format_current_file}{<slug>}`, a constant key
   compiled in. Validation paths (`format_validate_scan_sub()`,
@@ -266,9 +277,11 @@ fixture the detection harness already stages.
       Apache common log access log and 30 February on an Apache mod_jk log
       (asctime): each exits 0 with the line not matched, counted and noted,
       and nothing on stderr carries ` at <file> line <N>`. *Same scenarios.*
-- [x] **AC3** The detection signal still fires: the existing
-      `validate-format-detection.sh` scenarios for sample elimination and the
-      late flip (IF5) pass unchanged; under `-lf` pinned to the wrong member
+- [x] **AC3** The sample's detection still decides: the existing
+      `validate-format-detection.sh` scenarios for sample elimination pass
+      unchanged, and (D1) a block of out-of-range dates outside the sample
+      leaves the order as the sample chose it (`impossible-date-keeps-order`);
+      under `-lf` pinned to the wrong member
       of the date-layout group, the lines whose day exceeds 12 are not
       matched and counted, the rest matched, and the note carries the `-lf`
       hint. *The `format-pin` scenario of `validate-format-detection.sh`.*
@@ -277,7 +290,7 @@ fixture the detection harness already stages.
       real dates only day first is still read day first (#615 D15). *The
       `impossible-date` scenario of `validate-filter-summary.sh`; the
       day-first scenarios of `validate-csv-input.sh`.*
-- [ ] **AC5** *Unassertable from the command line.* On input with no
+- [ ] **AC5** *Withdrawn under D1: no line is held for a pending decision.* *Was unassertable from the command line.* On input with no
       detection sample (read through the detection window), a line impossible
       under the layout first chosen and valid under the one the window
       settles on would be matched at its own time. Found in drop 2: a file

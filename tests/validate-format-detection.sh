@@ -2390,6 +2390,40 @@ scenario_impossible_date() {
     done
 }
 
+# A date that cannot exist never changes a file's day/month order during the
+# read: the sample (front, middle and end) holds only days <= 12, so the
+# default order is chosen before line 1; a block of 40 lines whose month
+# token exceeds 12 sits between the sampled spots. The order holds, the 40
+# lines are not matched, and the 600 valid lines after them keep their dates.
+scenario_impossible_date_keeps_order() {
+    current_scenario="impossible-date-keeps-order"
+    echo "[$current_scenario]"
+    local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
+    local log="$dir/app.log"
+    perl -e 'my $t = " [main] INFO  c.e.Foo - message";
+             printf "2024-04-05 09:%02d:%02d.000%s\n", int($_ / 60) % 60, $_ % 60, $t for 0 .. 199;
+             printf "2024-25-04 10:00:%02d.000%s\n", $_ % 60, $t for 0 .. 39;
+             printf "2024-04-05 11:%02d:%02d.000%s\n", int($_ / 60) % 60, $_ % 60, $t for 0 .. 599;' > "$log"
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    local contract='features/log-format-registry.md D52 as amended 2026-10-10 (during the read a date that cannot exist never changes the order; the sample settles it before line 1); features/611-timestamp-acceptance.md D1'
+    assert_line "$out" pattern '^  flips: 0$' \
+        asserts 'Forty lines whose month token exceeds 12 do not switch the file to the other day/month order' \
+        produced_by 'format_timestamp_src() in ltl (the impossible-date branch signals nothing)' \
+        contract "$contract"
+    assert_line "$out" pattern '^  selected: mt10$' \
+        asserts 'The order the sample chose before line 1 (the group default, month first) is the order the whole file is read with' \
+        produced_by 'select_format_variants() in ltl' \
+        contract "$contract"
+    assert_line "$out" pattern '^  impossible_date_lines: 40$' \
+        asserts 'The forty lines are not matched and counted' \
+        produced_by 'format_timestamp_src() in ltl; emit_format_detection_verbose()' \
+        contract "$contract"
+    assert_line "$out" pattern '^  matched_lines: 800$' \
+        asserts 'Every valid line is matched, the 600 after the block under the order chosen before line 1' \
+        produced_by 'read_and_process_logs() in ltl' \
+        contract "$contract"
+}
+
 scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
@@ -2870,6 +2904,7 @@ scenario_register tomcat9-ms \
                   unregistered-levels-per-file \
                   format-pin \
                   impossible-date \
+                  impossible-date-keeps-order \
                   byte-notation \
                   apache-mod-jk \
                   apache-mod-jk-microseconds \
@@ -2944,6 +2979,7 @@ while read -r _scenario; do
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
         impossible-date                        ) scenario_impossible_date ;;
+        impossible-date-keeps-order            ) scenario_impossible_date_keeps_order ;;
         byte-notation                          ) scenario_byte_notation ;;
         apache-mod-jk                          ) scenario_apache_mod_jk ;;
         apache-mod-jk-microseconds             ) scenario_apache_mod_jk_microseconds ;;
