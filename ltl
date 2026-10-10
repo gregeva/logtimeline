@@ -817,7 +817,6 @@ my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
 my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
 my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
 my %format_detection_evidence;   # in_file => per-file variant selection record (select_format_variants())
-my %format_order_support;        # group => lines dated in the occupant's day/month order only since the last credit (format_order_support_credit())
 my %format_detection_formats;    # in_file => [ format names found in the file, first-bound first ] (D50)
 my %format_legend;               # format name => legend number, first-detection order across the run
 my @format_legend_order;         # legend numbers -> format names
@@ -826,8 +825,9 @@ my @format_legend_order;         # legend numbers -> format names
 # default's standing credit equals the extension weight, so an extension
 # alone ties and ties stay on the default. A date valid only in one
 # day/month order is a line of evidence for the members reading that order,
-# never decisive on its own (D44, D70); a filename-date mismatch eliminates
-# a member outright.
+# never decisive on its own (D44, D70); during the read such lines fill a
+# fading bucket that switches the order at a threshold (D72). A
+# filename-date mismatch eliminates a member outright.
 my %format_evidence_weights = (
     shape              => 1.0,   # the member's pattern matched sampled lines (necessary)
     stem               => 3.0,   # filename stem matched the member's declared stem
@@ -839,6 +839,8 @@ my %format_evidence_weights = (
     mono_per_violation => 0.5,   # monotonicity violation per distinct timestamp (comparative)
     mono_cap           => 1.0,   # ceiling on the total monotonicity penalty
     order_line         => 0.25,  # per line whose date is valid only in the member's day/month order
+    order_switch_lines => 5,     # bucket of lines valid only in the other order that switches the read (D72)
+    order_fade_lines   => 1000,  # lines read over which that bucket halves (D72)
 );
 # Scan telemetry for -V format-detection / scan. The no-match scan is the
 # structural worst case (every entry attempted, nothing matches), so its
@@ -4507,15 +4509,17 @@ sub format_variant_rank {
 
 # Steady-loop probe signal (N5): called from the generated block's
 # timestamp cache-miss branch — once per distinct timestamp, only on the
-# rare events — so it is a cold path. A date impossible under the entry's
-# layout is a line of evidence for each other live member of its variant
-# group whose layout reads it as a real date (D44, D70); a date impossible
-# in every layout is no evidence (#611). A monotonicity violation applies
-# the graded penalty. The lines dated in the occupant's order only, counted
-# by the generated block since the last signal, are credited first. The
-# group then re-selects; when the best live member changes, it takes the
-# slot (the caller re-scans the line under the new sub) and the flip is
-# counted.
+# rare events — so it is a cold path. In a group whose members read
+# different day/month orders, a date impossible under the entry's layout
+# and valid under another live member's adds one line to that member's
+# bucket, faded first for the lines read since it last moved; at the
+# threshold the member takes the slot, the bucket's lines are credited to
+# its score and every bucket of the group empties (D72). Below it the line
+# stays left out (D71). A date impossible in every layout is no evidence
+# (#611). A monotonicity violation applies the graded penalty; in other
+# groups the group then re-selects, and when the best live member changes it
+# takes the slot. Either way the caller re-scans the line under the new sub
+# and the flip is counted.
 # Returns 1 when the occupant changed, -1 for an impossible date while the
 # file's first decision is pending (the caller holds the line for the
 # replay to judge), 0 otherwise.
@@ -4533,17 +4537,28 @@ sub format_probe_signal {
     my $group = $entry->[FR_GROUP];
     my $g = $ev->{groups}{$group};
     my $W = \%format_evidence_weights;
-    format_order_support_credit($g, $group) if $g;
+    my $by_order = ($format_variant_groups{$group}{orders} // 0) > 1;
+    my $switch_to;
     if ($kind eq 'impossible_date') {
         $st->{impossible_date}++;
-        if ($g && (my ($y, $a, $b) = $value =~ /^(\d{4})-(\d{2})-(\d{2})/)) {
+        if ($g && $by_order && (my ($y, $a, $b) = $value =~ /^(\d{4})-(\d{2})-(\d{2})/)) {
+            # $. is the file's line count: the read loop is the only reader
+            # while the generated sub runs.
+            my $at = $.;
             for my $other (@{ $format_variant_groups{$group}{members} }) {
                 next if $other eq $name || !$g->{live}{$other};
                 my $lay = format_probe_layout( $format_registry_entry{$other} ) or next;
                 my ($mo, $dy) = $lay eq 'ddmm' ? ($b, $a) : ($a, $b);
                 next unless defined date_midnight($y, $mo, $dy);
-                $g->{scores}{$other} += $W->{order_line};
+                my $bk = $g->{bucket}{$other} //= { lines => 0, at => $at };
+                $bk->{lines} *= 0.5 ** (($at - $bk->{at}) / $W->{order_fade_lines}) if $at > $bk->{at};
+                $bk->{at} = $at;
+                $bk->{lines}++;
+                next unless $bk->{lines} >= $W->{order_switch_lines};
+                $g->{scores}{$other} += $bk->{lines} * $W->{order_line};
                 $g->{why}{$other} .= ',steady-a' unless $g->{why}{$other} =~ /\bsteady-a\b/;
+                $switch_to = $other;
+                last;
             }
         }
     } else {
@@ -4561,11 +4576,22 @@ sub format_probe_signal {
     }
     my $flipped = 0;
     if ($g) {
-        my $best = format_variant_rank($g, $group);
+        my $best;
+        if ($by_order) {
+            # Only the bucket moves the order; the confidence follows the
+            # occupant's share of the scores.
+            $best = $switch_to;
+            my $sel = $best // $g->{selected};
+            my $tot = 0; $tot += $g->{scores}{$_} for grep { $g->{live}{$_} } @{ $format_variant_groups{$group}{members} };
+            $g->{confidence} = $tot > 0 ? $g->{scores}{$sel} / $tot : 0;
+        } else {
+            $best = format_variant_rank($g, $group);
+        }
         if (defined $best && $best ne $g->{selected}) {
             $g->{selected} = $best;
             $g->{basis}    = 'evidence';
             $g->{flips}++;
+            delete $g->{bucket};
             format_registry_set_occupant( $format_registry_entry{$best} );
             $flipped = 1;
         }
@@ -4575,24 +4601,6 @@ sub format_probe_signal {
     # selection that follows sees the same evidence and decides.
     return -1 if $kind eq 'impossible_date' && !$flipped && !defined $log_format_pin && !%{ $ev->{groups} };
     return $flipped;
-}
-
-# Lines dated in the occupant's day/month order only, counted inline by the
-# generated block for a group whose members read different orders
-# (%format_order_support), are credited to the occupant here: before any
-# signal re-ranks the group, and when the file ends. The occupant is the
-# group's best member, so the credit refreshes the confidence and never
-# changes the selection.
-sub format_order_support_credit {
-    my ($g, $group) = @_;
-    my $n = delete $format_order_support{$group} or return;
-    my ($occupant) = grep { $_->[FR_GROUP] eq $group } @format_scan_order;
-    return unless $occupant && $g->{live}{ $occupant->[FR_NAME] };
-    my $name = $occupant->[FR_NAME];
-    $g->{scores}{$name} += $n * $format_evidence_weights{order_line};
-    $g->{why}{$name} .= ',steady-order' unless $g->{why}{$name} =~ /\bsteady-order\b/;
-    format_variant_rank($g, $group);
-    return;
 }
 
 # Variant ambiguity note (D47/I6): the first time in the run a file binds
@@ -5313,18 +5321,10 @@ substr($timestamp_str, 19) = '';};
         ? qq{        return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
         : '';
     my $prev_src = defined $spec->{variant_group} ? "        my \$prev = \$format_last_ts_epoch;\n" : '';
-    # A member of a group whose members read different day/month orders
-    # counts each new timestamp whose date is valid only in its own order
-    # (the day above 12): the evidence that keeps the order, credited to the
-    # occupant by format_order_support_credit() (D44).
-    my $vg = $spec->{variant_group};
-    my $order_src = ($layout =~ /^iso_/ && defined $vg && ($format_variant_groups{$vg}{orders} // 0) > 1)
-        ? qq{        \$format_order_support{'$vg'}++ if substr(\$timestamp_str, $day_off, 2) > 12 && !\$format_scan_validating;\n}
-        : '';
     # A date that cannot exist (the timestamp acceptance pattern): under an
     # ISO layout, a component out of range (month > 12, day > 31) is first
-    # a line of evidence for a sibling reading the other day/month order
-    # (D52 (a), D70), and a flip re-scans the line. Otherwise the line is not
+    # a line for the bucket of a sibling reading the other day/month order
+    # (D72), and a switch re-scans the line. Otherwise the line is not
     # matched, whether or not the other order reads it (D71): nothing is
     # recorded, the memo does not move, and the line is counted for the
     # run's note. While the file's first
@@ -5346,7 +5346,7 @@ else {
     if (defined \$midnight) {
 $prev_src        \$timestamp = \$format_last_ts_epoch = \$midnight + $time_of_day;
         \$format_last_ts_str = \$timestamp_str;
-$order_src$mono_src    }
+$mono_src    }
     else {
 $impossible_src    }
 }};
@@ -17027,10 +17027,6 @@ sub read_and_process_logs {
             }
         }
 
-        # The read's own evidence starts here: the sample (or the held lines)
-        # has been scored by select_format_variants().
-        %format_order_support = ();
-
         # Opening frame for this file, painted outside the throttle (#446 D4).
         # The throttle governs repaints; without an unconditional frame at the
         # start a run that finishes inside one interval reports nothing at all,
@@ -18358,13 +18354,6 @@ sub read_and_process_logs {
         }
 
         close $fh;
-
-        # The lines read in the occupant's day/month order only since the
-        # last signal are credited to this file's selection (D44).
-        if (my $ev = $format_detection_evidence{$in_file}) {
-            format_order_support_credit( $ev->{groups}{$_}, $_ ) for grep { $ev->{groups}{$_} } keys %format_order_support;
-        }
-        %format_order_support = ();
 
         # A file read day first leaves no day-first reading behind: the memo
         # and the date cache are keyed by the timestamp text alone (N3).
