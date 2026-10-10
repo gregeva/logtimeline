@@ -696,9 +696,9 @@ sample, `format_probe_signal()` during the read. ("I don't see how evidence,
 especially as it is on one line, should be deterministic for the entire
 file", architect, 2026-10-10.) #704 (one line decides a file's day/month
 order, and a dropped order can never return) fixes the implementation to
-D44, D48 and D53 as locked on 2026-08-22; it makes no new decision beyond
-the architect's amendment of I1 (2026-10-10): probe (a) becomes a weighted
-signal, set by the F7 method, and no longer eliminates an order.
+D44, D48 and D53 as locked on 2026-08-22, with the architect's amendment of
+I1 (2026-10-10: probe (a) becomes a weighted signal, set by the F7 method, and
+no longer eliminates an order) and the architect's D70 to D72 below.
 
 ### #704: the day/month order accumulates evidence (2026-10-10)
 
@@ -721,10 +721,14 @@ the F7 method, and no longer eliminates an order. Branch
   either way; the 840-line file holds 40 valid only day first, none valid only
   month first and 800 valid either way. In both, every distinguishing line
   favours day first; month first is held only by the group default's standing
-  credit (1.0). *Locked ("Lock A").*
+  credit (1.0). *Locked ("Lock A").* **Amended by D72 (the order holds until a
+  fading bucket of contrary lines fills) the same day:** distinguishing lines
+  too far apart to fill the bucket do not move the order, so the
+  1.2-million-line file, whose 12 day-first lines are 100,000 lines apart,
+  stays month first; the 840-line file, whose 40 are consecutive, moves.
 - **D71 — A line whose date is valid only in the other order, when it does
   not move the choice, is left out and counted like an impossible date.** It
-  lowers the current order's score; if the order moves, the line is re-read
+  adds to the other order's bucket (D72); if the order moves, the line is re-read
   under the new order and matched; if it holds, the line is not matched and is
   counted for the run's impossible-date note (#611), which names the other
   order's `-lf`. One order per file at a time stands (D47), and the time axis
@@ -732,21 +736,53 @@ the F7 method, and no longer eliminates an order. Branch
   amendment of 2026-09-30 ("impossible under every live layout is not
   matched") is read as "impossible under the order the file is being read
   with". *Locked ("Lock A").*
+- **D72 — The order a file is read in holds until a fading bucket of contrary
+  lines reaches a threshold.** The architect's design: a scale that, once
+  tipped, holds until enough further proof tips it back. While a file is read
+  in one day/month order, each line whose date is valid only in the other
+  order adds one to that order's bucket. The bucket fades as lines are read, so
+  recent lines outweigh old ones and one line 100,000 lines back weighs
+  nothing. When the bucket reaches the threshold, the file switches to the
+  other order and the bucket starts again, now filling only with lines against
+  the new order. A line valid in both orders adds nothing. Modelled on the
+  reading loop with a threshold of 5 lines and a bucket halving every 1,000
+  lines read: one contrary line (sampled or not) moves nothing and is left
+  out; 40 consecutive day-first lines in 840 switch at the 6th, 5 left out;
+  40 day-first lines then 40 month-first switch twice and end month first;
+  1.2 million lines with one day-first line every 100,000 never switch, 12
+  left out. Thresholds of 10 lines, or a bucket halving every 100 lines, give
+  the same outcomes. *Locked ("Yes").*
 
 **Design (Claude's, 2026-10-10; no architect lock, reviewed at the PR).**
-One weight per distinguishing line, a new entry of `%format_evidence_weights`
-(D46), its value set by the F7 method (each committed detection fixture
-resolving as required). In the sample (`select_format_variants()`), each order
-gains the weight for every sampled line whose date is valid only in that order;
-a date impossible in both is no evidence (#611). During the read, the generated
-block's timestamp memo-miss branch (once per new timestamp string, so a run of
-lines carrying the same timestamp counts once) adds the weight to the order a
-date is valid only in, through `format_probe_signal()`; when that makes the
-other order the best, the occupant changes and the line is re-read; otherwise
-the line is matched (valid in the current order) or left out and counted (valid
-only in the other, D71). The check for a date valid only in the current order is
-emitted only for members of a group whose members differ in date order. Out of
-scope: a CSV file's date order, settled once from its sampled rows by
+Three entries of `%format_evidence_weights` (D46): `order_line`, the weight of
+one distinguishing line (0.25, set by the F7 method); `order_switch_lines`,
+D72's threshold (5); `order_fade_lines`, the lines read over which the bucket
+halves (1,000).
+
+- *The sample chooses the order a file starts in* (`select_format_variants()`).
+  Each order gains `order_line` for every sampled line whose date is valid only
+  in it, against the default's standing credit (1.0), so a file starts in the
+  non-default order only on five more sampled lines for it than against it. A
+  date impossible in both orders is no evidence (#611). The sample does not
+  seed the bucket: the read meets the sampled lines again.
+- *The read applies D72* in `format_probe_signal()`, reached from the
+  generated block's timestamp memo-miss branch once per new timestamp string. A
+  date impossible in the order being read and valid in another member's adds
+  one to that member's bucket, after the bucket fades for the lines read since
+  it last changed. The fade is computed there from the file's line count, so the
+  generated block carries no per-line cost. At the threshold the occupant
+  changes and the line is re-read, the bucket's lines are credited to the new
+  member's score (`order_line` each) so `candidates:` and `confidence:` agree
+  with the selection, and every bucket of the group empties. Below it the line
+  is left out and counted (D71).
+- In a group whose members read different day/month orders, only the bucket
+  changes the occupant during the read: a monotonicity violation still lowers
+  the occupant's score, and so the confidence, but does not re-rank. Every
+  other group re-ranks on each signal as before.
+- Lines valid in both orders, and lines valid only in the order being read,
+  add nothing (D72).
+
+Out of scope: a CSV file's date order, settled once from its sampled rows by
 `features/615-csv-registry-entry.md` D15 and D18, not by D44.
 
 #### Acceptance criteria (agreed by the architect 2026-10-10)
@@ -782,8 +818,8 @@ evidence; 5 and 6 are existing scenarios.
       their selection, basis and confidence.
 - [ ] **7. No single date eliminates an order.** No elimination by a date
       valid only in the other order remains in `select_format_variants()` or
-      `format_probe_signal()`; the weight is an entry of
-      `%format_evidence_weights` only. Verified by review of the diff.
+      `format_probe_signal()`; the weight, the threshold and the fade are
+      entries of `%format_evidence_weights` only. Verified by review of the diff.
 - [ ] **8. No regression on the paths that reach the change.** Before/after on
       this machine: `single-day-access-log-standard` and
       `single-day-application-log-standard` (the generated ISO timestamp
