@@ -5626,9 +5626,10 @@ sub csv_block_for_file {
     my ($file, $line2_ts, $rows) = @_;
     $line2_ts =~ s/^[\s"]+|[\s"]+$//g if defined $line2_ts;
     my $kind = (defined $line2_ts && $line2_ts =~ /^(\d+)(\.\d+)?$/) ? 'epoch' : 'iso';
-    # An epoch in milliseconds has 13 digits before any fraction (seconds have
-    # 10 until the year 2286); -du names any other unit.
-    my $epoch_unit = $kind ne 'epoch' ? undef : $duration_unit_override // (length($1) == 13 ? 'ms' : undef);
+    # An epoch's unit is read from the digits before any fraction: from 2001
+    # to 2286 seconds have 10, milliseconds 13, microseconds 16, nanoseconds
+    # 19 (#611 D3). -du names the unit instead.
+    my $epoch_unit = $kind ne 'epoch' ? undef : $duration_unit_override // { 13 => 'ms', 16 => 'us', 19 => 'ns' }->{ length $1 };
     my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');
     my ($verdict, $placed, $digits, $served);
     for my $layout (@order) {

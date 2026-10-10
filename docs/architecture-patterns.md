@@ -502,7 +502,7 @@ mitigation note).
 - `iso_timestamp_parts` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date-time forms, either separator: the bounds and the index read-back)
 - `adapt_to_command_line_options` :: `print_usage("Invalid $flag timestamp '$value'. Accepted forms:` (a bound in no accepted form, before any file is read)
 - `csv_block_src` :: `substr($timestamp_str, 16, 0) = ':00' unless defined $1;` (a CSV timestamp, quoted or not, with or without seconds)
-- `csv_block_for_file` :: `(length($1) == 13 ? 'ms' : undef)` (a 13-digit epoch is milliseconds)
+- `csv_block_for_file` :: `{ 13 => 'ms', 16 => 'us', 19 => 'ns' }->{ length $1 }` (an epoch's unit from its digit count)
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
 - `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
