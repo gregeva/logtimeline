@@ -501,6 +501,8 @@ mitigation note).
 - `format_sample_probes` :: `my $midnight = date_midnight($y, $mo, $dy);` (the detection sample)
 - `iso_timestamp_parts` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date-time forms, either separator: the bounds and the index read-back)
 - `adapt_to_command_line_options` :: `print_usage("Invalid $flag timestamp '$value'. Accepted forms:` (a bound in no accepted form, before any file is read)
+- `csv_block_src` :: `substr($timestamp_str, 16, 0) = ':00' unless defined $1;` (a CSV timestamp, quoted or not, with or without seconds)
+- `csv_block_for_file` :: `(length($1) == 13 ? 'ms' : undef)` (a 13-digit epoch is milliseconds)
 - `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
 - `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
 - `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
@@ -513,8 +515,9 @@ per-file note, the layout signal kept); `features/640-csv-unplaced-rows-silent.m
 D1 (a line without a parsable timestamp is not matched, silently; messages are
 run-level).
 
-**Status.** Being built by #611 (one application-wide timestamp acceptance
-pattern).
+**Status.** Established by #611 (one application-wide timestamp acceptance
+pattern). A clock time out of range (`25:61:00`) on a log line is read
+arithmetically on every arm and is not yet part of it.
 
 ---
 

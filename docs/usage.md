@@ -436,7 +436,7 @@ User-defined metrics allow extraction of arbitrary values from log lines using r
 | `-ucm, --udm-csv-message <cols>` | Name the CSV header columns whose values form the message (default: a fixed label) |
 | `-ucs, --udm-csv-separator <sep>` | Set the CSV field delimiter, overriding the one detected from the header (comma, semicolon or tab) |
 
-A CSV file read with `-udm` takes its column names from its header row. Its dates are read year, month, day, or year, day, month when the file's own rows are real dates only that way.
+A CSV file read with `-udm` takes its column names from its header row. Its timestamp is a date and time (`YYYY-MM-DD`, then a space or `T` and `HH:MM` with or without seconds and a fraction), optionally in double quotes as ltl's own CSV output writes it, or an epoch number: seconds, or milliseconds when it has 13 digits, unless `-du` names the unit. Its dates are read year, month, day, or year, day, month when the file's own rows are real dates only that way. A row whose date cannot exist is not matched; the run says how many such rows it met.
 
 **UDM spec format:** `name[:unit[:function]][:key|:/regex/]`
 

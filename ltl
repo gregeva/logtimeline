@@ -5465,12 +5465,12 @@ sub format_validate_scan_sub {
 # -udm metric's column (-1 when the header has none) and the -ucm columns,
 # free of ';' so it lists among the scan orders in compiled_orders.
 sub csv_block_shape {
-    my ($layout) = @_;
+    my ($layout, $epoch_unit) = @_;
     my $sep = $csv_separator eq ',' ? 'comma' : $csv_separator eq ';' ? 'semicolon' : $csv_separator eq "\t" ? 'tab'
             : 'x' . unpack('H*', $csv_separator);
-    my $shape = { layout => $layout, sep => $csv_separator, ts => $csv_timestamp_col,
+    my $shape = { layout => $layout, sep => $csv_separator, ts => $csv_timestamp_col, epoch_unit => $epoch_unit,
                   metrics => [ @csv_udm_col_indices ], msg => [ @csv_message_col_indices ] };
-    $shape->{sig} = "csv:$layout:sep=$sep:ts=$csv_timestamp_col:udm=" . (join('/', @csv_udm_col_indices) || '-')
+    $shape->{sig} = "csv:$layout" . (defined $epoch_unit ? "=$epoch_unit" : '') . ":sep=$sep:ts=$csv_timestamp_col:udm=" . (join('/', @csv_udm_col_indices) || '-')
                   . ':msg=' . (join('/', @csv_message_col_indices) || '-');
     return $shape;
 }
@@ -5487,10 +5487,11 @@ sub csv_block_src {
     my $sep = quotemeta $shape->{sep};
     my @s = ( "my \@f = split(/$sep/, \$_[0], -1);",
               "\$timestamp_str = \$f[$shape->{ts}];",
-              q{$timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;},
+              q{$timestamp_str =~ s/^[\s"]+|[\s"]+$//g if defined $timestamp_str;},
               $shape->{layout} eq 'csv_epoch'
                 ? q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d+(?:\.\d+)?$/;}
-                : q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;} );
+                : q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/;
+substr($timestamp_str, 16, 0) = ':00' unless defined $1;} );
     my @m = @{ $shape->{metrics} };
     for my $i (0 .. $#m) {
         push @s, $m[$i] < 0
@@ -5506,7 +5507,7 @@ sub csv_block_src {
              $format_registry_spec{csv}{_cls_src};
     my $spec = { %{ $format_registry_spec{csv} } };
     $spec->{time} = { %{ $spec->{time} }, layout => $shape->{layout} };
-    push @s, format_timestamp_src($spec, { %$format_registry_opts, epoch_unit => $duration_unit_override }), 'return 1;';
+    push @s, format_timestamp_src($spec, { %$format_registry_opts, epoch_unit => $shape->{epoch_unit} }), 'return 1;';
     return "sub {\n" . join("\n", @s) . "\n}";
 }
 
@@ -5586,7 +5587,8 @@ sub csv_validate_block {
             ? join(' ', map { ($_ < @f ? $f[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices)
             : 'CSV data';
         if ($message ne $want_message) { $verdict = 'wiring'; last; }
-        my $ts = ($f[$csv_timestamp_col] // '') =~ s/^\s+|\s+$//gr;
+        my $ts = ($f[$csv_timestamp_col] // '') =~ s/^[\s"]+|[\s"]+$//gr;
+        substr($ts, 16, 0) = ':00' if $ts =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?!:\d)/;
         if (substr($timestamp_str, 0, 19) ne substr($ts, 0, 19)) { $verdict = 'wiring'; last; }
         my $d = ($ts =~ /:\d{2}:\d{2}[.,](\d+)/ || $ts =~ /^\d+\.(\d+)$/) ? length $1 : 0;
         $digits = $d if $d > $digits;
@@ -5618,11 +5620,15 @@ sub csv_validate_block {
 # Returns the block.
 sub csv_block_for_file {
     my ($file, $line2_ts, $rows) = @_;
-    my $kind = (defined $line2_ts && $line2_ts =~ /^\d+(\.\d+)?$/) ? 'epoch' : 'iso';
+    $line2_ts =~ s/^[\s"]+|[\s"]+$//g if defined $line2_ts;
+    my $kind = (defined $line2_ts && $line2_ts =~ /^(\d+)(\.\d+)?$/) ? 'epoch' : 'iso';
+    # An epoch in milliseconds has 13 digits before any fraction (seconds have
+    # 10 until the year 2286); -du names any other unit.
+    my $epoch_unit = $kind ne 'epoch' ? undef : $duration_unit_override // (length($1) == 13 ? 'ms' : undef);
     my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');
     my ($verdict, $placed, $digits, $served);
     for my $layout (@order) {
-        my $shape = csv_block_shape($layout);
+        my $shape = csv_block_shape($layout, $epoch_unit);
         if ($csv_block_live && $csv_block_live->{sig} eq $shape->{sig}) {
             $shape = $csv_block_live;
             ($verdict, $placed, $digits) = csv_validate_block($shape->{block}, $rows);
@@ -5635,14 +5641,13 @@ sub csv_block_for_file {
     die "ltl: format registry: the CSV block for $file reads a sampled row's values from other columns than its header names (produced_by csv_block_src())\n"
         if $verdict eq 'wiring';
     $served //= $csv_block_live->{layout} eq $order[0] ? $csv_block_live
-              : (compile_csv_block(csv_block_shape($order[0]), []))[0];
+              : (compile_csv_block(csv_block_shape($order[0], $epoch_unit), []))[0];
     timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     if (my $sample = $format_detection_sample{$file}) {
         $sample->{formats}{csv}     = $placed // 0;
         $sample->{frac_digits}{csv} = $digits // 0;
-        $sample->{frac_unit}{csv}   = time_unit_canonical($duration_unit_override)
-            if $kind eq 'epoch' && defined $duration_unit_override;
+        $sample->{frac_unit}{csv}   = time_unit_canonical($epoch_unit) if defined $epoch_unit;
     }
     return $csv_block = $served->{block};
 }

@@ -40,6 +40,7 @@ neutralize_colour_env
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 scenario_register csv-input \
                   quoted-timestamp-csv \
+                  accepted-forms \
                   index-read-as-input \
                   unplaced-rows \
                   unbound-metric-note \
@@ -62,6 +63,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 pass=0
 fail=0
 
+CONTRACT_611='features/611-timestamp-acceptance.md C8 (CSV forms: quoted, without seconds, 13-digit epoch milliseconds), AC8; features/640-csv-unplaced-rows-silent.md D2 (these forms deferred to #611)'
 CONTRACT_640='features/640-csv-unplaced-rows-silent.md D1 (a CSV row without a parsable timestamp is read and not matched, silently; metric messages are run-level)'
 
 # assert_command: eval a command; PASS if exit code 0. Surfaces the
@@ -216,17 +218,52 @@ if scenario_wanted quoted-timestamp-csv; then
         produced_by 'the shape test of the block csv_block_src() generates, before a csv row counts as a match' \
         contract    "features/user-defined-metrics.md § CSV Columnar Input (Issue #328); $CONTRACT_640"
     assert_command \
-        command     "[[ \"\$(file_detection_value '$TMP_DIR/mix.out' stats.csv matched_lines)\" == 0 ]]" \
-        label       'the quoted-timestamp CSV shows nothing matched' \
-        asserts     'No row of a CSV whose timestamps cannot be placed is matched' \
-        produced_by 'the block csv_block_src() generates (its shape test) + note_unmatched_line() in ltl' \
-        contract    "$CONTRACT_640"
+        command     "[[ \"\$(file_detection_value '$TMP_DIR/mix.out' stats.csv matched_lines)\" == 3 ]]" \
+        label       'the quoted, seconds-less CSV ltl writes is read: its three rows match' \
+        asserts     'A timestamp in double quotes and without seconds is an accepted CSV form' \
+        produced_by 'the shape test and trim of the block csv_block_src() generates' \
+        contract    "$CONTRACT_611"
     assert_command \
         command     "! grep -aq 'stats.csv' '$TMP_DIR/mix.out.stderr' && ! grep -aqi 'timestamp' '$TMP_DIR/mix.out.stderr'" \
         label       'no per-row or per-file timestamp message, the file never named on stderr' \
         asserts     'A CSV row without a parsable timestamp is never reported per row or per file' \
         produced_by 'read_and_process_logs() in ltl (the csv row paths)' \
         contract    "$CONTRACT_640"
+fi
+
+# --- The accepted CSV forms place their rows where a plain twin does ---------
+# The reference rows at whole minutes, unquoted with seconds; the same rows
+# quoted, without seconds, quoted with T and no seconds, and as 13-digit epoch
+# milliseconds with no -du. Then ltl's own STATS CSV, at -tp m, s and ms,
+# read back: each row lands in the minute it names.
+if scenario_wanted accepted-forms; then
+    current_scenario=accepted-forms
+    printf 'timestamp,latency\n2026-06-01 10:00:00,12\n2026-06-01 10:00:00,18\n2026-06-01 10:01:00,34\n' > "$TMP_DIR/forms-ref.csv"
+    printf 'timestamp,latency\n"2026-06-01 10:00:00",12\n"2026-06-01 10:00:00",18\n"2026-06-01 10:01:00",34\n' > "$TMP_DIR/forms-quoted.csv"
+    printf 'timestamp,latency\n2026-06-01 10:00,12\n2026-06-01 10:00,18\n2026-06-01 10:01,34\n' > "$TMP_DIR/forms-nosec.csv"
+    printf 'timestamp,latency\n"2026-06-01T10:00",12\n"2026-06-01T10:00",18\n"2026-06-01T10:01",34\n' > "$TMP_DIR/forms-quoted-t-nosec.csv"
+    printf 'timestamp,latency\n1780308000000,12\n1780308000000,18\n1780308060000,34\n' > "$TMP_DIR/forms-epoch-ms.csv"
+    want='2026-06-01 10:00|2|15;2026-06-01 10:01|1|34;'
+    for form in ref quoted nosec quoted-t-nosec epoch-ms; do
+        run_o "forms-$form" -bs 1 -udm latency "$TMP_DIR/forms-$form.csv"
+        assert_command \
+            command     "[[ \"\$(stats_rows '$TMP_DIR/forms-$form' latency_occurrences latency_mean)\" == '$want' ]]" \
+            label       "the $form form places its rows where the plain twin does" \
+            asserts     'Each accepted CSV timestamp form names the same instants: quoted, without seconds (second 0), T, 13-digit epoch milliseconds read as milliseconds with no -du' \
+            produced_by 'csv_block_src() and csv_block_for_file() in ltl (the trim, the seconds, the epoch unit)' \
+            contract    "$CONTRACT_611"
+    done
+    for tp in m s ms; do
+        run_o "forms-stats-$tp" -bs 1 -tp "$tp" -udm latency "$TMP_DIR/forms-ref.csv"
+        stats=$(find "$TMP_DIR/forms-stats-$tp" -name '*-LTL-STATS-*.csv' -print -quit)
+        run_o "forms-readback-$tp" -bs 1 -udm latency_mean "${stats:-$TMP_DIR/missing-stats-$tp.csv}"
+        assert_command \
+            command     "[[ \"\$(stats_rows '$TMP_DIR/forms-readback-$tp' latency_mean_occurrences latency_mean_mean)\" == '2026-06-01 10:00|1|15;2026-06-01 10:01|1|34;' ]]" \
+            label       "ltl's own STATS CSV written at -tp $tp is read back into the minutes it names" \
+            asserts     'The quoted timestamp ltl writes, at every output precision, is an accepted CSV form' \
+            produced_by 'csv_block_src() in ltl (the trim and the seconds)' \
+            contract    "$CONTRACT_611"
+    done
 fi
 
 # --- ltl's own index read back as input: the reference case -----------------

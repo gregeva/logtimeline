@@ -40,6 +40,18 @@ merged into this issue.
   (94), `validate-filter-summary.sh` (146), `validate-format-detection.sh`
   (458), `validate-doc-examples.sh` (51), `validate-udm-specs.sh` (250) and
   `validate-help-content.sh` (96) pass.
+- Drop 4: the CSV forms (C8). The CSV block's trim strips surrounding double
+  quotes, a value without seconds reads as second 0, and an epoch file whose
+  line-2 integer part has 13 digits is read in milliseconds when `-du` is not
+  given; the shape signature carries the epoch unit, so a seconds block is
+  never reused for a milliseconds file. Measured on three-row CSVs: quoted,
+  seconds-less, quoted `T` seconds-less and 13-digit epoch files place their
+  rows at the instants an unquoted full-second twin does; ltl's own STATS CSV
+  at `-tp m`, `s` and `ms`, read back, places its six rows over the range it
+  was written from, where the base code matched none. The `quoted-timestamp-csv`
+  scenario of `validate-csv-input.sh` asserted the consequence #640 D2
+  accepted until this issue (a quoted, seconds-less CSV matches nothing); it
+  now asserts its three rows match.
 
 ## 1. The motivating consumer
 
@@ -282,10 +294,11 @@ fixture the detection harness already stages.
       impossible date, exits non-zero before reading any file, with a usage
       error naming the accepted forms; no Perl module text on stderr. *Same
       scenario.*
-- [ ] **AC8** A CSV with quoted timestamps, one without seconds, ltl's own
+- [x] **AC8** A CSV with quoted timestamps, one without seconds, ltl's own
       STATS CSV at each of `-tp m`, `s`, `ms`, and a CSV of 13-digit epoch
       milliseconds each place their rows at the instants an unquoted,
       full-second (or epoch-seconds) twin of the same file places them.
+      *The `accepted-forms` scenario of `validate-csv-input.sh`.*
 - [ ] **AC9** The `single-day-access-log-standard` benchmark after the change
       is within noise of `611-before`.
 
