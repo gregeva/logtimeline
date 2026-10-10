@@ -458,6 +458,69 @@ file's precision evidence (`features/615-csv-registry-entry.md` D16, D17).
 
 ---
 
+## Timestamp acceptance: shape, then date, with one outcome per place
+
+**Definition.** A timestamp is accepted in two steps wherever it is read. Its
+**shape** is one of the forms the place accepts (a format's pattern, a CSV
+file's kind, the documented forms of an option value); its **date** exists,
+resolved once per distinct date by the one resolver on the date cache's miss,
+which returns undef instead of dying. Nothing else calls the time library on
+user input. A shape not accepted is a line not matched, silently. A date that
+cannot exist has one outcome per place:
+
+1. **A line (scanned or CSV).** Under an ISO layout, a component out of range
+   (month > 12, day > 31) is first the layout signal of the date-layout
+   variant group, and a flip re-scans the line. Otherwise the line is not
+   matched: it contributes nothing and the timestamp memo does not move. It
+   is counted per file and format, and the user is told once per run after
+   the read, per format, never per line or per file.
+2. **An option value (`-st`, `-et`).** A usage error naming the accepted
+   forms, before any file is read.
+3. **An index value read back.** Skipped.
+
+An ISO date-time takes either separator (space or `T`) and a fraction after
+`.` or `,` of up to nine digits, on every place that reads one.
+
+**Intended uses.** Any new place that reads a timestamp: a format layout, a
+user-declared format (#387), an option value, a file ltl reads back. It
+takes its date from the resolver and its outcome from the list above, never
+a `timegm`, `strptime` or message of its own.
+
+**Reasoning.** Before the pattern, each place did something of its own: a
+scanned ISO line with month 13 was counted at the previous line's time with a
+note per file, 30 February ended the run from inside the generated scan sub,
+the Apache and asctime layouts and CSV rows ended it on any impossible day,
+and `-st` read `T` as garbage and dropped the time of day. A guard alone
+would trade the loud failure for a quiet wrong answer; the count and the note
+are part of the pattern (`features/log-format-registry.md`, the #385
+mitigation note).
+
+**Consumption sites.**
+- `date_midnight` :: `return eval { timegm( 0, 0, 0, $day, $month - 1, $year ) };` (the one date resolver)
+- `timestamp_date_cache_add` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date cache's miss)
+- `format_sample_probes` :: `my $midnight = date_midnight($y, $mo, $dy);` (the detection sample)
+- `iso_timestamp_parts` :: `my $midnight = date_midnight($year, $month, $day) // return undef;` (the date-time forms, either separator: the bounds and the index read-back)
+- `adapt_to_command_line_options` :: `print_usage("Invalid $flag timestamp '$value'. Accepted forms:` (a bound in no accepted form, before any file is read)
+- `csv_block_src` :: `substr($timestamp_str, 16, 0) = ':00' unless defined $1;` (a CSV timestamp, quoted or not, with or without seconds)
+- `csv_block_for_file` :: `(length($1) == 13 ? 'ms' : undef)` (a 13-digit epoch is milliseconds)
+- `format_timestamp_src` :: `if (defined \$midnight) {` (every scanned layout and the CSV block: the date step)
+- `format_timestamp_src` :: `\$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;` (not matched, counted)
+- `format_probe_signal` :: `return -1 if $kind eq 'impossible_date'` (the layout signal; a held line while the first decision is pending)
+- `csv_validate_block` :: `if (!defined $ok) { $verdict = 'date'; last; }` (an impossible sampled row is the day-first retry's date failure)
+- `defer_timestamp_impossible_notes` :: `" line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n"` (once per run, per format)
+
+**Owning record.** `features/611-timestamp-acceptance.md` § 5;
+`features/log-format-registry.md` D52 as amended 2026-09-30 (not matched, no
+per-file note, the layout signal kept); `features/640-csv-unplaced-rows-silent.md`
+D1 (a line without a parsable timestamp is not matched, silently; messages are
+run-level).
+
+**Status.** Established by #611 (one application-wide timestamp acceptance
+pattern). A clock time out of range (`25:61:00`) on a log line is read
+arithmetically on every arm and is not yet part of it.
+
+---
+
 ## Observation counts and gated means
 
 **Definition.** Every accumulator carries its observation count beside its

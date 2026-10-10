@@ -356,6 +356,8 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
 # --- unmatched: a CSV row whose timestamp cannot be placed, beside the CSV metadata line (D22) ---
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 scenario_register csv-unparseable-row \
+                  impossible-date \
+                  time-window-forms \
                   summary-table-unchanged
 scenario_parse_args "$@"
 
@@ -397,6 +399,103 @@ cause_scenario combined-causes "$FIXTURES/http-status-families.txt" \
     -e catalog -ef
 
 # --- the run summary table is unchanged: no accounting row is added ---
+fi
+
+# --- unmatched: a line whose date cannot exist, on every per-line arm ---
+# The scanned ISO arm (month 13 and 30 February), the Apache common log date
+# (31 June), the asctime date (30 February) in one run, then a CSV row dated
+# 30 February. Each such line is read and not matched; the run continues and
+# says so once per format after the read.
+if scenario_wanted impossible-date; then
+current_scenario="impossible-date"
+if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    IMPOSSIBLE_CONTRACT='features/611-timestamp-acceptance.md C3, C4, C5 (a line whose date cannot exist is not matched, counted, and noted once per run per format); AC1, AC2, AC4'
+    out=$(run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt")
+    assert_line "$out" pattern '^lines_unmatched_impossible_date: 4$' \
+        asserts 'Month 13 and 30 February on the scanned ISO arm, 31 June on the Apache date and 30 February on the asctime date: four lines not matched because their date cannot exist, and the run continues' \
+        produced_by 'the impossible-date branch format_timestamp_src() emits into each scan block; timestamp_impossible_total() in ltl' \
+        contract "$IMPOSSIBLE_CONTRACT"
+    assert_line "$out" pattern '^lines_unmatched: 4$' \
+        asserts 'The four lines are unmatched, nothing else is' \
+        produced_by 'note_unmatched_line() in ltl, for a line the scan sub returns no entry for' \
+        contract "$IMPOSSIBLE_CONTRACT"
+    assert_line "$out" pattern '^lines_included: 7$' \
+        asserts 'The seven valid lines are included and none is placed at another line time: an impossible line contributes nothing' \
+        produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
+    assert_funnel_identities "$out"
+    assert_line "$out.stderr" pattern "^Note: 2 line\\(s\\) were not matched because their date cannot exist under the thingworx_standard format's date layout\$" \
+        asserts 'One note per format after the read, with the count and no file name, line number or value' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract "$IMPOSSIBLE_CONTRACT"
+    assert_line "$out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the access_common_duration_thread_session format's date layout\$" \
+        asserts 'The Apache common log date has the same outcome and note as the ISO arm' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract "$IMPOSSIBLE_CONTRACT"
+    assert_line "$out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the apache_mod_jk format's date layout\$" \
+        asserts 'The asctime date has the same outcome and note as the ISO arm' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract "$IMPOSSIBLE_CONTRACT"
+    assert_absent "$out.stderr" pattern 'line [0-9]+:|previous line' \
+        asserts 'No note per line or per file, and no line is kept at the previous line time' \
+        produced_by 'format_probe_signal() in ltl' \
+        contract 'features/log-format-registry.md D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C5'
+    csv_out=$(current_scenario=impossible-date-csv run_sections "$FIXTURES/impossible-date-csv.txt" -udm value::max)
+    assert_line "$csv_out" pattern '^lines_unmatched_impossible_date: 1$' \
+        asserts 'A CSV row dated 30 February under the order its file is read in is not matched, and the run continues' \
+        produced_by 'the impossible-date branch format_timestamp_src() emits into the CSV block csv_block_src() generates' \
+        contract "$IMPOSSIBLE_CONTRACT; supersedes features/615-csv-registry-entry.md D7"
+    assert_line "$csv_out" pattern '^lines_included: 2$' \
+        asserts 'The two valid rows are included' \
+        produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
+    assert_funnel_identities "$csv_out"
+    assert_line "$csv_out.stderr" pattern "^Note: 1 line\\(s\\) were not matched because their date cannot exist under the csv format's date layout\$" \
+        asserts 'A CSV row has the same outcome and note as a scanned line' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract "$IMPOSSIBLE_CONTRACT"
+fi
+fi
+
+# --- time window: the accepted forms of a bound, and a bound in none of them ---
+# The same 360 lines precede 12:00 on the fixture day whichever separator the
+# bound is written with; a value in no accepted form, or naming a date that
+# cannot exist, is refused before any file is read.
+if scenario_wanted time-window-forms; then
+current_scenario="time-window-forms"
+if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    FORMS_CONTRACT='features/611-timestamp-acceptance.md C6, C7 (one parser for -st and -et, either separator, a usage error naming the forms); AC6, AC7'
+    for bound in "2025-05-07T12:00:00" "2025-05-07T12:00" "2025-05-07T11:59:59.999"; do
+        out=$(current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound")
+        assert_line "$out" pattern '^excluded_time_window: 360$' \
+            asserts "-st $bound drops the same 360 lines as the space form: the T separator, a bound without seconds and a fraction are read whole" \
+            produced_by 'iso_timestamp_parts() through the -st/-et settlement in adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+        assert_funnel_identities "$out"
+    done
+    for bad in "-st:2025-13-01 00:00:00" "-et:2025-02-30" "-st:yesterday" "-et:25:00"; do
+        flag=${bad%%:*}; value=${bad#*:}
+        err="$TMP_DIR/time-window-forms-bad.stderr"
+        set +e
+        "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 "$flag" "$value" "$FIXTURES/tomcat-access-duration-spread.txt" > "$TMP_DIR/time-window-forms-bad.out" 2> "$err"
+        ec=$?
+        set -e
+        assert_equal "$flag '$value' exits 1" "$ec" 1 \
+            asserts "A $flag value in no accepted form, or naming a date or time that cannot exist, is a usage error" \
+            produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
+            contract "$FORMS_CONTRACT"
+        assert_line "$err" pattern "^.*Error: Invalid $flag timestamp '$value'\\. Accepted forms: YYYY-MM-DD, optionally followed by a space or T and HH:MM\\[:SS\\[\\.fraction\\]\\] \\(an absolute bound\\), or HH:MM\\[:SS\\[\\.fraction\\]\\] alone" \
+            asserts 'The usage error names the value and the accepted forms' \
+            produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement)' \
+            contract "$FORMS_CONTRACT"
+        assert_absent "$err" pattern 'Time/Piece|strptime| at .* line [0-9]+' \
+            asserts 'No Perl module text reaches the user' \
+            produced_by 'adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+        assert_absent "$TMP_DIR/time-window-forms-bad.out" pattern 'LINES READ' \
+            asserts 'Nothing is read: the bound is refused before the first file' \
+            produced_by 'adapt_to_command_line_options() in ltl' \
+            contract "$FORMS_CONTRACT"
+    done
+fi
 fi
 
 if scenario_wanted summary-table-unchanged; then

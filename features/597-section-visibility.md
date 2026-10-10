@@ -671,6 +671,11 @@ separately from standard output (D12).
       run without `-V` (D6, D14).
 - [x] A date/time option the tool cannot handle prints its warning on standard
       error, and standard output passes the accounting check below (D12).
+      *Restated by #611 (one application-wide timestamp acceptance pattern,
+      `features/611-timestamp-acceptance.md` C6): such a value is now a usage
+      error raised before any file is read, so the run prints no rows to
+      account; the `datetime-warning-stderr` scenario asserts the message is
+      on standard error and not on standard output.*
 - [x] On every run above, total rows minus `-V` rows minus reported section rows,
       separators and declared fixed spacing equals zero (D14).
 - [x] `-hi tl,hg` and `-hi tl -hi hg` hide the same sections, and every alias

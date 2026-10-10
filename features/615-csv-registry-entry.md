@@ -359,7 +359,10 @@ this document is numbered Dxx.
   time). #611 (the timestamp acceptance pattern) owns any change, on the one
   generated text. *Locked by the architect 2026-09-28; the clause "under the
   order the file is read with" is the architect's amendment of 2026-09-28
-  (D15).*
+  (D15).* **Superseded by #611** (one application-wide timestamp acceptance
+  pattern, `features/611-timestamp-acceptance.md` C3): such a row is not
+  matched, is counted, and is noted once per run; the day-first retry of D9
+  still reads the block's undef return on a sampled row as a date failure.
 - **D8 — A row with an unacceptable timestamp is not matched, and nothing
   further happens to it.** A row whose timestamp is neither epoch nor ISO is
   read and not matched: it is skipped before the metric capture and the

@@ -512,19 +512,22 @@ if scenario_wanted progress-rendered; then
     echo ""
 fi
 
-# The date/time warning is a notice: it prints on standard error, and standard
-# output still accounts for every row (D12).
+# A date/time option the tool cannot read is refused with a usage error: the
+# message is on standard error, never on standard output (D12; the value is
+# refused before any file is read, features/611-timestamp-acceptance.md C6).
 if scenario_wanted datetime-warning-stderr; then
     current_scenario=datetime-warning-stderr
-    if run_ltl datetime --disable-progress -bs 120 -n 2 -st 12h -V section-layout "$SPREAD_LOG"; then
-        assert_accounting datetime
-        assert_command \
-            command     "grep -q 'unhandled date/time format' $(printf '%q' "$TMP_DIR/datetime/err") && ! grep -q 'unhandled date/time format' $(printf '%q' "$(capture datetime)")" \
-            label       'the unhandled date/time warning is on standard error, not standard output' \
-            asserts     'A -st value in no handled date/time form prints its warning on standard error and nothing on standard output' \
-            produced_by 'calculate_start_end_filter_timestamps() through defer_notice() in ltl' \
-            contract    'features/597-section-visibility.md § D12'
-    fi
+    mkdir -p "$TMP_DIR/datetime"
+    set +e
+    ( cd "$TMP_DIR/datetime" && "$LTL" -ni --terminal-width "$WIDTH" --disable-progress -bs 120 -n 2 -st 12h -V section-layout "$SPREAD_LOG" > out 2> err )
+    datetime_rc=$?
+    set -e
+    assert_command \
+        command     "[[ $datetime_rc -eq 1 ]] && grep -q \"Invalid -st timestamp '12h'\" $(printf '%q' "$TMP_DIR/datetime/err") && ! grep -q 'Invalid -st' $(printf '%q' "$TMP_DIR/datetime/out")" \
+        label       'the date/time option the tool cannot read is refused on standard error, not standard output' \
+        asserts     'A -st value in no accepted date/time form is a usage error printed on standard error and nothing of it on standard output' \
+        produced_by 'adapt_to_command_line_options() in ltl (the -st/-et settlement, print_usage())' \
+        contract    'features/597-section-visibility.md § D12; features/611-timestamp-acceptance.md C6'
     echo ""
 fi
 

@@ -35,7 +35,6 @@
 use strict;
 use warnings;
 use POSIX qw(strftime floor);
-use Time::Piece;
 use Time::Local qw(timegm);
 use Term::ReadKey;
 use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
@@ -569,11 +568,8 @@ my $legend_length = 0;
 my $timestamp_length = 0;
 my $filter_range_start = "";
 my $filter_range_end = "";
-my $filter_range_start_epoch = 0;
-my $filter_range_end_epoch = 0;
 my %filter_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
 my %result_range_epoch = ( 'start' => 0, 'end' => 2521843200 );
-my %filter_range;
 # Seconds-of-day for any -st/-et bound supplied as a bare time (no date).
 # A time-only bound is a time-of-day window applied to every day, rather than
 # an absolute instant on a single date — so "noon to 1pm" means the same
@@ -870,7 +866,7 @@ my %format_unit_ambiguity_warned;      # file => 1 once it has been recorded as 
 my @format_unit_ambiguity;             # [ entry, consequence, override, [ files ] ] per entry a file fell to by default, in the order met
 my @duration_unit_line_files;          # [ file, slug ] per file bound to a format declaring duration_unit 'line' while -du was given
 my $format_current_file = '';          # file being read (steady-loop probe signals, -V)
-my $format_current_line_ref = \0;      # ref to the read loop's line counter (diagnostics)
+my %timestamp_impossible_lines;        # file => { slug => lines not matched because their date cannot exist }
 
 # Time-unit ladder: the one definition of every time unit the tool reads,
 # validates, converts or names. Each step carries its canonical token, the
@@ -4195,6 +4191,16 @@ sub format_registry_specs {
     );
 }
 
+# The one date resolver of the timestamp acceptance pattern: the midnight
+# epoch of a year, month (1 to 12) and day, or undef when a part is missing
+# (an unknown month name) or the date cannot exist (month 13, 30 February),
+# so the time library never ends the run on a value read from input.
+sub date_midnight {
+    my ($year, $month, $day) = @_;
+    return undef unless defined $year && defined $month && defined $day;
+    return eval { timegm( 0, 0, 0, $day, $month - 1, $year ) };
+}
+
 # Timestamp date cache: one midnight epoch per distinct DATE of the
 # post-chop, post-fractional-strip timestamp string, so timegm() runs once
 # per day and the time of day is added arithmetically — exact because
@@ -4204,8 +4210,12 @@ sub format_registry_specs {
 # evicts the oldest-stamped entries. A date seen again after eviction is
 # simply re-inserted with a fresh stamp. All of this lives on the cold
 # path (a new date), never per line.
+# Given the date's year, month (1 to 12) and day, it caches and returns the
+# midnight epoch from date_midnight(), or returns undef, caching nothing,
+# for a date that cannot exist.
 sub timestamp_date_cache_add {
-    my ($date, $midnight) = @_;
+    my ($date, $year, $month, $day) = @_;
+    my $midnight = date_midnight($year, $month, $day) // return undef;
     $timestamp_date_cache{$date} = $midnight;
     $timestamp_date_cache_added{$date} = ++$timestamp_date_cache_stamp;
     if (keys %timestamp_date_cache > TIMESTAMP_DATE_CACHE_MAX) {
@@ -4324,8 +4334,9 @@ sub format_sample_probes {
             my $r = $res{$k};
             $r->{n}++;
             if ($mo > 12 || $dy > 31) { $r->{oor}++; next }
-            my $epoch = eval { timegm($sec, $mi, $h, $dy, $mo - 1, $y) };
-            if (!defined $epoch) { $r->{oor}++; next }
+            my $midnight = date_midnight($y, $mo, $dy);
+            if (!defined $midnight) { $r->{oor}++; next }
+            my $epoch = $midnight + $h * 3600 + $mi * 60 + $sec;
             $r->{viol}++ if defined $prev{$k} && $epoch < $prev{$k};
             $prev{$k} = $epoch;
             $first{$k} //= $epoch;
@@ -4483,9 +4494,9 @@ sub select_format_variants {
 # monotonicity violation applies the graded penalty. The group then
 # re-selects; when the best live member changes, it takes the slot (the
 # caller re-scans the line under the new sub) and the flip is counted.
-# An impossible date with no live alternative is reported once per file
-# on stderr (D52/#385) — an intentional diagnostic, never an
-# ` at ... line` suffix. Returns 1 when the occupant changed.
+# Returns 1 when the occupant changed, -1 for an impossible date while the
+# file's first decision is pending (the caller holds the line for the
+# replay to judge), 0 otherwise.
 sub format_probe_signal {
     my ($entry, $kind, $value) = @_;
     return 0 unless $entry;
@@ -4539,10 +4550,7 @@ sub format_probe_signal {
     # While the file's first decision is pending (fallback-window prefill,
     # before the held lines have been scored) the signal only counts: the
     # selection that follows sees the same evidence and decides.
-    if ($kind eq 'impossible_date' && !$flipped && (defined $log_format_pin || %{ $ev->{groups} }) && !$st->{impossible_date_reported}++) {
-        defer_notice( "Note: $format_current_file line $$format_current_line_ref: timestamp '$value' has an impossible date component under the "
-            . $entry->[FR_SLUG] . " format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\n" );
-    }
+    return -1 if $kind eq 'impossible_date' && !$flipped && !defined $log_format_pin && !%{ $ev->{groups} };
     return $flipped;
 }
 
@@ -4630,6 +4638,38 @@ sub defer_format_unit_notes {
         defer_notice( "Note: -du $duration_unit_override is not applied to " . join(', ', map { $_->[0] } @duration_unit_line_files)
             . ": " . (@duration_unit_line_files > 1 ? 'their format names' : 'its format names') . " the duration unit on each line ("
             . join(', ', sort keys %slugs) . ")\n" );
+    }
+    return;
+}
+
+# Lines not matched because their date cannot exist (the timestamp acceptance
+# pattern): one file's count, or the run's when no file is named.
+sub timestamp_impossible_total {
+    my ($file) = @_;
+    my $total = 0;
+    for my $f (defined $file ? ($file) : keys %timestamp_impossible_lines) {
+        $total += $_ for values %{ $timestamp_impossible_lines{$f} || {} };
+    }
+    return $total;
+}
+
+# One note per format whose lines were not matched because their date cannot
+# exist, printed once per run after the read with the count, never per line
+# or per file. A format whose variant group has another member names the
+# other member's -lf, since a day and month read the wrong way round is how
+# such lines arise.
+sub defer_timestamp_impossible_notes {
+    my %by_slug;
+    for my $file (keys %timestamp_impossible_lines) {
+        $by_slug{$_} += $timestamp_impossible_lines{$file}{$_} for keys %{ $timestamp_impossible_lines{$file} };
+    }
+    for my $slug (sort keys %by_slug) {
+        my ($entry) = grep { $_->[FR_SLUG] eq $slug } values %format_registry_entry;
+        my $g = $entry && defined $entry->[FR_GROUP] ? $format_variant_groups{ $entry->[FR_GROUP] } : undef;
+        my @others = $g ? grep { $_->[FR_SLUG] ne $slug } map { $format_registry_entry{$_} } @{ $g->{members} } : ();
+        my $hint = @others ? ' - if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) : '';
+        defer_notice( "Note: " . value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
+            . " line(s) were not matched because their date cannot exist under the $slug format's date layout$hint\n" );
     }
     return;
 }
@@ -5151,8 +5191,8 @@ sub format_entry_block_src {
 # Returns the source pieces in order: the fraction handling, then the memo
 # fronting the layout parse.
 # Two layouts belong to the CSV block (csv_block_src). csv_ddmm is the csv
-# layout read day first (yyyy-dd-MM): the day-first offsets, and the
-# unguarded csv parse, which croaks on a date that cannot exist. csv_epoch
+# layout read day first (yyyy-dd-MM): the day-first offsets, and no layout
+# signal, the order being settled per file before line 2. csv_epoch
 # is a number of seconds, or of the -du unit given as $opts->{epoch_unit},
 # folded in as a constant; it carries no memo, since a hit would save only
 # the number's own conversion. Its fraction follows the read gate: digits
@@ -5202,43 +5242,58 @@ substr($timestamp_str, 19) = '';};
     # iso_ms_ddmm and csv_ddmm (yyyy-dd-MM, #385): the day and month reads
     # swap offsets.
     my ($day_off, $month_off) = ($layout eq 'iso_ms_ddmm' || $layout eq 'csv_ddmm') ? (5, 8) : (8, 5);
-    my $compute = ($layout eq 'asctime')
-        ? q{do { my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, timegm( 0, 0, 0, substr($timestamp_str, 4, 2), $format_month_map{ substr($timestamp_str, 0, 3) } - 1, substr($timestamp_str, 16, 4) ) ); $midnight + substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2) }}
-        : ($layout eq 'apache_clf')
-        ? q{do { my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), timegm( 0, 0, 0, $day, $format_month_map{$month_str} - 1, $year ) ) }; $midnight + substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2) }}
-        : qq{do { my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), timegm( 0, 0, 0, substr(\$timestamp_str, $day_off, 2), substr(\$timestamp_str, $month_off, 2) - 1, substr(\$timestamp_str, 0, 4) ) ); \$midnight + substr(\$timestamp_str, 11, 2) * 3600 + substr(\$timestamp_str, 14, 2) * 60 + substr(\$timestamp_str, 17, 2) }};
+    # Each layout gives the date's midnight (from %timestamp_date_cache, or
+    # the date resolver on its miss: one timegm() per distinct day, undef for
+    # a date that cannot exist) and the time of day as arithmetic.
+    my ($midnight, $time_of_day);
+    if ($layout eq 'asctime') {
+        $midnight    = q{my $date = substr($timestamp_str, 0, 7) . substr($timestamp_str, 16, 4); my $midnight = $timestamp_date_cache{$date} // timestamp_date_cache_add( $date, substr($timestamp_str, 16, 4), $format_month_map{ substr($timestamp_str, 0, 3) }, substr($timestamp_str, 4, 2) );};
+        $time_of_day = q{substr($timestamp_str, 7, 2) * 3600 + substr($timestamp_str, 10, 2) * 60 + substr($timestamp_str, 13, 2)};
+    } elsif ($layout eq 'apache_clf') {
+        $midnight    = q{my $colon = index($timestamp_str, ':'); my $midnight = $timestamp_date_cache{substr($timestamp_str, 0, $colon)} // do { my ($day, $month_str, $year) = $timestamp_str =~ m/(\d{2})\/([A-Za-z]+)\/(\d{4})/; timestamp_date_cache_add( substr($timestamp_str, 0, $colon), $year, $format_month_map{ $month_str // '' }, $day ) };};
+        $time_of_day = q{substr($timestamp_str, $colon + 1, 2) * 3600 + substr($timestamp_str, $colon + 4, 2) * 60 + substr($timestamp_str, $colon + 7, 2)};
+    } else {
+        $midnight    = qq{my \$midnight = \$timestamp_date_cache{substr(\$timestamp_str, 0, 10)} // timestamp_date_cache_add( substr(\$timestamp_str, 0, 10), substr(\$timestamp_str, 0, 4), substr(\$timestamp_str, $month_off, 2), substr(\$timestamp_str, $day_off, 2) );};
+        $time_of_day = q{substr($timestamp_str, 11, 2) * 3600 + substr($timestamp_str, 14, 2) * 60 + substr($timestamp_str, 17, 2)};
+    }
     # The memo-miss branch runs once per change of timestamp string between
     # consecutive lines — never once per line on dense streams — so it is
-    # where the steady-loop content probes live
-    # (D52/I2): for ISO layouts, an impossible date component under this
-    # layout (month > 12, day > 31 — the timegm() guard, #385) and a
-    # timestamp earlier than the previous distinct one are reported to
-    # format_probe_signal(), which feeds the one selection mechanism (N5);
-    # when the signal flips the group's occupant, the line is re-scanned
-    # under the new sub. The impossible-date line is carried at the previous
-    # distinct epoch and is memoised but never cached.
-    # The monotonicity probe feeds variant selection, which exists only for
-    # variant-group members; a group of one gets the impossible-date guard
-    # alone (sparse-timestamp streams such as GC logs miss the cache on
-    # nearly every line, so every op here is effectively per line there).
+    # where the steady-loop content probes live (D52/I2). A timestamp earlier
+    # than the previous distinct one is reported to format_probe_signal(),
+    # which feeds the one selection mechanism (N5); the monotonicity probe
+    # feeds variant selection, which exists only for variant-group members.
+    # When the signal flips the group's occupant, the line is re-scanned under
+    # the new sub.
     my $mono_src = defined $spec->{variant_group}
-        ? qq{    return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
+        ? qq{        return \$format_scan_sub->(\$_[0]) if defined \$prev && \$timestamp < \$prev && format_probe_signal(ENTRY_PLACEHOLDER, 'monotonicity', \$timestamp_str);\n}
         : '';
-    my $prev_src = defined $spec->{variant_group} ? "    my \$prev = \$format_last_ts_epoch;\n" : '';
-    my $miss_src = $layout =~ /^iso_/
-        ? qq{if (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) {
-    \$timestamp = \$format_last_ts_epoch // 0;
-    \$format_last_ts_str = \$timestamp_str;
-    return \$format_scan_sub->(\$_[0]) if format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str);
-} else {
-$prev_src    \$timestamp = \$format_last_ts_epoch = $compute;
-    \$format_last_ts_str = \$timestamp_str;
-$mono_src}}
-        : qq{\$timestamp = \$format_last_ts_epoch = $compute;
-    \$format_last_ts_str = \$timestamp_str;};
+    my $prev_src = defined $spec->{variant_group} ? "        my \$prev = \$format_last_ts_epoch;\n" : '';
+    # A date that cannot exist (the timestamp acceptance pattern): under an
+    # ISO layout, a component out of range (month > 12, day > 31) is first
+    # the layout signal (D52 (a)), and a flip re-scans the line. Otherwise
+    # the line is not matched: nothing is recorded, the memo does not move,
+    # and the line is counted for the run's note. While the file's first
+    # decision is pending (the detection-window prefill), a variant-group
+    # member holds the line as matched, so the replay under the decided
+    # occupant judges it.
+    my $slug = $spec->{slug} // $spec->{name};
+    my $impossible_src = '';
+    if ($layout =~ /^iso_/) {
+        $impossible_src .= qq{        my \$signal = (substr(\$timestamp_str, $month_off, 2) > 12 || substr(\$timestamp_str, $day_off, 2) > 31) ? format_probe_signal(ENTRY_PLACEHOLDER, 'impossible_date', \$timestamp_str) : 0;\n}
+                         . qq{        return \$format_scan_sub->(\$_[0]) if \$signal > 0;\n};
+        $impossible_src .= qq{        return ENTRY_PLACEHOLDER if \$signal < 0;\n} if defined $spec->{variant_group};
+    }
+    $impossible_src .= qq{        \$timestamp_impossible_lines{\$format_current_file}{'$slug'}++ unless \$format_scan_validating;\n}
+                     . qq{        return undef;\n};
     push @src, qq{if (\$timestamp_str eq \$format_last_ts_str) { \$timestamp = \$format_last_ts_epoch; }
 else {
-    $miss_src
+    $midnight
+    if (defined \$midnight) {
+$prev_src        \$timestamp = \$format_last_ts_epoch = \$midnight + $time_of_day;
+        \$format_last_ts_str = \$timestamp_str;
+$mono_src    }
+    else {
+$impossible_src    }
 }};
     return @src;
 }
@@ -5410,12 +5465,12 @@ sub format_validate_scan_sub {
 # -udm metric's column (-1 when the header has none) and the -ucm columns,
 # free of ';' so it lists among the scan orders in compiled_orders.
 sub csv_block_shape {
-    my ($layout) = @_;
+    my ($layout, $epoch_unit) = @_;
     my $sep = $csv_separator eq ',' ? 'comma' : $csv_separator eq ';' ? 'semicolon' : $csv_separator eq "\t" ? 'tab'
             : 'x' . unpack('H*', $csv_separator);
-    my $shape = { layout => $layout, sep => $csv_separator, ts => $csv_timestamp_col,
+    my $shape = { layout => $layout, sep => $csv_separator, ts => $csv_timestamp_col, epoch_unit => $epoch_unit,
                   metrics => [ @csv_udm_col_indices ], msg => [ @csv_message_col_indices ] };
-    $shape->{sig} = "csv:$layout:sep=$sep:ts=$csv_timestamp_col:udm=" . (join('/', @csv_udm_col_indices) || '-')
+    $shape->{sig} = "csv:$layout" . (defined $epoch_unit ? "=$epoch_unit" : '') . ":sep=$sep:ts=$csv_timestamp_col:udm=" . (join('/', @csv_udm_col_indices) || '-')
                   . ':msg=' . (join('/', @csv_message_col_indices) || '-');
     return $shape;
 }
@@ -5432,10 +5487,11 @@ sub csv_block_src {
     my $sep = quotemeta $shape->{sep};
     my @s = ( "my \@f = split(/$sep/, \$_[0], -1);",
               "\$timestamp_str = \$f[$shape->{ts}];",
-              q{$timestamp_str =~ s/^\s+|\s+$//g if defined $timestamp_str;},
+              q{$timestamp_str =~ s/^[\s"]+|[\s"]+$//g if defined $timestamp_str;},
               $shape->{layout} eq 'csv_epoch'
                 ? q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d+(?:\.\d+)?$/;}
-                : q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/;} );
+                : q{return 0 unless defined $timestamp_str && $timestamp_str =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/;
+substr($timestamp_str, 16, 0) = ':00' unless defined $1;} );
     my @m = @{ $shape->{metrics} };
     for my $i (0 .. $#m) {
         push @s, $m[$i] < 0
@@ -5451,7 +5507,7 @@ sub csv_block_src {
              $format_registry_spec{csv}{_cls_src};
     my $spec = { %{ $format_registry_spec{csv} } };
     $spec->{time} = { %{ $spec->{time} }, layout => $shape->{layout} };
-    push @s, format_timestamp_src($spec, { %$format_registry_opts, epoch_unit => $duration_unit_override }), 'return 1;';
+    push @s, format_timestamp_src($spec, { %$format_registry_opts, epoch_unit => $shape->{epoch_unit} }), 'return 1;';
     return "sub {\n" . join("\n", @s) . "\n}";
 }
 
@@ -5495,10 +5551,11 @@ sub csv_block_evict {
 # names for it (the timestamp to the second, each -udm metric, the message);
 # a row it does not place is no failure, rows being handled one by one
 # (#640 D1). An ISO row whose date
-# cannot exist under the block's order stops the block (the parse croaks):
-# a date failure, which the caller answers with the other order. Runs under
-# the snapshot and restore a mid-run compile requires: the record lexicals,
-# the memo and the date cache are left as they were.
+# cannot exist under the block's order makes the block return undef: a date
+# failure, which the caller answers with the other order. Runs under the
+# snapshot and restore a mid-run compile requires: the record lexicals, the
+# memo and the date cache are left as they were, and, validating, the block
+# counts no row for the run's impossible-date note.
 # Returns the verdict ('ok', 'date' or 'wiring'), the rows placed, and the
 # most fraction digits among their timestamps (the file's precision evidence,
 # D17).
@@ -5510,6 +5567,8 @@ sub csv_validate_block {
                          $line_outcome, $line_cls_sig,
                          $format_last_ts_str, $format_last_ts_epoch );
     my $saved_cache = timestamp_date_cache_snapshot();
+    my $was_validating = $format_scan_validating;
+    $format_scan_validating = 1;
     my ($verdict, $placed, $digits) = ('ok', 0, 0);
     ROW: for my $row (@$rows) {
         my $ok = eval { $block->($row) };
@@ -5528,11 +5587,13 @@ sub csv_validate_block {
             ? join(' ', map { ($_ < @f ? $f[$_] : '') =~ s/^\s+|\s+$//gr } @csv_message_col_indices)
             : 'CSV data';
         if ($message ne $want_message) { $verdict = 'wiring'; last; }
-        my $ts = ($f[$csv_timestamp_col] // '') =~ s/^\s+|\s+$//gr;
+        my $ts = ($f[$csv_timestamp_col] // '') =~ s/^[\s"]+|[\s"]+$//gr;
+        substr($ts, 16, 0) = ':00' if $ts =~ /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?!:\d)/;
         if (substr($timestamp_str, 0, 19) ne substr($ts, 0, 19)) { $verdict = 'wiring'; last; }
         my $d = ($ts =~ /:\d{2}:\d{2}[.,](\d+)/ || $ts =~ /^\d+\.(\d+)$/) ? length $1 : 0;
         $digits = $d if $d > $digits;
     }
+    $format_scan_validating = $was_validating;
     ( $timestamp_str, $category_bucket, $object, $instance, $user,
       $session, $platform, $thread, $message, $bytes, $duration,
       $status_code, $metrics_observed, $timestamp, $fractional_ms, $fraction_digits,
@@ -5547,8 +5608,8 @@ sub csv_validate_block {
 # is a number). An ISO file's date order is settled from its own sampled
 # rows, starting month first whatever file came before it (D18): month
 # first, then on a date failure day first, then, when both fail, month first
-# again, so a row impossible under that order stops the run as it reaches it
-# (D7). At each order, the live block serves when it was built for this
+# again, so a row impossible under that order is not matched as it reaches
+# it (#611). At each order, the live block serves when it was built for this
 # header and that order and passes the rows (a cache hit); otherwise the
 # block is generated, a compile that replaces the block before it. A wiring
 # failure stops the run here, before line 2 is processed. The memo and the
@@ -5559,11 +5620,15 @@ sub csv_validate_block {
 # Returns the block.
 sub csv_block_for_file {
     my ($file, $line2_ts, $rows) = @_;
-    my $kind = (defined $line2_ts && $line2_ts =~ /^\d+(\.\d+)?$/) ? 'epoch' : 'iso';
+    $line2_ts =~ s/^[\s"]+|[\s"]+$//g if defined $line2_ts;
+    my $kind = (defined $line2_ts && $line2_ts =~ /^(\d+)(\.\d+)?$/) ? 'epoch' : 'iso';
+    # An epoch in milliseconds has 13 digits before any fraction (seconds have
+    # 10 until the year 2286); -du names any other unit.
+    my $epoch_unit = $kind ne 'epoch' ? undef : $duration_unit_override // (length($1) == 13 ? 'ms' : undef);
     my @order = $kind eq 'epoch' ? ('csv_epoch') : ('csv', 'csv_ddmm');
     my ($verdict, $placed, $digits, $served);
     for my $layout (@order) {
-        my $shape = csv_block_shape($layout);
+        my $shape = csv_block_shape($layout, $epoch_unit);
         if ($csv_block_live && $csv_block_live->{sig} eq $shape->{sig}) {
             $shape = $csv_block_live;
             ($verdict, $placed, $digits) = csv_validate_block($shape->{block}, $rows);
@@ -5576,14 +5641,13 @@ sub csv_block_for_file {
     die "ltl: format registry: the CSV block for $file reads a sampled row's values from other columns than its header names (produced_by csv_block_src())\n"
         if $verdict eq 'wiring';
     $served //= $csv_block_live->{layout} eq $order[0] ? $csv_block_live
-              : (compile_csv_block(csv_block_shape($order[0]), []))[0];
+              : (compile_csv_block(csv_block_shape($order[0], $epoch_unit), []))[0];
     timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     if (my $sample = $format_detection_sample{$file}) {
         $sample->{formats}{csv}     = $placed // 0;
         $sample->{frac_digits}{csv} = $digits // 0;
-        $sample->{frac_unit}{csv}   = time_unit_canonical($duration_unit_override)
-            if $kind eq 'epoch' && defined $duration_unit_override;
+        $sample->{frac_unit}{csv}   = time_unit_canonical($epoch_unit) if defined $epoch_unit;
     }
     return $csv_block = $served->{block};
 }
@@ -6327,6 +6391,7 @@ sub emit_format_detection_verbose {
             push @verbose_output, "  byte_notation: -";
             push @verbose_output, "  matched_lines: 0";
             push @verbose_output, "  unmatched_lines: 0";
+            push @verbose_output, "  impossible_date_lines: " . timestamp_impossible_total($file);
             push @verbose_output, "  first_match_line: -";
             push @verbose_output, "  scan_attempts: 0";
             push @verbose_output, "  scan_failed_attempts: 0";
@@ -6343,6 +6408,7 @@ sub emit_format_detection_verbose {
         push @verbose_output, "  byte_notation: " . ($fdd->{byte_notation} // '-');
         push @verbose_output, "  matched_lines: $fdd->{matched_lines}";
         push @verbose_output, "  unmatched_lines: $fdd->{unmatched_lines}";
+        push @verbose_output, "  impossible_date_lines: " . timestamp_impossible_total($file);
         push @verbose_output, "  first_match_line: " .
             (defined $fdd->{first_match_line} ? $fdd->{first_match_line} : '-');
         push @verbose_output, "  scan_attempts: " . ($fdd->{scan_attempts} // 0);
@@ -6976,6 +7042,7 @@ sub emit_filter_summary_verbose {
     push @verbose_output, "=== filter-summary ===";
     push @verbose_output, "lines_read: $total_lines_read";
     push @verbose_output, "lines_unmatched: $total_lines_unmatched";
+    push @verbose_output, "lines_unmatched_impossible_date: " . timestamp_impossible_total();
     push @verbose_output, "lines_excluded: " . lines_excluded_total();
     push @verbose_output, "excluded_time_window: $excluded_time_window";
     push @verbose_output, "excluded_profile: $profile_dropped_samples";
@@ -11082,8 +11149,8 @@ sub print_help {
     $out .= help_opt("-s,   --seconds",               "Deprecated: use -tp s for the timestamp precision and a unit on -bs (-bs 30s) for the width. Reads a bare -bs number as seconds, and renders timestamps with seconds precision.");
     $out .= help_opt("-ms,  --milliseconds",          "Deprecated: use -tp ms for the timestamp precision and a unit on -bs (-bs 100ms) for the width. Reads a bare -bs number as milliseconds, and renders timestamps with .fff precision.");
     $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
-    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A full date (YYYY-MM-DD HH:MM:SS[.mmm]) is an absolute cutoff; a bare time (HH:MM[:SS[.mmm]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight.");
-    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a full date is an absolute cutoff; a bare time applies to every day.");
+    $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A date, or a date and time (YYYY-MM-DD, then a space or T and HH:MM[:SS[.fraction]]), is an absolute cutoff; a bare time (HH:MM[:SS[.fraction]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight. Any other value, or a date or time that cannot exist, is refused.");
+    $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name ($time_unit_list)");
     $out .= help_opt("-lf,  --log-format <name>",     "Read every file as this log format instead of detecting it - the escape hatch when detection picks the wrong variant; an unknown name lists the known formats");
     $out .= help_opt("-ru,  --rate-unit <unit>",      "Set the time unit for rate normalization: any of $time_unit_list; default m (the minute)");
@@ -14246,14 +14313,20 @@ sub exact_bound {
     return defined $seconds ? [ $seconds, $nanoseconds ] : undef;
 }
 
-# An index ISO date-time as [ whole seconds, nanoseconds ], read exactly from
-# its digits; undef when it does not parse.
+# A date-time as [ whole seconds, nanoseconds ], read exactly from its
+# digits (the timestamp acceptance pattern): YYYY-MM-DD, optionally followed
+# by a space or T and HH:MM, then :SS, then a fraction after . or , of up to
+# nine digits; month, day and hour may be written with one digit. undef when
+# the text is in no such form or names an instant that cannot exist. The
+# parser of the -st/-et date forms and of the index read-back.
 sub iso_timestamp_parts {
-    my ($iso_str) = @_;
-    return undef unless defined $iso_str && $iso_str =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?/;
-    my $nanoseconds = defined $7 ? substr($7 . '00000000', 0, 9) + 0 : 0;
-    my $seconds = eval { timegm($6, $5, $4, $3, $2 - 1, $1) };
-    return defined $seconds ? [ $seconds, $nanoseconds ] : undef;
+    my ($text) = @_;
+    return undef unless defined $text && $text =~ /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?)?$/;
+    my ($year, $month, $day, $hour, $minute, $second, $fraction) = ($1, $2, $3, $4 // 0, $5 // 0, $6 // 0, $7);
+    return undef if $hour > 23 || $minute > 59 || $second > 59;
+    my $midnight = date_midnight($year, $month, $day) // return undef;
+    my $nanoseconds = defined $fraction ? substr($fraction . '00000000', 0, 9) + 0 : 0;
+    return [ $midnight + $hour * 3600 + $minute * 60 + $second, $nanoseconds ];
 }
 
 # A bucket key rendered at the run's precision. A key held in integer
@@ -16063,8 +16136,23 @@ sub adapt_to_command_line_options {
     # so those blocks see one settled answer.
     $capture_messages = ( $top_n_messages > 0 ) ? 1 : 0;
 
-    $filter_range{'start'} = $filter_range_start if defined( $filter_range_start );
-    $filter_range{'end'} = $filter_range_end if defined(  $filter_range_end );
+    # -st and -et (the timestamp acceptance pattern), settled before any file
+    # is read: a date, or a date and time, read by iso_timestamp_parts(), is an
+    # absolute bound; a bare time is a time-of-day window applied to every day.
+    # A value in no accepted form, or naming a date or time that cannot exist,
+    # is a usage error naming the forms.
+    for my $bound ( [ start => '-st', $filter_range_start ], [ end => '-et', $filter_range_end ] ) {
+        my ($key, $flag, $value) = @$bound;
+        next if !defined $value || $value eq '';
+        if (my $parts = iso_timestamp_parts($value)) {
+            $filter_range_epoch{$key} = $parts->[0] + $parts->[1] / 1_000_000_000;
+        } elsif ($value =~ /^(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d{1,9}))?)?$/ && $1 <= 23 && $2 <= 59 && ($3 // 0) <= 59) {
+            $filter_range_tod{$key} = $1 * 3600 + $2 * 60 + ($3 // 0) + (defined $4 ? $4 / 10 ** length($4) : 0);
+        } else {
+            print_usage("Invalid $flag timestamp '$value'. Accepted forms: YYYY-MM-DD, optionally followed by a space or T and HH:MM[:SS[.fraction]] (an absolute bound), or HH:MM[:SS[.fraction]] alone (a time of day applied to every day)");
+            exit 1;
+        }
+    }
 
     # -mem option processing (Issue #356): optional literal operand 'debug'
     # enables per-phase memory diagnostics. Getopt's :s greedily captures a
@@ -16649,49 +16737,6 @@ sub adapt_to_command_line_options {
     return;
 }
 
-# Parse various possible formats for input of start and end times and set associated filter variables
-sub calculate_start_end_filter_timestamps {
-    my ( $log_epoch ) = @_;
-    # Calculate midnight of log date: truncate to day boundary
-    my $log_date = int($log_epoch / 86400) * 86400;
-
-    foreach my $key (keys %filter_range) {
-        my $value = $filter_range{$key};       # Get the value (either $filter_range_start or $filter_range_end)
-        next unless length( $filter_range{$key} ) > 0;
-        my $epoch_value;  # Variable to store the epoch time
-        my $fractional_ms = 0;
-
-        # Extract optional fractional seconds (supports . or , separator, 1-6 digits)
-        if ($value =~ s/(\d{2}:\d{2}:\d{2})[.,](\d{1,6})/$1/) {
-            my $frac_digits = $2;
-            $fractional_ms = $frac_digits * (10 ** (3 - length($frac_digits)));
-        }
-
-        # Convert timestamp to epoch seconds using Time::Piece -- WARNING -- use of strptime can cause timezone problems, it appears to work here as I've manually set TZ to UTC on input
-        if ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}:\d{2}/ ) {
-            $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M:%S" )->epoch;
-        } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{2}/ ) {
-            $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d %H:%M" )->epoch;
-        } elsif ( $value =~ /^\d{4}-\d{1,2}-\d{1,2}/ ) {
-            $epoch_value = Time::Piece->strptime( $value, "%Y-%m-%d" )->epoch;
-        } elsif ( $value =~ /^\d{1,2}:\d{2}:\d{2}/ ) {
-            my $tod = Time::Piece->strptime( $value, "%H:%M:%S" )->epoch;  # seconds since midnight
-            $epoch_value = $log_date + $tod;
-            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
-        } elsif ( $value =~ /^\d{1,2}:\d{2}/ ) {
-            my $tod = Time::Piece->strptime( $value, "%H:%M" )->epoch;     # seconds since midnight
-            $epoch_value = $log_date + $tod;
-            $filter_range_tod{$key} = $tod + ($fractional_ms / 1000);
-        } else {
-            defer_notice("Warning: unhandled date/time format - option not taken into account\n");
-        }
-
-        # Add fractional milliseconds for precision filtering
-        $filter_range_epoch{$key} = $epoch_value + ($fractional_ms / 1000) if defined( $epoch_value );
-    }
-    return 1;
-}
-
 sub adapt_to_terminal_settings {
     $terminal_width //= 80;                                             # Default to 80 if terminal width cannot be determined
     $terminal_height //= 24;                                            # Default to 24 if terminal height cannot be determined
@@ -16811,7 +16856,6 @@ sub read_and_process_logs {
             : ( (-f $in_file) ? (-s $in_file) : 0 );
         $progress_file_index++;
         $format_current_file = $in_file;
-        $format_current_line_ref = \$line_number;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
@@ -16834,7 +16878,6 @@ sub read_and_process_logs {
             sel_file_bytes_occurrences      => 0, sel_file_bytes_min    => undef, sel_file_bytes_max    => undef, sel_bytes_sum    => 0,
             sel_count_occurrences      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
-        my $filter_range_filter_initialized = 0;
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
@@ -17317,8 +17360,6 @@ sub read_and_process_logs {
 
                 # Add fractional milliseconds to epoch for precision filtering
                 my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
-
-                $filter_range_filter_initialized = calculate_start_end_filter_timestamps( $timestamp_epoch ) unless $filter_range_filter_initialized;
 
                 # Index file: pre-filter per-file tracking (Issue #46)
                 {
@@ -18328,6 +18369,7 @@ sub read_and_process_logs {
     # Notices raised while the read was running, held back so they did not
     # print into the progress line's row.
     defer_format_unit_notes();
+    defer_timestamp_impossible_notes();
     flush_deferred_notices();
 
     # Surface the levels the tool did not recognise. A line whose level slot
