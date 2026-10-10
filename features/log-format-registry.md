@@ -649,6 +649,38 @@ Mechanism choices the locked decisions leave to the implementer, recorded here b
 - **IF7 — Sabotage proofs.** Build gates: in-group filename overlap, a filename sample failing its matcher, a variant member declared before its default — each fails the build with its diagnostic. Harness: a copy with the stem weight zeroed and probe (a) disabled is caught by the selection/basis/confidence/candidates/absence assertions of five scenarios; a copy with the bracket, legend, `formats:` and `format_pin:` suppressed is caught by their four assertions.
 - **IF8 — Pre-existing, not this drop's:** `ltl /dev/stdin < file` reports 0 matched lines since #388 (the sample's own handle on a redirected regular file shares the offset with the main read). Pipes are refused before reading. Neither is a path this drop changes; noted for the umbrella's non-seekable-input work.
 
+### Finding (2026-10-10): one line decides a file's date order, contrary to D44
+
+D44 is the architect's direction: detection accumulates signals, confidence
+moves and is never 100%, and the choice may change as lines accumulate. What
+was built decides on one line and cannot move back:
+
+- **In the sample, before line 1.** One sampled line whose date is valid only
+  with day and month swapped eliminates the order it is impossible under
+  (`format_sample_probes()` counts it; `select_format_variants()` eliminates).
+  Measured on a synthetic Connection Server log of 1.2 million lines, every
+  line dated 5 April 2024, 12 of them reading `2024-13-05`, the first on line
+  1: of 444 sampled lines one was impossible month first and none day first;
+  the file was read day first, every line placed on 4 May, with no line left
+  out and no message.
+- **During the read.** At the first line whose date is valid only swapped,
+  the current order is eliminated for the rest of the file and the other takes
+  over (`format_probe_signal()` :: `$g->{live}{$name} = 0;`); nothing in the
+  read raises a score, so the eliminated order never returns. Measured on a
+  synthetic Connection Server log whose sampled front, middle and end hold
+  days up to the 12th and whose unsampled middle holds 40 lines dated
+  `2024-25-04`: the file switched day first at the first of them (`flips: 1`)
+  and the 600 lines after it dated `2024-04-05` were placed on 4 May.
+
+**Record correction.** The words "decisive against that layout" in D52 (a),
+and N5's rule that one impossible month eliminates the current member, were
+written by Claude (commits b03d15d and 76ad558, the latter's message calling
+its notes "for strike-or-lock") under headings that attribute them to the
+architect. The architect did not lock them ("I don't see how evidence,
+especially as it is on one line, should be deterministic for the entire
+file", 2026-10-10). They stand in the code until the issue filed for this
+finding resolves them.
+
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
 Rewritten 2026-08-22 under D53 (the original six constraints were framed around sizing a front-only held-line window).
