@@ -46,7 +46,7 @@ FIXTURE="tests/fixtures/tomcat-access-duration-spread.txt"
 # summary, so each renders; -n 1 keeps the messages table to one row. The time
 # axis is the subject (the timeline's rows), so the fixture's 14.5 hours stay
 # at the default bucket size for 53 rows.
-SHAPE="-hm duration -hg duration -n 1"
+SHAPE="-ni -hm duration -hg duration -n 1"
 
 for f in "$LTL" "$TOOL" "$CELLS" "$REPO_DIR/$FIXTURE"; do
     [[ -e "$f" ]] || { echo "ERROR: not found: $f"; exit 1; }
@@ -269,7 +269,7 @@ if scenario_wanted "$current_scenario"; then
     for pair in 'dark -dbg #191d27' 'light -lbg #ffffff'; do
         read -r bg flag fill <<< "$pair"
         out="$TMP_DIR/bg-$bg"
-        run_tool "$out" --name b$bg --background $bg --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -bs 1440 -oe -n 1 "$FIXTURE" || true
+        run_tool "$out" --name b$bg --background $bg --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -ni -bs 1440 -oe -n 1 "$FIXTURE" || true
         check_warnings "$out"
         assert_command \
             command     "grep -q -- ' $flag ' <(grep '^trace: probe run' '$out') && grep -q -- ' $flag ' <(grep '^trace: capture run' '$out') && grep -q '<rect width=\"100%\" height=\"100%\" fill=\"$fill\"/>' '$TMP_DIR/b$bg-options.svg'" \
@@ -279,7 +279,7 @@ if scenario_wanted "$current_scenario"; then
             contract    "$CONTRACT criterion 4, D7"
     done
     out="$TMP_DIR/bg-default"
-    run_tool "$out" --name bd --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -bs 1440 -oe -n 1 "$FIXTURE" || true
+    run_tool "$out" --name bd --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -ni -bs 1440 -oe -n 1 "$FIXTURE" || true
     check_warnings "$out"
     assert_command \
         command     "grep -q -- ' -dbg ' <(grep '^trace: capture run' '$out')" \
@@ -298,7 +298,7 @@ if scenario_wanted "$current_scenario"; then
         out="$TMP_DIR/state-$state"
         status=0
         # shellcheck disable=SC2086
-        run_tool "$out" --name s$state --out-dir "$TMP_DIR" --crop "sections=$section" -- $hide_args -bs 1440 -oe -n 1 "$FIXTURE" || status=$?
+        run_tool "$out" --name s$state --out-dir "$TMP_DIR" --crop "sections=$section" -- -ni $hide_args -bs 1440 -oe -n 1 "$FIXTURE" || status=$?
         check_warnings "$out"
         assert_command \
             command     "[[ $status -ne 0 ]] && grep -q \"section '$section' is $state\" '$out.stderr' && [[ ! -e '$TMP_DIR/s$state-$section.svg' ]]" \
@@ -314,13 +314,13 @@ current_scenario="size-precedence"
 if scenario_wanted "$current_scenario"; then
     echo "=== $current_scenario: criterion 6, command line over manifest over the default ==="
     manifest="$TMP_DIR/size.yaml"
-    printf 'screenshots:\n  - name: m\n    ltl: -bs 1440 -oe -n 1 %s\n    width: 180\n    height: 45\n    crops:\n      - sections: options\n' "$FIXTURE" > "$manifest"
+    printf 'screenshots:\n  - name: m\n    ltl: -ni -bs 1440 -oe -n 1 %s\n    width: 180\n    height: 45\n    crops:\n      - sections: options\n' "$FIXTURE" > "$manifest"
     for case in 'default 211 53 adhoc' 'command-line 150 40 adhoc --width 150 --height 40' 'manifest 180 45 manifest' 'command-line-over-manifest 170 44 manifest --width 170 --height 44'; do
         read -r name w h mode extra <<< "$case"
         out="$TMP_DIR/size-$name"
         if [[ "$mode" == adhoc ]]; then
             # shellcheck disable=SC2086
-            run_tool "$out" --name z --out-dir "$TMP_DIR" --trace $extra --crop 'sections=options' -- -bs 1440 -oe -n 1 "$FIXTURE" || true
+            run_tool "$out" --name z --out-dir "$TMP_DIR" --trace $extra --crop 'sections=options' -- -ni -bs 1440 -oe -n 1 "$FIXTURE" || true
         else
             # shellcheck disable=SC2086
             run_tool "$out" --manifest "$manifest" --out-dir "$TMP_DIR" --trace $extra || true
@@ -357,7 +357,7 @@ current_scenario="manifest"
 if scenario_wanted "$current_scenario"; then
     echo "=== $current_scenario: criterion 8, a batch run regenerates every entry ==="
     manifest="$TMP_DIR/batch.yaml"
-    printf 'screenshots:\n  - name: one\n    ltl: %s %s\n    crops:\n      - sections: histogram\n  - name: two\n    ltl: -h "POST /Thingworx" -bs 1440 -oe -n 1 %s\n    background: light\n    crops:\n      - sections: [timeline, options]\n' "$SHAPE" "$FIXTURE" "$FIXTURE" > "$manifest"
+    printf 'screenshots:\n  - name: one\n    ltl: %s %s\n    crops:\n      - sections: histogram\n  - name: two\n    ltl: -ni -h "POST /Thingworx" -bs 1440 -oe -n 1 %s\n    background: light\n    crops:\n      - sections: [timeline, options]\n' "$SHAPE" "$FIXTURE" "$FIXTURE" > "$manifest"
     out="$TMP_DIR/batch"
     mkdir -p "$TMP_DIR/batch-out"
     status=0
@@ -542,7 +542,7 @@ if scenario_wanted "$current_scenario"; then
     mkdir -p "$TMP_DIR/png-size" "$TMP_DIR/png-size-manifest"
     out="$TMP_DIR/png-size.run"
     status=0
-    run_tool "$out" --name p --out-dir "$TMP_DIR/png-size" --crop 'sections=histogram cols=12,90' --crop '' -- -bs 1440 -oe -n 1 -hg duration "$FIXTURE" || status=$?
+    run_tool "$out" --name p --out-dir "$TMP_DIR/png-size" --crop 'sections=histogram cols=12,90' --crop '' -- -ni -bs 1440 -oe -n 1 -hg duration "$FIXTURE" || status=$?
     check_warnings "$out"
     assert_command \
         command     "[[ $status -eq 0 ]] && [[ \"\$(svg_size '$TMP_DIR/png-size/p-histogram.svg')\" == 677\ * ]] && pngs_match_svgs '$TMP_DIR/png-size'" \
@@ -551,7 +551,7 @@ if scenario_wanted "$current_scenario"; then
         produced_by 'render_svg(), draw_pngs() in build/capture-screenshots.pl; build/capture-png.swift' \
         contract    "$CONTRACT criterion 16, D24, D25"
     manifest="$TMP_DIR/png-size.yaml"
-    printf 'screenshots:\n  - name: q\n    ltl: -bs 1440 -oe -n 1 -hg duration %s\n    pad: 1,3\n    crops:\n      - sections: histogram\n      - sections: summary-values\n        cols: 0,47\n' "$FIXTURE" > "$manifest"
+    printf 'screenshots:\n  - name: q\n    ltl: -ni -bs 1440 -oe -n 1 -hg duration %s\n    pad: 1,3\n    crops:\n      - sections: histogram\n      - sections: summary-values\n        cols: 0,47\n' "$FIXTURE" > "$manifest"
     out="$TMP_DIR/png-size-manifest.run"
     status=0
     run_tool "$out" --manifest "$manifest" --out-dir "$TMP_DIR/png-size-manifest" || status=$?
@@ -600,7 +600,7 @@ if scenario_wanted "$current_scenario"; then
     perl_bin=$(command -v perl)
     out="$TMP_DIR/png-needs-swiftc"
     status=0
-    ( cd "$REPO_DIR" && PATH="$nobin" "$perl_bin" "$TOOL" --name n --out-dir "$TMP_DIR/nobin-out" --trace -- -bs 1440 -oe -n 1 "$FIXTURE" ) > "$out" 2> "$out.stderr" || status=$?
+    ( cd "$REPO_DIR" && PATH="$nobin" "$perl_bin" "$TOOL" --name n --out-dir "$TMP_DIR/nobin-out" --trace -- -ni -bs 1440 -oe -n 1 "$FIXTURE" ) > "$out" 2> "$out.stderr" || status=$?
     check_warnings "$out"
     assert_command \
         command     "[[ $status -ne 0 ]] && grep -q 'swiftc is not found' '$out.stderr' && ! grep -q '^trace: probe run' '$out' && [[ -z \"\$(ls '$TMP_DIR/nobin-out')\" ]]" \
