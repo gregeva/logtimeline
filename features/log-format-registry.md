@@ -722,6 +722,16 @@ the F7 method, and no longer eliminates an order. Branch
   month first and 800 valid either way. In both, every distinguishing line
   favours day first; month first is held only by the group default's standing
   credit (1.0). *Locked ("Lock A").*
+- **D71 — A line whose date is valid only in the other order, when it does
+  not move the choice, is left out and counted like an impossible date.** It
+  lowers the current order's score; if the order moves, the line is re-read
+  under the new order and matched; if it holds, the line is not matched and is
+  counted for the run's impossible-date note (#611), which names the other
+  order's `-lf`. One order per file at a time stands (D47), and the time axis
+  is not stretched by single lines read in the other order (D48). D52's
+  amendment of 2026-09-30 ("impossible under every live layout is not
+  matched") is read as "impossible under the order the file is being read
+  with". *Locked ("Lock A").*
 
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
