@@ -299,8 +299,8 @@ fixture the detection harness already stages.
       milliseconds each place their rows at the instants an unquoted,
       full-second (or epoch-seconds) twin of the same file places them.
       *The `accepted-forms` scenario of `validate-csv-input.sh`.*
-- [ ] **AC9** The `single-day-access-log-standard` benchmark after the change
-      is within noise of `611-before`.
+- [x] **AC9** The `single-day-access-log-standard` benchmark after the change
+      is within noise of `611-before`. *Measured at the gate (§ 8).*
 
 Validation paths for the invariant "no library call can end the run on user
 input": every row of the table in § 4 above, each reached by AC1 to AC8:
@@ -325,3 +325,32 @@ note withdrawn as delivered, N5, the impossible-date diagnostic entry),
 § CSV Columnar Input (accepted forms), `features/503-yaml-aggregate-export.md`
 § `-V filter-summary` section contract, `tests/HARNESS-DESIGN.md` reserved
 names (section descriptions), release notes.
+
+## 8. Completion gate
+
+Run on this machine, `$version_number` restored to `0.19.0`, on the commit
+merged.
+
+| Case | Metric | before | after |
+|---|---|---|---|
+| `single-day-access-log-standard` (one run each) | `parse/read_files` | 8.4 s | 8.2 s (−1.7%) |
+| | total | 8.5 s | 8.3 s (−1.7%) |
+| | peak RSS | 99.6 MB | 98.3 MB (−1.3%) |
+| `network-latency-csv-standard` (three runs each, median and range) | `parse/read_files` | 1.662 s (1.644–1.664) | 1.657 s (1.634–1.661) |
+| | total | 1.683 s (1.666–1.686) | 1.680 s (1.657–1.684) |
+| | `detect/scan_sub_compile` | 12 ms (12–12) | 12 ms (12–13) |
+| | `detect/registry_build` | 20 ms (20–21) | 21 ms (21–21) |
+
+The CSV case is the named selection #615 D12 added; it reaches the CSV block
+drop 4 changed. Its `before` ran the base commit's `ltl` from the main
+checkout, as every `after` did. The one consistent difference is +1 ms on
+the per-run registry build, a constant: attributed, by reading and not by
+measurement, to the longer generated source of each format's block, the
+Apache and asctime layouts having gained the date branch. Nothing moves on
+the per-line path.
+
+The full harness suite (49 harnesses) ran once and failed one assertion:
+the `datetime-warning-stderr` scenario of `validate-section-layout.sh`
+triggered #597 D12's check with `-st 12h`, which is now a usage error (C6).
+The scenario was restated (25b2d38) and the suite re-run whole on that
+commit: 49 harnesses, every one exits 0 with assertions run.
