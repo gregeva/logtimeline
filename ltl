@@ -1375,6 +1375,9 @@ my $bytes_aggregate_demand         = 0;       # bytes_min/bytes_max at both scop
 my $bucket_bytes_demand            = 0;       # per-time-bucket bytes (%log_analysis total, count, extrema): timeline bytes column, STATS CSV, YAML export (#616 D30)
 my $message_bytes_demand           = 0;       # per-message bytes (%log_messages total, count, extrema): MESSAGES CSV, bytes sorts (#616 D30)
 my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
+my $session_capture_demand         = 0;       # per-bucket distinct sessions (%log_sessions): timeline sessions column, STATS CSV, YAML export (#620 D6)
+my $user_capture_demand            = 0;       # per-bucket distinct users (%log_users): timeline users column, STATS CSV, YAML export (#620 D6)
+my $index_capture_demand           = 0;       # per-file accumulations (%index_file_data): the ltl-index.csv rows and their drift check, unless -ni
 
 # Statistics-group demand registry (#305): extends the store-level demand
 # above to statistic-group granularity. The 22-statistic duration ladder is
@@ -16754,6 +16757,16 @@ sub adapt_to_command_line_options {
     # percentage columns, errRate) read the run totals and %bucket_outcomes,
     # not this store.
     $message_outcomes_demand = ( $write_messages_to_csv || $capture_messages ) ? 1 : 0;
+    # Session and user capture demand (#620 D6): each store is read by its
+    # timeline column unless it is hidden, and by -o (the STATS CSV and the
+    # YAML export carry it whether or not the column is shown). Hiding the
+    # column removes one consumer; discarding the field (-d session) is what
+    # removes the data. -V udm-counting reports what was captured.
+    $session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;
+    $user_capture_demand    = ( !$hide_user    || $write_messages_to_csv ) ? 1 : 0;
+    # The per-file accumulations are read only by the index file and its drift
+    # check, neither of which runs under -ni.
+    $index_capture_demand = $no_index ? 0 : 1;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -17432,7 +17445,7 @@ sub read_and_process_logs {
                 my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
 
                 # Index file: pre-filter per-file tracking (Issue #46)
-                {
+                if ($index_capture_demand) {
                     my $fd = $index_file_data{$in_file};
                     $fd->{match_count}++;
                     $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
@@ -17551,7 +17564,7 @@ sub read_and_process_logs {
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
 
                 # Index file: post-filter per-file tracking for selection entry (Issue #46)
-                {
+                if ($index_capture_demand) {
                     my $fd = $index_file_data{$in_file};
                     $fd->{sel_match_count}++;
                     $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
@@ -17612,11 +17625,13 @@ sub read_and_process_logs {
                 # bounds, as the file row's above. The heading's are folded
                 # under --profile, so their whole second is the folded one.
                 if ($timestamp_capture_ns) {
-                    my $fd = $index_file_data{$in_file};
                     my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
                     my $bs = $profile_mode ? int($bucket_epoch - $fractional_ms / 1000 + 0.5) : $timestamp;
-                    if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
-                    if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
+                    if ($index_capture_demand) {
+                        my $fd = $index_file_data{$in_file};
+                        if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
+                        if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
+                    }
                     if ($bucket_epoch == $output_timestamp_min && (!defined $output_timestamp_min_s || $bs < $output_timestamp_min_s || ($bs == $output_timestamp_min_s && $ns < $output_timestamp_min_ns))) { ($output_timestamp_min_s, $output_timestamp_min_ns) = ($bs, $ns) }
                     if ($bucket_epoch == $output_timestamp_max && (!defined $output_timestamp_max_s || $bs > $output_timestamp_max_s || ($bs == $output_timestamp_max_s && $ns > $output_timestamp_max_ns))) { ($output_timestamp_max_s, $output_timestamp_max_ns) = ($bs, $ns) }
                 }
@@ -18348,7 +18363,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE SESSION BASED STATISTICS DATA (Issue #26) ##
-                if( defined $session && $session ne "" && $session ne "-" ) {
+                if( $session_capture_demand && defined $session && $session ne "" && $session ne "-" ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
                     if( $line_is_highlighted ) {
@@ -18357,7 +18372,7 @@ sub read_and_process_logs {
                 }
                 ## CAPTURE USER BASED STATISTICS DATA (#444 D10): the sessions
                 ## model piece for piece, a bare - being an absent user (D14)
-                if( defined $user && $user ne "" && $user ne "-" ) {
+                if( $user_capture_demand && defined $user && $user ne "" && $user ne "-" ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
                     if( $line_is_highlighted ) {
