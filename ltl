@@ -7074,12 +7074,11 @@ sub emit_statistics_demand_verbose {
 # profile_window_seconds, included_weekdays, samples_included, samples_dropped;
 # the profile_active enum (yes|no). Weekdays are listed in the mode's own axis
 # order (first kept day first), comma-joined.
-# A line no format matched. Counted per file for -V format-detection and
-# once for the run; a file gets its detection record on its first
-# unmatched line even when no match has bound a format yet (Issue #228).
-sub note_unmatched_line {
-    my ($in_file) = @_;
-    my $fdd = $format_detection{$in_file} //= {
+# A file's format-detection record (Issue #228) as its read begins: no
+# format bound yet, nothing counted. read_and_process_logs() creates it before
+# the file's first line, so every site that counts into it finds it there.
+sub new_format_detection_record {
+    return {
         match_type       => undef,
         slug             => undef,
         metrics_observed => 0,
@@ -7088,6 +7087,13 @@ sub note_unmatched_line {
         unmatched_lines  => 0,
         first_match_line => undef,
     };
+}
+
+# A line no format matched. Counted per file for -V format-detection and
+# once for the run.
+sub note_unmatched_line {
+    my ($in_file) = @_;
+    my $fdd = $format_detection{$in_file} //= new_format_detection_record();
     $fdd->{unmatched_lines}++;
     $total_lines_unmatched++;
 }
@@ -16928,6 +16934,7 @@ sub read_and_process_logs {
         $progress_file_index++;
         $format_current_file = $in_file;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
+        $format_detection{$in_file} //= new_format_detection_record();
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
         my @file_stat = stat($in_file);
@@ -17347,15 +17354,7 @@ sub read_and_process_logs {
                 # Format-detection tracking (Issue #228). First successful
                 # match for the file establishes match_type/slug; subsequent
                 # matches just increment matched_lines.
-                my $fdd = $format_detection{$in_file} //= {
-                    match_type       => undef,
-                    slug             => undef,
-                    metrics_observed => 0,
-                    event_ledger     => 0,
-                    matched_lines    => 0,
-                    unmatched_lines  => 0,
-                    first_match_line => undef,
-                };
+                my $fdd = $format_detection{$in_file};
                 if (!defined $fdd->{match_type}) {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $line_entry ? $line_entry->[FR_SLUG] : 'unknown';
@@ -18387,18 +18386,10 @@ sub read_and_process_logs {
         # so every selected file must eventually enter the numerator.
         $progress_bytes_done += $progress_file_size;
 
-        # Scan telemetry lands with the file's detection record; a file may
-        # produce zero matches (or zero lines), so create the record here too.
+        # Scan telemetry lands with the file's detection record, which exists
+        # from the start of the read whether or not a line matched.
         {
-            my $fdd = $format_detection{$in_file} //= {
-                match_type       => undef,
-                slug             => undef,
-                metrics_observed => 0,
-                event_ledger     => 0,
-                matched_lines    => 0,
-                unmatched_lines  => 0,
-                first_match_line => undef,
-            };
+            my $fdd = $format_detection{$in_file};
             $fdd->{scan_attempts}        = $file_scan_attempts;
             $fdd->{scan_failed_attempts} = $file_scan_failed;
             # Formats found in this file (D50, N7): every entry whose run
