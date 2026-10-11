@@ -17859,6 +17859,10 @@ sub read_and_process_logs {
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if (!$consolidation_s1_matched) {
+                    # The message's entry, looked up once and written through: a lookup by
+                    # the full message key costs ~100 ns per line, a write through the
+                    # reference ~20 ns (#616, #620 D5).
+                    my $msg_entry;
                     if( $metrics_observed ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
@@ -17870,7 +17874,7 @@ sub read_and_process_logs {
                         # Welford-Pébay sidecars below carry the same data). Eliminating the
                         # empty arrayref saves ~40 bytes per (category, log_key) — at 10^5+
                         # key cardinality this is the dominant per-key allocation today.
-                        $log_messages{$category}{$log_key} //= ($message_stats_bin ? {
+                        $msg_entry = $log_messages{$category}{$log_key} //= ($message_stats_bin ? {
                             occurrences    => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
@@ -17893,8 +17897,8 @@ sub read_and_process_logs {
                             durations      => [],
                         });
 
-                        $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
+                        $msg_entry->{occurrences}++;
+                        $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
                         # bytes_occurrences counts lines that actually carried a
@@ -17902,8 +17906,8 @@ sub read_and_process_logs {
                         # dividing by it understates the mean on any log where some
                         # matched lines have no bytes field.
                         #
-                        # The entry reference is taken once and written through, and
-                        # the extrema are seeded on the first observation rather than
+                        # Written through the entry's one reference, and the extrema
+                        # are seeded on the first observation rather than
                         # tested for definedness on every line. Measured at
                         # +99 ns/line against +248 for the repeated-lookup,
                         # test-every-line idiom below — see
@@ -17920,28 +17924,27 @@ sub read_and_process_logs {
                         # bytes falls back the same way any operand with no values
                         # does.
                         if( defined $bytes && $message_bytes_demand ) {
-                            my $e = $log_messages{$category}{$log_key};
-                            $e->{total_bytes} += $bytes;
+                            $msg_entry->{total_bytes} += $bytes;
                             # The count is kept on every line the store's demand
                             # admits (#616 D30); the aggregate demand governs the
                             # extrema.
                             if( $bytes_aggregate_demand ) {
-                                if( $e->{bytes_occurrences}++ ) {
-                                    $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                                    $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                                if( $msg_entry->{bytes_occurrences}++ ) {
+                                    $msg_entry->{bytes_min} = $bytes if $bytes < $msg_entry->{bytes_min};
+                                    $msg_entry->{bytes_max} = $bytes if $bytes > $msg_entry->{bytes_max};
                                 } else {
-                                    $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                                    $msg_entry->{bytes_min} = $msg_entry->{bytes_max} = $bytes;
                                 }
                             } else {
-                                $e->{bytes_occurrences}++;
+                                $msg_entry->{bytes_occurrences}++;
                             }
                         }
 
                         if( defined $count ) {
-                            $log_messages{$category}{$log_key}{count_sum} += $count if defined $count;
-                            $log_messages{$category}{$log_key}{count_occurrences}++;
-                            $log_messages{$category}{$log_key}{count_min} = $count if !defined $log_messages{$category}{$log_key}{count_min} || $count < $log_messages{$category}{$log_key}{count_min};
-                            $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
+                            $msg_entry->{count_sum} += $count if defined $count;
+                            $msg_entry->{count_occurrences}++;
+                            $msg_entry->{count_min} = $count if !defined $msg_entry->{count_min} || $count < $msg_entry->{count_min};
+                            $msg_entry->{count_max} = $count if !defined $msg_entry->{count_max} || $count > $msg_entry->{count_max};
                         }
 
                         # UDM per-message storage (Issue #22)
@@ -17952,22 +17955,18 @@ sub read_and_process_logs {
                                 my $value = $udm_values{$name};
                                 if ($config->{agg_kind} eq 'counting') {
                                     # Only occurrences are tracked per message; distinct is bucket-scoped
-                                    $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
+                                    $msg_entry->{"udm_${name}_occurrences"}++;
                                     next;
                                 }
-                                $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
-                                $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
-                                $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
-                                $log_messages{$category}{$log_key}{"udm_${name}_max"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_max"} || $value > $log_messages{$category}{$log_key}{"udm_${name}_max"};
+                                $msg_entry->{"udm_${name}_sum"} += $value;
+                                $msg_entry->{"udm_${name}_occurrences"}++;
+                                $msg_entry->{"udm_${name}_min"} = $value if !defined $msg_entry->{"udm_${name}_min"} || $value < $msg_entry->{"udm_${name}_min"};
+                                $msg_entry->{"udm_${name}_max"} = $value if !defined $msg_entry->{"udm_${name}_max"} || $value > $msg_entry->{"udm_${name}_max"};
                             }
                         }
 
                         if( defined $duration && !$omit_durations ) {
-                            # The entry is found once for the total and its count: a
-                            # lookup by the full message key costs ~100 ns per line, an
-                            # increment through the reference ~20 ns (#616).
-                            my $me = $log_messages{$category}{$log_key};
-                            $me->{total_duration} += $duration;
+                            $msg_entry->{total_duration} += $duration;
 
                             # Statistics machinery (sum of squares, raw samples or bin
                             # counters + moment sidecars) is captured only when a surface
@@ -17975,7 +17974,7 @@ sub read_and_process_logs {
                             # accumulate regardless.
                             if( $message_duration_stats_demand ) {
                                 # Accumulate the sum of squares for variance calculation
-                                $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
+                                $msg_entry->{sum_of_squares} += $duration ** 2;
                                 # Issue #287 Commit 5: skip the durations[] push under -mdm bin —
                                 # this is the dominant memory consumer at high (category, log_key)
                                 # cardinality. The bin-counter store and Welford-Pébay sidecars
@@ -17984,7 +17983,7 @@ sub read_and_process_logs {
                                 # carried; the percentile path sorts and indexes numerically and the
                                 # moments path sums and squares, so the string buffer a plain copy
                                 # would inherit from the shared record lexical has no reader.
-                                push @{$log_messages{$category}{$log_key}{durations}}, 0 + $duration
+                                push @{$msg_entry->{durations}}, 0 + $duration
                                     unless $message_stats_bin;
     
                                 # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
@@ -18003,7 +18002,6 @@ sub read_and_process_logs {
                                 # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
                                 # populated in Commit 6 once Layer 4 measurement is available.
                                 if ($message_stats_bin) {
-                                    my $entry = $log_messages{$category}{$log_key};
     
                                     # Percentile-ladder source (the bin partition). Skip zero-valued
                                     # samples — partition's log-spaced geometry cannot bin them.
@@ -18017,10 +18015,10 @@ sub read_and_process_logs {
                                     # sample including 0, so calculate_statistics_bin can derive min,
                                     # mean, std_dev, skewness, kurtosis, bimodality_coef byte-identical
                                     # to the raw path.
-                                    $entry->{min} = $duration
-                                        if !defined $entry->{min} || $duration < $entry->{min};
-                                    $entry->{max} = $duration
-                                        if !defined $entry->{max} || $duration > $entry->{max};
+                                    $msg_entry->{min} = $duration
+                                        if !defined $msg_entry->{min} || $duration < $msg_entry->{min};
+                                    $msg_entry->{max} = $duration
+                                        if !defined $msg_entry->{max} || $duration > $msg_entry->{max};
     
                                     # Welford-Pébay online M2/M3/M4 update (Pébay 2008,
                                     # SAND2008-6212). The order matters: M4 reads the old M2 and M3,
@@ -18034,7 +18032,7 @@ sub read_and_process_logs {
                                     # this block (#616 D29). The M2/M3/M4 moment accumulation runs
                                     # only under shape-group demand (#305) — the moments feed
                                     # nothing else.
-                                    welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
+                                    welford_update($msg_entry, $msg_entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
                                 }
                             }  # end: if ($message_duration_stats_demand)
 
@@ -18042,17 +18040,18 @@ sub read_and_process_logs {
                             # timed line whatever the statistics demand (#616 D1, D18).
                             # It is incremented after the running-mean update above,
                             # which reads it as the count before this observation.
-                            $me->{duration_count}++;
+                            $msg_entry->{duration_count}++;
 
                         }
                     } else {
-                        $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
+                        $msg_entry = $log_messages{$category}{$log_key} //= {};
+                        $msg_entry->{occurrences}++;
+                        $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
                     # Under -g a new key's entry carries its grouping key, so the final
                     # pass groups the key by the value the streaming checkpoints used.
                     if (defined $new_key_grouping_key) {
-                        $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key;
+                        $msg_entry->{grouping_key} = $new_key_grouping_key;
                         # A new key the inline match missed is held for checkpoint
                         # processing; its line is now stored, so a checkpoint it
                         # triggers merges its data.
@@ -18088,7 +18087,8 @@ sub read_and_process_logs {
                     # held on this entry, so the raw durations[] array is omitted. The sidecars
                     # (min/max/duration_count/_running_mean/m2_sum/m3_sum/m4_sum) survive untouched
                     # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
-                    $log_analysis{$bucket} //= ($bucket_stats_bin ? {
+                    # The bucket's entry, looked up once and written through (#620 D5).
+                    my $bucket_entry = $log_analysis{$bucket} //= ($bucket_stats_bin ? {
                         occurrences => 0,
                         duration_sum => 0,
                         # count_sum => 0,
@@ -18114,29 +18114,28 @@ sub read_and_process_logs {
                         durations => [],
                     });
 
-                    $log_analysis{$bucket}{occurrences}++;
+                    $bucket_entry->{occurrences}++;
 
                     # Gate on the pre-coercion observation, not defined-ness: the
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        my $be = $log_analysis{$bucket};
-                        $be->{duration_sum} += $duration;
+                        $bucket_entry->{duration_sum} += $duration;
 
-                        $log_analysis{$bucket}{'duration_sum-HL'} += $duration if $line_is_highlighted;
+                        $bucket_entry->{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
                         # the duration bar and impact regardless.
                         if( $bucket_duration_stats_demand ) {
-                            $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
+                            $bucket_entry->{sum_of_squares} += $duration ** 2;
                             # Raw samples feed the percentile computation; under -bdm bin the
                             # bin-counter partition + sidecars below carry equivalent information.
                             # Issue #561: the number is retained, not the string the log line
                             # carried; the percentile path sorts and indexes numerically and the
                             # moments path sums and squares, so the string buffer a plain copy
                             # would inherit from the shared record lexical has no reader.
-                            push @{$log_analysis{$bucket}{durations}}, 0 + $duration
+                            push @{$bucket_entry->{durations}}, 0 + $duration
                                 unless $bucket_stats_bin;
 
                             # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
@@ -18147,12 +18146,11 @@ sub read_and_process_logs {
                             # duration_count exactly equals the raw path's `scalar @{durations}` denominator
                             # and the exact-value statistics (min/mean/std_dev/moments) match raw byte-for-byte.
                             if ($bucket_stats_bin) {
-                                my $entry = $log_analysis{$bucket};
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
 
-                                $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
-                                $entry->{max} = $duration if !defined $entry->{max} || $duration > $entry->{max};
+                                $bucket_entry->{min} = $duration if !defined $bucket_entry->{min} || $duration < $bucket_entry->{min};
+                                $bucket_entry->{max} = $duration if !defined $bucket_entry->{max} || $duration > $bucket_entry->{max};
 
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
                                 # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
@@ -18160,7 +18158,7 @@ sub read_and_process_logs {
                                 # observation; the count is incremented beside the total, after
                                 # this block (#616 D29). The M2/M3/M4 accumulation runs only
                                 # under shape-group demand (#305).
-                                welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
+                                welford_update($bucket_entry, $bucket_entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
                             }
                         }
 
@@ -18168,7 +18166,7 @@ sub read_and_process_logs {
                         # timed line whatever the statistics demand (#616 D1, D18),
                         # after the running-mean update, which reads it as the count
                         # before this observation.
-                        $be->{duration_count}++;
+                        $bucket_entry->{duration_count}++;
                     }
 
                     # Nothing about the bytes metric is captured under -ob (#432).
@@ -18185,35 +18183,34 @@ sub read_and_process_logs {
                     # only needs to know whether ANY line carried bytes.
                     if( $bytes_observed_line && $bucket_bytes_demand ) {
                         $bytes_observed = 1;
-                        my $e = $log_analysis{$bucket};
                         # A zero-byte response is a measured zero: it defines the
                         # total as it counts (#616 D30).
-                        $e->{total_bytes} += $bytes;
-                        $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
+                        $bucket_entry->{total_bytes} += $bytes;
+                        $bucket_entry->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         # The count is kept on every line the store's demand
                         # admits (#616 D30); the aggregate demand governs the
                         # extrema.
                         if( $bytes_aggregate_demand ) {
-                            if( $e->{bytes_occurrences}++ ) {
-                                $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                                $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                            if( $bucket_entry->{bytes_occurrences}++ ) {
+                                $bucket_entry->{bytes_min} = $bytes if $bytes < $bucket_entry->{bytes_min};
+                                $bucket_entry->{bytes_max} = $bytes if $bytes > $bucket_entry->{bytes_max};
                             } else {
-                                $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                                $bucket_entry->{bytes_min} = $bucket_entry->{bytes_max} = $bytes;
                             }
                         } else {
-                            $e->{bytes_occurrences}++;
+                            $bucket_entry->{bytes_occurrences}++;
                         }
                     }
 
                     if( defined $count ) {
-                        $log_analysis{$bucket}{count_sum} += $count;
-                        $log_analysis{$bucket}{count_occurrences}++;
-                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $line_is_highlighted;
-                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $line_is_highlighted;
+                        $bucket_entry->{count_sum} += $count;
+                        $bucket_entry->{count_occurrences}++;
+                        $bucket_entry->{'count_sum-HL'} += $count if $line_is_highlighted;
+                        $bucket_entry->{'count_occurrences-HL'}++ if $line_is_highlighted;
 
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
-                        $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
-                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
+                        $bucket_entry->{count_min} = $count if !defined $bucket_entry->{count_min} || $count < $bucket_entry->{count_min};
+                        $bucket_entry->{count_max} = $count if !defined $bucket_entry->{count_max} || $count > $bucket_entry->{count_max};
                     }
 
                     # UDM time-bucket storage (Issue #22)
@@ -18225,26 +18222,26 @@ sub read_and_process_logs {
                             if ($config->{agg_kind} eq 'counting') {
                                 # Counting aggregations (Issue #313): occurrences plus a distinct
                                 # value set per bucket, mirroring the %log_sessions pattern
-                                $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                                $bucket_entry->{"udm_${name}_occurrences"}++;
                                 $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
                                 if ($line_is_highlighted) {
-                                    $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                                    $bucket_entry->{"udm_${name}_occurrences-HL"}++;
                                     $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
                                 }
                                 next;
                             }
-                            $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
-                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                            $bucket_entry->{"udm_${name}_sum"} += $value;
+                            $bucket_entry->{"udm_${name}_occurrences"}++;
                             if ($line_is_highlighted) {
-                                $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
-                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
-                                $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
-                                    if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
-                                $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
-                                    if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                                $bucket_entry->{"udm_${name}_sum-HL"} += $value;
+                                $bucket_entry->{"udm_${name}_occurrences-HL"}++;
+                                $bucket_entry->{"udm_${name}_min-HL"} = $value
+                                    if !defined $bucket_entry->{"udm_${name}_min-HL"} || $value < $bucket_entry->{"udm_${name}_min-HL"};
+                                $bucket_entry->{"udm_${name}_max-HL"} = $value
+                                    if !defined $bucket_entry->{"udm_${name}_max-HL"} || $value > $bucket_entry->{"udm_${name}_max-HL"};
                             }
-                            $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
-                            $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
+                            $bucket_entry->{"udm_${name}_min"} = $value if !defined $bucket_entry->{"udm_${name}_min"} || $value < $bucket_entry->{"udm_${name}_min"};
+                            $bucket_entry->{"udm_${name}_max"} = $value if !defined $bucket_entry->{"udm_${name}_max"} || $value > $bucket_entry->{"udm_${name}_max"};
                         }
                     }
 
