@@ -141,15 +141,15 @@ Locked by the architect on 2026-10-11, in planning:
   ceiling (`features/478-highlight-decision-read-back.md`), and #621 is the
   structural form of it.
 - **D6.** Capture demand for the session and user stores (drop 4): a store is
-  captured when any consumer of it is active: its terminal column is shown,
-  `-o` is given (the STATS CSV and the aggregate export carry it whether or
-  not the column is shown, #444 D13), or a `-V` section that reports it
-  (`udm-counting`) is requested. A `-V` section is a request for more detail:
-  when the data is on and the section asks for it, it is captured, calculated
-  and shown. Hiding a column removes one consumer; it does not destroy the
-  data, which is what discarding a field (`-d session`) does. Every output,
-  `-V` sections included, is unchanged from the base on every option shape;
-  only a run with no active consumer stops building the store.
+  captured when its terminal column is shown or `-o` is given (the STATS CSV
+  and the aggregate export carry it whether or not the column is shown,
+  #444 D13). Hiding a column removes one consumer; it does not destroy the
+  data, which is what discarding a field (`-d session`) does. A `-V` section
+  that reports the store's data (`udm-counting`) reads whatever was captured
+  but creates no demand, under the standing rule that `-V` creates no demand
+  (#349, transcribed in `features/305-shape-moment-extended-percentile-demand.md`
+  § Store-level demand): under `--hide session` without `-o`, the store is not
+  built and `-V udm-counting` lists no session counts. The same for users.
 
 ## 5. Design
 
@@ -182,11 +182,11 @@ is listed, so that a record existing from the start of a file changes no
 **Drop 4: capture demand for session, user and index (D2 step 5).** Three
 booleans resolved in the demand block of `adapt_to_command_line_options`,
 after `apply_output_visibility` has settled the hide flags (D6):
-`$session_capture_demand = ( !$hide_session || $write_messages_to_csv || section_requested('udm-counting') ) ? 1 : 0;`,
+`$session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;`,
 `$user_capture_demand` likewise, and `$index_capture_demand = !$no_index`
 (under `-ni` nothing reads the record: `write_index_file` is skipped and
-`detect_index_drift` returns before reading it). The demand block's comment
-that `-V` sections create no demand is reworded to D6's rule for these stores. The session and user blocks and the two index blocks are
+`detect_index_drift` returns before reading it), in the shape of
+`$bucket_bytes_demand`. The session and user blocks and the two index blocks are
 gated on them; the nanosecond block is split so that the heading's bounds are
 always updated and the index's selection bounds only under the index demand.
 
@@ -230,8 +230,8 @@ listed beside it.
 | AC2 | Drop 1 or 2 on a run that uses none of the gated features | No string compare on a capture mode or the grouping sensitivity, and no loop over an empty `@udm_configs`, executes per line | `grep` of the loop body for the five compares (zero hits) and for an unguarded `foreach my $config (@udm_configs)` (zero hits) | assertable |
 | AC3 | Drop 1 under each capture mode | Raw and bin models of all four surfaces produce the base's output | option shapes: default; message-stats, bucket-stats, heatmap and histogram data models each `raw` and `bin`; `-g` with a mask | assertable |
 | AC4 | Drop 3 | The detection record's key list is written once (`grep -c 'first_match_line => undef'` = 1); `-V` format-detection sections unchanged on a file with matches, a file with none, an empty file and a CSV file | the § 7 comparison over those four files | assertable |
-| AC5 | Drop 4 under `--hide session` (or `user`), without `-o` and without `-V udm-counting` | No session (user) store is built: `-mem`'s `log_sessions` (`log_users`) size is that of an empty hash; every output is the base's | `-V` with `-mem` on an access log carrying sessions and users | assertable |
-| AC6 | Drop 4 with any active consumer: the column shown, `-o`, or `-V udm-counting`, each alone and each under `--hide session --hide user` | The terminal output, STATS CSV, aggregate export and `-V udm-counting` carry the sessions and users figures exactly as on the base | the § 7 comparison over the six shapes | assertable |
+| AC5 | Drop 4 under `--hide session` (or `user`) without `-o` | No session (user) store is built: `-mem`'s `log_sessions` (`log_users`) size is that of an empty hash; the terminal output is the base's; `-V udm-counting` lists no session (user) counts, the one intended difference from the base | `-V udm-counting` with `-mem` on an access log carrying sessions and users | assertable |
+| AC6 | Drop 4 with the column shown, or under `-o` with or without `--hide session --hide user` | The terminal output, STATS CSV, aggregate export and `-V udm-counting` carry the sessions and users figures exactly as on the base | the § 7 comparison over the three shapes | assertable |
 | AC7 | Drop 4 under `-ni` | `-mem`'s `index_file_data` holds no per-line accumulations; without `-ni`, `ltl-index.csv` is byte-identical to the base's, on a run with and without a filter, with and without nanosecond precision | the § 7 comparison and `tests/validate-index-read-back.sh` | assertable |
 | AC8 | Drop 5 | No caller of the resolver applies its own default (`grep` for `choose_data_model` and `// 'raw'`, `// 'bin'` beside it: zero hits); the latency predicate is written once | `grep`; the § 7 comparison under `--hide stats`, `-hm`, `-o` | assertable |
 | AC9 | Drop 6 on a run that swaps the occupant | `scan_sub_cache_hits` counts the swap's hit; every other `-V format-registry` key is unchanged | a scenario in `tests/validate-format-registry.sh` on a file that triggers a swap | assertable |
