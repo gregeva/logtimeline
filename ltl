@@ -17852,7 +17852,7 @@ sub read_and_process_logs {
                     # new key's grouping key too, so its accounting records are
                     # taken per category and grouping key like a grouped run's.
                     $new_key_grouping_key = $log_level // ""
-                        if $message_grouping_section_wanted && $group_similar_sensitivity eq "none"
+                        if $message_grouping_section_wanted && !$grouping_active
                         && !exists $log_messages{$category}{$log_key};
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
