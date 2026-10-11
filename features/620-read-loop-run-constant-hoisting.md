@@ -370,3 +370,35 @@ Found during implementation:
   over 61 shapes).
 - The detection record's third copy was `note_unmatched_line`, which the
   audit called the detection emitter.
+
+**Completion gate.** `before` captured on 905911a, `after` on 1a53db8 (version
+restored), one run each, `tests/baseline/run-benchmark.sh` on this machine:
+
+| Benchmark test | before | after | change |
+|---|---|---|---|
+| single-day-access-log-standard | 8.3 s | 7.6 s | −8.1 % |
+| single-day-access-log-no-messages | 6.7 s | 6.3 s | −6.0 % |
+| single-day-access-log-top25-consolidate | 9.7 s | 9.1 s | −6.9 % |
+| single-day-access-log-heatmap-histogram | 10.8 s | 10.3 s | −5.0 % |
+| single-day-access-log-heatmap-histogram-export | 9.8 s | 9.5 s | −2.4 % |
+| single-day-access-log-heatmap-histogram-consolidate | 12.2 s | 11.7 s | −4.1 % |
+| single-day-access-log-sort-p99 | 8.3 s | 7.7 s | −6.5 % |
+| single-day-access-log-sort-skewness | 8.4 s | 7.9 s | −6.6 % |
+| single-day-application-log-standard | 3.6 s | 3.5 s | −2.8 % |
+| single-day-application-log-top25-consolidate | 5.1 s | 5.1 s | −0.2 % |
+
+Lines read and included are identical in every test. Two peak-memory
+readings were 1 % or more higher in the single run: heatmap-histogram-consolidate
+(+2 MB, 2.0 %) and the application log's standard test (+464 KB, 1.0 %). Over
+five interleaved rounds the application log reads 45.1 MB against 45.2 MB
+(the same range); heatmap-histogram-consolidate reads 105.9 MB (104.9 to
+108.0) against 107.1 MB (107.0 to 108.6). Every structure `-mem` measures is
+within ±1.3 KB between base and tip on that run (`log_analysis` 960 bytes
+smaller); the difference is in unattributed memory, inside the base's own
+3 MB spread across identical runs: allocator variation, not a structure this
+issue changed.
+
+Full harness suite on 10a30d3 (the `ltl` of 1a53db8): 49 of 49
+`tests/validate-*.sh` exit 0, each with its assertions run, no runtime warning;
+`validate-csv-output.sh` (42 pass) and `validate-statistics.sh` (25 scenarios,
+the same 45 expected failures as before this issue) first, under `CI=1`.
