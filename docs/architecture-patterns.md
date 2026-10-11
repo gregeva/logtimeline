@@ -170,10 +170,10 @@ entry is the one instance (`features/615-csv-registry-entry.md` D1, D9, D10,
 D11): each CSV file's header builds its block. A pattern entry of its own
 waits for the second consumer, user-declared formats (#387).
 
-**Status.** Established. One refinement on record from the audit:
-`format_registry_set_occupant` does its own cache lookup instead of calling
-`format_scan_sub_resolve`, so occupant swaps bypass the cache-hit telemetry
-(item 8, F8.1). The cache bypass is #620.
+**Status.** Established. Every point that changes the scan order and needs
+the sub live again, the occupant swap included, resolves through
+`format_scan_sub_resolve`, which counts the cache hits
+(`features/620-read-loop-run-constant-hoisting.md` D2 step 7).
 
 ---
 
@@ -208,7 +208,7 @@ election, promotion, occupant swap or pin).
 
 **Status.** Established for the four sites. Whether the per-line loop body of
 `read_and_process_logs` becomes a fifth is the audit's item 8 question,
-measured in drop 2. The per-line loop body as a switchable generated variant is #621, not planned, after #620.
+measured in drop 2. The per-line loop body as a switchable generated variant is #621, not planned.
 
 ---
 
@@ -295,10 +295,12 @@ table).
 ## Data-model selectors resolved once per surface
 
 **Definition.** Each statistical surface resolves its data model (`raw` or
-`bin`) through one resolver, `resolve_data_model($surface)` behind
-`choose_data_model()`: the per-surface flag, then the omnibus flag, then
-`undef`, which the caller replaces by the surface's default. Validation is one
-sub with one error form.
+`bin`) through one resolver, `resolve_data_model($surface)`: the per-surface
+flag, then the omnibus flag, then the surface's default, held beside the
+resolver in `%data_model_default`. No caller applies a default of its own.
+Validation is one sub with one error form. The read loop tests the resolved
+modes as booleans (`$message_stats_bin` and its siblings), set beside the
+capture-mode scalars before the loop.
 
 **Intended uses.** Any new surface that can hold exact or binned data resolves
 its model through the resolver, before the parse loop, into a run-scoped
@@ -310,14 +312,14 @@ time and § Resolution at each call site).
 
 **Consumption sites.**
 - `_validate_dm` :: `return if defined $value && ($value eq 'raw' || $value eq 'bin');`
-- `read_and_process_logs` :: `$heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';`
-- `calculate_all_statistics` :: `my $dm = choose_data_model('bucket-stats') // 'raw';`
+- `read_and_process_logs` :: `$heatmap_capture_mode       = resolve_data_model('heatmap');`
+- `read_and_process_logs` :: `$message_stats_bin = $message_stats_capture_mode eq 'bin' ? 1 : 0;`
+- `calculate_all_statistics` :: `my $dm = resolve_data_model('bucket-stats');`
 
 **Owning record.** `features/266-data-model-selectors.md`.
 
-**Status.** Needs refinement: each surface's default is repeated at fourteen
-call sites instead of held with the surface (item 1, F1.14), and the resolved
-capture modes are tested per line as string compares (item 8). Both are #620 (the default held with the surface; the capture modes as booleans).
+**Status.** Established (`features/620-read-loop-run-constant-hoisting.md`
+D2 steps 1 and 6).
 
 ---
 
@@ -350,6 +352,9 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 - `read_and_process_logs` :: `if( $bytes_observed_line && $bucket_bytes_demand ) {`
 - `read_and_process_logs` :: `$log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;`
 - `read_and_process_logs` :: `if( $message_duration_stats_demand ) {`
+- `adapt_to_command_line_options` :: `$session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;` and its user twin
+- `adapt_to_command_line_options` :: `$index_capture_demand = $no_index ? 0 : 1;`
+- `read_and_process_logs` :: `if ($index_capture_demand) {`
 
 **Owning record.** `features/516-bytes-aggregate-demand-gate.md` D1 and D2;
 `features/616-gated-mean-derivation.md` D30 (a metric is processed only when a
@@ -360,9 +365,10 @@ the CLAUDE.md checkpoint on observation counts.
 
 **Status.** Established for the observation-count rule by #616 (counts kept
 beside their totals under the same gate, a total projected only when counted,
-bytes processed only when produced and demanded at each store). Needs
-refinement for the per-line captures #620 gates (session, user and index
-capture).
+bytes processed only when produced and demanded at each store), and for the
+session, user and index capture by #620 (`features/620-read-loop-run-constant-hoisting.md`
+D6: hiding a column removes one consumer, `-o` remains one, and a `-V`
+section creates no demand).
 
 ---
 
@@ -667,9 +673,11 @@ classes).
 **Owning record.** `features/305-shape-moment-extended-percentile-demand.md`;
 `features/duration-statistics.md` § Demand model.
 
-**Status.** Established. One latent drift: the timeline latency column's
-visibility is restated in the registry's `active` predicate, in the demand
-block and in `build_column_layout` (audit, FP.1). The drift is #620 (the layout and the demand block read the registry predicate).
+**Status.** Established. The timeline latency column's visibility is the
+registry's `active` predicate alone: `stat_consumer_active()` evaluates it once
+into `$timeline_latency_column_active`, which the demand block and
+`build_column_layout` read (`features/620-read-loop-run-constant-hoisting.md`
+D2 step 6).
 
 ---
 
@@ -698,13 +706,16 @@ which is the cost a flag exists to bound.
 - `adapt_to_command_line_options` :: `$outcome_filter_active = ( $include_failure || $exclude_failure`
 - `settle_message_option_flags` :: `$discard_active    = ( @discard_subs || $discard_field{'query-string'} ) ? 1 : 0;`: the expose, mask and discard flags and `@mask_subs` are derived once, from their final lists, after the three resolvers and `apply_discard_precedence`, which only build and trim lists (#613 D9).
 - `read_and_process_logs` :: `if( $discard_active ) {`
+- `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
+- `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
 
 **Owning record.** This entry.
 
-**Status.** Needs refinement. Thirty-eight run-scoped flags exist; the capture
-modes are string compares in the loop rather than booleans (item 8); the loop
-carries about 107 tests of run constants per line, whose cost drop 2 measures.
-The capture modes and the run-constant tests are #620.
+**Status.** Established. The capture modes, the grouping sensitivity and the
+numeric filter bounds are tested in the loop as flags
+(`features/620-read-loop-run-constant-hoisting.md` D2 step 1, D5). The
+off-by-default feature gates are not grouped one flag per block: that shape
+was declined on a measured ceiling (D5), and #621 is its structural form.
 
 ---
 
@@ -1051,7 +1062,8 @@ the decision and the notice the same for all five.
 carries. A feature that is off costs one falsy scalar read and no sub call; a
 guard that is only needed on a rare branch sits on that branch (the
 impossible-date guard on the memo-miss branch); a value constant for the run is
-computed before the loop; any change to the loop is measured before and after
+computed before the loop; an entry written several times per line is looked up
+once and written through its reference; any change to the loop is measured before and after
 on the machine doing the work, with the interleaved method when the expected
 effect is near the noise floor.
 
@@ -1065,20 +1077,28 @@ on a measured 0.24 percent ceiling (`features/478-highlight-decision-read-back.m
 the inline guard placement costs nothing on a cache hit
 (`features/log-format-registry.md`, the #384 prototype findings); a
 package-global read-compare-write on every line measured about 1.5 percent
-before it was moved (the comment at the bytes-observed latch).
+before it was moved (the comment at the bytes-observed latch); a lookup by the
+full message key costs about 100 ns per line, a write through a reference
+about 20 ns, and one reference per message and bucket entry measured 4.9
+percent faster on a day of web-server access log
+(`features/620-read-loop-run-constant-hoisting.md` § 10).
 
 **Consumption sites.**
 - `read_and_process_logs` :: `&& ( !$numeric_highlight_active || (`
 - `format_entry_block_src` :: `my $miss_src = $layout =~ /^iso_/`
 - `read_and_process_logs` :: `if( $bytes_observed_line && !$omit_bytes ) {`
 - `read_and_process_logs` :: `$log_key = substr("[$log_level] $message", 0, $max_log_message_length);`
+- `read_and_process_logs` :: `$msg_entry = $log_messages{$category}{$log_key} //= ($message_stats_bin ? {`
+- `read_and_process_logs` :: `my $file_index = $index_file_data{$in_file};`
 
 **Owning record.** `features/312-numeric-criteria-highlight-selection.md` §
 Core mechanism; `features/478-highlight-decision-read-back.md`;
 `features/567-discard-named-values-from-message.md` § Post-release finding;
 `docs/perl-performance-optimization.md`; `tests/baseline/README.md`.
 
-**Status.** Needs refinement: the loop carries about 107 tests of run constants
-per line and recomputes the millisecond bucket size per line (audit, item 8,
-measured in drop 2). The key length is resolved once per run since #619 (one
-per-run key cut). Refined by #620 (hoisting in measured steps) and, as a switchable follow-up, #621.
+**Status.** Established. The run-constant tests the audit measured (item 8)
+are flags resolved once, the millisecond bucket size and the key cut are
+settled once per run, and the loop's entries are written through one
+reference each (`features/620-read-loop-run-constant-hoisting.md`). The
+remaining per-line option tests are the off-by-default feature gates; a
+switchable generated loop body that would drop them is #621, not planned.

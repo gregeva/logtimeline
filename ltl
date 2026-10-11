@@ -426,6 +426,7 @@ my ( $highlight_duration_min, $highlight_duration_max );
 my ( $highlight_bytes_min, $highlight_bytes_max );
 my ( $highlight_count_min, $highlight_count_max );
 my $numeric_highlight_active = 0;   # any numeric highlight bound given
+my $numeric_filter_active = 0;      # any numeric filter bound given
 my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
 # Per-message retention gate. A top-message count of 0 means the per-message
@@ -1089,6 +1090,7 @@ my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 
 # or 'none' when the requested ranking stood.
 my %sort_gate = ( operand => undef, family => 'occurrences', observed => undef, fallback => 'none' );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
+my $grouping_active = 0;   # message grouping runs: $group_similar_sensitivity is not "none", settled once
 
 # CLI option resolution tracking (Issue #231) — populated in
 # adapt_to_command_line_options() and consumed by the runtime-config -V
@@ -1337,9 +1339,9 @@ my %csv_family_decimals;                             # populated during option r
 
 # Issue #266: explicit per-surface statistical data-model selectors. The five
 # scalars below hold the user-supplied selector for each surface (or undef
-# when the user did not pass the flag). resolve_data_model()/choose_data_model()
-# read these to dispatch raw vs bin reductions at the caller. Defaults live in
-# the call sites, not here — the flags exist purely to override.
+# when the user did not pass the flag). resolve_data_model() reads these,
+# then the surface's default, to dispatch raw vs bin reductions at the caller;
+# the flags exist purely to override.
 #
 # These selectors and the precision lever (%TIER_BPD / --data-model-precision)
 # are orthogonal: the selector chooses WHICH data model a surface uses (raw
@@ -1352,12 +1354,15 @@ my $data_model_message             = undef;   # -mdm  / --message-stats-data-mod
 my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-model
 
 # Issue #266: caller-side capture-mode cache for the parsing hot path. Set
-# once before the parsing loop begins (see choose_data_model() callers) so
+# once before the parsing loop begins (from resolve_data_model()) so
 # the per-line branch in read_and_process_logs() does not re-resolve.
 my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
 my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #289
+# The same four modes as the booleans the read loop tests, set beside them:
+# a string compare per line costs more than a scalar truth test.
+my ( $histogram_raw, $heatmap_raw, $message_stats_bin, $bucket_stats_bin ) = ( 0, 0, 0, 0 );
 
 # Duration-statistics demand: the data model stores only what will be output,
 # so statistics capture and computation run only when at least one output
@@ -1371,6 +1376,10 @@ my $bytes_aggregate_demand         = 0;       # bytes_min/bytes_max at both scop
 my $bucket_bytes_demand            = 0;       # per-time-bucket bytes (%log_analysis total, count, extrema): timeline bytes column, STATS CSV, YAML export (#616 D30)
 my $message_bytes_demand           = 0;       # per-message bytes (%log_messages total, count, extrema): MESSAGES CSV, bytes sorts (#616 D30)
 my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
+my $session_capture_demand         = 0;       # per-bucket distinct sessions (%log_sessions): timeline sessions column, STATS CSV, YAML export (#620 D6)
+my $user_capture_demand            = 0;       # per-bucket distinct users (%log_users): timeline users column, STATS CSV, YAML export (#620 D6)
+my $index_capture_demand           = 0;       # per-file accumulations (%index_file_data): the ltl-index.csv rows and their drift check, unless -ni
+my $timeline_latency_column_active = 0;      # the timeline latency-statistics column is shown: the @STAT_CONSUMERS predicate, evaluated once
 
 # Statistics-group demand registry (#305): extends the store-level demand
 # above to statistic-group granularity. The 22-statistic duration ladder is
@@ -2736,11 +2745,18 @@ sub profile_fold_phrase {
     return "a single $days_span profile";
 }
 
-# Issue #266: resolve the user-supplied data-model selector for a surface.
-# Returns 'raw', 'bin', or undef. undef means the user supplied neither the
-# per-surface flag nor the omnibus -dm/--data-model; callers fall back to
-# their existing internal default. The surface name is one of: histogram,
-# heatmap, message-stats, bucket-stats.
+# Issue #266: resolve the data model ('raw' or 'bin') of a surface: the
+# per-surface flag, then the omnibus -dm/--data-model, then the surface's
+# default. The heatmap and histogram default to 'bin'; the two statistics
+# stores to 'raw', because the per-message-key store's cardinality is
+# unbounded and bin must be opted into. The surface name is one of:
+# histogram, heatmap, message-stats, bucket-stats.
+my %data_model_default = (
+    histogram       => 'bin',
+    heatmap         => 'bin',
+    'message-stats' => 'raw',
+    'bucket-stats'  => 'raw',
+);
 sub resolve_data_model {
     my ($surface) = @_;
     my %per_surface = (
@@ -2752,16 +2768,16 @@ sub resolve_data_model {
     my $per = $per_surface{$surface};
     return $per if defined $per;
     return $data_model_omnibus if defined $data_model_omnibus;
-    return undef;
+    return $data_model_default{$surface};
 }
 
-# Issue #266: caller-side dispatch helper. Returns the user-supplied
-# selector for $surface (a per-surface flag if set, else the omnibus -dm),
-# or undef if neither was supplied. Callers apply their own internal
-# default when undef is returned.
-sub choose_data_model {
-    my ($surface) = @_;
-    return resolve_data_model($surface);
+# Whether the @STAT_CONSUMERS entry named is active on this run: its predicate
+# is the one definition of when that surface is shown.
+sub stat_consumer_active {
+    my ($name) = @_;
+    my ($consumer) = grep { $_->{name} eq $name } @STAT_CONSUMERS;
+    die "stat_consumer_active: no consumer named $name\n" unless $consumer;
+    return $consumer->{active}->() ? 1 : 0;
 }
 
 # Issue #305: derive per-store per-group statistics demand from the consumer
@@ -4824,8 +4840,7 @@ sub format_registry_set_occupant {
         }
     }
     return 0 unless $changed;
-    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     return 1;
@@ -6877,19 +6892,19 @@ sub emit_percentile_algorithm_verbose {
     my @surfaces = (
         {
             id              => 'histogram',
-            data_model      => choose_data_model('histogram')   // 'bin',
+            data_model      => resolve_data_model('histogram'),
             effective_track => 'matches_data_model',
             bpd             => $histogram_stream_bpd,
         },
         {
             id              => 'heatmap',
-            data_model      => choose_data_model('heatmap')     // 'bin',
+            data_model      => resolve_data_model('heatmap'),
             effective_track => 'matches_data_model',
             bpd             => $heatmap_stream_bpd,
         },
         {
             id              => 'message-stats',
-            data_model      => choose_data_model('message-stats') // 'raw',
+            data_model      => resolve_data_model('message-stats'),
             # Issue #287: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
@@ -6897,7 +6912,7 @@ sub emit_percentile_algorithm_verbose {
         },
         {
             id              => 'bucket-stats',
-            data_model      => choose_data_model('bucket-stats')  // 'raw',
+            data_model      => resolve_data_model('bucket-stats'),
             # Issue #289: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
@@ -7012,7 +7027,7 @@ sub emit_statistics_demand_verbose {
         # Welford-Pébay sidecar derivation.
         my $source = 'none';
         if ($store_demand{$store} && $store_shape_demand{$store}) {
-            my $dm = choose_data_model($store_surface{$store}) // 'raw';
+            my $dm = resolve_data_model($store_surface{$store});
             $source = $dm eq 'bin' ? 'sidecar' : 'second_pass';
         }
         push @verbose_output, "  moment_source: $source";
@@ -7070,12 +7085,11 @@ sub emit_statistics_demand_verbose {
 # profile_window_seconds, included_weekdays, samples_included, samples_dropped;
 # the profile_active enum (yes|no). Weekdays are listed in the mode's own axis
 # order (first kept day first), comma-joined.
-# A line no format matched. Counted per file for -V format-detection and
-# once for the run; a file gets its detection record on its first
-# unmatched line even when no match has bound a format yet (Issue #228).
-sub note_unmatched_line {
-    my ($in_file) = @_;
-    my $fdd = $format_detection{$in_file} //= {
+# A file's format-detection record (Issue #228) as its read begins: no
+# format bound yet, nothing counted. read_and_process_logs() creates it before
+# the file's first line, so every site that counts into it finds it there.
+sub new_format_detection_record {
+    return {
         match_type       => undef,
         slug             => undef,
         metrics_observed => 0,
@@ -7084,6 +7098,13 @@ sub note_unmatched_line {
         unmatched_lines  => 0,
         first_match_line => undef,
     };
+}
+
+# A line no format matched. Counted per file for -V format-detection and
+# once for the run.
+sub note_unmatched_line {
+    my ($in_file) = @_;
+    my $fdd = $format_detection{$in_file} //= new_format_detection_record();
     $fdd->{unmatched_lines}++;
     $total_lines_unmatched++;
 }
@@ -16471,6 +16492,7 @@ sub adapt_to_command_line_options {
     # Highlight activation: numeric criteria and the regex matcher each activate
     # highlighting on their own; when both are given a line must satisfy both (AND).
     $numeric_highlight_active = quantity_bounds_given('highlight') ? 1 : 0;
+    $numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;
     $outcome_highlight_active = ( $highlight_failure || $highlight_success ) ? 1 : 0;
     $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
                        || $outcome_highlight_active ) ? 1 : 0;
@@ -16696,6 +16718,9 @@ sub adapt_to_command_line_options {
             if $write_messages_to_csv;
     }
 
+    # Message grouping as the read loop tests it, after -n 0 has had its say.
+    $grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;
+
     # Duration-statistics demand resolution: each statistics store is captured
     # and computed only when at least one of its output surfaces is active.
     # Duration-based sort keys (-so min/mean/p50/...) order the messages table
@@ -16703,8 +16728,9 @@ sub adapt_to_command_line_options {
     # Heatmap and histogram consume durations through their own dedicated
     # stores and gates and create no demand here; -V sections report resolved
     # state truthfully whether or not statistics ran, so they create none either.
+    $timeline_latency_column_active = stat_consumer_active('timeline-latency-column');
     $bucket_duration_stats_demand = ( !$omit_durations && (
-           !$hide_stats                          # timeline latency-statistics column (hidden by default under -hm)
+           $timeline_latency_column_active       # timeline latency-statistics column (hidden by default under -hm)
         || $write_messages_to_csv                # STATS CSV statistics columns
     ) ) ? 1 : 0;
     # Both message-store surfaces - the messages-table statistics variant and the
@@ -16741,6 +16767,16 @@ sub adapt_to_command_line_options {
     # percentage columns, errRate) read the run totals and %bucket_outcomes,
     # not this store.
     $message_outcomes_demand = ( $write_messages_to_csv || $capture_messages ) ? 1 : 0;
+    # Session and user capture demand (#620 D6): each store is read by its
+    # timeline column unless it is hidden, and by -o (the STATS CSV and the
+    # YAML export carry it whether or not the column is shown). Hiding the
+    # column removes one consumer; discarding the field (-d session) is what
+    # removes the data. -V udm-counting reports what was captured.
+    $session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;
+    $user_capture_demand    = ( !$hide_user    || $write_messages_to_csv ) ? 1 : 0;
+    # The per-file accumulations are read only by the index file and its drift
+    # check, neither of which runs under -ni.
+    $index_capture_demand = $no_index ? 0 : 1;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -16890,17 +16926,17 @@ sub pause_for_keypress {
 sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
 
-    # Issue #266: resolve the heatmap and histogram capture modes once,
-    # before entering the per-line parsing loop. The hot-path branches at
-    # the heatmap and histogram raw-value-capture sites read these scalars
-    # so they do not re-resolve per line. Heatmap and histogram default
-    # to 'bin' when the user did not pin a selector; the per-message-key
-    # surface defaults to 'raw' because its (category, log_key) cardinality
-    # is unbounded and bin must be opted into.
-    $heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';
-    $histogram_capture_mode     = choose_data_model('histogram')     // 'bin';
-    $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
-    $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
+    # Issue #266: resolve the four capture modes once, before entering the
+    # per-line parsing loop, so the hot-path branches read a scalar rather
+    # than re-resolving per line.
+    $heatmap_capture_mode       = resolve_data_model('heatmap');
+    $histogram_capture_mode     = resolve_data_model('histogram');
+    $message_stats_capture_mode = resolve_data_model('message-stats');
+    $bucket_stats_capture_mode  = resolve_data_model('bucket-stats');
+    $heatmap_raw       = $heatmap_capture_mode       eq 'raw' ? 1 : 0;
+    $histogram_raw     = $histogram_capture_mode     eq 'raw' ? 1 : 0;
+    $message_stats_bin = $message_stats_capture_mode eq 'bin' ? 1 : 0;
+    $bucket_stats_bin  = $bucket_stats_capture_mode  eq 'bin' ? 1 : 0;
 
 
     foreach my $in_file (@in_files) {
@@ -16917,6 +16953,7 @@ sub read_and_process_logs {
         $progress_file_index++;
         $format_current_file = $in_file;
         my %fr_matches_at_start = map { $_ => $format_registry_entry{$_}[FR_MATCHES] } keys %format_registry_entry;
+        $format_detection{$in_file} //= new_format_detection_record();
 
         # Index file: capture file metadata and initialize per-file counters (Issue #46)
         my @file_stat = stat($in_file);
@@ -16938,6 +16975,8 @@ sub read_and_process_logs {
             sel_file_bytes_occurrences      => 0, sel_file_bytes_min    => undef, sel_file_bytes_max    => undef, sel_bytes_sum    => 0,
             sel_count_occurrences      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
+        # The file's index record, found once for every line that writes it.
+        my $file_index = $index_file_data{$in_file};
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
@@ -17336,15 +17375,7 @@ sub read_and_process_logs {
                 # Format-detection tracking (Issue #228). First successful
                 # match for the file establishes match_type/slug; subsequent
                 # matches just increment matched_lines.
-                my $fdd = $format_detection{$in_file} //= {
-                    match_type       => undef,
-                    slug             => undef,
-                    metrics_observed => 0,
-                    event_ledger     => 0,
-                    matched_lines    => 0,
-                    unmatched_lines  => 0,
-                    first_match_line => undef,
-                };
+                my $fdd = $format_detection{$in_file};
                 if (!defined $fdd->{match_type}) {
                     $fdd->{match_type}       = $match_type;
                     $fdd->{slug}             = $line_entry ? $line_entry->[FR_SLUG] : 'unknown';
@@ -17422,8 +17453,8 @@ sub read_and_process_logs {
                 my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
 
                 # Index file: pre-filter per-file tracking (Issue #46)
-                {
-                    my $fd = $index_file_data{$in_file};
+                if ($index_capture_demand) {
+                    my $fd = $file_index;
                     $fd->{match_count}++;
                     $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
@@ -17517,20 +17548,24 @@ sub read_and_process_logs {
                 # metric (same semantics as the numeric highlight criteria), so it
                 # is dropped — and counted, so the exclusion is reported after
                 # processing instead of silently shrinking the totals.
-                if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
-                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
-                    if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
-                    if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
-                }
-                if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
-                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
-                    if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
-                    if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
-                }
-                if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
-                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
-                    if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
-                    if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
+                # $numeric_filter_active keeps a run with no bound to one scalar
+                # test per line.
+                if( $numeric_filter_active ) {
+                    if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
+                        if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
+                        if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
+                        if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
+                    }
+                    if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
+                        if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
+                        if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
+                        if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
+                    }
+                    if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
+                        if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
+                        if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
+                        if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
+                    }
                 }
 
                 # A skipped /regex/ capture is counted here, past every filter,
@@ -17541,8 +17576,8 @@ sub read_and_process_logs {
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
 
                 # Index file: post-filter per-file tracking for selection entry (Issue #46)
-                {
-                    my $fd = $index_file_data{$in_file};
+                if ($index_capture_demand) {
+                    my $fd = $file_index;
                     $fd->{sel_match_count}++;
                     $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
                     $fd->{sel_last_timestamp}  = $timestamp_epoch if !defined $fd->{sel_last_timestamp}  || $timestamp_epoch > $fd->{sel_last_timestamp};
@@ -17602,11 +17637,13 @@ sub read_and_process_logs {
                 # bounds, as the file row's above. The heading's are folded
                 # under --profile, so their whole second is the folded one.
                 if ($timestamp_capture_ns) {
-                    my $fd = $index_file_data{$in_file};
                     my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
                     my $bs = $profile_mode ? int($bucket_epoch - $fractional_ms / 1000 + 0.5) : $timestamp;
-                    if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
-                    if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
+                    if ($index_capture_demand) {
+                        my $fd = $file_index;
+                        if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
+                        if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
+                    }
                     if ($bucket_epoch == $output_timestamp_min && (!defined $output_timestamp_min_s || $bs < $output_timestamp_min_s || ($bs == $output_timestamp_min_s && $ns < $output_timestamp_min_ns))) { ($output_timestamp_min_s, $output_timestamp_min_ns) = ($bs, $ns) }
                     if ($bucket_epoch == $output_timestamp_max && (!defined $output_timestamp_max_s || $bs > $output_timestamp_max_s || ($bs == $output_timestamp_max_s && $ns > $output_timestamp_max_ns))) { ($output_timestamp_max_s, $output_timestamp_max_ns) = ($bs, $ns) }
                 }
@@ -17742,7 +17779,7 @@ sub read_and_process_logs {
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
                     my $consolidation_s1_matched = 0;
                     my $new_key_grouping_key;
-                    if ($group_similar_sensitivity ne "none") {
+                    if ($grouping_active) {
                         my $grouping_key = $log_level // "";
                         my $cat_gk = "$category|$grouping_key";
 
@@ -17766,14 +17803,16 @@ sub read_and_process_logs {
                                     $stats_source->{count_min} = $count;
                                     $stats_source->{count_max} = $count;
                                 }
-                                foreach my $config (@udm_configs) {
-                                    my $name = $config->{name};
-                                    next unless defined $udm_values{$name};
-                                    my $value = $udm_values{$name};
-                                    $stats_source->{"udm_${name}_sum"} = $value;
-                                    $stats_source->{"udm_${name}_occurrences"} = 1;
-                                    $stats_source->{"udm_${name}_min"} = $value;
-                                    $stats_source->{"udm_${name}_max"} = $value;
+                                if (@udm_configs) {
+                                    foreach my $config (@udm_configs) {
+                                        my $name = $config->{name};
+                                        next unless defined $udm_values{$name};
+                                        my $value = $udm_values{$name};
+                                        $stats_source->{"udm_${name}_sum"} = $value;
+                                        $stats_source->{"udm_${name}_occurrences"} = 1;
+                                        $stats_source->{"udm_${name}_min"} = $value;
+                                        $stats_source->{"udm_${name}_max"} = $value;
+                                    }
                                 }
                                 if (defined $duration && !$omit_durations) {
                                     $stats_source->{total_duration} = $duration;
@@ -17788,7 +17827,7 @@ sub read_and_process_logs {
                                     # body carries both the source string and the integer the
                                     # per-file index block's duration_sum read out of it, so a plain
                                     # copy retains a string buffer no consumer of this array reads.
-                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
+                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_bin;
                                     $stats_source->{duration_count} = 1;
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
@@ -17796,7 +17835,7 @@ sub read_and_process_logs {
                                     # bin block (via merge_bin_state) folds this into
                                     # the cluster. min/max from $stats_source->{min,max}
                                     # already populated above via raw producer fields.
-                                    if ($message_stats_capture_mode eq 'bin') {
+                                    if ($message_stats_bin) {
                                         $stats_source->{_running_mean}  = $duration;
                                         $stats_source->{m2_sum}         = 0;
                                         $stats_source->{m3_sum}         = 0;
@@ -17821,11 +17860,15 @@ sub read_and_process_logs {
                     # new key's grouping key too, so its accounting records are
                     # taken per category and grouping key like a grouped run's.
                     $new_key_grouping_key = $log_level // ""
-                        if $message_grouping_section_wanted && $group_similar_sensitivity eq "none"
+                        if $message_grouping_section_wanted && !$grouping_active
                         && !exists $log_messages{$category}{$log_key};
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
                     if (!$consolidation_s1_matched) {
+                    # The message's entry, looked up once and written through: a lookup by
+                    # the full message key costs ~100 ns per line, a write through the
+                    # reference ~20 ns (#616, #620 D5).
+                    my $msg_entry;
                     if( $metrics_observed ) {
 
                         # Initialize the hash if not already done (don't initialize it all, allowing for lazy population of only the fields we need)
@@ -17837,7 +17880,7 @@ sub read_and_process_logs {
                         # Welford-Pébay sidecars below carry the same data). Eliminating the
                         # empty arrayref saves ~40 bytes per (category, log_key) — at 10^5+
                         # key cardinality this is the dominant per-key allocation today.
-                        $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
+                        $msg_entry = $log_messages{$category}{$log_key} //= ($message_stats_bin ? {
                             occurrences    => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
@@ -17860,8 +17903,8 @@ sub read_and_process_logs {
                             durations      => [],
                         });
 
-                        $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
+                        $msg_entry->{occurrences}++;
+                        $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
                         # bytes_occurrences counts lines that actually carried a
@@ -17869,8 +17912,8 @@ sub read_and_process_logs {
                         # dividing by it understates the mean on any log where some
                         # matched lines have no bytes field.
                         #
-                        # The entry reference is taken once and written through, and
-                        # the extrema are seeded on the first observation rather than
+                        # Written through the entry's one reference, and the extrema
+                        # are seeded on the first observation rather than
                         # tested for definedness on every line. Measured at
                         # +99 ns/line against +248 for the repeated-lookup,
                         # test-every-line idiom below — see
@@ -17887,52 +17930,49 @@ sub read_and_process_logs {
                         # bytes falls back the same way any operand with no values
                         # does.
                         if( defined $bytes && $message_bytes_demand ) {
-                            my $e = $log_messages{$category}{$log_key};
-                            $e->{total_bytes} += $bytes;
+                            $msg_entry->{total_bytes} += $bytes;
                             # The count is kept on every line the store's demand
                             # admits (#616 D30); the aggregate demand governs the
                             # extrema.
                             if( $bytes_aggregate_demand ) {
-                                if( $e->{bytes_occurrences}++ ) {
-                                    $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                                    $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                                if( $msg_entry->{bytes_occurrences}++ ) {
+                                    $msg_entry->{bytes_min} = $bytes if $bytes < $msg_entry->{bytes_min};
+                                    $msg_entry->{bytes_max} = $bytes if $bytes > $msg_entry->{bytes_max};
                                 } else {
-                                    $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                                    $msg_entry->{bytes_min} = $msg_entry->{bytes_max} = $bytes;
                                 }
                             } else {
-                                $e->{bytes_occurrences}++;
+                                $msg_entry->{bytes_occurrences}++;
                             }
                         }
 
                         if( defined $count ) {
-                            $log_messages{$category}{$log_key}{count_sum} += $count if defined $count;
-                            $log_messages{$category}{$log_key}{count_occurrences}++;
-                            $log_messages{$category}{$log_key}{count_min} = $count if !defined $log_messages{$category}{$log_key}{count_min} || $count < $log_messages{$category}{$log_key}{count_min};
-                            $log_messages{$category}{$log_key}{count_max} = $count if !defined $log_messages{$category}{$log_key}{count_max} || $count > $log_messages{$category}{$log_key}{count_max};
+                            $msg_entry->{count_sum} += $count if defined $count;
+                            $msg_entry->{count_occurrences}++;
+                            $msg_entry->{count_min} = $count if !defined $msg_entry->{count_min} || $count < $msg_entry->{count_min};
+                            $msg_entry->{count_max} = $count if !defined $msg_entry->{count_max} || $count > $msg_entry->{count_max};
                         }
 
                         # UDM per-message storage (Issue #22)
-                        foreach my $config (@udm_configs) {
-                            my $name = $config->{name};
-                            next unless defined $udm_values{$name};
-                            my $value = $udm_values{$name};
-                            if ($config->{agg_kind} eq 'counting') {
-                                # Only occurrences are tracked per message; distinct is bucket-scoped
-                                $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
-                                next;
+                        if (@udm_configs) {
+                            foreach my $config (@udm_configs) {
+                                my $name = $config->{name};
+                                next unless defined $udm_values{$name};
+                                my $value = $udm_values{$name};
+                                if ($config->{agg_kind} eq 'counting') {
+                                    # Only occurrences are tracked per message; distinct is bucket-scoped
+                                    $msg_entry->{"udm_${name}_occurrences"}++;
+                                    next;
+                                }
+                                $msg_entry->{"udm_${name}_sum"} += $value;
+                                $msg_entry->{"udm_${name}_occurrences"}++;
+                                $msg_entry->{"udm_${name}_min"} = $value if !defined $msg_entry->{"udm_${name}_min"} || $value < $msg_entry->{"udm_${name}_min"};
+                                $msg_entry->{"udm_${name}_max"} = $value if !defined $msg_entry->{"udm_${name}_max"} || $value > $msg_entry->{"udm_${name}_max"};
                             }
-                            $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
-                            $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
-                            $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
-                            $log_messages{$category}{$log_key}{"udm_${name}_max"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_max"} || $value > $log_messages{$category}{$log_key}{"udm_${name}_max"};
                         }
 
                         if( defined $duration && !$omit_durations ) {
-                            # The entry is found once for the total and its count: a
-                            # lookup by the full message key costs ~100 ns per line, an
-                            # increment through the reference ~20 ns (#616).
-                            my $me = $log_messages{$category}{$log_key};
-                            $me->{total_duration} += $duration;
+                            $msg_entry->{total_duration} += $duration;
 
                             # Statistics machinery (sum of squares, raw samples or bin
                             # counters + moment sidecars) is captured only when a surface
@@ -17940,7 +17980,7 @@ sub read_and_process_logs {
                             # accumulate regardless.
                             if( $message_duration_stats_demand ) {
                                 # Accumulate the sum of squares for variance calculation
-                                $log_messages{$category}{$log_key}{sum_of_squares} += $duration ** 2;
+                                $msg_entry->{sum_of_squares} += $duration ** 2;
                                 # Issue #287 Commit 5: skip the durations[] push under -mdm bin —
                                 # this is the dominant memory consumer at high (category, log_key)
                                 # cardinality. The bin-counter store and Welford-Pébay sidecars
@@ -17949,8 +17989,8 @@ sub read_and_process_logs {
                                 # carried; the percentile path sorts and indexes numerically and the
                                 # moments path sums and squares, so the string buffer a plain copy
                                 # would inherit from the shared record lexical has no reader.
-                                push @{$log_messages{$category}{$log_key}{durations}}, 0 + $duration
-                                    unless $message_stats_capture_mode eq 'bin';
+                                push @{$msg_entry->{durations}}, 0 + $duration
+                                    unless $message_stats_bin;
     
                                 # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
                                 # store and update the Welford-Pébay online central-moment accumulators
@@ -17967,8 +18007,7 @@ sub read_and_process_logs {
                                 # ladder; the cross-model envelope at tests/statistics-drift/cross-model-
                                 # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
                                 # populated in Commit 6 once Layer 4 measurement is available.
-                                if ($message_stats_capture_mode eq 'bin') {
-                                    my $entry = $log_messages{$category}{$log_key};
+                                if ($message_stats_bin) {
     
                                     # Percentile-ladder source (the bin partition). Skip zero-valued
                                     # samples — partition's log-spaced geometry cannot bin them.
@@ -17982,10 +18021,10 @@ sub read_and_process_logs {
                                     # sample including 0, so calculate_statistics_bin can derive min,
                                     # mean, std_dev, skewness, kurtosis, bimodality_coef byte-identical
                                     # to the raw path.
-                                    $entry->{min} = $duration
-                                        if !defined $entry->{min} || $duration < $entry->{min};
-                                    $entry->{max} = $duration
-                                        if !defined $entry->{max} || $duration > $entry->{max};
+                                    $msg_entry->{min} = $duration
+                                        if !defined $msg_entry->{min} || $duration < $msg_entry->{min};
+                                    $msg_entry->{max} = $duration
+                                        if !defined $msg_entry->{max} || $duration > $msg_entry->{max};
     
                                     # Welford-Pébay online M2/M3/M4 update (Pébay 2008,
                                     # SAND2008-6212). The order matters: M4 reads the old M2 and M3,
@@ -17999,7 +18038,7 @@ sub read_and_process_logs {
                                     # this block (#616 D29). The M2/M3/M4 moment accumulation runs
                                     # only under shape-group demand (#305) — the moments feed
                                     # nothing else.
-                                    welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
+                                    welford_update($msg_entry, $msg_entry->{duration_count}, 1, $duration, 0, 0, 0, $message_stats_demand_shape);
                                 }
                             }  # end: if ($message_duration_stats_demand)
 
@@ -18007,21 +18046,22 @@ sub read_and_process_logs {
                             # timed line whatever the statistics demand (#616 D1, D18).
                             # It is incremented after the running-mean update above,
                             # which reads it as the count before this observation.
-                            $me->{duration_count}++;
+                            $msg_entry->{duration_count}++;
 
                         }
                     } else {
-                        $log_messages{$category}{$log_key}{occurrences}++;
-                        $log_messages{$category}{$log_key}{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
+                        $msg_entry = $log_messages{$category}{$log_key} //= {};
+                        $msg_entry->{occurrences}++;
+                        $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
                     # Under -g a new key's entry carries its grouping key, so the final
                     # pass groups the key by the value the streaming checkpoints used.
                     if (defined $new_key_grouping_key) {
-                        $log_messages{$category}{$log_key}{grouping_key} = $new_key_grouping_key;
+                        $msg_entry->{grouping_key} = $new_key_grouping_key;
                         # A new key the inline match missed is held for checkpoint
                         # processing; its line is now stored, so a checkpoint it
                         # triggers merges its data.
-                        consolidation_fire_checkpoints($category) if $group_similar_sensitivity ne "none";
+                        consolidation_fire_checkpoints($category) if $grouping_active;
                     }
                     }  # end: if (!$consolidation_s1_matched)
                 }
@@ -18053,7 +18093,8 @@ sub read_and_process_logs {
                     # held on this entry, so the raw durations[] array is omitted. The sidecars
                     # (min/max/duration_count/_running_mean/m2_sum/m3_sum/m4_sum) survive untouched
                     # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
-                    $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
+                    # The bucket's entry, looked up once and written through (#620 D5).
+                    my $bucket_entry = $log_analysis{$bucket} //= ($bucket_stats_bin ? {
                         occurrences => 0,
                         duration_sum => 0,
                         # count_sum => 0,
@@ -18079,30 +18120,29 @@ sub read_and_process_logs {
                         durations => [],
                     });
 
-                    $log_analysis{$bucket}{occurrences}++;
+                    $bucket_entry->{occurrences}++;
 
                     # Gate on the pre-coercion observation, not defined-ness: the
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
-                        my $be = $log_analysis{$bucket};
-                        $be->{duration_sum} += $duration;
+                        $bucket_entry->{duration_sum} += $duration;
 
-                        $log_analysis{$bucket}{'duration_sum-HL'} += $duration if $line_is_highlighted;
+                        $bucket_entry->{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
                         # the duration bar and impact regardless.
                         if( $bucket_duration_stats_demand ) {
-                            $log_analysis{$bucket}{sum_of_squares} += $duration ** 2;
+                            $bucket_entry->{sum_of_squares} += $duration ** 2;
                             # Raw samples feed the percentile computation; under -bdm bin the
                             # bin-counter partition + sidecars below carry equivalent information.
                             # Issue #561: the number is retained, not the string the log line
                             # carried; the percentile path sorts and indexes numerically and the
                             # moments path sums and squares, so the string buffer a plain copy
                             # would inherit from the shared record lexical has no reader.
-                            push @{$log_analysis{$bucket}{durations}}, 0 + $duration
-                                unless $bucket_stats_capture_mode eq 'bin';
+                            push @{$bucket_entry->{durations}}, 0 + $duration
+                                unless $bucket_stats_bin;
 
                             # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
                             # Welford-Pébay online central-moment sidecars (mirrors the per-message-key
@@ -18111,13 +18151,12 @@ sub read_and_process_logs {
                             # every sample including 0 (inside the existing $duration >= 0 gate) so
                             # duration_count exactly equals the raw path's `scalar @{durations}` denominator
                             # and the exact-value statistics (min/mean/std_dev/moments) match raw byte-for-byte.
-                            if ($bucket_stats_capture_mode eq 'bin') {
-                                my $entry = $log_analysis{$bucket};
+                            if ($bucket_stats_bin) {
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
 
-                                $entry->{min} = $duration if !defined $entry->{min} || $duration < $entry->{min};
-                                $entry->{max} = $duration if !defined $entry->{max} || $duration > $entry->{max};
+                                $bucket_entry->{min} = $duration if !defined $bucket_entry->{min} || $duration < $bucket_entry->{min};
+                                $bucket_entry->{max} = $duration if !defined $bucket_entry->{max} || $duration > $bucket_entry->{max};
 
                                 # Welford-Pébay online M2/M3/M4 update (Pébay 2008, SAND2008-6212).
                                 # Order matters: M4 reads the old M2 and M3, M3 reads the old M2, M2 last.
@@ -18125,7 +18164,7 @@ sub read_and_process_logs {
                                 # observation; the count is incremented beside the total, after
                                 # this block (#616 D29). The M2/M3/M4 accumulation runs only
                                 # under shape-group demand (#305).
-                                welford_update($entry, $entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
+                                welford_update($bucket_entry, $bucket_entry->{duration_count}, 1, $duration, 0, 0, 0, $bucket_stats_demand_shape);
                             }
                         }
 
@@ -18133,7 +18172,7 @@ sub read_and_process_logs {
                         # timed line whatever the statistics demand (#616 D1, D18),
                         # after the running-mean update, which reads it as the count
                         # before this observation.
-                        $be->{duration_count}++;
+                        $bucket_entry->{duration_count}++;
                     }
 
                     # Nothing about the bytes metric is captured under -ob (#432).
@@ -18150,65 +18189,66 @@ sub read_and_process_logs {
                     # only needs to know whether ANY line carried bytes.
                     if( $bytes_observed_line && $bucket_bytes_demand ) {
                         $bytes_observed = 1;
-                        my $e = $log_analysis{$bucket};
                         # A zero-byte response is a measured zero: it defines the
                         # total as it counts (#616 D30).
-                        $e->{total_bytes} += $bytes;
-                        $e->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
+                        $bucket_entry->{total_bytes} += $bytes;
+                        $bucket_entry->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         # The count is kept on every line the store's demand
                         # admits (#616 D30); the aggregate demand governs the
                         # extrema.
                         if( $bytes_aggregate_demand ) {
-                            if( $e->{bytes_occurrences}++ ) {
-                                $e->{bytes_min} = $bytes if $bytes < $e->{bytes_min};
-                                $e->{bytes_max} = $bytes if $bytes > $e->{bytes_max};
+                            if( $bucket_entry->{bytes_occurrences}++ ) {
+                                $bucket_entry->{bytes_min} = $bytes if $bytes < $bucket_entry->{bytes_min};
+                                $bucket_entry->{bytes_max} = $bytes if $bytes > $bucket_entry->{bytes_max};
                             } else {
-                                $e->{bytes_min} = $e->{bytes_max} = $bytes;
+                                $bucket_entry->{bytes_min} = $bucket_entry->{bytes_max} = $bytes;
                             }
                         } else {
-                            $e->{bytes_occurrences}++;
+                            $bucket_entry->{bytes_occurrences}++;
                         }
                     }
 
                     if( defined $count ) {
-                        $log_analysis{$bucket}{count_sum} += $count;
-                        $log_analysis{$bucket}{count_occurrences}++;
-                        $log_analysis{$bucket}{'count_sum-HL'} += $count if $line_is_highlighted;
-                        $log_analysis{$bucket}{'count_occurrences-HL'}++ if $line_is_highlighted;
+                        $bucket_entry->{count_sum} += $count;
+                        $bucket_entry->{count_occurrences}++;
+                        $bucket_entry->{'count_sum-HL'} += $count if $line_is_highlighted;
+                        $bucket_entry->{'count_occurrences-HL'}++ if $line_is_highlighted;
 
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
-                        $log_analysis{$bucket}{count_min} = $count if !defined $log_analysis{$bucket}{count_min} || $count < $log_analysis{$bucket}{count_min};
-                        $log_analysis{$bucket}{count_max} = $count if !defined $log_analysis{$bucket}{count_max} || $count > $log_analysis{$bucket}{count_max};
+                        $bucket_entry->{count_min} = $count if !defined $bucket_entry->{count_min} || $count < $bucket_entry->{count_min};
+                        $bucket_entry->{count_max} = $count if !defined $bucket_entry->{count_max} || $count > $bucket_entry->{count_max};
                     }
 
                     # UDM time-bucket storage (Issue #22)
-                    foreach my $config (@udm_configs) {
-                        my $name = $config->{name};
-                        next unless defined $udm_values{$name};
-                        my $value = $udm_values{$name};
-                        if ($config->{agg_kind} eq 'counting') {
-                            # Counting aggregations (Issue #313): occurrences plus a distinct
-                            # value set per bucket, mirroring the %log_sessions pattern
-                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                            $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
-                            if ($line_is_highlighted) {
-                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
-                                $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                    if (@udm_configs) {
+                        foreach my $config (@udm_configs) {
+                            my $name = $config->{name};
+                            next unless defined $udm_values{$name};
+                            my $value = $udm_values{$name};
+                            if ($config->{agg_kind} eq 'counting') {
+                                # Counting aggregations (Issue #313): occurrences plus a distinct
+                                # value set per bucket, mirroring the %log_sessions pattern
+                                $bucket_entry->{"udm_${name}_occurrences"}++;
+                                $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
+                                if ($line_is_highlighted) {
+                                    $bucket_entry->{"udm_${name}_occurrences-HL"}++;
+                                    $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                                }
+                                next;
                             }
-                            next;
+                            $bucket_entry->{"udm_${name}_sum"} += $value;
+                            $bucket_entry->{"udm_${name}_occurrences"}++;
+                            if ($line_is_highlighted) {
+                                $bucket_entry->{"udm_${name}_sum-HL"} += $value;
+                                $bucket_entry->{"udm_${name}_occurrences-HL"}++;
+                                $bucket_entry->{"udm_${name}_min-HL"} = $value
+                                    if !defined $bucket_entry->{"udm_${name}_min-HL"} || $value < $bucket_entry->{"udm_${name}_min-HL"};
+                                $bucket_entry->{"udm_${name}_max-HL"} = $value
+                                    if !defined $bucket_entry->{"udm_${name}_max-HL"} || $value > $bucket_entry->{"udm_${name}_max-HL"};
+                            }
+                            $bucket_entry->{"udm_${name}_min"} = $value if !defined $bucket_entry->{"udm_${name}_min"} || $value < $bucket_entry->{"udm_${name}_min"};
+                            $bucket_entry->{"udm_${name}_max"} = $value if !defined $bucket_entry->{"udm_${name}_max"} || $value > $bucket_entry->{"udm_${name}_max"};
                         }
-                        $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
-                        $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                        if ($line_is_highlighted) {
-                            $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
-                            $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
-                            $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
-                                if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
-                            $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
-                                if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
-                        }
-                        $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
-                        $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
                     }
 
                     ## HEATMAP RAW VALUE CAPTURE ##
@@ -18236,7 +18276,7 @@ sub read_and_process_logs {
 
                             # Issue #266: dispatch via $heatmap_capture_mode resolved
                             # once before this loop (set near the parsing-loop entry).
-                            if ($heatmap_capture_mode eq 'raw') {
+                            if ($heatmap_raw) {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
                                 push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $line_is_highlighted;
                             } else {
@@ -18254,7 +18294,7 @@ sub read_and_process_logs {
 
                         # Issue #266: dispatch via $histogram_capture_mode resolved
                         # once before this loop (set near the parsing-loop entry).
-                        if ($histogram_capture_mode eq 'raw') {
+                        if ($histogram_raw) {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                                 # Issue #561: the number is retained, not the string the log line
                                 # carried; the histogram bins numerically and no consumer of these
@@ -18332,7 +18372,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE SESSION BASED STATISTICS DATA (Issue #26) ##
-                if( defined $session && $session ne "" && $session ne "-" ) {
+                if( defined $session && $session ne "" && $session ne "-" && $session_capture_demand ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
                     if( $line_is_highlighted ) {
@@ -18341,7 +18381,7 @@ sub read_and_process_logs {
                 }
                 ## CAPTURE USER BASED STATISTICS DATA (#444 D10): the sessions
                 ## model piece for piece, a bare - being an absent user (D14)
-                if( defined $user && $user ne "" && $user ne "-" ) {
+                if( defined $user && $user ne "" && $user ne "-" && $user_capture_demand ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
                     if( $line_is_highlighted ) {
@@ -18370,18 +18410,10 @@ sub read_and_process_logs {
         # so every selected file must eventually enter the numerator.
         $progress_bytes_done += $progress_file_size;
 
-        # Scan telemetry lands with the file's detection record; a file may
-        # produce zero matches (or zero lines), so create the record here too.
+        # Scan telemetry lands with the file's detection record, which exists
+        # from the start of the read whether or not a line matched.
         {
-            my $fdd = $format_detection{$in_file} //= {
-                match_type       => undef,
-                slug             => undef,
-                metrics_observed => 0,
-                event_ledger     => 0,
-                matched_lines    => 0,
-                unmatched_lines  => 0,
-                first_match_line => undef,
-            };
+            my $fdd = $format_detection{$in_file};
             $fdd->{scan_attempts}        = $file_scan_attempts;
             $fdd->{scan_failed_attempts} = $file_scan_failed;
             # Formats found in this file (D50, N7): every entry whose run
@@ -18491,7 +18523,7 @@ sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
     # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
     # the user did not pin a selector for the heatmap surface.
-    my $dm = choose_data_model('heatmap') // 'bin';
+    my $dm = resolve_data_model('heatmap');
     return $dm eq 'raw'
         ? calculate_heatmap_buckets_exact()
         : finalize_heatmap_unified();
@@ -18841,7 +18873,7 @@ sub calculate_histogram_buckets {
     return unless $histogram_enabled;
     # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
     # the user did not pin a selector for the histogram surface.
-    my $dm = choose_data_model('histogram') // 'bin';
+    my $dm = resolve_data_model('histogram');
     return $dm eq 'raw'
         ? calculate_histogram_buckets_exact()
         : finalize_histogram_unified();
@@ -19343,7 +19375,7 @@ sub calculate_all_statistics {
             # the demanded statistics groups' fields (#305) — merging it into
             # the %log_stats{$bucket} literal below is the storage gate:
             # undemanded statistic fields are never written.
-            my $dm = choose_data_model('bucket-stats') // 'raw';
+            my $dm = resolve_data_model('bucket-stats');
             my $bucket_demand = {
                 store    => 'bucket',    # telemetry attribution (-V statistics-demand)
                 csv_body => $bucket_stats_demand_csv_body,
@@ -19624,7 +19656,7 @@ sub calculate_all_statistics {
                     extended => ($sort_group eq 'extended_percentiles' ? 1 : 0),
                     shape    => ($sort_group eq 'shape_moments'        ? 1 : 0),
                 };
-                my $dm = choose_data_model('message-stats') // 'raw';
+                my $dm = resolve_data_model('message-stats');
 
                 my (%sort_value, %demoted_sorted, @fill_block);
                 my ($demoted, $population_calls) = (0, 0);
@@ -19821,7 +19853,7 @@ sub calculate_all_statistics {
                     # below is the storage gate — undemanded statistic fields
                     # are never written onto the per-key entry, which is the
                     # memory lever at high key cardinality.
-                    my $dm = choose_data_model('message-stats') // 'raw';
+                    my $dm = resolve_data_model('message-stats');
                     my $message_demand = {
                         store    => 'message',    # telemetry attribution (-V statistics-demand)
                         csv_body => $message_stats_demand_csv_body,
@@ -20365,7 +20397,7 @@ sub initialize_empty_time_windows {
 # Returns an ordered array of column definition hashes.
 sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
-    my $show_latency = $durations_observed && !$omit_durations && !$hide_stats;
+    my $show_latency = $durations_observed && !$omit_durations && $timeline_latency_column_active;
     my $show_heatmap = $heatmap_enabled;
     my $timestamp_w  = length(format_timestamp(0, precision => $timestamp_precision, shape => 'run'));
     my $latency_w    = 52;
@@ -23681,7 +23713,7 @@ sub print_threadpool_summary {
 # Every stage takes two standing inputs alongside its data, both settled during
 # option processing before any stage runs: the resolved statistics demand
 # (@STAT_CONSUMERS -> resolve_statistics_group_demand(), #305) and the
-# per-surface data-model capture modes (choose_data_model(), #266).
+# per-surface data-model capture modes (resolve_data_model(), #266).
 # See docs/staged-processing-pipeline.md, "Named pipeline stages".
 
 # Stage: detect -- pre-read detection inputs.

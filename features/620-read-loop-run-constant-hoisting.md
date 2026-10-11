@@ -2,8 +2,8 @@
 
 ## Status
 
-Planning, 2026-10-11. Code audited at `release/0.19.0` e172dbd. No branch cut,
-no code written. Parent: #622 (the refactoring the redundant-logic-surfaces
+Implemented 2026-10-11 on `620-read-loop-run-constant-hoisting` (§ 10); code
+audited for planning at `release/0.19.0` e172dbd. Parent: #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). Follow-up: #621 (a switchable generated loop body, not
 planned), blocked by this issue.
 
@@ -174,10 +174,10 @@ new key, per-message storage, time-bucket storage) are each wrapped in
 **Drop 3: the detection record's initialiser (D2 step 4).**
 `new_format_detection_record()` returns the key list once. The record is
 created for each file before its loop starts; the loop's first-match site and
-the per-file block read it; the emitter calls the sub for a file that has no
-record. Before this drop is written, every reader of `$format_detection{$file}`
-is listed, so that a record existing from the start of a file changes no
-`exists` or `defined` test.
+the per-file block read it; `note_unmatched_line`, the third copy (the audit
+called it the detection emitter), calls the sub. Before this drop is written,
+every reader of `$format_detection{$file}` is listed, so that a record existing
+from the start of a file changes no `exists` or `defined` test.
 
 **Drop 4: capture demand for session, user and index (D2 step 5).** Three
 booleans resolved in the demand block of `adapt_to_command_line_options`,
@@ -193,9 +193,9 @@ always updated and the index's selection bounds only under the index demand.
 **Drop 5: data-model defaults and the latency predicate (D2 step 6).**
 `resolve_data_model` holds each surface's default and never returns undef;
 `choose_data_model`, a pass-through, is removed and its callers call the
-resolver. The four capture modes and the drop 1 booleans are resolved once at
-option settlement rather than at loop entry, and the ten callers outside the
-loop read the resolved scalars. The registry's `timeline-latency-column`
+resolver. The four capture modes and the drop 1 booleans stay resolved at loop
+entry: every other caller runs after the read, so nothing gains from moving
+them. The registry's `timeline-latency-column`
 predicate is evaluated once into `$timeline_latency_column_active`, which the
 demand block and `build_column_layout` read.
 
@@ -232,7 +232,7 @@ listed beside it.
 | AC4 | Drop 3 | The detection record's key list is written once (`grep -c 'first_match_line => undef'` = 1); `-V` format-detection sections unchanged on a file with matches, a file with none, an empty file and a CSV file | the § 7 comparison over those four files | assertable |
 | AC5 | Drop 4 under `--hide session` (or `user`) without `-o` | No session (user) store is built: `-mem`'s `log_sessions` (`log_users`) size is that of an empty hash; the terminal output is the base's; `-V udm-counting` lists no session (user) counts, the one intended difference from the base | `-V udm-counting` with `-mem` on an access log carrying sessions and users | assertable |
 | AC6 | Drop 4 with the column shown, or under `-o` with or without `--hide session --hide user` | The terminal output, STATS CSV, aggregate export and `-V udm-counting` carry the sessions and users figures exactly as on the base | the § 7 comparison over the three shapes | assertable |
-| AC7 | Drop 4 under `-ni` | `-mem`'s `index_file_data` holds no per-line accumulations; without `-ni`, `ltl-index.csv` is byte-identical to the base's, on a run with and without a filter, with and without nanosecond precision | the § 7 comparison and `tests/validate-index-read-back.sh` | assertable |
+| AC7 | Drop 4 under `-ni` | No per-line index accumulation runs (no `-mem` row reports `%index_file_data`, so this half is shown by the code and by drop 4's timing under `-ni`); without `-ni`, `ltl-index.csv` is byte-identical to the base's, on a run with and without a filter, with and without nanosecond precision | the § 7 comparison and `tests/validate-index-read-back.sh` | assertable |
 | AC8 | Drop 5 | No caller of the resolver applies its own default (`grep` for `choose_data_model` and `// 'raw'`, `// 'bin'` beside it: zero hits); the latency predicate is written once | `grep`; the § 7 comparison under `--hide stats`, `-hm`, `-o` | assertable |
 | AC9 | Drop 6 on a run that swaps the occupant | `scan_sub_cache_hits` counts the swap's hit; every other `-V format-registry` key is unchanged | a scenario in `tests/validate-format-registry.sh` on a file that triggers a swap | assertable |
 | AC11 | Drop 7 | No full-key lookup of a message entry or bucket entry remains in the loop's message and bucket sections (`grep -c` of the two key expressions in the loop body: one each, at the reference) | `grep`; the § 7 comparison over the drop 1 option shapes plus `-o`, `-so bytes`, `-h`, `-udm` | assertable |
@@ -286,3 +286,119 @@ full harness suite.
 - `features/266-data-model-selectors.md` § Resolution at each call site: the
   default held by the resolver.
 - #622's Order list; #621 released.
+
+## 10. Implementation record
+
+Branch `620-read-loop-run-constant-hoisting`, cut from `release/0.19.0`
+905911a. Every drop was compared with its parent over the same 44 to 51
+option shapes on slices of five log families (a web-server access log with
+thread and session, one without session, an application log carrying users, a
+script log carrying duration and count, a CSV of metrics, an empty file),
+with bare `-V`, `-o` and the index file written; timing and memory rows and
+the float sums whose last digits follow hash order are normalised. The base
+build compared with itself gives no difference over the same shapes.
+
+Timing is the interleaved, order-balanced method of
+`prototype/342-read-loop-cost-curve/run-curve.sh`: ten rounds of parent and
+drop on the day of web-server access log (761,698 lines) and the day of
+application log (479,904 lines) the benchmark uses; per-round delta, median
+and range. On this machine two builds that differ only off the per-line path
+read up to about ±1.2 % apart on the access log (drops 3, 5 and 6 below),
+which is the resolution of a ten-round median here.
+
+| Drop | Commit | Output against parent | Access log, per-round delta | Application log, per-round delta |
+|---|---|---|---|---|
+| 1, capture modes and grouping as booleans | 116edbc | identical, 44 shapes | −0.93 % (−0.203 to +0.168 s), faster in 7 of 10 | +0.37 % over 20 rounds (−0.162 to +0.069 s), slower in 12 of 20 |
+| 2, guards on the user-defined-metric loops | b738701 | identical, 44 shapes | −1.21 % (−0.185 to +0.027 s), faster in 9 of 10 | +0.63 % (−0.030 to +0.081 s), slower in 7 of 10; the guarded loops are on branches this log's lines do not reach |
+| 3, the detection record's initialiser | 6491f2b | identical, 51 shapes (multi-file and unmatched-only runs added) | +0.38 % (−0.077 to +0.103 s) | −0.68 % (−0.110 to +0.009 s) |
+| 4, capture demand for session, user and index | 9b4bf5a | identical, 51 shapes, except D6's named difference: under `--hide session`/`--hide user` without `-o`, `-V udm-counting` lists no session (4 lines) or user (1 line) counts | default options +1.21 % (−0.231 to +0.234 s), slower in 9 of 10; with `--hide session --hide user -ni` on the thread-session access log **−19.6 %** (6.337 s to 5.081 s, faster in 10 of 10) | default +0.14 %; with `--hide user -ni` **−13.8 %** (3.567 s to 3.059 s, faster in 10 of 10) |
+| 5, data-model defaults in the resolver; the latency rule once | 15935c7 | identical, 51 shapes | −1.15 % (−0.195 to +0.092 s) | −0.35 % |
+| 6, the occupant swap through the resolver | cae1f1f | identical, 51 shapes; `scan_sub_cache_hits` 3 against 2 on a month-first, day-first, month-first run | +0.29 % (−0.212 to +0.094 s) | −0.41 % |
+| 7, one reference per message and bucket entry (D5) | bf33d26 | identical, 61 shapes (each numeric-filter family and end added) | **−4.94 %** (8.201 s to 7.779 s; −0.547 to −0.350 s), faster in 10 of 10; bin models (`-mdm bin -bdm bin`) **−4.07 %** (10.631 s to 10.216 s), faster in 10 of 10 | +0.29 % (−0.056 to +0.034 s) |
+| 8, one flag for the numeric filter bounds (D5) | 0103932 | identical, 61 shapes | **−1.80 %** (−0.249 to −0.061 s), faster in 10 of 10 | **−1.48 %** (−0.097 to −0.011 s), faster in 10 of 10 |
+
+Store sizes under drop 4 (`-V benchmark-data -mem`, the thread-session access
+log slice): `log_sessions` 29,019 bytes on drop 3 and 120 bytes, an empty
+hash, on drop 4 under `--hide session --hide user`.
+
+Harnesses run per drop, each passing with no runtime warning: drop 1
+`validate-statistics.sh`, `validate-histogram-bin-counters.sh` (148),
+`validate-heatmap-palette.sh` (85), `validate-message-grouping.sh` (51),
+`validate-regression.sh` (74 of 74); drop 2 `validate-udm-specs.sh` (250),
+`validate-udm-counting.sh` (44); drop 3 `validate-format-registry.sh` (57),
+`validate-format-detection.sh` (472), `validate-csv-input.sh` (43); drop 4
+`validate-udm-counting.sh` (44), `validate-index-read-back.sh` (98),
+`validate-aggregate-export.sh` (163), `validate-csv-output.sh` (42),
+`validate-timestamp-precision.sh` (94); drop 5
+`validate-statistics-demand.sh` (112), `validate-section-layout.sh` (186),
+`validate-runtime-config.sh` (85), `validate-option-resolution.sh` (186);
+drop 6 `validate-format-registry.sh` (59, with the new `occupant-swap`
+scenario, shown failing on the drop 5 build); drops 7 and 8
+`validate-statistics.sh` (25 scenarios, the same 45 expected failures as at
+drop 1), `validate-csv-output.sh` (42), `validate-aggregate-export.sh` (163),
+`validate-udm-counting.sh` (44), `validate-message-grouping.sh` (51),
+`validate-filter-summary.sh` (146), `validate-numeric-criteria-notices.sh` (10).
+
+**Drop 4's cost on a default run, and the follow-up that removed it.** Drop 4
+as first committed measured +1.21 % on the default access-log run over ten
+rounds, outside the ±1.2 % spread, and +1.07 % (slower in 20 of 20) over
+twenty rounds against drop 3. Attribution, twenty rounds each against drop 3
+on the day of web-server access log:
+
+| Build | Default options | `-ni` |
+|---|---|---|
+| drop 4 as committed (9b4bf5a) | +1.27 % (−0.004 to +0.213 s), slower in 18 of 20 | −19.06 % (8.228 s to 6.669 s) |
+| drop 4 without its two index gates | +0.09 % (−0.110 to +0.203 s), slower in 11 of 20 | not measured |
+| drop 4 with the session and user flags tested after the field tests | +1.08 %, slower in 19 of 20 | not measured |
+| drop 4 with the file's index record taken once per file (e8da582) | **−0.99 %** (−0.164 to +0.026 s), faster in 18 of 20 | **−20.14 %** (8.228 s to 6.578 s) |
+
+The two index gates carried the whole cost; each index block also looked up
+`$index_file_data{$in_file}` on every line, three lookups a line for a value
+fixed per file. Taking that reference once per file pays for the gates. The
+session and user flags are tested after the field tests, so a line without
+the field pays nothing for them; on this log, which carries no session, that
+order made no measurable difference. The per-line index accumulation is
+about a fifth of a default access-log run (`-ni` saves 19 to 20 %), far more
+than the audit's estimate of about 4 % for those blocks (item 8, part 3).
+
+Found during implementation:
+
+- One grouping compare drop 1 did not reach: the `-V message-grouping`
+  accounting's `$group_similar_sensitivity eq "none"` (the hoist probe counted
+  only the `ne` form). It is evaluated only when that section is requested, and
+  reads `!$grouping_active` in a drop 1 follow-up (6ad86e8, byte-identical
+  over 61 shapes).
+- The detection record's third copy was `note_unmatched_line`, which the
+  audit called the detection emitter.
+
+**Completion gate.** `before` captured on 905911a, `after` on 1a53db8 (version
+restored), one run each, `tests/baseline/run-benchmark.sh` on this machine:
+
+| Benchmark test | before | after | change |
+|---|---|---|---|
+| single-day-access-log-standard | 8.3 s | 7.6 s | −8.1 % |
+| single-day-access-log-no-messages | 6.7 s | 6.3 s | −6.0 % |
+| single-day-access-log-top25-consolidate | 9.7 s | 9.1 s | −6.9 % |
+| single-day-access-log-heatmap-histogram | 10.8 s | 10.3 s | −5.0 % |
+| single-day-access-log-heatmap-histogram-export | 9.8 s | 9.5 s | −2.4 % |
+| single-day-access-log-heatmap-histogram-consolidate | 12.2 s | 11.7 s | −4.1 % |
+| single-day-access-log-sort-p99 | 8.3 s | 7.7 s | −6.5 % |
+| single-day-access-log-sort-skewness | 8.4 s | 7.9 s | −6.6 % |
+| single-day-application-log-standard | 3.6 s | 3.5 s | −2.8 % |
+| single-day-application-log-top25-consolidate | 5.1 s | 5.1 s | −0.2 % |
+
+Lines read and included are identical in every test. Two peak-memory
+readings were 1 % or more higher in the single run: heatmap-histogram-consolidate
+(+2 MB, 2.0 %) and the application log's standard test (+464 KB, 1.0 %). Over
+five interleaved rounds the application log reads 45.1 MB against 45.2 MB
+(the same range); heatmap-histogram-consolidate reads 105.9 MB (104.9 to
+108.0) against 107.1 MB (107.0 to 108.6). Every structure `-mem` measures is
+within ±1.3 KB between base and tip on that run (`log_analysis` 960 bytes
+smaller); the difference is in unattributed memory, inside the base's own
+3 MB spread across identical runs: allocator variation, not a structure this
+issue changed.
+
+Full harness suite on 10a30d3 (the `ltl` of 1a53db8): 49 of 49
+`tests/validate-*.sh` exit 0, each with its assertions run, no runtime warning;
+`validate-csv-output.sh` (42 pass) and `validate-statistics.sh` (25 scenarios,
+the same 45 expected failures as before this issue) first, under `CI=1`.

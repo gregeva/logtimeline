@@ -55,6 +55,8 @@ For each of the four surfaces, at the point the surface decides which data model
 2. Else if `-dm` is set → use its value.
 3. Else → the surface's existing internal logic decides, unchanged from today (this includes the existing `--exact-percentiles` consultation for surfaces 1 and 2).
 
+Step 3 is held by the resolver: `resolve_data_model()` returns the surface's default from `%data_model_default` (heatmap and histogram `bin`, the per-message and per-bucket statistics stores `raw`), so it never returns undef and no call site applies a default of its own (`features/620-read-loop-run-constant-hoisting.md` D2 step 6).
+
 ### Validation
 
 `raw` and `bin` are the only accepted values. Any other value (`--data-model dense`, `--message-stats-data-model 7`) causes `ltl` to die at option-parse time with a clear error.
