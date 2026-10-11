@@ -17777,14 +17777,16 @@ sub read_and_process_logs {
                                     $stats_source->{count_min} = $count;
                                     $stats_source->{count_max} = $count;
                                 }
-                                foreach my $config (@udm_configs) {
-                                    my $name = $config->{name};
-                                    next unless defined $udm_values{$name};
-                                    my $value = $udm_values{$name};
-                                    $stats_source->{"udm_${name}_sum"} = $value;
-                                    $stats_source->{"udm_${name}_occurrences"} = 1;
-                                    $stats_source->{"udm_${name}_min"} = $value;
-                                    $stats_source->{"udm_${name}_max"} = $value;
+                                if (@udm_configs) {
+                                    foreach my $config (@udm_configs) {
+                                        my $name = $config->{name};
+                                        next unless defined $udm_values{$name};
+                                        my $value = $udm_values{$name};
+                                        $stats_source->{"udm_${name}_sum"} = $value;
+                                        $stats_source->{"udm_${name}_occurrences"} = 1;
+                                        $stats_source->{"udm_${name}_min"} = $value;
+                                        $stats_source->{"udm_${name}_max"} = $value;
+                                    }
                                 }
                                 if (defined $duration && !$omit_durations) {
                                     $stats_source->{total_duration} = $duration;
@@ -17923,19 +17925,21 @@ sub read_and_process_logs {
                         }
 
                         # UDM per-message storage (Issue #22)
-                        foreach my $config (@udm_configs) {
-                            my $name = $config->{name};
-                            next unless defined $udm_values{$name};
-                            my $value = $udm_values{$name};
-                            if ($config->{agg_kind} eq 'counting') {
-                                # Only occurrences are tracked per message; distinct is bucket-scoped
+                        if (@udm_configs) {
+                            foreach my $config (@udm_configs) {
+                                my $name = $config->{name};
+                                next unless defined $udm_values{$name};
+                                my $value = $udm_values{$name};
+                                if ($config->{agg_kind} eq 'counting') {
+                                    # Only occurrences are tracked per message; distinct is bucket-scoped
+                                    $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
+                                    next;
+                                }
+                                $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
                                 $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
-                                next;
+                                $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
+                                $log_messages{$category}{$log_key}{"udm_${name}_max"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_max"} || $value > $log_messages{$category}{$log_key}{"udm_${name}_max"};
                             }
-                            $log_messages{$category}{$log_key}{"udm_${name}_sum"} += $value;
-                            $log_messages{$category}{$log_key}{"udm_${name}_occurrences"}++;
-                            $log_messages{$category}{$log_key}{"udm_${name}_min"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_min"} || $value < $log_messages{$category}{$log_key}{"udm_${name}_min"};
-                            $log_messages{$category}{$log_key}{"udm_${name}_max"} = $value if !defined $log_messages{$category}{$log_key}{"udm_${name}_max"} || $value > $log_messages{$category}{$log_key}{"udm_${name}_max"};
                         }
 
                         if( defined $duration && !$omit_durations ) {
@@ -18193,33 +18197,35 @@ sub read_and_process_logs {
                     }
 
                     # UDM time-bucket storage (Issue #22)
-                    foreach my $config (@udm_configs) {
-                        my $name = $config->{name};
-                        next unless defined $udm_values{$name};
-                        my $value = $udm_values{$name};
-                        if ($config->{agg_kind} eq 'counting') {
-                            # Counting aggregations (Issue #313): occurrences plus a distinct
-                            # value set per bucket, mirroring the %log_sessions pattern
-                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                            $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
-                            if ($line_is_highlighted) {
-                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
-                                $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                    if (@udm_configs) {
+                        foreach my $config (@udm_configs) {
+                            my $name = $config->{name};
+                            next unless defined $udm_values{$name};
+                            my $value = $udm_values{$name};
+                            if ($config->{agg_kind} eq 'counting') {
+                                # Counting aggregations (Issue #313): occurrences plus a distinct
+                                # value set per bucket, mirroring the %log_sessions pattern
+                                $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                                $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
+                                if ($line_is_highlighted) {
+                                    $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                                    $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
+                                }
+                                next;
                             }
-                            next;
+                            $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
+                            $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
+                            if ($line_is_highlighted) {
+                                $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
+                                $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
+                                $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
+                                    if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
+                                $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
+                                    if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
+                            }
+                            $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
+                            $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
                         }
-                        $log_analysis{$bucket}{"udm_${name}_sum"} += $value;
-                        $log_analysis{$bucket}{"udm_${name}_occurrences"}++;
-                        if ($line_is_highlighted) {
-                            $log_analysis{$bucket}{"udm_${name}_sum-HL"} += $value;
-                            $log_analysis{$bucket}{"udm_${name}_occurrences-HL"}++;
-                            $log_analysis{$bucket}{"udm_${name}_min-HL"} = $value
-                                if !defined $log_analysis{$bucket}{"udm_${name}_min-HL"} || $value < $log_analysis{$bucket}{"udm_${name}_min-HL"};
-                            $log_analysis{$bucket}{"udm_${name}_max-HL"} = $value
-                                if !defined $log_analysis{$bucket}{"udm_${name}_max-HL"} || $value > $log_analysis{$bucket}{"udm_${name}_max-HL"};
-                        }
-                        $log_analysis{$bucket}{"udm_${name}_min"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_min"} || $value < $log_analysis{$bucket}{"udm_${name}_min"};
-                        $log_analysis{$bucket}{"udm_${name}_max"} = $value if !defined $log_analysis{$bucket}{"udm_${name}_max"} || $value > $log_analysis{$bucket}{"udm_${name}_max"};
                     }
 
                     ## HEATMAP RAW VALUE CAPTURE ##
