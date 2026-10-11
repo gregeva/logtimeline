@@ -212,7 +212,9 @@ options, twenty alternating rounds, during the read-loop run-constant work
 - **Its memory is not measured:** no `-mem` row reports `%index_file_data`.
 
 The architect's reading (2026-10-11): a fifth of every default run spent on the
-index is likely to bring the index's deprecation forward.
+index is likely to bring the index's deprecation forward. Filed as #708
+(deprecate the run index), whose specification phase researches what reads
+the index and what the current implementation and open issues really need.
 
 ## Related Issues
 
