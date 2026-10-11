@@ -16973,6 +16973,8 @@ sub read_and_process_logs {
             sel_file_bytes_occurrences      => 0, sel_file_bytes_min    => undef, sel_file_bytes_max    => undef, sel_bytes_sum    => 0,
             sel_count_occurrences      => 0, sel_count_min    => undef, sel_count_max    => undef, sel_count_sum    => 0,
         };
+        # The file's index record, found once for every line that writes it.
+        my $file_index = $index_file_data{$in_file};
         my( $file_name ) = $in_file =~ /(.+)(\W\d{4,}).+$/;
         %udm_last_value = () if @udm_configs;  # Reset delta state between files (Issue #22)
         $csv_detected = 0;
@@ -17450,7 +17452,7 @@ sub read_and_process_logs {
 
                 # Index file: pre-filter per-file tracking (Issue #46)
                 if ($index_capture_demand) {
-                    my $fd = $index_file_data{$in_file};
+                    my $fd = $file_index;
                     $fd->{match_count}++;
                     $fd->{first_timestamp} = $timestamp_epoch if !defined $fd->{first_timestamp} || $timestamp_epoch < $fd->{first_timestamp};
                     $fd->{last_timestamp}  = $timestamp_epoch if !defined $fd->{last_timestamp}  || $timestamp_epoch > $fd->{last_timestamp};
@@ -17569,7 +17571,7 @@ sub read_and_process_logs {
 
                 # Index file: post-filter per-file tracking for selection entry (Issue #46)
                 if ($index_capture_demand) {
-                    my $fd = $index_file_data{$in_file};
+                    my $fd = $file_index;
                     $fd->{sel_match_count}++;
                     $fd->{sel_first_timestamp} = $timestamp_epoch if !defined $fd->{sel_first_timestamp} || $timestamp_epoch < $fd->{sel_first_timestamp};
                     $fd->{sel_last_timestamp}  = $timestamp_epoch if !defined $fd->{sel_last_timestamp}  || $timestamp_epoch > $fd->{sel_last_timestamp};
@@ -17632,7 +17634,7 @@ sub read_and_process_logs {
                     my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
                     my $bs = $profile_mode ? int($bucket_epoch - $fractional_ms / 1000 + 0.5) : $timestamp;
                     if ($index_capture_demand) {
-                        my $fd = $index_file_data{$in_file};
+                        my $fd = $file_index;
                         if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
                         if ($timestamp_epoch == $fd->{sel_last_timestamp}  && (!defined $fd->{sel_last_s}  || $timestamp > $fd->{sel_last_s}  || ($timestamp == $fd->{sel_last_s}  && $ns > $fd->{sel_last_ns})))  { @$fd{qw(sel_last_s sel_last_ns)}   = ($timestamp, $ns) }
                     }
@@ -18367,7 +18369,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE SESSION BASED STATISTICS DATA (Issue #26) ##
-                if( $session_capture_demand && defined $session && $session ne "" && $session ne "-" ) {
+                if( defined $session && $session ne "" && $session ne "-" && $session_capture_demand ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
                     if( $line_is_highlighted ) {
@@ -18376,7 +18378,7 @@ sub read_and_process_logs {
                 }
                 ## CAPTURE USER BASED STATISTICS DATA (#444 D10): the sessions
                 ## model piece for piece, a bare - being an absent user (D14)
-                if( $user_capture_demand && defined $user && $user ne "" && $user ne "-" ) {
+                if( defined $user && $user ne "" && $user ne "-" && $user_capture_demand ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
                     if( $line_is_highlighted ) {
