@@ -664,6 +664,45 @@ scenario_csv_day_first() {
         contract    'features/615-csv-registry-entry.md D18 (every CSV file date order is settled starting month first, whatever file came before it; the cost is these two compiles)'
 }
 
+# ---------------------------------------------------------------------------
+# Scenario: occupant swap — a file whose dates read only day first seats the
+# connection-server group's day-first member; the next file, month first,
+# seats the default again. The order it returns to was compiled for the first
+# file, so the swap is served from the cache, and the hit is counted because
+# the swap resolves through format_scan_sub_resolve() like every other route
+# to the scan sub. Thirty-line fixtures generated here; -bs 1440 -oe: the
+# assertions read registry counters, never a bucket.
+# ---------------------------------------------------------------------------
+write_occupant_swap_fixtures() {
+    local i
+    for i in $(seq 10 39); do
+        printf '2023-%02d-25 10:%02d:00.000 [Thread-6] INFO  c.t.i.Entrypoint - Step %d done\n' $(( i % 12 + 1 )) "$i" "$i"
+    done > "$TMP_DIR/swap-a-month-first.txt"
+    for i in $(seq 10 39); do
+        printf '2023-25-%02d 11:%02d:00.000 [Thread-6] INFO  c.t.i.Entrypoint - Step %d done\n' $(( i % 12 + 1 )) "$i" "$i"
+    done > "$TMP_DIR/swap-b-day-first.txt"
+    cp "$TMP_DIR/swap-a-month-first.txt" "$TMP_DIR/swap-c-month-first.txt"
+}
+
+scenario_occupant_swap() {
+    current_scenario="occupant-swap"
+    echo "[$current_scenario]"
+    write_occupant_swap_fixtures
+    local out
+    out=$(run_format_registry "$TMP_DIR/swap-c-month-first.txt" "$TMP_DIR/swap-a-month-first.txt" "$TMP_DIR/swap-b-day-first.txt")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^scan_subs_compiled: 2$' \
+        asserts     'Two orders are compiled for three files: the month-first order once, the day-first order once; the third file returns to an order already compiled' \
+        produced_by 'format_registry_set_occupant() and format_scan_sub_resolve() in ltl' \
+        contract    'features/log-format-registry.md D60 (a format scan sub is compiled when detection elects it, through the signature cache)'
+    assert_line "$out" \
+        pattern     '^scan_sub_cache_hits: 3$' \
+        asserts     'The swap back to the month-first occupant is served from the cache and counted as a hit, as every resolve the cache serves is' \
+        produced_by 'format_registry_set_occupant() in ltl, resolving through format_scan_sub_resolve(), which counts $format_scan_sub_cache_hits' \
+        contract    'features/log-format-registry.md section -V format-registry section-contract (scan_sub_cache_hits); features/620-read-loop-run-constant-hoisting.md D2 step 7'
+}
+
 echo "=== validate-format-registry.sh ==="
 echo ""
 
@@ -678,7 +717,8 @@ scenario_register inventory \
                   csv-pinned \
                   csv-same-shape \
                   csv-different-shape \
-                  csv-day-first
+                  csv-day-first \
+                  occupant-swap
 scenario_parse_args "$@"
 
 while read -r _scenario; do
@@ -695,6 +735,7 @@ while read -r _scenario; do
         csv-same-shape           ) scenario_csv_same_shape ;;
         csv-different-shape      ) scenario_csv_different_shape ;;
         csv-day-first            ) scenario_csv_day_first ;;
+        occupant-swap            ) scenario_occupant_swap ;;
     esac
     echo ""
 done < <(scenario_selected)

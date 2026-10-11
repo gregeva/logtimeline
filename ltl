@@ -4839,8 +4839,7 @@ sub format_registry_set_occupant {
         }
     }
     return 0 unless $changed;
-    my $sig = join ',', map { $_->[FR_NAME] } @format_scan_order;
-    $format_scan_sub = $format_scan_sub_cache{$sig} //= compile_format_scan_sub($format_registry_opts);
+    format_scan_sub_resolve();
     timestamp_date_cache_clear();
     ( $format_last_ts_str, $format_last_ts_epoch ) = ( '', undef );
     return 1;
