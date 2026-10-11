@@ -426,6 +426,7 @@ my ( $highlight_duration_min, $highlight_duration_max );
 my ( $highlight_bytes_min, $highlight_bytes_max );
 my ( $highlight_count_min, $highlight_count_max );
 my $numeric_highlight_active = 0;   # any numeric highlight bound given
+my $numeric_filter_active = 0;      # any numeric filter bound given
 my $highlight_active = 0;           # regex/file highlight OR numeric highlight given; gates all highlight rendering
 my $top_n_messages = 10;
 # Per-message retention gate. A top-message count of 0 means the per-message
@@ -16491,6 +16492,7 @@ sub adapt_to_command_line_options {
     # Highlight activation: numeric criteria and the regex matcher each activate
     # highlighting on their own; when both are given a line must satisfy both (AND).
     $numeric_highlight_active = quantity_bounds_given('highlight') ? 1 : 0;
+    $numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;
     $outcome_highlight_active = ( $highlight_failure || $highlight_success ) ? 1 : 0;
     $highlight_active = ( defined($highlight_filter) || $numeric_highlight_active
                        || $outcome_highlight_active ) ? 1 : 0;
@@ -17546,20 +17548,24 @@ sub read_and_process_logs {
                 # metric (same semantics as the numeric highlight criteria), so it
                 # is dropped — and counted, so the exclusion is reported after
                 # processing instead of silently shrinking the totals.
-                if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
-                    if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
-                    if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
-                    if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
-                }
-                if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
-                    if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
-                    if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
-                    if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
-                }
-                if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
-                    if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
-                    if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
-                    if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
+                # $numeric_filter_active keeps a run with no bound to one scalar
+                # test per line.
+                if( $numeric_filter_active ) {
+                    if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
+                        if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
+                        if( defined( $filter_duration_min ) && $duration < $filter_duration_min ) { $excluded_numeric++; next; }	# skip if duration value is below specified minimum filter
+                        if( defined( $filter_duration_max ) && $duration > $filter_duration_max ) { $excluded_numeric++; next; }	# skip if duration value is above specified maximum filter
+                    }
+                    if( defined( $filter_bytes_min ) || defined( $filter_bytes_max ) ) {
+                        if( !defined( $bytes ) ) { $numeric_filter_no_metric{bytes}++; $excluded_numeric++; next; }
+                        if( defined( $filter_bytes_min ) && $bytes < $filter_bytes_min ) { $excluded_numeric++; next; }		# skip if bytes value is below specified minimum filter
+                        if( defined( $filter_bytes_max ) && $bytes > $filter_bytes_max ) { $excluded_numeric++; next; }		# skip if bytes value is above specified maximum filter
+                    }
+                    if( defined( $filter_count_min ) || defined( $filter_count_max ) ) {
+                        if( !defined( $count ) ) { $numeric_filter_no_metric{count}++; $excluded_numeric++; next; }
+                        if( defined( $filter_count_min ) && $count < $filter_count_min ) { $excluded_numeric++; next; }		# skip if count value is below specified minimum filter
+                        if( defined( $filter_count_max ) && $count > $filter_count_max ) { $excluded_numeric++; next; }		# skip if count value is above specified maximum filter
+                    }
                 }
 
                 # A skipped /regex/ capture is counted here, past every filter,
