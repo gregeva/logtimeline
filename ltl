@@ -1338,9 +1338,9 @@ my %csv_family_decimals;                             # populated during option r
 
 # Issue #266: explicit per-surface statistical data-model selectors. The five
 # scalars below hold the user-supplied selector for each surface (or undef
-# when the user did not pass the flag). resolve_data_model()/choose_data_model()
-# read these to dispatch raw vs bin reductions at the caller. Defaults live in
-# the call sites, not here — the flags exist purely to override.
+# when the user did not pass the flag). resolve_data_model() reads these,
+# then the surface's default, to dispatch raw vs bin reductions at the caller;
+# the flags exist purely to override.
 #
 # These selectors and the precision lever (%TIER_BPD / --data-model-precision)
 # are orthogonal: the selector chooses WHICH data model a surface uses (raw
@@ -1353,7 +1353,7 @@ my $data_model_message             = undef;   # -mdm  / --message-stats-data-mod
 my $data_model_bucket              = undef;   # -bdm  / --bucket-stats-data-model
 
 # Issue #266: caller-side capture-mode cache for the parsing hot path. Set
-# once before the parsing loop begins (see choose_data_model() callers) so
+# once before the parsing loop begins (from resolve_data_model()) so
 # the per-line branch in read_and_process_logs() does not re-resolve.
 my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
@@ -1378,6 +1378,7 @@ my $message_outcomes_demand        = 0;       # per-message success/failure coun
 my $session_capture_demand         = 0;       # per-bucket distinct sessions (%log_sessions): timeline sessions column, STATS CSV, YAML export (#620 D6)
 my $user_capture_demand            = 0;       # per-bucket distinct users (%log_users): timeline users column, STATS CSV, YAML export (#620 D6)
 my $index_capture_demand           = 0;       # per-file accumulations (%index_file_data): the ltl-index.csv rows and their drift check, unless -ni
+my $timeline_latency_column_active = 0;      # the timeline latency-statistics column is shown: the @STAT_CONSUMERS predicate, evaluated once
 
 # Statistics-group demand registry (#305): extends the store-level demand
 # above to statistic-group granularity. The 22-statistic duration ladder is
@@ -2743,11 +2744,18 @@ sub profile_fold_phrase {
     return "a single $days_span profile";
 }
 
-# Issue #266: resolve the user-supplied data-model selector for a surface.
-# Returns 'raw', 'bin', or undef. undef means the user supplied neither the
-# per-surface flag nor the omnibus -dm/--data-model; callers fall back to
-# their existing internal default. The surface name is one of: histogram,
-# heatmap, message-stats, bucket-stats.
+# Issue #266: resolve the data model ('raw' or 'bin') of a surface: the
+# per-surface flag, then the omnibus -dm/--data-model, then the surface's
+# default. The heatmap and histogram default to 'bin'; the two statistics
+# stores to 'raw', because the per-message-key store's cardinality is
+# unbounded and bin must be opted into. The surface name is one of:
+# histogram, heatmap, message-stats, bucket-stats.
+my %data_model_default = (
+    histogram       => 'bin',
+    heatmap         => 'bin',
+    'message-stats' => 'raw',
+    'bucket-stats'  => 'raw',
+);
 sub resolve_data_model {
     my ($surface) = @_;
     my %per_surface = (
@@ -2759,16 +2767,16 @@ sub resolve_data_model {
     my $per = $per_surface{$surface};
     return $per if defined $per;
     return $data_model_omnibus if defined $data_model_omnibus;
-    return undef;
+    return $data_model_default{$surface};
 }
 
-# Issue #266: caller-side dispatch helper. Returns the user-supplied
-# selector for $surface (a per-surface flag if set, else the omnibus -dm),
-# or undef if neither was supplied. Callers apply their own internal
-# default when undef is returned.
-sub choose_data_model {
-    my ($surface) = @_;
-    return resolve_data_model($surface);
+# Whether the @STAT_CONSUMERS entry named is active on this run: its predicate
+# is the one definition of when that surface is shown.
+sub stat_consumer_active {
+    my ($name) = @_;
+    my ($consumer) = grep { $_->{name} eq $name } @STAT_CONSUMERS;
+    die "stat_consumer_active: no consumer named $name\n" unless $consumer;
+    return $consumer->{active}->() ? 1 : 0;
 }
 
 # Issue #305: derive per-store per-group statistics demand from the consumer
@@ -6884,19 +6892,19 @@ sub emit_percentile_algorithm_verbose {
     my @surfaces = (
         {
             id              => 'histogram',
-            data_model      => choose_data_model('histogram')   // 'bin',
+            data_model      => resolve_data_model('histogram'),
             effective_track => 'matches_data_model',
             bpd             => $histogram_stream_bpd,
         },
         {
             id              => 'heatmap',
-            data_model      => choose_data_model('heatmap')     // 'bin',
+            data_model      => resolve_data_model('heatmap'),
             effective_track => 'matches_data_model',
             bpd             => $heatmap_stream_bpd,
         },
         {
             id              => 'message-stats',
-            data_model      => choose_data_model('message-stats') // 'raw',
+            data_model      => resolve_data_model('message-stats'),
             # Issue #287: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
@@ -6904,7 +6912,7 @@ sub emit_percentile_algorithm_verbose {
         },
         {
             id              => 'bucket-stats',
-            data_model      => choose_data_model('bucket-stats')  // 'raw',
+            data_model      => resolve_data_model('bucket-stats'),
             # Issue #289: bin reduction now implemented end-to-end; the
             # effective algorithm tracks the resolved data model.
             effective_track => 'matches_data_model',
@@ -7019,7 +7027,7 @@ sub emit_statistics_demand_verbose {
         # Welford-Pébay sidecar derivation.
         my $source = 'none';
         if ($store_demand{$store} && $store_shape_demand{$store}) {
-            my $dm = choose_data_model($store_surface{$store}) // 'raw';
+            my $dm = resolve_data_model($store_surface{$store});
             $source = $dm eq 'bin' ? 'sidecar' : 'second_pass';
         }
         push @verbose_output, "  moment_source: $source";
@@ -16719,8 +16727,9 @@ sub adapt_to_command_line_options {
     # Heatmap and histogram consume durations through their own dedicated
     # stores and gates and create no demand here; -V sections report resolved
     # state truthfully whether or not statistics ran, so they create none either.
+    $timeline_latency_column_active = stat_consumer_active('timeline-latency-column');
     $bucket_duration_stats_demand = ( !$omit_durations && (
-           !$hide_stats                          # timeline latency-statistics column (hidden by default under -hm)
+           $timeline_latency_column_active       # timeline latency-statistics column (hidden by default under -hm)
         || $write_messages_to_csv                # STATS CSV statistics columns
     ) ) ? 1 : 0;
     # Both message-store surfaces - the messages-table statistics variant and the
@@ -16916,17 +16925,13 @@ sub pause_for_keypress {
 sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
 
-    # Issue #266: resolve the heatmap and histogram capture modes once,
-    # before entering the per-line parsing loop. The hot-path branches at
-    # the heatmap and histogram raw-value-capture sites read these scalars
-    # so they do not re-resolve per line. Heatmap and histogram default
-    # to 'bin' when the user did not pin a selector; the per-message-key
-    # surface defaults to 'raw' because its (category, log_key) cardinality
-    # is unbounded and bin must be opted into.
-    $heatmap_capture_mode       = choose_data_model('heatmap')       // 'bin';
-    $histogram_capture_mode     = choose_data_model('histogram')     // 'bin';
-    $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
-    $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
+    # Issue #266: resolve the four capture modes once, before entering the
+    # per-line parsing loop, so the hot-path branches read a scalar rather
+    # than re-resolving per line.
+    $heatmap_capture_mode       = resolve_data_model('heatmap');
+    $histogram_capture_mode     = resolve_data_model('histogram');
+    $message_stats_capture_mode = resolve_data_model('message-stats');
+    $bucket_stats_capture_mode  = resolve_data_model('bucket-stats');
     $heatmap_raw       = $heatmap_capture_mode       eq 'raw' ? 1 : 0;
     $histogram_raw     = $histogram_capture_mode     eq 'raw' ? 1 : 0;
     $message_stats_bin = $message_stats_capture_mode eq 'bin' ? 1 : 0;
@@ -18514,7 +18519,7 @@ sub calculate_heatmap_buckets {
     return unless $heatmap_enabled;
     # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
     # the user did not pin a selector for the heatmap surface.
-    my $dm = choose_data_model('heatmap') // 'bin';
+    my $dm = resolve_data_model('heatmap');
     return $dm eq 'raw'
         ? calculate_heatmap_buckets_exact()
         : finalize_heatmap_unified();
@@ -18864,7 +18869,7 @@ sub calculate_histogram_buckets {
     return unless $histogram_enabled;
     # Issue #266: caller-side data-model dispatch. Defaults to 'bin' when
     # the user did not pin a selector for the histogram surface.
-    my $dm = choose_data_model('histogram') // 'bin';
+    my $dm = resolve_data_model('histogram');
     return $dm eq 'raw'
         ? calculate_histogram_buckets_exact()
         : finalize_histogram_unified();
@@ -19366,7 +19371,7 @@ sub calculate_all_statistics {
             # the demanded statistics groups' fields (#305) — merging it into
             # the %log_stats{$bucket} literal below is the storage gate:
             # undemanded statistic fields are never written.
-            my $dm = choose_data_model('bucket-stats') // 'raw';
+            my $dm = resolve_data_model('bucket-stats');
             my $bucket_demand = {
                 store    => 'bucket',    # telemetry attribution (-V statistics-demand)
                 csv_body => $bucket_stats_demand_csv_body,
@@ -19647,7 +19652,7 @@ sub calculate_all_statistics {
                     extended => ($sort_group eq 'extended_percentiles' ? 1 : 0),
                     shape    => ($sort_group eq 'shape_moments'        ? 1 : 0),
                 };
-                my $dm = choose_data_model('message-stats') // 'raw';
+                my $dm = resolve_data_model('message-stats');
 
                 my (%sort_value, %demoted_sorted, @fill_block);
                 my ($demoted, $population_calls) = (0, 0);
@@ -19844,7 +19849,7 @@ sub calculate_all_statistics {
                     # below is the storage gate — undemanded statistic fields
                     # are never written onto the per-key entry, which is the
                     # memory lever at high key cardinality.
-                    my $dm = choose_data_model('message-stats') // 'raw';
+                    my $dm = resolve_data_model('message-stats');
                     my $message_demand = {
                         store    => 'message',    # telemetry attribution (-V statistics-demand)
                         csv_body => $message_stats_demand_csv_body,
@@ -20388,7 +20393,7 @@ sub initialize_empty_time_windows {
 # Returns an ordered array of column definition hashes.
 sub build_column_layout {
     my $show_legend  = !($omit_values && $omit_rate);
-    my $show_latency = $durations_observed && !$omit_durations && !$hide_stats;
+    my $show_latency = $durations_observed && !$omit_durations && $timeline_latency_column_active;
     my $show_heatmap = $heatmap_enabled;
     my $timestamp_w  = length(format_timestamp(0, precision => $timestamp_precision, shape => 'run'));
     my $latency_w    = 52;
@@ -23704,7 +23709,7 @@ sub print_threadpool_summary {
 # Every stage takes two standing inputs alongside its data, both settled during
 # option processing before any stage runs: the resolved statistics demand
 # (@STAT_CONSUMERS -> resolve_statistics_group_demand(), #305) and the
-# per-surface data-model capture modes (choose_data_model(), #266).
+# per-surface data-model capture modes (resolve_data_model(), #266).
 # See docs/staged-processing-pipeline.md, "Named pipeline stages".
 
 # Stage: detect -- pre-read detection inputs.
