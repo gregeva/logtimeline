@@ -170,6 +170,50 @@ With `match_count`, `duration_count`, `bytes_count`, and `count_count` from the 
 
 If the index already contains `duration_min`, `duration_max`, etc., the first pass of two-pass processing can be skipped entirely - we already know the value ranges needed for binning.
 
+## Run shape and measured cost
+
+The index is written on every run unless `-ni` is given, so its cost is paid
+by default. Its work falls into five parts, all in `read_and_process_logs`
+except the run-level ones:
+
+| Part | Runs | What it does |
+|---|---|---|
+| Read the existing index | once per run, before the first file | `%index_preseed` from `ltl-index.csv` (read-back, `features/179-index-read-back.md`) |
+| Create the file's record | once per file, before its first line | `$index_file_data{$in_file} = {...}`, its reference taken once as `$file_index` |
+| Accumulate | **every matched line, twice** | before the filters: match count, first and last timestamp (with their nanosecond parts under nanosecond precision), count, sum, min and max of duration, bytes and count; after the filters, the same set again as the `sel_*` fields |
+| Finish the file's record | once per file, after its last line | `line_count`, `read_elapsed` |
+| Drift check, write | once per run, per file | `detect_index_drift`, `write_index_file` |
+
+The read, create, finish and write parts are the intended design: what the run
+already knows, stored per file for a later run. The accumulation is per line
+because no other store holds per-file figures: `%format_detection` counts
+matched and unmatched lines per file for detection only, and the bucket
+statistics hold count, sum, min and max per time bucket, where one bucket can
+mix lines from several files. The index therefore builds its own per-file
+figures from every line.
+
+Measured on a day of web-server access log carrying duration and bytes, default
+options, twenty alternating rounds, during the read-loop run-constant work
+(`features/620-read-loop-run-constant-hoisting.md` § 10):
+
+| Build | Run time | Against the base |
+|---|---|---|
+| base: index accumulation on every run, each block looking up `$index_file_data{$in_file}` per line | 8.228 s median | |
+| capture gated on its consumers (index on `-ni`, session and user on their columns), record taken once per file; default options, index written | | −0.99 % (−0.164 to +0.026 s), faster in 18 of 20 |
+| the same build with `-ni`, accumulation skipped | 6.578 s median | **−20.14 %** (−1.730 to −1.542 s), faster in 20 of 20 |
+
+- **The per-line accumulation is about a fifth of a default access-log run.**
+  The redundant-logic-surfaces audit had estimated about 4 % for these blocks.
+  The cost scales with matched lines, not with files.
+- **The per-line lookup of the file's record was itself measurable.** Adding the
+  `-ni` gate in front of the two accumulation blocks first cost +1.07 % on the
+  default run (slower in 20 of 20) while each block found the record by key
+  on every line; taking the reference once per file turned that into −0.99 %.
+- **Its memory is not measured:** no `-mem` row reports `%index_file_data`.
+
+The architect's reading (2026-10-11): a fifth of every default run spent on the
+index is likely to bring the index's deprecation forward.
+
 ## Related Issues
 
 This feature is a prerequisite for:
