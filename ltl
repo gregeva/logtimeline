@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-620";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -1089,6 +1089,7 @@ my ( $sort_type, $sort_key, $sort_ascending ) = ( "occurrences", "occurrences", 
 # or 'none' when the requested ranking stood.
 my %sort_gate = ( operand => undef, family => 'occurrences', observed => undef, fallback => 'none' );
 my ( $group_similar_sensitivity, $trend_value ) = ( "none" );
+my $grouping_active = 0;   # message grouping runs: $group_similar_sensitivity is not "none", settled once
 
 # CLI option resolution tracking (Issue #231) — populated in
 # adapt_to_command_line_options() and consumed by the runtime-config -V
@@ -1358,6 +1359,9 @@ my $histogram_capture_mode         = undef;   # 'raw' or 'bin' (set before parsi
 my $heatmap_capture_mode           = undef;   # 'raw' or 'bin' (set before parsing loop)
 my $message_stats_capture_mode     = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #287
 my $bucket_stats_capture_mode      = undef;   # 'raw' or 'bin' (set before parsing loop) — Issue #289
+# The same four modes as the booleans the read loop tests, set beside them:
+# a string compare per line costs more than a scalar truth test.
+my ( $histogram_raw, $heatmap_raw, $message_stats_bin, $bucket_stats_bin ) = ( 0, 0, 0, 0 );
 
 # Duration-statistics demand: the data model stores only what will be output,
 # so statistics capture and computation run only when at least one output
@@ -16696,6 +16700,9 @@ sub adapt_to_command_line_options {
             if $write_messages_to_csv;
     }
 
+    # Message grouping as the read loop tests it, after -n 0 has had its say.
+    $grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;
+
     # Duration-statistics demand resolution: each statistics store is captured
     # and computed only when at least one of its output surfaces is active.
     # Duration-based sort keys (-so min/mean/p50/...) order the messages table
@@ -16901,6 +16908,10 @@ sub read_and_process_logs {
     $histogram_capture_mode     = choose_data_model('histogram')     // 'bin';
     $message_stats_capture_mode = choose_data_model('message-stats') // 'raw';
     $bucket_stats_capture_mode  = choose_data_model('bucket-stats')  // 'raw';
+    $heatmap_raw       = $heatmap_capture_mode       eq 'raw' ? 1 : 0;
+    $histogram_raw     = $histogram_capture_mode     eq 'raw' ? 1 : 0;
+    $message_stats_bin = $message_stats_capture_mode eq 'bin' ? 1 : 0;
+    $bucket_stats_bin  = $bucket_stats_capture_mode  eq 'bin' ? 1 : 0;
 
 
     foreach my $in_file (@in_files) {
@@ -17742,7 +17753,7 @@ sub read_and_process_logs {
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
                     my $consolidation_s1_matched = 0;
                     my $new_key_grouping_key;
-                    if ($group_similar_sensitivity ne "none") {
+                    if ($grouping_active) {
                         my $grouping_key = $log_level // "";
                         my $cat_gk = "$category|$grouping_key";
 
@@ -17788,7 +17799,7 @@ sub read_and_process_logs {
                                     # body carries both the source string and the integer the
                                     # per-file index block's duration_sum read out of it, so a plain
                                     # copy retains a string buffer no consumer of this array reads.
-                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_capture_mode eq 'bin';
+                                    $stats_source->{durations} = [0 + $duration] unless $message_stats_bin;
                                     $stats_source->{duration_count} = 1;
                                     # Issue #287: under -mdm bin, additionally seed the
                                     # bin-state sidecars + counter entry on the single-
@@ -17796,7 +17807,7 @@ sub read_and_process_logs {
                                     # bin block (via merge_bin_state) folds this into
                                     # the cluster. min/max from $stats_source->{min,max}
                                     # already populated above via raw producer fields.
-                                    if ($message_stats_capture_mode eq 'bin') {
+                                    if ($message_stats_bin) {
                                         $stats_source->{_running_mean}  = $duration;
                                         $stats_source->{m2_sum}         = 0;
                                         $stats_source->{m3_sum}         = 0;
@@ -17837,7 +17848,7 @@ sub read_and_process_logs {
                         # Welford-Pébay sidecars below carry the same data). Eliminating the
                         # empty arrayref saves ~40 bytes per (category, log_key) — at 10^5+
                         # key cardinality this is the dominant per-key allocation today.
-                        $log_messages{$category}{$log_key} //= ($message_stats_capture_mode eq 'bin' ? {
+                        $log_messages{$category}{$log_key} //= ($message_stats_bin ? {
                             occurrences    => 0,
                             total_duration => 0,
                             sum_of_squares => 0,
@@ -17950,7 +17961,7 @@ sub read_and_process_logs {
                                 # moments path sums and squares, so the string buffer a plain copy
                                 # would inherit from the shared record lexical has no reader.
                                 push @{$log_messages{$category}{$log_key}{durations}}, 0 + $duration
-                                    unless $message_stats_capture_mode eq 'bin';
+                                    unless $message_stats_bin;
     
                                 # Issue #287: under -mdm bin, additionally feed the per-key bin-counter
                                 # store and update the Welford-Pébay online central-moment accumulators
@@ -17967,7 +17978,7 @@ sub read_and_process_logs {
                                 # ladder; the cross-model envelope at tests/statistics-drift/cross-model-
                                 # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
                                 # populated in Commit 6 once Layer 4 measurement is available.
-                                if ($message_stats_capture_mode eq 'bin') {
+                                if ($message_stats_bin) {
                                     my $entry = $log_messages{$category}{$log_key};
     
                                     # Percentile-ladder source (the bin partition). Skip zero-valued
@@ -18021,7 +18032,7 @@ sub read_and_process_logs {
                         # A new key the inline match missed is held for checkpoint
                         # processing; its line is now stored, so a checkpoint it
                         # triggers merges its data.
-                        consolidation_fire_checkpoints($category) if $group_similar_sensitivity ne "none";
+                        consolidation_fire_checkpoints($category) if $grouping_active;
                     }
                     }  # end: if (!$consolidation_s1_matched)
                 }
@@ -18053,7 +18064,7 @@ sub read_and_process_logs {
                     # held on this entry, so the raw durations[] array is omitted. The sidecars
                     # (min/max/duration_count/_running_mean/m2_sum/m3_sum/m4_sum) survive untouched
                     # to calculate_statistics_bin() at consume time. The raw branch is unchanged.
-                    $log_analysis{$bucket} //= ($bucket_stats_capture_mode eq 'bin' ? {
+                    $log_analysis{$bucket} //= ($bucket_stats_bin ? {
                         occurrences => 0,
                         duration_sum => 0,
                         # count_sum => 0,
@@ -18102,7 +18113,7 @@ sub read_and_process_logs {
                             # moments path sums and squares, so the string buffer a plain copy
                             # would inherit from the shared record lexical has no reader.
                             push @{$log_analysis{$bucket}{durations}}, 0 + $duration
-                                unless $bucket_stats_capture_mode eq 'bin';
+                                unless $bucket_stats_bin;
 
                             # Issue #289: under -bdm bin, feed the per-bucket bin-counter store and the
                             # Welford-Pébay online central-moment sidecars (mirrors the per-message-key
@@ -18111,7 +18122,7 @@ sub read_and_process_logs {
                             # every sample including 0 (inside the existing $duration >= 0 gate) so
                             # duration_count exactly equals the raw path's `scalar @{durations}` denominator
                             # and the exact-value statistics (min/mean/std_dev/moments) match raw byte-for-byte.
-                            if ($bucket_stats_capture_mode eq 'bin') {
+                            if ($bucket_stats_bin) {
                                 my $entry = $log_analysis{$bucket};
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
@@ -18236,7 +18247,7 @@ sub read_and_process_logs {
 
                             # Issue #266: dispatch via $heatmap_capture_mode resolved
                             # once before this loop (set near the parsing-loop entry).
-                            if ($heatmap_capture_mode eq 'raw') {
+                            if ($heatmap_raw) {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
                                 push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $line_is_highlighted;
                             } else {
@@ -18254,7 +18265,7 @@ sub read_and_process_logs {
 
                         # Issue #266: dispatch via $histogram_capture_mode resolved
                         # once before this loop (set near the parsing-loop entry).
-                        if ($histogram_capture_mode eq 'raw') {
+                        if ($histogram_raw) {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                                 # Issue #561: the number is retained, not the string the log line
                                 # carried; the histogram bins numerically and no consumer of these
