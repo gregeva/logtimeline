@@ -254,6 +254,28 @@ run; `-idx` is today's default run.
   Its relationship to the index read-back is trued up to say the index is not
   used.
 
+## Records searched
+
+`./process/find-records.sh --issues -ni --no-index -idx --index ltl-index.csv
+read_index_file write_index_file index-read-back`, run 2026-10-12 on
+`release/0.19.0` at `af8a002`. Each record found, and what was done with it:
+
+| Records | Disposition |
+|---|---|
+| `features/index-file.md`, `features/179-index-read-back.md`, `features/log-format-registry.md` | Read; trued up (status line, related issues, D18, D49, risk 8) |
+| `features/547-standing-detection-of-a-dirty-repository-root.md`, `598-screenshot-capture.md`, `629-udm-custom-regex-defects.md`, `639-own-artifacts-as-input.md`, `620-read-loop-run-constant-hoisting.md` | Read where they name the index; they describe it as written on every run. A note at the head of each points here |
+| `features/616-gated-mean-derivation.md` | Read where it names the index (D17, D24: zero-byte responses counted; bytes heatmap pre-seeded). A note at its head records that this applies only under `-idx`, and the repeat-run axis defect of § 3 |
+| `docs/usage.md`, `docs/process/screenshots.md`, `tests/HARNESS-DESIGN.md` | Read; trued up |
+| `releases/v0.19.0.md` | Read: six bullets about the index in this unreleased version (lines naming #616, #525 and #620). Raised with the architect at the release-notes step |
+| `releases/v0.14.0.md`, `v0.14.5.md`, `v0.15.0.md`, `v0.17.0.md`, `v0.18.0.md` | Dismissed: released notes, not edited |
+| `features/503-yaml-aggregate-export.md` | Read: the export takes the filter signature from `serialize_filters()`, not from the index; unaffected |
+| `features/273`, `342` (both), `432`, `447`, `455`, `525`, `561`, `615`, `640`; `docs/architecture-patterns.md` | Dismissed: they record the index's columns, formatting or code as it was audited; the code is unchanged under `-idx` |
+| `features/180`, `58`, `446`, `457` | Dismissed: they place `read_index_file()` / `write_index_file()` in the pipeline; the calls remain, gated |
+| `features/187`, `395`, `396`, `418`, `426`, `444`, `445`, `456`, `458`, `463`, `472`, `520`, `545`, `546`, `566`, `567`, `580`, `597`, `605`, `608`, `609`, `611`, `613`, `617`, `619`, `638`, `653`, `656`, `user-defined-metrics.md`, `209`, `312`; `docs/test-logs.md` | Dismissed: they pass `-ni` in recorded invocations, cite read-back harness counts, or name `index-read-back` among `-V` sections; `-ni` still runs (D8) |
+| Issues #23, #44 | Read; trued up (D6, D7) |
+| Issues #386 (default analysis precision per format), #642 (`-udm` number parsing), #678 (all-zero user-defined-metric heatmap) | Read: #386 lists the index bounds as a consumer of the sub-second value, one fewer under the deprecation; #642 and #678 pass `-ni` in their reproductions, which still runs |
+| Issues #97, #115, #218, #258, #370, #372, #387, #426, #469, #60, #618, #622, #648, #658, #687, #709 | Dismissed: their bodies hold none of the terms as written; the finder matched them loosely |
+
 ## Implementation record
 
 - `ltl`: a new `$index_enabled`, set by `-idx, --index`, gates the read

@@ -3,6 +3,11 @@
 Issue #547 (BUG: `ltl -o` products left in the repository root are hidden by
 `.gitignore` and reported by nothing). Branch off `release/0.18.1`.
 
+> **The run index is off by default** (2026-10-12, #708): `ltl-index.csv` is read and
+> written only under `-idx, --index`; `-ni` is accepted and has no effect
+> (`features/708-run-index-deprecation.md`). What this record says about the
+> index being written on every run describes the behaviour before that change.
+
 ## Status
 
 Implemented. `process/check-root-clean.sh` exists to the contract below and
