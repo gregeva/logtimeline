@@ -150,7 +150,8 @@ about anything else, these still hold.
 - [ ] Name the surfaces the work touches, the feature docs and research that own
       them, and the locked decisions that govern them. Read them. Then speak.
 - [ ] The owning records are found by search (`./process/find-records.sh
-      --issues <terms>`), not taken from the issue's links:
+      --issues <terms>`; exit 3 means an issue search failed and the list is
+      incomplete), not taken from the issue's links:
       every option (short and long form), sub and user-visible message the work
       touches is searched across `features/`, `docs/`, `releases/` and the issue
       bodies (a surface with no option, such as file arguments, by the subs and
@@ -338,7 +339,8 @@ about anything else, these still hold.
       deleted (`docs/process/workflow.md` § 4).
 - [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
       without asking, including deleting the issue's own before/after benchmark
-      TSVs and removing its merged worktree. Only another issue's artifacts wait.
+      TSVs and removing its merged worktree, whose `logs` symlink goes with it
+      (the corpus it points to is untouched). Only another issue's artifacts wait.
 - [ ] **A merged PR is not a closed issue.** After any `gh pr merge`, the issue
       it belongs to is closed, its `status:` label stripped and its completion
       comment written, in that same action, before another issue is touched.

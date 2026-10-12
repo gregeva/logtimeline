@@ -44,12 +44,16 @@ deny "settings.local.json is machine-local and never edited by Claude"
 
 # A feature doc may cite a record (a features/ or docs/ Markdown file) only
 # when this session has read it: a Read of the file, or a shell command that
-# reads it (cat, sed, head, tail, awk, grep, less, perl, python). The check
-# reads the text being written, so a citation already in the doc is checked
-# only when the write repeats it. Records that do not exist in the checkout
-# being written (a file still to be created) are not checked.
-if ( $p =~ m{^(.*)/features/[^/]+\.md$} ) {
-    my $checkout = $1;
+# reads it (cat, sed, head, tail, awk, grep, less, perl, python). A record is
+# cited by its path, or by its issue number alone: #451, or 451 before a
+# decision label (451 D4) or a possessive (451's), names every
+# features/451-*.md. The doc's own number is not a citation. The check reads
+# the text being written, so a citation already in the doc is checked only
+# when the write repeats it. Records that do not exist in the checkout being
+# written (a file still to be created) are not checked.
+if ( $p =~ m{^(.*)/features/([^/]+)\.md$} ) {
+    my ( $checkout, $own ) = ( $1, $2 );
+    my ($own_number) = $own =~ /^(\d+)-/;
     my $ti = $call->{tool_input} // {};
     my $text = join "\n", grep { defined } $ti->{content}, $ti->{new_string},
         map { $_->{new_string} } @{ $ti->{edits} // [] };
@@ -58,6 +62,16 @@ if ( $p =~ m{^(.*)/features/[^/]+\.md$} ) {
         my $record = $1;
         next if $p =~ m{/\Q$record\E$};
         $cited{$record} = 1 if -f "$checkout/$record";
+    }
+    my %numbers;
+    $numbers{$1} = 1 while $text =~ m{(?<![\w#/.-])#(\d{2,5})\b}g;
+    $numbers{$1} = 1 while $text =~ m{(?<![\w#/.-])(\d{2,5})(?=(?: [DORF]\d|'s\b))}g;
+    delete $numbers{$own_number} if defined $own_number;
+    for my $number ( keys %numbers ) {
+        for my $file ( glob "$checkout/features/$number-*.md" ) {
+            ( my $record = $file ) =~ s{^\Q$checkout\E/}{};
+            $cited{$record} = 1;
+        }
     }
     my $transcript = $call->{transcript_path} // '';
     if ( %cited && $transcript ne '' && open my $fh, '<', $transcript ) {
