@@ -2,7 +2,7 @@
 
 ## Status
 
-Analysis redone 2026-10-12 on branch `614-operand-settlement` (at
+**Complete** (PR #712, merged 2026-10-12). Analysis redone 2026-10-12 on branch `614-operand-settlement` (at
 `release/0.19.0` b4ec4ef), under CLAUDE.md § Before planning: the owning
 records were found by search and each read or dismissed (§ 3), and § 4 states
 each surface's contract with the record line behind it. The architect
@@ -748,4 +748,9 @@ Verification: reading, and `tests/validate-help-content.sh`,
 - **Pre-existing, outside this issue:** `-hm x -udm x::max` on a log where
   `x` never matches dies in the heatmap colour lookup (`Can't use an
   undefined value as an ARRAY reference`, exit 255), on the release code as
-  on this branch.
+  on this branch. Filed as #713.
+- **Completion gate** on bbe6260: full suite 49/49 exit 0; `standard`
+  benchmark medians of three, before 6.14 s (5.97–6.59), after 6.11 s
+  (6.10–6.68), peak memory 102.86 MB to 102.97 MB; `sort-p99`,
+  `sort-skewness`, `heatmap` and `histogram` one run each, after 1.9 to 7.6
+  per cent faster. Merged through PR #712 (e02f46a).
