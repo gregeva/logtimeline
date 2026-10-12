@@ -248,7 +248,7 @@ current_scenario="index-signature"
 
 assert_command \
     label "an outcome-filtered run writes its own selection row and never reuses the unfiltered one (AC6)" \
-    command "cd '$TMP_DIR' && mkdir -p idx && cd idx && cp '$ACCESS_FIXTURE' f.txt && '$LTL' --disable-progress -bs 1440 -oe -n 1 -lf '$ACCESS_FORMAT' f.txt >/dev/null 2>r1.err && '$LTL' --disable-progress -bs 1440 -oe -n 1 -ef -lf '$ACCESS_FORMAT' f.txt >/dev/null 2>r2.err && [[ \$(grep -c '^selection,' ltl-index.csv) == 2 ]] && grep -q '^selection,.*,-ef\$' ltl-index.csv && [[ \$(grep -c '^selection,' ltl-index.csv) != \$(grep -c '^selection,.*,-ef\$' ltl-index.csv) ]]" \
+    command "cd '$TMP_DIR' && mkdir -p idx && cd idx && cp '$ACCESS_FIXTURE' f.txt && '$LTL' --disable-progress -idx -bs 1440 -oe -n 1 -lf '$ACCESS_FORMAT' f.txt >/dev/null 2>r1.err && '$LTL' --disable-progress -idx -bs 1440 -oe -n 1 -ef -lf '$ACCESS_FORMAT' f.txt >/dev/null 2>r2.err && [[ \$(grep -c '^selection,' ltl-index.csv) == 2 ]] && grep -q '^selection,.*,-ef\$' ltl-index.csv && [[ \$(grep -c '^selection,' ltl-index.csv) != \$(grep -c '^selection,.*,-ef\$' ltl-index.csv) ]]" \
     asserts "the -ef/-es/-if/-is options enter the persisted filter signature, so a filtered run appends a selection row under its own signature instead of matching the unfiltered row" \
     produced_by "serialize_filters() and has_active_filters() in ltl; write side write_index_file()" \
     contract "features/455-success-failure-filter-highlight-criteria.md D7, AC6" \

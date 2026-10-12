@@ -1,5 +1,10 @@
 # Feature: programmatic console screenshot capture (#598)
 
+> **The run index is off by default** (2026-10-12, #708): `ltl-index.csv` is read and
+> written only under `-idx, --index`; `-ni` is accepted and has no effect
+> (`features/708-run-index-deprecation.md`). What this record says about the
+> index being written on every run describes the behaviour before that change.
+
 ## GitHub Issue
 
 [#598](https://github.com/gregeva/logtimeline/issues/598): Enhancement: programmatic

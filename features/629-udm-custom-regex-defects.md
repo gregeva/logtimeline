@@ -1,5 +1,10 @@
 # #629 — Multiple defects when using a user-defined metric with a custom regex and capture group
 
+> **The run index is off by default** (2026-10-12, #708): `ltl-index.csv` is read and
+> written only under `-idx, --index`; `-ni` is accepted and has no effect
+> (`features/708-run-index-deprecation.md`). What this record says about the
+> index being written on every run describes the behaviour before that change.
+
 Umbrella record for #629. The report's four observations were investigated on
 release 0.18.5 (v0.18.4 plus the version stamp) and on release/0.19.0; every
 finding below behaves identically on both. Each defect has its own sub-issue

@@ -68,7 +68,8 @@ my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
 my $impact_time_exponent = 7;		            # it was 5, and was weighting a few slow executions too heavily compared to frequent faster executions
 my ( $time_bucket_size, $bucket_size_seconds, $print_seconds, $print_milliseconds, $print_version, $omit_empty, $omit_summary, $omit_rate, $omit_stats, $omit_durations, $omit_bytes, $omit_count ) = 0;
-my $no_index = 0;                                                       # -ni: neither read nor update ltl-index.csv in the working directory
+my $index_enabled = 0;                                                  # -idx: read and update ltl-index.csv in the working directory
+my $no_index = 0;                                                       # -ni: accepted and without effect, the index being off unless -idx
 my $recursive_files = 0;                                                # -r: expand each file argument's filename component against every depth beneath its directory part
 my @unreadable_directories;                                             # -r sweep: directories that could not be opened, reported once at the tail of read_and_process_logs()
 my ( $include_query_string, $include_session, $include_user, $include_threadpool_summary, $include_count ) = ( 0, 0, 0, 0, 0 );
@@ -1378,7 +1379,7 @@ my $message_bytes_demand           = 0;       # per-message bytes (%log_messages
 my $message_outcomes_demand        = 0;       # per-message success/failure counters: MESSAGES CSV successes/failures columns (#517)
 my $session_capture_demand         = 0;       # per-bucket distinct sessions (%log_sessions): timeline sessions column, STATS CSV, YAML export (#620 D6)
 my $user_capture_demand            = 0;       # per-bucket distinct users (%log_users): timeline users column, STATS CSV, YAML export (#620 D6)
-my $index_capture_demand           = 0;       # per-file accumulations (%index_file_data): the ltl-index.csv rows and their drift check, unless -ni
+my $index_capture_demand           = 0;       # per-file accumulations (%index_file_data): the ltl-index.csv rows and their drift check, under -idx
 my $timeline_latency_column_active = 0;      # the timeline latency-statistics column is shown: the @STAT_CONSUMERS predicate, evaluated once
 
 # Statistics-group demand registry (#305): extends the store-level demand
@@ -2873,7 +2874,7 @@ sub _classify_argv_provenance {
                 'include-failure|if', 'exclude-failure|ef', 'highlight-failure|hf',
                 'include-success|is', 'exclude-success|es', 'highlight-success|hs',
                 'verbose|V',
-                'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'no-index|ni',
+                'omit-values|ov', 'precise-values|pv', 'omit-stats|os', 'omit-empty|oe', 'index|idx', 'no-index|ni',
                 'recursive|r',
                 'omit-summary|osum', 'omit-rate|or', 'omit-durations|od',
                 'summary-mono|sm', 'summary-bar-off|sbo',
@@ -2982,6 +2983,7 @@ sub emit_runtime_config_verbose {
         'precise-values'                    => $precise_values,
         'omit-stats'                        => $omit_stats,
         'omit-empty'                        => $omit_empty,
+        'index'                             => $index_enabled,
         'no-index'                          => $no_index,
         'recursive'                         => $recursive_files,
         'omit-summary'                      => $omit_summary,
@@ -11262,7 +11264,7 @@ sub print_help {
     $out .= help_opt("-pv,  --precise-values",        "Show exact category totals in the legend, unshortened");
     $out .= help_opt("-os,  --omit-stats",            "Deprecated: use -od, --omit-durations to skip capturing durations, or -hst, --hide-stats to hide the statistics panel");
     $out .= help_opt("-oe,  --omit-empty",            "Skip time buckets that contain zero log entries");
-    $out .= help_opt("-ni,  --no-index",              "Do not read or update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs; the run neither benefits from nor adds to it");
+    $out .= help_opt("-idx, --index",                 "Read and update ltl-index.csv, the per-directory index that records each analysed file and pre-seeds later runs");
     $out .= help_opt("-r,   --recursive",             "Match each file argument's filename pattern at every depth below its directory, instead of only directly inside it. \"logs/access/*.log\" becomes every .log file anywhere under logs/access; \"*.log\" recurses from the current directory. Put the pattern in double quotes so your shell passes it through unchanged: an unquoted pattern is expanded, or rejected, by the shell before ltl sees it, and the sweep then covers only what the shell already matched. Subdirectories are entered whatever their own names are, shallower files are read before deeper ones, and a file reachable from two arguments is read once. Directory symlinks are not followed, and directories that cannot be read are skipped and reported at the end.");
     $out .= help_opt("-or,  --omit-rate",             "Hide the error/message rate from the legend");
     $out .= help_opt("-od,  --omit-durations",        "Suppress duration extraction and related columns (significantly reduces memory and processing time on large files)");
@@ -16022,7 +16024,8 @@ sub adapt_to_command_line_options {
         'precise-values|pv' => \$precise_values,
         'omit-stats|os' => sub { $omit_stats = 1; push @section_visibility_ops, [ 'hide', 'stats,heatmap' ] },   # as -hst (#692 D26)
         'omit-empty|oe' => \$omit_empty,
-        'no-index|ni' => \$no_index,
+        'index|idx' => \$index_enabled,
+        'no-index|ni' => \$no_index,                                       # hidden - accepted and without effect, the index being off unless -idx
         'recursive|r' => \$recursive_files,
         'omit-summary|osum' => sub { push @section_visibility_ops, [ 'hide', 'summary' ] },
         'hide|hi=s' => sub { push @section_visibility_ops, [ 'hide', $_[1] ] },
@@ -16775,8 +16778,8 @@ sub adapt_to_command_line_options {
     $session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;
     $user_capture_demand    = ( !$hide_user    || $write_messages_to_csv ) ? 1 : 0;
     # The per-file accumulations are read only by the index file and its drift
-    # check, neither of which runs under -ni.
-    $index_capture_demand = $no_index ? 0 : 1;
+    # check, neither of which runs without -idx.
+    $index_capture_demand = $index_enabled ? 1 : 0;
 
     # Statistics-group demand (#305): layer per-group demand on top of the
     # store-level booleans above, from the consumer declarations in
@@ -23735,7 +23738,7 @@ sub pipeline_detect {
     $elapsed_detect_registry_build = tv_interval($registry_build_start);
 
     # Issue #179: Read existing ltl-index.csv before parse pass to pre-seed bounds.
-    read_index_file() unless $no_index;
+    read_index_file() if $index_enabled;
 
     memory_debug_decomposition("startup");
 }
@@ -24152,7 +24155,7 @@ sub pipeline_render {
     # it, and its total time, so it follows the summary (Issue #503).
     write_aggregate_export();
 
-    write_index_file() unless $no_index;  # Write persistent index file with per-file metadata (Issue #46)
+    write_index_file() if $index_enabled;  # Write persistent index file with per-file metadata (Issue #46)
 }
 
 # Expand one file argument to every file matching its filename component at

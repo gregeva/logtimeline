@@ -1,5 +1,9 @@
 # Feature: Index file read-back with drift detection and refresh
 
+**Status:** deprecated with the index and off by default; it runs only under
+`-idx, --index` (`features/708-run-index-deprecation.md`, #708). Removal is
+tracked by #710.
+
 ## Overview
 
 ltl writes `ltl-index.csv` today via the #46 feature, recording both whole-file metadata (`file` entries) and per-run filter-specific statistics (`selection` entries). No code path reads either back. This feature adds startup read-back with **most-specific-to-less-specific lookup** — selection entry first when filters match, file entry as fallback — plus end-of-run drift detection that refreshes the matching index entry when live values exceed pre-seeded bounds. The pre-seeded values become a primitive consumable by downstream features.

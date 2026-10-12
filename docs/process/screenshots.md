@@ -420,7 +420,8 @@ others still run; the run exits non-zero naming the failures.
   such file is deleted, including an earlier `ltl -o` export of your own left
   there, so keep exports elsewhere. In a folder the entry names, only the files
   the run wrote are deleted; an export already there is left alone.
-- `ltl` writes its index file, `ltl-index.csv`, in the folder it runs in. In the
+- An entry whose options include `-idx` makes `ltl` write its index file,
+  `ltl-index.csv`, in the folder it runs in; without `-idx` none is written. In the
   repository root it is ignored by git and left. In a folder the entry names it
   is deleted after the entry's runs when they created it; one already there is
   left, with `ltl`'s rows added to it.

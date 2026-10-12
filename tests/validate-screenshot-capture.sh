@@ -500,7 +500,8 @@ fi
 current_scenario="folder-index"
 if scenario_wanted "$current_scenario"; then
     echo "=== $current_scenario: criterion 19, in a named folder an index the recipe created is removed ==="
-    # The index file is the subject, so these runs do not pass -ni.
+    # The index file is the subject, so these runs pass -idx: the index is
+    # written only when it is turned on.
     # -bs 1440 -oe -n 1: nothing rendered is read.
     for case in fresh existing; do
         folder="$TMP_DIR/index-$case"
@@ -508,13 +509,13 @@ if scenario_wanted "$current_scenario"; then
         cp "$REPO_DIR/$FIXTURE" "$folder/access.txt"
         real=$(cd "$folder" && pwd -P)
         if [[ "$case" == existing ]]; then
-            ( cd "$folder" && "$LTL" --disable-progress -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr"
+            ( cd "$folder" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 access.txt ) > "$TMP_DIR/index-seed" 2> "$TMP_DIR/index-seed.stderr"
             check_warnings "$TMP_DIR/index-seed"
         fi
         had_index=$([[ -s "$folder/ltl-index.csv" ]] && echo yes || echo no)
         out="$TMP_DIR/folder-index-$case"
         status=0
-        run_tool "$out" --name i$case --dir "$folder" --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -bs 1440 -oe -n 1 access.txt || status=$?
+        run_tool "$out" --name i$case --dir "$folder" --out-dir "$TMP_DIR" --trace --crop 'sections=options' -- -idx -bs 1440 -oe -n 1 access.txt || status=$?
         check_warnings "$out"
         if [[ "$case" == fresh ]]; then
             assert_command \

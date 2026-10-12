@@ -1,5 +1,8 @@
 # Feature: Index File for Progressive File Metadata Caching
 
+**Status:** deprecated and off by default; turned on by `-idx, --index`
+(`features/708-run-index-deprecation.md`, #708). Removal is tracked by #710.
+
 ## Overview
 
 Implement a persistent index file (`ltl-index.csv`) that stores pre-computed metadata about log files and filtered selections. This enables faster subsequent analysis runs by avoiding redundant file processing and provides the foundation for intelligent heuristics in other performance features.
@@ -172,9 +175,10 @@ If the index already contains `duration_min`, `duration_max`, etc., the first pa
 
 ## Run shape and measured cost
 
-The index is written on every run unless `-ni` is given, so its cost is paid
-by default. Its work falls into five parts, all in `read_and_process_logs`
-except the run-level ones:
+Until the deprecation (#708) the index was written on every run unless `-ni`
+was given, so its cost was paid by default; it is now written only under
+`-idx`. Its work falls into five parts, all in `read_and_process_logs` except
+the run-level ones:
 
 | Part | Runs | What it does |
 |---|---|---|
@@ -215,10 +219,16 @@ The architect's reading (2026-10-11): a fifth of every default run spent on the
 index is likely to bring the index's deprecation forward. Filed as #708
 (deprecate the run index), whose specification phase researches what reads
 the index and what the current implementation and open issues really need.
+The research is recorded in `features/708-run-index-deprecation.md`: nothing
+outside the tool reads the index, its one effect on output is the heatmap's
+seeded range (wrong on a repeat run in two reproduced cases), and no open issue
+needs it as it is.
 
 ## Related Issues
 
-This feature is a prerequisite for:
+None of these depends on the index (`features/708-run-index-deprecation.md` § 4): #34, #41 and #51 are closed, superseded by the online-resizing bin counters; #2 budgets memory live during the run; #44's file investigation is the per-file pre-read sampling pass. The index is deprecated and off by default (#708); removal is tracked by #710.
+
+This feature was written as a prerequisite for:
 - #2 - Performance: Implement maximum memory usage ceiling and default auto-detection
 - #34 - Performance: Memory-optimized mode for histogram and heatmap (two-pass streaming)
 - #41 - Performance: Align heatmap with histogram binning algorithms

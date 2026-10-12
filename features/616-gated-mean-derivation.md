@@ -1,5 +1,10 @@
 # One gated derivation of means and totals over accumulators that always carry an observation count (Issue #616)
 
+> **The run index is off by default** (2026-10-12, #708): the index means, bytes
+> columns and heatmap pre-seed recorded here apply only under `-idx, --index`. The
+> bytes heatmap pre-seed (D24) was found to start a repeat run's axis at 1 B
+> when the index holds a zero-byte response (`features/708-run-index-deprecation.md` § 3).
+
 ## Status
 
 **Specification agreed with the architect 2026-09-28 on branch
