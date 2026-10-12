@@ -215,6 +215,10 @@ The architect's reading (2026-10-11): a fifth of every default run spent on the
 index is likely to bring the index's deprecation forward. Filed as #708
 (deprecate the run index), whose specification phase researches what reads
 the index and what the current implementation and open issues really need.
+The research is recorded in `features/708-run-index-deprecation.md`: nothing
+outside the tool reads the index, its one effect on output is the heatmap's
+seeded range (wrong on a repeat run in two reproduced cases), and no open issue
+needs it as it is.
 
 ## Related Issues
 
