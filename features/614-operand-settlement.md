@@ -541,32 +541,32 @@ mechanism criterion is a source check in the same harness, as
 `quantity-units-declared` checks `ltl`'s source in the option-resolution
 harness. All are assertable.
 
-- [ ] **A value in the option's vocabulary is taken**, with no pushback and no
+- [x] **A value in the option's vocabulary is taken**, with no pushback and no
       notice: `-hm bytes`, `-hg duration,bytes`, `-V format-detection`,
       `-V format-detection,csv-output`, `-V all`, `-g 90`, `-mem debug`,
       `-mem release`. `-V list` still lists the sections and exits 0.
-- [ ] **Anything else is pushed back as a file argument**, and the option
+- [x] **Anything else is pushed back as a file argument**, and the option
       takes its bare default: for each of the five, `ltl <option>
       <fixture>` selects the fixture, exits 0, and runs with `-hm` on
       `duration`, `-hg` on every available metric, `-V` on every section,
       `-g` at 85, `-mem` without its debug detail.
-- [ ] **The pushback is silent, the same for all five.** In that case stderr
+- [x] **The pushback is silent, the same for all five.** In that case stderr
       carries nothing from the option: `ltl -hg <fixture>`,
       `ltl -mem <fixture>`, `ltl -g <fixture>` and the rest run clean.
-- [ ] **A pushed-back value that is not a file stops at file resolution,
+- [x] **A pushed-back value that is not a file stops at file resolution,
       naming the option.** `ltl -V foo <fixture>` and `ltl -g 85% <fixture>`
       end in phase 1's usage error, exit 2, which names the value, the option
       it followed, and that it is not in that option's vocabulary (the
       metrics from `available_metric_names()` for `-hm` and `-hg`, a pointer
       to `-V list` for `-V`, 50 to 99 for `-g`, `debug` for `-mem`).
-- [ ] **User-defined names are in the vocabulary wherever `-udm` stands.**
+- [x] **User-defined names are in the vocabulary wherever `-udm` stands.**
       `-hm x -udm x::max` and `-udm x::max -hm x` both take `x`; likewise
       `-hg`. User-defined metrics are parsed before the helper runs.
-- [ ] **A comma list with a member in the vocabulary belongs to the option.**
+- [x] **A comma list with a member in the vocabulary belongs to the option.**
       `-V format-detection,foo` is a rejection naming `foo` and pointing to
       `-V list`, exit 1, never a file argument; the same rule gives
       `-hg duration,foo`'s rejection in phase 3.
-- [ ] **The mechanism.** One sub makes the decision for all five options;
+- [x] **The mechanism.** One sub makes the decision for all five options;
       `unshift @ARGV` occurs in `ltl` only in that sub and in the
       environment-argument merge in `adapt_to_command_line_options()`; `-V`'s
       path test (`$name =~ m{[/.]} || -e $name`) is gone.
@@ -584,20 +584,20 @@ assert the `Unknown heatmap metric` error) and the base-name panels of
 exit status, stderr, and the rendered histogram panel titles. All are
 assertable.
 
-- [ ] **A comma list with an unknown member is a rejection.** `-hg
+- [x] **A comma list with an unknown member is a rejection.** `-hg
       duration,foo` exits 1 before any file is read, names `foo`, and lists
       `duration, bytes, count`; with `-udm x::max` it lists `duration, bytes,
       count, x`. Today it runs `duration` with an empty stderr.
-- [ ] **One metric list for every run-time message.** Each message that
+- [x] **One metric list for every run-time message.** Each message that
       lists metrics at run time (the `-hg` rejection, phase 1's error for a
       value pushed back from `-hm` or `-hg`) reads `available_metric_names()`:
       the built-in metrics, then the user-defined ones. No run-time message
       writes the built-in list alone. The help rows, written before any
       `-udm` is read, keep the table's built-in list and "or one of your own".
-- [ ] **`-udm`'s position does not matter.** `-hg duration,x -udm x::max` and
+- [x] **`-udm`'s position does not matter.** `-hg duration,x -udm x::max` and
       `-udm x::max -hg duration,x` render the same two panels; so do
       `-hg rows -udm rows -udm rows::delta` and the order reversed.
-- [ ] **What resolution does today is kept.** Built-in names in any case
+- [x] **What resolution does today is kept.** Built-in names in any case
       (`-hg BYTES`); user-defined names case-sensitive, then by base name
       (#104); `time` still works with its deprecation notice; `durationMs` is
       a key spelling, never a metric name (inside a list it is the
@@ -605,10 +605,10 @@ assertable.
       with its warning and is still skipped by `-hg` with its warning; `-hg`
       stays additive across the environment and the command line; bare `-hg`
       still shows every available metric but counting ones.
-- [ ] **The rejection exits 1 through the usage path.** It is reported
+- [x] **The rejection exits 1 through the usage path.** It is reported
       through `print_usage()` and `exit 1`, as the `-so` rejection is, never a
       bare `die` (observation 9).
-- [ ] **The mechanism.** `handle_histogram_option()` records the operand and
+- [x] **The mechanism.** `handle_histogram_option()` records the operand and
       resolves nothing: no `builtin_metric_name()` call and no warning in it.
       Every `-hm` and `-hg` operand is resolved after `parse_udm_configs()`
       through `resolve_metric_operand()`.
@@ -707,3 +707,25 @@ Verification: reading, and `tests/validate-help-content.sh`,
       marked established.
 - [ ] The records this issue changes carry a pointer to it: 432 O3, 420 D2,
       451 D4.
+
+## Implementation record
+
+- **Phase 1** (58f2125): each file argument is expanded on its own; an
+  argument that selected no file, beside one that did, stops the run (exit 2)
+  naming it. Four scenarios in `validate-recursive-file-selection.sh`, each
+  shown to fail on the pre-change `ltl` or on a doctored copy.
+- **Phases 2 and 3**: `settle_optional_operand()` decides for `-hm`, `-hg`,
+  `-V`, `-g` and `-mem`; `parse_udm_configs()` now runs before the optional
+  operands are settled; `handle_histogram_option()` only records. The
+  `Unknown heatmap metric` and `Unknown histogram metric` dies are gone (no
+  longer reachable). Found on the way: with `-udm rows -udm rows::delta`,
+  `-hg rows` rendered both panels only because the old handler, run before
+  `-udm` was read, pushed `rows` back as a file and left `-hg` bare.
+  User-defined-metrics criterion 5 (#482) asks for exactly those two panels,
+  so the `-hg` binding now binds a base name to every config carrying it, in
+  declaration order. The `time` deprecation notice now names the options in
+  the order they are settled (`-hm`, `-hg`, `-so`).
+- **Pre-existing, outside this issue:** `-hm x -udm x::max` on a log where
+  `x` never matches dies in the heatmap colour lookup (`Can't use an
+  undefined value as an ARRAY reference`, exit 255), on the release code as
+  on this branch.

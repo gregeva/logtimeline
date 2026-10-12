@@ -676,6 +676,7 @@ my ( $csv_block, $csv_block_live, @csv_udm_values );
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
 my $verbose = 0;                                         # Verbose mode flag (-V); true if any section requested
 my @verbose_args;                                        # Raw -V arguments collected by Getopt (Issue #226)
+my %pushed_back_operand;                                 # A value an optional-operand option gave back as a file argument => why, for the file-resolution error
 my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
 my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
@@ -1281,6 +1282,7 @@ my %heatmap_metric_map = map { $_->{name} => { column => $_->{column} } } @built
 # Histogram data structures and settings (Issue #25)
 my $histogram_enabled = 0;                    # Flag: histogram mode active
 my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
+my @histogram_operands;                       # Each -hg value as given, from the environment and the command line ('' for bare -hg)
 my $histogram_width_percent = 95;             # Width as percentage of terminal (default, auto-adapted by histogram count)
 my $histogram_width_explicit = 0;             # Flag: true if user explicitly set -hgw
 my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
@@ -15704,40 +15706,47 @@ sub settle_message_option_flags {
     return;
 }
 
+# -hg records each value it is given; the values are settled with the other
+# optional operands once the -udm metrics are known, so a user-defined name
+# is recognised wherever -udm stands on the line. Repeated -hg (the
+# environment's and the command line's) is additive.
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
+    push @histogram_operands, $opt_value // '';
+}
 
-    if (defined $opt_value && $opt_value ne '') {
-        # Check if the value looks like a filename (not a valid metric)
-        # This handles the case where -hg is followed by a filename
-        my @parts = split /,/, $opt_value;
-        my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;
-
-        if (!$has_valid_metric && !@udm_raw_args) {
-            # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
-            # Push it back to @ARGV so it can be processed as a file
-            unshift @ARGV, $opt_value;
-            return;
-        }
-
-        # Parse comma-separated metrics, additive behavior. Built-in tokens
-        # canonicalize through builtin_metric_name(); anything else is kept
-        # verbatim as a potential UDM name (case-sensitive) and resolved by
-        # resolve_metric_operand() after parse_udm_configs().
-        for my $metric (split /,/, $opt_value) {
-            $metric = trim($metric);
-            my $builtin = builtin_metric_name($metric, '-hg/--histogram');
-            if (defined $builtin) {
-                $histogram_metrics{$builtin} = 1;
-            } elsif (@udm_raw_args) {
-                $histogram_metrics{$metric} = 1;
-            } else {
-                warn "Unknown histogram metric: $metric (valid: $builtin_metric_list)\n";
-            }
-        }
+# The optional-operand options (-hm, -hg, -V, -g, -mem) all decide the same
+# way. Getopt's :s takes the word after the option as its value whether or
+# not it was meant as one. A value in the option's vocabulary is the
+# option's; a value with no member in it goes back onto @ARGV as a file
+# argument, silently, and the option takes its bare default. Should that
+# argument then select no file, the file-resolution error says which option
+# it followed and what that option takes. A comma list (-hg, -V) with some
+# members in the vocabulary is the option's, and its unknown members stop the
+# run. Returns the members taken, or nothing when the value was given back.
+sub settle_optional_operand {
+    my (%operand) = @_;
+    my $value   = $operand{value};
+    my @members = $operand{list} ? ( grep { $_ ne '' } map { trim($_) } split /,/, $value ) : ($value);
+    my @unknown = grep { !$operand{known}->($_) } @members;
+    if ( @unknown == @members ) {
+        unshift @ARGV, $value;
+        $pushed_back_operand{$value} = "it followed $operand{option} and is not $operand{expects}";
+        return;
     }
-    # If no specific metrics given, will default to all available after parsing
+    if (@unknown) {
+        print_usage( join_with_or( map { "'$_'" } @unknown ) . " given to $operand{option} "
+                   . ( @unknown > 1 ? 'are' : 'is' ) . " not $operand{expects}" );
+        exit 1;
+    }
+    return @members;
+}
+
+# What a -hm or -hg value must be, with the metrics this run knows: the
+# built-in ones, then the -udm ones.
+sub metric_operand_expects {
+    return 'a metric; the metrics are ' . join( ', ', available_metric_names() );
 }
 
 # Classify a single raw @ARGV token as an informational-option invocation, or
@@ -16138,6 +16147,10 @@ sub adapt_to_command_line_options {
     }
     apply_output_visibility(0);
 
+    # The -udm metrics are parsed before the optional operands are settled:
+    # -hm and -hg take a user-defined metric's name, wherever -udm stands.
+    parse_udm_configs() if @udm_raw_args;
+
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
     # for the contract. Behavior:
@@ -16147,7 +16160,8 @@ sub adapt_to_command_line_options {
     #   -V list                     => print known sections + descriptions, exit 0
     #   -V <name>                   => $verbose=1, that section selected
     #   -V <a>,<b>  /  -V a -V b    => $verbose=1, both selected
-    #   -V bogus                    => warn to stderr, continue without that section
+    #   -V <word with no section>   => a file argument (settle_optional_operand), -V bare
+    #   -V <a>,bogus                => usage error naming bogus
     if (@verbose_args) {
         $verbose = 1;
         my @requested;
@@ -16157,12 +16171,16 @@ sub adapt_to_command_line_options {
                 push @requested, 'all';
                 next;
             }
-            # Allow comma-list shorthand: -V a,b,c
-            push @requested, split(/,/, $arg);
+            my @names = settle_optional_operand(
+                option  => '-V/--verbose',
+                value   => $arg,
+                list    => 1,
+                known   => sub { $_[0] eq 'all' || $_[0] eq 'list' || exists $verbose_section_registry{ $_[0] } },
+                expects => "a verbose section; 'ltl -V list' lists them",
+            );
+            push @requested, @names ? @names : 'all';
         }
         for my $name (@requested) {
-            $name =~ s/^\s+|\s+$//g;
-            next if $name eq '';
             if ($name eq 'list') {
                 print "Known -V sections (Issue #226):\n";
                 # Width follows the longest registered name so a new section
@@ -16186,27 +16204,8 @@ sub adapt_to_command_line_options {
                 $verbose_sections_requested{'all'} = 1;
                 next;
             }
-            if (exists $verbose_section_registry{$name}) {
-                $verbose_sections_requested{$name} = 1;
-            } elsif ($name =~ m{[/.]} || -e $name) {
-                # Looks like a filename (path separator, dot, or existing file
-                # on disk) — Getopt::Long greedily ate the next positional
-                # argument when the user typed bare `-V <file>`. Push it back
-                # to @ARGV and treat -V as bare (all sections). Same pattern
-                # as -g, -hm, -hg elsewhere in this parser.
-                unshift @ARGV, $name;
-                $verbose_sections_requested{'all'} = 1;
-            } else {
-                warn "Unknown -V section: $name. Known sections: "
-                    . join(', ', @verbose_section_order)
-                    . " (and 'all', 'list'). Continuing.\n";
-            }
+            $verbose_sections_requested{$name} = 1;
         }
-        # If -V was given but every requested name was unknown,
-        # %verbose_sections_requested is empty. Keep $verbose=1 so the run
-        # still records that verbose was requested, but no sections will
-        # match through section_requested(). This mirrors the issue body:
-        # exit code unchanged, warning emitted, run continues.
     }
 
     # Issue #462: consolidation records which keys each cluster absorbed, and
@@ -16239,20 +16238,18 @@ sub adapt_to_command_line_options {
     }
 
     # -mem option processing (Issue #356): optional literal operand 'debug'
-    # enables per-phase memory diagnostics. Getopt's :s greedily captures a
-    # following bare token, so any value other than the literal 'debug' is
-    # pushed back as a positional (file) argument. Unlike -g/-hm (#231) the
-    # pushback is silent: -mem accepts exactly one literal, so a following
-    # filename is the normal invocation shape, not a mis-typed operand.
+    # enables per-phase memory diagnostics ('release' is a hidden second
+    # literal). Any other value is a file argument (settle_optional_operand).
     if (defined $memory_usage_operand) {
         $show_memory = 1;
-        if ($memory_usage_operand eq 'debug') {
-            $show_memory_debug = 1;
-        } elsif ($memory_usage_operand eq 'release') {
-            $memory_release_after_use = 1;
-        } elsif ($memory_usage_operand ne '') {
-            unshift @ARGV, $memory_usage_operand;
-        }
+        my ($literal) = $memory_usage_operand eq '' ? () : settle_optional_operand(
+            option  => '-mem/--memory-usage',
+            value   => $memory_usage_operand,
+            known   => sub { $_[0] eq 'debug' || $_[0] eq 'release' },
+            expects => 'debug',
+        );
+        $show_memory_debug        = 1 if ( $literal // '' ) eq 'debug';
+        $memory_release_after_use = 1 if ( $literal // '' ) eq 'release';
     }
 
     # D62: arm the compile-boundary RSS measurement whenever a surface that
@@ -16265,43 +16262,35 @@ sub adapt_to_command_line_options {
 
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
-        if ($group_similar_sensitivity eq '') {
-            # -g with no value: use default threshold (85)
-            $consolidation_threshold = 85;
-        } elsif ($group_similar_sensitivity =~ /^\d+$/) {
-            $consolidation_threshold = int($group_similar_sensitivity);
-        } else {
-            # Non-numeric value captured (likely a filename) — push it back.
-            # Issue #231: surface this previously-silent pushback so users
-            # see why -g looks like it took the default threshold.
-            warn "-g value '$group_similar_sensitivity' is not numeric; treating as positional argument and using default threshold 85.\n";
-            unshift @ARGV, $group_similar_sensitivity;
-            $consolidation_threshold = 85;
-        }
+        # -g with no value, or with a value that is a file argument
+        # (settle_optional_operand), takes the default threshold (85).
+        my ($threshold) = $group_similar_sensitivity eq '' ? () : settle_optional_operand(
+            option  => '-g/--group-similar',
+            value   => $group_similar_sensitivity,
+            known   => sub { $_[0] =~ /^\d+$/ },
+            expects => 'a similarity threshold, a whole number from 50 to 99',
+        );
+        $consolidation_threshold = defined $threshold ? int($threshold) : 85;
         # Ensure threshold is in valid range
         $consolidation_threshold = 50 if $consolidation_threshold < 50;
         $consolidation_threshold = 99 if $consolidation_threshold > 99;
         $group_similar_sensitivity = $consolidation_threshold;  # normalize for downstream checks
     }
 
-    # Heatmap option processing
+    # Heatmap option processing. A value that names no metric is a file
+    # argument (settle_optional_operand) and the heatmap shows duration; a
+    # built-in name takes its canonical form ('time' resolves to 'duration');
+    # a user-defined name is kept as given and bound to its config below.
     if (defined $heatmap_metric) {
         $heatmap_enabled = 1;
-        # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
-        my $builtin = builtin_metric_name($heatmap_metric, '-hm/--heatmap');
-        if ($heatmap_metric eq '') {
-            $heatmap_metric = 'duration';  # Default metric (empty string case)
-        } elsif (defined $builtin) {
-            $heatmap_metric = $builtin;    # canonical form ('time' resolves to 'duration')
-        } elsif (@udm_raw_args) {
-            # Potential UDM name — resolve via resolve_metric_operand() after parse_udm_configs()
-        } else {
-            # No UDM args — it's likely a filename, push it back.
-            # Issue #231: surface this previously-silent pushback.
-            warn "-hm value '$heatmap_metric' is not a built-in metric ($builtin_metric_choices) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
-            unshift @ARGV, $heatmap_metric;
-            $heatmap_metric = 'duration';  # Default metric
-        }
+        my ($metric) = $heatmap_metric eq '' ? () : settle_optional_operand(
+            option  => '-hm/--heatmap',
+            value   => $heatmap_metric,
+            known   => sub { resolve_metric_operand( $_[0], '-hm/--heatmap' ) },
+            expects => metric_operand_expects(),
+        );
+        my $builtin = defined $metric ? builtin_metric_name( $metric, '-hm/--heatmap' ) : 'duration';
+        $heatmap_metric = defined $builtin ? $builtin : $metric;
 
         # -dbg wins over -lbg regardless of CLI order: force dark and skip auto-detect
         if ($heatmap_dark_bg_explicit) {
@@ -16317,10 +16306,25 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Histogram option processing (Issue #25)
-    # If histogram enabled but no specific metrics requested, default to all available after parsing
-    # The handler already sets $histogram_enabled = 1 and populates %histogram_metrics
+    # Histogram option processing (Issue #25). Each -hg value is settled as
+    # an optional operand: the metrics it names are added (built-in names in
+    # canonical form, user-defined names as given, bound to their configs
+    # below); a value naming none is a file argument. With no metric named,
+    # every available metric is shown.
     if ($histogram_enabled) {
+        for my $value ( grep { $_ ne '' } @histogram_operands ) {
+            my @metrics = settle_optional_operand(
+                option  => '-hg/--histogram',
+                value   => $value,
+                list    => 1,
+                known   => sub { resolve_metric_operand( $_[0], '-hg/--histogram' ) },
+                expects => metric_operand_expects(),
+            );
+            for my $metric (@metrics) {
+                my $builtin = builtin_metric_name( $metric, '-hg/--histogram' );
+                $histogram_metrics{ defined $builtin ? $builtin : $metric } = 1;
+            }
+        }
         if ($histogram_bucket_override < 0) {
             warn "Invalid bucket override value: $histogram_bucket_override. Disabling override.\n";
             $histogram_bucket_override = 0;
@@ -16626,7 +16630,6 @@ sub adapt_to_command_line_options {
 
     apply_parse_time_sort_gate($sort_operand_typed);
 
-    parse_udm_configs() if @udm_raw_args;
     apply_output_visibility(1);   # a user-defined metric's column is known by its heading now (#597 D24)
 
     # The exposed names resolve against the metrics the run declares, so
@@ -16637,7 +16640,7 @@ sub adapt_to_command_line_options {
     apply_discard_precedence() if @discard_names;
     settle_message_option_flags();
 
-    # Validate UDM heatmap metric name (must run after parse_udm_configs)
+    # Bind a user-defined heatmap metric to its config; a counting one turns the heatmap off
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');
         if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
@@ -16648,32 +16651,33 @@ sub adapt_to_command_line_options {
         } elsif ($resolved && $resolved->{kind} eq 'udm') {
             $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
-        } else {
-            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";
         }
     }
 
-    # Validate UDM histogram metric names (must run after parse_udm_configs)
+    # Bind user-defined histogram metrics to their configs; counting ones are skipped
     if ($histogram_enabled && %histogram_metrics) {
-        for my $metric (keys %histogram_metrics) {
-            my $resolved = resolve_metric_operand($metric, '-hg/--histogram');
-            next if $resolved && $resolved->{kind} eq 'builtin';
-            my $match = $resolved ? $resolved->{config} : undef;
-            # base_name resolution for disambiguated metrics (#104): register
-            # the canonical name alongside the token the user supplied.
-            $histogram_metrics{$match->{name}} = 1 if $match && $match->{name} ne $metric;
-            if ($match && $match->{agg_kind} eq 'counting') {
-                # A per-line distribution over counting (string) values is meaningless
-                print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
-                delete $histogram_metrics{$metric};
-                delete $histogram_metrics{$match->{name}};
-            } elsif ($match) {
-                push @histogram_udm_configs, $match;
-                # Colors resolved from @column_layout in normalize_data_for_output()
-            } else {
-                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', available_metric_names()) . "\n";
+        my %bound;
+        for my $metric ( grep { !exists $builtin_metric{$_} } sort keys %histogram_metrics ) {
+            # A metric's own name binds its config; a base name binds every
+            # config that carries it (#104, and the specs #482 separated),
+            # each with its own panel. The canonical name is registered
+            # alongside the token the user supplied.
+            my @matches = grep { $_->{name} eq $metric } @udm_configs;
+            @matches = grep { $_->{base_name} eq $metric } @udm_configs unless @matches;
+            for my $match (@matches) {
+                if ( $match->{agg_kind} eq 'counting' ) {
+                    # A per-line distribution over counting (string) values is meaningless
+                    print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                    delete $histogram_metrics{$metric};
+                    delete $histogram_metrics{ $match->{name} };
+                    next;
+                }
+                $histogram_metrics{ $match->{name} } = 1;
+                $bound{ $match->{name} } = 1;
             }
         }
+        # In declaration order; colors resolved from @column_layout in normalize_data_for_output()
+        @histogram_udm_configs = grep { $bound{ $_->{name} } } @udm_configs;
     }
 
     # Bare -hg: include all UDM metrics (counting UDMs carry no per-line distribution)
@@ -24168,10 +24172,13 @@ sub pipeline_render {
 }
 
 # What the usage error says about one file argument that selected no file:
-# a directory is named as one; anything else matched no file.
+# a directory is named as one; anything else matched no file. A value an
+# optional-operand option gave back also says which option it followed.
 sub file_argument_problem {
     my ($argument) = @_;
-    return -d $argument ? "'$argument' is a directory, not a file" : "'$argument' matches no file";
+    my $problem = -d $argument ? "'$argument' is a directory, not a file" : "'$argument' matches no file";
+    $problem .= " ($pushed_back_operand{$argument})" if exists $pushed_back_operand{$argument};
+    return $problem;
 }
 
 # Expand one file argument to every file matching its filename component at

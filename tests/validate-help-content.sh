@@ -825,14 +825,15 @@ scenario_K_name_list_parity() {
     "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
     check_stderr_warnings "$help_out.stderr" "$current_scenario"
 
-    # The lists the tool's own rejections and warning print. -udm comes
-    # first on the -hg run: without a -udm, -hg pushes an operand it does not
-    # recognise back as a file name. Each run but the -udm one exits non-zero
-    # by design.
+    # The lists the tool's own rejections and warning print: -hm's value that
+    # names no metric is given back as a file argument and named, with the
+    # metrics, when it selects no file; -hg's comma list with an unknown
+    # member is rejected with the metrics. Each run but the -udm one exits
+    # non-zero by design.
     local err="$TMP_DIR/name-errors"
     mkdir -p "$err"
     "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hm foo "$NAME_FIXTURE" > "$err/hm.out" 2> "$err/hm" || true
-    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg duration,foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
     ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
@@ -840,8 +841,8 @@ scenario_K_name_list_parity() {
     for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
 
     local hm_list hg_list hide_columns udm_functions
-    hm_list=$(sed -n "s/^Error: Unknown heatmap metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hm")
-    hg_list=$(sed -n "s/^Error: Unknown histogram metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hg")
+    hm_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hm" | sed -n "s/^Error: 'foo' matches no file (it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\), x)$/\1/p")
+    hg_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hg" | sed -n "s/^Error: 'foo' given to -hg\/--histogram is not a metric; the metrics are \(.*\), x$/\1/p")
     hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
     udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
     local mask_list mask_or_list
@@ -849,9 +850,9 @@ scenario_K_name_list_parity() {
     mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
 
     assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" && -n "$mask_list" ]] && echo found )" "found" \
-        label       'the -hm and -hg unknown-metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
+        label       'the -hm and -hg metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
         asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
-        produced_by 'adapt_to_command_line_options(), apply_output_visibility() and parse_udm_configs() in ltl' \
+        produced_by 'settle_optional_operand() and file_argument_problem() (via metric_operand_expects()), apply_output_visibility() and parse_udm_configs() in ltl' \
         contract    "$CONTRACT_NAME_LISTS"
     assert_equal "$hg_list" "$hm_list" \
         label       'the -hm and -hg errors print one built-in metric list' \
