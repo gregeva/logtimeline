@@ -284,6 +284,10 @@ From the audit of the harness surface. All are consequences of existing rules in
 - ~~**O3 — Alias normalisation point for D3.**~~ **Closed** — `duration_` is stripped
   once, ahead of both the whitelist and the ladder, so a prefixed spelling reaches
   neither the identity arm nor the `%STAT_FIELD_GROUP` membership test.
+  **Replaced by #614** (`features/614-operand-settlement.md` § 5 observation 4):
+  the strip accepted `duration_` before any word, so `duration_bytes` ranked by
+  bytes. The `-so` vocabulary is now generated as `<metric>_<statistic>` for the
+  statistics each metric carries, and nothing is stripped.
 - ~~**O4 — Oracle key space.**~~ **Closed** — the oracle keeps its bare statistic keys
   and the mapping to the prefixed CSV columns lives in the comparator, guarded by a
   paired-rows-but-zero-cells check so a stale mapping fails loudly instead of

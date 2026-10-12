@@ -459,6 +459,34 @@ scenario_aliases() {
         contract    'Issue #261: p99999 is routed to the shared percentiles topic'
 }
 
+# --- Scenario: a -so name that names a statistic explains it (#614 D4). ---
+scenario_so_names_explain() {
+    current_scenario="so-names-explain"
+    echo "[$current_scenario]"
+    local contract='features/614-operand-settlement.md § 2 D4 (--explain resolves statistic names through the statistic table -so reads) and § Acceptance criteria phase 5'
+    local pair so_name topic r1 r2
+    for pair in duration_p95:percentiles bytes_mean:mean count_avg:mean duration_avg:mean duration_stddev:std_dev duration_impact:impact bytes_min:min count_max:max duration_iqr:iqr; do
+        IFS=: read -r so_name topic <<< "$pair"
+        r1=$(run_ltl "so-name-$topic" --explain "$topic")
+        r2=$(run_ltl "so-name-$so_name" --explain "$so_name")
+        check_capture_warnings "${r1#*:}"
+        check_capture_warnings "${r2#*:}"
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain $so_name produces the $topic topic, the statistic -so $so_name ranks by" \
+            produced_by 'resolve_explain_topic() in ltl (through %so_spelling and %statistic_by_spelling)' \
+            contract    "$contract"
+    done
+    local result
+    for so_name in bytes_sum bytes_occurrences; do
+        result=$(run_ltl "so-name-$so_name" --explain "$so_name")
+        check_capture_warnings "${result#*:}"
+        assert_exit "${result%%:*}" 1 \
+            asserts     "ltl --explain $so_name stays an unknown topic: neither a sum nor a metric's occurrences has a topic" \
+            produced_by 'resolve_explain_topic() in ltl' \
+            contract    "$contract"
+    done
+}
+
 # --- Scenario 3: --explain with no arg lists the topic registry. ---
 scenario_registry() {
     current_scenario="registry:no-arg"
@@ -1985,6 +2013,7 @@ echo ""
 
 scenario_register all-topics-render \
                   aliases \
+                  so-names-explain \
                   registry:no-arg \
                   error:unknown-explain-topic \
                   help-statistics \
@@ -2017,6 +2046,7 @@ while read -r _scenario; do
     case "$_scenario" in
         all-topics-render                 ) scenario_all_topics_render ;;
         aliases                           ) scenario_aliases ;;
+        so-names-explain                  ) scenario_so_names_explain ;;
         registry:no-arg                   ) scenario_registry ;;
         error:unknown-explain-topic       ) scenario_unknown_topic ;;
         help-statistics                   ) scenario_help_statistics ;;

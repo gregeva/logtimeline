@@ -16,7 +16,9 @@ ltl -bs 5 -i "POST" logs/*/access.log
 
 When multiple files are specified, logtimeline processes them sequentially and combines the results into a single timeline. This is useful for analyzing rotated log files, multiple days of logs, or logs from different sources on the same system.
 
-Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped.
+Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped. An argument that selects no file at all — a directory, a path that does not exist, or a pattern that matches nothing — stops the run with an error naming it, so a mistyped path is never silently left out. When no argument selects a file, the run stops with `unable to open any files`.
+
+An option whose value is optional (`-hm`, `-hg`, `-V`, `-g`, `-mem`) takes the word after it only when that word is one of its values; otherwise the word is read as a file argument and the option keeps its default, so `ltl -hg access.log` reads `access.log` and shows every metric's histogram. A comma list given to `-hg` or `-V` that mixes known and unknown names stops the run with an error naming the unknown ones.
 
 That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
 
@@ -32,7 +34,7 @@ The timeline is divided into time buckets — fixed-width windows that aggregate
 | `-tp, --timestamp-precision <precision>` | Set the precision timestamps are shown at: `m` (the minute, the default), `s`, `ms`, `us` or `ns`, also spelled `minute`, `second`, `millisecond`, `microsecond` or `nanosecond`; never finer than the log's timestamps carry. The bucket width is set by `-bs` alone, so `-bs 100ms -tp ms` draws ten buckets a second, each labelled to the millisecond. |
 | `-s, --seconds` | Deprecated: use `-tp s` for the timestamp precision and a unit on `-bs` (`-bs 30s`) for the width. Reads a bare `-bs` number as seconds, and renders timestamps with seconds precision. |
 | `-ms, --milliseconds` | Deprecated: use `-tp ms` for the timestamp precision and a unit on `-bs` (`-bs 100ms`) for the width. Reads a bare `-bs` number as milliseconds, and renders timestamps with `.fff` precision. |
-| `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Each mode has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
+| `-pr, --profile <mode>` | Fold the timeline onto one representative period so every date overlays into a single profile view — e.g. what a typical Tuesday at 09:15 looks like across weeks of logs. The singular modes (`day`, `workday`, `weekday`, `weekend`) stack their days onto one 24-hour axis with time-of-day labels; the plural ones (`week`, `workweek`, `weekdays`, `weekends`) keep each day's identity on the axis, the weekday shown once per day in bold. Every mode but `day` has an `-alt` variant that uses the Sunday-anchored calendar. Days a mode does not keep are dropped before folding and contribute no samples. Composes with `-bs` (granularity within the period) and the `-st`/`-et`, `-i`/`-e` filters, which apply to the original timestamps before folding. Run `ltl --help profile` for which days each mode keeps and how to choose one. |
 | `-st, --start <timestamp>` | Only process log lines at or after this time. A date, or a date and time (`YYYY-MM-DD`, then a space or `T` and `HH:MM[:SS[.fraction]]`), is an absolute cutoff; a bare time (`HH:MM[:SS[.fraction]]`) is a time-of-day window applied to every day, regardless of how the logs are split across files. A bare-time start later than the end wraps past midnight. Any other value, or a date or time that cannot exist, is refused with a usage error. |
 | `-et, --end <timestamp>` | Only process log lines before this time. Same forms as `-st`: a date is an absolute cutoff; a bare time applies to every day. |
 | `-du, --duration-unit <unit>` | Specify the duration unit used in the log file when it cannot be determined from the format or the file name (`ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`) |
@@ -237,28 +239,27 @@ The summary table is sorted by occurrence count by default. Use `-so` to rank me
 | `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
 
-A bare metric name means that metric's total: `bytes` is the sum of bytes,
-`duration` the total duration, `count` the sum of the count metric. The other
-aggregates name the metric first and what is being aggregated second, so
-`bytes_mean` and `count_mean` read the same way.
+A metric's statistic is written `<metric>_<statistic>`: the metric first, then
+the statistic, as `bytes_mean` and `count_max` read. Each metric carries its own
+statistics:
 
-| Group | Values |
-|-------|--------|
-| Totals | `duration`, `bytes`, `count`, `occurrences`, `impact`; deprecated: `time` for `duration`, `size` for `bytes` |
-| Bytes | `bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` |
-| Count | `count_occurrences`, `count_min`, `count_mean`, `count_max` |
-| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev`, `cv` |
-| Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
-| Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
+| Metric | Statistics |
+|--------|------------|
+| `duration` | `sum`, `min`, `mean`, `max`, `stddev`, `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `iqr`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999`, `cv`, `skewness`, `kurtosis`, `bimodality_coef`, `impact` |
+| `bytes` | `sum`, `occurrences`, `min`, `mean`, `max` |
+| `count` | `sum`, `occurrences`, `min`, `mean`, `max` |
 
-`stddev` is the name of the standard deviation; `std_dev` is the spelling the
-CSV headers and YAML keys carry, and is still accepted by `-so` as a deprecated
-spelling. `time` and `size` print a deprecation notice on stderr for this
-release.
+A bare metric name is its sum: `bytes` is `bytes_sum`, `duration` is
+`duration_sum`, `count` is `count_sum`. Duration's statistics are also accepted
+bare, because duration is the tool's subject: `p95` is `duration_p95`.
+`<metric>_avg` is `<metric>_mean`, and `avg` is `mean`. `occurrences` ranks by
+the number of messages.
 
-The latency values rank on duration, which is the tool's subject, so they are
-spelled bare. Each also accepts a `duration_` prefix — `duration_p95` is
-`p95` — for consistency with the other metric families.
+Deprecated, accepted for this release with a notice on stderr: `time` for
+`duration`, `size` for `bytes`, `std_dev` for `stddev`, `count_total` for
+`count_occurrences`, `total` for `occurrences`. `stddev` is the name of the
+standard deviation; `std_dev` is the spelling the CSV headers and YAML keys
+carry.
 
 `occurrences` counts the messages that matched; `bytes_occurrences` counts only
 those lines that carried a bytes value, which is what `bytes_mean` divides by.
@@ -527,7 +528,8 @@ The `-V` flag emits diagnostic sections describing internal state — effective 
 | `-V <name>` | Emit only the named section |
 | `-V <a>,<b>,<c>` | Emit a comma-separated list of sections |
 | `-V <a> -V <b>` | Repeat the flag — equivalent to `-V a,b` |
-| `-V <unknown>` | Warn to stderr, continue with remaining valid sections |
+| `-V <a>,<unknown>` | Stop with an error naming the unknown section |
+| `-V <word that is no section>` | The word is read as a file argument and `-V` emits all sections; if it is not a file either, the run stops with an error naming it |
 
 Section names are stable across releases — renames are breaking changes governed by `tests/HARNESS-DESIGN.md`. Discover the current set with `ltl -V list`.
 
@@ -553,8 +555,6 @@ Section content is governed by per-section stability contracts — additions are
 
 | Trigger | Warning |
 |---------|---------|
-| `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
-| `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 | `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A note reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
 
@@ -575,7 +575,7 @@ Version, help, and diagnostic options.
 | Option | Description |
 |--------|-------------|
 | `-v, --version` | Print the version number and exit |
-| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes) `formats` (the log formats it recognises and how each classifies successes and failures) or `units` (the units an option taking a count, a byte size or a duration accepts) |
+| `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes), `formats` (the log formats it recognises and how each classifies successes and failures), `profile` (every -pr mode: the days it keeps, its window and axis, and what its -alt variant changes) or `units` (the units an option taking a count, a byte size or a duration accepts) |
 | `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization, a method (e.g. `classification`) or an analysis technique (e.g. `resolution-zoom`); with no topic, lists available topics |
 | `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
 | `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
@@ -590,9 +590,9 @@ That said, logtimeline accepts a few alternates, each on the options listed. Bui
 |---------------|------------|-------------|
 | `duration` | `time` (deprecated) | `-so`, `-hm`, `-hg` |
 | `bytes` | `size` (deprecated) | `-so` |
-| `occurrences` | `total` | `-so` |
+| `occurrences` | `total` (deprecated) | `-so` |
 | `mean` | `avg` | `-so`, `--explain`, the `-udm` function |
 | `distinct` | `dcount`, `unique` | the `-udm` function |
-| `stddev` | `std_dev`, the spelling CSV headers and YAML keys carry | `-so`, `--explain` |
+| `stddev` | `std_dev` (deprecated on `-so`), the spelling CSV headers and YAML keys carry | `-so`, `--explain` |
 
 On `-x` and `-d`, `time` is a key written in the line, never the duration metric.

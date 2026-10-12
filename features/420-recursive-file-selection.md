@@ -40,6 +40,10 @@ ambiguous, this is the tiebreaker.
   recursion would silently do nothing.
 
 - **D2 — A bare directory argument matches nothing, with or without `-r`.**
+  *Changed by #614* (`features/614-operand-settlement.md` § 2 D1, file
+  resolution): matching nothing is unchanged, but beside an argument that
+  selects files a bare directory argument now stops the run with a usage error
+  naming it as a directory, rather than being skipped without a word.
   `logs/access` names only directories and carries no filename component, so
   there is nothing to match. Unchanged from today. This is why D1's split is
   unambiguous rather than a heuristic: a valid pattern always has a filename

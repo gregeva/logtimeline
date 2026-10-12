@@ -825,14 +825,15 @@ scenario_K_name_list_parity() {
     "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
     check_stderr_warnings "$help_out.stderr" "$current_scenario"
 
-    # The lists the tool's own rejections and warning print. -udm comes
-    # first on the -hg run: without a -udm, -hg pushes an operand it does not
-    # recognise back as a file name. Each run but the -udm one exits non-zero
-    # by design.
+    # The lists the tool's own rejections and warning print: -hm's value that
+    # names no metric is given back as a file argument and named, with the
+    # metrics, when it selects no file; -hg's comma list with an unknown
+    # member is rejected with the metrics. Each run but the -udm one exits
+    # non-zero by design.
     local err="$TMP_DIR/name-errors"
     mkdir -p "$err"
     "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hm foo "$NAME_FIXTURE" > "$err/hm.out" 2> "$err/hm" || true
-    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg duration,foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
     ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
@@ -840,8 +841,8 @@ scenario_K_name_list_parity() {
     for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
 
     local hm_list hg_list hide_columns udm_functions
-    hm_list=$(sed -n "s/^Error: Unknown heatmap metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hm")
-    hg_list=$(sed -n "s/^Error: Unknown histogram metric 'foo'\. Available: \(.*\), x$/\1/p" "$err/hg")
+    hm_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hm" | sed -n "s/^Error: 'foo' matches no file (it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\), x)$/\1/p")
+    hg_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hg" | sed -n "s/^Error: 'foo' given to -hg\/--histogram is not a metric; the metrics are \(.*\), x$/\1/p")
     hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
     udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
     local mask_list mask_or_list
@@ -849,9 +850,9 @@ scenario_K_name_list_parity() {
     mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
 
     assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" && -n "$mask_list" ]] && echo found )" "found" \
-        label       'the -hm and -hg unknown-metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
+        label       'the -hm and -hg metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
         asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
-        produced_by 'adapt_to_command_line_options(), apply_output_visibility() and parse_udm_configs() in ltl' \
+        produced_by 'settle_optional_operand() and file_argument_problem() (via metric_operand_expects()), apply_output_visibility() and parse_udm_configs() in ltl' \
         contract    "$CONTRACT_NAME_LISTS"
     assert_equal "$hg_list" "$hm_list" \
         label       'the -hm and -hg errors print one built-in metric list' \
@@ -909,18 +910,108 @@ scenario_K_name_list_parity() {
         produced_by 'docs/usage.md option table' \
         contract    "$CONTRACT_NAME_LISTS; D7"
 
-    # The -so row: a bare metric word is its total, in the table's order,
-    # with time and size shown only as deprecated spellings (613 D1, D8).
-    assert_row_carries "$help_out" '^ +-so, +--sort-on <field>' "A bare metric name means its total: $hm_list (deprecated: time for duration, size for bytes)." \
-        label       'the --help -so row names the built-in metrics the -hm error lists, with time and size only as deprecated spellings' \
-        asserts     'The -so help row interpolates the built-in metric list and the deprecated spellings from the metric table' \
-        produced_by 'print_help() in ltl ($builtin_metric_list and the deprecated column of @builtin_metrics)' \
-        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
-    assert_row_carries "$USAGE_MD" '^\| Totals \|' "$(backticked_list "$hm_list"), \`occurrences\`, \`impact\`; deprecated: \`time\` for \`duration\`, \`size\` for \`bytes\`" \
-        label       'the docs/usage.md -so Totals row names the built-in metrics in table order, time and size only as deprecated' \
-        asserts     'docs/usage.md agrees with the -so help row' \
-        produced_by 'docs/usage.md -so value table' \
-        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+    # The -so row and the -so error say what -so takes in the same words,
+    # generated from the metric and statistic tables (614 D3); docs/usage.md
+    # lists each metric's statistics and the deprecated spellings to match.
+    local so_row="$TMP_DIR/help-so-row.txt" so_err="$TMP_DIR/so-error.txt"
+    awk '/^ +-so, +--sort-on <field>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$so_row"
+    "$LTL" --disable-progress -bs 1440 -oe -so bogus "$NAME_FIXTURE" > /dev/null 2> "$so_err.raw" || true
+    check_stderr_warnings "$so_err.raw" "$current_scenario/so"
+    sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$so_err.raw" | sed -n "s/^Error: invalid sort type 'bogus'\. -so takes //p" > "$so_err"
+    local so_takes
+    so_takes=$(cat "$so_err")
+    assert_row_carries "$so_row" '-so, +--sort-on <field>' "Choose what ranks the messages in the summary: $so_takes Deprecated: " \
+        label       'the --help -so row states what -so takes in the words of the -so error' \
+        asserts     'The -so help row and the -so error read one generated vocabulary text' \
+        produced_by 'print_help() and the -so resolution in adapt_to_command_line_options(), both through so_vocabulary_text() in ltl' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3 (the help row and the error read the generated set)"
+    local metric statistics usage_row
+    for metric in duration bytes count; do
+        statistics=$(sed -E "s/.* ${metric}_ followed by ([^;.]*)[;.].*/\1/; s/ or /, /" <<< "$so_takes")
+        assert_row_carries "$USAGE_MD" "^\\| \`$metric\` \\| " "| \`$metric\` | $(backticked_list "$statistics") |" \
+            label       "the docs/usage.md -so table lists the statistics $metric carries, as the -so error does" \
+            asserts     'docs/usage.md agrees with the generated -so vocabulary, metric by metric and in order' \
+            produced_by 'docs/usage.md -so metric table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
+    done
+    local so_deprecated usage_deprecated
+    so_deprecated=$(sed -E 's/.* Deprecated: ([^.]*)\..*/\1/' "$so_row")
+    usage_deprecated=$(awk '/^Deprecated, accepted for this release with a notice on stderr: / { f = 1 } f { printf "%s ", $0 } f && /^$/ { exit }' "$USAGE_MD" | sed -E 's/^Deprecated, accepted for this release with a notice on stderr: ([^.]*)\..*/\1/; s/`//g; s/  +/ /g')
+    assert_equal "$usage_deprecated" "$so_deprecated" \
+        label       'docs/usage.md names the deprecated -so spellings the --help -so row names, in order' \
+        asserts     'docs/usage.md agrees with the deprecated spellings the tool lists' \
+        produced_by 'so_deprecated_text() in ltl; docs/usage.md -so section' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
+
+    # The --help row names every topic the unknown-topic error lists, each
+    # with its description, from one topic table (614 D5); docs/usage.md
+    # matches it.
+    local help_row="$TMP_DIR/help-help-row.txt" topic_err="$TMP_DIR/help-topic-error.txt" topics topic
+    awk '/^ +-\?, +--help \[<topic>\]/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$help_row"
+    "$LTL" --disable-progress --help bogus > /dev/null 2> "$topic_err.raw" || true
+    check_stderr_warnings "$topic_err.raw" "$current_scenario/help-topic"
+    topics=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$topic_err.raw" | sed -n "s/^Error: unknown --help topic 'bogus' (try: \(.*\))$/\1/p")
+    assert_equal "$( [[ -n "$topics" ]] && echo found )" "found" \
+        label       'the unknown --help topic error lists the topics' \
+        asserts     'The error names the topics from the topic table; an unmatched message is a failure, not a pass' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    local usage_help_row
+    usage_help_row=$(grep -E '^\| `-\?, --help \[<topic>\]`' "$USAGE_MD" | head -1 || true)
+    for topic in ${topics//,/ }; do
+        assert_row_carries "$help_row" '-\?, +--help \[<topic>\]' "'$topic' (" \
+            label       "the --help row names the $topic topic with its description" \
+            asserts     'The --help row names every topic the dispatch knows, from the one topic table' \
+            produced_by 'print_help() in ltl (@help_topics)' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5 (as extended: name, description, renderer)"
+        local description
+        description=$(sed -E "s/.*'$topic' \(([^)]*)\).*/\1/" "$help_row")
+        assert_row_carries "$USAGE_MD" '^\| `-\?, --help \[<topic>\]`' "\`$topic\` ($description)" \
+            label       "the docs/usage.md --help row names the $topic topic in the words of --help" \
+            asserts     'docs/usage.md agrees with the topics and descriptions the tool prints' \
+            produced_by 'docs/usage.md option table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    done
+
+    assert_equal "$(grep -cE 'elsif \(\$help_topic eq' "$LTL")" "0" \
+        label       'the --help dispatch has no branch per topic' \
+        asserts     'dispatch_informational_options() finds a topic in the topic table; no elsif names a topic' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "features/614-operand-settlement.md D5 (one topic table read by the dispatch, its error and the help row)"
+
+    # The -pr row names the modes from the mode table, in its order, and says
+    # which have an -alt variant: day has none (256), so it is not claimed to
+    # (614 D6 as extended). docs/usage.md matches. The -pr error names the
+    # value and points to --help profile, naming no mode (451 D4).
+    local pr_row="$TMP_DIR/help-pr-row.txt" pr_err="$TMP_DIR/pr-error.txt"
+    awk '/^ +-pr, +--profile <mode>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$pr_row"
+    assert_row_carries "$pr_row" '-pr, +--profile <mode>' "The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Every mode but day has an -alt variant using the Sunday-anchored calendar." \
+        label       'the --help -pr row names the modes in table order and does not claim day has an -alt variant' \
+        asserts     'The -pr row is generated from the mode table, so it names the one-day and one-week modes the table holds and leaves out the -alt variant day lacks' \
+        produced_by 'profile_modes_text() over @profile_mode_rows in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md (there is no day-alt)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "The singular modes (\`day\`, \`workday\`, \`weekday\`, \`weekend\`)" \
+        label       'the docs/usage.md -pr row names the singular modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "the plural ones (\`week\`, \`workweek\`, \`weekdays\`, \`weekends\`)" \
+        label       'the docs/usage.md -pr row names the plural modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "Every mode but \`day\` has an \`-alt\` variant" \
+        label       'the docs/usage.md -pr row does not claim day has an -alt variant' \
+        asserts     'docs/usage.md agrees with the mode table on which modes have an -alt variant' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md'
+    "$LTL" --disable-progress -bs 1440 -oe -pr bogus "$NAME_FIXTURE" > /dev/null 2> "$pr_err" || true
+    check_stderr_warnings "$pr_err" "$current_scenario/pr"
+    assert_equal "$(grep -c "'bogus' is not a valid profile mode. Run 'ltl --help profile'" "$pr_err")/$(grep -cE 'workweek|weekends|-alt variant' "$pr_err")" "1/0" \
+        label       'the -pr error names the value, points to --help profile and names no mode' \
+        asserts     'The invalid-mode error points to --help profile rather than listing the modes' \
+        produced_by '_validate_profile() in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as changed); features/451-weekday-weekend-profile-modes.md D4'
 
     # The -udm function row gives the names grouped by kind, each with its
     # note; stripped of the notes and the group labels, it is the list the

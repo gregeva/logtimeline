@@ -80,7 +80,9 @@ my ( $include_query_string, $include_session, $include_user, $include_threadpool
 # layout), its family (the kind of value, which chooses its formatter), its
 # help text, the stored key a bare -so metric word ranks by (its total, per
 # the aggregate-naming rule that a bare metric word is its total), the flag
-# -d sets to switch it off (what its omit option sets), and the
+# -d sets to switch it off (what its omit option sets), the statistics -so
+# ranks it by (each statistic's name beside its stored key; duration's are
+# read from the statistic table below), and the
 # deprecated spellings still accepted for one release, each with the
 # options that accept it. Names match in any case. A key a format reads a
 # metric from (durationMS) is not a name here: it is a key written in the
@@ -89,8 +91,10 @@ my @builtin_metrics = (
     { name => 'duration', column => 'duration', family => 'duration', help => 'how long an entry took',    sort_key => 'total_duration', omit_flag => \$omit_durations,
       deprecated => { time => [ '-hm/--heatmap', '-hg/--histogram', '-so/--sort-on' ] } },
     { name => 'bytes',    column => 'bytes',    family => 'bytes',    help => 'response or payload size',  sort_key => 'total_bytes',    omit_flag => \$omit_bytes,
+      statistics => [ sum => 'total_bytes', occurrences => 'bytes_occurrences', min => 'bytes_min', mean => 'bytes_mean', max => 'bytes_max' ],
       deprecated => { size => [ '-so/--sort-on' ] } },
     { name => 'count',    column => 'count',    family => 'count',    help => 'work completed, per entry', sort_key => 'count_sum',      omit_flag => \$omit_count,
+      statistics => [ sum => 'count_sum', occurrences => 'count_occurrences', min => 'count_min', mean => 'count_mean', max => 'count_max' ],
       deprecated => {} },
 );
 my @builtin_metric_names   = map { $_->{name} } @builtin_metrics;
@@ -455,7 +459,7 @@ my @statistic_names = (
     { name => 'min',             key => 'min',             sort => 1, explain => 'min',             udm => 'aggregation', udm_position => 2 },
     { name => 'mean',            key => 'mean',            sort => 1, explain => 'mean',            udm => 'aggregation', udm_position => 4, aliases => [ 'avg' ] },
     { name => 'max',             key => 'max',             sort => 1, explain => 'max',             udm => 'aggregation', udm_position => 3 },
-    { name => 'stddev',          key => 'std_dev',         sort => 1, explain => 'std_dev',         deprecated => 'std_dev', deprecation_notice => 0 },
+    { name => 'stddev',          key => 'std_dev',         sort => 1, explain => 'std_dev',         deprecated => 'std_dev', deprecation_notice => 1 },
     ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p1 p5 p10 p25 p50 p75 ) ),
     { name => 'iqr',             key => 'iqr',             sort => 1, explain => 'iqr' },
     ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p90 p95 p99 p999 p9999 p99999 ) ),
@@ -476,6 +480,42 @@ $_->{aliases} //= [] for @statistic_names;
 # Every spelling a statistic row is typed under, lower-cased: its name, its
 # aliases and its deprecated spelling. The -so and --explain lookup.
 my %statistic_by_spelling = map { my $row = $_; map { lc($_) => $row } grep { defined } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } @statistic_names;
+# Duration carries every statistic the statistic table ranks by, beside its
+# sum and impact (616 D21: impact is a duration statistic).
+$builtin_metric{duration}{statistics} = [ sum => 'total_duration', ( map { $_->{name} => $_->{key} } grep { $_->{sort} } @statistic_names ), impact => 'impact' ];
+# The -so vocabulary, generated from the two tables above: each spelling -so
+# accepts, lower-cased, to the sort it names: the stored key it ranks by, the
+# metric whose values it draws on (its family, for the sort gates), the
+# statistic, and the canonical spelling. Each metric with each statistic it
+# carries is <metric>_<statistic>; a bare metric name is its sum; duration's
+# statistics are also accepted bare, duration being the tool's subject
+# (#432 D3); avg, mean's one alias, is accepted wherever mean is, the one
+# alias accepted after a metric's prefix. occurrences ranks by the number of
+# messages and draws on no metric. A deprecated spelling resolves with the
+# canonical spelling it gives way to, for its notice.
+my %so_deprecated_spellings = ( total => 'occurrences', count_total => 'count_occurrences' );
+my %so_spelling = ( occurrences => { key => 'occurrences', family => 'occurrences', name => 'occurrences' } );
+for my $metric (@builtin_metrics) {
+    my @statistics = @{ $metric->{statistics} };
+    while ( my ( $statistic, $key ) = splice @statistics, 0, 2 ) {
+        my $prefixed = "$metric->{name}_$statistic";
+        my $name     = $statistic eq 'sum' ? $metric->{name} : $metric->{name} eq 'duration' ? $statistic : $prefixed;
+        my $entry    = { key => $key, family => $metric->{name}, statistic => $statistic, name => $name };
+        my @spellings = ( $prefixed, $statistic eq 'sum' ? $metric->{name} : () );
+        push @spellings, $statistic if $metric->{name} eq 'duration' && $statistic ne 'sum';
+        if ( $statistic eq 'mean' ) {
+            push @spellings, "$metric->{name}_avg";
+            push @spellings, 'avg' if $metric->{name} eq 'duration';
+        }
+        $so_spelling{$_} = $entry for @spellings;
+        my $row = $statistic_by_spelling{$statistic};
+        next unless $row && defined $row->{deprecated} && $row->{deprecation_notice};
+        for my $spelling ( "$metric->{name}_$row->{deprecated}", $metric->{name} eq 'duration' ? $row->{deprecated} : () ) {
+            $so_spelling{$spelling} = { %$entry, deprecated => 1 };
+        }
+    }
+}
+$so_spelling{$_} = { %{ $so_spelling{ $so_deprecated_spellings{$_} } }, deprecated => 1 } for keys %so_deprecated_spellings;
 # The -udm function slot, in the order it lists its names: the functions of
 # each kind, every accepted spelling, and the alias of each.
 my @udm_functions          = sort { $a->{udm_position} <=> $b->{udm_position} } grep { $_->{udm} } @statistic_names;
@@ -485,6 +525,15 @@ my %udm_functions_of_kind;
 push @{ $udm_functions_of_kind{ $_->{udm} } }, $_->{name} for @udm_functions;
 # --explain: every spelling that is not itself a topic, to the topic that covers it.
 my %explain_aliases = map { my $row = $_; map { lc($_) => $row->{explain} } grep { defined && lc($_) ne $row->{explain} } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } grep { $_->{explain} } @statistic_names;
+# The --help topics: each name, the one-line description the --help row gives
+# it, and the sub that renders it. The dispatch, its unknown-topic error and
+# the help row read this table.
+my @help_topics = (
+    { name => 'statistics', description => 'every statistic ltl computes',                                                 render => \&print_help_statistics },
+    { name => 'formats',    description => 'the log formats it recognises and how each classifies successes and failures', render => \&print_help_formats },
+    { name => 'profile',    description => 'every -pr mode: the days it keeps, its window and axis, and what its -alt variant changes', render => \&print_help_profile },
+    { name => 'units',      description => 'the units an option taking a count, a byte size or a duration accepts',        render => \&print_help_units },
+);
 my $total_lines_read = 0;
 my $total_lines_included = 0;
 # Line accounting between read and included: lines no format matched (a CSV
@@ -619,9 +668,10 @@ my $output_timestamp_max = 0;
 #   include:  wday set (0=Sun..6=Sat) kept; undef = all days; others are dropped
 #   format:   strftime label format ('%H:%M' time-only, '%a %H:%M' weekday+time)
 # The rendered profile window (kept days x 86400, reported by -V profile) is
-# derived from these by profile_window_seconds(), not stored here.
+# derived from these by profile_window_seconds(), not stored here. The rows
+# are kept in order: the -pr help row names the modes as the table lists them.
 my $profile_mode = '';
-my %profile_modes = (
+my @profile_mode_rows = (
     'day'           => { period => 86400,  anchor => 0,      include => undef,                   format => '%H:%M' },
     'workday'       => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
     'workday-alt'   => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
@@ -638,6 +688,8 @@ my %profile_modes = (
     'weekends'      => { period => 604800, anchor => 172800, include => { 6,1,0,1 },             format => '%a %H:%M' },
     'weekends-alt'  => { period => 604800, anchor => 86400,  include => { 5,1,6,1 },             format => '%a %H:%M' },
 );
+my %profile_modes      = @profile_mode_rows;
+my @profile_mode_names = @profile_mode_rows[ grep { !( $_ % 2 ) } 0 .. $#profile_mode_rows ];   # in table order
 my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
@@ -676,6 +728,7 @@ my ( $csv_block, $csv_block_live, @csv_udm_values );
 my (@include_files, @exclude_files, @highlight_files);   # File paths from command line (arrays for multiple files)
 my $verbose = 0;                                         # Verbose mode flag (-V); true if any section requested
 my @verbose_args;                                        # Raw -V arguments collected by Getopt (Issue #226)
+my %pushed_back_operand;                                 # A value an optional-operand option gave back as a file argument => why, for the file-resolution error
 my $pattern_file_max_size = 10 * 1024;                   # 10KB file size limit
 my $pattern_file_max_patterns = 1000;                    # Max patterns per file (warn if exceeded)
 my $pattern_regex_max_length = 10240;                    # 10KB regex length warning threshold
@@ -1281,6 +1334,7 @@ my %heatmap_metric_map = map { $_->{name} => { column => $_->{column} } } @built
 # Histogram data structures and settings (Issue #25)
 my $histogram_enabled = 0;                    # Flag: histogram mode active
 my %histogram_metrics = ();                   # Metrics to display: {duration => 1, bytes => 1, count => 1}
+my @histogram_operands;                       # Each -hg value as given, from the environment and the command line ('' for bare -hg)
 my $histogram_width_percent = 95;             # Width as percentage of terminal (default, auto-adapted by histogram count)
 my $histogram_width_explicit = 0;             # Flag: true if user explicitly set -hgw
 my $histogram_height = 8;                     # Height in rows (default 8, auto-scaled based on terminal)
@@ -2663,13 +2717,24 @@ sub _validate_dm {
 # --profile|-pr: accept only the known fold modes; die at parse time otherwise.
 # The mode list is long enough that reciting it here buries the error, so the
 # message names the base vocabularies and points at the full reference.
+# The -pr help row's account of the modes, from the mode table: the base
+# modes that fold onto one day and those that keep a week, in table order,
+# and which have an -alt variant.
+sub profile_modes_text {
+    my @base   = grep { !/-alt$/ } @profile_mode_names;
+    my @single = grep { $profile_modes{$_}{period} == 86400 } @base;
+    my @week   = grep { $profile_modes{$_}{period} != 86400 } @base;
+    my @no_alt = grep { !exists $profile_modes{"$_-alt"} } @base;
+    my $alt    = @no_alt ? 'Every mode but ' . join_with_or(@no_alt) . ' has' : 'Each has';
+    return 'The singular modes (' . join( ', ', @single ) . ') stack their days onto one 24-hour axis; the plural ones ('
+         . join( ', ', @week ) . ") keep each day's identity on the axis. $alt an -alt variant using the Sunday-anchored calendar.";
+}
+
 sub _validate_profile {
     my ($value) = @_;
     return if defined $value && exists $profile_modes{$value};
     die "--profile: '" . (defined $value ? $value : '')
-      . "' is not a valid profile mode; the modes are day, week, workday, workweek, weekday,"
-      . " weekdays, weekend and weekends, each with an -alt variant."
-      . " Run 'ltl --help profile' for what each one keeps and folds onto.\n";
+      . "' is not a valid profile mode. Run 'ltl --help profile' for the modes, what each one keeps and what it folds onto.\n";
 }
 
 # Fold a timestamp onto its position within the mode's reference period.
@@ -8799,12 +8864,20 @@ sub explain_summary_line {
 my %explain_topics;
 
 # Resolve a user-supplied --explain argument to a canonical topic name,
-# honoring %explain_aliases. Returns undef on unknown topic.
+# honoring %explain_aliases. A name -so accepts that names a statistic
+# (duration_p95, bytes_mean, count_avg) explains that statistic: the -so
+# vocabulary gives the statistic, and the statistic table its topic, or the
+# topic of its own name when it has no row (impact). Returns undef on unknown
+# topic.
 sub resolve_explain_topic {
     my ($name) = @_;
     return undef unless defined $name && $name ne '';
     my $key = lc $name;
     $key = $explain_aliases{$key} if exists $explain_aliases{$key};
+    if ( !exists $explain_topics{$key} && ( my $sort = $so_spelling{$key} ) ) {
+        my $row = defined $sort->{statistic} ? $statistic_by_spelling{ $sort->{statistic} } : undef;
+        $key = $row ? $row->{explain} // '' : $sort->{statistic} // '';
+    }
     return exists $explain_topics{$key} ? $key : undef;
 }
 
@@ -10583,7 +10656,7 @@ sub populate_explain_topics {
             { type => 'subheading', text => 'Operational use' },
             { type => 'paragraph', text => $explain_std_dev_operational },
             { type => 'subheading', text => 'Example' },
-            { type => 'pre',       text => "    ltl -so std_dev -n 20 access.log      # highest absolute spread\n    ltl -so cv -n 20 access.log           # highest relative spread\n" },
+            { type => 'pre',       text => "    ltl -so stddev -n 20 access.log       # highest absolute spread\n    ltl -so cv -n 20 access.log           # highest relative spread\n" },
             { type => 'subheading', text => 'How ltl computes this' },
             { type => 'paragraph', text => $explain_std_dev_compute },
             { type => 'subheading', text => 'See also' },
@@ -11231,7 +11304,7 @@ sub print_help {
     $out .= help_opt("-tp,  --timestamp-precision <precision>", "Set the precision timestamps are shown at: m (the minute, the default), s, ms, us or ns, also spelled minute, second, millisecond, microsecond or nanosecond; never finer than the log's timestamps carry. The bucket width is set by -bs alone, so -bs 100ms -tp ms draws ten buckets a second, each labelled to the millisecond.");
     $out .= help_opt("-s,   --seconds",               "Deprecated: use -tp s for the timestamp precision and a unit on -bs (-bs 30s) for the width. Reads a bare -bs number as seconds, and renders timestamps with seconds precision.");
     $out .= help_opt("-ms,  --milliseconds",          "Deprecated: use -tp ms for the timestamp precision and a unit on -bs (-bs 100ms) for the width. Reads a bare -bs number as milliseconds, and renders timestamps with .fff precision.");
-    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
+    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. " . profile_modes_text() . " Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A date, or a date and time (YYYY-MM-DD, then a space or T and HH:MM[:SS[.fraction]]), is an absolute cutoff; a bare time (HH:MM[:SS[.fraction]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight. Any other value, or a date or time that cannot exist, is refused.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name ($time_unit_list)");
@@ -11313,10 +11386,7 @@ sub print_help {
 
     # Sorting
     $out .= help_subheading("Sorting");
-    my @so_deprecated = map { my $metric = $_; map { "$_ for $metric->{name}" } grep { grep { $_ eq '-so/--sort-on' } @{ $metric->{deprecated}{$_} } } sort keys %{ $metric->{deprecated} } } @builtin_metrics;
-    my @so_statistics = map { $_->{name} } grep { $_->{sort} } @statistic_names;
-    my @so_aliases    = map { my $row = $_; map { "$_ for $row->{name}" } @{ $row->{aliases} } } grep { $_->{sort} } @statistic_names;
-    $out .= help_opt("-so,  --sort-on <field>",       "Choose which metric to rank messages by in the summary. A bare metric name means its total: $builtin_metric_list (deprecated: " . join( ', ', @so_deprecated ) . "). Statistics: " . join( ', ', @so_statistics ) . " (alias: " . join( ', ', @so_aliases ) . "). Aggregates: occurrences, bytes_occurrences, bytes_min, bytes_mean, bytes_max, count_occurrences, count_min, count_mean, count_max, impact. See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
+    $out .= help_opt("-so,  --sort-on <field>",       "Choose what ranks the messages in the summary: " . so_vocabulary_text() . " Deprecated: " . so_deprecated_text() . ". See 'ltl --help statistics' for the index, or 'ltl --explain <topic>' for details. When no message can be ranked by the chosen metric, a note says so and the table is ordered by occurrences.");
     $out .= help_opt("-sa,  --sort-ascending",        "Reverse the sort order to show lowest values first");
 
     # Heatmap
@@ -11375,7 +11445,7 @@ sub print_help {
     # INFO
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
-    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) 'formats' (the log formats it recognises and how each classifies successes and failures) or 'units' (the units an option taking a count, a byte size or a duration accepts).");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: " . join_with_or( map { "'$_->{name}' ($_->{description})" } @help_topics ) . ".");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
@@ -15272,28 +15342,42 @@ sub trim  { my $s = shift; $s =~ s/^\s+|\s+$//g; return $s }
 
 # Canonical built-in name for a token, or undef. Safe to call at option
 # parse time, before parse_udm_configs() has run.
-# Every -so sort key draws on one source metric. Unsatisfiability of a sort is a
-# property of that metric family, not of the individual operand (#418): the family
-# has a parse-time killer (its --omit-* flag) and a run-wide observation state, and
-# an operand can rank exactly when its family's source was collected. Occurrences
-# is the line tally and always satisfiable; it is the fallback target.
-sub sort_key_metric_family {
-    my ($key) = @_;
-    return 'occurrences' if $key eq 'occurrences';
-    return 'bytes'       if $key eq 'total_bytes' || $key =~ /^bytes_/;
-    return 'count'       if $key =~ /^count_/;
-    return 'duration';
+# What -so accepts, in words, from the generated vocabulary's sources: the
+# help row and the -so error say the same thing.
+sub so_vocabulary_text {
+    my @per_metric = map {
+        my @statistics = @{ $_->{statistics} };
+        "$_->{name}_ followed by " . join_with_or( @statistics[ grep { !( $_ % 2 ) } 0 .. $#statistics ] )
+    } @builtin_metrics;
+    return "a metric's statistic, written <metric>_<statistic>: " . join( '; ', @per_metric ) . '. '
+         . "A bare metric name is its sum ($builtin_metric_list); duration's statistics are also accepted bare (p95 is duration_p95); "
+         . '<metric>_avg is <metric>_mean, and avg is mean. occurrences ranks by the number of messages.';
 }
 
+# The spellings -so still accepts for a release, each with what replaces it.
+sub so_deprecated_text {
+    my @deprecated = map { my $metric = $_; map { "$_ for $metric->{name}" } grep { grep { $_ eq '-so/--sort-on' } @{ $metric->{deprecated}{$_} } } sort keys %{ $metric->{deprecated} } } @builtin_metrics;
+    push @deprecated, map { "$_->{deprecated} for $_->{name}" } grep { $_->{sort} && defined $_->{deprecated} && $_->{deprecation_notice} } @statistic_names;
+    push @deprecated, map { "$_ for $so_deprecated_spellings{$_}" } sort { $so_deprecated_spellings{$a} cmp $so_deprecated_spellings{$b} } keys %so_deprecated_spellings;
+    return join( ', ', @deprecated );
+}
+
+# Every -so sort draws on one source metric, its family, read from the -so
+# vocabulary. Unsatisfiability of a sort is a property of that metric family, not
+# of the individual operand (#418): the family has a parse-time killer (its
+# --omit-* flag) and a run-wide observation state, and an operand can rank exactly
+# when its family's source was collected. Occurrences is the line tally and always
+# satisfiable; it is the fallback target.
+#
 # Parse-time detection point (#418): the source metric of the requested sort key is
 # switched off by its --omit-* flag, so no key can ever rank. The sort falls back to
 # occurrences literally — the calculated-statistic branch is never entered — and the
 # notice names the contradiction rather than an absence of data, because the values
 # were never collected.
 sub apply_parse_time_sort_gate {
-    my ($operand) = @_;
+    my ( $operand, $family ) = @_;
     $sort_gate{operand} = $operand;
-    $sort_gate{family}  = sort_key_metric_family($sort_key);
+    $sort_gate{family}  = $family;
     return unless $capture_messages;    # no message is retained, so none is ranked
     my %killer = (
         duration => [ $omit_durations, '-od/--omit-durations' ],
@@ -15704,40 +15788,47 @@ sub settle_message_option_flags {
     return;
 }
 
+# -hg records each value it is given; the values are settled with the other
+# optional operands once the -udm metrics are known, so a user-defined name
+# is recognised wherever -udm stands on the line. Repeated -hg (the
+# environment's and the command line's) is additive.
 sub handle_histogram_option {
     my ($opt_name, $opt_value) = @_;
     $histogram_enabled = 1;
+    push @histogram_operands, $opt_value // '';
+}
 
-    if (defined $opt_value && $opt_value ne '') {
-        # Check if the value looks like a filename (not a valid metric)
-        # This handles the case where -hg is followed by a filename
-        my @parts = split /,/, $opt_value;
-        my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;
-
-        if (!$has_valid_metric && !@udm_raw_args) {
-            # Value doesn't contain any valid metrics and no UDM args - it's likely a filename
-            # Push it back to @ARGV so it can be processed as a file
-            unshift @ARGV, $opt_value;
-            return;
-        }
-
-        # Parse comma-separated metrics, additive behavior. Built-in tokens
-        # canonicalize through builtin_metric_name(); anything else is kept
-        # verbatim as a potential UDM name (case-sensitive) and resolved by
-        # resolve_metric_operand() after parse_udm_configs().
-        for my $metric (split /,/, $opt_value) {
-            $metric = trim($metric);
-            my $builtin = builtin_metric_name($metric, '-hg/--histogram');
-            if (defined $builtin) {
-                $histogram_metrics{$builtin} = 1;
-            } elsif (@udm_raw_args) {
-                $histogram_metrics{$metric} = 1;
-            } else {
-                warn "Unknown histogram metric: $metric (valid: $builtin_metric_list)\n";
-            }
-        }
+# The optional-operand options (-hm, -hg, -V, -g, -mem) all decide the same
+# way. Getopt's :s takes the word after the option as its value whether or
+# not it was meant as one. A value in the option's vocabulary is the
+# option's; a value with no member in it goes back onto @ARGV as a file
+# argument, silently, and the option takes its bare default. Should that
+# argument then select no file, the file-resolution error says which option
+# it followed and what that option takes. A comma list (-hg, -V) with some
+# members in the vocabulary is the option's, and its unknown members stop the
+# run. Returns the members taken, or nothing when the value was given back.
+sub settle_optional_operand {
+    my (%operand) = @_;
+    my $value   = $operand{value};
+    my @members = $operand{list} ? ( grep { $_ ne '' } map { trim($_) } split /,/, $value ) : ($value);
+    my @unknown = grep { !$operand{known}->($_) } @members;
+    if ( @unknown == @members ) {
+        unshift @ARGV, $value;
+        $pushed_back_operand{$value} = "it followed $operand{option} and is not $operand{expects}";
+        return;
     }
-    # If no specific metrics given, will default to all available after parsing
+    if (@unknown) {
+        print_usage( join_with_or( map { "'$_'" } @unknown ) . " given to $operand{option} "
+                   . ( @unknown > 1 ? 'are' : 'is' ) . " not $operand{expects}" );
+        exit 1;
+    }
+    return @members;
+}
+
+# What a -hm or -hg value must be, with the metrics this run knows: the
+# built-in ones, then the -udm ones.
+sub metric_operand_expects {
+    return 'a metric; the metrics are ' . join( ', ', available_metric_names() );
 }
 
 # Classify a single raw @ARGV token as an informational-option invocation, or
@@ -15825,31 +15916,16 @@ sub dispatch_informational_options {
     if ($want_help) {
         if ($help_topic eq '') {
             print_help();            # already paginated internally
+            exit 0;
         }
-        elsif ($help_topic eq 'statistics') {
-            my $out = print_help_statistics();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'formats') {
-            my $out = print_help_formats();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'profile') {
-            my $out = print_help_profile();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'units') {
-            my $out = print_help_units();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile, units)");
+        my ($topic) = grep { $_->{name} eq $help_topic } @help_topics;
+        unless ($topic) {
+            print_usage( "unknown --help topic '$help_topic' (try: " . join( ', ', map { $_->{name} } @help_topics ) . ")" );
             exit 1;
         }
+        my $out = $topic->{render}->();
+        $out =~ s/^\n+//;
+        pipe_to_pager($out);
         exit 0;
     }
     if ($want_explain) {
@@ -16138,6 +16214,10 @@ sub adapt_to_command_line_options {
     }
     apply_output_visibility(0);
 
+    # The -udm metrics are parsed before the optional operands are settled:
+    # -hm and -hg take a user-defined metric's name, wherever -udm stands.
+    parse_udm_configs() if @udm_raw_args;
+
     # Issue #226: -V section selectivity. Resolve @verbose_args (raw from
     # GetOptions :s@) into %verbose_sections_requested. See HARNESS-DESIGN.md
     # for the contract. Behavior:
@@ -16147,7 +16227,8 @@ sub adapt_to_command_line_options {
     #   -V list                     => print known sections + descriptions, exit 0
     #   -V <name>                   => $verbose=1, that section selected
     #   -V <a>,<b>  /  -V a -V b    => $verbose=1, both selected
-    #   -V bogus                    => warn to stderr, continue without that section
+    #   -V <word with no section>   => a file argument (settle_optional_operand), -V bare
+    #   -V <a>,bogus                => usage error naming bogus
     if (@verbose_args) {
         $verbose = 1;
         my @requested;
@@ -16157,12 +16238,16 @@ sub adapt_to_command_line_options {
                 push @requested, 'all';
                 next;
             }
-            # Allow comma-list shorthand: -V a,b,c
-            push @requested, split(/,/, $arg);
+            my @names = settle_optional_operand(
+                option  => '-V/--verbose',
+                value   => $arg,
+                list    => 1,
+                known   => sub { $_[0] eq 'all' || $_[0] eq 'list' || exists $verbose_section_registry{ $_[0] } },
+                expects => "a verbose section; 'ltl -V list' lists them",
+            );
+            push @requested, @names ? @names : 'all';
         }
         for my $name (@requested) {
-            $name =~ s/^\s+|\s+$//g;
-            next if $name eq '';
             if ($name eq 'list') {
                 print "Known -V sections (Issue #226):\n";
                 # Width follows the longest registered name so a new section
@@ -16186,27 +16271,8 @@ sub adapt_to_command_line_options {
                 $verbose_sections_requested{'all'} = 1;
                 next;
             }
-            if (exists $verbose_section_registry{$name}) {
-                $verbose_sections_requested{$name} = 1;
-            } elsif ($name =~ m{[/.]} || -e $name) {
-                # Looks like a filename (path separator, dot, or existing file
-                # on disk) — Getopt::Long greedily ate the next positional
-                # argument when the user typed bare `-V <file>`. Push it back
-                # to @ARGV and treat -V as bare (all sections). Same pattern
-                # as -g, -hm, -hg elsewhere in this parser.
-                unshift @ARGV, $name;
-                $verbose_sections_requested{'all'} = 1;
-            } else {
-                warn "Unknown -V section: $name. Known sections: "
-                    . join(', ', @verbose_section_order)
-                    . " (and 'all', 'list'). Continuing.\n";
-            }
+            $verbose_sections_requested{$name} = 1;
         }
-        # If -V was given but every requested name was unknown,
-        # %verbose_sections_requested is empty. Keep $verbose=1 so the run
-        # still records that verbose was requested, but no sections will
-        # match through section_requested(). This mirrors the issue body:
-        # exit code unchanged, warning emitted, run continues.
     }
 
     # Issue #462: consolidation records which keys each cluster absorbed, and
@@ -16239,20 +16305,18 @@ sub adapt_to_command_line_options {
     }
 
     # -mem option processing (Issue #356): optional literal operand 'debug'
-    # enables per-phase memory diagnostics. Getopt's :s greedily captures a
-    # following bare token, so any value other than the literal 'debug' is
-    # pushed back as a positional (file) argument. Unlike -g/-hm (#231) the
-    # pushback is silent: -mem accepts exactly one literal, so a following
-    # filename is the normal invocation shape, not a mis-typed operand.
+    # enables per-phase memory diagnostics ('release' is a hidden second
+    # literal). Any other value is a file argument (settle_optional_operand).
     if (defined $memory_usage_operand) {
         $show_memory = 1;
-        if ($memory_usage_operand eq 'debug') {
-            $show_memory_debug = 1;
-        } elsif ($memory_usage_operand eq 'release') {
-            $memory_release_after_use = 1;
-        } elsif ($memory_usage_operand ne '') {
-            unshift @ARGV, $memory_usage_operand;
-        }
+        my ($literal) = $memory_usage_operand eq '' ? () : settle_optional_operand(
+            option  => '-mem/--memory-usage',
+            value   => $memory_usage_operand,
+            known   => sub { $_[0] eq 'debug' || $_[0] eq 'release' },
+            expects => 'debug',
+        );
+        $show_memory_debug        = 1 if ( $literal // '' ) eq 'debug';
+        $memory_release_after_use = 1 if ( $literal // '' ) eq 'release';
     }
 
     # D62: arm the compile-boundary RSS measurement whenever a surface that
@@ -16265,43 +16329,35 @@ sub adapt_to_command_line_options {
 
     # Consolidation option processing (Issue #96)
     if ($group_similar_sensitivity ne "none") {
-        if ($group_similar_sensitivity eq '') {
-            # -g with no value: use default threshold (85)
-            $consolidation_threshold = 85;
-        } elsif ($group_similar_sensitivity =~ /^\d+$/) {
-            $consolidation_threshold = int($group_similar_sensitivity);
-        } else {
-            # Non-numeric value captured (likely a filename) — push it back.
-            # Issue #231: surface this previously-silent pushback so users
-            # see why -g looks like it took the default threshold.
-            warn "-g value '$group_similar_sensitivity' is not numeric; treating as positional argument and using default threshold 85.\n";
-            unshift @ARGV, $group_similar_sensitivity;
-            $consolidation_threshold = 85;
-        }
+        # -g with no value, or with a value that is a file argument
+        # (settle_optional_operand), takes the default threshold (85).
+        my ($threshold) = $group_similar_sensitivity eq '' ? () : settle_optional_operand(
+            option  => '-g/--group-similar',
+            value   => $group_similar_sensitivity,
+            known   => sub { $_[0] =~ /^\d+$/ },
+            expects => 'a similarity threshold, a whole number from 50 to 99',
+        );
+        $consolidation_threshold = defined $threshold ? int($threshold) : 85;
         # Ensure threshold is in valid range
         $consolidation_threshold = 50 if $consolidation_threshold < 50;
         $consolidation_threshold = 99 if $consolidation_threshold > 99;
         $group_similar_sensitivity = $consolidation_threshold;  # normalize for downstream checks
     }
 
-    # Heatmap option processing
+    # Heatmap option processing. A value that names no metric is a file
+    # argument (settle_optional_operand) and the heatmap shows duration; a
+    # built-in name takes its canonical form ('time' resolves to 'duration');
+    # a user-defined name is kept as given and bound to its config below.
     if (defined $heatmap_metric) {
         $heatmap_enabled = 1;
-        # Handle case where -hm is followed by a filename (GetOptions captures it as optional value)
-        my $builtin = builtin_metric_name($heatmap_metric, '-hm/--heatmap');
-        if ($heatmap_metric eq '') {
-            $heatmap_metric = 'duration';  # Default metric (empty string case)
-        } elsif (defined $builtin) {
-            $heatmap_metric = $builtin;    # canonical form ('time' resolves to 'duration')
-        } elsif (@udm_raw_args) {
-            # Potential UDM name — resolve via resolve_metric_operand() after parse_udm_configs()
-        } else {
-            # No UDM args — it's likely a filename, push it back.
-            # Issue #231: surface this previously-silent pushback.
-            warn "-hm value '$heatmap_metric' is not a built-in metric ($builtin_metric_choices) and no -udm configs are defined; treating as positional argument and using default metric 'duration'.\n";
-            unshift @ARGV, $heatmap_metric;
-            $heatmap_metric = 'duration';  # Default metric
-        }
+        my ($metric) = $heatmap_metric eq '' ? () : settle_optional_operand(
+            option  => '-hm/--heatmap',
+            value   => $heatmap_metric,
+            known   => sub { resolve_metric_operand( $_[0], '-hm/--heatmap' ) },
+            expects => metric_operand_expects(),
+        );
+        my $builtin = defined $metric ? builtin_metric_name( $metric, '-hm/--heatmap' ) : 'duration';
+        $heatmap_metric = defined $builtin ? $builtin : $metric;
 
         # -dbg wins over -lbg regardless of CLI order: force dark and skip auto-detect
         if ($heatmap_dark_bg_explicit) {
@@ -16317,10 +16373,25 @@ sub adapt_to_command_line_options {
         }
     }
 
-    # Histogram option processing (Issue #25)
-    # If histogram enabled but no specific metrics requested, default to all available after parsing
-    # The handler already sets $histogram_enabled = 1 and populates %histogram_metrics
+    # Histogram option processing (Issue #25). Each -hg value is settled as
+    # an optional operand: the metrics it names are added (built-in names in
+    # canonical form, user-defined names as given, bound to their configs
+    # below); a value naming none is a file argument. With no metric named,
+    # every available metric is shown.
     if ($histogram_enabled) {
+        for my $value ( grep { $_ ne '' } @histogram_operands ) {
+            my @metrics = settle_optional_operand(
+                option  => '-hg/--histogram',
+                value   => $value,
+                list    => 1,
+                known   => sub { resolve_metric_operand( $_[0], '-hg/--histogram' ) },
+                expects => metric_operand_expects(),
+            );
+            for my $metric (@metrics) {
+                my $builtin = builtin_metric_name( $metric, '-hg/--histogram' );
+                $histogram_metrics{ defined $builtin ? $builtin : $metric } = 1;
+            }
+        }
         if ($histogram_bucket_override < 0) {
             warn "Invalid bucket override value: $histogram_bucket_override. Disabling override.\n";
             $histogram_bucket_override = 0;
@@ -16519,16 +16590,19 @@ sub adapt_to_command_line_options {
     # dispatch_informational_options() before GetOptions runs; $show_help,
     # $explain_arg, and $print_version are populated here but no longer read.
 
+    # Each argument is expanded on its own, so an argument that selects no file
+    # is known by name: a directory, a path that does not exist, a pattern
+    # that matches nothing. Directories and other non-files inside an
+    # argument that did select files are skipped without a word.
+    my @selected_nothing;
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
-        if ($recursive_files) {
-            push @in_files, expand_recursive_pattern($pattern);      # -r: the filename component matches at every depth beneath the pattern's directory component
-        }
-        else {
-            push @in_files, bsd_glob($pattern);					    # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
-        }
+        my @expanded = $recursive_files
+            ? expand_recursive_pattern($pattern)                    # -r: the filename component matches at every depth beneath the pattern's directory component
+            : bsd_glob($pattern);                                   # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
+        my @files = grep { -f $_ } @expanded;                       # only files are read
+        push @selected_nothing, $pattern unless @files;
+        push @in_files, @files;
     }
-
-	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     # A recursive sweep can reach one file from two patterns whose roots nest
     # ('-r logs/*.888 logs/access/*.888'), and reading a file twice doubles its
@@ -16554,70 +16628,32 @@ sub adapt_to_command_line_options {
         print_usage( "unable to open any files", undef, $quoting_hint );
         exit 2;
     }
-    # Duration keeps its bare spellings on the CLI because duration is the tool's
-    # subject: every statistic in the summary table is a duration statistic unless
-    # it says otherwise. A user who has learned the metric_aggregate convention from
-    # the count and bytes families guesses `duration_p95`, so the prefix is accepted
-    # as an alias and stripped to the bare name here (#432).
-    #
-    # Stripping happens once, ahead of both the whitelist and the ladder, rather than
-    # as an alias arm per statistic: the ladder's final arm is an identity mapping
-    # where the operand spelling IS the storage key, and %STAT_FIELD_GROUP — which
-    # gates whether the statistic is computed at all — is keyed by the bare names. A
-    # prefixed spelling reaching either would silently switch the statistic off and
-    # rank undef against undef, which is the #428 failure mode.
-    #
-    # `duration` is the metric's own sum and is not a prefixed statistic, so it is
-    # excluded from the strip.
-    my $sort_operand_typed = $sort_type;
-    $sort_type =~ s/^duration_//i unless $sort_type =~ /^duration$/i;
-
-    # A bare metric word is its total, and a bare statistic word its stored key,
-    # each read from its table (the built-in metric and statistic-name tables),
-    # in any case. The other names below are matched case-insensitively, as
-    # every arm of the ladder is.
-    my $sort_metric    = builtin_metric_name( $sort_type, '-so/--sort-on' );
-    my $sort_statistic = $statistic_by_spelling{ lc $sort_type };
-    undef $sort_statistic unless $sort_statistic && $sort_statistic->{sort};
-    do { print_usage( "invalid sort type used" ); exit 1; } unless defined $sort_metric || $sort_statistic || grep { lc $_ eq lc $sort_type } qw(
-        occurrences total impact
-        bytes_occurrences bytes_min bytes_mean bytes_max
-        count_occurrences count_total count_sum count_min count_mean count_avg count_max
-    );
-
-    if( defined $sort_metric ) {
-        $sort_key = $builtin_metric{$sort_metric}{sort_key};
-    } elsif( $sort_statistic ) {
-        # Percentile and distribution-shape statistics are stored on
-        # %log_messages under the key they are named by (#220, #222).
-        $sort_key = $sort_statistic->{key};
-    } elsif( $sort_type =~ /^(?:occurrences|total)$/i ) {
-        $sort_key = "occurrences";
-    } elsif( $sort_type =~ /^impact$/i ) {
-        $sort_key = "impact";
-    } elsif( $sort_type =~ /^(?:count_occurrences|count_total)$/i ) {
-        $sort_key = "count_occurrences";
-    } elsif( $sort_type =~ /^count_sum$/i ) {
-        $sort_key = "count_sum";
-    } elsif( $sort_type =~ /^count_min$/i ) {
-        $sort_key = "count_min";
-    } elsif( $sort_type =~ /^(?:count_mean|count_avg)$/i ) {
-        $sort_key = "count_mean";
-    } elsif( $sort_type =~ /^count_max$/i ) {
-        $sort_key = "count_max";
-    } elsif( $sort_type =~ /^bytes_occurrences$/i ) {
-        $sort_key = "bytes_occurrences";
-    } elsif( $sort_type =~ /^bytes_min$/i ) {
-        $sort_key = "bytes_min";
-    } elsif( $sort_type =~ /^bytes_mean$/i ) {
-        $sort_key = "bytes_mean";
-    } elsif( $sort_type =~ /^bytes_max$/i ) {
-        $sort_key = "bytes_max";
+    # Files were selected, but not by every argument: the run would read less
+    # than was asked for, so it stops and names each argument that selected none.
+    if (@selected_nothing) {
+        print_usage( join( '; ', map { file_argument_problem($_) } @selected_nothing ) );
+        exit 2;
     }
+    # -so resolves through the generated vocabulary (%so_spelling): a
+    # metric's statistic as <metric>_<statistic>, a bare metric name as its
+    # sum, duration's statistics also bare, avg wherever mean is, occurrences.
+    # A deprecated metric spelling (time, size) resolves through the metric
+    # table, which records its notice; any other deprecated spelling records
+    # one here.
+    my $sort_operand_typed = $sort_type;
+    my $sort = $so_spelling{ lc $sort_type };
+    unless ($sort) {
+        my $metric = builtin_metric_name( $sort_type, '-so/--sort-on' );
+        $sort = $so_spelling{$metric} if defined $metric;
+    }
+    unless ($sort) {
+        print_usage( "invalid sort type '$sort_operand_typed'. -so takes " . so_vocabulary_text() );
+        exit 1;
+    }
+    record_deprecation( spelling => lc $sort_operand_typed, option => '-so/--sort-on', advice => "use $sort->{name}" ) if $sort->{deprecated};
+    ( $sort_type, $sort_key ) = ( $sort->{name}, $sort->{key} );
+    apply_parse_time_sort_gate( $sort_operand_typed, $sort->{family} );
 
-    apply_parse_time_sort_gate($sort_operand_typed);
-
-    parse_udm_configs() if @udm_raw_args;
     apply_output_visibility(1);   # a user-defined metric's column is known by its heading now (#597 D24)
 
     # The exposed names resolve against the metrics the run declares, so
@@ -16628,7 +16664,7 @@ sub adapt_to_command_line_options {
     apply_discard_precedence() if @discard_names;
     settle_message_option_flags();
 
-    # Validate UDM heatmap metric name (must run after parse_udm_configs)
+    # Bind a user-defined heatmap metric to its config; a counting one turns the heatmap off
     if ($heatmap_enabled && defined $heatmap_metric && !exists $heatmap_metric_map{$heatmap_metric}) {
         my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');
         if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
@@ -16639,32 +16675,33 @@ sub adapt_to_command_line_options {
         } elsif ($resolved && $resolved->{kind} eq 'udm') {
             $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
-        } else {
-            die "Error: Unknown heatmap metric '$heatmap_metric'. Available: " . join(', ', available_metric_names()) . "\n";
         }
     }
 
-    # Validate UDM histogram metric names (must run after parse_udm_configs)
+    # Bind user-defined histogram metrics to their configs; counting ones are skipped
     if ($histogram_enabled && %histogram_metrics) {
-        for my $metric (keys %histogram_metrics) {
-            my $resolved = resolve_metric_operand($metric, '-hg/--histogram');
-            next if $resolved && $resolved->{kind} eq 'builtin';
-            my $match = $resolved ? $resolved->{config} : undef;
-            # base_name resolution for disambiguated metrics (#104): register
-            # the canonical name alongside the token the user supplied.
-            $histogram_metrics{$match->{name}} = 1 if $match && $match->{name} ne $metric;
-            if ($match && $match->{agg_kind} eq 'counting') {
-                # A per-line distribution over counting (string) values is meaningless
-                print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
-                delete $histogram_metrics{$metric};
-                delete $histogram_metrics{$match->{name}};
-            } elsif ($match) {
-                push @histogram_udm_configs, $match;
-                # Colors resolved from @column_layout in normalize_data_for_output()
-            } else {
-                die "Error: Unknown histogram metric '$metric'. Available: " . join(', ', available_metric_names()) . "\n";
+        my %bound;
+        for my $metric ( grep { !exists $builtin_metric{$_} } sort keys %histogram_metrics ) {
+            # A metric's own name binds its config; a base name binds every
+            # config that carries it (#104, and the specs #482 separated),
+            # each with its own panel. The canonical name is registered
+            # alongside the token the user supplied.
+            my @matches = grep { $_->{name} eq $metric } @udm_configs;
+            @matches = grep { $_->{base_name} eq $metric } @udm_configs unless @matches;
+            for my $match (@matches) {
+                if ( $match->{agg_kind} eq 'counting' ) {
+                    # A per-line distribution over counting (string) values is meaningless
+                    print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                    delete $histogram_metrics{$metric};
+                    delete $histogram_metrics{ $match->{name} };
+                    next;
+                }
+                $histogram_metrics{ $match->{name} } = 1;
+                $bound{ $match->{name} } = 1;
             }
         }
+        # In declaration order; colors resolved from @column_layout in normalize_data_for_output()
+        @histogram_udm_configs = grep { $bound{ $_->{name} } } @udm_configs;
     }
 
     # Bare -hg: include all UDM metrics (counting UDMs carry no per-line distribution)
@@ -24156,6 +24193,16 @@ sub pipeline_render {
     write_aggregate_export();
 
     write_index_file() if $index_enabled;  # Write persistent index file with per-file metadata (Issue #46)
+}
+
+# What the usage error says about one file argument that selected no file:
+# a directory is named as one; anything else matched no file. A value an
+# optional-operand option gave back also says which option it followed.
+sub file_argument_problem {
+    my ($argument) = @_;
+    my $problem = -d $argument ? "'$argument' is a directory, not a file" : "'$argument' matches no file";
+    $problem .= " ($pushed_back_operand{$argument})" if exists $pushed_back_operand{$argument};
+    return $problem;
 }
 
 # Expand one file argument to every file matching its filename component at

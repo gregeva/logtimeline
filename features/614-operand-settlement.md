@@ -496,33 +496,33 @@ stderr error block, and the `files:` / `file:` lines of `-V format-detection`
 for what was selected. Each criterion is run without and with `-r`. All are
 assertable; the fixture tree and the assertion surface already exist.
 
-- [ ] **A directory beside a file.** `ltl <fixture>/archive <fixture>/alpha.888`
+- [x] **A directory beside a file.** `ltl <fixture>/archive <fixture>/alpha.888`
       stops before reading any file, exit 2, and the error names
       `<fixture>/archive` and says it is a directory.
-- [ ] **A path that does not exist beside a file.** `ltl <fixture>/absent.888
+- [x] **A path that does not exist beside a file.** `ltl <fixture>/absent.888
       <fixture>/alpha.888` stops before reading any file, exit 2, and the
       error names `<fixture>/absent.888`.
-- [ ] **A pattern that matches nothing beside a file.** `ltl
+- [x] **A pattern that matches nothing beside a file.** `ltl
       "<fixture>/*.none" <fixture>/alpha.888` (quoted, so `ltl` expands it)
       stops before reading any file, exit 2, and the error names the pattern
       as typed.
-- [ ] **Every such argument is named.** With two arguments that select no
+- [x] **Every such argument is named.** With two arguments that select no
       file beside one that does, the one error names both.
-- [ ] **Expansion comes first.** A quoted pattern that selects files
+- [x] **Expansion comes first.** A quoted pattern that selects files
       (`"<fixture>/*.888"`) is never reported as selecting nothing; it runs
       and selects the files it matches.
-- [ ] **Directories inside a pattern that selected files stay silent.**
+- [x] **Directories inside a pattern that selected files stay silent.**
       `ltl "<fixture>/*"` without `-r` selects the root's four files
       (`alpha.888`, `beta.888`, `charlie.123`, `delta.000`) and skips
       `archive/`, `nested/` and `only-nonmatching/`; with `-r` it selects every
       file in the tree. Either way stderr carries no file-selection message.
-- [ ] **Nothing selected at all is the existing failure, unchanged.** When no
+- [x] **Nothing selected at all is the existing failure, unchanged.** When no
       argument selects any file, whether one argument or several, the run
       ends in `Error: unable to open any files`, byte-identical, exit 2, with
       the quoting hint under `-r` only (445 D1 to D3). The existing
       `bare-directory-matches-nothing` and `no-match-quoting-guidance`
       scenarios pass unchanged.
-- [ ] **The mechanism.** The check runs inside the existing expansion loop in
+- [x] **The mechanism.** The check runs inside the existing expansion loop in
       `adapt_to_command_line_options()`, on each argument's `bsd_glob` or
       `expand_recursive_pattern` result, and reports through `print_usage()`,
       the mechanism the no-files error uses; the silent
@@ -541,32 +541,32 @@ mechanism criterion is a source check in the same harness, as
 `quantity-units-declared` checks `ltl`'s source in the option-resolution
 harness. All are assertable.
 
-- [ ] **A value in the option's vocabulary is taken**, with no pushback and no
+- [x] **A value in the option's vocabulary is taken**, with no pushback and no
       notice: `-hm bytes`, `-hg duration,bytes`, `-V format-detection`,
       `-V format-detection,csv-output`, `-V all`, `-g 90`, `-mem debug`,
       `-mem release`. `-V list` still lists the sections and exits 0.
-- [ ] **Anything else is pushed back as a file argument**, and the option
+- [x] **Anything else is pushed back as a file argument**, and the option
       takes its bare default: for each of the five, `ltl <option>
       <fixture>` selects the fixture, exits 0, and runs with `-hm` on
       `duration`, `-hg` on every available metric, `-V` on every section,
       `-g` at 85, `-mem` without its debug detail.
-- [ ] **The pushback is silent, the same for all five.** In that case stderr
+- [x] **The pushback is silent, the same for all five.** In that case stderr
       carries nothing from the option: `ltl -hg <fixture>`,
       `ltl -mem <fixture>`, `ltl -g <fixture>` and the rest run clean.
-- [ ] **A pushed-back value that is not a file stops at file resolution,
+- [x] **A pushed-back value that is not a file stops at file resolution,
       naming the option.** `ltl -V foo <fixture>` and `ltl -g 85% <fixture>`
       end in phase 1's usage error, exit 2, which names the value, the option
       it followed, and that it is not in that option's vocabulary (the
       metrics from `available_metric_names()` for `-hm` and `-hg`, a pointer
       to `-V list` for `-V`, 50 to 99 for `-g`, `debug` for `-mem`).
-- [ ] **User-defined names are in the vocabulary wherever `-udm` stands.**
+- [x] **User-defined names are in the vocabulary wherever `-udm` stands.**
       `-hm x -udm x::max` and `-udm x::max -hm x` both take `x`; likewise
       `-hg`. User-defined metrics are parsed before the helper runs.
-- [ ] **A comma list with a member in the vocabulary belongs to the option.**
+- [x] **A comma list with a member in the vocabulary belongs to the option.**
       `-V format-detection,foo` is a rejection naming `foo` and pointing to
       `-V list`, exit 1, never a file argument; the same rule gives
       `-hg duration,foo`'s rejection in phase 3.
-- [ ] **The mechanism.** One sub makes the decision for all five options;
+- [x] **The mechanism.** One sub makes the decision for all five options;
       `unshift @ARGV` occurs in `ltl` only in that sub and in the
       environment-argument merge in `adapt_to_command_line_options()`; `-V`'s
       path test (`$name =~ m{[/.]} || -e $name`) is gone.
@@ -584,20 +584,20 @@ assert the `Unknown heatmap metric` error) and the base-name panels of
 exit status, stderr, and the rendered histogram panel titles. All are
 assertable.
 
-- [ ] **A comma list with an unknown member is a rejection.** `-hg
+- [x] **A comma list with an unknown member is a rejection.** `-hg
       duration,foo` exits 1 before any file is read, names `foo`, and lists
       `duration, bytes, count`; with `-udm x::max` it lists `duration, bytes,
       count, x`. Today it runs `duration` with an empty stderr.
-- [ ] **One metric list for every run-time message.** Each message that
+- [x] **One metric list for every run-time message.** Each message that
       lists metrics at run time (the `-hg` rejection, phase 1's error for a
       value pushed back from `-hm` or `-hg`) reads `available_metric_names()`:
       the built-in metrics, then the user-defined ones. No run-time message
       writes the built-in list alone. The help rows, written before any
       `-udm` is read, keep the table's built-in list and "or one of your own".
-- [ ] **`-udm`'s position does not matter.** `-hg duration,x -udm x::max` and
+- [x] **`-udm`'s position does not matter.** `-hg duration,x -udm x::max` and
       `-udm x::max -hg duration,x` render the same two panels; so do
       `-hg rows -udm rows -udm rows::delta` and the order reversed.
-- [ ] **What resolution does today is kept.** Built-in names in any case
+- [x] **What resolution does today is kept.** Built-in names in any case
       (`-hg BYTES`); user-defined names case-sensitive, then by base name
       (#104); `time` still works with its deprecation notice; `durationMs` is
       a key spelling, never a metric name (inside a list it is the
@@ -605,10 +605,10 @@ assertable.
       with its warning and is still skipped by `-hg` with its warning; `-hg`
       stays additive across the environment and the command line; bare `-hg`
       still shows every available metric but counting ones.
-- [ ] **The rejection exits 1 through the usage path.** It is reported
+- [x] **The rejection exits 1 through the usage path.** It is reported
       through `print_usage()` and `exit 1`, as the `-so` rejection is, never a
       bare `die` (observation 9).
-- [ ] **The mechanism.** `handle_histogram_option()` records the operand and
+- [x] **The mechanism.** `handle_histogram_option()` records the operand and
       resolves nothing: no `builtin_metric_name()` call and no warning in it.
       Every `-hm` and `-hg` operand is resolved after `parse_udm_configs()`
       through `resolve_metric_operand()`.
@@ -621,29 +621,29 @@ Verification: scenarios in `tests/validate-statistics-demand.sh` (the
 plus `tests/validate-help-content.sh` for the rows. Equivalence is asserted by
 identical stdout of two runs on the same fixture. All are assertable.
 
-- [ ] **Every generated name ranks.** For each metric and each statistic it
+- [x] **Every generated name ranks.** For each metric and each statistic it
       carries, `-so <metric>_<statistic>` is accepted and its `sort_gate`
       family is that metric: duration carries sum, min, mean, max, stddev,
       the twelve percentiles, iqr, cv, skewness, kurtosis, bimodality_coef
       and impact; bytes and count carry sum, occurrences, min, mean and max.
-- [ ] **Shorthands are the same sort.** These pairs give identical stdout:
+- [x] **Shorthands are the same sort.** These pairs give identical stdout:
       `bytes`/`bytes_sum`, `count`/`count_sum`, `duration`/`duration_sum`,
       `min`/`duration_min`, `p95`/`duration_p95`, `impact`/`duration_impact`,
       `avg`/`mean`/`duration_avg`/`duration_mean`, `bytes_avg`/`bytes_mean`,
       `count_avg`/`count_mean`.
-- [ ] **Cross-metric names are rejected.** `duration_bytes`,
+- [x] **Cross-metric names are rejected.** `duration_bytes`,
       `duration_count_sum`, `duration_occurrences`, `duration_total`,
       `bytes_p95` and `count_stddev` exit 1 with the `-so` error, which names
       the value and lists what `-so` accepts in the words of the help row.
-- [ ] **Deprecated spellings work for the release, with their notice.**
+- [x] **Deprecated spellings work for the release, with their notice.**
       `total`, `count_total`, `std_dev`, `duration_std_dev`, `time` and
       `size` each print one `Warning: ... is deprecated` line naming
       `-so/--sort-on` and the replacement, and give the same stdout as the
       replacement. `stddev` prints none.
-- [ ] **The rows read the set.** The `-so` help row and the error print the
+- [x] **The rows read the set.** The `-so` help row and the error print the
       same vocabulary text; the `docs/usage.md` `-so` table agrees with it
       (`validate-help-content.sh`).
-- [ ] **The mechanism.** One table of `-so` spellings is generated from
+- [x] **The mechanism.** One table of `-so` spellings is generated from
       `@builtin_metrics` and `@statistic_names`; the `s/^duration_//` strip,
       the literal allow-list and the `elsif` ladder are gone; the sort
       family is read from the table entry, not inferred from a key prefix.
@@ -653,14 +653,14 @@ identical stdout of two runs on the same fixture. All are assertable.
 Verification: `tests/validate-explain.sh`, comparing topic output. All are
 assertable.
 
-- [ ] **A `-so` name that names a statistic explains it.** `--explain
+- [x] **A `-so` name that names a statistic explains it.** `--explain
       duration_p95` shows the percentiles topic; `bytes_mean`, `count_avg`
       and `duration_avg` the mean topic; `duration_stddev` the std_dev topic;
       `duration_impact` the impact topic; `bytes_min` the min topic.
-- [ ] **What is not a statistic topic stays unknown.** `--explain bytes_sum`
+- [x] **What is not a statistic topic stays unknown.** `--explain bytes_sum`
       and `--explain bytes_occurrences` keep the unknown-topic error, since
       neither sum nor a metric's occurrences has a topic.
-- [ ] **The mechanism.** `resolve_explain_topic()` resolves a spelling
+- [x] **The mechanism.** `resolve_explain_topic()` resolves a spelling
       through the `-so` table entry's statistic and that statistic's
       `explain` field; no second list of spellings.
 
@@ -669,13 +669,13 @@ assertable.
 Verification: `tests/validate-help-content.sh` and `tests/validate-explain.sh`
 (unknown topics are a hard error). All are assertable.
 
-- [ ] **Each topic renders as before.** `--help statistics`, `formats`,
+- [x] **Each topic renders as before.** `--help statistics`, `formats`,
       `profile` and `units` give the same output as before the change.
-- [ ] **The error and the row read the table.** `--help bogus` exits 1 with
+- [x] **The error and the row read the table.** `--help bogus` exits 1 with
       the error naming `bogus` and the four topics; the `--help` row names
       all four, each with its one-line description; the `docs/usage.md` row
       matches.
-- [ ] **The mechanism.** One table of name, description and renderer; the
+- [x] **The mechanism.** One table of name, description and renderer; the
       dispatch iterates it, with no `elsif` per topic.
 
 ### Phase 7 — `-pr` error and row
@@ -683,14 +683,14 @@ Verification: `tests/validate-help-content.sh` and `tests/validate-explain.sh`
 Verification: `tests/validate-help-content.sh` for the rows,
 `tests/validate-profile.sh` unchanged. All are assertable.
 
-- [ ] **The error points, and lists nothing.** `-pr bogus` exits 1 with an
+- [x] **The error points, and lists nothing.** `-pr bogus` exits 1 with an
       error naming `bogus` and pointing to `ltl --help profile`, naming no
       mode.
-- [ ] **The row is generated from the mode table.** The `-pr` help row names
+- [x] **The row is generated from the mode table.** The `-pr` help row names
       the singular modes (a one-day period) and the plural modes (a one-week
       period) in table order and says which have an `-alt` variant, so `day`
       is not claimed to have one; the `docs/usage.md` row matches.
-- [ ] **Profiles fold as before.** `validate-profile.sh` and
+- [x] **Profiles fold as before.** `validate-profile.sh` and
       `validate-profile-render.sh` pass unchanged.
 
 ### Phase 8 — records and documentation
@@ -698,12 +698,54 @@ Verification: `tests/validate-help-content.sh` for the rows,
 Verification: reading, and `tests/validate-help-content.sh`,
 `tests/validate-doc-examples.sh` where they reach.
 
-- [ ] `docs/usage.md`: the `-so` table, the `--help` and `-pr` rows, § Files
+- [x] `docs/usage.md`: the `-so` table, the `--help` and `-pr` rows, § Files
       (an argument that selects no file is an error), and § Stderr warnings
       without the `-g` and `-hm` pushback rows.
-- [ ] `docs/explain/statistics.md` example uses `stddev`.
-- [ ] `docs/architecture-patterns.md` *Optional-operand options and the
+- [x] `docs/explain/statistics.md` example uses `stddev`.
+- [x] `docs/architecture-patterns.md` *Optional-operand options and the
       filename pushback* names the helper as its one consumption site and is
       marked established.
-- [ ] The records this issue changes carry a pointer to it: 432 O3, 420 D2,
+- [x] The records this issue changes carry a pointer to it: 432 O3, 420 D2,
       451 D4.
+
+## Implementation record
+
+- **Phase 1** (58f2125): each file argument is expanded on its own; an
+  argument that selected no file, beside one that did, stops the run (exit 2)
+  naming it. Four scenarios in `validate-recursive-file-selection.sh`, each
+  shown to fail on the pre-change `ltl` or on a doctored copy.
+- **Phases 2 and 3**: `settle_optional_operand()` decides for `-hm`, `-hg`,
+  `-V`, `-g` and `-mem`; `parse_udm_configs()` now runs before the optional
+  operands are settled; `handle_histogram_option()` only records. The
+  `Unknown heatmap metric` and `Unknown histogram metric` dies are gone (no
+  longer reachable). Found on the way: with `-udm rows -udm rows::delta`,
+  `-hg rows` rendered both panels only because the old handler, run before
+  `-udm` was read, pushed `rows` back as a file and left `-hg` bare.
+  User-defined-metrics criterion 5 (#482) asks for exactly those two panels,
+  so the `-hg` binding now binds a base name to every config carrying it, in
+  declaration order. The `time` deprecation notice now names the options in
+  the order they are settled (`-hm`, `-hg`, `-so`).
+- **Phase 4**: `%so_spelling` is generated from `@builtin_metrics` (each
+  metric's `statistics`, name beside stored key; duration's read from
+  `@statistic_names` plus sum and impact) and `@statistic_names`; the strip,
+  the allow-list, the ladder and `sort_key_metric_family()` are gone, and the
+  sort gate takes its family from the entry. `so_vocabulary_text()` and
+  `so_deprecated_text()` give the help row and the error one text. `total`
+  and `count_total` are declared deprecated in `%so_deprecated_spellings`; the
+  `std_dev` notice is on (`deprecation_notice => 1`), on `-so` only, since
+  `std_dev` remains `--explain`'s topic name. `docs/usage.md`'s `-so` section
+  is rewritten to the naming rule, and the `stddev` example (observation 6)
+  is changed in `docs/explain/statistics.md` and the `std_dev` topic.
+- **Phases 5 to 8**: `resolve_explain_topic()` reads `%so_spelling`;
+  `@help_topics` drives the `--help` dispatch, error and row;
+  `@profile_mode_rows` keeps the mode table in order for `profile_modes_text()`.
+  `docs/usage.md` (§ Files, the `-V` table, § Stderr warnings, the `-so`,
+  `--help` and `-pr` rows), `docs/architecture-patterns.md` (the
+  optional-operand entry now established, the table-and-resolver entry, the
+  sort-gate and notices entries) and the changed records (432 O3, 420 D2,
+  451 D4, histogram-charts § Command Line Interface, user-defined-metrics
+  criterion 19) are trued up.
+- **Pre-existing, outside this issue:** `-hm x -udm x::max` on a log where
+  `x` never matches dies in the heatmap colour lookup (`Can't use an
+  undefined value as an ARRAY reference`, exit 255), on the release code as
+  on this branch.

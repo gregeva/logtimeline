@@ -182,8 +182,8 @@ option_arity() {
 #
 # Getopt::Long hands an optional-value option the next token whatever it
 # holds, so '-g <file>' binds the file to -g and leaves no input argument.
-# ltl does not stop there: a -g value that is not numeric is warned about and
-# unshifted back onto @ARGV as a positional argument (#231), which is how that
+# ltl does not stop there: a -g value that is not numeric is given back to
+# @ARGV as a positional argument (settle_optional_operand), which is how that
 # command still profiles the file the analyst named. Mirroring Getopt::Long
 # alone therefore diverges from ltl exactly where ltl compensates, so an
 # optional value is claimed only when the token could be one.

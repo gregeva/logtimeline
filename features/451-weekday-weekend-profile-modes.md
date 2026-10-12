@@ -58,6 +58,9 @@ The shipped `period_seconds` echoed the internal 7-day fold modulus (`fold_epoch
 The fold modulus stays internal and is no longer exposed. This is a rename of a stability-contracted `-V` key plus a value correction on two existing modes: `tests/HARNESS-DESIGN.md` is consulted before the change, and the harness (`tests/validate-profile.sh`), the reserved-names list in HARNESS-DESIGN.md, and the `-V profile` contract below are updated in the same commit.
 
 **D4 — `--help profile` is the mode reference; the main `--help` row stays concise.**
+*Amended by #614* (`features/614-operand-settlement.md` § 2 D6): the row's mode
+lists and its `-alt` statement are generated from the mode table, which has no
+`day-alt` (256), so the row no longer says every mode has an `-alt` variant.
 `--help profile` (a third topic on the existing `--help <topic>` surface, beside `statistics` and `formats`) documents every mode: kept days, window, axis, and what its `-alt` variant changes. The `-pr` row in `print_help()` and the matching `docs/usage.md` row name the base modes, state that each has an `-alt` variant, and point to `--help profile` to choose. The invalid-mode error message points to `--help profile` rather than listing all fifteen names. Not `--explain`: the mode list is operational detail, not method documentation.
 
 **D5 — No prototype.** Table rows in the existing `%profile_modes` structure; no new data model, no new per-line cost (`fold_epoch()` already does one hash lookup and one weekday-set test per matched line).

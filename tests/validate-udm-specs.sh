@@ -1021,27 +1021,31 @@ scenario_collision_operands() {
         command     "grep -q 'rows:sum Distribution' '$hg' && grep -q 'rows:delta Distribution' '$hg'" \
         label       'two distribution panels render, titled by their resolved names' \
         asserts     'A base name shared by two specs resolves to both panels rather than one merged panel' \
-        produced_by 'resolve_metric_operand() + print_histograms() in ltl' \
+        produced_by 'the -hg binding in adapt_to_command_line_options() (a base name binds every config carrying it) + print_histograms() in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$hg' | grep -o 'P50: 30   P99: 100' | grep -c .)\" -ge 1 ] && [ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$control' | grep -o 'P50: 30' | grep -c .)\" -ge 1 ]" \
+        command     "[ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$hg' | grep -oE 'P50: 30 +(P[0-9.]+: [0-9.]+ +)*P99: 100 ' | grep -c .)\" -ge 1 ] && [ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$control' | grep -o 'P50: 30' | grep -c .)\" -ge 1 ]" \
         label       'the raw panel percentiles match the single-spec control' \
-        asserts     'The separated metric distributes its own values, not a mixture of both specs' \
+        asserts     'The separated metric distributes its own values, not a mixture of both specs: the rows:sum panel reads P50 30 and P99 100, as the single-spec control does, whatever percentiles the panel width shows between them' \
         produced_by 'print_histograms() in ltl' \
         contract    "$CONTRACT_482"
 
     unknown="$TMP_DIR/unknown.out"
     "$LTL" --disable-progress -ni -bs 1440 -oe -hm nosuchmetric \
         -udm rows -udm 'rows::delta' "$COLLISION_FIXTURE" > "$unknown" 2>"$unknown.stderr" || true
+    # -hm's value names no metric, so it is given back as a file argument and,
+    # selecting no file, named with the metrics this run knows.
+    local metric_list="$TMP_DIR/metric-list.txt"
+    sed -n "s/.*it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\))$/\1/p" "$unknown.stderr" | tr ',' '\n' | sed 's/ //g' > "$metric_list"
     assert_command \
-        command     "cat '$unknown' '$unknown.stderr' | grep 'Available:' | grep -q 'rows:sum, rows:delta'" \
-        label       'the unknown-metric error lists both resolved names' \
+        command     "[ -s '$metric_list' ] && tr '\\n' ',' < '$metric_list' | grep -q 'rows:sum,rows:delta'" \
+        label       'the metric list the -hm error prints names both resolved names' \
         asserts     'available_metric_names() reports the separated metrics under their resolved names' \
-        produced_by 'available_metric_names() in ltl' \
+        produced_by 'available_metric_names() in ltl, via metric_operand_expects() and file_argument_problem()' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | grep -c .)\" = \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | sort -u | grep -c .)\" ]" \
-        label       'the Available list contains no repeated name' \
+        command     "[ -s '$metric_list' ] && [ \"\$(grep -c . '$metric_list')\" = \"\$(sort -u '$metric_list' | grep -c .)\" ]" \
+        label       'the metric list contains no repeated name' \
         asserts     'Resolved names are unique, so the operand list no longer shows one name twice' \
         produced_by 'available_metric_names() in ltl' \
         contract    "$CONTRACT_482"
