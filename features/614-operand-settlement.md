@@ -669,13 +669,13 @@ assertable.
 Verification: `tests/validate-help-content.sh` and `tests/validate-explain.sh`
 (unknown topics are a hard error). All are assertable.
 
-- [ ] **Each topic renders as before.** `--help statistics`, `formats`,
+- [x] **Each topic renders as before.** `--help statistics`, `formats`,
       `profile` and `units` give the same output as before the change.
-- [ ] **The error and the row read the table.** `--help bogus` exits 1 with
+- [x] **The error and the row read the table.** `--help bogus` exits 1 with
       the error naming `bogus` and the four topics; the `--help` row names
       all four, each with its one-line description; the `docs/usage.md` row
       matches.
-- [ ] **The mechanism.** One table of name, description and renderer; the
+- [x] **The mechanism.** One table of name, description and renderer; the
       dispatch iterates it, with no `elsif` per topic.
 
 ### Phase 7 — `-pr` error and row

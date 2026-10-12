@@ -525,6 +525,15 @@ my %udm_functions_of_kind;
 push @{ $udm_functions_of_kind{ $_->{udm} } }, $_->{name} for @udm_functions;
 # --explain: every spelling that is not itself a topic, to the topic that covers it.
 my %explain_aliases = map { my $row = $_; map { lc($_) => $row->{explain} } grep { defined && lc($_) ne $row->{explain} } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } grep { $_->{explain} } @statistic_names;
+# The --help topics: each name, the one-line description the --help row gives
+# it, and the sub that renders it. The dispatch, its unknown-topic error and
+# the help row read this table.
+my @help_topics = (
+    { name => 'statistics', description => 'every statistic ltl computes',                                                 render => \&print_help_statistics },
+    { name => 'formats',    description => 'the log formats it recognises and how each classifies successes and failures', render => \&print_help_formats },
+    { name => 'profile',    description => 'every -pr mode: the days it keeps, its window and axis, and what its -alt variant changes', render => \&print_help_profile },
+    { name => 'units',      description => 'the units an option taking a count, a byte size or a duration accepts',        render => \&print_help_units },
+);
 my $total_lines_read = 0;
 my $total_lines_included = 0;
 # Line accounting between read and included: lines no format matched (a CSV
@@ -11422,7 +11431,7 @@ sub print_help {
     # INFO
     $out .= help_heading("INFO");
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
-    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: 'statistics' (every statistic ltl computes) 'formats' (the log formats it recognises and how each classifies successes and failures) or 'units' (the units an option taking a count, a byte size or a duration accepts).");
+    $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: " . join_with_or( map { "'$_->{name}' ($_->{description})" } @help_topics ) . ".");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
@@ -15893,31 +15902,16 @@ sub dispatch_informational_options {
     if ($want_help) {
         if ($help_topic eq '') {
             print_help();            # already paginated internally
+            exit 0;
         }
-        elsif ($help_topic eq 'statistics') {
-            my $out = print_help_statistics();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'formats') {
-            my $out = print_help_formats();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'profile') {
-            my $out = print_help_profile();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        elsif ($help_topic eq 'units') {
-            my $out = print_help_units();
-            $out =~ s/^\n+//;
-            pipe_to_pager($out);
-        }
-        else {
-            print_usage("unknown --help topic '$help_topic' (try: statistics, formats, profile, units)");
+        my ($topic) = grep { $_->{name} eq $help_topic } @help_topics;
+        unless ($topic) {
+            print_usage( "unknown --help topic '$help_topic' (try: " . join( ', ', map { $_->{name} } @help_topics ) . ")" );
             exit 1;
         }
+        my $out = $topic->{render}->();
+        $out =~ s/^\n+//;
+        pipe_to_pager($out);
         exit 0;
     }
     if ($want_explain) {

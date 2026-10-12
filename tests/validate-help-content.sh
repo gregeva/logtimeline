@@ -943,6 +943,42 @@ scenario_K_name_list_parity() {
         produced_by 'so_deprecated_text() in ltl; docs/usage.md -so section' \
         contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
 
+    # The --help row names every topic the unknown-topic error lists, each
+    # with its description, from one topic table (614 D5); docs/usage.md
+    # matches it.
+    local help_row="$TMP_DIR/help-help-row.txt" topic_err="$TMP_DIR/help-topic-error.txt" topics topic
+    awk '/^ +-\?, +--help \[<topic>\]/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$help_row"
+    "$LTL" --disable-progress --help bogus > /dev/null 2> "$topic_err.raw" || true
+    check_stderr_warnings "$topic_err.raw" "$current_scenario/help-topic"
+    topics=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$topic_err.raw" | sed -n "s/^Error: unknown --help topic 'bogus' (try: \(.*\))$/\1/p")
+    assert_equal "$( [[ -n "$topics" ]] && echo found )" "found" \
+        label       'the unknown --help topic error lists the topics' \
+        asserts     'The error names the topics from the topic table; an unmatched message is a failure, not a pass' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    local usage_help_row
+    usage_help_row=$(grep -E '^\| `-\?, --help \[<topic>\]`' "$USAGE_MD" | head -1 || true)
+    for topic in ${topics//,/ }; do
+        assert_row_carries "$help_row" '-\?, +--help \[<topic>\]' "'$topic' (" \
+            label       "the --help row names the $topic topic with its description" \
+            asserts     'The --help row names every topic the dispatch knows, from the one topic table' \
+            produced_by 'print_help() in ltl (@help_topics)' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5 (as extended: name, description, renderer)"
+        local description
+        description=$(sed -E "s/.*'$topic' \(([^)]*)\).*/\1/" "$help_row")
+        assert_row_carries "$USAGE_MD" '^\| `-\?, --help \[<topic>\]`' "\`$topic\` ($description)" \
+            label       "the docs/usage.md --help row names the $topic topic in the words of --help" \
+            asserts     'docs/usage.md agrees with the topics and descriptions the tool prints' \
+            produced_by 'docs/usage.md option table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    done
+
+    assert_equal "$(grep -cE 'elsif \(\$help_topic eq' "$LTL")" "0" \
+        label       'the --help dispatch has no branch per topic' \
+        asserts     'dispatch_informational_options() finds a topic in the topic table; no elsif names a topic' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "features/614-operand-settlement.md D5 (one topic table read by the dispatch, its error and the help row)"
+
     # The -udm function row gives the names grouped by kind, each with its
     # note; stripped of the notes and the group labels, it is the list the
     # warning prints.
