@@ -910,18 +910,38 @@ scenario_K_name_list_parity() {
         produced_by 'docs/usage.md option table' \
         contract    "$CONTRACT_NAME_LISTS; D7"
 
-    # The -so row: a bare metric word is its total, in the table's order,
-    # with time and size shown only as deprecated spellings (613 D1, D8).
-    assert_row_carries "$help_out" '^ +-so, +--sort-on <field>' "A bare metric name means its total: $hm_list (deprecated: time for duration, size for bytes)." \
-        label       'the --help -so row names the built-in metrics the -hm error lists, with time and size only as deprecated spellings' \
-        asserts     'The -so help row interpolates the built-in metric list and the deprecated spellings from the metric table' \
-        produced_by 'print_help() in ltl ($builtin_metric_list and the deprecated column of @builtin_metrics)' \
-        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
-    assert_row_carries "$USAGE_MD" '^\| Totals \|' "$(backticked_list "$hm_list"), \`occurrences\`, \`impact\`; deprecated: \`time\` for \`duration\`, \`size\` for \`bytes\`" \
-        label       'the docs/usage.md -so Totals row names the built-in metrics in table order, time and size only as deprecated' \
-        asserts     'docs/usage.md agrees with the -so help row' \
-        produced_by 'docs/usage.md -so value table' \
-        contract    "$CONTRACT_NAME_LISTS; D1 and D8 (time and size deprecated)"
+    # The -so row and the -so error say what -so takes in the same words,
+    # generated from the metric and statistic tables (614 D3); docs/usage.md
+    # lists each metric's statistics and the deprecated spellings to match.
+    local so_row="$TMP_DIR/help-so-row.txt" so_err="$TMP_DIR/so-error.txt"
+    awk '/^ +-so, +--sort-on <field>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$so_row"
+    "$LTL" --disable-progress -bs 1440 -oe -so bogus "$NAME_FIXTURE" > /dev/null 2> "$so_err.raw" || true
+    check_stderr_warnings "$so_err.raw" "$current_scenario/so"
+    sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$so_err.raw" | sed -n "s/^Error: invalid sort type 'bogus'\. -so takes //p" > "$so_err"
+    local so_takes
+    so_takes=$(cat "$so_err")
+    assert_row_carries "$so_row" '-so, +--sort-on <field>' "Choose what ranks the messages in the summary: $so_takes Deprecated: " \
+        label       'the --help -so row states what -so takes in the words of the -so error' \
+        asserts     'The -so help row and the -so error read one generated vocabulary text' \
+        produced_by 'print_help() and the -so resolution in adapt_to_command_line_options(), both through so_vocabulary_text() in ltl' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3 (the help row and the error read the generated set)"
+    local metric statistics usage_row
+    for metric in duration bytes count; do
+        statistics=$(sed -E "s/.* ${metric}_ followed by ([^;.]*)[;.].*/\1/; s/ or /, /" <<< "$so_takes")
+        assert_row_carries "$USAGE_MD" "^\\| \`$metric\` \\| " "| \`$metric\` | $(backticked_list "$statistics") |" \
+            label       "the docs/usage.md -so table lists the statistics $metric carries, as the -so error does" \
+            asserts     'docs/usage.md agrees with the generated -so vocabulary, metric by metric and in order' \
+            produced_by 'docs/usage.md -so metric table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
+    done
+    local so_deprecated usage_deprecated
+    so_deprecated=$(sed -E 's/.* Deprecated: ([^.]*)\..*/\1/' "$so_row")
+    usage_deprecated=$(awk '/^Deprecated, accepted for this release with a notice on stderr: / { f = 1 } f { printf "%s ", $0 } f && /^$/ { exit }' "$USAGE_MD" | sed -E 's/^Deprecated, accepted for this release with a notice on stderr: ([^.]*)\..*/\1/; s/`//g; s/  +/ /g')
+    assert_equal "$usage_deprecated" "$so_deprecated" \
+        label       'docs/usage.md names the deprecated -so spellings the --help -so row names, in order' \
+        asserts     'docs/usage.md agrees with the deprecated spellings the tool lists' \
+        produced_by 'so_deprecated_text() in ltl; docs/usage.md -so section' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
 
     # The -udm function row gives the names grouped by kind, each with its
     # note; stripped of the notes and the group labels, it is the list the

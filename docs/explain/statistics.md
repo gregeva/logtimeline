@@ -100,7 +100,7 @@ Standard deviation measures *absolute spread* around the mean: how far observed 
 **Example.**
 
 ```text
-ltl -so std_dev -n 20 access.log      # highest absolute spread
+ltl -so stddev -n 20 access.log       # highest absolute spread
 ltl -so cv -n 20 access.log           # highest relative spread
 ```
 

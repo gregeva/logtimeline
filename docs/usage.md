@@ -237,28 +237,27 @@ The summary table is sorted by occurrence count by default. Use `-so` to rank me
 | `-so, --sort-on <field>` | Choose which metric to rank messages by in the summary. Valid values are grouped below. |
 | `-sa, --sort-ascending` | Reverse the sort order to show lowest values first |
 
-A bare metric name means that metric's total: `bytes` is the sum of bytes,
-`duration` the total duration, `count` the sum of the count metric. The other
-aggregates name the metric first and what is being aggregated second, so
-`bytes_mean` and `count_mean` read the same way.
+A metric's statistic is written `<metric>_<statistic>`: the metric first, then
+the statistic, as `bytes_mean` and `count_max` read. Each metric carries its own
+statistics:
 
-| Group | Values |
-|-------|--------|
-| Totals | `duration`, `bytes`, `count`, `occurrences`, `impact`; deprecated: `time` for `duration`, `size` for `bytes` |
-| Bytes | `bytes_occurrences`, `bytes_min`, `bytes_mean`, `bytes_max` |
-| Count | `count_occurrences`, `count_min`, `count_mean`, `count_max` |
-| Latency stats | `min`, `mean` (alias `avg`), `max`, `stddev`, `cv` |
-| Percentile latency | `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999` |
-| Distribution shape | `iqr`, `skewness`, `kurtosis`, `bimodality_coef` |
+| Metric | Statistics |
+|--------|------------|
+| `duration` | `sum`, `min`, `mean`, `max`, `stddev`, `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `iqr`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999`, `cv`, `skewness`, `kurtosis`, `bimodality_coef`, `impact` |
+| `bytes` | `sum`, `occurrences`, `min`, `mean`, `max` |
+| `count` | `sum`, `occurrences`, `min`, `mean`, `max` |
 
-`stddev` is the name of the standard deviation; `std_dev` is the spelling the
-CSV headers and YAML keys carry, and is still accepted by `-so` as a deprecated
-spelling. `time` and `size` print a deprecation notice on stderr for this
-release.
+A bare metric name is its sum: `bytes` is `bytes_sum`, `duration` is
+`duration_sum`, `count` is `count_sum`. Duration's statistics are also accepted
+bare, because duration is the tool's subject: `p95` is `duration_p95`.
+`<metric>_avg` is `<metric>_mean`, and `avg` is `mean`. `occurrences` ranks by
+the number of messages.
 
-The latency values rank on duration, which is the tool's subject, so they are
-spelled bare. Each also accepts a `duration_` prefix — `duration_p95` is
-`p95` — for consistency with the other metric families.
+Deprecated, accepted for this release with a notice on stderr: `time` for
+`duration`, `size` for `bytes`, `std_dev` for `stddev`, `count_total` for
+`count_occurrences`, `total` for `occurrences`. `stddev` is the name of the
+standard deviation; `std_dev` is the spelling the CSV headers and YAML keys
+carry.
 
 `occurrences` counts the messages that matched; `bytes_occurrences` counts only
 those lines that carried a bytes value, which is what `bytes_mean` divides by.
@@ -590,9 +589,9 @@ That said, logtimeline accepts a few alternates, each on the options listed. Bui
 |---------------|------------|-------------|
 | `duration` | `time` (deprecated) | `-so`, `-hm`, `-hg` |
 | `bytes` | `size` (deprecated) | `-so` |
-| `occurrences` | `total` | `-so` |
+| `occurrences` | `total` (deprecated) | `-so` |
 | `mean` | `avg` | `-so`, `--explain`, the `-udm` function |
 | `distinct` | `dcount`, `unique` | the `-udm` function |
-| `stddev` | `std_dev`, the spelling CSV headers and YAML keys carry | `-so`, `--explain` |
+| `stddev` | `std_dev` (deprecated on `-so`), the spelling CSV headers and YAML keys carry | `-so`, `--explain` |
 
 On `-x` and `-d`, `time` is a key written in the line, never the duration metric.

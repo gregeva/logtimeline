@@ -621,29 +621,29 @@ Verification: scenarios in `tests/validate-statistics-demand.sh` (the
 plus `tests/validate-help-content.sh` for the rows. Equivalence is asserted by
 identical stdout of two runs on the same fixture. All are assertable.
 
-- [ ] **Every generated name ranks.** For each metric and each statistic it
+- [x] **Every generated name ranks.** For each metric and each statistic it
       carries, `-so <metric>_<statistic>` is accepted and its `sort_gate`
       family is that metric: duration carries sum, min, mean, max, stddev,
       the twelve percentiles, iqr, cv, skewness, kurtosis, bimodality_coef
       and impact; bytes and count carry sum, occurrences, min, mean and max.
-- [ ] **Shorthands are the same sort.** These pairs give identical stdout:
+- [x] **Shorthands are the same sort.** These pairs give identical stdout:
       `bytes`/`bytes_sum`, `count`/`count_sum`, `duration`/`duration_sum`,
       `min`/`duration_min`, `p95`/`duration_p95`, `impact`/`duration_impact`,
       `avg`/`mean`/`duration_avg`/`duration_mean`, `bytes_avg`/`bytes_mean`,
       `count_avg`/`count_mean`.
-- [ ] **Cross-metric names are rejected.** `duration_bytes`,
+- [x] **Cross-metric names are rejected.** `duration_bytes`,
       `duration_count_sum`, `duration_occurrences`, `duration_total`,
       `bytes_p95` and `count_stddev` exit 1 with the `-so` error, which names
       the value and lists what `-so` accepts in the words of the help row.
-- [ ] **Deprecated spellings work for the release, with their notice.**
+- [x] **Deprecated spellings work for the release, with their notice.**
       `total`, `count_total`, `std_dev`, `duration_std_dev`, `time` and
       `size` each print one `Warning: ... is deprecated` line naming
       `-so/--sort-on` and the replacement, and give the same stdout as the
       replacement. `stddev` prints none.
-- [ ] **The rows read the set.** The `-so` help row and the error print the
+- [x] **The rows read the set.** The `-so` help row and the error print the
       same vocabulary text; the `docs/usage.md` `-so` table agrees with it
       (`validate-help-content.sh`).
-- [ ] **The mechanism.** One table of `-so` spellings is generated from
+- [x] **The mechanism.** One table of `-so` spellings is generated from
       `@builtin_metrics` and `@statistic_names`; the `s/^duration_//` strip,
       the literal allow-list and the `elsif` ladder are gone; the sort
       family is read from the table entry, not inferred from a key prefix.
@@ -725,6 +725,17 @@ Verification: reading, and `tests/validate-help-content.sh`,
   so the `-hg` binding now binds a base name to every config carrying it, in
   declaration order. The `time` deprecation notice now names the options in
   the order they are settled (`-hm`, `-hg`, `-so`).
+- **Phase 4**: `%so_spelling` is generated from `@builtin_metrics` (each
+  metric's `statistics`, name beside stored key; duration's read from
+  `@statistic_names` plus sum and impact) and `@statistic_names`; the strip,
+  the allow-list, the ladder and `sort_key_metric_family()` are gone, and the
+  sort gate takes its family from the entry. `so_vocabulary_text()` and
+  `so_deprecated_text()` give the help row and the error one text. `total`
+  and `count_total` are declared deprecated in `%so_deprecated_spellings`; the
+  `std_dev` notice is on (`deprecation_notice => 1`), on `-so` only, since
+  `std_dev` remains `--explain`'s topic name. `docs/usage.md`'s `-so` section
+  is rewritten to the naming rule, and the `stddev` example (observation 6)
+  is changed in `docs/explain/statistics.md` and the `std_dev` topic.
 - **Pre-existing, outside this issue:** `-hm x -udm x::max` on a log where
   `x` never matches dies in the heatmap colour lookup (`Can't use an
   undefined value as an ARRAY reference`, exit 255), on the release code as

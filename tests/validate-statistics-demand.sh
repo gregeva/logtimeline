@@ -235,6 +235,7 @@ scenario_register scenario-1-terminal-only-default \
                   scenario-14-retained-durations-are-numbers \
                   scenario-15-exported-spelling-on-fractional-durations \
                   scenario-16-sort-on-statistic-aliases \
+                  scenario-18-sort-on-generated-vocabulary \
                   scenario-17-heatmap-show-stats-demand
 scenario_parse_args "$@"
 
@@ -1144,6 +1145,102 @@ if body=$(extract_section "$csv"); then
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS timeline-latency-column inactive while $hide_stats)' \
         contract    "$HEATMAP_CONTRACT"
 fi
+echo
+fi
+
+############################################################
+# Scenario 18 (#614 phase 4): the -so vocabulary is generated from the metric
+# and statistic tables. Each metric with each statistic it carries is
+# <metric>_<statistic> and ranks on that metric's family; the shorthands rank
+# as their full names do; cross-metric names are refused; deprecated
+# spellings rank as their replacements with one notice. The expected lists
+# below are the requirement (features/614-operand-settlement.md § 5
+# observation 4, the naming rule), not read from ltl. `-bs 1440 -oe` and the
+# twelve-line access fixture: the sort_gate line, the ranked messages and
+# stderr are all that is read.
+if scenario_wanted scenario-18-sort-on-generated-vocabulary; then
+current_scenario="scenario-18-sort-on-generated-vocabulary"
+echo "--- $current_scenario ---"
+VOCAB_CONTRACT='features/614-operand-settlement.md § 2 D3 (the -so vocabulary generated from the tables), § 5 observations 4 and 5 (<metric>_<statistic>; avg after a prefix), § Acceptance criteria phase 4'
+VOCAB_PRODUCED_BY='the -so resolution in adapt_to_command_line_options() through %so_spelling, generated from @builtin_metrics and @statistic_names in ltl'
+declare -A carried=(
+    [duration]="sum min mean max stddev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef impact"
+    [bytes]="sum occurrences min mean max"
+    [count]="sum occurrences min mean max"
+)
+for metric in duration bytes count; do
+    for statistic in ${carried[$metric]}; do
+        operand="${metric}_${statistic}"
+        out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -n 5 -so "$operand")
+        check_capture_warnings "$out"
+        if body=$(extract_section "$out"); then
+            assert_line "$body" \
+                pattern     "^sort_gate: operand=$operand family=$metric " \
+                asserts     "-so $operand is accepted and ranks on the $metric family" \
+                produced_by "$VOCAB_PRODUCED_BY" \
+                contract    "$VOCAB_CONTRACT"
+        fi
+    done
+done
+
+# Shorthands rank as their full names: the rendered messages are identical.
+ranked() {
+    local capture
+    capture=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -n 20 --hide title,timeline,options,summary -so "$1")
+    check_capture_warnings "$capture"
+    echo "$capture"
+}
+for pair in bytes:bytes_sum count:count_sum duration:duration_sum min:duration_min p95:duration_p95 impact:duration_impact \
+            avg:mean mean:duration_mean duration_avg:duration_mean bytes_avg:bytes_mean count_avg:count_mean; do
+    IFS=: read -r first second <<< "$pair"
+    one=$(ranked "$first"); two=$(ranked "$second")
+    assert_command \
+        command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ -n \"\$(sed '1,/^=== END statistics-demand ===\$/d' '$one')\" ] && ! grep -q '^Warning:' '$one.stderr' '$two.stderr'" \
+        label       "-so $first and -so $second render the same ranked messages, with no deprecation notice" \
+        asserts     "A shorthand is the same sort as its full name: -so $first and -so $second give identical message tables, and neither is a deprecated spelling (the fixture carries no count values, so the count sorts print their fallback note, which is not read here)" \
+        produced_by "$VOCAB_PRODUCED_BY" \
+        contract    "$VOCAB_CONTRACT"
+done
+
+# Deprecated spellings rank as their replacements, with one notice each.
+for pair in total:occurrences count_total:count_occurrences std_dev:stddev duration_std_dev:stddev time:duration size:bytes; do
+    IFS=: read -r old new <<< "$pair"
+    one=$(ranked "$old"); two=$(ranked "$new")
+    assert_command \
+        command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ \"\$(grep -c '^Warning: $old is deprecated.*(given to -so/--sort-on): use $new\$' '$one.stderr')\" = 1 ] && ! grep -q '^Warning:' '$two.stderr'" \
+        label       "-so $old ranks as -so $new and prints one deprecation notice naming $new" \
+        asserts     "A deprecated spelling keeps working for the release: the same message table as -so $new, and one stderr line naming -so/--sort-on and the replacement" \
+        produced_by "$VOCAB_PRODUCED_BY; record_deprecation() and print_deprecation_notices() in ltl" \
+        contract    "$VOCAB_CONTRACT; D3 (total, count_total and std_dev deprecated with a notice)"
+done
+
+# Names that mix two metrics, or give a metric a statistic it does not carry,
+# are refused with the -so error.
+for operand in duration_bytes duration_count_sum duration_occurrences duration_total bytes_p95 count_stddev; do
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -so "$operand" "$SINGLE_SAMPLE_FIXTURE" > "$WORKDIR/reject.out" 2> "$WORKDIR/reject.err"
+    rc=$?
+    set -e
+    if ! assert_no_runtime_warnings "$WORKDIR/reject.err" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+    assert_command \
+        command     "[ $rc = 1 ] && sed -e 's/.\\x08//g' -e 's/\\x1b\\[[0-9;]*m//g' '$WORKDIR/reject.err' | grep -q \"^Error: invalid sort type '$operand'. -so takes a metric's statistic, written <metric>_<statistic>: \"" \
+        label       "-so $operand is refused, exit 1, naming it and what -so takes" \
+        asserts     "$operand is not a statistic of the metric it names, so -so refuses it and lists its vocabulary" \
+        produced_by "$VOCAB_PRODUCED_BY; so_vocabulary_text() in ltl" \
+        contract    "$VOCAB_CONTRACT"
+done
+
+# The mechanism, read from the source where the requirement lives: no prefix
+# strip, no literal allow-list, no per-name ladder, and the family read from
+# the vocabulary rather than inferred from a key's prefix.
+assert_command \
+    command     "! grep -qF 's/^duration_//' '$LTL' && ! grep -qE 'count_occurrences count_total|elsif\\( *\\\$sort_type =~' '$LTL' && ! grep -q 'sub sort_key_metric_family' '$LTL' && grep -q 'apply_parse_time_sort_gate( \\\$sort_operand_typed, \\\$sort->{family} )' '$LTL'" \
+    label       'the -so resolution is the generated table alone' \
+    asserts     'The duration_ strip, the literal allow-list, the elsif ladder and the prefix-based family inference are gone; the sort gate takes its family from the vocabulary entry' \
+    produced_by "$VOCAB_PRODUCED_BY" \
+    contract    "$VOCAB_CONTRACT"
 echo
 fi
 
