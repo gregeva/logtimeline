@@ -498,9 +498,9 @@ scenario_finer_bound_note() {
 scenario_runtime_value() {
     current_scenario="runtime-value"
     echo "[$current_scenario]"
-    run_ltl rv-us -bs 1440 -oe -n 1 -V runtime-config,index-read-back -dmin 200us "$BOUNDARY_FIXTURE"
+    run_ltl rv-us -idx -bs 1440 -oe -n 1 -V runtime-config,index-read-back -dmin 200us "$BOUNDARY_FIXTURE"
     rm -f "$TMP_DIR/ltl-index.csv"
-    run_ltl rv-bare -bs 1440 -oe -n 1 -V index-read-back -dmin 0.2 "$BOUNDARY_FIXTURE"
+    run_ltl rv-bare -idx -bs 1440 -oe -n 1 -V index-read-back -dmin 0.2 "$BOUNDARY_FIXTURE"
     rm -f "$TMP_DIR/ltl-index.csv"
     check "runtime-config duration_min" "$(line_value rv-us duration_min)" 0.2 \
         '-V runtime-config carries the value converted to the unit ltl uses internally (milliseconds)' \

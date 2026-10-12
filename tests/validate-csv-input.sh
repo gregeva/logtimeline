@@ -278,7 +278,7 @@ if scenario_wanted index-read-as-input; then
     mkdir "$TMP_DIR/idx"
     write_latency_log "$TMP_DIR/idx/app.log"
     idx_build_rc=0
-    ( cd "$TMP_DIR/idx" && "$LTL" --disable-progress -bs 1440 -oe -n 1 app.log > index-build.out 2> index-build.out.stderr ) || idx_build_rc=$?
+    ( cd "$TMP_DIR/idx" && "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 app.log > index-build.out 2> index-build.out.stderr ) || idx_build_rc=$?
     check_capture_warnings "$TMP_DIR/idx/index-build.out" "index-build"
     assert_command \
         command     "[[ $idx_build_rc -eq 0 ]] && [[ \"\$(head -1 '$TMP_DIR/idx/ltl-index.csv' | cut -d, -f1)\" == entry_type ]]" \

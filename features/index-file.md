@@ -1,5 +1,8 @@
 # Feature: Index File for Progressive File Metadata Caching
 
+**Status:** deprecated and off by default; turned on by `-idx, --index`
+(`features/708-run-index-deprecation.md`, #708). Removal is tracked by #710.
+
 ## Overview
 
 Implement a persistent index file (`ltl-index.csv`) that stores pre-computed metadata about log files and filtered selections. This enables faster subsequent analysis runs by avoiding redundant file processing and provides the foundation for intelligent heuristics in other performance features.
@@ -172,9 +175,10 @@ If the index already contains `duration_min`, `duration_max`, etc., the first pa
 
 ## Run shape and measured cost
 
-The index is written on every run unless `-ni` is given, so its cost is paid
-by default. Its work falls into five parts, all in `read_and_process_logs`
-except the run-level ones:
+Until the deprecation (#708) the index was written on every run unless `-ni`
+was given, so its cost was paid by default; it is now written only under
+`-idx`. Its work falls into five parts, all in `read_and_process_logs` except
+the run-level ones:
 
 | Part | Runs | What it does |
 |---|---|---|

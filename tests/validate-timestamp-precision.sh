@@ -136,7 +136,7 @@ printf 'timestamp,latency\n1771078373123,12\n1771078433456,34\n' > "$CSVEPOCH"
 # the assertions read the timeline labels, the summary heading's bounds, the
 # run index and the aggregate export. No messages table (-n 0), no empty
 # buckets (-oe); width 200 keeps the heading's two bounds on one line. The
-# index is a subject here, so -ni is passed only where it is not read; every
+# index is a subject here, so -idx is passed where it is read; every
 # run that writes an index or an export runs in a directory of its own.
 COMMON=(--disable-progress -n 0 -oe --terminal-width 200)
 
@@ -296,7 +296,7 @@ fi
 # ---------------------------------------------------------------------------
 if scenario_wanted one-rounding/three-digit-ms; then
 current_scenario="one-rounding/three-digit-ms"
-run_in round "${COMMON[@]}" -o -V aggregate-export -ms -bs 1000 "$THREE"
+run_in round "${COMMON[@]}" -idx -o -V aggregate-export -ms -bs 1000 "$THREE"
 d="$TMP_DIR/round"
 first=$(heading_bounds "$d"); first=${first%%|*}
 obs=$(export_observation "$d" start)
@@ -316,7 +316,7 @@ fi
 # ---------------------------------------------------------------------------
 if scenario_wanted carry/next-second; then
 current_scenario="carry/next-second"
-run_in carry "${COMMON[@]}" -o -V aggregate-export -ms -bs 100 "$CARRY"
+run_in carry "${COMMON[@]}" -idx -o -V aggregate-export -ms -bs 100 "$CARRY"
 d="$TMP_DIR/carry"
 last=$(heading_bounds "$d"); last=${last##*|}
 obs=$(export_observation "$d" end)
@@ -342,7 +342,7 @@ fi
 
 if scenario_wanted carry/next-day; then
 current_scenario="carry/next-day"
-run_in dayend "${COMMON[@]}" -o -V aggregate-export -ms -bs 100 "$DAYEND"
+run_in dayend "${COMMON[@]}" -idx -o -V aggregate-export -ms -bs 100 "$DAYEND"
 d="$TMP_DIR/dayend"
 last=$(heading_bounds "$d"); last=${last##*|}
 idx=$(index_cell "$d" file last_timestamp)
@@ -383,14 +383,14 @@ current_scenario="index/older-row-fresh"
 d="$TMP_DIR/fresh"
 mkdir -p "$d"
 cp "$THREE" "$d/three.log"
-run_in fresh "${COMMON[@]}" -V index-read-back -ms -bs 1000 three.log
+run_in fresh "${COMMON[@]}" -idx -V index-read-back -ms -bs 1000 three.log
 # Rewrite the file row's file_mtime with the expression the index writer used
 # before the one formatter, so the read-back compares the new formatter's
 # on-disk time against a value written the established way.
 old_form=$(perl -MPOSIX=strftime -e 'print strftime("%Y-%m-%dT%H:%M:%S", gmtime((stat $ARGV[0])[9]))' "$d/three.log")
 perl -i -pe 'BEGIN { $v = shift } s/^(file,[^,]*,[^,]*,[^,]*,)[^,]*,/$1$v,/' "$old_form" "$d/ltl-index.csv"
 written=$(index_cell "$d" file file_mtime)
-run_in fresh "${COMMON[@]}" -V index-read-back -ms -bs 1000 three.log
+run_in fresh "${COMMON[@]}" -idx -V index-read-back -ms -bs 1000 three.log
 fresh=$(awk '/^=== index-read-back ===/ {s=1; next} s && /^  freshness: / {print $2; exit}' "$d/out.txt")
 if [[ "$written" == "$old_form" && "$fresh" == "fresh" ]]; then
     pass_with "a row whose file_mtime was written in the established form reads fresh"
@@ -812,7 +812,7 @@ fi
 
 if scenario_wanted nanosecond/index-and-export; then
 current_scenario="nanosecond/index-and-export"
-run_in nine-out "${COMMON[@]}" -o -V aggregate-export -bs 1 -tp ns "$NINE"
+run_in nine-out "${COMMON[@]}" -idx -o -V aggregate-export -bs 1 -tp ns "$NINE"
 d="$TMP_DIR/nine-out"
 start=$(export_observation "$d" start); end=$(export_observation "$d" end)
 row=""
@@ -868,7 +868,7 @@ expect_note() {
 
 if scenario_wanted truth/clamped; then
 current_scenario="truth/clamped"
-run_in tc-access "${COMMON[@]}" -bs 1 -tp ms "$ACCESS"
+run_in tc-access "${COMMON[@]}" -idx -bs 1 -tp ms "$ACCESS"
 b=$(heading_bounds "$TMP_DIR/tc-access")
 frac_labels=$(labels "$TMP_DIR/tc-access" | grep -c '\.' || true)
 idx_first=$(index_cell "$TMP_DIR/tc-access" file first_timestamp)

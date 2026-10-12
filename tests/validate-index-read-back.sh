@@ -57,7 +57,11 @@ INDEX_FIXTURE="$SCRIPT_DIR/fixtures/ltl-index-readback.csv"
 # bucket size is not part of the selection signature (serialize_filters()),
 # so the timeline collapses to one non-empty bucket - the two-file scenarios
 # pair fixtures 25 days apart - and the summary table is suppressed.
-COMMON="--disable-progress -bs 1440 -oe -osum -n 1"
+# The index is off by default; COMMON turns it on with -idx, and
+# COMMON_DEFAULT is the same run without it, for the scenarios asserting
+# that a default run leaves the index alone.
+COMMON_DEFAULT="--disable-progress -bs 1440 -oe -osum -n 1"
+COMMON="$COMMON_DEFAULT -idx"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -1290,6 +1294,105 @@ scenario_index_heatmap_bytes_preseed() {
 }
 
 # ---------------------------------------------------------------------------
+# #708: the index is off by default, -idx turns it on, -ni has no effect
+# ---------------------------------------------------------------------------
+IDX708_CONTRACT='features/708-run-index-deprecation.md D1 (nothing printed about the index), D2 (off by default), D3 (-idx turns it on), D8 (-ni accepted and without effect)'
+
+# The index's modification time is set back to a fixed past instant before
+# a run, so a rewrite within the same second still shows as a change.
+INDEX_PAST_STAMP=202001011200
+index_mtime() { stat -f %m ltl-index.csv 2>/dev/null || stat -c %Y ltl-index.csv; }
+
+scenario_default_writes_no_index() {
+    current_scenario="default-writes-no-index"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
+    check_capture_warnings "$out"
+    assert_command \
+        command     '[[ ! -e ltl-index.csv ]] && ! compgen -G ".ltl-index.*.tmp" >/dev/null' \
+        label       'a default run leaves no ltl-index.csv and no temp index behind' \
+        asserts     'A run without -idx does not write the index: neither ltl-index.csv nor its write-side temp file exists afterwards in a directory that held neither' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^index_used: no$' \
+        asserts     'A run without -idx does not read an index, so the read-back reports index_used=no' \
+        produced_by 'emit_index_readback_verbose() in ltl; read_index_file() not called without -idx' \
+        contract    "$IDX708_CONTRACT"
+}
+
+scenario_default_leaves_index_untouched() {
+    current_scenario="default-leaves-index-untouched"
+    echo "[$current_scenario]"
+    local out sum_before sum_after mtime_before
+    seed_from_fixture
+    touch -t "$INDEX_PAST_STAMP" ltl-index.csv
+    sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
+    mtime_before=$(index_mtime)
+    out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
+    check_capture_warnings "$out"
+    sum_after=$(shasum ltl-index.csv | cut -d' ' -f1)
+    assert_command \
+        command     "[[ '$sum_after' == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
+        label       'a default run leaves an existing ltl-index.csv byte-identical, its modification time unchanged' \
+        asserts     'A run without -idx neither rewrites nor touches an index already in the directory, even one holding a fresh entry for the file being read' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^index_used: no$' \
+        asserts     'A run without -idx does not read the index beside it: the fixture holds a fresh entry for this file, which an -idx run would use' \
+        produced_by 'read_index_file() call in the MAIN section of ltl, gated on $index_enabled; emit_index_readback_verbose()' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  lookup: none$' \
+        asserts     'With the index not read, the file reports no lookup tier' \
+        produced_by 'emit_index_readback_verbose() in ltl (no %index_preseed entry: lookup none)' \
+        contract    "$IDX708_CONTRACT"
+    assert_command \
+        command     "! grep -qi 'index' '$out.stderr'" \
+        label       'nothing about the index on stderr' \
+        asserts     'The deprecation is silent: a default run beside an existing index prints no notice, warning or other line about the index' \
+        produced_by 'ltl (no notice is emitted for the index; print_deprecation_notices() carries none)' \
+        contract    "$IDX708_CONTRACT"
+}
+
+scenario_no_index_is_noop() {
+    current_scenario="no-index-is-noop"
+    echo "[$current_scenario]"
+    local out_default out_ni out_both sum_before mtime_before
+    seed_from_fixture
+    touch -t "$INDEX_PAST_STAMP" ltl-index.csv
+    sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
+    mtime_before=$(index_mtime)
+    out_default=$(run_ltl $COMMON_DEFAULT "$ACCESS_LOG")
+    check_capture_warnings "$out_default"
+    out_ni=$(run_ltl $COMMON_DEFAULT -ni "$ACCESS_LOG")
+    check_capture_warnings "$out_ni"
+    assert_command \
+        command     "grep -Eq 'command-line options: .* -ni([^a-z-]|\$)' '$out_ni' && cmp -s <(grep -v 'command-line options:' '$out_default') <(grep -v 'command-line options:' '$out_ni') && cmp -s '$out_default.stderr' '$out_ni.stderr'" \
+        label       'a -ni run prints what a default run prints, its echoed options line apart, on stdout and stderr' \
+        asserts     '-ni is accepted and has no effect: no notice and no difference in output, except that the options line under the timeline echoes -ni as typed' \
+        produced_by "the 'no-index|ni' GetOptions entry in ltl, read by nothing" \
+        contract    "$IDX708_CONTRACT"
+    assert_command \
+        command     "[[ \"\$(shasum ltl-index.csv | cut -d' ' -f1)\" == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
+        label       'neither the default nor the -ni run touched the existing index' \
+        asserts     'A run with -ni, like a default run, leaves an existing index byte-identical with its modification time unchanged' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    rm -f ltl-index.csv
+    out_both=$(run_ltl $COMMON -ni "$ACCESS_LOG")
+    check_capture_warnings "$out_both"
+    assert_command \
+        command     '[[ "$(grep -c "^file," ltl-index.csv 2>/dev/null || true)" -ge 1 ]]' \
+        label       '-idx -ni writes the index, as -idx alone does' \
+        asserts     '-ni does not switch off an index that -idx turns on: the run writes ltl-index.csv with a file row' \
+        produced_by "write_index_file() in ltl; the 'index|idx' and 'no-index|ni' GetOptions entries" \
+        contract    "$IDX708_CONTRACT"
+}
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1489,7 +1592,10 @@ scenario_register cold-no-index \
                   index-run-precision \
                   drift-runtime-precision \
                   drift-numeric-structure \
-                  bound-signature-unchanged
+                  bound-signature-unchanged \
+                  default-writes-no-index \
+                  default-leaves-index-untouched \
+                  no-index-is-noop
 scenario_parse_args "$@"
 
 echo "Validating index read-back against ltl at $LTL"
@@ -1529,6 +1635,9 @@ while read -r _scenario; do
         drift-runtime-precision              ) _fn=scenario_drift_runtime_precision ;;
         drift-numeric-structure              ) _fn=scenario_drift_numeric_structure ;;
         bound-signature-unchanged            ) _fn=scenario_bound_signature_unchanged ;;
+        default-writes-no-index              ) _fn=scenario_default_writes_no_index ;;
+        default-leaves-index-untouched       ) _fn=scenario_default_leaves_index_untouched ;;
+        no-index-is-noop                     ) _fn=scenario_no_index_is_noop ;;
     esac
     echo ""
     in_scenario_dir "$_fn"
