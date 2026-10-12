@@ -62,7 +62,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.19.0";
+my $version_number = "0.19.0-614";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -16519,16 +16519,19 @@ sub adapt_to_command_line_options {
     # dispatch_informational_options() before GetOptions runs; $show_help,
     # $explain_arg, and $print_version are populated here but no longer read.
 
+    # Each argument is expanded on its own, so an argument that selects no file
+    # is known by name: a directory, a path that does not exist, a pattern
+    # that matches nothing. Directories and other non-files inside an
+    # argument that did select files are skipped without a word.
+    my @selected_nothing;
     foreach my $pattern (@ARGV) {									# do in process file globbing for common experience across environments (Windows doesn't glob in the shell, passes in the parameters)
-        if ($recursive_files) {
-            push @in_files, expand_recursive_pattern($pattern);      # -r: the filename component matches at every depth beneath the pattern's directory component
-        }
-        else {
-            push @in_files, bsd_glob($pattern);					    # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
-        }
+        my @expanded = $recursive_files
+            ? expand_recursive_pattern($pattern)                    # -r: the filename component matches at every depth beneath the pattern's directory component
+            : bsd_glob($pattern);                                   # bsd_glob: wildcard/brace/tilde expansion without treating whitespace as a pattern separator, so paths containing spaces survive as one candidate
+        my @files = grep { -f $_ } @expanded;                       # only files are read
+        push @selected_nothing, $pattern unless @files;
+        push @in_files, @files;
     }
-
-	@in_files = grep { -f $_ } @in_files;								# only accept files in list to be read (remove anything else in the globbed directory list)
 
     # A recursive sweep can reach one file from two patterns whose roots nest
     # ('-r logs/*.888 logs/access/*.888'), and reading a file twice doubles its
@@ -16552,6 +16555,12 @@ sub adapt_to_command_line_options {
                       . "      or rejected, by the shell before ltl ever sees it.\n"
             if $recursive_files;
         print_usage( "unable to open any files", undef, $quoting_hint );
+        exit 2;
+    }
+    # Files were selected, but not by every argument: the run would read less
+    # than was asked for, so it stops and names each argument that selected none.
+    if (@selected_nothing) {
+        print_usage( join( '; ', map { file_argument_problem($_) } @selected_nothing ) );
         exit 2;
     }
     # Duration keeps its bare spellings on the CLI because duration is the tool's
@@ -24156,6 +24165,13 @@ sub pipeline_render {
     write_aggregate_export();
 
     write_index_file() if $index_enabled;  # Write persistent index file with per-file metadata (Issue #46)
+}
+
+# What the usage error says about one file argument that selected no file:
+# a directory is named as one; anything else matched no file.
+sub file_argument_problem {
+    my ($argument) = @_;
+    return -d $argument ? "'$argument' is a directory, not a file" : "'$argument' matches no file";
 }
 
 # Expand one file argument to every file matching its filename component at

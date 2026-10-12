@@ -496,33 +496,33 @@ stderr error block, and the `files:` / `file:` lines of `-V format-detection`
 for what was selected. Each criterion is run without and with `-r`. All are
 assertable; the fixture tree and the assertion surface already exist.
 
-- [ ] **A directory beside a file.** `ltl <fixture>/archive <fixture>/alpha.888`
+- [x] **A directory beside a file.** `ltl <fixture>/archive <fixture>/alpha.888`
       stops before reading any file, exit 2, and the error names
       `<fixture>/archive` and says it is a directory.
-- [ ] **A path that does not exist beside a file.** `ltl <fixture>/absent.888
+- [x] **A path that does not exist beside a file.** `ltl <fixture>/absent.888
       <fixture>/alpha.888` stops before reading any file, exit 2, and the
       error names `<fixture>/absent.888`.
-- [ ] **A pattern that matches nothing beside a file.** `ltl
+- [x] **A pattern that matches nothing beside a file.** `ltl
       "<fixture>/*.none" <fixture>/alpha.888` (quoted, so `ltl` expands it)
       stops before reading any file, exit 2, and the error names the pattern
       as typed.
-- [ ] **Every such argument is named.** With two arguments that select no
+- [x] **Every such argument is named.** With two arguments that select no
       file beside one that does, the one error names both.
-- [ ] **Expansion comes first.** A quoted pattern that selects files
+- [x] **Expansion comes first.** A quoted pattern that selects files
       (`"<fixture>/*.888"`) is never reported as selecting nothing; it runs
       and selects the files it matches.
-- [ ] **Directories inside a pattern that selected files stay silent.**
+- [x] **Directories inside a pattern that selected files stay silent.**
       `ltl "<fixture>/*"` without `-r` selects the root's four files
       (`alpha.888`, `beta.888`, `charlie.123`, `delta.000`) and skips
       `archive/`, `nested/` and `only-nonmatching/`; with `-r` it selects every
       file in the tree. Either way stderr carries no file-selection message.
-- [ ] **Nothing selected at all is the existing failure, unchanged.** When no
+- [x] **Nothing selected at all is the existing failure, unchanged.** When no
       argument selects any file, whether one argument or several, the run
       ends in `Error: unable to open any files`, byte-identical, exit 2, with
       the quoting hint under `-r` only (445 D1 to D3). The existing
       `bare-directory-matches-nothing` and `no-match-quoting-guidance`
       scenarios pass unchanged.
-- [ ] **The mechanism.** The check runs inside the existing expansion loop in
+- [x] **The mechanism.** The check runs inside the existing expansion loop in
       `adapt_to_command_line_options()`, on each argument's `bsd_glob` or
       `expand_recursive_pattern` result, and reports through `print_usage()`,
       the mechanism the no-files error uses; the silent
