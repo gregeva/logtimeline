@@ -253,3 +253,38 @@ run; `-idx` is today's default run.
 - **D6 — The parsing-architecture issue (#23) no longer counts on the index.**
   Its relationship to the index read-back is trued up to say the index is not
   used.
+
+## Implementation record
+
+- `ltl`: a new `$index_enabled`, set by `-idx, --index`, gates the read
+  (`read_index_file()`), the per-line capture (`$index_capture_demand`) and the
+  write (`write_index_file()`). `-ni, --no-index` keeps its GetOptions entry and
+  its `$no_index` scalar, read by nothing, and is marked hidden. The `--help`
+  and `docs/usage.md` rows are replaced by the `-idx, --index` row.
+- `tests/validate-index-read-back.sh`: every existing scenario runs with `-idx`
+  (AC5); three scenarios are new: `default-writes-no-index` (AC1),
+  `default-leaves-index-untouched` (AC2, AC7) and `no-index-is-noop` (AC6,
+  AC7). Against the base build the assertions that separate the two builds
+  fail: the index written, the index rewritten, the index read
+  (`index_used: yes`), `-idx` unknown.
+- The harnesses that read an index file pass `-idx` on the runs whose index
+  they read (`validate-csv-input.sh`, `validate-timestamp-precision.sh`,
+  `validate-outcome-criteria.sh`, `validate-option-resolution.sh`,
+  `validate-screenshot-capture.sh`), as does
+  `tests/fixtures/regenerate-index-readback-fixtures.sh`.
+- AC3, measured 2026-10-12 on the 5,000-line Tomcat access-log slice with
+  `-o -V -hm -hg`, unfiltered and with `-dmin 50 -i GET`: the base build with
+  `-ni` against this build's default run. The STATS and MESSAGES CSVs are
+  identical; the terminal output, `-V` and the aggregate export differ only in
+  timing, memory, the output file names, and `-ni` where the base run was given
+  it (the `no_index` runtime-config line and the echoed options).
+- AC4, measured 2026-10-12, one run each, `single-day-access-log-standard`
+  (761,698 lines), both builds from worktrees side by side:
+
+  | Comparison | Total | Change |
+  |---|---|---|
+  | base default → this build's default | 7.8 s → 6.1 s | −22.8 % |
+  | base with `-ni` → this build's default | 6.1 s → 6.1 s | +0.1 % (+4 ms) |
+  | `single-day-access-log-heatmap`, base default → this build's default | 9.0 s → 7.0 s | −22.6 % |
+
+  Peak memory moved by less than 1 % in each comparison.
