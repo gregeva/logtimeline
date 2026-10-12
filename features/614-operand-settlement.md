@@ -683,14 +683,14 @@ Verification: `tests/validate-help-content.sh` and `tests/validate-explain.sh`
 Verification: `tests/validate-help-content.sh` for the rows,
 `tests/validate-profile.sh` unchanged. All are assertable.
 
-- [ ] **The error points, and lists nothing.** `-pr bogus` exits 1 with an
+- [x] **The error points, and lists nothing.** `-pr bogus` exits 1 with an
       error naming `bogus` and pointing to `ltl --help profile`, naming no
       mode.
-- [ ] **The row is generated from the mode table.** The `-pr` help row names
+- [x] **The row is generated from the mode table.** The `-pr` help row names
       the singular modes (a one-day period) and the plural modes (a one-week
       period) in table order and says which have an `-alt` variant, so `day`
       is not claimed to have one; the `docs/usage.md` row matches.
-- [ ] **Profiles fold as before.** `validate-profile.sh` and
+- [x] **Profiles fold as before.** `validate-profile.sh` and
       `validate-profile-render.sh` pass unchanged.
 
 ### Phase 8 — records and documentation

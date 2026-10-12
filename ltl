@@ -668,9 +668,10 @@ my $output_timestamp_max = 0;
 #   include:  wday set (0=Sun..6=Sat) kept; undef = all days; others are dropped
 #   format:   strftime label format ('%H:%M' time-only, '%a %H:%M' weekday+time)
 # The rendered profile window (kept days x 86400, reported by -V profile) is
-# derived from these by profile_window_seconds(), not stored here.
+# derived from these by profile_window_seconds(), not stored here. The rows
+# are kept in order: the -pr help row names the modes as the table lists them.
 my $profile_mode = '';
-my %profile_modes = (
+my @profile_mode_rows = (
     'day'           => { period => 86400,  anchor => 0,      include => undef,                   format => '%H:%M' },
     'workday'       => { period => 86400,  anchor => 0,      include => { 1,1,2,1,3,1,4,1,5,1 }, format => '%H:%M' },
     'workday-alt'   => { period => 86400,  anchor => 0,      include => { 0,1,1,1,2,1,3,1,4,1 }, format => '%H:%M' },
@@ -687,6 +688,8 @@ my %profile_modes = (
     'weekends'      => { period => 604800, anchor => 172800, include => { 6,1,0,1 },             format => '%a %H:%M' },
     'weekends-alt'  => { period => 604800, anchor => 86400,  include => { 5,1,6,1 },             format => '%a %H:%M' },
 );
+my %profile_modes      = @profile_mode_rows;
+my @profile_mode_names = @profile_mode_rows[ grep { !( $_ % 2 ) } 0 .. $#profile_mode_rows ];   # in table order
 my ( $profile_dropped_samples, $profile_included_samples ) = ( 0, 0 );
 my( $exclude_regex, $include_regex, $highlight_regex, $threadpool_activity_regex );
 my( $include_filter, $exclude_filter, $highlight_filter );  # Compiled filter matchers (Issue #117)
@@ -2714,13 +2717,24 @@ sub _validate_dm {
 # --profile|-pr: accept only the known fold modes; die at parse time otherwise.
 # The mode list is long enough that reciting it here buries the error, so the
 # message names the base vocabularies and points at the full reference.
+# The -pr help row's account of the modes, from the mode table: the base
+# modes that fold onto one day and those that keep a week, in table order,
+# and which have an -alt variant.
+sub profile_modes_text {
+    my @base   = grep { !/-alt$/ } @profile_mode_names;
+    my @single = grep { $profile_modes{$_}{period} == 86400 } @base;
+    my @week   = grep { $profile_modes{$_}{period} != 86400 } @base;
+    my @no_alt = grep { !exists $profile_modes{"$_-alt"} } @base;
+    my $alt    = @no_alt ? 'Every mode but ' . join_with_or(@no_alt) . ' has' : 'Each has';
+    return 'The singular modes (' . join( ', ', @single ) . ') stack their days onto one 24-hour axis; the plural ones ('
+         . join( ', ', @week ) . ") keep each day's identity on the axis. $alt an -alt variant using the Sunday-anchored calendar.";
+}
+
 sub _validate_profile {
     my ($value) = @_;
     return if defined $value && exists $profile_modes{$value};
     die "--profile: '" . (defined $value ? $value : '')
-      . "' is not a valid profile mode; the modes are day, week, workday, workweek, weekday,"
-      . " weekdays, weekend and weekends, each with an -alt variant."
-      . " Run 'ltl --help profile' for what each one keeps and folds onto.\n";
+      . "' is not a valid profile mode. Run 'ltl --help profile' for the modes, what each one keeps and what it folds onto.\n";
 }
 
 # Fold a timestamp onto its position within the mode's reference period.
@@ -11290,7 +11304,7 @@ sub print_help {
     $out .= help_opt("-tp,  --timestamp-precision <precision>", "Set the precision timestamps are shown at: m (the minute, the default), s, ms, us or ns, also spelled minute, second, millisecond, microsecond or nanosecond; never finer than the log's timestamps carry. The bucket width is set by -bs alone, so -bs 100ms -tp ms draws ten buckets a second, each labelled to the millisecond.");
     $out .= help_opt("-s,   --seconds",               "Deprecated: use -tp s for the timestamp precision and a unit on -bs (-bs 30s) for the width. Reads a bare -bs number as seconds, and renders timestamps with seconds precision.");
     $out .= help_opt("-ms,  --milliseconds",          "Deprecated: use -tp ms for the timestamp precision and a unit on -bs (-bs 100ms) for the width. Reads a bare -bs number as milliseconds, and renders timestamps with .fff precision.");
-    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Each has an -alt variant using the Sunday-anchored calendar. Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
+    $out .= help_opt("-pr,  --profile <mode>",        "Fold the timeline onto one representative period so every date overlays into a single profile. " . profile_modes_text() . " Run 'ltl --help profile' for which days each mode keeps and how to choose one.");
     $out .= help_opt("-st,  --start <timestamp>",     "Only process log lines at or after this time. A date, or a date and time (YYYY-MM-DD, then a space or T and HH:MM[:SS[.fraction]]), is an absolute cutoff; a bare time (HH:MM[:SS[.fraction]]) is a time-of-day window applied to every day. With -et, a bare-time start later than the end wraps past midnight. Any other value, or a date or time that cannot exist, is refused.");
     $out .= help_opt("-et,  --end <timestamp>",       "Only process log lines before this time. Same forms as -st: a date is an absolute cutoff; a bare time applies to every day.");
     $out .= help_opt("-du,  --duration-unit <unit>",  "Specify the duration unit used in the log file when it cannot be determined from the format or the file name ($time_unit_list)");

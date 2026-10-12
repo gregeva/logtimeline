@@ -979,6 +979,40 @@ scenario_K_name_list_parity() {
         produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
         contract    "features/614-operand-settlement.md D5 (one topic table read by the dispatch, its error and the help row)"
 
+    # The -pr row names the modes from the mode table, in its order, and says
+    # which have an -alt variant: day has none (256), so it is not claimed to
+    # (614 D6 as extended). docs/usage.md matches. The -pr error names the
+    # value and points to --help profile, naming no mode (451 D4).
+    local pr_row="$TMP_DIR/help-pr-row.txt" pr_err="$TMP_DIR/pr-error.txt"
+    awk '/^ +-pr, +--profile <mode>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$pr_row"
+    assert_row_carries "$pr_row" '-pr, +--profile <mode>' "The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Every mode but day has an -alt variant using the Sunday-anchored calendar." \
+        label       'the --help -pr row names the modes in table order and does not claim day has an -alt variant' \
+        asserts     'The -pr row is generated from the mode table, so it names the one-day and one-week modes the table holds and leaves out the -alt variant day lacks' \
+        produced_by 'profile_modes_text() over @profile_mode_rows in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md (there is no day-alt)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "The singular modes (\`day\`, \`workday\`, \`weekday\`, \`weekend\`)" \
+        label       'the docs/usage.md -pr row names the singular modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "the plural ones (\`week\`, \`workweek\`, \`weekdays\`, \`weekends\`)" \
+        label       'the docs/usage.md -pr row names the plural modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "Every mode but \`day\` has an \`-alt\` variant" \
+        label       'the docs/usage.md -pr row does not claim day has an -alt variant' \
+        asserts     'docs/usage.md agrees with the mode table on which modes have an -alt variant' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md'
+    "$LTL" --disable-progress -bs 1440 -oe -pr bogus "$NAME_FIXTURE" > /dev/null 2> "$pr_err" || true
+    check_stderr_warnings "$pr_err" "$current_scenario/pr"
+    assert_equal "$(grep -c "'bogus' is not a valid profile mode. Run 'ltl --help profile'" "$pr_err")/$(grep -cE 'workweek|weekends|-alt variant' "$pr_err")" "1/0" \
+        label       'the -pr error names the value, points to --help profile and names no mode' \
+        asserts     'The invalid-mode error points to --help profile rather than listing the modes' \
+        produced_by '_validate_profile() in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as changed); features/451-weekday-weekend-profile-modes.md D4'
+
     # The -udm function row gives the names grouped by kind, each with its
     # note; stripped of the notes and the group labels, it is the list the
     # warning prints.
