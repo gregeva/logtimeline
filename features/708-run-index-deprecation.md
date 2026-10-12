@@ -226,6 +226,10 @@ Made by the architect on 2026-10-12, from the findings above.
   typed.
 - **D9 — `-ni` is hidden.** It is no longer listed in `--help` or
   `docs/usage.md`; it is still accepted (D8).
+- **D10 — The index bullets already in the v0.19.0 release notes stay.** The
+  bullet that `-ni` runs read faster still holds: that run is now the default.
+  The bullet that pre-seeds the bytes heatmap's range is a bug fix and stays in
+  the bug-fix section. The two bullets of D4 are added beside them.
 
 ## Acceptance criteria
 
@@ -266,7 +270,7 @@ read_index_file write_index_file index-read-back`, run 2026-10-12 on
 | `features/547-standing-detection-of-a-dirty-repository-root.md`, `598-screenshot-capture.md`, `629-udm-custom-regex-defects.md`, `639-own-artifacts-as-input.md`, `620-read-loop-run-constant-hoisting.md` | Read where they name the index; they describe it as written on every run. A note at the head of each points here |
 | `features/616-gated-mean-derivation.md` | Read where it names the index (D17, D24: zero-byte responses counted; bytes heatmap pre-seeded). A note at its head records that this applies only under `-idx`, and the repeat-run axis defect of § 3 |
 | `docs/usage.md`, `docs/process/screenshots.md`, `tests/HARNESS-DESIGN.md` | Read; trued up |
-| `releases/v0.19.0.md` | Read: six bullets about the index in this unreleased version (lines naming #616, #525 and #620). Raised with the architect at the release-notes step |
+| `releases/v0.19.0.md` | Read: six bullets about the index in this unreleased version (lines naming #616, #525 and #620); they stay (D10) |
 | `releases/v0.14.0.md`, `v0.14.5.md`, `v0.15.0.md`, `v0.17.0.md`, `v0.18.0.md` | Dismissed: released notes, not edited |
 | `features/503-yaml-aggregate-export.md` | Read: the export takes the filter signature from `serialize_filters()`, not from the index; unaffected |
 | `features/273`, `342` (both), `432`, `447`, `455`, `525`, `561`, `615`, `640`; `docs/architecture-patterns.md` | Dismissed: they record the index's columns, formatting or code as it was audited; the code is unchanged under `-idx` |
