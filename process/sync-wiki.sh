@@ -9,9 +9,9 @@
 # than restating the map, and tests/validate-explain.sh reads the map from here.
 #
 # Usage:
-#   ./build/sync-wiki.sh verify [--version X.Y.Z]   compare published against docs/ (read-only)
-#   ./build/sync-wiki.sh publish --version X.Y.Z    overwrite the wiki from docs/ and push
-#   ./build/sync-wiki.sh map                        print the source-to-page map
+#   ./process/sync-wiki.sh verify [--version X.Y.Z]   compare published against docs/ (read-only)
+#   ./process/sync-wiki.sh publish --version X.Y.Z    overwrite the wiki from docs/ and push
+#   ./process/sync-wiki.sh map                        print the source-to-page map
 #
 # "verify" exits non-zero naming every page that is behind its source, and is
 # what makes a skipped publish visible: the release is not finished while it
@@ -41,7 +41,7 @@ die() { echo "[error] $*" >&2; exit 1; }
 
 usage() {
     cat >&2 <<USAGE
-Usage: ./build/sync-wiki.sh <command> [options]
+Usage: ./process/sync-wiki.sh <command> [options]
 
   verify [--version X.Y.Z]   Clone the wiki and compare every page against its
                              docs/ source. Read-only. Exits non-zero, naming each
@@ -73,7 +73,7 @@ require_sources() {
             missing=$((missing + 1))
         fi
     done <<< "$WIKI_PAGE_MAP"
-    [ "$missing" -eq 0 ] || die "$missing mapped source(s) missing — fix the map in build/sync-wiki.sh"
+    [ "$missing" -eq 0 ] || die "$missing mapped source(s) missing — fix the map in process/sync-wiki.sh"
 }
 
 # Clones into a fresh temporary directory and echoes nothing: the path is
@@ -136,7 +136,7 @@ cmd_verify() {
 
     if [ "$behind" -gt 0 ]; then
         echo ""
-        die "$behind of $checked check(s) behind — run ./build/sync-wiki.sh publish --version X.Y.Z"
+        die "$behind of $checked check(s) behind — run ./process/sync-wiki.sh publish --version X.Y.Z"
     fi
     echo ""
     echo "[ok] all $checked check(s) current"

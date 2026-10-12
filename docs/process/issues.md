@@ -109,14 +109,14 @@ Every open issue carries exactly one `status:` label. Closed issues carry none.
 
 Status changes at the moment the state changes, never batched. The transitions
 are embedded in the steps that cause them (branch verification, PR creation,
-close). `build/issue-status.sh` is the only sanctioned writer; `set` swaps
+close). `process/issue-status.sh` is the only sanctioned writer; `set` swaps
 labels atomically.
 
 ```bash
-./build/issue-status.sh set {number} "in progress"
-./build/issue-status.sh show {number}
-./build/issue-status.sh list
-./build/issue-status.sh sweep      # strips status from closed issues; proposes, never applies, elsewhere
+./process/issue-status.sh set {number} "in progress"
+./process/issue-status.sh show {number}
+./process/issue-status.sh list
+./process/issue-status.sh sweep      # strips status from closed issues; proposes, never applies, elsewhere
 ```
 
 Status is a deliberate decision, never a computed value. A recorded status

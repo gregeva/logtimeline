@@ -237,7 +237,7 @@ in `README.md` sets it inline, which reads as one command and cannot be half-app
   `local::lib`, or a Linux system Perl).
 - **No literal path appears anywhere in the resolution.**
 
-**D8 (delegated): the preflight is a separate script, `build/profiling-preflight.sh`,
+**D8 (delegated): the preflight is a separate script, `tests/profile/profiling-preflight.sh`,
 called from the top of `tests/profile/run-profile.sh`.**
 *Rationale for a separate script over an inline sub-step:* the same check is what
 `README.md` points a reader at when something is wrong, and what a future consumer
@@ -245,7 +245,7 @@ called from the top of `tests/profile/run-profile.sh`.**
 `run-profile.sh`. A reader who wants to know whether the environment is ready should not
 have to run a profiling session to find out. It also keeps `run-profile.sh` about
 profiling, and puts environment setup next to the other setup scripts in `build/`, where
-`build/setup-hooks.sh` and `build/macos-setup.sh` already live.
+`process/setup-hooks.sh` and `build/macos-setup.sh` already live.
 
 **D9 (delegated): the README profiling subsection lives under § Developer Setup, not
 beside § Test-harness dependencies.**
@@ -297,7 +297,7 @@ environment it is testing and is disproportionate to a developer-tooling fix.
 
 ## Preflight contract
 
-`build/profiling-preflight.sh`
+`tests/profile/profiling-preflight.sh`
 
 **Inputs**
 
@@ -431,7 +431,7 @@ To be inserted in `README.md` § Developer Setup, after the maintainer-tools par
 >
 > ```bash
 > perl -MDevel::NYTProf::Data -e 'print "module ok\n"'
-> ./build/profiling-preflight.sh
+> ./tests/profile/profiling-preflight.sh
 > ```
 >
 > The first line checks the module. The second also checks that the HTML report tool
@@ -450,7 +450,7 @@ To be inserted in `README.md` § Developer Setup, after the maintainer-tools par
 | `build/generate-cpanfile.sh` | Append the development-only block to the Unix cpanfile |
 | `build/cpanfile` | Regenerated, carrying the block |
 | `build/macos-setup.sh` | Honour `LTL_INSTALL_DEV_DEPS`; print which install form was chosen |
-| `build/profiling-preflight.sh` | New |
+| `tests/profile/profiling-preflight.sh` | New |
 | `tests/profile/run-profile.sh` | Call the preflight; resolve the interpreter and HTML tool; stop on HTML failure; repository-relative closing text |
 | `tests/profile/extract-profile.pl` | Shebang |
 | `features/nytprof-profiling-workflow.md` | Environment, Quick Start, What NOT to Do |
@@ -546,7 +546,7 @@ Run on the development machine with `perl` on PATH resolving to Homebrew Perl 5.
 
 | Criterion | What was run | What was observed |
 |---|---|---|
-| A missing profiler self-installs and the run completes with a report | `./build/profiling-preflight.sh` with the module absent, then a 1k profiling run | The preflight printed that it was installing, installed `Devel::NYTProf` 6.15, re-checked and exited 0; the run exited 0 and wrote `nytprof/index.html` at 45,963 bytes |
+| A missing profiler self-installs and the run completes with a report | `./tests/profile/profiling-preflight.sh` with the module absent, then a 1k profiling run | The preflight printed that it was installing, installed `Devel::NYTProf` 6.15, re-checked and exited 0; the run exited 0 and wrote `nytprof/index.html` at 45,963 bytes |
 | A failed install stops the run and names the manual command | `LTL_PROFILING_INSTALL=0 ./tests/profile/run-profile.sh --label <probe> -- …` | Exit 2, output carried `cd build && cpanm --notest --installdeps --with-develop .`, and no directory was created under `tests/profile/results/` |
 | A missing HTML tool stops the run | the same run with the preflight's script directory pointed at an empty directory | Exit 2 before profiling, nothing written under `results/`; with `--no-html` added, the run continued and printed that it was doing so |
 | No mechanism names a Perl version or a keg path | `git grep -nE 'Cellar\|5\.4[0-9]' -- build/ tests/profile/*.sh tests/profile/*.pl README.md` | No matches. In `features/nytprof-profiling-workflow.md` the single match is the `Perl: 5.42.0` line inside the fenced § Example Output sample |

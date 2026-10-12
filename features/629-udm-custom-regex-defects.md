@@ -88,7 +88,7 @@ blocked by #637, #640 is blocked by #638. Start with #637.
 Next steps, per issue, following `docs/process/workflow.md`:
 
 1. Check out `release/0.18.5` and sync it; branch `{issue}-{short-description}`
-   from it; `./build/issue-status.sh set {issue} "in progress"`; set
+   from it; `./process/issue-status.sh set {issue} "in progress"`; set
    `$version_number` to `0.18.5-{issue}`.
 2. All three touch the read loop: capture the `before` benchmark on the base
    commit (`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label {issue}-before`).

@@ -1,18 +1,18 @@
 #!/usr/bin/env perl
 # capture-screenshots.pl: run ltl and write SVG and PNG screenshots of its output.
 #
-#   build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
+#   process/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #       [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
 #       -- <ltl options and input files>
-#   build/capture-screenshots.pl --manifest FILE [--only NAME]
+#   process/capture-screenshots.pl --manifest FILE [--only NAME]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #
 # ltl runs twice, in the repository root or in the folder the recipe names: a
 # probe run with -V section-layout for the rows each section printed, then the
 # capture run whose output is drawn. Each crop is one image,
 # BASE[-sections][-label].svg, with a PNG of the same size beside it drawn by
-# WebKit (build/capture-png.swift). A manifest lists one recipe per entry, in
+# WebKit (process/capture-png.swift). A manifest lists one recipe per entry, in
 # the same words. Specification and guidance:
 # features/598-screenshot-capture.md, docs/process/screenshots.md.
 use strict;
@@ -28,7 +28,7 @@ use Text::ParseWords qw(shellwords);
 
 my $repo_root = abs_path( File::Spec->catdir( dirname( abs_path(__FILE__) ), '..' ) );
 my $ltl       = File::Spec->catfile( $repo_root, 'ltl' );
-my $png_source = File::Spec->catfile( $repo_root, 'build', 'capture-png.swift' );
+my $png_source = File::Spec->catfile( $repo_root, 'process', 'capture-png.swift' );
 
 # Default terminal size (D11), padding (D18), manifest output (D10) and image
 # cell geometry.
@@ -108,11 +108,11 @@ sub fail { die "$_[0]\n" }
 
 sub usage {
     return <<'END';
-usage: build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
+usage: process/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
            [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
            -- <ltl options and input files>
-       build/capture-screenshots.pl --manifest FILE [--only NAME]
+       process/capture-screenshots.pl --manifest FILE [--only NAME]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 
 Runs ltl in the repository root, or in --dir DIR, and writes one SVG per crop,
@@ -378,13 +378,13 @@ sub run_recipe {
 
 # ---- PNG (D23 to D25) ------------------------------------------------------
 
-# The PNG helper, build/capture-png.swift, compiled once per run before ltl
+# The PNG helper, process/capture-png.swift, compiled once per run before ltl
 # first runs, so a machine without swiftc stops with nothing run.
 my $png_helper;
 sub prepare_png_helper {
     return if defined $png_helper;
     my ($swiftc) = grep { -f && -x } map { File::Spec->catfile( $_, 'swiftc' ) } File::Spec->path;
-    fail('swiftc is not found: the PNG beside each SVG is drawn by WebKit through build/capture-png.swift, which needs the Swift compiler (macOS, Xcode command line tools)')
+    fail('swiftc is not found: the PNG beside each SVG is drawn by WebKit through process/capture-png.swift, which needs the Swift compiler (macOS, Xcode command line tools)')
         unless $swiftc;
     my $dir = tempdir( CLEANUP => 1 );
     my $binary = File::Spec->catfile( $dir, 'capture-png' );

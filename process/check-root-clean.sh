@@ -13,9 +13,9 @@
 # ./tests/cleanup-test-artifacts.sh is the only sanctioned cleanup.
 #
 # Usage:
-#   ./build/check-root-clean.sh              probe this session's root and the main checkout
-#   ./build/check-root-clean.sh <directory>  probe that root only
-#   ./build/check-root-clean.sh --quiet      exit code only, no output
+#   ./process/check-root-clean.sh              probe this session's root and the main checkout
+#   ./process/check-root-clean.sh <directory>  probe that root only
+#   ./process/check-root-clean.sh --quiet      exit code only, no output
 #
 # Exit: 0 every probed root clean, 1 findings printed, 2 usage error or a root
 # that cannot be probed. The session-start sweep discards the exit code; a
@@ -28,7 +28,7 @@ ROOT_ARG=""
 
 usage() {
     cat >&2 <<'USAGE'
-Usage: ./build/check-root-clean.sh [<directory>] [--quiet]
+Usage: ./process/check-root-clean.sh [<directory>] [--quiet]
 
   <directory>   Probe this root only, instead of this session's root and the
                 main checkout.

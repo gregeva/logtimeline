@@ -212,7 +212,7 @@ The load-over-time example block, its reading string, its command block,
 ## Citation corrections
 
 - The wiki's *Load Over Time* (`Analysis-Techniques-Reference`, synced from
-  `docs/explain/techniques.md` by `build/sync-wiki.sh`) carries the reading and its
+  `docs/explain/techniques.md` by `process/sync-wiki.sh`) carries the reading and its
   numbers but not the rendered rows: `threads in pool, per bucket: 182 182 182` is in
   the terminal page only. The mirror describes the signal in a sentence.
 - "At bucket widths of 5 minutes or more the column is the pool's size": on the

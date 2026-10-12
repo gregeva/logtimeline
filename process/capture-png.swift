@@ -1,9 +1,9 @@
 // capture-png.swift: draw each screenshot SVG with WebKit and write a PNG of
 // exactly its width and height, one pixel per unit (D23 to D25 in
 // features/598-screenshot-capture.md). Compiled and run by
-// build/capture-screenshots.pl:
+// process/capture-screenshots.pl:
 //
-//   swiftc -O -o DIR/capture-png build/capture-png.swift
+//   swiftc -O -o DIR/capture-png process/capture-png.swift
 //   DIR/capture-png IMAGE.svg OUT.png [IMAGE.svg OUT.png ...]
 //
 // Each SVG is loaded as a document in an off-screen WKWebView sized to it and

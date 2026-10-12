@@ -5,8 +5,8 @@ Issue #547 (BUG: `ltl -o` products left in the repository root are hidden by
 
 ## Status
 
-Implemented. `build/check-root-clean.sh` exists to the contract below and
-`build/claude-hooks/session-start.sh` calls it. Every acceptance criterion was
+Implemented. `process/check-root-clean.sh` exists to the contract below and
+`process/claude-hooks/session-start.sh` calls it. Every acceptance criterion was
 executed against a scratch clone under the scratchpad and passes; the results
 and the two findings the implementation established are in
 § *Implementation record*. This document is the record; the corrections below
@@ -33,7 +33,7 @@ way I cannot see", and today there is no answer short of knowing to pass a flag
 nobody in the repository passes. The consumer is not a user of `ltl` and not a
 harness; it is the person starting a session, and the surface that person reads
 every session is the outstanding-state sweep printed by
-`build/claude-hooks/session-start.sh`.
+`process/claude-hooks/session-start.sh`.
 
 The backlog is live, not hypothetical. Probed from this worktree on
 2026-09-13, `git status --short --ignored=traditional` in the main checkout
@@ -117,7 +117,7 @@ them and no statement of where they went. Run from the repository root, which
 is exactly what `docs/usage.md` documents, they land in the repository root.
 
 **Every surface that reports repository state reads git's default non-ignored
-view.** `build/claude-hooks/session-start.sh` probes with
+view.** `process/claude-hooks/session-start.sh` probes with
 `git status --short`, `.githooks/pre-commit` reads
 `git diff --cached --name-only`, and `tests/cleanup-test-artifacts.sh` looks
 only at its own `.artifacts` directory under `tests/`. None of them passes
@@ -252,7 +252,7 @@ becomes noise. *Rationale for no globs:* a glob is a second matcher to get
 right, and a name-per-line list is auditable by reading it.
 
 **D8 (delegated): output shape.** One line per finding inside the existing
-`== Outstanding state` block printed by `build/claude-hooks/session-start.sh`,
+`== Outstanding state` block printed by `process/claude-hooks/session-start.sh`,
 then one closing line naming the sanctioned cleanup. Nothing at all on a clean
 root, not even a heading. Exact format in § *The script contract*. *Rationale:*
 the block is the surface the developer and the session both already read, a
@@ -296,7 +296,7 @@ cost, no frequency-times-cost profile, and the verification method is known and
 was demonstrated during the investigation, on both roots.
 
 **D12 (delegated): the hook never fails a session.** The script's own exit code
-is informative; the call site in `build/claude-hooks/session-start.sh` discards
+is informative; the call site in `process/claude-hooks/session-start.sh` discards
 it. *Rationale:* the sweep exits 0 unconditionally today and a session that
 cannot start because the root is dirty would be a far worse defect than the one
 being fixed. The non-zero exit exists for the future call sites named in D3 and
@@ -304,7 +304,7 @@ for a developer running the script directly.
 
 ## The script contract
 
-`build/check-root-clean.sh`
+`process/check-root-clean.sh`
 
 **Inputs.** No required arguments. Two optional ones: a directory path, which
 probes that root instead of the default pair, and `--quiet`, which suppresses
@@ -384,18 +384,18 @@ The exit status in the folded case stays 0: a current index is not a finding.
 **Exit codes.** `0` when every probed root is clean after exclusions and
 acknowledgements; `1` when at least one finding was printed; `2` on a usage
 error or when a root cannot be probed. The caller in
-`build/claude-hooks/session-start.sh` discards all three (D12).
+`process/claude-hooks/session-start.sh` discards all three (D12).
 
 ## The hook wiring change
 
-`build/claude-hooks/session-start.sh` gains one call, placed after the
+`process/claude-hooks/session-start.sh` gains one call, placed after the
 `uncommitted:` and `unpushed on this branch:` probes and before the release
 branch comparison, so that git's visible state and git's hidden state are
 adjacent in the block. The call is guarded on the script being executable and
 its exit status is discarded:
 
 ```
-[ -x ./build/check-root-clean.sh ] && ./build/check-root-clean.sh || true
+[ -x ./process/check-root-clean.sh ] && ./process/check-root-clean.sh || true
 ```
 
 `.claude/settings.json` does **not** change. The `SessionStart` matcher
@@ -404,7 +404,7 @@ and no new hook event is introduced. This is stated explicitly because the issue
 and the pre-interview both left the wiring open; the conclusion is that there is
 nothing to wire.
 
-`build/setup-hooks.sh` does not change either: it activates the tracked
+`process/setup-hooks.sh` does not change either: it activates the tracked
 pre-commit guard and has no relationship to the session-start hook.
 
 ## Acceptance criteria
@@ -418,7 +418,7 @@ omits `--disable-progress`.
       **[assertable]** Method: create a scratch clone, run
       `ltl --disable-progress -o -bs 1440 -oe` against the smallest fixture
       carrying the signal inside a scratch directory, move one product to the
-      clone's root, run `build/check-root-clean.sh <clone-root>` capturing
+      clone's root, run `process/check-root-clean.sh <clone-root>` capturing
       output once to the scratchpad, and read from the file that the line names
       the file with a non-zero size and an age, and that the exit status is 1.
 - [x] With the planted product's name in `.claude/root-clean-ack.txt` in that
@@ -456,7 +456,7 @@ omits `--disable-progress`.
 - [x] The session-start sweep still exits 0 and prints its existing block when
       the script reports findings, and when the script is absent or not
       executable. **[assertable]** Method: run
-      `build/claude-hooks/session-start.sh` in a scratch clone with a planted
+      `process/claude-hooks/session-start.sh` in a scratch clone with a planted
       product, confirm exit 0 and the findings inside the existing
       `== Outstanding state` block; then with the script bit cleared, confirm
       exit 0 and an unchanged block.
@@ -473,10 +473,10 @@ in shape during the investigation, on both this worktree and the main checkout.
 
 ## Implementation record
 
-`build/check-root-clean.sh` implements the script contract above;
-`build/claude-hooks/session-start.sh` gains the one guarded call, placed after
+`process/check-root-clean.sh` implements the script contract above;
+`process/claude-hooks/session-start.sh` gains the one guarded call, placed after
 the `unpushed on this branch:` probe. `.claude/settings.json` and
-`build/setup-hooks.sh` are unchanged, as the wiring section states.
+`process/setup-hooks.sh` are unchanged, as the wiring section states.
 
 ### How the criteria were executed
 
@@ -520,7 +520,7 @@ criterion observed:
   labelled `main checkout` and no `session` line appeared.
 - Run from that scratch repository's own root, each finding appeared exactly
   once and only the `session` label was present.
-- `build/claude-hooks/session-start.sh` run against the dirty scratch
+- `process/claude-hooks/session-start.sh` run against the dirty scratch
   repository exited 0 with the findings inside the existing
   `== Outstanding state` block, adjacent to the `uncommitted:` probe; with the
   script's executable bit cleared it exited 0 with the block otherwise
@@ -636,7 +636,7 @@ architect's to dispose of. None is in scope here.
 2. **The product-shape vocabulary is spelled independently at fourteen sites
    across `tests/*.sh`, plus prose in `docs/usage.md` and
    `features/503-yaml-aggregate-export.md`, and no library under `tests/lib/`
-   owns it.** D4 gives it one home in `build/check-root-clean.sh` as a
+   owns it.** D4 gives it one home in `process/check-root-clean.sh` as a
    labelling table so that a target exists; converging the fourteen sites onto
    it is separate work touching `tests/`. D6 of the #527 specification records
    the adjacent finding from the other direction (eight correct inline
@@ -655,7 +655,7 @@ architect's to dispose of. None is in scope here.
   (the working directory is never recorded; the directory list is the distinct
   directory parts of the files read) is why `ltl` writing to the current
   directory is a contract rather than an oversight, and is untouched here.
-- `build/claude-hooks/session-start.sh`, the outstanding-state sweep: the one
+- `process/claude-hooks/session-start.sh`, the outstanding-state sweep: the one
   surface changed.
 - `tests/cleanup-test-artifacts.sh`, the only sanctioned cleanup, unchanged.
 - `docs/process/workflow.md` § 3 (the scope table) and § 4 step 6 (the

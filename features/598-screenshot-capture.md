@@ -33,9 +33,9 @@ As filed on the issue, in three parts, plus a fourth added in specification:
    render run. Output taller than the terminal is handled by hiding or bounding
    sections, never by scrolling back.
 2. **Batch processor.** Reads a manifest, separate from the page map in
-   `build/sync-wiki.sh`, listing every screenshot: command line, input files,
+   `process/sync-wiki.sh`, listing every screenshot: command line, input files,
    geometry overrides, crops, output image names.
-3. **Release step.** Before `build/sync-wiki.sh` (D19); runs the batch processor, and the
+3. **Release step.** Before `process/sync-wiki.sh` (D19); runs the batch processor, and the
    images are committed before any documentation update that references them.
 4. **Guidance for agents** (architect, 2026-09-24). Documentation written for
    machine and AI use, not for end users, explaining the intended and appropriate
@@ -135,8 +135,8 @@ documentation exposes nothing sensitive.
 
 | What | Where |
 |---|---|
-| the tool | `build/capture-screenshots.pl`, release tooling beside `build/sync-wiki.sh` |
-| the manifest | `build/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
+| the tool | `process/capture-screenshots.pl`, release tooling beside `process/sync-wiki.sh` |
+| the manifest | `process/screenshots.yaml`, beside the tool that reads it; hand-edited source is kept apart from generated output |
 | the images | `images/screenshots/*.svg`, generated output only, in a subfolder of the repository's existing `images/` so regeneration never touches the hand-captured screenshots there |
 | input paths in the manifest | relative to the repository root (`logs/...`), so one recipe resolves on every development machine |
 
@@ -154,7 +154,7 @@ command line takes precedence over the manifest, the manifest over the default.
 |---|---|
 | `docs/process/screenshots.md` | the guidance: when to use the tool, writing a manifest entry, choosing sections and offsets, the sensitivity warning, the refresh pipeline |
 | a row in the `CLAUDE.md` *Where to look* table | creating or changing a documentation screenshot points at `docs/process/screenshots.md` |
-| a path-scoped rule in `.claude/rules/` on `images/screenshots/**` and `build/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
+| a path-scoped rule in `.claude/rules/` on `images/screenshots/**` and `process/screenshots.yaml` | images are generated, never edited by hand; a new screenshot is a manifest entry plus a regeneration |
 
 **D13: run-varying figures are accepted** (architect, 2026-09-24). The summary's
 `TOTAL TIME` and `MAXIMUM MEMORY USED` differ on every run, so an image showing them
@@ -220,12 +220,12 @@ left and right count cells; each value is 0 or more.
 | `1,4,1,2` | 1 | 4 | 1 | 2 |
 
 **D19: the manifest, batch mode and release step** (architect, 2026-09-24).
-`build/screenshots.yaml` lists one entry per run of the tool, in the ad hoc run's
+`process/screenshots.yaml` lists one entry per run of the tool, in the ad hoc run's
 words:
 
 ```yaml
 # Every documentation screenshot, regenerated at each release by
-#   build/capture-screenshots.pl --manifest build/screenshots.yaml
+#   process/capture-screenshots.pl --manifest process/screenshots.yaml
 screenshots:
   # Duration and bytes histograms of a day of web traffic, one image each
   - name: access
@@ -249,7 +249,7 @@ screenshots:
 - `--manifest FILE` regenerates every entry into `images/screenshots/` (D10), each
   entry all-or-nothing; `--only NAME` regenerates one entry.
 - Size and padding: the tool's command line over the entry over the default.
-- The release step runs the batch before `build/sync-wiki.sh`, and the images are
+- The release step runs the batch before `process/sync-wiki.sh`, and the images are
   committed before any documentation update that references them.
 
 **D20: full blocks are drawn in front** (architect, 2026-09-24). A line glyph is
@@ -284,7 +284,7 @@ snapshot helper, is chosen by a prototype (`prototype/650-png/`).
 
 **D24: the PNG is a Swift WebKit snapshot** (architect, 2026-10-01; #650), chosen on
 the prototype's measurements (`prototype/650-png/findings.md`). The helper,
-`build/capture-png.swift`, loads the SVG in an off-screen `WKWebView` sized to it,
+`process/capture-png.swift`, loads the SVG in an off-screen `WKWebView` sized to it,
 snapshots it and writes a PNG of the SVG's width and height, which D25 makes whole
 numbers (in the prototype, rounded to the nearest pixel: 1548 x 450, 677 x 240 and
 403 x 450 for the committed images, wide and tall alike), on the tool's exact background colours, byte-identical across runs, 0.52 s
@@ -313,7 +313,7 @@ run; one already there is left in place, with the rows `ltl` added to it.
 **Command line.** One ad hoc run mirrors one manifest entry, in the same words:
 
 ```
-build/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
+process/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
                              [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR]
                              [--crop 'sections=A[,B] start=±N end=±N cols=L,R label=LABEL'] ...
                              -- <ltl options and input files>
@@ -558,7 +558,7 @@ input); 10 is the documents' existence; 12 is verified by eye; 9 is not required
 - [ ] 9. *(not required: Linux is a nice-to-have, D15)* The same recipe on Linux
       and on macOS yields the same crop cells.
 - [x] 10. `docs/process/screenshots.md` exists, the `CLAUDE.md` row points at it, and
-      the path rule covers `images/screenshots/**` and `build/screenshots.yaml` (D12).
+      the path rule covers `images/screenshots/**` and `process/screenshots.yaml` (D12).
 - [x] 11. Every character sits within its cell's columns as displayed: the pixel
       check (Quick Look on macOS, `edges` in `tests/lib/screenshot-cells.pl`)
       samples each full block's left and right edges (D14, D20).

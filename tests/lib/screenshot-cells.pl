@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# screenshot-cells.pl: read a screenshot SVG written by build/capture-screenshots.pl
+# screenshot-cells.pl: read a screenshot SVG written by process/capture-screenshots.pl
 # back into cells and compare them with ltl's own output, decoded independently
 # by tests/lib/rendered-output.pl (tests/HARNESS-DESIGN.md § Asserting rendered
 # output). Used by tests/validate-screenshot-capture.sh.
@@ -23,7 +23,7 @@ use File::Temp qw(tempdir);
 require( File::Spec->rel2abs( dirname(__FILE__) ) . '/rendered-output.pl' );
 
 # Cell geometry of the images: CELL_WIDTH, CELL_HEIGHT and BASELINE in
-# build/capture-screenshots.pl.
+# process/capture-screenshots.pl.
 use constant CELL_WIDTH  => 7.2;
 use constant CELL_HEIGHT => 15;
 use constant BASELINE    => 0.76;

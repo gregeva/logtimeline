@@ -29,7 +29,7 @@ manual command if it cannot.
 Check the environment without starting a profiling session:
 
 ```bash
-./build/profiling-preflight.sh
+./tests/profile/profiling-preflight.sh
 ```
 
 ---
@@ -396,7 +396,7 @@ Cross-Validation: NYTProf call counts vs ltl -V output
 
 - **Do not assume nytprofhtml is in PATH.** Homebrew does not link the Perl keg's own
   `bin` onto PATH, which is where cpanm installs it. `run-profile.sh` resolves it
-  through `build/profiling-preflight.sh`; call that rather than pinning a path.
+  through `tests/profile/profiling-preflight.sh`; call that rather than pinning a path.
 
 - **Do not write nytprof.out to the project root.** `run-profile.sh` handles this by
   `cd`-ing to the output directory before running perl. Never run `perl -d:NYTProf ltl`

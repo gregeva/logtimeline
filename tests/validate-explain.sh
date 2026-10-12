@@ -1756,35 +1756,35 @@ scenario_technique_mirror() {
 #   3. The release procedure no longer runs the script that owns the map, so
 #      the map is current and nothing applies it.
 #
-# The map is read out of build/sync-wiki.sh, which is the single place it is
+# The map is read out of process/sync-wiki.sh, which is the single place it is
 # written down, so this scenario cannot drift from the script it guards.
 scenario_wiki_sync_map() {
     current_scenario="wiki-sync-map"
     echo "[$current_scenario]"
-    local sync_script="$REPO_DIR/build/sync-wiki.sh"
+    local sync_script="$REPO_DIR/process/sync-wiki.sh"
     local workflow="$REPO_DIR/docs/process/workflow.md"
 
     if [[ ! -x "$sync_script" ]]; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The wiki sync map is read from the executable script that owns it."
-        echo "        produced_by: build/sync-wiki.sh (the source-to-page map)"
-        echo "        contract:    Issue #539: build/sync-wiki.sh is the single source of the map; the release procedure and this harness both read it from there"
+        echo "        produced_by: process/sync-wiki.sh (the source-to-page map)"
+        echo "        contract:    Issue #539: process/sync-wiki.sh is the single source of the map; the release procedure and this harness both read it from there"
         echo "        (not found or not executable: $sync_script)"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: build/sync-wiki.sh missing or not executable")
+        failures+=("$current_scenario :: process/sync-wiki.sh missing or not executable")
         return
     fi
 
     # The map, straight from the script: one "<source> <page>" pair per line.
     local map_file="$TMP_DIR/wiki-sync-map.txt"
-    if ! ( cd "$REPO_DIR" && ./build/sync-wiki.sh map ) > "$map_file" 2>"$TMP_DIR/wiki-sync-map.err"; then
+    if ! ( cd "$REPO_DIR" && ./process/sync-wiki.sh map ) > "$map_file" 2>"$TMP_DIR/wiki-sync-map.err"; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The sync script prints its source-to-page map on demand."
-        echo "        produced_by: build/sync-wiki.sh (cmd_map)"
+        echo "        produced_by: process/sync-wiki.sh (cmd_map)"
         echo "        contract:    Issue #539: the map is machine-readable so its consumers read it rather than restating it"
         sed 's/^/        /' "$TMP_DIR/wiki-sync-map.err"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: ./build/sync-wiki.sh map failed")
+        failures+=("$current_scenario :: ./process/sync-wiki.sh map failed")
         return
     fi
 
@@ -1793,7 +1793,7 @@ scenario_wiki_sync_map() {
     if [[ "$mapped" -eq 0 ]]; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The sync script carries a map naming a source and a page per copy."
-        echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+        echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
         echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors: a lookup matching nothing is a failure, never a pass"
         fail=$((fail + 1))
         failures+=("$current_scenario :: the sync map is empty")
@@ -1813,7 +1813,7 @@ scenario_wiki_sync_map() {
             echo "  FAIL  $current_scenario"
             echo "        the sync map copies '$src', which does not exist"
             echo "        asserts:     Every source the wiki sync map copies is a file that exists, so the release step cannot fail part-way through."
-            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
             echo "        contract:    Issue #504 R9: the wiki is overwritten from docs/ each release; a map line naming a moved or deleted file breaks that release"
             fail=$((fail + 1))
             failures+=("$current_scenario :: sync source missing: $src")
@@ -1833,7 +1833,7 @@ scenario_wiki_sync_map() {
             echo "  FAIL  $current_scenario"
             echo "        '$base' has no line in the wiki sync map"
             echo "        asserts:     Every docs/explain mirror is copied to the wiki by the release step, so a topic family reachable in the terminal is reachable on the wiki."
-            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
             echo "        contract:    Issue #504 R9, AC11: the mirror exists so a wiki reader reaches the same content as the terminal; a mirror the sync map does not name never gets there"
             fail=$((fail + 1))
             failures+=("$current_scenario :: mirror not in the sync map: $base")

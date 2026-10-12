@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time bootstrap: activate the tracked pre-commit hook for this clone.
-# Run from repo root: ./build/setup-hooks.sh
+# Run from repo root: ./process/setup-hooks.sh
 
 set -euo pipefail
 

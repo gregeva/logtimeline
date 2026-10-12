@@ -3,7 +3,7 @@
 # profiling-preflight.sh — verify the environment can run a profiling session
 #
 # Usage:
-#   ./build/profiling-preflight.sh
+#   ./tests/profile/profiling-preflight.sh
 #
 # Checks, in order:
 #   1. The interpreter on PATH is not macOS system Perl.
@@ -32,6 +32,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="$(cd "$SCRIPT_DIR/../../build" && pwd)"   # the cpanfile and its development-only dependencies
 
 PROFILER_MODULE="Devel::NYTProf::Data"
 HTML_TOOL="nytprofhtml"
@@ -106,7 +107,7 @@ install_dev_dependencies() {
         return 3
     fi
     echo "[info] The profiling tools are missing for $RESOLVED_PERL. Installing the development-only dependencies."
-    if ( cd "$SCRIPT_DIR" && cpanm --notest --installdeps --with-develop . ); then
+    if ( cd "$BUILD_DIR" && cpanm --notest --installdeps --with-develop . ); then
         return 0
     fi
     echo "[error] The install of the development-only dependencies failed." >&2

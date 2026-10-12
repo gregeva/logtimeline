@@ -57,7 +57,7 @@ so the gate runs on exactly the code being merged. Nothing hardcodes a version:
 
 ```bash
 git branch --show-current                          # issue number + short description
-./build/issue-status.sh set {number} "in progress"
+./process/issue-status.sh set {number} "in progress"
 # set $version_number = "X.Y.Z-{issue}" in ltl
 ```
 
@@ -205,7 +205,7 @@ and gone a week later.
    "commit" are separate instructions.
 2. `git push origin {feature-branch}`
 3. `gh pr create --base release/X.Y.Z --head {feature-branch}` and immediately
-   `./build/issue-status.sh set {number} "in review"`
+   `./process/issue-status.sh set {number} "in review"`
 4. `gh pr merge {PR#} --merge`
 5. `git log origin/release/X.Y.Z --oneline -3` to confirm the merge landed.
 6. **Release notes.** `releases/v{version}.md` gets one bullet with a `(#NNN)`
@@ -298,7 +298,7 @@ architect, is a last resort after the steps have been tried singly.
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`
 7. Regenerate the documentation screenshots:
-   `build/capture-screenshots.pl --manifest build/screenshots.yaml`, which must
+   `process/capture-screenshots.pl --manifest process/screenshots.yaml`, which must
    exit 0. Look at every image that changed and check each one the tool marks as
    showing messages or the file list for sensitive content
    (`docs/process/screenshots.md`). Then `git add images/screenshots/`: step 9's
@@ -323,10 +323,10 @@ architect, is a last resort after the steps have been tried singly.
 
 13. `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` — never `--delete-branch`, release branches are preserved.
 14. **The release is finished only when** `gh pr view {PR#} --json state` reports `MERGED` and `git log --oneline main..release/X.Y.Z` is empty. An open release PR is an unfinished release, and so is one whose wiki sync (step 15) has not run. Any session that finds main behind a release branch reports that first and fixes it before anything else; it never rebases new work onto the release branch to route around it.
-15. Sync the wiki: `./build/sync-wiki.sh publish --version X.Y.Z`
+15. Sync the wiki: `./process/sync-wiki.sh publish --version X.Y.Z`
 
     The `docs/` files are the source of truth; the wiki is overwritten each
-    release. `build/sync-wiki.sh` carries the source-to-page map and is the
+    release. `process/sync-wiki.sh` carries the source-to-page map and is the
     only place it is written down — a `docs/` file the wiki should carry gets
     a line in that map and nowhere else. Each page is a byte-for-byte copy of
     its source, so a link to a sibling page is written in the source as its
@@ -335,7 +335,7 @@ architect, is a last resort after the steps have been tried singly.
     asserts it against what is on disk, so a mirror added without a map line,
     or a map line naming a file that does not exist, fails before the release.
 
-    Then `./build/sync-wiki.sh verify --version X.Y.Z`, which must exit 0: the
+    Then `./process/sync-wiki.sh verify --version X.Y.Z`, which must exit 0: the
     release is not finished while it fails. Content equality is not enough on
     its own — a release that changed no `docs/` file leaves every page matching
     its source whether or not the publish ran, so the check also reads the

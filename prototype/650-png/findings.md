@@ -7,7 +7,7 @@ writes a PNG whose width and height in pixels are the SVG's, Quick Look with
 Measured 2026-10-01 on macOS 26.6.2 (Apple silicon, Retina display), on the four
 committed images in `images/screenshots/` (1548 x 450, 676.8 x 240 twice,
 403.2 x 450: dark background) and one light-background crop of the synthetic
-Tomcat fixture's histograms (1548 x 240), written by `build/capture-screenshots.pl`.
+Tomcat fixture's histograms (1548 x 240), written by `process/capture-screenshots.pl`.
 
 ## Routes
 
@@ -54,7 +54,7 @@ and resamples to 1x. The cause was not taken further.
 
 **Colours.** The Swift route's corner pixel is the tool's background exactly:
 `#191d27` on the dark images (the "Clear Dark" background in
-`build/capture-screenshots.pl`), `#ffffff` on the light one.
+`process/capture-screenshots.pl`), `#ffffff` on the light one.
 
 **Repeatable.** Each of the four images rendered twice through the Swift route gave
 byte-identical PNGs.

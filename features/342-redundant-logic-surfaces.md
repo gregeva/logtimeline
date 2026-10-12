@@ -1504,7 +1504,7 @@ where an owning doc exists the entry summarises and points; where none exists
 (activation flags, behavioural notices, the one-resolution-surface rule) the entry
 is the record. `docs/staged-processing-pipeline.md` stays where it is unless the
 discussion decides otherwise. The file names Perl identifiers, so it is a developer
-document: it is not added to the wiki source map in `build/sync-wiki.sh`, and
+document: it is not added to the wiki source map in `process/sync-wiki.sh`, and
 `tests/validate-explain.sh` is run to confirm the map still matches the disk.
 
 ### The two `CLAUDE.md` edits, in the same commit as the patterns file

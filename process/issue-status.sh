@@ -10,10 +10,10 @@
 # dependencies. This script neither reads nor reports it.
 #
 # Usage:
-#   ./build/issue-status.sh set <issue> <status>   set status (swaps in one call)
-#   ./build/issue-status.sh show <issue>           print one issue's status
-#   ./build/issue-status.sh list                   list open issues with status
-#   ./build/issue-status.sh sweep                  integrity check + advisory proposals
+#   ./process/issue-status.sh set <issue> <status>   set status (swaps in one call)
+#   ./process/issue-status.sh show <issue>           print one issue's status
+#   ./process/issue-status.sh list                   list open issues with status
+#   ./process/issue-status.sh sweep                  integrity check + advisory proposals
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ die() { echo "[error] $*" >&2; exit 1; }
 
 usage() {
     cat >&2 <<USAGE
-Usage: ./build/issue-status.sh <command> [args]
+Usage: ./process/issue-status.sh <command> [args]
 
   set <issue> <status>   Set an open issue's status. Valid: ${STATUSES[*]/#/}
                          Accepts the bare name ("in review") or the full label
@@ -145,7 +145,7 @@ cmd_sweep() {
     while IFS=$'\t' read -r number labels; do
         [ -n "$number" ] || continue
         echo "[conflict] #$number carries several statuses ($labels) — pick one:"
-        echo "           ./build/issue-status.sh set $number <status>"
+        echo "           ./process/issue-status.sh set $number <status>"
         multiple=$((multiple + 1))
     done < <(gh issue list --state open --limit 500 --json number,labels \
         --jq "[.[] | {number, s: [.labels[].name | select(startswith(\"$LABEL_PREFIX\"))]} | select(.s | length > 1)]
@@ -210,7 +210,7 @@ cmd_sweep() {
         if [ -n "$proposal" ]; then
             echo "[propose] #$number  ${current:-(no status)} -> $proposal"
             echo "          why:   $reason"
-            echo "          apply: ./build/issue-status.sh set $number \"$proposal\""
+            echo "          apply: ./process/issue-status.sh set $number \"$proposal\""
             proposed=$((proposed + 1))
         fi
     done < <(gh issue list --state open --limit 500 --json number,labels \

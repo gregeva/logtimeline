@@ -59,7 +59,7 @@ unpushed=$(git log --oneline '@{u}..' 2>/dev/null | head -10)
 # What git is hiding, beside what git is showing: an artifact left at depth one
 # of this root or of the main checkout that .gitignore covers. Reports only; the
 # exit code is discarded so a dirty root can never fail a session.
-[ -x ./build/check-root-clean.sh ] && ./build/check-root-clean.sh || true
+[ -x ./process/check-root-clean.sh ] && ./process/check-root-clean.sh || true
 
 # A release branch ahead of main is normal while the release is open; it is a
 # finding once the release tag exists (the release PR was never merged). The
@@ -83,8 +83,8 @@ unmerged=$(git branch -a --no-merged "$base" --format='%(refname:short)' 2>/dev/
 prs=$(gh pr list --state open --limit 20 2>/dev/null)
 [ -n "$prs" ] && { echo "open PRs:"; echo "$prs"; }
 
-if [ -x ./build/issue-status.sh ]; then
-    status=$(./build/issue-status.sh list 2>/dev/null | head -40)
+if [ -x ./process/issue-status.sh ]; then
+    status=$(./process/issue-status.sh list 2>/dev/null | head -40)
     [ -n "$status" ] && { echo "open issues by status:"; echo "$status"; }
 fi
 

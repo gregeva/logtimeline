@@ -90,7 +90,7 @@ about anything else, these still hold.
 ### At session start, or whenever context begins mid-stream
 
 - [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
-      `git branch -a --no-merged main`, `./build/issue-status.sh list`, uncommitted
+      `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
       session's.
 - [ ] Any issue still labelled `status: in review` whose PR reports `MERGED` is
@@ -145,8 +145,23 @@ about anything else, these still hold.
 
 - [ ] Name the surfaces the work touches, the feature docs and research that own
       them, and the locked decisions that govern them. Read them. Then speak.
+- [ ] The owning records are found by search (`./process/find-records.sh
+      --issues <terms>`), not taken from the issue's links:
+      every option (short and long form), sub and user-visible message the work
+      touches is searched across `features/`, `docs/`, `releases/` and the issue
+      bodies (a surface with no option, such as file arguments, by the subs and
+      messages that implement it), and each
+      record found is read or dismissed in the feature doc with its reason.
 - [ ] Read every feature file and doc the issue references; investigation
-      findings live there, not in the thread.
+      findings live there, not in the thread. An audit, an issue body or another
+      record's restatement points at a record; it is never the record.
+- [ ] A divergence is a finding only when it quotes the primary record line that
+      defines the expected behaviour, after a search for a record that makes the
+      behaviour deliberate. Without one it is an observation, raised as a
+      question, never stated as a correction or a defect.
+- [ ] The first message on a new issue states each touched surface's contract,
+      with the record line behind it, for the architect to confirm. Gaps,
+      findings and questions follow his confirmation.
 - [ ] Verify every sub name, path and artifact the issue cites exists; note
       corrections on the issue. Audit the current code the plan touches.
 - [ ] Lead with the motivating consumer: what this is *for* precedes what it does.
@@ -351,7 +366,7 @@ about anything else, these still hold.
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
-| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `build/screenshots.yaml`, generated, never captured or edited by hand) |
+| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `process/screenshots.yaml`, generated, never captured or edited by hand) |
 | Building on, or adding to, a recurring mechanism (a registry, a gate, a generated sub, the layout, a notice) | `docs/architecture-patterns.md` |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
@@ -359,11 +374,12 @@ about anything else, these still hold.
 | Bin-counter substrate and precision tiers | `features/189-histogram-bin-counter-primitives.md`, `features/293-precision-lever-unification.md` |
 | Performance work and profiling | `docs/perl-performance-optimization.md`, `features/nytprof-profiling-workflow.md`, `tests/baseline/README.md` |
 | Regex ordering and patterns | `docs/regex-best-practices.md` |
-| What is enforced automatically, and how | `.claude/rules/`, `build/claude-hooks/` |
+| What is enforced automatically, and how | `.claude/rules/`, `process/claude-hooks/` |
+| Tools of the development process (issue status, hooks, record finder, wiki sync, screenshots, root check) | `process/`; `build/` holds only building and packaging the binary |
 
 ## Repository hygiene
 
-Public repository. `./build/setup-hooks.sh` activates the tracked pre-commit
+Public repository. `./process/setup-hooks.sh` activates the tracked pre-commit
 guard at `.githooks/pre-commit`, which blocks staging anything under `.claude/`
 except the two shared, reviewed files named below, plus `.env*`, key and
 credential files, and common token patterns; `.gitignore` is the primary
@@ -376,13 +392,15 @@ rules in this file are enforced rather than advised:
   `paths` is read or edited (harnesses, `ltl`, user docs, feature docs,
   prototypes, release notes, benchmark tooling).
 - `.claude/settings.json`: hooks. At session start, resume, clear and compaction
-  `build/claude-hooks/session-start.sh` prints the outstanding-state sweep into
-  context. Before every Bash call `build/claude-hooks/guard-bash.sh` blocks
+  `process/claude-hooks/session-start.sh` prints the outstanding-state sweep into
+  context. Before every Bash call `process/claude-hooks/guard-bash.sh` blocks
   destructive operations against `logs/`, `ltl` without `--disable-progress`,
   `git merge`, pushes to main, `--delete-branch`, and model-versioned commit
   trailers, and asks before release-only benchmark tiers or `--no-verify`.
-  Before every file write `build/claude-hooks/guard-write.sh` blocks writes
-  under `logs/`, to released baseline TSVs, and of problem reports into the repo.
+  Before every file write `process/claude-hooks/guard-write.sh` blocks writes
+  under `logs/`, to released baseline TSVs, and of problem reports into the repo,
+  and a feature doc write that cites a `features/` or `docs/` record the
+  session's transcript shows no read of.
 
 A rule that a hook can check belongs in a hook; a rule that needs judgement
 belongs in a checkpoint. `.claude/settings.local.json` stays machine-local and
@@ -481,7 +499,7 @@ bucket boundaries, gradients yellow/green/cyan by metric.
 An observation from a session is recorded by editing the checkpoint or
 principle it belongs to, in one or two lines, in the section where the check is
 performed; a rule that can be checked mechanically goes into a hook under
-`build/claude-hooks/` or a path-scoped rule under `.claude/rules/` instead. Incident narratives, dates, issue numbers and severity markers do
+`process/claude-hooks/` or a path-scoped rule under `.claude/rules/` instead. Incident narratives, dates, issue numbers and severity markers do
 not go here; the commit message that makes the edit carries the incident.
 After each release, the checkpoints are reviewed against what actually went
 wrong, and anything that never fired is removed.

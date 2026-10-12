@@ -44,7 +44,7 @@ LTL="$PROJECT_DIR/ltl"
 RESULTS_DIR="$SCRIPT_DIR/results"
 SAMPLES_DIR="$SCRIPT_DIR/samples"
 EXTRACT_SCRIPT="$SCRIPT_DIR/extract-profile.pl"
-PREFLIGHT="$PROJECT_DIR/build/profiling-preflight.sh"
+PREFLIGHT="$PROJECT_DIR/tests/profile/profiling-preflight.sh"
 
 # Defaults
 LABEL="$(date +%Y%m%d-%H%M%S)"

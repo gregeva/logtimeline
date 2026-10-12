@@ -38,7 +38,7 @@ Measured on release/0.18.6 (`c56ae7b`).
   `ESC[48;5;226m ESC[38;5;0m` under `-dbg`. Across the whole capture, `-V`
   sections aside, that one escape is the only rendered difference between the two
   runs: every bar cell is the same under both.
-- **Rendered.** Through `build/capture-screenshots.pl` with `background: light` and
+- **Rendered.** Through `process/capture-screenshots.pl` with `background: light` and
   crop `sections: histogram`, the highlighted row is a solid yellow band with no
   legible text and the highlighted bars are pale yellow beside the population's
   darker yellow. With `background: dark` both read clearly.
@@ -257,7 +257,7 @@ highlighted histogram percentile row, unreadable on a light background (`-lbg`).
   locator stops with a reason, never an empty report, on a capture with the
   band's background removed and on one with the histogram missing from
   `-V section-layout`.
-- **AC4 (rendered, measured once).** Through `build/capture-screenshots.pl` with
+- **AC4 (rendered, measured once).** Through `process/capture-screenshots.pl` with
   `background: light` and crop `sections: histogram`, measured from the SVG cell
   colours (WCAG 2): text `#2d3840` (index 0 in the light profile) on `#ffff00` /
   `#00ff00` / `#00ffff` (duration / bytes / count bands) measures 11.17 / 8.74 /

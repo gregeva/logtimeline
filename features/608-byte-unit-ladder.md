@@ -779,7 +779,7 @@ criterion is unknown.
 | `validate-help-content.sh` | the new parity scenario (criterion 13); the `-bn` row joins the visible-long-option and short-form scenarios | D8, D17, and the new-option rule |
 | `validate-format-detection.sh` | new scenarios asserting the run-level and per-file `byte_notation` keys (criteria 8 to 10, the `-V format-detection` half); no existing assertion moves | stability contract: additions are non-breaking |
 | `tests/validate-byte-units.sh` (new; asserts the byte-unit feature's rendered cells, no owning `-V` section, named for the feature as `validate-bucket-size-units.sh` is) | criteria 5 to 7, 11, 12 and the rendered-cell half of 8 to 10 | a new harness; no existing assertion moves |
-| `validate-screenshot-capture.sh` and `build/screenshots.yaml` | the web-server bytes histogram screenshot regenerates in SI | D7, D15; screenshots are generated, never edited |
+| `validate-screenshot-capture.sh` and `process/screenshots.yaml` | the web-server bytes histogram screenshot regenerates in SI | D7, D15; screenshots are generated, never edited |
 
 ### Fixtures
 
