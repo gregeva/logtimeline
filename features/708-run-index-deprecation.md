@@ -218,6 +218,26 @@ Made by the architect on 2026-10-12, from the findings above.
   file investigation is superseded, for the most part, by the per-file pre-read
   sampling pass (`sample_file_for_detection()`), the scaffolding for determining
   such things from the outset rather than on a second execution.
+- **D8 — `-ni, --no-index` stays accepted as a silent no-op.** It changes
+  nothing and prints nothing, so a run with it is a default run. It is removed
+  with the index (#710). A consequence: `-idx -ni` is an `-idx` run.
+
+## Acceptance criteria
+
+Draft, for agreement before code. A default run of this build is today's `-ni`
+run; `-idx` is today's default run.
+
+| # | Condition and observable outcome | State | Verified by |
+|---|---|---|---|
+| AC1 | A default run in a directory without an index leaves no `ltl-index.csv` and no `.ltl-index.*.tmp` behind | assertable | `tests/validate-index-read-back.sh`, new scenario |
+| AC2 | A default run in a directory holding an index leaves it byte-identical with its modification time unchanged, and `-V index-read-back` reports `index_used: no` and `lookup: none` for every file | assertable | `tests/validate-index-read-back.sh`, new scenario |
+| AC3 | A default run's output equals a `-ni` run of the base build: terminal output, STATS and MESSAGES CSVs, the aggregate export, and every `-V` section except timing and memory | assertable | diff of base and branch builds on a filtered and an unfiltered run, during development and at the gate |
+| AC4 | A default run does none of the per-line index work: its time on the access-log benchmark is within noise of the base build's `-ni` run, and faster than the base build's default run | assertable | before/after benchmark, `single-day-access-log-standard` |
+| AC5 | `-idx`/`--index` reads and writes the index as the base build's default run does: every existing read-back scenario passes with `-idx` added, and the index it writes equals the base build's | assertable | `tests/validate-index-read-back.sh`, existing scenarios with `-idx`; the other harnesses that read an index file get `-idx` |
+| AC6 | `-ni` is a no-op: a `-ni` run equals a default run (output, stderr, files left behind), and an `-idx -ni` run equals an `-idx` run | assertable | `tests/validate-index-read-back.sh`, new scenario |
+| AC7 | Nothing about the index is printed at run time: stderr of a default run and of a `-ni` run in a directory holding an index carries no line about it | assertable | the scenarios of AC2 and AC6 |
+| AC8 | `--help` and `docs/usage.md` carry an `-idx, --index` row, and agree | assertable | `tests/validate-help-content.sh` |
+| AC9 | The release notes carry the two bullets of D4 and nothing else about the index | unassertable by a harness | read at the release-note step |
 - **D4 — The release notes carry the deprecation.** One bullet states that the
   index is deprecated; one states that it is now off by default and is turned
   on with the new option (by both its forms). These are the only user-facing
