@@ -16,7 +16,9 @@ ltl -bs 5 -i "POST" logs/*/access.log
 
 When multiple files are specified, logtimeline processes them sequentially and combines the results into a single timeline. This is useful for analyzing rotated log files, multiple days of logs, or logs from different sources on the same system.
 
-Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped.
+Glob expansion is performed internally by logtimeline rather than relying on the shell, ensuring consistent behavior across platforms — particularly on Windows where the shell does not expand wildcards. Only regular files are accepted; directories and other non-file entries in a glob result are silently skipped. An argument that selects no file at all — a directory, a path that does not exist, or a pattern that matches nothing — stops the run with an error naming it, so a mistyped path is never silently left out. When no argument selects a file, the run stops with `unable to open any files`.
+
+An option whose value is optional (`-hm`, `-hg`, `-V`, `-g`, `-mem`) takes the word after it only when that word is one of its values; otherwise the word is read as a file argument and the option keeps its default, so `ltl -hg access.log` reads `access.log` and shows every metric's histogram. A comma list given to `-hg` or `-V` that mixes known and unknown names stops the run with an error naming the unknown ones.
 
 That internal expansion only happens if the pattern actually reaches logtimeline. On macOS and Linux, an unquoted wildcard is expanded by the shell first, and logtimeline receives the list of names the shell already matched — or, in some shells, the command is refused outright when the pattern matched nothing. It makes no difference for a single-level pattern, but it silently narrows a recursive sweep to whatever the shell already found. Put wildcard patterns in double quotes whenever you use `-r`: `ltl -r "logs/*.log"`.
 
@@ -526,7 +528,8 @@ The `-V` flag emits diagnostic sections describing internal state — effective 
 | `-V <name>` | Emit only the named section |
 | `-V <a>,<b>,<c>` | Emit a comma-separated list of sections |
 | `-V <a> -V <b>` | Repeat the flag — equivalent to `-V a,b` |
-| `-V <unknown>` | Warn to stderr, continue with remaining valid sections |
+| `-V <a>,<unknown>` | Stop with an error naming the unknown section |
+| `-V <word that is no section>` | The word is read as a file argument and `-V` emits all sections; if it is not a file either, the run stops with an error naming it |
 
 Section names are stable across releases — renames are breaking changes governed by `tests/HARNESS-DESIGN.md`. Discover the current set with `ltl -V list`.
 
@@ -552,8 +555,6 @@ Section content is governed by per-section stability contracts — additions are
 
 | Trigger | Warning |
 |---------|---------|
-| `-g <non-numeric>` (e.g. `-g logfile.log`) | The non-numeric value is treated as a positional argument and the default similarity threshold (85) is applied. |
-| `-hm <unknown-metric>` without any `-udm` configured (e.g. `-hm bogus`) | The value is treated as a positional argument and the default heatmap metric (`duration`) is applied. |
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
 | `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A note reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
 

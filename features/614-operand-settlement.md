@@ -698,14 +698,14 @@ Verification: `tests/validate-help-content.sh` for the rows,
 Verification: reading, and `tests/validate-help-content.sh`,
 `tests/validate-doc-examples.sh` where they reach.
 
-- [ ] `docs/usage.md`: the `-so` table, the `--help` and `-pr` rows, § Files
+- [x] `docs/usage.md`: the `-so` table, the `--help` and `-pr` rows, § Files
       (an argument that selects no file is an error), and § Stderr warnings
       without the `-g` and `-hm` pushback rows.
-- [ ] `docs/explain/statistics.md` example uses `stddev`.
-- [ ] `docs/architecture-patterns.md` *Optional-operand options and the
+- [x] `docs/explain/statistics.md` example uses `stddev`.
+- [x] `docs/architecture-patterns.md` *Optional-operand options and the
       filename pushback* names the helper as its one consumption site and is
       marked established.
-- [ ] The records this issue changes carry a pointer to it: 432 O3, 420 D2,
+- [x] The records this issue changes carry a pointer to it: 432 O3, 420 D2,
       451 D4.
 
 ## Implementation record
@@ -736,6 +736,15 @@ Verification: reading, and `tests/validate-help-content.sh`,
   `std_dev` remains `--explain`'s topic name. `docs/usage.md`'s `-so` section
   is rewritten to the naming rule, and the `stddev` example (observation 6)
   is changed in `docs/explain/statistics.md` and the `std_dev` topic.
+- **Phases 5 to 8**: `resolve_explain_topic()` reads `%so_spelling`;
+  `@help_topics` drives the `--help` dispatch, error and row;
+  `@profile_mode_rows` keeps the mode table in order for `profile_modes_text()`.
+  `docs/usage.md` (§ Files, the `-V` table, § Stderr warnings, the `-so`,
+  `--help` and `-pr` rows), `docs/architecture-patterns.md` (the
+  optional-operand entry now established, the table-and-resolver entry, the
+  sort-gate and notices entries) and the changed records (432 O3, 420 D2,
+  451 D4, histogram-charts § Command Line Interface, user-defined-metrics
+  criterion 19) are trued up.
 - **Pre-existing, outside this issue:** `-hm x -udm x::max` on a log where
   `x` never matches dies in the heatmap colour lookup (`Can't use an
   undefined value as an ARRAY reference`, exit 255), on the release code as

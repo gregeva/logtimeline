@@ -45,10 +45,11 @@ the errors and help rows read cannot disagree with the parser.
 - `number_unit_canonical` :: `return $number_unit_by_spelling{ lc $spelling };` over `@number_unit_ladder` (every tier's spelling and the input-only `also` spellings), read through `resolve_quantity_option` by the count rows of `@quantity_options`; the `-udm` unit slot reads the ladder's `udm` symbols case-sensitively through `%udm_number_factor`; the count errors and `--help units` interpolate `$number_unit_list`.
 - `byte_unit_canonical` :: `return $byte_unit_by_spelling{ lc $spelling };` over `@byte_unit_ladder` (each step's SI and IEC token and byte count, and on input its long-tier words), read by the `-udm` unit slot and through `resolve_quantity_option` by the byte rows of `@quantity_options`; the GC heap-size reader `gc_heap_size_bytes` reads each figure's prefix letter through `byte_prefix_bytes` (`%byte_unit_by_prefix`, a view of the ladder) at the notation the format declares; the unknown-unit warning interpolates `$time_unit_list` and `$byte_unit_list`.
 - `print_help` :: `"Time: $time_unit_list. Bytes: $byte_unit_si_list are powers of 1000, $byte_unit_iec_list powers of 1024; ..."`: the `-du`, `-ru`, `-bs` and `-udm unit` rows interpolate both ladders' lists, never a literal; `tests/validate-help-content.sh` scenario `J-unit-list-parity` compares each row, and its `docs/usage.md` row, with the list the matching error or warning prints; scenario `K-name-list-parity` does the same for the name vocabularies (the `-hm`, `-hg`, `--hide` column and `-udm` function rows).
-- `adapt_to_command_line_options` :: `if (exists $verbose_section_registry{$name}) {` over `%verbose_section_registry`, which also serves `-V list` and the unknown-name warning.
-- `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`.
+- `adapt_to_command_line_options` :: `known   => sub { $_[0] eq 'all' || $_[0] eq 'list' || exists $verbose_section_registry{ $_[0] } },` over `%verbose_section_registry`, which also serves `-V list`.
+- `_validate_profile` :: `return if defined $value && exists $profile_modes{$value};` over `%profile_modes`, a view of the ordered `@profile_mode_rows`; `profile_modes_text` builds the `-pr` help row's mode lists and its `-alt` statement from the same rows, and the invalid-mode error points to `--help profile` (#614).
 - `builtin_metric_name` :: `return $lc if exists $builtin_metric{$lc};` over `@builtin_metrics` (name, layout column, family, help text, the stored key a bare `-so` word ranks by, deprecated spellings with the options that accept them), read by `-hm`, `-hg` and `-so`; `@graph_columns`, the metric entries of `@visibility_columns`, `%heatmap_metric_map`, `available_metric_names`, the internal metric loops and `resolve_value_kind` read its views, and every unknown-metric message and the `-hm`, `-hg`, `-x` and `-d` help rows interpolate `$builtin_metric_list` (#613 D5).
-- `adapt_to_command_line_options` :: `my $sort_statistic = $statistic_by_spelling{ lc $sort_type };` over `@statistic_names` (typed name, stored key, aliases, deprecated spelling, `--explain` topic, place in the `-udm` function slot); `parse_udm_configs` reads `%udm_function_names`, `%udm_function_aliases` and `%udm_functions_of_kind` from it, `resolve_explain_topic` reads `%explain_aliases`, and the `--help statistics` and `--explain` alias notes and the `-udm` function help row are derived from it (#613 D8, D17).
+- `adapt_to_command_line_options` :: `my $sort = $so_spelling{ lc $sort_type };` over `%so_spelling`, the `-so` vocabulary generated from the `statistics` of each `@builtin_metrics` entry and from `@statistic_names` (typed name, stored key, aliases, deprecated spelling, `--explain` topic, place in the `-udm` function slot): `<metric>_<statistic>`, the bare metric as its sum, duration's statistics bare, `avg` wherever `mean` is, each with the stored key and the metric family the sort gates read. `so_vocabulary_text` and `so_deprecated_text` give the `-so` help row and error one text; `resolve_explain_topic` reads `%so_spelling` and `%explain_aliases`; `parse_udm_configs` reads `%udm_function_names`, `%udm_function_aliases` and `%udm_functions_of_kind`; the `--help statistics` and `--explain` alias notes and the `-udm` function help row are derived from `@statistic_names` (#613 D8, D17; #614 D3, D4).
+- `dispatch_informational_options` :: `my ($topic) = grep { $_->{name} eq $help_topic } @help_topics;` over `@help_topics` (name, description, renderer), which the unknown-topic error and the `--help` row also read (#614 D5).
 - `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };` over `@mask_identifiers` (each name and the `%mask_patterns` entries it covers, `ip` among them) and `@mask_order`; `resolve_discard_names` reads the same table, and the `-m` error interpolates `$mask_identifier_list` (#613 D7).
 - `resolve_message_name` :: `if ( my $field = $message_field{ lc $name } ) {` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them), the one resolution `resolve_expose_names` and `resolve_discard_names` share; `@cleared_fields` is its view for the field-clearing flag (#613 D6).
 - `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;` over `%explain_topics`.
@@ -62,14 +63,13 @@ ladder: one ladder at file scope, no sub keeps a table of its own) is the
 worked contract; `features/histogram-charts.md` § Command Line Interface for
 metric names; `tests/HARNESS-DESIGN.md` § Reserved section names for `-V`.
 
-**Status.** Needs refinement, until #614 (operand checks and texts derive from
-the vocabulary) lands. The audit's item 1 found the shape followed
+**Status.** Established. The audit's item 1 found the shape followed
 unevenly. Since #613 (one vocabulary for names), every option that takes a
 metric name resolves it through the built-in metric table: `-hm`, `-hg`, `-so`,
 `-x` and `-d` through `builtin_metric_name`, `--hide` and `--show` through the
-metric entries of `@visibility_columns`. The family-prefixed `-so`
-names are a literal list beside the two tables; the `-pr` and `--help` errors
-list their vocabularies as literals. Refined by #614.
+metric entries of `@visibility_columns`. Since #614 the family-prefixed `-so`
+names are generated from the two tables, and the `-so`, `--help` and `-pr`
+rows and errors read their tables rather than literals.
 
 ---
 
@@ -978,7 +978,7 @@ discover (`features/418-unsatisfiable-sort-selection-cost.md`); the gates
 decide as early as the information exists.
 
 **Consumption sites.**
-- `adapt_to_command_line_options` :: `apply_parse_time_sort_gate($sort_operand_typed);`
+- `adapt_to_command_line_options` :: `apply_parse_time_sort_gate( $sort_operand_typed, $sort->{family} );` (the family is the `-so` vocabulary entry's, #614)
 - `calculate_all_statistics` :: `apply_post_walk_sort_gate($sort_defined_keys);`
 
 **Owning record.** `features/418-unsatisfiable-sort-selection-cost.md`,
@@ -1017,8 +1017,9 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 **Owning record.** This entry, until #412 (the notices surface) lands and
 inventories every ad-hoc notice.
 
-**Status.** Needs refinement: one warning is emitted inside the option
-parser's warning capture and never prints (item 1, F1.17), refined by #614.
+**Status.** Needs refinement. The warning emitted inside the option parser's
+warning capture, which never printed (item 1, F1.17), is gone since #614: the
+`-hg` handler only records its value.
 The numbers inside notices render through the one dispatch since #617: each
 notice names the budget row for what it exposes, `notice` (prose) for a scale
 and `notice exact` for a count a list beside it must agree with, and a share
@@ -1031,28 +1032,41 @@ per metric kind*).
 
 **Definition.** An option whose operand is optional (`-hm`, `-hg`, `-V`, `-g`,
 `-mem`) may be followed by a filename that the option parser takes as its
-value. The handler decides whether the value names something in the option's
-vocabulary; if not, it pushes the value back onto `@ARGV` as a positional
-argument and takes the option's default. This entry is the record.
+value. One helper, `settle_optional_operand()`, decides for every such option
+at option settlement, once the `-udm` metrics are parsed: a value in the
+option's vocabulary is the option's; a value with no member in it goes back
+onto `@ARGV` as a file argument, silently, and the option takes its bare
+default; a comma list (`-hg`, `-V`) with some members in the vocabulary is the
+option's, and its unknown members are a usage error. Nothing is checked
+against the filesystem there. File resolution then expands every argument on
+its own, and an argument that selects no file is a usage error naming it; a
+value an option gave back is named with the option it followed and what that
+option takes.
 
-**Intended uses.** Any new option with an optional operand follows the same
-decision and says what it did.
+**Intended uses.** Any new option with an optional operand calls
+`settle_optional_operand()` with its vocabulary and the phrase for what it
+takes, and adds no decision of its own.
 
-**Reasoning.** Five options make the decision five ways: two warn, three are
-silent, and a pushed-back name that is not a file is then dropped by the
-file-list filter without a notice (audit, item 1, F1.6). One helper would make
-the decision and the notice the same for all five.
+**Reasoning.** Five options made the decision five ways: two warned, three
+were silent, and a pushed-back name that was not a file was then dropped by
+the file-list filter without a notice (audit, item 1, F1.6). One helper makes
+the decision the same for all five, and the file-resolution error makes a
+mistyped value visible where it matters.
 
 **Consumption sites.**
-- `handle_histogram_option` :: `unshift @ARGV, $opt_value;`
-- `adapt_to_command_line_options` :: `unshift @ARGV, $heatmap_metric;`
-- `adapt_to_command_line_options` :: `unshift @ARGV, $group_similar_sensitivity;`
-- `adapt_to_command_line_options` :: `unshift @ARGV, $memory_usage_operand;`
-- `adapt_to_command_line_options` :: `@in_files = grep { -f $_ } @in_files;`
+- `settle_optional_operand` :: `unshift @ARGV, $value;`
+- `adapt_to_command_line_options` :: `my @names = settle_optional_operand(`
+- `adapt_to_command_line_options` :: `my ($literal) = $memory_usage_operand eq '' ? () : settle_optional_operand(`
+- `adapt_to_command_line_options` :: `my ($threshold) = $group_similar_sensitivity eq '' ? () : settle_optional_operand(`
+- `adapt_to_command_line_options` :: `my ($metric) = $heatmap_metric eq '' ? () : settle_optional_operand(`
+- `adapt_to_command_line_options` :: `my @metrics = settle_optional_operand(`
+- `adapt_to_command_line_options` :: `push @selected_nothing, $pattern unless @files;`
+- `file_argument_problem` :: `$problem .= " ($pushed_back_operand{$argument})" if exists $pushed_back_operand{$argument};`
 
-**Owning record.** This entry.
+**Owning record.** This entry, with `features/614-operand-settlement.md` § 2
+D1 for the decisions behind it.
 
-**Status.** Needs refinement (F1.6, F1.17). Refined by #614 (one pushback rule, a usage error for an argument that resolves to no file).
+**Status.** Established (#614).
 
 ---
 
