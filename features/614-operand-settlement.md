@@ -653,14 +653,14 @@ identical stdout of two runs on the same fixture. All are assertable.
 Verification: `tests/validate-explain.sh`, comparing topic output. All are
 assertable.
 
-- [ ] **A `-so` name that names a statistic explains it.** `--explain
+- [x] **A `-so` name that names a statistic explains it.** `--explain
       duration_p95` shows the percentiles topic; `bytes_mean`, `count_avg`
       and `duration_avg` the mean topic; `duration_stddev` the std_dev topic;
       `duration_impact` the impact topic; `bytes_min` the min topic.
-- [ ] **What is not a statistic topic stays unknown.** `--explain bytes_sum`
+- [x] **What is not a statistic topic stays unknown.** `--explain bytes_sum`
       and `--explain bytes_occurrences` keep the unknown-topic error, since
       neither sum nor a metric's occurrences has a topic.
-- [ ] **The mechanism.** `resolve_explain_topic()` resolves a spelling
+- [x] **The mechanism.** `resolve_explain_topic()` resolves a spelling
       through the `-so` table entry's statistic and that statistic's
       `explain` field; no second list of spellings.
 

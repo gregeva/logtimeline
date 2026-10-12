@@ -8841,12 +8841,20 @@ sub explain_summary_line {
 my %explain_topics;
 
 # Resolve a user-supplied --explain argument to a canonical topic name,
-# honoring %explain_aliases. Returns undef on unknown topic.
+# honoring %explain_aliases. A name -so accepts that names a statistic
+# (duration_p95, bytes_mean, count_avg) explains that statistic: the -so
+# vocabulary gives the statistic, and the statistic table its topic, or the
+# topic of its own name when it has no row (impact). Returns undef on unknown
+# topic.
 sub resolve_explain_topic {
     my ($name) = @_;
     return undef unless defined $name && $name ne '';
     my $key = lc $name;
     $key = $explain_aliases{$key} if exists $explain_aliases{$key};
+    if ( !exists $explain_topics{$key} && ( my $sort = $so_spelling{$key} ) ) {
+        my $row = defined $sort->{statistic} ? $statistic_by_spelling{ $sort->{statistic} } : undef;
+        $key = $row ? $row->{explain} // '' : $sort->{statistic} // '';
+    }
     return exists $explain_topics{$key} ? $key : undef;
 }
 
