@@ -186,21 +186,41 @@ counters.
 - The bodies of #23 and #44 (the read-back as a dependency).
 - `tests/HARNESS-DESIGN.md` § Invocation coherence (`-ni` on every harness).
 
-## 6. Facts bearing on the issue's open questions
+## 6. Why the index existed
 
-On whether a deprecated default run still writes the index:
+The architect's account (2026-10-12): the index was built for the heatmap and
+the histogram, to establish the boundaries of the bin-counter bucket sizes up
+front on a read, without having to process all the lines first. The histograms
+as now implemented do not need this: the counts are captured without the
+boundaries known up front, and the minimum and maximum are captured during the
+read so they are known before drawing. The goal that drove the index turned out
+not to be necessary.
 
-- The cost is in the per-line accumulation, which only the write and the drift
-  check read. Writing the index during deprecation means paying the full
-  fifth of the run time.
-- The read-back's only effect on output is the heatmap seed, which is wrong in
-  the cases above and neutral otherwise. Not reading the index changes no
-  output except to correct those cases.
+What brings the deprecation forward is the measured cost of the per-file
+structures the index needs (about a fifth of a default access-log run), paid on
+every run for something no one uses, and the index files it leaves in every
+directory the tool runs in.
 
-On what to keep if a reader needs part of it:
+## Decisions
 
-- No reader in the tool, the repository or the open issues needs any column.
-- The file-heuristics issue's need is a per-file profile (size, time range,
-  line count, read rate). That is the same shape as the index's `file` row,
-  produced by a cold probe of the files rather than by accumulating every line
-  of a full read.
+Made by the architect on 2026-10-12, from the findings above.
+
+- **D1 — The deprecation is silent at run time.** No notice, warning or other
+  indication is printed. The index works under the covers; the user is not
+  aware of it and does not need to be.
+- **D2 — The index is off by default.** A default run behaves as a `-ni` run
+  does today: it neither reads nor writes `ltl-index.csv`, and does none of the
+  per-line work that feeds it.
+- **D3 — A new command-line option turns the index on.** No option to do so
+  exists today. It restores today's default behaviour: read the index at
+  startup, accumulate, write it at the end. Its name is not yet decided.
+- **D4 — The release notes carry the deprecation.** One bullet states that the
+  index is deprecated; one states that it is now off by default and is turned
+  on with the new option (by both its forms). These are the only user-facing
+  statements of the deprecation.
+- **D5 — Removal is a separate issue, labelled `not planned`.** It removes the
+  index code from the tool and completes the deprecation. It is blocked by
+  this issue.
+- **D6 — The parsing-architecture issue (#23) no longer counts on the index.**
+  Its relationship to the index read-back is trued up to say the index is not
+  used.
