@@ -222,7 +222,9 @@ needs it as it is.
 
 ## Related Issues
 
-This feature is a prerequisite for:
+None of these depends on the index (`features/708-run-index-deprecation.md` § 4): #34, #41 and #51 are closed, superseded by the online-resizing bin counters; #2 budgets memory live during the run; #44's file investigation is the per-file pre-read sampling pass. The index is deprecated and off by default (#708); removal is tracked by #710.
+
+This feature was written as a prerequisite for:
 - #2 - Performance: Implement maximum memory usage ceiling and default auto-detection
 - #34 - Performance: Memory-optimized mode for histogram and heatmap (two-pass streaming)
 - #41 - Performance: Align heatmap with histogram binning algorithms

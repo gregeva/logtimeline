@@ -213,7 +213,11 @@ Made by the architect on 2026-10-12, from the findings above.
   per-line work that feeds it.
 - **D3 — A new command-line option turns the index on.** No option to do so
   exists today. It restores today's default behaviour: read the index at
-  startup, accumulate, write it at the end. Its name is not yet decided.
+  startup, accumulate, write it at the end. It is `-idx, --index`.
+- **D7 — The file heuristics issue (#44) no longer depends on the index.** Its
+  file investigation is superseded, for the most part, by the per-file pre-read
+  sampling pass (`sample_file_for_detection()`), the scaffolding for determining
+  such things from the outset rather than on a second execution.
 - **D4 — The release notes carry the deprecation.** One bullet states that the
   index is deprecated; one states that it is now off by default and is turned
   on with the new option (by both its forms). These are the only user-facing
