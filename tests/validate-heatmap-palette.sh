@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # validate-heatmap-palette.sh — Validate the heatmap-palette `-V` section
 # emits the resolved palette state under each light/dark selection path
-# and each heatmap metric (Issue #250).
+# and each heatmap metric (Issue #250), and that a user-defined heatmap
+# takes the colour of its spec position, with or without a timeline column
+# (Issues #678, #713).
 # Usage: ./tests/validate-heatmap-palette.sh
 #
 # Follows the self-documenting assertion design from tests/HARNESS-DESIGN.md.
@@ -29,9 +31,9 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/logs-dir.sh"
 LTL="$REPO_DIR/ltl"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
-# every assertion reads the -V heatmap-palette section - the resolved
+# the palette scenarios read the -V heatmap-palette section - the resolved
 # metric, palette and background source, all option-derived - never a
-# heatmap cell. The 5k ScriptLog slice (durationMS, bytes and count on
+# heatmap cell; the user-defined scenarios below carry their own shape. The 5k ScriptLog slice (durationMS, bytes and count on
 # every line, so each -hm metric resolves) at `-bs 1440 -oe -n 1 -osum`
 # produces the identical section.
 SCRIPT_LOG="$LOGS_DIR/ThingworxLogs/CustomThingworxLogs/ScriptLog-DPMExtended-clean-5k.log"
