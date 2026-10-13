@@ -442,9 +442,14 @@ my $top_n_messages = 10;
 my $capture_messages = 1;
 my ( $write_messages_to_csv, $csv, $csv_fh, $csv_file_args ) = ( 0, undef, undef, "" );
 my $run_file_stamp;   # the local-time stamp every output file of one run is named by
-# The duration statistics family in STATS CSV column order: the header, the
-# row and the aggregate export read this one list.
+# The statistics families in CSV column order, by stored key: the header, the
+# row and the aggregate export read these lists. The bytes family carries no
+# sum, its total being the bare bytes column; a user-defined numeric metric
+# carries the basic aggregates the count metric does.
 my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
+my @bytes_family_stats    = qw( occurrences min mean max );
+my @count_family_stats    = qw( occurrences min mean max sum );
+my @udm_family_stats      = qw( occurrences min mean max sum );
 # Statistic and aggregation names: the one table of the names a user types
 # for a statistic (-so, --explain) or an aggregation (the -udm function
 # slot). Each row carries the typed name, which every CSV header and YAML key
@@ -7973,14 +7978,14 @@ sub write_aggregate_export {
                 next unless defined $stats->{bytes};
                 my $block = aggregate_mapping();
                 if ($bytes_family_active) {
-                    $block->{$_} = aggregate_number($stats->{"bytes_$_"}) for grep { defined $stats->{"bytes_$_"} } qw(occurrences min mean max);
+                    $block->{$_} = aggregate_number($stats->{"bytes_$_"}) for grep { defined $stats->{"bytes_$_"} } @bytes_family_stats;
                 }
                 $block->{sum} = aggregate_number($stats->{bytes});
                 $b->{bytes} = $block;
             } elsif ($key eq 'count') {
                 next if $omit_count || !defined $stats->{count_occurrences};
                 my $block = aggregate_mapping();
-                $block->{$_} = aggregate_number($stats->{"count_$_"}) for grep { defined $stats->{"count_$_"} } qw(occurrences min mean max sum);
+                $block->{$_} = aggregate_number($stats->{"count_$_"}) for grep { defined $stats->{"count_$_"} } @count_family_stats;
                 $b->{count} = $block;
             } elsif ($key =~ /^udm_(.+)$/) {
                 my $name = $1;
@@ -7995,7 +8000,7 @@ sub write_aggregate_export {
                 } else {
                     next unless defined $stats->{"${key}_occurrences"};
                     my $block = aggregate_mapping();
-                    $block->{$_} = aggregate_number($stats->{"${key}_$_"}) for grep { defined $stats->{"${key}_$_"} } qw(occurrences min mean max sum);
+                    $block->{$_} = aggregate_number($stats->{"${key}_$_"}) for grep { defined $stats->{"${key}_$_"} } @udm_family_stats;
                     $udm->{$name} = $block;
                 }
             } elsif ($key eq 'sessions' || $key eq 'users') {
@@ -11734,8 +11739,7 @@ sub udm_csv_columns {
     return { shape => 'single', stats => [ $config->{aggregation} ], columns => [$prefix] }
         if $name ne $config->{base_name};
 
-    my @stats = qw(occurrences min mean max sum);
-    return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };
+    return { shape => 'family', stats => [ @udm_family_stats ], columns => [ map { "${prefix}_$_" } @udm_family_stats ] };
 }
 
 # The function field as it is spelled into a resolved metric name. 'delta' and
@@ -21134,13 +21138,13 @@ sub normalize_data_for_output {
             push @populated_graph_columns, $key;
             push @output_columns, "${key}_nice" if $key =~ /^(duration|bytes)$/;
             if ($key =~ /^count$/) {
-                push @output_columns, "${key}_occurrences", "${key}_min", "${key}_mean", "${key}_max", "${key}_sum" if !$omit_count;
+                push @output_columns, map { "${key}_$_" } @count_family_stats if !$omit_count;
             } elsif ($key =~ /^udm_/) {
                 (my $csv_key = $key) =~ s/^udm_//;
                 my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
                 push @output_columns, $cfg
                     ? @{ udm_csv_columns($cfg)->{columns} }
-                    : map { "${csv_key}_$_" } qw(occurrences min mean max sum);
+                    : map { "${csv_key}_$_" } @udm_family_stats;
             } else {
                 push @output_columns, $key;
                 # #444 D13: whatever is captured as a metric is exported — the
@@ -21160,7 +21164,7 @@ sub normalize_data_for_output {
     # Add CSV output columns for latency stats. @output_columns drives the CSV
     # header/data only here; the terminal render uses @column_layout.
     if (stats_csv_bytes_columns_active()) {
-        push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );
+        push @output_columns, map { "bytes_$_" } @bytes_family_stats;
     }
     if (stats_csv_duration_columns_active()) {
         push @output_columns, map { "duration_$statistic_name_by_key{$_}" } @duration_family_stats;
@@ -22006,7 +22010,7 @@ sub print_bar_graph {
                         format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
                 } elsif( $key =~ /^count$/i ) {
                     next if $omit_count;
-                    foreach my $metric ( qw( occurrences min mean max sum ) ) {
+                    foreach my $metric ( @count_family_stats ) {
                         push @csv_data, format_csv_value( $log_stats{$bucket}{"count_${metric}"}, "count_${metric}" );
                     }
                 } elsif( $key =~ /^udm_(.+)$/ ) {
@@ -22016,7 +22020,7 @@ sub print_bar_graph {
                     if ($csv && $csv->{shape} eq 'single') {
                         push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
                     } else {
-                        foreach my $metric ( @{ $csv ? $csv->{stats} : [ qw( occurrences min mean max sum ) ] } ) {
+                        foreach my $metric ( @{ $csv ? $csv->{stats} : \@udm_family_stats } ) {
                             push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
                         }
                     }
@@ -22036,7 +22040,7 @@ sub print_bar_graph {
             # below and under its own shared predicate. Pushed ahead of them to match
             # the header order in normalize_data_for_output.
             if( stats_csv_bytes_columns_active() ) {
-                foreach my $metric ( qw( occurrences min mean max ) ) {
+                foreach my $metric ( @bytes_family_stats ) {
                     push @csv_data, format_csv_value( $log_stats{$bucket}{"bytes_${metric}"}, "bytes_${metric}" );
                 }
             }
