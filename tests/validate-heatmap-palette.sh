@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # validate-heatmap-palette.sh — Validate the heatmap-palette `-V` section
 # emits the resolved palette state under each light/dark selection path
-# and each heatmap metric (Issue #250), and that a user-defined heatmap
+# and each heatmap metric (Issue #250), with or without a heatmap drawn
+# (Issue #665), and that a user-defined heatmap
 # takes the colour of its spec position, with or without a timeline column
 # (Issues #678, #713).
 # Usage: ./tests/validate-heatmap-palette.sh
@@ -20,7 +21,8 @@
 # explicitly forbids). The section reports the gradient array that
 # print_heatmap_row() will use, plus the provenance of the light_bg flag,
 # so this harness can guard the -lbg / -dbg / auto-detect / default
-# branches and the -dbg-wins-over-lbg precedence rule.
+# branches and the -dbg-wins-over-lbg precedence rule. The background is a
+# global setting, so these hold with no heatmap drawn as with one (Issue #665).
 
 set -euo pipefail
 
@@ -192,6 +194,47 @@ scenario_no_heatmap() {
 }
 
 # ---------------------------------------------------------------------------
+# The background setting is global (features/665-background-setting-global.md
+# acceptance criteria AC1 to AC4): -lbg and -dbg settle the same way whether
+# or not a heatmap is requested, and the terminal is queried only for a
+# heatmap that will be drawn. Each run has no heatmap, or one switched off at
+# option settlement, so the section reports heatmap_active: no.
+# ---------------------------------------------------------------------------
+
+# Args: scenario_name, ltl_args, expected_light_bg ("no"|"yes"), expected_source
+scenario_background() {
+    scenario_wanted "$1" || return 0
+    local name="$1" ltl_args="$2" exp_lbg="$3" exp_source="$4"
+
+    current_scenario="$name"
+    echo "[$current_scenario]"
+    local out
+    # shellcheck disable=SC2086
+    out=$(run_section $ltl_args)
+    check_capture_warnings "$out"
+
+    assert_header_present "$out"
+
+    assert_line "$out" \
+        pattern     '^heatmap_active: no$' \
+        asserts     'No heatmap is drawn on this run, so the section reports the background setting from its inactive branch' \
+        produced_by 'emit_heatmap_palette_verbose() in ltl (inactive branch)' \
+        contract    'Issue #250 - section reports inactive state without crashing when heatmap is off'
+
+    assert_line "$out" \
+        pattern     "^light_bg: ${exp_lbg}\$" \
+        asserts     "The background setting is global: with no heatmap drawn, light_bg reports the settled value of \$light_background (${exp_lbg}), as it would with one" \
+        produced_by 'adapt_to_command_line_options() in ltl (background settlement)' \
+        contract    'features/665-background-setting-global.md section 2 - -dbg wins over -lbg whenever both are given, whatever other options are given'
+
+    assert_line "$out" \
+        pattern     "^light_bg_source: ${exp_source}\$" \
+        asserts     "light_bg_source reports the provenance of the setting (${exp_source}) with no heatmap drawn; precedence: -dbg > -lbg > auto-detect > default, and auto-detect only when a reader of the setting is active" \
+        produced_by 'adapt_to_command_line_options() in ltl (background settlement; terminal query gated on a drawn heatmap)' \
+        contract    'features/665-background-setting-global.md section 2 - the terminal is queried only when something will read the result'
+}
+
+# ---------------------------------------------------------------------------
 # Per-palette scenarios — each forces dark or light and asserts metric,
 # color name, the matching gradient array literal, gradient_active, and
 # light_bg_source.
@@ -241,15 +284,15 @@ scenario_palette() {
 
     assert_line "$out" \
         pattern     "^light_bg: ${exp_lbg}\$" \
-        asserts     "light_bg reports the resolved value of \$heatmap_light_bg (${exp_lbg}) that print_heatmap_row() will branch on" \
+        asserts     "light_bg reports the resolved value of \$light_background (${exp_lbg}) that print_heatmap_row() will branch on" \
         produced_by 'emit_heatmap_palette_verbose() in ltl' \
         contract    'Issue #250 - light_bg field equals the runtime value read by print_heatmap_row()'
 
     assert_line "$out" \
         pattern     "^light_bg_source: ${exp_source}\$" \
         asserts     "light_bg_source reports the provenance of the light_bg decision (${exp_source}); precedence: -dbg > -lbg > auto-detect > default" \
-        produced_by 'adapt_to_command_line_options() in ltl - set by -lbg callback, -dbg reconciliation block, and auto-detect block' \
-        contract    'Issue #250 - \$heatmap_light_bg_source is the canonical provenance signal; the four enumerated values are the only valid emissions'
+        produced_by 'adapt_to_command_line_options() in ltl - background settlement, and the terminal query gated on a drawn heatmap' \
+        contract    'Issue #250 - \$light_background_source is the canonical provenance signal; the four enumerated values are the only valid emissions'
 
     assert_line "$out" \
         pattern     "^gradient_dark: ${exp_dark}\$" \
@@ -266,7 +309,7 @@ scenario_palette() {
     assert_line "$out" \
         pattern     "^gradient_active: ${exp_active}\$" \
         asserts     "gradient_active reports which branch (${exp_active}) print_heatmap_row() will pick when rendering; load-bearing line for visual palette coverage" \
-        produced_by 'emit_heatmap_palette_verbose() in ltl (\$heatmap_light_bg ? "light" : "dark")' \
+        produced_by 'emit_heatmap_palette_verbose() in ltl (\$light_background ? "light" : "dark")' \
         contract    'Issue #250 - gradient_active is the contract for which palette renders'
 }
 
@@ -496,6 +539,11 @@ echo ""
 # scenario_palette call already carries.
 SCENARIO_USAGE_NOTE="  (one scenario per heatmap palette case)"
 scenario_register no-heatmap \
+                  no-heatmap-lbg-then-dbg \
+                  no-heatmap-dbg-then-lbg \
+                  no-heatmap-dbg \
+                  no-heatmap-lbg \
+                  no-query-heatmap-off \
                   dbg-duration \
                   dbg-bytes \
                   dbg-count \
@@ -511,6 +559,20 @@ scenario_register no-heatmap \
 scenario_parse_args "$@"
 
 scenario_no_heatmap
+echo ""
+
+# --- The background setting without a heatmap: -dbg wins in either order ---
+scenario_background "no-heatmap-lbg-then-dbg" "-lbg -dbg" "no" "-dbg"
+echo ""
+scenario_background "no-heatmap-dbg-then-lbg" "-dbg -lbg" "no" "-dbg"
+echo ""
+scenario_background "no-heatmap-dbg" "-dbg" "no" "-dbg"
+echo ""
+scenario_background "no-heatmap-lbg" "-lbg" "yes" "-lbg"
+echo ""
+# A counting user-defined metric switches the heatmap off at option
+# settlement, so nothing reads the background and the terminal is not queried
+scenario_background "no-query-heatmap-off" "-udm m::distinct:/(\w+)/ -hm m" "no" "default"
 echo ""
 
 # --- -dbg path: each of three metrics ---

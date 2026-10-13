@@ -1308,16 +1308,18 @@ my %timestamp_date_cache_added;    # date string -> insertion stamp (eviction or
 my $timestamp_date_cache_stamp = 0;
 use constant TIMESTAMP_DATE_CACHE_MAX => 100;
 
+# The background the output is drawn for, one setting for the whole run
+my $light_background_given = 0;             # -lbg given
+my $dark_background_given = 0;              # -dbg given; wins over -lbg
+my $light_background = 0;                   # draw for a light background
+my $light_background_source = 'default';    # what settled it: '-dbg' | '-lbg' | 'auto-detect' | 'default'
+
 # Heatmap data structures
 my $heatmap_enabled = 0;                    # Flag: heatmap mode active
 my $heatmap_metric;                         # Metric: duration|bytes|count|<udm_name> (undef until set by CLI)
 my $heatmap_udm_config;                     # Reference to @udm_configs entry for heatmap UDM metric
 my @histogram_udm_configs;                  # References to @udm_configs entries for histogram UDM metrics
 my $heatmap_width = 52;                     # Number of histogram buckets (default matches latency stats width)
-my $heatmap_light_bg = 0;                   # Flag: use light background color gradients (set by -lbg or auto-detect)
-my $heatmap_light_bg_auto = 1;              # Flag: auto-detect terminal background (disabled if -lbg or -dbg explicitly set)
-my $heatmap_dark_bg_explicit = 0;           # Flag: -dbg given on CLI; forces dark, wins over -lbg
-my $heatmap_light_bg_source = 'default';    # Provenance of $heatmap_light_bg: '-lbg' | '-dbg' | 'auto-detect' | 'default'
 my %heatmap_data;                           # {$bucket}{$range_index} = count
 my %heatmap_data_hl;                        # {$bucket}{$range_index} = highlighted count
 my %heatmap_raw;                            # {$bucket} = [raw values] - exact-path only
@@ -6798,7 +6800,8 @@ sub emit_format_detection_evidence_verbose {
 # at render time: which metric is active, light vs dark selection, the
 # provenance of that selection, and the dark/light gradient arrays that
 # print_heatmap_row() picks between. Always emitted when requested; reports
-# heatmap_active: no with n/a fields when -hm is not set.
+# heatmap_active: no with n/a fields when no heatmap is drawn, and the
+# background setting, which is global, either way.
 #
 # Contract (Issue #250): the section is consumed by
 # tests/validate-heatmap-palette.sh. Renames of the section header, any
@@ -6813,8 +6816,8 @@ sub emit_heatmap_palette_verbose {
     if (!$heatmap_enabled || !defined $heatmap_metric) {
         push @verbose_output, "heatmap_active: no";
         push @verbose_output, "metric: -";
-        push @verbose_output, "light_bg: " . ($heatmap_light_bg ? 'yes' : 'no');
-        push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
+        push @verbose_output, "light_bg: " . ($light_background ? 'yes' : 'no');
+        push @verbose_output, "light_bg_source: $light_background_source";
         push @verbose_output, "color_name: -";
         push @verbose_output, "gradient_dark: -";
         push @verbose_output, "gradient_light: -";
@@ -6832,12 +6835,12 @@ sub emit_heatmap_palette_verbose {
 
     my $gradient_dark_str  = defined $entry && $entry->{gradient}       ? join(',', @{$entry->{gradient}})       : '-';
     my $gradient_light_str = defined $entry && $entry->{gradient_light} ? join(',', @{$entry->{gradient_light}}) : '-';
-    my $gradient_active    = $heatmap_light_bg ? 'light' : 'dark';
+    my $gradient_active    = $light_background ? 'light' : 'dark';
 
     push @verbose_output, "heatmap_active: yes";
     push @verbose_output, "metric: $heatmap_metric";
-    push @verbose_output, "light_bg: " . ($heatmap_light_bg ? 'yes' : 'no');
-    push @verbose_output, "light_bg_source: $heatmap_light_bg_source";
+    push @verbose_output, "light_bg: " . ($light_background ? 'yes' : 'no');
+    push @verbose_output, "light_bg_source: $light_background_source";
     push @verbose_output, "color_name: " . (defined $color_key ? $color_key : '-');
     push @verbose_output, "gradient_dark: $gradient_dark_str";
     push @verbose_output, "gradient_light: $gradient_light_str";
@@ -16113,8 +16116,8 @@ sub adapt_to_command_line_options {
         'skip-final-min-keys=i' => \$consolidation_skip_min_keys,                    # hidden (#584): population floor for the final-pass skip, so the decision is testable on a small fixture
         'heatmap|hm:s' => \$heatmap_metric,
         'heatmap-width|hmw=i' => \$heatmap_width,
-        'light-background|lbg' => sub { $heatmap_light_bg = 1; $heatmap_light_bg_auto = 0; $heatmap_light_bg_source = '-lbg'; },
-        'dark-background|dbg'  => sub { $heatmap_dark_bg_explicit = 1; $heatmap_light_bg_auto = 0; },
+        'light-background|lbg' => \$light_background_given,
+        'dark-background|dbg'  => \$dark_background_given,
         'histogram|hg:s' => \&handle_histogram_option,
         'histogram-width|hgw=i' => sub { $histogram_width_percent = $_[1]; $histogram_width_explicit = 1; },
         'histogram-height|hgh=i' => sub { $histogram_height = $_[1]; $histogram_height_explicit = 1; },
@@ -16296,6 +16299,15 @@ sub adapt_to_command_line_options {
         $group_similar_sensitivity = $consolidation_threshold;  # normalize for downstream checks
     }
 
+    # The background the output is drawn for, a global style setting: -dbg
+    # wins over -lbg whichever comes first, whatever other options are given.
+    # With neither, the terminal may be asked once the readers are known.
+    if ($dark_background_given) {
+        ( $light_background, $light_background_source ) = ( 0, '-dbg' );
+    } elsif ($light_background_given) {
+        ( $light_background, $light_background_source ) = ( 1, '-lbg' );
+    }
+
     # Heatmap option processing. A value that names no metric is a file
     # argument (settle_optional_operand) and the heatmap shows duration; a
     # built-in name takes its canonical form ('time' resolves to 'duration');
@@ -16310,19 +16322,6 @@ sub adapt_to_command_line_options {
         );
         my $builtin = defined $metric ? builtin_metric_name( $metric, '-hm/--heatmap' ) : 'duration';
         $heatmap_metric = defined $builtin ? $builtin : $metric;
-
-        # -dbg wins over -lbg regardless of CLI order: force dark and skip auto-detect
-        if ($heatmap_dark_bg_explicit) {
-            $heatmap_light_bg = 0;
-            $heatmap_light_bg_auto = 0;
-            $heatmap_light_bg_source = '-dbg';
-        }
-
-        # Auto-detect light terminal background if neither -lbg nor -dbg was set
-        if ($heatmap_light_bg_auto) {
-            $heatmap_light_bg = detect_light_terminal_background();
-            $heatmap_light_bg_source = 'auto-detect';
-        }
     }
 
     # Histogram option processing (Issue #25). Each -hg value is settled as
@@ -16628,6 +16627,14 @@ sub adapt_to_command_line_options {
             $heatmap_udm_config = $resolved->{config};
             $heatmap_metric_map{$heatmap_metric} = { column => undef };
         }
+    }
+
+    # The terminal is asked for its background only when no option settled
+    # it and something will read the answer: the heatmap's gradient, whose
+    # on/off is final here
+    if ( $light_background_source eq 'default' && $heatmap_enabled ) {
+        $light_background = detect_light_terminal_background();
+        $light_background_source = 'auto-detect';
     }
 
     # Bind user-defined histogram metrics to their configs; counting ones are skipped
@@ -21456,7 +21463,7 @@ sub print_heatmap_row {
 
     my $color_key = $heatmap_metric_map{$heatmap_metric}{color};
     my $entry = $column_color_lookup{$color_key} // $heatmap_special_gradients{$color_key};
-    my @gradient = @{$heatmap_light_bg ? $entry->{gradient_light} : $entry->{gradient}};
+    my @gradient = @{$light_background ? $entry->{gradient_light} : $entry->{gradient}};
     my $highlight_bg = $entry->{plain_bg_num} // $heatmap_metric_map{$heatmap_metric}{highlight_bg} // 184;
 
     # Get percentile positions for this bucket
