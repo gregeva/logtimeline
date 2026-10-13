@@ -186,8 +186,10 @@ actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
 `CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
 each harness's output once to a scratch file and inspect the file.
 
-While working a single harness, the check is that harness. The full suite runs
-once, here.
+The suite is the gate's failsafe, never a development tool. While working, the
+check is the developer's own runs aimed at the change, and at most a single
+harness scenario. The full suite runs here, once; its second pass on the
+generated read path belongs to the release gate (§ 5, step 4).
 
 ## 4. Merge and close
 
@@ -295,6 +297,22 @@ architect, is a last resort after the steps have been tried singly.
 2. Verify `$version_number` reads `X.Y.Z` (no branch left its `-{issue}` marker). If wrong, fix it here and note which branch.
 3. Run every `tests/validate-*.sh`, `CI=1 ./tests/validate-csv-output.sh` first, then `CI=1 ./tests/validate-statistics.sh`, then the rest; capture once, inspect the files. The gate is the complete suite.
 4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift. Then `./tests/cleanup-test-artifacts.sh`.
+   Then the suite runs a second time, on the generated read path
+   (`features/621-generated-read-loop-body.md` D3). The harnesses' fixtures are
+   under the read path's size threshold, so the first run reads every file with
+   the standard path. `LTL` points every harness, and the shared CSV cache, at a
+   copy of `ltl` whose one difference is a threshold of 0, so each file takes the
+   generated body; the harnesses that read the source read the same source. The
+   cache is cleared before and after, since it does not know which `ltl` filled
+   it. `tests/validate-read-path.sh` runs `ltl` itself and compares the two paths
+   on its own.
+   ```bash
+   gen="$(mktemp -d)/ltl"
+   sed 's/^my \$read_path_threshold       = 2_097_152;/my $read_path_threshold       = 0;/' ltl > "$gen" && chmod +x "$gen"
+   diff ltl "$gen" | grep -c '^>'      # exactly 1, or the copy is wrong
+   LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest
+   ./tests/cleanup-test-artifacts.sh
+   ```
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`
 7. Regenerate the documentation screenshots:

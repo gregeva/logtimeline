@@ -80,7 +80,7 @@ _CSV_CACHE_RULES_DIR="$_CSV_CACHE_TESTS_DIR/csv-output/rules"
 # (#448). Overridable so the harness can put the rule itself under test.
 _CSV_CACHE_MAX_AGE_MINUTES="${CSV_CACHE_MAX_AGE_MINUTES:-60}"
 _CSV_CACHE_CLEANUP="$_CSV_CACHE_TESTS_DIR/cleanup-test-artifacts.sh"
-_CSV_CACHE_LTL="$_CSV_CACHE_REPO_DIR/ltl"
+_CSV_CACHE_LTL="${LTL:-$_CSV_CACHE_REPO_DIR/ltl}"
 
 # Pure: produce the kebab-case shorthand for an options string.
 csv_cache_options_shorthand() {

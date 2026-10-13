@@ -95,6 +95,10 @@ docker run --rm --platform=linux/$architecture \
     fi
 
     echo ""
+    echo "Verifying the generated read path..."
+    ./build/verify-read-path.sh tests/fixtures/access-classification-buckets.txt ./${PACKAGE_NAME}
+
+    echo ""
     echo "=========================================="
     echo "BUILD SUCCESSFUL: ${PACKAGE_NAME}"
     echo "=========================================="

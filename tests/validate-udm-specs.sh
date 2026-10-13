@@ -21,7 +21,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
 # subject is per-spec interpretation and run-wide production, which is the
 # same at any bucket size, so one bucket (-bs 1440) with -oe on a 4-line

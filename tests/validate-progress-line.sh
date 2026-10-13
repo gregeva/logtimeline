@@ -46,7 +46,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # Invocation shape (HARNESS-DESIGN.md § Invocation coherence): every assertion
 # reads the progress line, which the read pass emits. Nothing it carries depends

@@ -42,7 +42,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 HARNESS_DIR="$SCRIPT_DIR/statistics-drift"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
 # scenario's options and fixture in scenarios.tsv are the subject (the

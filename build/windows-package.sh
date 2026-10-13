@@ -166,6 +166,10 @@ docker run --rm --platform=linux/$architecture \
     fi
 
     echo ""
+    echo "Verifying the generated read path..."
+    bash ./verify-read-path.sh ../tests/fixtures/access-classification-buckets.txt wine "../${PACKAGE_NAME}.exe"
+
+    echo ""
     echo "=========================================="
     echo "BUILD SUCCESSFUL: ${PACKAGE_NAME}.exe"
     echo "=========================================="

@@ -218,6 +218,9 @@ my %verbose_section_registry = (
     'format-registry' => {
         description => 'The compiled format registry itself: entry inventory, variant groups and their occupants, static scan order and derived ancestor constraints, and scan-sub compile state (Issue #413).',
     },
+    'read-path' => {
+        description => 'The path each file was read by: the generated body above the size threshold, the standard path at or below it and under -D, with the threshold in effect, why a generated body could not be prepared, and what each gate marker resolved to (Issue #721).',
+    },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
@@ -260,6 +263,7 @@ my @verbose_section_order = qw(
     filter-summary
     format-detection
     format-registry
+    read-path
     heatmap-palette
     csv-output
     percentile-algorithm
@@ -881,7 +885,26 @@ my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
                                  # FORMAT_DETECTION_WINDOW_FALLBACK
 my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
 my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
-my %format_detection_evidence;   # in_file => per-file variant selection record (select_format_variants())
+
+# The read path (## GENERATED READ LOOP ##). A file larger than the threshold
+# is read by a body generated from the per-line loop's own text, its gates on
+# values fixed for the run resolved once; a file at or below it, and every
+# file under -D, by the loop itself, the reference. The body's text is written
+# on the first file that needs it and compiled per file, closing over that
+# file's variables. A body that cannot be prepared leaves its file to the loop,
+# with a notice (features/621-generated-read-loop-body.md D1, D2, D4, D6, D7).
+my $read_path_standard_forced = 0;          # -D, --debug
+my $read_path_threshold       = 2_097_152;  # hidden --generated-loop-threshold=N, bytes
+my %read_path_file;                          # in_file => { size, path, reason }
+my @read_path_files;                         # the files given a path, in reading order
+my $read_path_text;                          # the generated body's text, once written
+my $read_path_text_state      = 'not_needed'; # not_needed | written | failed
+my $read_path_fallback_reason;               # the first reason a body could not be prepared
+my $read_path_text_failure;                 # why the text could not be written: source_unreadable | marker_mismatch
+my $read_path_noticed        = 0;           # the fallback notice is queued once a run
+my @read_path_markers;                       # [ source line, op, kept ] per marker, in loop order
+my $elapsed_read_path_generation = 0;        # writing the text and every compile, summed
+my %format_detection_evidence;  # in_file => per-file variant selection record (select_format_variants())
 my %format_detection_formats;    # in_file => [ format names found in the file, first-bound first ] (D50)
 my %format_legend;               # format name => legend number, first-detection order across the run
 my @format_legend_order;         # legend numbers -> format names
@@ -1234,6 +1257,7 @@ my @quantity_options = (
     { long => 'consolidation-trigger',                     kind => 'count', value => 'size', target => \$consolidation_trigger },                 # hidden
     { long => 'consolidation-ceiling',                     kind => 'count', value => 'size', target => \$consolidation_occurrence_ceiling },      # hidden
     { long => 'consolidation-max-patterns',                kind => 'count', value => 'size', target => \$consolidation_max_patterns },            # hidden
+    { long => 'generated-loop-threshold',                  kind => 'bytes', value => 'size', min => 0, target => \$read_path_threshold },                 # hidden
 );
 my %quantity_option_by_long = map { $_->{long} => $_ } @quantity_options;
 # The options whose value is a number that is not a quantity, each with the
@@ -2992,7 +3016,7 @@ sub _classify_argv_provenance {
                 'mdm|message-stats-data-model',
                 'bdm|bucket-stats-data-model',
                 'terminal-width|tw', 'terminal-height|th', 'no-auto-hide|nah',
-                'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
+                'debug|D', 'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
             );
             for my $s (@specs) {
                 my @parts = split /\|/, $s;
@@ -11484,6 +11508,7 @@ sub print_help {
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
+    $out .= help_opt("-D,   --debug",           "Read every file with the standard path, slower on large files: for reproducing a problem, or profiling the run");
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -12117,7 +12142,8 @@ sub number_unit_canonical {
 # typed in (undef for a bare number, which is taken as it stands), and the
 # problem that stops the run, if any. A unit is read in the row's kind only. A
 # value within rounding of a whole number is that whole number, so 1.1k is
-# 1100. A bound refuses a negative; a size refuses a fraction.
+# 1100. A bound refuses a negative; a size refuses a fraction; a row carrying
+# a min refuses a value below it.
 sub resolve_quantity_option {
     my ($row, $text) = @_;
     my $kind = $quantity_kind{ $row->{kind} };
@@ -12138,6 +12164,7 @@ sub resolve_quantity_option {
     }
     return (undef, $unit, 'a bound cannot be negative')  if $row->{value} eq 'bound' && $value < 0;
     return (undef, $unit, "not a whole number $units")    if $row->{value} eq 'size'  && $value != int($value);
+    return (undef, $unit, "cannot be below $row->{min}")  if defined $row->{min} && $value < $row->{min};
     return ($value, $unit, undef);
 }
 
@@ -16135,6 +16162,7 @@ sub adapt_to_command_line_options {
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'terminal-height|th=i' => sub { set_terminal_height($_[1]) },               # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
+        'debug|D' => \$read_path_standard_forced,
         'debug-layout' => \$debug_layout,                                           # hidden
         'detection-window=i' => \$format_detection_window,                          # hidden — D30 two-phase-store window size (default 0 until #17 sizes it)
         'validate-layout' => \$validate_layout,                                     # hidden
@@ -16921,6 +16949,247 @@ sub pause_for_keypress {
     }
 }
 
+## GENERATED READ LOOP ##
+# The read path's generated body: the per-line loop of read_and_process_logs,
+# written from the program's own source with every `#@<op> <expression>`
+# marker resolved once for the run. A line a resolution drops is left empty,
+# so the text keeps the source's line numbers and one #line directive maps
+# warnings, die messages and profiler lines back to the source. The text is
+# written once per run; read_and_process_logs compiles it per file, in the
+# scope of that file's variables. Record: features/621-generated-read-loop-body.md.
+#
+# The marker operations, applied to the statement or block below the marker:
+#   when EXPR    a block whose whole condition is EXPR: true keeps the arm
+#                without its test and drops the other arms; false drops the
+#                arm, keeping an else arm's body or turning an elsif into the
+#                if. A statement: false drops it, true keeps it.
+#   and TERM     the condition is TERM && rest (or rest && TERM): false as
+#                when-false; true removes the term's text from the condition.
+#   unless EXPR  a statement carrying `unless EXPR`: true drops the statement,
+#                false removes the modifier.
+#   true EXPR    when EXPR holds the block's condition is always true: unwrap.
+#   false EXPR   when EXPR holds the block's condition is always false: drop.
+# A marker that does not find what it names is a mismatch: generation stops
+# and the file is read by the loop itself (D7).
+
+# A marker's expression, evaluated once in the scope of the run's settings.
+sub generated_loop_flag {
+    my ($expr) = @_;
+    my $v = eval "($expr) ? 1 : 0";
+    die "marker_mismatch: marker [$expr] does not evaluate: $@" if $@;
+    return $v;
+}
+sub generated_loop_strip { (my $t = $_[0]) =~ s/(?:^|(?<=\s))#.*$//; return $t }
+# The line the block opens on at or after $i, and the line it closes on.
+sub generated_loop_block {
+    my ($t, $i) = @_;
+    my $o = $i;
+    $o++ until $o > $#$t || generated_loop_strip($t->[$o]) =~ /\{\s*$/;
+    die "marker_mismatch: no block opens at or after offset $i\n" if $o > $#$t;
+    my $depth = 1;
+    for my $j ($o + 1 .. $#$t) {
+        next unless $t->[$j] =~ /[{}]/;
+        my $s = generated_loop_strip($t->[$j]);
+        while ($s =~ /([{}])/g) {
+            if ($1 eq '{') { $depth++ }
+            elsif (--$depth == 0) { return ($o, $j) }
+        }
+    }
+    die "marker_mismatch: no close for the block opened at offset $o\n";
+}
+# What a marker governs: ('stmt', first, last) or ('block', first, [arms]).
+sub generated_loop_target {
+    my ($t, $j) = @_;
+    die "marker_mismatch: a marker ends the loop's text\n" if $j > $#$t;
+    my $s = generated_loop_strip($t->[$j]);
+    die "marker_mismatch: no statement or block below the marker at offset $j\n" if $s !~ /\S/;
+    my $opens  = () = $s =~ /\{/g;
+    my $closes = () = $s =~ /\}/g;
+    return ('stmt', $j, $j) if $opens == $closes && $s =~ /[;}]\s*$/;
+    for my $k ($j .. $#$t) {
+        my $sk = generated_loop_strip($t->[$k]);
+        last if $sk =~ /\{\s*$/;
+        return ('stmt', $j, $k) if $sk =~ /;\s*$/;
+    }
+    my ($o, $c) = generated_loop_block($t, $j);
+    my @arms = ([ 'if', $j, $o, $c ]);
+    while ($t->[$c] =~ /^\s*\}\s*(else|elsif)\b/) {
+        my $kind = $1;
+        my ($o2, $c2) = generated_loop_block($t, $c);
+        push @arms, [ $kind, $c, $o2, $c2 ];
+        $c = $c2;
+    }
+    return ('block', $j, \@arms);
+}
+sub generated_loop_blank { my ($t, $a, $b) = @_; $t->[$_] = "\n" for $a .. $b }
+# A block whose condition is known: 1 true, 0 false.
+sub generated_loop_resolve {
+    my ($t, $arms, $truth) = @_;
+    my ($first, @rest) = @$arms;
+    if ($truth) {
+        # The arm keeps its own scope as `if (1) {`: Perl folds the constant
+        # test away, the arm's declarations stay its own, and unlike a bare
+        # block it is no loop, so next and last still mean the read loop.
+        my ($ind) = $t->[ $first->[1] ] =~ /^(\s*)/;
+        generated_loop_blank($t, $first->[1], $first->[2] - 1) if $first->[2] > $first->[1];
+        $t->[ $first->[2] ] = "${ind}if (1) {\n";
+        if (@rest) {
+            $t->[ $first->[3] ] = "${ind}}\n";
+            generated_loop_blank($t, $first->[3] + 1, $arms->[-1][3]);
+        }
+    } elsif (!@rest) {
+        generated_loop_blank($t, $first->[1], $first->[3]);
+    } elsif ($rest[0][0] eq 'else') {
+        my ($ind) = $t->[ $first->[1] ] =~ /^(\s*)/;
+        generated_loop_blank($t, $first->[1], $rest[0][2] - 1);
+        $t->[ $rest[0][2] ] = "${ind}if (1) {\n";
+    } else {
+        generated_loop_blank($t, $first->[1], $rest[0][1] - 1);
+        $t->[ $rest[0][1] ] =~ s/^(\s*)\}\s*elsif\s*\(/$1if (/ or die "marker_mismatch: elsif arm not rewritten\n";
+    }
+}
+# Resolves every marker of the loop's lines in place; returns the markers as
+# [ offset, op, kept ], kept meaning the code below the marker stays.
+sub generated_loop_text {
+    my ($t) = @_;
+    my @markers;
+    for my $i (0 .. $#$t) {
+        next unless $t->[$i] =~ /^\s*#\@(when|and|unless|true|false)\s+(.+?)\s*$/;
+        my ($op, $expr) = ($1, $2);
+        $expr =~ s/\s+#\s.*$//;   # a comment after the expression
+        $t->[$i] = "\n";
+        my ($kind, $first, $span) = generated_loop_target($t, $i + 1);
+        my $last = $kind eq 'stmt' ? $span : $span->[0][2];   # the statement, or the condition through the opening line
+        my $v = generated_loop_flag($expr);
+        if ($op eq 'when' && $kind eq 'block') {
+            # The block's whole condition is the expression; a block testing
+            # anything else needs `false !EXPR`, which keeps its test.
+            (my $cond = join '', map { generated_loop_strip($_) } @$t[ $first .. $last ]) =~ s/\s+//g;
+            (my $want = $expr) =~ s/\s+//g;
+            die "marker_mismatch: when [$expr] above a block testing something else\n"
+                unless $cond =~ /^(?:\}?(?:if|elsif)\((.*)\)\{)$/ && ($1 eq $want || $1 eq "($want)");
+        }
+        my $kept = 1;
+        if ($op eq 'when' || ($op eq 'and' && !$v)) {
+            if ($kind eq 'block') { generated_loop_resolve($t, $span, $v); $kept = $v }
+            elsif (!$v)           { generated_loop_blank($t, $first, $span); $kept = 0 }
+        } elsif ($op eq 'and') {
+            my $done = 0;
+            for my $k ($first .. $last) {
+                $done = 1, last if $t->[$k] =~ s/\Q$expr\E\s*&&\s*// || $t->[$k] =~ s/\s*&&\s*\Q$expr\E//;
+                # The term ends its line and its && opens the next.
+                if ($k < $last && $t->[$k] =~ /\Q$expr\E\s*$/ && $t->[$k + 1] =~ /^\s*&&/) {
+                    $t->[$k] =~ s/\s*\Q$expr\E(\s*)$/$1/;
+                    $t->[$k + 1] =~ s/^(\s*)&&\s*/$1/;
+                    $done = 1;
+                    last;
+                }
+            }
+            die "marker_mismatch: no term [$expr] in the condition below its marker\n" unless $done;
+        } elsif ($op eq 'unless') {
+            if ($v) { generated_loop_blank($t, $first, $span); $kept = 0 }
+            else {
+                my $done = 0;
+                for my $k ($first .. $span) { $done = 1, last if $t->[$k] =~ s/\s*\bunless\s+\Q$expr\E// }
+                die "marker_mismatch: no `unless $expr` to remove\n" unless $done;
+            }
+        } else {   # true, false: a block whose condition is known when EXPR holds
+            die "marker_mismatch: $op marker above a statement\n" unless $kind eq 'block';
+            if ($v) { generated_loop_resolve($t, $span, $op eq 'true' ? 1 : 0); $kept = $op eq 'true' ? 1 : 0 }
+        }
+        push @markers, [ $i, $op, $kept ];
+    }
+    return \@markers;
+}
+# The generated body's text for this run, written on first need and cached;
+# undef when it cannot be written, with the reason recorded. The error state
+# is left as it was found, so a die in the read loop exits with the same
+# status on either path.
+sub read_path_text {
+    return $read_path_text if $read_path_text_state eq 'written';
+    return undef           if $read_path_text_state eq 'failed';
+    local ($!, $@);
+    my $t0 = [gettimeofday];
+    my $text = eval {
+        my $file = __FILE__;
+        # In a PAR-packed binary __FILE__ names the archive member
+        # (script/ltl), which is not on disk; PAR runs the script from an
+        # extracted copy named in PAR_0, two lines longer at the top
+        # (`package main;` and a #line directive).
+        my ($read_from, $line_offset) = ($file, 0);
+        ($read_from, $line_offset) = ($ENV{PAR_0}, 2)
+            if !-e $file && defined $ENV{PAR_0} && -e $ENV{PAR_0};
+        # Streamed: only the reading sub's lines are kept, from its per-line
+        # loop to the next sub.
+        open my $sfh, '<', $read_from or die "source_unreadable: $read_from: $!\n";
+        my ($in_sub, $line, @s) = (0, undef);
+        while (my $l = <$sfh>) {
+            if (!$in_sub) { $in_sub = 1 if $l =~ /^sub read_and_process_logs \{/; next }
+            last if $l =~ /^sub /;
+            if (!defined $line) {
+                next unless $l =~ /^\s*while \(1\) \{/;
+                $line = $. - $line_offset;
+            }
+            push @s, $l;
+        }
+        close $sfh;
+        die "source_unreadable: no per-line loop in $read_from\n" unless defined $line;
+        my (undef, $end) = generated_loop_block(\@s, 0);
+        my @t = @s[ 0 .. $end ];
+        my $markers = generated_loop_text(\@t);
+        @read_path_markers = map { [ $line + $_->[0], $_->[1], $_->[2] ] } @$markers;
+        "sub {\n#line $line \"$file\"\n" . join('', @t) . "}\n";
+    };
+    $elapsed_read_path_generation += tv_interval($t0);
+    if (!defined $text) {
+        ($read_path_text_failure) = $@ =~ /^(source_unreadable|marker_mismatch):/;
+        $read_path_text_failure //= 'marker_mismatch';
+        $read_path_text_state = 'failed';
+        @read_path_markers = ();
+        return undef;
+    }
+    $read_path_text_state = 'written';
+    return $read_path_text = $text;
+}
+# The path a file is read by, recorded for -V read-path: 1 for the generated
+# body, 0 for the loop itself. Under -D the threshold is not consulted.
+sub read_path_wants_generated {
+    my ($in_file, $size) = @_;
+    my ($path, $reason) = $read_path_standard_forced      ? ('standard', 'forced_standard')
+                        : $size > $read_path_threshold    ? ('generated', 'above_threshold')
+                        :                                   ('standard', 'at_or_below_threshold');
+    push @read_path_files, $in_file unless $read_path_file{$in_file};
+    $read_path_file{$in_file} = { size => $size, path => $path, reason => $reason };
+    return $path eq 'generated' ? 1 : 0;
+}
+# A body that could not be prepared for this file: it is read by the loop
+# itself, and the run says so once.
+sub read_path_fall_back {
+    my ($reason, $in_file) = @_;
+    $read_path_fallback_reason //= $reason;
+    @{ $read_path_file{$in_file} }{qw(path reason)} = ('standard', 'fallback');
+    return if $read_path_noticed++;
+    defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");
+    return;
+}
+
+sub emit_read_path_verbose {
+    return unless section_requested('read-path');
+    push @verbose_output, "=== read-path ===";
+    push @verbose_output, "threshold_bytes: $read_path_threshold ("
+        . ( defined $quantity_entered{'generated-loop-threshold'} ? 'option' : 'default' ) . ")";
+    push @verbose_output, "standard_path_forced: " . ( $read_path_standard_forced ? 'yes' : 'no' );
+    push @verbose_output, "generated_text: $read_path_text_state";
+    push @verbose_output, "fallback_reason: " . ( $read_path_fallback_reason // '-' );
+    for my $f (@read_path_files) {
+        my $r = $read_path_file{$f};
+        push @verbose_output, "file: $f", "  size_bytes: $r->{size}", "  path: $r->{path}", "  reason: $r->{reason}";
+    }
+    push @verbose_output, sprintf( "marker: %d op=%s kept=%s", $_->[0], $_->[1], ( $_->[2] ? 'yes' : 'no' ) )
+        for @read_path_markers;
+    push @verbose_output, "=== END read-path ===";
+}
+
 # Parse logs, bucket by time, and count log levels
 sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
@@ -17082,6 +17351,28 @@ sub read_and_process_logs {
             $progress_last_paint = Time::HiRes::time();
         }
 
+        # The read path for this file: its generated body, compiled here so it
+        # closes over this file's variables, or the loop below. The error state
+        # is left as it was found, so a die in either exits alike.
+        my $generated_loop;
+        if (read_path_wants_generated($in_file, $progress_file_size)) {
+            if (defined(my $text = read_path_text())) {
+                my $t0 = [gettimeofday];
+                { local ($!, $@); $generated_loop = eval $text; }
+                $elapsed_read_path_generation += tv_interval($t0);
+                read_path_fall_back('compile_failure', $in_file) unless $generated_loop;
+            } else {
+                read_path_fall_back($read_path_text_failure, $in_file);
+            }
+        }
+
+        # The per-line loop. A `#@<op> <expression>` comment above a gate names
+        # the value, fixed for the run, that decides it: when, and, unless, true,
+        # false. The read path writes a file's generated body from this text,
+        # resolving each marker once (## GENERATED READ LOOP ##); a marker is
+        # kept true to the gate below it, and one that no longer finds it stops
+        # generation. The loop itself is the reference: -D reads every file here.
+        if ($generated_loop) { $generated_loop->() } else {
         while (1) {
             # Line source: held window lines replay first (carrying their
             # one-time classification), then the stream. A held line whose
@@ -17110,17 +17401,20 @@ sub read_and_process_logs {
             # point below, which is the only surface that answers it; every
             # consumer further down the loop reads this value rather than
             # testing the -HL suffix the tag point appends to $category_bucket.
+            #@when $highlight_active || $histogram_enabled
             my $line_is_highlighted = 0;
             my ( $occurrences, $count ) = ( undef, undef );
             my ( $threadname );
             my $line_entry;                                 # winning registry entry for this line (drives timestamp-parse dispatch)
             $total_lines_read++;
+            #@when $show_memory_debug
             memory_debug_sample("read_lines") if $show_memory_debug && $total_lines_read % 75000 == 0;
 
             # Repaint gate (#446 D4). The stride is the cheap integer test that
             # keeps Time::HiRes off the per-line path; the clock behind it is
             # what actually decides, so the refresh rate follows elapsed time
             # rather than how fast the input happens to arrive.
+            #@and !$disable_progress
             if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {
                 my $now = Time::HiRes::time();
                 if ($now - $progress_last_paint >= PROGRESS_REPAINT_SECONDS) {
@@ -17202,6 +17496,7 @@ sub read_and_process_logs {
             # CSV detection is deferred: line 1 is stashed as a potential header, and only
             # confirmed as CSV when line 2 also fails all log pattern matches and validates
             # as CSV data. A log pattern match on any line disqualifies CSV.
+            #@and @udm_configs
             if (@udm_configs && !$csv_detected) {
                 if ($is_line_match) {
                     $potential_csv_header = undef;  # Log pattern matched — not a CSV file
@@ -17269,6 +17564,7 @@ sub read_and_process_logs {
             # entirely rather than carrying an empty one (D1).
             # $discard_any_field keeps a run that discards no field to one
             # scalar test per line.
+            #@when $discard_any_field
             if( $discard_any_field ) {
                 undef $thread  if $discard_field{thread};
                 undef $session if $discard_field{session};
@@ -17277,9 +17573,11 @@ sub read_and_process_logs {
             }
 
             ## COUNT METRICS # capture count metrics unless explicitly omitted
+            #@and !$omit_count
             if( !$omit_count && defined $message ) {
                 ( $count ) = $message =~ / count\s*=\s*(\d+)/;
                 if( defined $count ) {
+                    #@unless $expose_count
                     $message =~ s/ count\s*=\s*\d+/ count=?/g unless $expose_count;   # the value is masked for grouping, and kept in place when the run exposes count
                     $metrics_observed = 1;
                 }
@@ -17296,8 +17594,11 @@ sub read_and_process_logs {
             # of a multi-line entry leaves the previous record's $message in
             # place, and is never recorded, so trying it could only coerce its
             # text and move the delta state (features/637-udm-continuation-lines.md D1).
+            #@when @udm_configs || $heatmap_enabled || $histogram_enabled
             my %udm_values;
+            #@when @udm_configs
             my $udm_skipped;    # names of /regex/ metrics whose capture this line's numeric aggregation could not use
+            #@and @udm_configs
             if (@udm_configs && $is_line_match && defined $message) {
                 foreach my $config_idx (0 .. $#udm_configs) {
                     my $config = $udm_configs[$config_idx];
@@ -17368,6 +17669,7 @@ sub read_and_process_logs {
                     $message =~ s/\Q$matched_value\E/?/ unless $match_type == 13 || $config->{expose};
                 }
             }
+            #@when @udm_configs
             $metrics_observed = 1 if %udm_values;
 
             if( $is_line_match ) {
@@ -17422,6 +17724,7 @@ sub read_and_process_logs {
                 # format-carried branch converts nothing today — it exists so
                 # a non-ms format declaration is honored without code changes.
                 if (defined $duration) {
+                    #@when defined $duration_unit_override
                     if (defined $duration_unit_override) {
                         $duration = convert_duration_to_ms($duration, $duration_unit_override)
                             unless $line_entry && ($line_entry->[FR_DURATION_UNIT] // '') eq 'line';
@@ -17452,6 +17755,7 @@ sub read_and_process_logs {
                 my $timestamp_epoch = $timestamp + ($fractional_ms / 1000);
 
                 # Index file: pre-filter per-file tracking (Issue #46)
+                #@when $index_capture_demand
                 if ($index_capture_demand) {
                     my $fd = $file_index;
                     $fd->{match_count}++;
@@ -17461,6 +17765,7 @@ sub read_and_process_logs {
                     # takes the line's exact seconds and nanoseconds when they are
                     # better. The floating comparison never misorders two
                     # instants; it can only make them equal.
+                    #@when $timestamp_capture_ns
                     if ($timestamp_capture_ns) {
                         my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
                         if ($timestamp_epoch == $fd->{first_timestamp} && (!defined $fd->{first_s} || $timestamp < $fd->{first_s} || ($timestamp == $fd->{first_s} && $ns < $fd->{first_ns}))) { @$fd{qw(first_s first_ns)} = ($timestamp, $ns) }
@@ -17494,6 +17799,7 @@ sub read_and_process_logs {
                 # --profile — so "noon to 1pm" means the same window on every
                 # day regardless of how the logs are split. A bound given with
                 # a date keeps its absolute cutoff (the per-bound branches below).
+                #@when %filter_range_tod
                 if (%filter_range_tod) {
                     my $tod = $timestamp_epoch - int($timestamp_epoch / 86400) * 86400;
                     my ($tod_s, $tod_e) = @filter_range_tod{qw(start end)};
@@ -17509,6 +17815,7 @@ sub read_and_process_logs {
                         if (!defined $tod_e && $timestamp_epoch >= $filter_range_epoch{'end'})   { $excluded_time_window++; next; }
                     }
                 } else {
+                    #@when $filter_range_epoch{start} != 0 || $filter_range_epoch{end} != 2521843200 # %filter_range_epoch's unbounded values
                     if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} ) { $excluded_time_window++; next; }
                 }
 
@@ -17519,6 +17826,7 @@ sub read_and_process_logs {
                 # real value for the index file; $bucket_epoch carries the folded
                 # value used for bucket keys and the displayed min/max range.
                 my $bucket_epoch = $timestamp_epoch;
+                #@when $profile_mode
                 if ($profile_mode) {
                     my $folded = fold_epoch($timestamp_epoch, $profile_mode);
                     if (!defined $folded) {
@@ -17528,7 +17836,9 @@ sub read_and_process_logs {
                     $bucket_epoch = $folded + ($fractional_ms / 1000);
                 }
 
+                #@and defined( $exclude_filter )
                 if( defined( $exclude_filter )         && match_filter($_, $exclude_filter) )  { $excluded_filter++; next; }
+                #@and defined( $include_filter )
                 if( defined( $include_filter )         && !match_filter($_, $include_filter) ) { $excluded_filter++; next; }
                 # Outcome filters select on the classification the scan block
                 # already produced (1 success, 2 failure, 4 classification
@@ -17536,6 +17846,7 @@ sub read_and_process_logs {
                 # include keeps only its named outcome; an exclude drops only
                 # its named outcome, so unclassified and conflict lines survive
                 # every exclude and satisfy no include.
+                #@when $outcome_filter_active
                 if( $outcome_filter_active ) {
                     if( $include_failure && $line_outcome != 2 ) { $excluded_filter++; next; }
                     if( $include_success && $line_outcome != 1 ) { $excluded_filter++; next; }
@@ -17549,6 +17860,7 @@ sub read_and_process_logs {
                 # processing instead of silently shrinking the totals.
                 # $numeric_filter_active keeps a run with no bound to one scalar
                 # test per line.
+                #@when $numeric_filter_active
                 if( $numeric_filter_active ) {
                     if( defined( $filter_duration_min ) || defined( $filter_duration_max ) ) {
                         if( !defined( $duration ) ) { $numeric_filter_no_metric{duration}++; $excluded_numeric++; next; }
@@ -17569,12 +17881,14 @@ sub read_and_process_logs {
 
                 # A skipped /regex/ capture is counted here, past every filter,
                 # so it describes the same lines as the recorded figure.
+                #@when @udm_configs
                 if ($udm_skipped) { $udm_skipped_lines{$_}++ for @$udm_skipped; }
 
                 # take note if any results were found in this file
                 $in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
 
                 # Index file: post-filter per-file tracking for selection entry (Issue #46)
+                #@when $index_capture_demand
                 if ($index_capture_demand) {
                     my $fd = $file_index;
                     $fd->{sel_match_count}++;
@@ -17606,6 +17920,7 @@ sub read_and_process_logs {
                 # decides when the others are absent. A line missing a metric never satisfies a
                 # numeric criterion on that metric, and a line classified to neither outcome
                 # never satisfies an outcome criterion.
+                #@and $highlight_active
                 if( $highlight_active
                     && ( !defined( $highlight_filter ) || match_filter($_, $highlight_filter) )
                     && ( !$outcome_highlight_active || (
@@ -17624,6 +17939,7 @@ sub read_and_process_logs {
                     $in_files_matched{$in_file} = 2 unless $in_files_matched{$in_file} == 2;
                 } else {
                     $category = 'plain';
+                    #@when $highlight_active
                     $line_is_highlighted = 0;
                 }
 
@@ -17635,9 +17951,11 @@ sub read_and_process_logs {
                 # Nanosecond precision: the selection row's and the heading's
                 # bounds, as the file row's above. The heading's are folded
                 # under --profile, so their whole second is the folded one.
+                #@when $timestamp_capture_ns
                 if ($timestamp_capture_ns) {
                     my $ns = length $fraction_digits ? substr($fraction_digits . '00000000', 0, 9) + 0 : int($fractional_ms * 1_000_000 + 0.5);
                     my $bs = $profile_mode ? int($bucket_epoch - $fractional_ms / 1000 + 0.5) : $timestamp;
+                    #@when $index_capture_demand
                     if ($index_capture_demand) {
                         my $fd = $file_index;
                         if ($timestamp_epoch == $fd->{sel_first_timestamp} && (!defined $fd->{sel_first_s} || $timestamp < $fd->{sel_first_s} || ($timestamp == $fd->{sel_first_s} && $ns < $fd->{sel_first_ns}))) { @$fd{qw(sel_first_s sel_first_ns)} = ($timestamp, $ns) }
@@ -17648,6 +17966,7 @@ sub read_and_process_logs {
                 }
 
                 my $bucket;
+                #@when $bucket_key_scale > 1
                 if ($bucket_key_scale > 1) {
                     # Integer milliseconds or microseconds, rounded at that unit,
                     # so no floating-point drift moves a line across a bucket edge
@@ -17695,15 +18014,18 @@ sub read_and_process_logs {
                     $cls_success_declared = 1 if $cls && $cls->{success} && @{ $cls->{success} };
                     $cls_failure_declared = 1 if $cls && $cls->{failure} && @{ $cls->{failure} };
                 }
+                #@when $profile_mode
                 $profile_included_samples++ if $profile_mode;
 
                 # $capture_messages leads the test so that a run retaining no
                 # message pays a single scalar read per line and skips key
                 # construction, grouping and per-key accumulation entirely; a
                 # retaining run pays that one boolean and nothing else.
+                #@and $capture_messages
                 if( $capture_messages && defined( $message ) ) {
                     my $log_key = "";
                     my $log_level = $status_code > 0 ? $status_code : $category_bucket;			# If we received an actual HTTP status code, use that for the message statistic data model
+                    #@when $highlight_active
                     $log_level =~ s/-HL$//;
 
                     # Exposed values (-x), appended in the order their names
@@ -17714,6 +18036,7 @@ sub read_and_process_logs {
                     # line that cannot carry the key before the pattern runs,
                     # and $expose_active keeps a run that exposes nothing to
                     # one scalar test per line.
+                    #@when $expose_active
                     if( $expose_active ) {
                         for my $ex (@expose_appends) {
                             if ($ex->[0] == EXPOSE_LINE_KEY) {
@@ -17743,6 +18066,7 @@ sub read_and_process_logs {
                     # leaves, and the query string goes whole.
                     # $discard_active keeps a run that discards nothing in the
                     # message to one scalar test.
+                    #@when $discard_active
                     if( $discard_active ) {
                         $message =~ s/\?.+$// if $discard_field{'query-string'};
                         for my $d (@discard_subs) {
@@ -17754,6 +18078,7 @@ sub read_and_process_logs {
                     # exposed values have been added, so an exposed value that
                     # carries an identifier is masked in place. $mask_active
                     # keeps a run that masks nothing to one scalar test.
+                    #@when $mask_active
                     if( $mask_active ) {
                         for my $m (@mask_subs) {
                             $message =~ s/$m->[0]/$m->[1]/g;
@@ -17776,8 +18101,11 @@ sub read_and_process_logs {
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
+                    #@when $grouping_active
                     my $consolidation_s1_matched = 0;
+                    #@when $grouping_active || $message_grouping_section_wanted
                     my $new_key_grouping_key;
+                    #@when $grouping_active
                     if ($grouping_active) {
                         my $grouping_key = $log_level // "";
                         my $cat_gk = "$category|$grouping_key";
@@ -17802,6 +18130,7 @@ sub read_and_process_logs {
                                     $stats_source->{count_min} = $count;
                                     $stats_source->{count_max} = $count;
                                 }
+                                #@when @udm_configs
                                 if (@udm_configs) {
                                     foreach my $config (@udm_configs) {
                                         my $name = $config->{name};
@@ -17826,6 +18155,7 @@ sub read_and_process_logs {
                                     # body carries both the source string and the integer the
                                     # per-file index block's duration_sum read out of it, so a plain
                                     # copy retains a string buffer no consumer of this array reads.
+                                    #@unless $message_stats_bin
                                     $stats_source->{durations} = [0 + $duration] unless $message_stats_bin;
                                     $stats_source->{duration_count} = 1;
                                     # Issue #287: under -mdm bin, additionally seed the
@@ -17834,6 +18164,7 @@ sub read_and_process_logs {
                                     # bin block (via merge_bin_state) folds this into
                                     # the cluster. min/max from $stats_source->{min,max}
                                     # already populated above via raw producer fields.
+                                    #@when $message_stats_bin
                                     if ($message_stats_bin) {
                                         $stats_source->{_running_mean}  = $duration;
                                         $stats_source->{m2_sum}         = 0;
@@ -17858,11 +18189,13 @@ sub read_and_process_logs {
                     # An ungrouped run reporting -V message-grouping records each
                     # new key's grouping key too, so its accounting records are
                     # taken per category and grouping key like a grouped run's.
+                    #@and $message_grouping_section_wanted
                     $new_key_grouping_key = $log_level // ""
                         if $message_grouping_section_wanted && !$grouping_active
                         && !exists $log_messages{$category}{$log_key};
 
                     ## CAPTURE MESSAGE BASED STATISTICS DATA AND PREPARE FOR SORTING ##
+                    #@true !$grouping_active
                     if (!$consolidation_s1_matched) {
                     # The message's entry, looked up once and written through: a lookup by
                     # the full message key costs ~100 ns per line, a write through the
@@ -17903,6 +18236,7 @@ sub read_and_process_logs {
                         });
 
                         $msg_entry->{occurrences}++;
+                        #@and $message_outcomes_demand
                         $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
 
                         # Bytes carries the same aggregate family as count (#432).
@@ -17928,11 +18262,13 @@ sub read_and_process_logs {
                         # discards a metric has nothing to rank on either, and -so
                         # bytes falls back the same way any operand with no values
                         # does.
+                        #@and $message_bytes_demand
                         if( defined $bytes && $message_bytes_demand ) {
                             $msg_entry->{total_bytes} += $bytes;
                             # The count is kept on every line the store's demand
                             # admits (#616 D30); the aggregate demand governs the
                             # extrema.
+                            #@when $bytes_aggregate_demand
                             if( $bytes_aggregate_demand ) {
                                 if( $msg_entry->{bytes_occurrences}++ ) {
                                     $msg_entry->{bytes_min} = $bytes if $bytes < $msg_entry->{bytes_min};
@@ -17953,6 +18289,7 @@ sub read_and_process_logs {
                         }
 
                         # UDM per-message storage (Issue #22)
+                        #@when @udm_configs
                         if (@udm_configs) {
                             foreach my $config (@udm_configs) {
                                 my $name = $config->{name};
@@ -17970,6 +18307,7 @@ sub read_and_process_logs {
                             }
                         }
 
+                        #@and !$omit_durations
                         if( defined $duration && !$omit_durations ) {
                             $msg_entry->{total_duration} += $duration;
 
@@ -17977,6 +18315,7 @@ sub read_and_process_logs {
                             # counters + moment sidecars) is captured only when a surface
                             # will consume the per-key statistics; the totals and impact
                             # accumulate regardless.
+                            #@when $message_duration_stats_demand
                             if( $message_duration_stats_demand ) {
                                 # Accumulate the sum of squares for variance calculation
                                 $msg_entry->{sum_of_squares} += $duration ** 2;
@@ -17988,6 +18327,7 @@ sub read_and_process_logs {
                                 # carried; the percentile path sorts and indexes numerically and the
                                 # moments path sums and squares, so the string buffer a plain copy
                                 # would inherit from the shared record lexical has no reader.
+                                #@unless $message_stats_bin
                                 push @{$msg_entry->{durations}}, 0 + $duration
                                     unless $message_stats_bin;
     
@@ -18006,6 +18346,7 @@ sub read_and_process_logs {
                                 # ladder; the cross-model envelope at tests/statistics-drift/cross-model-
                                 # tolerances.tsv (R9.2 of features/287-*.md) absorbs that divergence,
                                 # populated in Commit 6 once Layer 4 measurement is available.
+                                #@when $message_stats_bin
                                 if ($message_stats_bin) {
     
                                     # Percentile-ladder source (the bin partition). Skip zero-valued
@@ -18051,10 +18392,12 @@ sub read_and_process_logs {
                     } else {
                         $msg_entry = $log_messages{$category}{$log_key} //= {};
                         $msg_entry->{occurrences}++;
+                        #@and $message_outcomes_demand
                         $msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
                     }
                     # Under -g a new key's entry carries its grouping key, so the final
                     # pass groups the key by the value the streaming checkpoints used.
+                    #@false !$grouping_active && !$message_grouping_section_wanted
                     if (defined $new_key_grouping_key) {
                         $msg_entry->{grouping_key} = $new_key_grouping_key;
                         # A new key the inline match missed is held for checkpoint
@@ -18124,14 +18467,17 @@ sub read_and_process_logs {
                     # Gate on the pre-coercion observation, not defined-ness: the
                     # zero-default above makes `defined $duration` vacuously true, and
                     # a line with no duration must not contribute a fabricated 0 sample.
+                    #@and !$omit_durations
                     if( $duration_observed && !$omit_durations && $duration >= 0 ) {
                         $bucket_entry->{duration_sum} += $duration;
 
+                        #@when $highlight_active
                         $bucket_entry->{'duration_sum-HL'} += $duration if $line_is_highlighted;
                         # Statistics machinery (sum of squares, raw samples or bin
                         # counters + moment sidecars) is captured only when a surface
                         # will consume the per-bucket statistics; totals above feed
                         # the duration bar and impact regardless.
+                        #@when $bucket_duration_stats_demand
                         if( $bucket_duration_stats_demand ) {
                             $bucket_entry->{sum_of_squares} += $duration ** 2;
                             # Raw samples feed the percentile computation; under -bdm bin the
@@ -18140,6 +18486,7 @@ sub read_and_process_logs {
                             # carried; the percentile path sorts and indexes numerically and the
                             # moments path sums and squares, so the string buffer a plain copy
                             # would inherit from the shared record lexical has no reader.
+                            #@unless $bucket_stats_bin
                             push @{$bucket_entry->{durations}}, 0 + $duration
                                 unless $bucket_stats_bin;
 
@@ -18150,6 +18497,7 @@ sub read_and_process_logs {
                             # every sample including 0 (inside the existing $duration >= 0 gate) so
                             # duration_count exactly equals the raw path's `scalar @{durations}` denominator
                             # and the exact-value statistics (min/mean/std_dev/moments) match raw byte-for-byte.
+                            #@when $bucket_stats_bin
                             if ($bucket_stats_bin) {
 
                                 counter_update(\%bucket_stats_counters, $bucket, $duration, $bucket_stats_buckets_per_decade) if $duration > 0;
@@ -18186,15 +18534,18 @@ sub read_and_process_logs {
                     # rather than once per line: a package-global read-compare-write
                     # on every line measured ~1.5% of total runtime, for a flag that
                     # only needs to know whether ANY line carried bytes.
+                    #@and $bucket_bytes_demand
                     if( $bytes_observed_line && $bucket_bytes_demand ) {
                         $bytes_observed = 1;
                         # A zero-byte response is a measured zero: it defines the
                         # total as it counts (#616 D30).
                         $bucket_entry->{total_bytes} += $bytes;
+                        #@when $highlight_active
                         $bucket_entry->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
                         # The count is kept on every line the store's demand
                         # admits (#616 D30); the aggregate demand governs the
                         # extrema.
+                        #@when $bytes_aggregate_demand
                         if( $bytes_aggregate_demand ) {
                             if( $bucket_entry->{bytes_occurrences}++ ) {
                                 $bucket_entry->{bytes_min} = $bytes if $bytes < $bucket_entry->{bytes_min};
@@ -18210,7 +18561,9 @@ sub read_and_process_logs {
                     if( defined $count ) {
                         $bucket_entry->{count_sum} += $count;
                         $bucket_entry->{count_occurrences}++;
+                        #@when $highlight_active
                         $bucket_entry->{'count_sum-HL'} += $count if $line_is_highlighted;
+                        #@when $highlight_active
                         $bucket_entry->{'count_occurrences-HL'}++ if $line_is_highlighted;
 
                         # Track min/max incrementally (needed for comparison, but not calculating statistics here)
@@ -18219,6 +18572,7 @@ sub read_and_process_logs {
                     }
 
                     # UDM time-bucket storage (Issue #22)
+                    #@when @udm_configs
                     if (@udm_configs) {
                         foreach my $config (@udm_configs) {
                             my $name = $config->{name};
@@ -18229,6 +18583,7 @@ sub read_and_process_logs {
                                 # value set per bucket, mirroring the %log_sessions pattern
                                 $bucket_entry->{"udm_${name}_occurrences"}++;
                                 $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
+                                #@false !$highlight_active
                                 if ($line_is_highlighted) {
                                     $bucket_entry->{"udm_${name}_occurrences-HL"}++;
                                     $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
@@ -18237,6 +18592,7 @@ sub read_and_process_logs {
                             }
                             $bucket_entry->{"udm_${name}_sum"} += $value;
                             $bucket_entry->{"udm_${name}_occurrences"}++;
+                            #@false !$highlight_active
                             if ($line_is_highlighted) {
                                 $bucket_entry->{"udm_${name}_sum-HL"} += $value;
                                 $bucket_entry->{"udm_${name}_occurrences-HL"}++;
@@ -18251,6 +18607,7 @@ sub read_and_process_logs {
                     }
 
                     ## HEATMAP RAW VALUE CAPTURE ##
+                    #@when $heatmap_enabled
                     if ($heatmap_enabled) {
                         my $heatmap_value;
                         if ($heatmap_metric eq 'duration' && defined $duration && $duration >= 0) {
@@ -18275,11 +18632,14 @@ sub read_and_process_logs {
 
                             # Issue #266: dispatch via $heatmap_capture_mode resolved
                             # once before this loop (set near the parsing-loop entry).
+                            #@when $heatmap_raw
                             if ($heatmap_raw) {
                                 push @{$heatmap_raw{$bucket}}, $heatmap_value;
+                                #@when $highlight_active
                                 push @{$heatmap_raw_hl{$bucket}}, $heatmap_value if $line_is_highlighted;
                             } else {
                                 counter_update(\%heatmap_counters, $bucket, $heatmap_value, $heatmap_stream_bpd);
+                                #@when $highlight_active
                                 counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)
                                     if $line_is_highlighted;
                             }
@@ -18288,11 +18648,13 @@ sub read_and_process_logs {
 
                     ## HISTOGRAM RAW VALUE CAPTURE (Issue #25) ##
                     # Histogram collects values across entire population (not per time-bucket like heatmap)
+                    #@when $histogram_enabled
                     if ($histogram_enabled) {
                         my $is_highlighted = $line_is_highlighted;
 
                         # Issue #266: dispatch via $histogram_capture_mode resolved
                         # once before this loop (set near the parsing-loop entry).
+                        #@when $histogram_raw
                         if ($histogram_raw) {
                             if ((!%histogram_metrics || $histogram_metrics{duration}) && defined $duration && $duration > 0 && !$omit_durations) {
                                 # Issue #561: the number is retained, not the string the log line
@@ -18357,6 +18719,7 @@ sub read_and_process_logs {
                 }
 
                 ## CAPTURE THREAD AND THREAD POOL BASED STATISTICS DATA ##
+                #@false !defined $threadpool_activity_regex && !$include_threadpool_summary
                 if( ( defined $threadpool && $threadpool ne "" ) && ( ( defined $threadpool_activity_regex && $threadpool =~ /$threadpool_activity_regex/ ) || ( !defined $threadpool_activity_regex && $include_threadpool_summary ) ) ) {
                     # Thread Pool Based Statistics Capture (Overall Summary) #
                     $threadpool_activity{$category}{$threadpool}{$thread} = 0 if !defined $threadpool_activity{$category}{$threadpool}{$thread};
@@ -18365,24 +18728,29 @@ sub read_and_process_logs {
                     # Time Window Based Statistics Capture (Time Window Graphs) #
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {                       # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
                 }
 
                 ## CAPTURE SESSION BASED STATISTICS DATA (Issue #26) ##
+                #@and $session_capture_demand
                 if( defined $session && $session ne "" && $session ne "-" && $session_capture_demand ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {
                         $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
                 }
                 ## CAPTURE USER BASED STATISTICS DATA (#444 D10): the sessions
                 ## model piece for piece, a bare - being an absent user (D14)
+                #@and $user_capture_demand
                 if( defined $user && $user ne "" && $user ne "-" && $user_capture_demand ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {
                         $log_users{$bucket}{highlight}{$user} += 1;
                     }
@@ -18390,6 +18758,7 @@ sub read_and_process_logs {
             } else {
                 note_unmatched_line($in_file);
             }
+        }
         }
 
         close $fh;
@@ -21665,6 +22034,9 @@ sub print_verbose_output {
     # first line, promotion mid-read), so this row attributes cost within
     # them and is deliberately NOT part of the stage total below.
     printf "TIMING\tdetect/scan_sub_compile\t%.3f\n", $elapsed_detect_scan_sub_compile;
+    # Writing the read path's generated body and compiling it per file, summed.
+    # Inside parse/read_files, so not part of the stage total below.
+    printf "TIMING\tread/path_generation\t%.3f\n", $elapsed_read_path_generation;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
@@ -23991,6 +24363,8 @@ sub pipeline_render {
     emit_format_detection_verbose();
 
     emit_format_registry_verbose();
+
+    emit_read_path_verbose();
 
     emit_heatmap_palette_verbose();
 
