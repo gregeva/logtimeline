@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #714 merged into `release/0.19.0` as 0735cfe on 2026-10-13. The record below is the work as it went.
+
 **Gate passed, 2026-10-13** (on 2e592f7). Decisions D1 to D9 are locked. The audited
 current state (§ 3) was read on `release/0.19.0` at 5c03f24. No code has
 changed. The acceptance criteria (§ 5) are put to the architect before step 1

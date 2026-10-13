@@ -2,7 +2,9 @@
 
 ## Status
 
-`status: in progress`. Scope as locked last, 2026-10-07: § 5.0 (rows keep
+**Delivered**, issue closed: PRs #690 (2507671, 2026-10-08) and #701 (14604c2, 2026-10-10) merged into `release/0.19.0`. The record below is the work as it went.
+
+Scope as locked last, 2026-10-07: § 5.0 (rows keep
 their data by default; the release is behind a hidden `-mem release`). Scope widened by the architect on 2026-10-07 to every
 store of raw values (§ 2). The first design (`ee1326c`, in-place sort of the
 stored array) regresses peak memory when every row is given statistics on a log

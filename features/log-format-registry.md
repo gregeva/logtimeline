@@ -703,6 +703,8 @@ no longer eliminates an order) and the architect's D70 to D72 below.
 
 ### #704: the day/month order accumulates evidence (2026-10-10)
 
+**Delivered**, issue closed: PR #706 merged into `release/0.19.0` as 800db00 on 2026-10-10.
+
 The fix for the finding above. The implementation follows D44, D48 and D53 as
 locked on 2026-08-22, with I1 as amended by the architect on 2026-10-10: a date
 valid only with day and month swapped is a weighted signal, its weight set by

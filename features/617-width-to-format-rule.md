@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #677 merged into `release/0.19.0` as 3dbbf94 on 2026-10-04 (the specification with PR #626). The record below is the work as it went.
+
 Specification agreed with the architect 2026-09-28. Implementation started
 2026-10-04 on branch `617-width-to-format-rule` off `release/0.19.0` (2c04a38),
 `$version_number` stamped `0.19.0-617`, the before benchmark captured on the

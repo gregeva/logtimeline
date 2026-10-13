@@ -7,6 +7,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #707 merged into `release/0.19.0` as 607a166 on 2026-10-11. The record below is the work as it went.
+
 Implemented 2026-10-11 on `620-read-loop-run-constant-hoisting` (§ 10); code
 audited for planning at `release/0.19.0` e172dbd. Parent: #622 (the refactoring the redundant-logic-surfaces
 audit dispatched). Follow-up: #621 (a switchable generated loop body, not

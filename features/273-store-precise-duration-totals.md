@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #634 merged into `release/0.19.0` as da876f8 on 2026-09-29 (the specification with PR #631). The record below is the work as it went.
+
 Specification agreed with the architect 2026-09-29 on branch
 `273-store-precise-duration-totals` off `release/0.19.0`. Drop 1 (the message
 store) and drop 2 (the time-bucket store) implemented 2026-09-29; the

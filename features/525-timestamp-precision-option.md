@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PRs #663 (dd4f469, 2026-10-02) and #691 (485e533, 2026-10-08) merged into `release/0.19.0` (the specification with PRs #632 and #633). The record below is the work as it went.
+
 Specification agreed with the architect 2026-09-29 on branch
 `525-timestamp-precision-option` off `release/0.19.0`. Implementation in
 progress: drops 1 (the one formatter), 2 (the long spellings), 3 (the

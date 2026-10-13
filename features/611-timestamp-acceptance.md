@@ -8,6 +8,8 @@ merged into this issue.
 
 ## Status
 
+**Delivered**, issue closed: PRs #702 (2477160) and #705 (efb4861) merged into `release/0.19.0` on 2026-10-10. The record below is the work as it went.
+
 - 2026-10-10: work started on `611-impossible-dates` off `release/0.19.0`.
   The situation below was measured on the base commit (8372942) before any
   change. The architect agreed the four-drop delivery of § 7 and directed

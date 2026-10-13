@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, both issues closed: PR #716 merged into `release/0.19.0` as 78c0c8f on 2026-10-13, for #678 and #713 together. The record below is the work as it went.
+
 **Gate passed, 2026-10-13** (on ec98119, branch `678-udm-heatmap-colour`). D1 to D4 are locked; the acceptance criteria are agreed and pass. The current state (§ 3) was read on
 `release/0.19.0` at b736e7b. No code has changed.
 

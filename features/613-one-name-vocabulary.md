@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #676 merged into `release/0.19.0` as 6fb9dda on 2026-10-04 (the specification with PR #623). The record below is the work as it went.
+
 Specification agreed with the architect 2026-09-28 and merged into
 `release/0.19.0` (PR #623). Implementation started 2026-10-04 on branch
 `613-one-name-vocabulary` off `release/0.19.0` (12712ae): `$version_number`

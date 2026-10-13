@@ -2,6 +2,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #635 merged into `release/0.19.0` as 2d25725 on 2026-09-29 (the specification with PR #624). The record below is the work as it went.
+
 Specification agreed with the architect 2026-09-28 on branch
 `608-byte-unit-ladder` off `release/0.19.0` (base commit 58f8d94). Implementation
 in progress on the same branch, synced to `release/0.19.0` at 99fd43a: drop 1

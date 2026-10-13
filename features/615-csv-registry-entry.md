@@ -2,11 +2,10 @@
 
 ## Status
 
-Specification agreed with the architect 2026-09-28 on branch
-`615-csv-registry-entry` off `release/0.19.0`; implementation not started.
-Issue #615 (CSV input as a header-instantiated registry entry) is labelled
-`status: in progress`. Nothing in `ltl` has changed on the branch.
+**Delivered**, issue closed: PR #693 merged into `release/0.19.0` as f416f55 on 2026-10-08 (the specification with PR #625). The record below is the work as it went.
 
+Specification agreed with the architect 2026-09-28 on branch
+`615-csv-registry-entry` off `release/0.19.0`. Implementation followed (PR #693).
 Re-audited 2026-10-08 against `release/0.19.0` at 8230949, after #525 (one
 timestamp formatter, then a single timestamp-precision option), #605 (units on
 inputs) and #640 (CSV rows with an unplaceable timestamp read silently) landed:

@@ -7,6 +7,8 @@
 
 ## Status
 
+**Delivered**, issue closed: PR #645 merged into `release/0.19.0` as c00d4c3 on 2026-09-30 (the specification with PR #627). The record below is the work as it went.
+
 **Specification agreed with the architect 2026-09-28 on branch
 `616-gated-mean-derivation` off `release/0.19.0`; implementation started
 2026-09-30.** The specification was written at `58f8d94`. Implementation starts
