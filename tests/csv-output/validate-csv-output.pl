@@ -57,11 +57,12 @@ GetOptions(
     'file-kind=s'          => \$opt{file_kind},
     'expected-families=s'  => \$opt{expected_families},
     'v-precision=s'        => \$opt{v_precision},
+    'v-columns=s'          => \$opt{v_columns},
     'profile-mode=s'       => \$opt{profile_mode},   # optional: '' = none; else a --profile mode
     'expected-categories=s' => \$opt{expected_categories},  # optional: messages-kind categorical content assertions
 ) or die "bad args\n";
 
-for my $k (qw(rules csv scenario file_kind expected_families v_precision)) {
+for my $k (qw(rules csv scenario file_kind expected_families v_precision v_columns)) {
     die "missing --$k\n" unless defined $opt{$k};
 }
 $opt{profile_mode} //= '';
@@ -107,6 +108,10 @@ my %vp = load_v_precision($opt{v_precision});
 
 my @rules = load_rules($opt{rules});
 
+# Parse the -V csv-output / columns block: this file's columns, in file order,
+# each with the precision family the tool writes its cells in.
+my @v_columns = load_v_columns($opt{v_columns}, $opt{file_kind});
+
 # Columns that exist only because a switched-off family's metric is captured.
 # A switched-off family no rule is conditional on would assert nothing.
 my @off_rules;
@@ -147,6 +152,7 @@ if ($opt{file_kind} eq 'messages') {
 # --- Phase 1: column structure ---
 $fails += check_column_structure($header_row, \@rules);
 $fails += check_off_family_columns_absent($header_row, \@off_rules);
+$fails += check_precision_labels($header_row, \@rules, \@v_columns);
 
 my %rule_by_name = map { $_->{column} => $_ } @rules;
 my %col_index;
@@ -868,6 +874,63 @@ sub qquote {
 # Issue #268: parse the -V csv-output / precision sub-section block.
 # Returns a hash keyed by field name. Source annotations '(<source>)'
 # are stripped to leave a bare value the validator can compare.
+sub load_v_columns {
+    my ($path, $kind) = @_;
+    open my $fh, '<', $path or die "open v-columns $path: $!";
+    my @columns;
+    while (my $line = <$fh>) {
+        chomp $line;
+        next if $line =~ /^\s*$/ || $line eq join("\t", qw(file column precision));
+        my ($file, $column, $precision) = split /\t/, $line, -1;
+        push @columns, { column => $column, precision => $precision } if $file eq $kind;
+    }
+    close $fh;
+    return @columns;
+}
+
+# features/618-csv-column-declaration.md D4 and AC4: the tool's CSV
+# declaration reports, per column, the precision family its cells are written
+# in (-V csv-output / columns). Its column list is the file's header, in
+# order; and each column's rules row carries a precision field equal to the
+# tool's. A header column the section does not report is a failure, never a
+# skipped comparison.
+sub check_precision_labels {
+    my ($header, $rules, $v_columns) = @_;
+    my $fails = 0;
+    my %rule = map { $_->{column} => $_ } @$rules;
+    my %tool = map { $_->{column} => $_->{precision} } @$v_columns;
+    my $declared = join(',', map { $_->{column} } @$v_columns);
+    my $written  = join(',', @$header);
+    $checks++;
+    if ($declared ne $written) {
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 1, column => '(header)',
+            asserts => 'the header is the column list of the CSV declaration, in order, as -V csv-output / columns reports it',
+            produced_by => $opt{file_kind} eq 'messages' ? 'build_messages_csv_columns' : 'build_stats_csv_columns',
+            contract => 'features/618-csv-column-declaration.md D1 (one declaration per column, read by the header and the row)',
+            expected => $declared, actual => $written, rule => 'declaration is the header',
+        });
+        $fails++;
+    }
+    for my $column (@$header) {
+        $checks++;
+        my $tool_family = $tool{$column};
+        my $rule_family = $rule{$column} ? $rule{$column}{precision} : undef;
+        next if defined $tool_family && defined $rule_family && $rule_family ne '' && $rule_family eq $tool_family;
+        emit_fail({
+            scenario => $opt{scenario}, file => $opt{file_kind}, row => 1, column => $column,
+            asserts => "the rules TSV's precision field for '$column' names the precision family the tool writes its cells in",
+            produced_by => 'emit_csv_output_verbose (-V csv-output / columns), from ' . ($opt{file_kind} eq 'messages' ? 'build_messages_csv_columns' : 'build_stats_csv_columns'),
+            contract => 'features/618-csv-column-declaration.md D4 (the rules TSVs carry the tool\'s precision label for every column)',
+            expected => defined $tool_family ? $tool_family : '(a family reported by -V csv-output / columns)',
+            actual => defined $rule_family && $rule_family ne '' ? $rule_family : '(no precision in the rules row)',
+            rule => 'precision label',
+        });
+        $fails++;
+    }
+    return $fails;
+}
+
 sub load_v_precision {
     my ($path) = @_;
     open my $fh, '<', $path or die "open v-precision $path: $!";

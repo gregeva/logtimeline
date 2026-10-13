@@ -65,6 +65,12 @@ One row per column:
 | `required` | `yes`, `no`, `conditional:<family>` or `every-row:<family>` |
 | `max_decimals` | Integer 0–5, or `n/a` for non-numeric types |
 | `family` | `meta`, `duration`, `bytes`, `count`, `percentile`, `dispersion`, `shape`, `level`, `udm` |
+| `precision` | The precision family the tool writes the column's cells in: `meta`, `count`, `duration`, `percentile`, `shape`, `bytes`, `level`, `rate`. Compared with what `ltl -V csv-output` reports for every header column (`csv-output / columns`); a mismatch fails |
+
+`family` and `precision` are two attributes. `precision` decides a cell's
+decimals and is the tool's label (`features/618-csv-column-declaration.md`
+D4). `family` groups the columns that fill together on a row, which the
+group-consistency check reads.
 
 Family membership follows populate conditions, not statistical theme: `dispersion`
 (`std_dev`, `cv`) populates at n≥2 observations, `shape` (`skewness`, `kurtosis`,

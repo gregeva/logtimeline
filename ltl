@@ -222,7 +222,7 @@ my %verbose_section_registry = (
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
     'csv-output' => {
-        description => 'CSV output precision mode, resolved per-family decimal counts, duration unit source, and max-decimals ceiling for the structural harness (Issue #268).',
+        description => 'CSV output precision mode, resolved per-family decimal counts, duration unit source, and max-decimals ceiling for the structural harness (Issue #268); every column of the STATS and MESSAGES files with its precision family (Issue #618).',
     },
     'percentile-algorithm' => {
         description => 'Per-surface effective percentile algorithm: resolved data model and algorithm name for histogram, heatmap, message-stats, and bucket-stats (Issue #280).',
@@ -1265,7 +1265,7 @@ my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pas
 
 my @in_files;
 my @stats_csv_columns;     # the STATS CSV declaration for this run: build_stats_csv_columns()
-my @messages_csv_columns;  # the MESSAGES CSV declaration for this run: build_messages_csv_columns()
+my @messages_csv_columns;  # the MESSAGES CSV declaration: build_messages_csv_columns()
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
 
@@ -6843,10 +6843,12 @@ sub emit_heatmap_palette_verbose {
 }
 
 # Issue #268: CSV output observability. The parent section opens unconditionally
-# (when -o is set) and contains one or more sub-sections. Currently:
+# (when -o is set) and contains its sub-sections:
 #   csv-output / precision   — precision mode, per-family decimals, max-decimals ceiling
-# Future sub-sections (e.g. csv-output / structure for column counts, output files)
-# slot in here without breaking the locked precision contract.
+#   csv-output / columns     — every column of the STATS and MESSAGES files, in
+#                              file order, with the precision family its cells
+#                              are written in, read from the two CSV
+#                              declarations (features/618-csv-column-declaration.md D4)
 #
 # Locked surface: parent section name, sub-section name, all field names within
 # precision sub-section (decimals_{meta,count,duration,percentile,shape,bytes,level}
@@ -6900,6 +6902,14 @@ sub emit_csv_output_verbose {
     }
     push @verbose_output, "max_decimals_ceiling: $ceiling";
     push @verbose_output, "=== END csv-output / precision ===";
+
+    # Tab-separated: a column name may carry a space (a log level such as
+    # 'Pause Young').
+    push @verbose_output, "=== csv-output / columns ===";
+    push @verbose_output, join( "\t", qw(file column precision) );
+    push @verbose_output, map { join( "\t", 'stats',    $_->{name}, $_->{family} ) } @stats_csv_columns;
+    push @verbose_output, map { join( "\t", 'messages', $_->{name}, $_->{family} ) } @messages_csv_columns;
+    push @verbose_output, "=== END csv-output / columns ===";
 
     push @verbose_output, "=== END csv-output ===";
 }
@@ -20858,10 +20868,10 @@ sub csv_declared_row {
     return \@row;
 }
 
-# The MESSAGES CSV declaration: one entry per column in file order. Its
-# columns do not depend on what the run observed, beyond the user-defined
-# metrics configured; a cell is called with the message's entry and the row's
-# context (its grouping and key).
+# The MESSAGES CSV declaration: one entry per column in file order, built
+# beside the STATS declaration. Its columns do not depend on what the run
+# observed, beyond the user-defined metrics configured; a cell is called with
+# the message's entry and the row's context (its grouping and key).
 sub build_messages_csv_columns {
     my @columns = (
         { name => 'category',    family => 'meta', text => 1, cell => sub { $_[1]{grouping} } },
@@ -21218,7 +21228,8 @@ sub normalize_data_for_output {
 
     # The STATS CSV declaration, from what this run observed. It drives the CSV
     # header and rows only; the terminal render uses @column_layout.
-    @stats_csv_columns = build_stats_csv_columns(\%stats_csv_categories);
+    @stats_csv_columns    = build_stats_csv_columns(\%stats_csv_categories);
+    @messages_csv_columns = build_messages_csv_columns();
 
     foreach my $bucket (keys %log_occurrences) {
         # Scale the total values to the printable size
@@ -24004,7 +24015,6 @@ sub pipeline_render {
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        @messages_csv_columns = build_messages_csv_columns();
         $csv->print( $csv_fh, [ map { $_->{name} } @messages_csv_columns ] );
     }
 
