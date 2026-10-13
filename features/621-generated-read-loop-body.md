@@ -140,4 +140,22 @@ dependencies).
 
 **Found on the way, pre-existing:** on the script log,
 `-udm durationMS::max -hg -h Things` ends the run in the histogram drawing
-("Can't use an undefined value as an ARRAY reference"), on the base as well.
+("Can't use an undefined value as an ARRAY reference"), on the base and on the
+released v0.18.6 as well; filed as #719.
+
+## 6. Direction (the architect, 2026-10-13)
+
+- The PAR::Packer angle is tested first, as its own sub-issue: #720 (prove the
+  generated read-loop body in the PAR-packed binaries). It blocks the
+  implementation.
+- The implementation is its own sub-issue: #721 (generate the read loop's body
+  per run for large inputs, with an option to force the inline loop).
+- The generated path is taken only when a file is above a size threshold, so a
+  small file does not pay the fixed cost (§ 5: slower than the base at 1,000
+  lines) and does not need the speedup. Threshold chosen from § 5's
+  measurements: 2 MB per file. Generation costs about 7 ms; at 10,000 lines
+  (about 1.8 to 1.9 MB of the benchmark logs) the generated body measured 3 to
+  9 % faster than the base, at 1,000 lines 8 to 13 % slower. The size of a file
+  is known before it is read; its line count is not.
+- A command-line option shuts the runtime compile off and forces the standard
+  inline flow, for development, debugging and profiling; proposed as `--debug`.
