@@ -183,6 +183,21 @@ Locked by the architect on 2026-10-13.
   `--detection-window=N`. Chosen over a switch forcing the generated path, an
   environment variable, and no mechanism (the generated path then tested only
   on corpus files above the threshold).
+- **D3** (locked by the architect 2026-10-13, under #721). Both paths are
+  covered in two places. A dedicated harness, `tests/validate-read-loop.sh`,
+  compares the generated body with the inline loop byte for byte over an
+  option-shape set in which every marker's gate is switched on at least once,
+  and fails when one is not. At the completion gate the full suite runs a
+  second time with `--generated-loop-threshold=0`, so every existing assertion
+  is checked against the generated path as well; each harness lets `LTL` be
+  overridden for that pass (a one-line change in each of the 48 that set it),
+  and `docs/process/workflow.md` § 3 (b) gains the second pass in the same
+  change. The suite is the completion gate's failsafe, never a development
+  tool: while the work is under way, the developer runs dedicated tests aimed
+  at what is being changed, and at most a single harness scenario. Chosen over
+  every `ltl` call in every harness running both paths (342 call sites moved
+  to a shared runner, suite time doubled on every run) and the dedicated
+  harness alone.
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
