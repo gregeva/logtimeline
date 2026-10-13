@@ -2,7 +2,7 @@
 
 ## Status
 
-**Specification, 2026-10-13.** Decisions D1 to D7 are locked. The audited
+**In progress, 2026-10-13.** Decisions D1 to D9 are locked. The audited
 current state (§ 3) was read on `release/0.19.0` at 5c03f24. No code has
 changed. The acceptance criteria (§ 5) are put to the architect before step 1
 of the plan (§ 6).
@@ -106,6 +106,38 @@ with the architect on 2026-10-13.
   (`features/708-run-index-deprecation.md`: off by default, `-idx` turns it
   on) but still present, so its writer and reader read the one declaration
   like every other CSV surface. *Architect, 2026-10-13.*
+
+- **D8 — The declaration has a fixed part and a per-run part.** The fixed
+  part exists at file scope: the statistic lists, each column's precision
+  family (a duration statistic's from an attribute on its row of the
+  statistic table: `min`, `mean` and `max` take the metric's family, the
+  percentiles and `iqr` `percentile`, `stddev`, `cv` and the moments `shape`),
+  and how a metric's columns are named (`udm_csv_columns`). The per-run part
+  is the list of columns one file carries, built once after the logs are read
+  and the statistics calculated, from what was observed (a user-defined
+  metric has columns only when a line carried a value for it; the duration
+  and bytes families only when durations or bytes were observed; a category
+  only when it occurred), at the point the header is built today. Each entry
+  holds the header name, the precision family and how to compute the cell for
+  a bucket or a message; the header is the entries' names and the row their
+  cells, so the STATS header no longer renames the rate columns at write
+  time. Once both CSVs read it, `%csv_column_family` and the name patterns in
+  `resolve_csv_column_family` give way to the declaration. *Architect,
+  2026-10-13.*
+- **D9 — A user-defined `ratio` is precision family `shape`, fixed in this
+  issue.** Measured 2026-10-13 on the first 100,000 lines of the ThingWorx
+  application log with `-udm repeat::ratio:U` (206 occurrences over 3
+  distinct users): the STATS `repeat_ratio` cell read `69` at the default
+  precision and also under `-cp 3`, and `68.6666666666667` under `-cp full`.
+  The formatter resolved the column's family from its name, matched none and
+  fell back to 0 decimals in every mode but `full`. A ratio is unitless like
+  `cv`, so it takes `shape`: `68.667` at the default and under `-cp 3`. The
+  other STATS columns that matched no family (sessions, users, thread pools,
+  a user-defined `distinct` or `count`) are whole numbers, so declaring their
+  family changes no output in any mode. The fix is a user-observable change
+  and carries its own release-notes bullet; the reference capture was retaken
+  after it (`repeat_ratio` the only column that moved). *Architect,
+  2026-10-13.*
 
 **Inherited decisions this issue implements, not re-decided:**
 
@@ -229,6 +261,11 @@ decimal count, two `-ru` units, a highlight).
 - [ ] **AC7 — The run index reads one list.** The writer and the reader read
       one column declaration; the index read-back harness passes unchanged.
       *Assertable:* `validate-index-read-back.sh`.
+- [ ] **AC9 — A user-defined ratio carries the shape decimals.** On a day
+      bucket where ten lines carry the key over four distinct values, the
+      STATS ratio cell reads `2.5`. *Assertable:* the CSV-output harness's
+      `udm-ratio-cell` scenario (`tests/csv-output/expected/udm-ratio-cell.tsv`),
+      shown to fail on the code before the fix.
 - [ ] **AC8 — No runtime warnings** on any run of the capture set
       (`tests/lib/runtime-warnings.sh`). *Assertable.*
 
