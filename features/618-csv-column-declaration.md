@@ -212,11 +212,11 @@ decimal count, two `-ru` units, a highlight).
 - [ ] **AC4 — The tool and the rules agree on every column's precision
       family.** Every rules row carries a `precision` value equal to the
       family the tool formats that column under, and `%csv_column_family`'s
-      comment states what is true. *Assertable, method to be agreed:* the
-      tool writes each emitted column's precision family into a `-V` section
-      and the CSV-output harness compares it with the rules' `precision`
-      field (cost: one `-V` section from the declaration, one harness check,
-      `tests/HARNESS-DESIGN.md` followed).
+      comment states what is true. *Assertable:* the tool writes each emitted
+      column's precision family into a `-V` section, read from the
+      declaration, and the CSV-output harness compares it with the rules'
+      `precision` field (`tests/HARNESS-DESIGN.md` followed). *Method agreed
+      by the architect 2026-10-13.*
 - [ ] **AC5 — A short row fails.** A row whose value count differs from the
       header's stops the run with a message naming the file and both counts.
       *Unassertable by a harness* (it needs a defect in the tool to fire);
@@ -238,17 +238,22 @@ One step at a time, each committed and pushed on the issue branch once its
 output is read against the capture.
 
 1. **Rename** (D5, D6): § 4's sites, the rules TSVs' `column` field, the
-   statistics-drift baselines re-captured, the release-notes bullet. Then the
-   capture set is written and kept in the scratchpad as the reference.
-2. **Rules `precision` field** (D4): the field added to both rules TSVs with
-   the tool's label for every column, and the check of AC4.
-3. **Family lists at file scope** (D1): `bytes` and `count` beside
+   statistics-drift baselines' header line. Then the capture set is written
+   and kept in the scratchpad as the reference. *Done 2026-10-13* (bfb0c06);
+   the release-notes bullet is written at close-out on the release branch.
+2. **Family lists at file scope** (D1): `bytes` and `count` beside
    `@duration_family_stats`; the user-defined fallback read from
    `udm_csv_columns`.
-4. **The STATS declaration** (D1, D3): header and row from one walk; the rate
+3. **The STATS declaration** (D1, D3): header and row from one walk; the rate
    name held in the declaration; the padding replaced by the hard failure.
-5. **The MESSAGES declaration** (D1): header and row from the declaration,
+4. **The MESSAGES declaration** (D1): header and row from the declaration,
    shared with STATS where the column is the same statistic.
+5. **Rules `precision` field and its `-V` section** (D4, AC4): the field added
+   to both rules TSVs with the tool's label for every column, and the check.
+   It follows the two declarations because the section reports the family
+   each cell is formatted under, which only the declaration holds: today the
+   STATS rate cells and the user-defined cells are formatted under a name
+   other than their header's.
 6. **The aggregate export's walk** reads the declaration.
 7. **The run index** (D7): one column list read by the writer and the reader.
 
