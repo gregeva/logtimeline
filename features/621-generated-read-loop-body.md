@@ -225,6 +225,14 @@ Locked by the architect on 2026-10-13.
   compiles nothing. Chosen over one compile per run, which moves 13 per-file
   variables out of the per-file loop for no measured speed gain (§ 5: −12.66 %
   per file, −12.81 % per run, over 41 application-log files).
+- **D7** (locked by the architect 2026-10-13, under #721). A marker that does
+  not find what it names is a mismatch: a `when`, `true`, `false` or `unless`
+  marker with no gate or modifier below it, and an `and` marker whose term is
+  not in the condition below it, all stop generation, and the file falls back
+  under D4. Marker rot is therefore always visible: a notice for the user, a
+  failure of the identity harness. Chosen over the prototype's handling, where
+  an `and` marker that missed its term left the term in the condition and
+  carried on, correct but silently slower.
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
@@ -320,6 +328,18 @@ pipe, a process substitution) has no size, reads as 0 and takes the inline
 loop. The body's text is written on the first file that needs it and cached
 for the run, so a run of small files only, or under `-D`, never reads its own
 source.
+
+**Drop 2, generator (confirmed 2026-10-13).** As § 5 prototyped and § 8
+proved in the packed binaries: the source read from `__FILE__`, or from
+PAR's extracted copy (`$ENV{PAR_0}`, two lines longer) when `__FILE__` is
+not on disk; only `read_and_process_logs` from its `while (1) {` to the loop's
+closing brace kept; each `#@<op> <expression>` marker (`when`, `and`,
+`unless`, `true`, `false`) evaluated once per run and its gate resolved; a
+dropped line left empty so line numbers survive under one `#line N
+"<__FILE__>"` directive; a known-true arm kept as `if (1) {` with its own
+scope. The generator subs sit together under a `## GENERATED READ LOOP ##`
+section marker before `read_and_process_logs`. A marker that misses is a
+mismatch (D7).
 
 ## Acceptance criteria
 
