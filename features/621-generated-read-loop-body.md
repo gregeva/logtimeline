@@ -184,7 +184,7 @@ Locked by the architect on 2026-10-13.
   environment variable, and no mechanism (the generated path then tested only
   on corpus files above the threshold).
 - **D3** (locked by the architect 2026-10-13, under #721). Both paths are
-  covered in two places. A dedicated harness, `tests/validate-read-loop.sh`,
+  covered in two places. A dedicated harness, `tests/validate-read-path.sh`,
   compares the generated body with the inline loop byte for byte over an
   option-shape set in which every marker's gate is switched on at least once,
   and fails when one is not. At the completion gate the full suite runs a
@@ -203,14 +203,14 @@ Locked by the architect on 2026-10-13.
   marker does not match the code under it, or the generated text does not
   compile), that file is read by the inline loop; a notice prints on stderr
   once per run saying the standard path is used, slower on large files, and
-  `-V read-loop` records the reason. The output stays correct; only speed is
+  `-V read-path` records the reason. The output stays correct; only speed is
   lost. The identity harness fails on any fallback, since with the threshold
   at 0 every file must take the generated body. Chosen over stopping the run
   with an error.
 - **D5** (locked by the architect 2026-10-13, under #721). The release build
   proves each packaged binary prepares the generated body: every binary it
   runs reads a small committed fixture with `--generated-loop-threshold=0
-  -V read-loop`, and the job fails unless every file reports the generated
+  -V read-path`, and the job fails unless every file reports the generated
   path. A step each in the macOS and Linux jobs of
   `.github/workflows/release-build.yml` and one inside
   `build/windows-package.sh` under Wine; the Linux arm64 binary stays checked
@@ -311,8 +311,8 @@ Branch `721-generated-read-loop`, cut from `release/0.19.0` c039396. The
 above the loop's gates, comment-only. (2) The generated path: generator,
 per-file path choice, `--generated-loop-threshold=N`, `-D, --debug` with its
 `--help` and `docs/usage.md` rows, the fallback notice, matching exit status,
-the timing row, the `-V read-loop` section, the architecture-patterns entry.
-(3) `tests/validate-read-loop.sh`. (4) `LTL` overridable in the 48 harnesses
+the timing row, the `-V read-path` section, the architecture-patterns entry.
+(3) `tests/validate-read-path.sh`. (4) `LTL` overridable in the 48 harnesses
 that set it; `docs/process/workflow.md` § 3 (b). (5) The release-build step
 and its committed fixture. Then the gate: the `after` benchmark, the full
 suite twice. The prototype's premise holds on the base: `ltl` changed by one
@@ -349,34 +349,66 @@ is taken while the read pass owns the terminal, printed by
 `flush_deferred_notices()`, once per run. Its text, in user terms: "Note: the
 faster read path could not be prepared, so large files are read with the
 standard path, which is slower". The reason (source unreadable, marker
-mismatch, compile failure) is recorded in `-V read-loop` only. Generation and
+mismatch, compile failure) is recorded in `-V read-path` only. Generation and
 the compile run under `local $!` and `local $@`, so the error state after
 them is what it was before: a `die` in the loop exits with the same status on
 both paths (§ 5 measured 25 against 1, `$!` left set by the generator's file
 reads) and names the same line under the `#line` directive.
 
+**Drop 2, observability.** The section is `-V read-path`, named for the
+feature as the user knows it (`-D`'s text says the standard path, the notice
+the faster read path), and its harness `tests/validate-read-path.sh`. Section
+contract, in the content shape of `tests/HARNESS-DESIGN.md`:
+
+```
+=== read-path ===
+threshold_bytes: 2097152 (default)      # (option) when --generated-loop-threshold set it
+standard_path_forced: no                # yes under -D
+generated_text: written                 # written | not_needed | failed
+fallback_reason: -                      # - | source_unreadable | marker_mismatch | compile_failure
+file: <path>
+  size_bytes: <bytes>
+  path: generated                       # generated | standard
+  reason: above_threshold               # above_threshold | at_or_below_threshold | forced_standard | fallback
+marker: <source line> op=<op> kept=yes  # one per marker; kept: the code under it stays in the generated body
+=== END read-path ===
+```
+
+The marker lines serve criterion 7's coverage check: every marker shows
+`kept=yes` in at least one shape, whatever its operation. A marker is named by
+its source line, stable within one build; its expression is not printed. The
+text writing and every compile are summed into a `benchmark-data` row, `TIMING
+read/path_generation`, in the way `detect/scan_sub_compile` sums the scan-sub
+compiles. The section joins the reserved-names list of
+`tests/HARNESS-DESIGN.md` in the commit that adds it.
+
+**Drop 2, records.** `docs/architecture-patterns.md` § Generated code
+compiled from source strings gains the fifth consumption site and its status
+line in the commit that adds the generator; `-D, --debug` gains its
+`print_help()` row and `docs/usage.md` row in the commit that adds the option.
+
 ## Acceptance criteria
 
-Agreed with the architect 2026-10-13, for #721. `-V read-loop` is a new
+Agreed with the architect 2026-10-13, for #721. `-V read-path` is a new
 section reporting, per file, its size, the threshold in effect, the path
 taken, the fallback reason if any, and each marker's resolution; its harness
-is `tests/validate-read-loop.sh`.
+is `tests/validate-read-path.sh`.
 
 | # | condition and observable outcome | state | verified by |
 |---|---|---|---|
-| 1 | With no options, a file above 2,097,152 bytes is read by the generated body; a file at or below it by the inline loop. | assertable | `-V read-loop` reports the default threshold; a fixture of N bytes is read inline at threshold N and generated at N−1 |
-| 2 | With `--generated-loop-threshold=0`, every file with at least one line is read by the generated body. | assertable | `-V read-loop` |
-| 3 | Under `-D`, every file is read by the inline loop, including with `--generated-loop-threshold=0`. | assertable | `-V read-loop` |
-| 4 | In a run over several files of different sizes, each file takes its own path, and the output equals an all-inline run. | assertable | `-V read-loop` and the identity comparison |
+| 1 | With no options, a file above 2,097,152 bytes is read by the generated body; a file at or below it by the inline loop. | assertable | `-V read-path` reports the default threshold; a fixture of N bytes is read inline at threshold N and generated at N−1 |
+| 2 | With `--generated-loop-threshold=0`, every file with at least one line is read by the generated body. | assertable | `-V read-path` |
+| 3 | Under `-D`, every file is read by the inline loop, including with `--generated-loop-threshold=0`. | assertable | `-V read-path` |
+| 4 | In a run over several files of different sizes, each file takes its own path, and the output equals an all-inline run. | assertable | `-V read-path` and the identity comparison |
 | 5 | A threshold value that is not a non-negative integer stops the run with an error naming the option. | assertable | exit status and stderr |
 | 6 | `-D, --debug` has a `--help` row and a `docs/usage.md` row; `--generated-loop-threshold` appears in neither. | assertable | `tests/validate-help-content.sh` |
-| 7 | Over an option-shape set in which every marker's gate is switched on by at least one shape, the output with the threshold at 0 is byte-identical to the `-D` output. | assertable | `validate-read-loop.sh`, failing when any marker is never switched on (`-V read-loop` marker resolutions). Outputs compared, every one the loop feeds: standard output; the STATS and MESSAGES CSVs; the YAML aggregate export; the run index row (`ltl-index.csv`); every `-V` section; timing and memory rows excepted |
+| 7 | Over an option-shape set in which every marker's gate is switched on by at least one shape, the output with the threshold at 0 is byte-identical to the `-D` output. | assertable | `validate-read-path.sh`, failing when any marker is never switched on (`-V read-path` marker resolutions). Outputs compared, every one the loop feeds: standard output; the STATS and MESSAGES CSVs; the YAML aggregate export; the run index row (`ltl-index.csv`); every `-V` section; timing and memory rows excepted |
 | 8 | No runtime warning on either path, on every identity shape. | assertable | `tests/lib/runtime-warnings.sh` |
 | 9 | A run that stops with an error exits with the same status and message on both paths (§ 5 measured 25 on the generated body against 1 on the inline loop). | assertable | an error case run on both paths |
 | 10 | The format scan-sub compile count is the same on both paths; the generated body's own cost is reported in its own timing row, not in `format_scan_subs`. | assertable | `-V format-registry`, `-V benchmark-data` |
 | 11 | Above the threshold the measured saving holds: the access-log and application-log days are each at least 12 % faster than `before`, median of three. | assertable | the `after` benchmark against the four `before` tests of § 9 |
 | 12 | A warning or `die` in the generated body names its source line, as on the inline loop. | development check | a probe with an injected warning, as #720 ran; a harness cannot inject a fault into the shipped code |
 | 13 | No loop block exists twice in the source. | review | the diff |
-| 14 | When the generated body cannot be prepared for a file, that file is read by the inline loop, one notice prints on stderr for the run, `-V read-loop` records the reason, and the output equals the `-D` output (D4). | assertable | `validate-read-loop.sh` on a copy of `ltl` with one marker altered so it no longer matches its code |
+| 14 | When the generated body cannot be prepared for a file, that file is read by the inline loop, one notice prints on stderr for the run, `-V read-path` records the reason, and the output equals the `-D` output (D4). | assertable | `validate-read-path.sh` on a copy of `ltl` with one marker altered so it no longer matches its code |
 | 15 | At the completion gate the full suite passes a second time with `--generated-loop-threshold=0`, and `docs/process/workflow.md` § 3 (b) says so (D3). | assertable | the gate's second pass; each of the 48 harnesses that set `LTL` lets it be overridden |
 | 16 | The release build fails when a packaged binary it runs does not report the generated path on the committed fixture (D5). | assertable | the new step, its check shown to reject output reporting the inline path (`-D`) |

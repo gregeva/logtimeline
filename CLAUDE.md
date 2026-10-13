@@ -127,6 +127,10 @@ about anything else, these still hold.
       against. No retracted framings, no self-orienting context.
 - [ ] One question at a time. A clarification gets a short explanation plus a
       small table, not a discourse.
+- [ ] Only a real choice goes to the architect: two or more viable options, or
+      a tension not already settled by the records. A step with one sensible
+      option is recorded and taken, never put up for sign-off, and a walkthrough
+      does not pause on it.
 - [ ] A decision that needs the architect's lock is asked as a direct question
       in the same message ("Do you lock D33: <what it means>?"), never written
       into a record as "awaiting lock" or parked as an open question in a feature doc.
