@@ -54,7 +54,7 @@ the errors and help rows read cannot disagree with the parser.
 - `resolve_message_name` :: `if ( my $field = $message_field{ lc $name } ) {` over `@message_fields` (the parsed fields and message parts `-x` and `-d` name, with what each option does to them), the one resolution `resolve_expose_names` and `resolve_discard_names` share; `@cleared_fields` is its view for the field-clearing flag (#613 D6).
 - `resolve_explain_topic` :: `return exists $explain_topics{$key} ? $key : undef;` over `%explain_topics`.
 - `resolve_visibility_name` :: `my $column = $column_aliases{$name} // $column_of_plural{$name} // $name;` over `@output_sections`, `@visibility_columns`, their alias tables and the plural names of the Sessions and Users columns.
-- `resolve_csv_column_family` :: `return $csv_column_family{$column} if exists $csv_column_family{$column};` over `%csv_column_family`.
+- `metric_family_csv_columns` :: `{ name => "duration_$statistic_name_by_key{$_}", family => $precision eq 'metric' ? 'duration' : $precision, key => $_, statistic => $statistic_name_by_key{$_} }` over `@duration_family_stats`, `@bytes_family_stats`, `@count_family_stats` and the `precision` column of `@statistic_names`: the CSV column declaration. `build_stats_csv_columns` and `build_messages_csv_columns` build each file's per-run column list (name, precision family, stored key or cell) after the read; the header writes its names, `csv_declared_row` each row, `write_aggregate_export` reads the families' statistics, and `-V csv-output / columns` reports every column with its family, which the rules TSVs' `precision` field is checked against (#618 D1, D4, D8). The run index's columns are `@index_columns`, read by its writer through `index_row` and by its reader.
 - `bpd_for_surface` :: `return $TIER_BPD{$surface}[$data_model_precision_level - 1];` over `%TIER_BPD`.
 - `column_total_field` :: `return $column_total_field{$column} // $column;` over `%column_total_field`, read by the bar scaling in `normalize_data_for_output` and the timeline cell in `print_bar_graph`.
 
@@ -235,8 +235,9 @@ renderer (`features/column-layout-refactor.md` § Goals).
 Requirements, § Required Separation (the CSV and summary outputs stay out of the
 layout by design).
 
-**Status.** Established. The CSV columns have no equivalent declaration (item
-6); the layout is deliberately not it. The CSV column declaration is #618.
+**Status.** Established. The layout is deliberately not the CSV columns'
+declaration: those have their own (entry *Declarative table with one
+resolver*, `metric_family_csv_columns`; #618).
 
 ---
 
@@ -562,7 +563,7 @@ representation retargets one site per quantity.
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{count_mean} = mean_of(`
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{"udm_${name}_mean"} = mean_of( $sum, $occ );`
 - `calculate_all_statistics` :: `$log_messages{$category}{$log_key}{bytes_mean} = mean_of(` (the per-message bytes mean, stored precise)
-- `write_index_file` :: `my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';` and its five siblings
+- `write_index_file` :: `my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration', 2 ) // '';` and its five siblings
 - `derive_moment_statistics` :: `my $mean = mean_of($total, $n);` (the duration mean, both data models)
 - `impact_of` :: `my $mean = mean_of( $entry->{total_duration}, $entry->{duration_count} ) // 0;` (impact from the reported mean)
 
@@ -775,7 +776,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 - `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;`
 - `resolve_message_name` :: `my $metric = builtin_metric_name($name);`: the one resolution `-x` and `-d` share (#613 section 5.2): the parsed field, the identifier (`-d` only) and the built-in metric in any case, then a user-defined metric by its name, else a key written in the line, carrying the metrics it feeds (`probe_key_metric`, `udm_line_key`).
 - `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };`: `-m` resolves through the identifier table `-d` reads.
-- `print_bar_graph` :: `push @csv_data, format_csv_value($total_occurrences, 'occurrences');`
+- `csv_declared_row` :: `$entry->{text} ? @value : map { format_csv_value( $_, $entry->{family} ) } @value;`
 - `share_row_text` :: `my $share = value_text( $count / $denominator * 100, kind => 'percentage', budget => 'share row', width => $slack );`
 - `write_index_file` :: `my $now_iso = format_timestamp(time(), precision => 's', shape => 'iso');`
 
@@ -814,16 +815,16 @@ the sort and the CSV's raw cell.
 **Consumption sites.**
 - `calculate_statistics` :: `my $mean = $bucket_data->{total_duration} / $duration_count;`
 - `print_bar_graph` :: `value_text($log_stats{$bucket}{duration_sum}, metric => 'duration', budget => 'nice cell')`
-- `print_message_summary` :: `my $total_bytes = defined $total_bytes_num ? value_text( $total_bytes_num, metric => 'bytes', budget => 'nice cell' ) : undef;`
+- `build_messages_csv_columns` :: `cell => sub { my $v = $total_bytes->( $_[0] ); defined $v ? value_text( $v, metric => 'bytes', budget => 'nice cell' ) : undef } },`
 - `print_message_summary` :: `value_text( $total_duration, metric => 'duration', budget => $total_budget )` (the messages-table total, walked by its column width)
-- `print_message_summary` :: `defined $total_duration ? value_text( $total_duration, metric => 'duration', budget => 'nice cell' ) : undef,` (the MESSAGES CSV `duration_nice`, beside `format_csv_value($total_duration,    'duration'),`)
-- `format_csv_value` :: `my $family = resolve_csv_column_family($column);` (every CSV emit)
+- `build_messages_csv_columns` :: `cell => sub { defined $_[0]{total_duration} ? value_text( $_[0]{total_duration}, metric => 'duration', budget => 'nice cell' ) : undef } },` (the MESSAGES CSV `duration_nice`, beside the `duration` column read under the stored key `total_duration`)
+- `format_csv_value` :: `my ($value, $family, $fixed_decimals) = @_;` (every CSV emit, under the precision family its column's declaration gives)
 
 **Owning record.** `features/273-store-precise-duration-totals.md`, with
 #268's completion record and `releases/v0.15.0.md`.
 
-**Status.** Established. The per-message bytes mean (`print_message_summary` ::
-`my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};`) and the run
+**Status.** Established. The per-message bytes mean (the MESSAGES declaration's
+`bytes_mean` column, read under its stored key) and the run
 index's six means (`write_index_file`, through `format_csv_value` at a fixed two
 decimals) are sites; the entry *Observation counts and gated means*
 cross-references this one.
