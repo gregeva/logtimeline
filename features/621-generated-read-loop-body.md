@@ -207,6 +207,16 @@ Locked by the architect on 2026-10-13.
   lost. The identity harness fails on any fallback, since with the threshold
   at 0 every file must take the generated body. Chosen over stopping the run
   with an error.
+- **D5** (locked by the architect 2026-10-13, under #721). The release build
+  proves each packaged binary prepares the generated body: every binary it
+  runs reads a small committed fixture with `--generated-loop-threshold=0
+  -V read-loop`, and the job fails unless every file reports the generated
+  path. A step each in the macOS and Linux jobs of
+  `.github/workflows/release-build.yml` and one inside
+  `build/windows-package.sh` under Wine; the Linux arm64 binary stays checked
+  by file type only, as today. Identity is not re-proven in the binary: the
+  suite proves it on the source the binary is packed from. Chosen over handing
+  the case to #227 (binary smoke harness) and over #720's one-time proof alone.
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
