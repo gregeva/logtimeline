@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planning, 2026-10-13.** D1 is locked. The current state (§ 3) was read on
+**Planning, 2026-10-13.** D1 and D2 are locked. The current state (§ 3) was read on
 `release/0.19.0` at b736e7b. No code has changed.
 
 - **Issues:** #678 (a heatmap of a user-defined time metric whose every value
@@ -39,6 +39,14 @@ run whose heatmap metric captured no value completes without a runtime error.
   in a run where an earlier user-defined metric captured nothing, a later
   metric's timeline column keeps its own colour instead of taking the empty
   one's. *Architect, 2026-10-13.*
+- **D2 — The user-defined colours start where they start today.** The first
+  user-defined slot stays `3`, plus one for each of the sessions and users
+  columns when the run adds it, plus the number of thread-pool columns; D1
+  fixes only the order from there. A run whose user-defined metrics all
+  captured data keeps today's colours exactly, and a heatmap and its column
+  read the same slot. The same `-udm` spec can still take a different colour
+  on a log with sessions or users than on one without, as it does today.
+  *Architect, 2026-10-13.*
 
 ## 3. Current state (read 2026-10-13, `release/0.19.0` at b736e7b)
 
