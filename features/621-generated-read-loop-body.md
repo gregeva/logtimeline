@@ -435,6 +435,17 @@ the override too, and it is cleared between the passes because its key does
 not record which `ltl` filled it. `tests/validate-read-path.sh` stays on the
 script in both passes. Procedure: `docs/process/workflow.md` § 3 (b).
 
+**Drop 5, the release-build check.** `build/verify-read-path.sh <fixture>
+<command>` runs a packaged binary on the committed
+`tests/fixtures/access-classification-buckets.txt` (15 lines of web-server
+access log) with `--generated-loop-threshold=0 -V read-path` and fails unless
+the body was written and every file reports the generated path. Each package
+script calls it beside its existing `--version` check, so the release workflow
+runs it through the scripts its jobs call (D5 placed it in the jobs; the
+scripts are where the binary is already run). That covers the Linux arm64
+binary too, which its script already runs under emulation. Shown to reject a
+run under `-D`.
+
 **Observation, pre-existing.** A size row of `@quantity_options` accepts a
 negative: `-n -1` exits 0. The threshold refuses one through its own `min`;
 the other size options are unchanged.
