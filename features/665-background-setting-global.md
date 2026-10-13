@@ -5,7 +5,7 @@
 **Implemented, 2026-10-13** (branch `665-dark-background-override`, off
 `release/0.19.0` at f98a9c9). The contracts in § 2 were confirmed by the
 architect on 2026-10-13 and are the acceptance criteria, applied to every run;
-all six pass. The completion gate has not run.
+all six pass. The completion gate passed on 5e209e4 (§ Completion gate).
 
 - **Issue:** #665 (`-dbg` does not override `-lbg` unless a heatmap is
   requested).
@@ -142,6 +142,23 @@ base where the base breaks the contract.
   in `light_bg` and `light_bg_source` as the contract requires, and in the
   timeline row, which is one of the two forms the base itself produces
   (below).
+
+### Completion gate
+
+On 5e209e4 (`$version_number` restored to `0.19.0`), this machine, 2026-10-13.
+
+- **Benchmark**, base f98a9c9 in the `release/0.19.0` worktree against
+  5e209e4 in a worktree beside it, one run each:
+  `single-day-access-log-standard` total 6.5 s → 6.3 s (−3.5%),
+  `single-day-access-log-heatmap` 7.6 s → 7.3 s (−4.0%); no metric worse by
+  more than 1%. `log_analysis` reads +960 B in both pairs: on the
+  `http-status-families` fixture with `-mem -V benchmark-data`, the same code
+  measures 1442 B and 1378 B on two runs, so the store's measured size moves
+  by 64 B per entry from run to run, and the standard test holds 15 entries.
+  Not caused by this change, which runs once at option settlement.
+- **Full harness suite:** all 49 `tests/validate-*.sh` exit 0, each with its
+  assertions run (`validate-heatmap-palette.sh` 120 passed; CSV output 44 of
+  44; statistics drift 25 of 25 scenarios).
 
 ### Finding outside this issue
 
