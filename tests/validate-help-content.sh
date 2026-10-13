@@ -27,7 +27,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 USAGE_MD="$REPO_DIR/docs/usage.md"
 # Test log: tiny clean access log (~83 KB). Per repo memory
 # (feedback_test_logs.md) avoid the corrupt 2025-03-21 file; Codebeamer's

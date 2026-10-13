@@ -21,7 +21,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 TOOL="$REPO_DIR/process/capture-screenshots.pl"
 CELLS="$SCRIPT_DIR/lib/screenshot-cells.pl"
 CONTRACT='features/598-screenshot-capture.md'

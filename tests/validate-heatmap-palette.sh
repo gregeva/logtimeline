@@ -31,7 +31,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the palette scenarios read the -V heatmap-palette section - the resolved
 # metric, palette and background source, all option-derived - never a

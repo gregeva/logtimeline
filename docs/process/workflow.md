@@ -186,8 +186,30 @@ actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
 `CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
 each harness's output once to a scratch file and inspect the file.
 
-While working a single harness, the check is that harness. The full suite runs
-once, here.
+Then the suite runs a second time on the generated read path
+(`features/621-generated-read-loop-body.md` D3): the harnesses' fixtures are
+under the read path's size threshold, so the first pass reads every file with
+the standard path. `LTL` points every harness, and the shared CSV cache, at a
+copy of `ltl` whose one difference is a threshold of 0, so each file takes the
+generated body; the source readers among the harnesses read the same source.
+The cache is cleared between the passes, since it does not know which `ltl`
+filled it:
+
+```bash
+./tests/cleanup-test-artifacts.sh
+gen="$(mktemp -d)/ltl"
+sed 's/^my \$read_path_threshold       = 2_097_152;/my $read_path_threshold       = 0;/' ltl > "$gen" && chmod +x "$gen"
+diff ltl "$gen" | grep -c '^>'      # exactly 1, or the copy is wrong
+LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest, as above
+./tests/cleanup-test-artifacts.sh
+```
+
+`tests/validate-read-path.sh` runs `ltl` itself in both passes; it compares
+the two paths on its own.
+
+The suite is the gate's failsafe, never a development tool. While working, the
+check is the developer's own runs aimed at the change, and at most a single
+harness scenario. The full suite runs here, twice.
 
 ## 4. Merge and close
 

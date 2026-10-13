@@ -25,7 +25,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 FIXTURES="$REPO_DIR/tests/fixtures"
 CHECKER="$REPO_DIR/tests/aggregate-export/validate-aggregate-export.pl"
 RULES="$REPO_DIR/tests/aggregate-export/rules/keys.tsv"

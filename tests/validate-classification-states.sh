@@ -24,7 +24,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 FIXTURE="$REPO_DIR/tests/fixtures/classification-states.txt"
 CHECKER="$REPO_DIR/tests/aggregate-export/validate-aggregate-export.pl"
 

@@ -21,7 +21,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LTL="$(cd "$SCRIPT_DIR/.." && pwd)/ltl"
+LTL="${LTL:-$(cd "$SCRIPT_DIR/.." && pwd)/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"

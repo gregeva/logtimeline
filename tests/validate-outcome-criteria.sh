@@ -31,7 +31,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 ACCESS_FIXTURE="$REPO_DIR/tests/fixtures/access-classification-buckets.txt"
 DIAG_FIXTURE="$REPO_DIR/tests/fixtures/diagnostics-classification-overlap.txt"

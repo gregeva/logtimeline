@@ -25,7 +25,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 CHECKER="$SCRIPT_DIR/duration-display/check-duration-cells.pl"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the render invariants read duration CELLS - their unit, zero form and

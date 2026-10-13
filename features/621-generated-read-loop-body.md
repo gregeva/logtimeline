@@ -425,6 +425,16 @@ source line and exit alike. Proven to fail: a marker naming the wrong flag
 (output differs in the highlighted session counts), a misplaced `when` (every
 shape falls back), a marker that can never be true (coverage fails).
 
+**Drop 4, the second pass.** Ten harnesses read `ltl`'s source through
+`$LTL` (`grep`, `perl -ne`, `perl -`), so `LTL` points at a copy of `ltl` whose
+one difference is a default threshold of 0, not at a wrapper adding the
+option: the source readers read the same source, every run takes the generated
+body, and each harness still changes by one line (`LTL="${LTL:-$REPO_DIR/ltl}"`,
+48 of them). The shared CSV cache runs its own `ltl` path, so its line takes
+the override too, and it is cleared between the passes because its key does
+not record which `ltl` filled it. `tests/validate-read-path.sh` stays on the
+script in both passes. Procedure: `docs/process/workflow.md` § 3 (b).
+
 **Observation, pre-existing.** A size row of `@quantity_options` accepts a
 negative: `-n -1` exits 0. The threshold refuses one through its own `min`;
 the other size options are unchanged.
