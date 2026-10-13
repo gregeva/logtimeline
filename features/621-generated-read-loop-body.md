@@ -186,21 +186,22 @@ Locked by the architect on 2026-10-13.
   `--detection-window=N`. Chosen over a switch forcing the generated path, an
   environment variable, and no mechanism (the generated path then tested only
   on corpus files above the threshold).
-- **D3** (locked by the architect 2026-10-13, under #721). Both paths are
-  covered in two places. A dedicated harness, `tests/validate-read-path.sh`,
-  compares the generated body with the inline loop byte for byte over an
-  option-shape set in which every marker's gate is switched on at least once,
-  and fails when one is not. At the completion gate the full suite runs a
-  second time with `--generated-loop-threshold=0`, so every existing assertion
-  is checked against the generated path as well; each harness lets `LTL` be
-  overridden for that pass (a one-line change in each of the 48 that set it),
-  and `docs/process/workflow.md` § 3 (b) gains the second pass in the same
-  change. The suite is the completion gate's failsafe, never a development
-  tool: while the work is under way, the developer runs dedicated tests aimed
-  at what is being changed, and at most a single harness scenario. Chosen over
-  every `ltl` call in every harness running both paths (342 call sites moved
-  to a shared runner, suite time doubled on every run) and the dedicated
-  harness alone.
+- **D3** (locked by the architect 2026-10-13, under #721; amended the same day).
+  Both paths are covered in two places. A dedicated harness,
+  `tests/validate-read-path.sh`, compares the generated body with the inline
+  loop byte for byte over an option-shape set in which every marker's gate is
+  switched on at least once, and fails when one is not. At the release gate
+  the full suite runs a second time on the generated path, so every existing
+  assertion is checked against it as well (`docs/process/workflow.md` § 5,
+  step 4); each harness lets `LTL` be overridden for that pass (a one-line
+  change in each of the 48 that set it). An issue's gate runs the suite once:
+  a second pass doubles a gate of about 18 minutes, and development cannot
+  wait on it. The suite is the gate's failsafe, never a development tool:
+  while the work is under way, the developer runs dedicated tests aimed at what
+  is being changed, and at most a single harness scenario. Chosen over every
+  `ltl` call in every harness running both paths (342 call sites moved to a
+  shared runner, suite time doubled on every run) and the dedicated harness
+  alone.
 - **D4** (locked by the architect 2026-10-13, under #721). When the generated
   body cannot be prepared for a file (the program's source cannot be read, a
   marker does not match the code under it, or the generated text does not
@@ -320,9 +321,9 @@ per-file path choice, `--generated-loop-threshold=N`, `-D, --debug` with its
 `--help` and `docs/usage.md` rows, the fallback notice, matching exit status,
 the timing row, the `-V read-path` section, the architecture-patterns entry.
 (3) `tests/validate-read-path.sh`. (4) `LTL` overridable in the 48 harnesses
-that set it; `docs/process/workflow.md` § 3 (b). (5) The release-build step
+that set it; `docs/process/workflow.md` § 5, step 4. (5) The release-build step
 and its committed fixture. Then the gate: the `after` benchmark, the full
-suite twice. The prototype's premise holds on the base: `ltl` changed by one
+suite. The prototype's premise holds on the base: `ltl` changed by one
 line outside the loop since 524a66d, and all 77 markers place.
 
 **Drop 2, path choice (confirmed 2026-10-13).** Per file, after format
@@ -433,7 +434,7 @@ body, and each harness still changes by one line (`LTL="${LTL:-$REPO_DIR/ltl}"`,
 48 of them). The shared CSV cache runs its own `ltl` path, so its line takes
 the override too, and it is cleared between the passes because its key does
 not record which `ltl` filled it. `tests/validate-read-path.sh` stays on the
-script in both passes. Procedure: `docs/process/workflow.md` § 3 (b).
+script in both passes. Procedure: `docs/process/workflow.md` § 5, step 4.
 
 **Drop 5, the release-build check.** `build/verify-read-path.sh <fixture>
 <command>` runs a packaged binary on the committed
@@ -478,5 +479,5 @@ is `tests/validate-read-path.sh`.
 | 12 | A warning or `die` in the generated body names its source line, as on the inline loop. | assertable | `validate-read-path.sh` injects a warning and a `die` into a copy of `ltl` |
 | 13 | No loop block exists twice in the source. | review | the diff |
 | 14 | When the generated body cannot be prepared for a file, that file is read by the inline loop, one notice prints on stderr for the run, `-V read-path` records the reason, and the output equals the `-D` output (D4). | assertable | `validate-read-path.sh` on a copy of `ltl` with one marker altered so it no longer matches its code |
-| 15 | At the completion gate the full suite passes a second time with `--generated-loop-threshold=0`, and `docs/process/workflow.md` § 3 (b) says so (D3). | assertable | the gate's second pass; each of the 48 harnesses that set `LTL` lets it be overridden |
+| 15 | At the release gate the full suite passes a second time on the generated path, and `docs/process/workflow.md` § 5, step 4, says so (D3). | assertable | the release gate's second pass; each of the 48 harnesses that set `LTL` lets it be overridden |
 | 16 | The release build fails when a packaged binary it runs does not report the generated path on the committed fixture (D5). | assertable | the new step, its check shown to reject output reporting the inline path (`-D`) |
