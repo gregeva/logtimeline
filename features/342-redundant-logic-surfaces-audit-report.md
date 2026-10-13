@@ -3,6 +3,8 @@
 ## Status
 
 Opened 2026-09-26 with the scoping pass's verified inventory as its first entries.
+The refactoring the review dispatched, #622, is closed (2026-10-13): its twenty
+sub-issues are closed and every stage of § Review progress is *done*.
 The specification, method, locked decisions and acceptance criteria are in
 `features/342-redundant-logic-surfaces.md`; this document holds the findings.
 
