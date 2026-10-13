@@ -171,7 +171,8 @@ Every place outside the audit report that names a renamed column, found by
 | `ltl`: `pipeline_render` (the rate header names, the MESSAGES header literal), `print_message_summary` (the `duration_std_dev` family tag), `%csv_column_family`, `resolve_csv_column_family` | The emitted names and the names the formatter resolves |
 | `tests/csv-output/rules/stats-columns.tsv`, `messages-columns.tsv` | The `column` field of the renamed rows |
 | `tests/validate-bucket-size-units.sh` (the `msg-rate_wk` assertion), `tests/csv-output/expected/udm-rate-cell.tsv` (the `msg-rate_sec` cell) | The column each assertion looks up |
-| `tests/statistics-drift/baselines/*/{stats,messages}.csv` (50 files) | Re-captured after the rename (D6) |
+| `tests/validate-log-level-vocabulary.sh` (the error-rate column it reads), `tests/aggregate-export/rules/keys.tsv` and `validate-aggregate-export.pl` (the export's `duration.std_dev` key and its CSV twin), `tests/statistics-drift/compare-statistics-drift.pl` (`l3_csv_column`, mapping the oracle's `std_dev` to its CSV column) | The name each harness looks up |
+| `tests/statistics-drift/baselines/*/{stats,messages}.csv` (50 files) | Header line rewritten to the new names; no other line changes, which the drift harness then confirms against the renamed output (D6) |
 | `features/224-validate-statistics-test-harness.md` § Decision 5, `features/503-yaml-aggregate-export.md` (the `err_rate` key's comment), `features/rate-unit.md`, `features/user-defined-metrics.md` | Current-contract mentions of the STATS rate and `std_dev` column names, trued up in the same step |
 | `ltl`: `write_aggregate_export` (the duration family's `std_dev` key); `features/503-yaml-aggregate-export.md` (the schema example's `std_dev`) | The export's statistic key |
 | `releases/v0.19.0.md` | One bullet: the renamed columns and export key |
