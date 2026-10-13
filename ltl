@@ -7967,7 +7967,8 @@ sub write_aggregate_export {
         $b->{err_rate} = aggregate_number($err_rate) if defined $err_rate;
         $b->{msg_rate} = aggregate_number($msg_rate) if defined $msg_rate;
 
-        # The STATS CSV column families, in the order the row writes them.
+        # The STATS CSV column families, in the order the row writes them, each
+        # family's statistics read from the declaration the CSVs share.
         my ($udm, $threadpools);
         for my $key (@populated_graph_columns) {
             if ($key eq 'duration') {
@@ -7977,13 +7978,14 @@ sub write_aggregate_export {
                 $block->{occurrences} = aggregate_number($stats->{duration_count}) if defined $stats->{duration_count};
                 $block->{sum}         = aggregate_number($stats->{duration_sum});
                 if ($duration_family_active) {
-                    for my $stat (@duration_family_stats) {
+                    for my $column (metric_family_csv_columns('duration')) {
+                        my $stat = $column->{key};
                         next unless defined $stats->{$stat};
                         if (exists $percentile_quantile{$stat}) {
-                            if (percentile_supported($stat, $stats->{duration_count})) { $block->{ $statistic_name_by_key{$stat} } = aggregate_number($stats->{$stat}) }
+                            if (percentile_supported($stat, $stats->{duration_count})) { $block->{ $column->{statistic} } = aggregate_number($stats->{$stat}) }
                             else { $percentiles_gated++ }
                         } else {
-                            $block->{ $statistic_name_by_key{$stat} } = aggregate_number($stats->{$stat});
+                            $block->{ $column->{statistic} } = aggregate_number($stats->{$stat});
                         }
                     }
                 }
@@ -7992,21 +7994,21 @@ sub write_aggregate_export {
                 next unless defined $stats->{bytes};
                 my $block = aggregate_mapping();
                 if ($bytes_family_active) {
-                    $block->{$_} = aggregate_number($stats->{"bytes_$_"}) for grep { defined $stats->{"bytes_$_"} } @bytes_family_stats;
+                    $block->{ $_->{statistic} } = aggregate_number($stats->{ $_->{key} }) for grep { defined $stats->{ $_->{key} } } metric_family_csv_columns('bytes');
                 }
                 $block->{sum} = aggregate_number($stats->{bytes});
                 $b->{bytes} = $block;
             } elsif ($key eq 'count') {
                 next if $omit_count || !defined $stats->{count_occurrences};
                 my $block = aggregate_mapping();
-                $block->{$_} = aggregate_number($stats->{"count_$_"}) for grep { defined $stats->{"count_$_"} } @count_family_stats;
+                $block->{ $_->{statistic} } = aggregate_number($stats->{ $_->{key} }) for grep { defined $stats->{ $_->{key} } } metric_family_csv_columns('count');
                 $b->{count} = $block;
             } elsif ($key =~ /^udm_(.+)$/) {
                 my $name = $1;
                 my ($config) = grep { $_->{name} eq $name } @udm_configs;
                 $udm //= aggregate_mapping();
-                my $csv = $config ? udm_csv_columns($config) : undef;
-                if ($csv && $csv->{shape} eq 'single') {
+                my $csv = udm_csv_columns($config);
+                if ($csv->{shape} eq 'single') {
                     next unless defined $stats->{$key};
                     my $block = aggregate_mapping();
                     $block->{ $csv->{stats}[0] } = aggregate_number($stats->{$key});
@@ -8014,7 +8016,7 @@ sub write_aggregate_export {
                 } else {
                     next unless defined $stats->{"${key}_occurrences"};
                     my $block = aggregate_mapping();
-                    $block->{$_} = aggregate_number($stats->{"${key}_$_"}) for grep { defined $stats->{"${key}_$_"} } @udm_family_stats;
+                    $block->{$_} = aggregate_number($stats->{"${key}_$_"}) for grep { defined $stats->{"${key}_$_"} } @{ $csv->{stats} };
                     $udm->{$name} = $block;
                 }
             } elsif ($key eq 'sessions' || $key eq 'users') {
@@ -20836,21 +20838,22 @@ sub histogram_value_observed {
 
 # Key function used to normalize data for output, graphing, and data scaling.
 # The CSV columns of one metric's statistics family, which the STATS and the
-# MESSAGES declarations share: each column's name, its precision family and
-# the stored key its value is read under in a bucket's statistics or a
-# message's entry. A duration statistic's family comes from its statistic-table
-# row ('metric' being the duration family itself); the bytes count of
-# observations is a meta column.
+# MESSAGES declarations and the aggregate export share: each column's name,
+# its precision family, the stored key its value is read under in a bucket's
+# statistics or a message's entry, and the statistic's typed name, which the
+# export writes as its key. A duration statistic's family comes from its
+# statistic-table row ('metric' being the duration family itself); the bytes
+# count of observations is a meta column.
 sub metric_family_csv_columns {
     my ($metric) = @_;
     if ( $metric eq 'duration' ) {
         return map {
             my $precision = $statistic_by_key{$_}{precision};
-            { name => "duration_$statistic_name_by_key{$_}", family => $precision eq 'metric' ? 'duration' : $precision, key => $_ }
+            { name => "duration_$statistic_name_by_key{$_}", family => $precision eq 'metric' ? 'duration' : $precision, key => $_, statistic => $statistic_name_by_key{$_} }
         } @duration_family_stats;
     }
     my @stats = $metric eq 'bytes' ? @bytes_family_stats : @count_family_stats;
-    return map { { name => "${metric}_$_", family => ( $metric eq 'bytes' && $_ eq 'occurrences' ) ? 'meta' : $metric, key => "${metric}_$_" } } @stats;
+    return map { { name => "${metric}_$_", family => ( $metric eq 'bytes' && $_ eq 'occurrences' ) ? 'meta' : $metric, key => "${metric}_$_", statistic => $_ } } @stats;
 }
 
 # One CSV row from a declaration: each entry's value, read under its stored key
