@@ -1,0 +1,3 @@
+message_match	expected
+# one day bucket: 18 lines carry the count key, a mean of 20.389 written at the three decimals -cp 3 asks for, as count_mean beside it is
+@cell	stats	timestamp=2026-01-26 00:00	c:mean	20.389	features/618-csv-column-declaration.md D9 (every user-defined value column has a declared precision family: a function's column of a metric typed with two functions is a count, and honours -cp)

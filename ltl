@@ -457,25 +457,26 @@ my @udm_family_stats      = qw( occurrences min mean max sum );
 # whether its notice prints yet), the --explain topic that covers it, and its
 # place in the -udm function slot: the kind (aggregation, counting or
 # transform), the position the slot lists it at, and the note its help row
-# gives it. The statistic rows keep
+# gives it, and the CSV precision family its columns are written in ('metric'
+# takes the family of the metric it describes). The statistic rows keep
 # the order of @duration_family_stats; the rows only the function slot
 # accepts follow. Every surface reads the views below.
 my @statistic_names = (
-    { name => 'min',             key => 'min',             sort => 1, explain => 'min',             udm => 'aggregation', udm_position => 2 },
-    { name => 'mean',            key => 'mean',            sort => 1, explain => 'mean',            udm => 'aggregation', udm_position => 4, aliases => [ 'avg' ] },
-    { name => 'max',             key => 'max',             sort => 1, explain => 'max',             udm => 'aggregation', udm_position => 3 },
-    { name => 'stddev',          key => 'std_dev',         sort => 1, explain => 'std_dev',         deprecated => 'std_dev', deprecation_notice => 1 },
-    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p1 p5 p10 p25 p50 p75 ) ),
-    { name => 'iqr',             key => 'iqr',             sort => 1, explain => 'iqr' },
-    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles' } } qw( p90 p95 p99 p999 p9999 p99999 ) ),
-    { name => 'cv',              key => 'cv',              sort => 1, explain => 'cv' },
-    { name => 'skewness',        key => 'skewness',        sort => 1, explain => 'skewness' },
-    { name => 'kurtosis',        key => 'kurtosis',        sort => 1, explain => 'kurtosis' },
-    { name => 'bimodality_coef', key => 'bimodality_coef', sort => 1, explain => 'bimodality_coef' },
+    { name => 'min',             key => 'min',             sort => 1, explain => 'min',             precision => 'metric',     udm => 'aggregation', udm_position => 2 },
+    { name => 'mean',            key => 'mean',            sort => 1, explain => 'mean',            precision => 'metric',     udm => 'aggregation', udm_position => 4, aliases => [ 'avg' ] },
+    { name => 'max',             key => 'max',             sort => 1, explain => 'max',             precision => 'metric',     udm => 'aggregation', udm_position => 3 },
+    { name => 'stddev',          key => 'std_dev',         sort => 1, explain => 'std_dev',         precision => 'shape',      deprecated => 'std_dev', deprecation_notice => 1 },
+    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles', precision => 'percentile' } } qw( p1 p5 p10 p25 p50 p75 ) ),
+    { name => 'iqr',             key => 'iqr',             sort => 1, explain => 'iqr',             precision => 'percentile' },
+    ( map { { name => $_, key => $_, sort => 1, explain => 'percentiles', precision => 'percentile' } } qw( p90 p95 p99 p999 p9999 p99999 ) ),
+    { name => 'cv',              key => 'cv',              sort => 1, explain => 'cv',              precision => 'shape' },
+    { name => 'skewness',        key => 'skewness',        sort => 1, explain => 'skewness',        precision => 'shape' },
+    { name => 'kurtosis',        key => 'kurtosis',        sort => 1, explain => 'kurtosis',        precision => 'shape' },
+    { name => 'bimodality_coef', key => 'bimodality_coef', sort => 1, explain => 'bimodality_coef', precision => 'shape' },
     { name => 'sum',             key => 'sum',             udm => 'aggregation', udm_position => 1, udm_note => 'default' },
     { name => 'count',           key => 'count',           udm => 'counting',    udm_position => 5 },
     { name => 'distinct',        key => 'distinct',        udm => 'counting',    udm_position => 6, aliases => [ 'dcount', 'unique' ] },
-    { name => 'ratio',           key => 'ratio',           udm => 'counting',    udm_position => 7 },
+    { name => 'ratio',           key => 'ratio',           udm => 'counting',    udm_position => 7, precision => 'shape' },
     { name => 'rate',            key => 'rate',            udm => 'counting',    udm_position => 8 },
     { name => 'drate',           key => 'drate',           udm => 'counting',    udm_position => 9 },
     { name => 'delta',           key => 'delta',           udm => 'transform',   udm_position => 10, udm_note => 'keeps negative differences' },
@@ -488,6 +489,7 @@ my %statistic_by_spelling = map { my $row = $_; map { lc($_) => $row } grep { de
 # The typed name of each stored statistic key: the name the CSV columns and
 # the aggregate export write for it.
 my %statistic_name_by_key = map { $_->{key} => $_->{name} } @statistic_names;
+my %statistic_by_key      = map { $_->{key} => $_ } @statistic_names;
 # Duration carries every statistic the statistic table ranks by, beside its
 # sum and impact (616 D21: impact is a duration statistic).
 $builtin_metric{duration}{statistics} = [ sum => 'total_duration', ( map { $_->{name} => $_->{key} } grep { $_->{sort} } @statistic_names ), impact => 'impact' ];
@@ -1261,7 +1263,8 @@ my $consolidation_skip_min_keys      = 20_000; # keys handed forward, at or abov
 my $consolidation_cliff_sample       = 300;    # keys sampled to locate the similarity cliff edge
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
 
-my ( @in_files, @output_columns );
+my @in_files;
+my @stats_csv_columns;  # the STATS CSV declaration for this run: build_stats_csv_columns()
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
 
@@ -15186,8 +15189,6 @@ sub resolve_csv_column_family {
     return 'rate' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
     return 'rate' if $column =~ /^udm_(.+)$/ && udm_config_by_name($1)
                   && resolve_value_kind( metric => $1 )->{kind} eq 'rate';
-    # A user-defined ratio is unitless, like the coefficient of variation.
-    return 'shape' if $column =~ /^udm_(.+)$/ && ( ( udm_config_by_name($1) // {} )->{aggregation} // '' ) eq 'ratio';
     # Log-level columns: matched against the configured log levels.
     return 'level' if grep { $_ eq $column } @log_levels;
     # UDM dynamic columns: <name>_<aggregate>; family follows the underlying
@@ -15212,6 +15213,14 @@ sub resolve_csv_column_family {
 # precision, since it is compared across runs (#616 D8, D16).
 sub format_csv_value {
     my ($value, $column, $fixed_decimals) = @_;
+    return format_csv_family_value( $value, defined $fixed_decimals ? undef : resolve_csv_column_family($column), $fixed_decimals );
+}
+
+# Format one CSV value under a precision family, the form a declared column
+# writes through: the family's decimals under the run's --csv-precision, or the
+# fixed decimals given. An unknown family writes no decimals.
+sub format_csv_family_value {
+    my ($value, $family, $fixed_decimals) = @_;
     return undef unless defined $value;
     return $value if $csv_precision eq 'full' && !defined $fixed_decimals;
     # Non-numeric values (pre-formatted strings) pass through unchanged.
@@ -15220,7 +15229,6 @@ sub format_csv_value {
     if (defined $fixed_decimals) {
         $decimals = $fixed_decimals;
     } else {
-        my $family = resolve_csv_column_family($column);
         $decimals = defined $family && exists $csv_family_decimals{$family}
             ? $csv_family_decimals{$family}
             : 0;
@@ -20902,6 +20910,94 @@ sub histogram_value_observed {
 }
 
 # Key function used to normalize data for output, graphing, and data scaling.
+# The STATS CSV declaration for this run: one entry per column in file order,
+# each holding its header name, its precision family and the cell it writes for
+# a bucket. Built once, after the read, from what the run observed: the
+# categories that occurred, the metrics that carried a value, the bytes and
+# duration families under their shared gates. The header writes the names and
+# print_bar_graph() each bucket's cells, so a row cannot carry a value its
+# header lacks. A cell is called with the bucket and the row's context (its
+# timestamp, category counts and total occurrences, which the legend pass
+# computes); an entry marked text writes its cell as given.
+sub build_stats_csv_columns {
+    my ($categories) = @_;
+    my @columns = ( { name => 'timestamp', family => 'meta', text => 1, cell => sub { $_[1]{timestamp} } } );
+
+    for my $category ( grep { exists $categories->{$_} } @log_levels ) {
+        my ($rate) = $category =~ /^(err|msg)-rate$/;
+        push @columns, {
+            name   => $rate ? "${rate}_rate$rate_csv_suffix{$rate_unit}" : $category,
+            family => $rate ? 'rate' : 'level',
+            cell   => sub { $_[1]{categories}{$category} },
+        };
+    }
+
+    # #452 D9: the bucket's outcome counts beside its total — exact by
+    # construction, the percentages derivable precisely by any consumer.
+    push @columns, { name => 'occurrences', family => 'meta', cell => sub { $_[1]{occurrences} } };
+    for my $outcome ( [ successes => 1 ], [ failures => 2 ], [ conflicts => 4 ] ) {
+        my ( $name, $slot ) = @$outcome;
+        push @columns, { name => $name, family => 'meta', cell => sub { $bucket_outcomes{ $_[0] } ? ( $bucket_outcomes{ $_[0] }[$slot] // 0 ) : 0 } };
+    }
+
+    # The graphed metrics, in @populated_graph_columns order. Each is written
+    # whether or not its terminal column is visible: the CSV is not bound to
+    # the terminal's width.
+    for my $key (@populated_graph_columns) {
+        if ( $key eq 'duration' || $key eq 'bytes' ) {
+            my $total = $key eq 'duration' ? 'duration_sum' : 'bytes';
+            push @columns,
+                { name => "${key}_nice", family => $key, text => 1,
+                  cell => sub { my $v = $log_stats{ $_[0] }{$total}; defined $v ? value_text( $v, metric => $key, budget => 'nice cell' ) : undef } },
+                { name => $key, family => $key, cell => sub { $log_stats{ $_[0] }{$total} } };
+        } elsif ( $key eq 'count' ) {
+            next if $omit_count;
+            push @columns, map { my $stat = $_; { name => "count_$stat", family => 'count', cell => sub { $log_stats{ $_[0] }{"count_$stat"} } } } @count_family_stats;
+        } elsif ( $key =~ /^udm_(.+)$/ ) {
+            my $name = $1;
+            my ($config) = grep { $_->{name} eq $name } @udm_configs;
+            my $csv = udm_csv_columns($config);
+            if ( $csv->{shape} eq 'single' ) {
+                push @columns, { name => $csv->{columns}[0], family => udm_csv_family($config), cell => sub { $log_stats{ $_[0] }{$key} } };
+            } else {
+                my @stats = @{ $csv->{stats} };
+                push @columns, map { my $stat = $stats[$_]; { name => $csv->{columns}[$_], family => 'count', cell => sub { $log_stats{ $_[0] }{"${key}_$stat"} } } } 0 .. $#stats;
+            }
+        } else {
+            # Sessions, users and thread pools: whole counts. #444 D13: the
+            # highlighted twin of the sessions and users columns joins whenever
+            # a highlight is active.
+            push @columns, { name => $key, family => 'meta', cell => sub { $log_stats{ $_[0] }{$key} } };
+            push @columns, { name => "$key-HL", family => 'meta', cell => sub { $log_stats{ $_[0] }{"$key-HL"} // 0 } }
+                if $highlight_active && $key =~ /^(?:sessions|users)$/;
+        }
+    }
+
+    # The bytes and duration families (#432): CSV-only, each under its shared
+    # gate, which the export asks too.
+    if ( stats_csv_bytes_columns_active() ) {
+        push @columns, map { my $stat = $_; { name => "bytes_$stat", family => $stat eq 'occurrences' ? 'meta' : 'bytes', cell => sub { $log_stats{ $_[0] }{"bytes_$stat"} } } } @bytes_family_stats;
+    }
+    if ( stats_csv_duration_columns_active() ) {
+        for my $stat (@duration_family_stats) {
+            my $precision = $statistic_by_key{$stat}{precision};
+            push @columns, { name => "duration_$statistic_name_by_key{$stat}", family => $precision eq 'metric' ? 'duration' : $precision, cell => sub { $log_stats{ $_[0] }{$stat} } };
+        }
+    }
+    return @columns;
+}
+
+# The CSV precision family of a user-defined metric's one value column: a rate
+# takes the rate family from the kind resolver (617 D21), a function whose
+# statistic row names a unitless family takes it (a ratio: shape), and every
+# other one is a count.
+sub udm_csv_family {
+    my ($config) = @_;
+    return 'rate' if resolve_value_kind( metric => $config->{name} )->{kind} eq 'rate';
+    my $precision = ( $statistic_by_key{ $config->{aggregation} } // {} )->{precision} // '';
+    return $precision eq 'shape' ? 'shape' : 'count';
+}
+
 sub normalize_data_for_output {
 
     my %max_total = (
@@ -20911,11 +21007,9 @@ sub normalize_data_for_output {
         count => 0,
     );
     $max_total{"udm_$_->{name}"} = 0 for @udm_configs;  # Initialize UDM max totals (Issue #22)
-    my %output_columns;
+    my %stats_csv_categories;   # the categories that occurred, each a STATS CSV column
 
     print "\rScaling and normalizing data..." unless $disable_progress;
-
-    push @output_columns, "timestamp";
 
     foreach my $bucket (keys %log_occurrences) {
         my $total_occurrences = 0;
@@ -21031,23 +21125,12 @@ sub normalize_data_for_output {
                 $title_length = length("$category_bucket: " . legend_category_total($occurrences) . " ");
             }
             $bucket_legend_length += $title_length;
-            $output_columns{$category_bucket} = 1 if !exists $output_columns{$category_bucket};
+            $stats_csv_categories{$category_bucket} = 1;
         }
 
         $legend_length = $bucket_legend_length if $bucket_legend_length > $legend_length;
     }
 
-    foreach my $category_bucket ( @log_levels ) {
-        if( exists $output_columns{$category_bucket} ) {
-            push @output_columns, $category_bucket;
-        }
-    }
-    push @output_columns, "occurrences"; # if $category_bucket =~ /^err-rate$/;
-    # #452 D9: per-bucket outcome COUNTS join the STATS CSV — exact by
-    # construction, the percentages derivable precisely by any consumer
-    # (#503 reads, never recomputes), the eligibility judgement the
-    # consumer's own.
-    push @output_columns, "successes", "failures", "conflicts";
 
     # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
     {
@@ -21134,28 +21217,9 @@ sub normalize_data_for_output {
 
     # --- Phase 3: Build old arrays from @column_layout ---
 
-    # Build @populated_graph_columns and @output_columns (still needed for scaling and CSV)
+    # Build @populated_graph_columns (needed for scaling and the STATS CSV)
     foreach my $key (@graph_columns) {
-        if (defined $max_total{$key} && $max_total{$key} != 0) {
-            push @populated_graph_columns, $key;
-            push @output_columns, "${key}_nice" if $key =~ /^(duration|bytes)$/;
-            if ($key =~ /^count$/) {
-                push @output_columns, map { "${key}_$_" } @count_family_stats if !$omit_count;
-            } elsif ($key =~ /^udm_/) {
-                (my $csv_key = $key) =~ s/^udm_//;
-                my ($cfg) = grep { $_->{name} eq $csv_key } @udm_configs;
-                push @output_columns, $cfg
-                    ? @{ udm_csv_columns($cfg)->{columns} }
-                    : map { "${csv_key}_$_" } @udm_family_stats;
-            } else {
-                push @output_columns, $key;
-                # #444 D13: whatever is captured as a metric is exported — the
-                # highlighted twin of the sessions and users columns joins the
-                # STATS CSV beside the category -HL twins whenever a highlight
-                # is active.
-                push @output_columns, "$key-HL" if $highlight_active && $key =~ /^(?:sessions|users)$/;
-            }
-        }
+        push @populated_graph_columns, $key if defined $max_total{$key} && $max_total{$key} != 0;
     }
 
 
@@ -21163,14 +21227,9 @@ sub normalize_data_for_output {
     my $ts_col = (grep { $_->{id} eq 'timestamp' } @column_layout)[0];
     $timestamp_length = $ts_col->{width} + $ts_col->{spacing_before} + $ts_col->{spacing_after};
 
-    # Add CSV output columns for latency stats. @output_columns drives the CSV
-    # header/data only here; the terminal render uses @column_layout.
-    if (stats_csv_bytes_columns_active()) {
-        push @output_columns, map { "bytes_$_" } @bytes_family_stats;
-    }
-    if (stats_csv_duration_columns_active()) {
-        push @output_columns, map { "duration_$statistic_name_by_key{$_}" } @duration_family_stats;
-    }
+    # The STATS CSV declaration, from what this run observed. It drives the CSV
+    # header and rows only; the terminal render uses @column_layout.
+    @stats_csv_columns = build_stats_csv_columns(\%stats_csv_categories);
 
     foreach my $bucket (keys %log_occurrences) {
         # Scale the total values to the printable size
@@ -21680,7 +21739,6 @@ sub print_verbose_output {
 
 sub print_bar_graph {
     my $lines_printed = 0;
-    my @csv_data;
 
     open_section('timeline');
     if( $total_lines_included ) {
@@ -21767,7 +21825,7 @@ sub print_bar_graph {
             my $log_details = "";
             my $rate_metrics = "";
             my $legend_length_bucket = 0;
-            my %output_columns;
+            my %category_cells;    # the STATS CSV category cells for this bucket
             my $scaled_occurrences_total = 0;
 
             ## LOOP THROUGH LOG CATEGORY BUCKETS AND BUILD PER ROW LEGEND COUNTS
@@ -21810,37 +21868,11 @@ sub print_bar_graph {
                         $legend_length_bucket += length("$category_bucket: $cat_total ");
                     }
 
-                    $output_columns{$category_bucket} = $occurrences;
-# 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
+                    $category_cells{$category_bucket} = $occurrences;
                 } else {
-                    $output_columns{$category_bucket} = 0;                                  # push empty value to CSV data list
+                    $category_cells{$category_bucket} = 0;
                 }
             }
-
-            # Add the log level message counts to the output CSV file
-            foreach my $category_bucket ( @output_columns ) {
-               next if $category_bucket =~ /^timestamp$/;								# skip the first column and get to the counts
-               last if $category_bucket =~ /^occurrences$/;								# only fill in empty values up to the occurrences column
-
-               if( exists $output_columns{$category_bucket} ) {								# if there was a count for this log level, add it to the list
-                   # Issue #268: level-family columns (log-level counts and
-                   # rate columns) route through format_csv_value() so the
-                   # --csv-precision mode controls emit. Rate columns get a
-                   # per-column override of 1 decimal in default mode.
-                   push @csv_data, format_csv_value($output_columns{$category_bucket}, $category_bucket);
-
-# 2026-01-04 TO DO: this may not be required, test after fixing the count and byte metric collection with no duration stats
-               } else {
-                   push @csv_data, undef;										# if there wasn't a count for this log level, add a blank column
-               }
-            }
-
-            push @csv_data, format_csv_value($total_occurrences, 'occurrences');			# add the total message count to the output CSV data
-            # #452 D9: the bucket's outcome counts, in lockstep with the
-            # 'successes','failures' header pushes in normalize_data_for_output().
-            push @csv_data, format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[1] // 0) : 0, 'successes' ),
-                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[2] // 0) : 0, 'failures' ),
-                            format_csv_value( $bucket_outcomes{$bucket} ? ($bucket_outcomes{$bucket}[4] // 0) : 0, 'conflicts' );
 
             ## RENDER ROW BY ITERATING @column_layout
             for my $col (grep { $_->{visible} } @column_layout) {
@@ -21926,12 +21958,11 @@ sub print_bar_graph {
                     my $trend_value = $log_stats{$bucket}{$field};
 
                     if( defined $log_stats{$bucket}{$field} ) {
-                        # Issue #289: this branch now computes $trend_value for terminal
-                        # DISPLAY only. CSV emission of the proportional-metric columns
-                        # moved to the visibility-independent post-loop builder below
-                        # (build_proportional_csv_data), so an auto-hidden or
-                        # hidden column no longer drops its CSV value or
-                        # misaligns the row (mirrors the latency-stats block's design).
+                        # Issue #289: this branch computes $trend_value for terminal
+                        # display only. The STATS CSV row is written from the
+                        # declaration (build_stats_csv_columns) after this loop, so an
+                        # auto-hidden or hidden column neither drops its CSV value nor
+                        # misaligns the row.
                         $trend_value = " " . value_text( $log_stats{$bucket}{$field}, metric => timeline_column_metric($key), budget => $column_budget{$key} );
 
                         # Render the metric bar using color from column layout
@@ -21991,83 +22022,21 @@ sub print_bar_graph {
                 print " " x ($col->{spacing_after} // 0);
             }
 
-            # Issue #289: emit the proportional-metric CSV columns independent of
-            # @column_layout render visibility. The previous in-loop pushes only
-            # fired for VISIBLE columns, so a metric column that was auto-hidden
-            # (narrow terminal) or hidden silently dropped its
-            # CSV value and shifted every subsequent column. This builder walks
-            # @populated_graph_columns in the SAME order as the @output_columns
-            # header build (normalize_data_for_output) so header and data stay
-            # aligned by construction. _nice columns use a stable, width-independent
-            # format (the CSV is not terminal-geometry-bound; the rendered bar still
-            # formats per column width above).
-            foreach my $key (@populated_graph_columns) {
-                if( $key =~ /^(time|duration)$/i ) {
-                    push @csv_data,
-                        (defined $log_stats{$bucket}{duration_sum} ? value_text($log_stats{$bucket}{duration_sum}, metric => 'duration', budget => 'nice cell') : undef),
-                        format_csv_value( $log_stats{$bucket}{duration_sum}, 'duration' );
-                } elsif( $key =~ /^bytes$/i ) {
-                    push @csv_data,
-                        (defined $log_stats{$bucket}{$key} ? value_text($log_stats{$bucket}{$key}, metric => 'bytes', budget => 'nice cell') : undef),
-                        format_csv_value( $log_stats{$bucket}{$key}, 'bytes' );
-                } elsif( $key =~ /^count$/i ) {
-                    next if $omit_count;
-                    foreach my $metric ( @count_family_stats ) {
-                        push @csv_data, format_csv_value( $log_stats{$bucket}{"count_${metric}"}, "count_${metric}" );
-                    }
-                } elsif( $key =~ /^udm_(.+)$/ ) {
-                    my $metric_name = $1;
-                    my ($config) = grep { $_->{name} eq $metric_name } @udm_configs;
-                    my $csv = $config ? udm_csv_columns($config) : undef;
-                    if ($csv && $csv->{shape} eq 'single') {
-                        push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
-                    } else {
-                        foreach my $metric ( @{ $csv ? $csv->{stats} : \@udm_family_stats } ) {
-                            push @csv_data, format_csv_value( $log_stats{$bucket}{"${key}_${metric}"}, "${key}_${metric}" );
-                        }
-                    }
-                } else {
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{$key}, $key );
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{"$key-HL"} // 0, "$key-HL" )
-                        if $highlight_active && $key =~ /^(?:sessions|users)$/;
-                }
-            }
-
-            # Append latency stats to CSV data. The header lists these columns
-            # under the same shared predicate (see normalize_data_for_output),
-            # so rows always match the header regardless of whether the latency
-            # *display column* was auto-hidden by terminal width (Issue #263)
-            # or hidden on the terminal surface, as under -hm (Issue #289).
-            # The bytes aggregate family (#432), CSV-only like the duration stats
-            # below and under its own shared predicate. Pushed ahead of them to match
-            # the header order in normalize_data_for_output.
-            if( stats_csv_bytes_columns_active() ) {
-                foreach my $metric ( @bytes_family_stats ) {
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{"bytes_${metric}"}, "bytes_${metric}" );
-                }
-            }
-
-            if( stats_csv_duration_columns_active() ) {
-                # The value is looked up by its stored key and formatted under its
-                # column name: the duration_ prefix (#432) and the statistic's
-                # typed name.
-                foreach my $stat ( @duration_family_stats ) {
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, "duration_$statistic_name_by_key{$stat}" );
-                }
-            }
-
-            # Print statistics for time-bucket statistics to the CSV file if activated
+            # The bucket's STATS CSV row: each declared column's cell, written
+            # whatever the terminal shows (Issue #289: a hidden or auto-hidden
+            # column never drops its value). A row whose length differs from
+            # the header is a defect, never padded over.
             if( $write_messages_to_csv && defined $csv_fh ) {
-                # Pad row to header width so every row has the same field count.
-                # Trailing empties (percentile/shape cols on no-duration buckets)
-                # would otherwise emit short rows that misalign downstream consumers.
-                my @row = ( $bucket_time_str, @csv_data );
-                my $target_width = scalar @output_columns;
-                push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;
+                my %row_context = ( timestamp => $bucket_time_str, categories => \%category_cells, occurrences => $total_occurrences );
+                my @row = map {
+                    my $entry = $_;
+                    my @cell = $entry->{cell}->( $bucket, \%row_context );
+                    $entry->{text} ? @cell : map { format_csv_family_value( $_, $entry->{family} ) } @cell;
+                } @stats_csv_columns;
+                die sprintf( "STATS CSV row for %s carries %d values under a header of %d columns\n", $bucket_time_str, scalar @row, scalar @stats_csv_columns )
+                    if @row != @stats_csv_columns;
                 $csv->print($csv_fh, \@row);
             }
-
-            undef @csv_data;
 
             print "\n";
             pause_for_keypress() if( $pause_output && $lines_printed++ > 1 && $lines_printed % ( $terminal_height - 1 ) == 0 );
@@ -24136,12 +24105,7 @@ sub pipeline_render {
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('STATS');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-        my @csv_columns = map {
-            if    ($_ eq 'err-rate') { "err_rate$rate_csv_suffix{$rate_unit}" }
-            elsif ($_ eq 'msg-rate') { "msg_rate$rate_csv_suffix{$rate_unit}" }
-            else  { $_ }
-        } @output_columns;
-        $csv->print($csv_fh, [ @csv_columns ] );
+        $csv->print($csv_fh, [ map { $_->{name} } @stats_csv_columns ] );
     }
 
     if( !section_hidden('timeline') ) {

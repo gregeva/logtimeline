@@ -51,3 +51,5 @@ job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric
 job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric
 job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric
 job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric
+c:max	*	float	conditional:udm-function	5	udm-function
+c:mean	*	float	conditional:udm-function	5	udm-function
