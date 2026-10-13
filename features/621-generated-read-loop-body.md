@@ -103,7 +103,10 @@ directive. A switch selects the inline loop instead.
 
 **Identity.** Both placements of the compile produce the base's output on 46
 option shapes over five log families that switch every marked gate on, with
-no runtime warning (the comparison takes 57 s). On the default options the
+no runtime warning (the comparison takes 57 s). The comparison stripped colour
+escapes, which hides what a highlight renders as shading, and the 46 shapes
+did not switch on every gate: five markers were wrong in a way only that
+shading shows (§ 9, drop 3). On the default options the
 generated body is code-identical to the hand-specialised loop of § 4.
 
 **Speed**, ten rounds, per-round delta against the base:
@@ -267,6 +270,10 @@ against the unpacked base.
 | output identical to the packed inline loop, 46 shapes, no runtime warning | 45; `-mem debug` differs in memory figures | 45; `-mem debug` differs in memory figures | 46 | 46 |
 | the injected warning reads `at script/ltl line N`, N the statement's source line, on the inline and the generated path | yes | yes | yes | yes |
 
+That comparison, like § 5's, stripped colour escapes, so it could not see the
+five wrong markers § 9 records; packaging changes neither the markers nor the
+comparison, so the verdict stands.
+
 **The `-mem debug` differences are memory figures only**, every other line of
 that output identical:
 
@@ -388,6 +395,40 @@ read/path_generation`, in the way `detect/scan_sub_compile` sums the scan-sub
 compiles. The section joins the reserved-names list of
 `tests/HARNESS-DESIGN.md` in the commit that adds it.
 
+**Drop 3, what the identity harness found.** `tests/validate-read-path.sh`
+compares raw output, colour escapes included, over 52 option shapes, and
+requires every marker counted from the source to be kept by one of them. Three
+things surfaced, none visible to the prototype's comparison:
+
+- **Five wrong markers, inherited from `markers.tsv`.** `#@when
+  $highlight_active` stood above five blocks testing `$line_is_highlighted`
+  (the highlighted heatmap and histogram values, thread-pool threads, sessions
+  and users). `when` unwraps its block when true, so under a highlight the
+  generated body counted every line as highlighted; only the highlighted
+  shading of those cells showed it. Corrected to `#@false !$highlight_active`,
+  which drops the block without a highlight and keeps its per-line test with
+  one. The generator now refuses the class (D7): a `when` above a block whose
+  condition is not its expression is a mismatch.
+- **An `and` term at the end of its line**, its `&&` opening the next line
+  (the highlight decision), which the prototype kept silently and D7 then
+  refused. The generator removes the term and the `&&` across the two lines;
+  a term that is not in its condition stays a mismatch.
+- **Six gates no shape switched on**: the index capture and its nanosecond
+  arm (the shapes ran with `-ni`), the progress repaint (every run had
+  `--disable-progress`), the message-statistics bin arm inside grouping, the
+  highlighted raw heatmap values and the highlighted thread-pool threads. Five
+  shapes added, an `-idx` shape run without `-ni` and one run with progress on.
+
+Criterion 12 is assertable after all: the harness injects a warning and a
+`die` into a copy of `ltl` and asserts both paths report the statement's
+source line and exit alike. Proven to fail: a marker naming the wrong flag
+(output differs in the highlighted session counts), a misplaced `when` (every
+shape falls back), a marker that can never be true (coverage fails).
+
+**Observation, pre-existing.** A size row of `@quantity_options` accepts a
+negative: `-n -1` exits 0. The threshold refuses one through its own `min`;
+the other size options are unchanged.
+
 **Drop 2, records.** `docs/architecture-patterns.md` § Generated code
 compiled from source strings gains the fifth consumption site and its status
 line in the commit that adds the generator; `-D, --debug` gains its
@@ -413,7 +454,7 @@ is `tests/validate-read-path.sh`.
 | 9 | A run that stops with an error exits with the same status and message on both paths (§ 5 measured 25 on the generated body against 1 on the inline loop). | assertable | an error case run on both paths |
 | 10 | The format scan-sub compile count is the same on both paths; the generated body's own cost is reported in its own timing row, not in `format_scan_subs`. | assertable | `-V format-registry`, `-V benchmark-data` |
 | 11 | Above the threshold the measured saving holds: the access-log and application-log days are each at least 12 % faster than `before`, median of three. | assertable | the `after` benchmark against the four `before` tests of § 9 |
-| 12 | A warning or `die` in the generated body names its source line, as on the inline loop. | development check | a probe with an injected warning, as #720 ran; a harness cannot inject a fault into the shipped code |
+| 12 | A warning or `die` in the generated body names its source line, as on the inline loop. | assertable | `validate-read-path.sh` injects a warning and a `die` into a copy of `ltl` |
 | 13 | No loop block exists twice in the source. | review | the diff |
 | 14 | When the generated body cannot be prepared for a file, that file is read by the inline loop, one notice prints on stderr for the run, `-V read-path` records the reason, and the output equals the `-D` output (D4). | assertable | `validate-read-path.sh` on a copy of `ltl` with one marker altered so it no longer matches its code |
 | 15 | At the completion gate the full suite passes a second time with `--generated-loop-threshold=0`, and `docs/process/workflow.md` § 3 (b) says so (D3). | assertable | the gate's second pass; each of the 48 harnesses that set `LTL` lets it be overridden |

@@ -17061,6 +17061,14 @@ sub generated_loop_text {
         my ($kind, $first, $span) = generated_loop_target($t, $i + 1);
         my $last = $kind eq 'stmt' ? $span : $span->[0][2];   # the statement, or the condition through the opening line
         my $v = generated_loop_flag($expr);
+        if ($op eq 'when' && $kind eq 'block') {
+            # The block's whole condition is the expression; a block testing
+            # anything else needs `false !EXPR`, which keeps its test.
+            (my $cond = join '', map { generated_loop_strip($_) } @$t[ $first .. $last ]) =~ s/\s+//g;
+            (my $want = $expr) =~ s/\s+//g;
+            die "marker_mismatch: when [$expr] above a block testing something else\n"
+                unless $cond =~ /^(?:\}?(?:if|elsif)\((.*)\)\{)$/ && ($1 eq $want || $1 eq "($want)");
+        }
         my $kept = 1;
         if ($op eq 'when' || ($op eq 'and' && !$v)) {
             if ($kind eq 'block') { generated_loop_resolve($t, $span, $v); $kept = $v }
@@ -17069,6 +17077,13 @@ sub generated_loop_text {
             my $done = 0;
             for my $k ($first .. $last) {
                 $done = 1, last if $t->[$k] =~ s/\Q$expr\E\s*&&\s*// || $t->[$k] =~ s/\s*&&\s*\Q$expr\E//;
+                # The term ends its line and its && opens the next.
+                if ($k < $last && $t->[$k] =~ /\Q$expr\E\s*$/ && $t->[$k + 1] =~ /^\s*&&/) {
+                    $t->[$k] =~ s/\s*\Q$expr\E(\s*)$/$1/;
+                    $t->[$k + 1] =~ s/^(\s*)&&\s*/$1/;
+                    $done = 1;
+                    last;
+                }
             }
             die "marker_mismatch: no term [$expr] in the condition below its marker\n" unless $done;
         } elsif ($op eq 'unless') {
@@ -18568,7 +18583,7 @@ sub read_and_process_logs {
                                 # value set per bucket, mirroring the %log_sessions pattern
                                 $bucket_entry->{"udm_${name}_occurrences"}++;
                                 $udm_distinct{$bucket}{$name}{plain}{$value} += 1;
-                                #@when $highlight_active
+                                #@false !$highlight_active
                                 if ($line_is_highlighted) {
                                     $bucket_entry->{"udm_${name}_occurrences-HL"}++;
                                     $udm_distinct{$bucket}{$name}{highlight}{$value} += 1;
@@ -18577,7 +18592,7 @@ sub read_and_process_logs {
                             }
                             $bucket_entry->{"udm_${name}_sum"} += $value;
                             $bucket_entry->{"udm_${name}_occurrences"}++;
-                            #@when $highlight_active
+                            #@false !$highlight_active
                             if ($line_is_highlighted) {
                                 $bucket_entry->{"udm_${name}_sum-HL"} += $value;
                                 $bucket_entry->{"udm_${name}_occurrences-HL"}++;
@@ -18713,7 +18728,7 @@ sub read_and_process_logs {
                     # Time Window Based Statistics Capture (Time Window Graphs) #
                     $log_threadpools{$bucket}{$threadpool}{plain}{$thread} += 1;
 
-                    #@when $highlight_active
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {                       # capture total duration and bytes for highlighted rows
                         $log_threadpools{$bucket}{$threadpool}{highlight}{$thread} += 1;
                     }
@@ -18724,7 +18739,7 @@ sub read_and_process_logs {
                 if( defined $session && $session ne "" && $session ne "-" && $session_capture_demand ) {
                     $session_data_found = 1;
                     $log_sessions{$bucket}{plain}{$session} += 1;
-                    #@when $highlight_active
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {
                         $log_sessions{$bucket}{highlight}{$session} += 1;
                     }
@@ -18735,7 +18750,7 @@ sub read_and_process_logs {
                 if( defined $user && $user ne "" && $user ne "-" && $user_capture_demand ) {
                     $user_data_found = 1;
                     $log_users{$bucket}{plain}{$user} += 1;
-                    #@when $highlight_active
+                    #@false !$highlight_active
                     if( $line_is_highlighted ) {
                         $log_users{$bucket}{highlight}{$user} += 1;
                     }
