@@ -2,7 +2,7 @@
 
 ## Status
 
-Measured (§ 3, § 4), not planned for implementation. Branch `621-generated-read-loop-body`,
+Measured (§ 3, § 4) and priced by prototype (§ 5), not planned for implementation. Branch `621-generated-read-loop-body`,
 cut from `release/0.19.0` 524a66d. Parent: #622 (the refactoring the
 redundant-logic-surfaces audit dispatched). The hoisting it followed (#620)
 is done (`features/620-read-loop-run-constant-hoisting.md`).
@@ -85,3 +85,59 @@ substitution, measured nothing resolvable on its own (+0.40 % and −0.05 %).
 The measurement covers the default options only. A run that switches options
 on needs the blocks they guard, and its generated body keeps more of the
 loop.
+
+## 5. What a generated body costs (prototype, 2026-10-13)
+
+Record: `tests/profile/results/621-remaining-loop-bound/analysis-generator.md`
+(hypotheses in `hypothesis-generator.md`, written before the measurements);
+tooling `prototype/621-remaining-loop-bound/make-generated.pl` and
+`markers.tsv`.
+
+**The mechanism prototyped.** The inline loop stays the one source and the
+reference. 77 marker comments above its gates each name the run-constant
+expression that decides the gate. At run start a generator of about 150 lines
+streams the program's own source, resolves every marker once, blanks what the
+run does not need (keeping line numbers), keeps a known-true arm's scope as
+`if (1) {`, and compiles the text as an anonymous sub under one `#line`
+directive. A switch selects the inline loop instead.
+
+**Identity.** Both placements of the compile produce the base's output on 46
+option shapes over five log families that switch every marked gate on, with
+no runtime warning (the comparison takes 57 s). On the default options the
+generated body is code-identical to the hand-specialised loop of § 4.
+
+**Speed**, ten rounds, per-round delta against the base:
+
+| selection | hand-specialised (§ 4) | generated, compiled per file | generated, compiled per run |
+|---|---|---|---|
+| access log, full day | −19.57 % | −19.02 % | −18.03 % |
+| application log, full day | −17.23 % | −16.51 % | −16.82 % |
+| application logs, 41 files | −14.30 % | −12.66 % | −12.81 % |
+| access log, 100,000 lines | −19.12 % | −17.12 % | −16.73 % |
+| access log, 10,000 lines | −15.62 % | −9.40 % | −8.43 % |
+| access log, 1,000 lines | −1.98 % | +12.88 % | +7.63 % |
+| application log, 1,000 lines | −3.85 % | +9.72 % | +11.25 % |
+
+**The four recorded costs, priced:**
+
+| cost | price |
+|---|---|
+| the body becomes text assembled from pieces | none duplicated: the body is written from the inline loop at each run, about 5.3 ms, plus a 1.5 ms compile |
+| a defect reports inside evaluated text | with the `#line` directive, warnings, `die` messages and NYTProf name the source file and line exactly as the inline loop does; without it, `(eval N) line M`. The harnesses' runtime-warning check catches both |
+| the loop's lexical state moves | compiled per file, nothing moves (3 lines change; one 1.5 ms compile per file, 63 ms over 41 files); compiled per run, 13 per-file variables move out of the per-file loop (29 lines change); same speed |
+| every feature block becomes an includable piece | 77 marker lines, no block moved; a marker naming the wrong flag can drop a feature's output silently, caught only by the identity comparison on a shape that switches that gate on; one breaking a declaration fails loudly at run start |
+
+**Also measured:** 0.5 to 2 MB more peak memory (the inline loop's code is
+held beside the generated body's); slower than the base on a 1,000-line input
+by the 7 ms fixed cost; a `die` in the generated body exits with `$!`'s value
+(25 here) where the inline loop exited 1.
+
+**Not verified:** a PAR-packed binary. The generator reads PAR's extracted
+copy of the script (named in `PAR_0`, two lines longer) when `__FILE__` is
+not on disk; that layout was simulated and works, but the packager could not
+be installed on this machine (the network proxy blocks one of its
+dependencies).
+
+**Found on the way, pre-existing:** on the script log,
+`-udm durationMS::max -hg -h Things` ends the run in the histogram drawing
+("Can't use an undefined value as an ARRAY reference"), on the base as well.
