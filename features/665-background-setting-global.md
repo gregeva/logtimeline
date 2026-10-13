@@ -2,8 +2,8 @@
 
 ## Status
 
-**Implemented, 2026-10-13** (branch `665-dark-background-override`, off
-`release/0.19.0` at f98a9c9). The contracts in § 2 were confirmed by the
+**Done, 2026-10-13** (branch `665-dark-background-override`, off
+`release/0.19.0` at f98a9c9; PR #718, merge 6481dc8). The contracts in § 2 were confirmed by the
 architect on 2026-10-13 and are the acceptance criteria, applied to every run;
 all six pass. The completion gate passed on 5e209e4 (§ Completion gate).
 
