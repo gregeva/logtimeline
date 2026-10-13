@@ -47,16 +47,16 @@ run whose heatmap metric captured no value completes without a runtime error.
   read the same slot. The same `-udm` spec can still take a different colour
   on a log with sessions or users than on one without, as it does today.
   *Architect, 2026-10-13.*
-- **D3 — A user-defined heatmap with nothing to grade renders as the built-in
-  duration's does.** When every captured value is zero (#678) and when nothing
-  was captured (#713), the heatmap shows its header and footer at 0 in the
-  metric's own unit, empty rows, in the colour D1 gives it, and the run exits
-  0. The built-in reference, on two application-log lines carrying no
+- **D3 — A user-defined heatmap of a metric that captured no value renders
+  as the built-in duration's does with no durations.** When nothing was
+  captured (#713), the heatmap shows its header and footer at 0 in the
+  metric's own unit, empty rows, in the colour D1 gives it, and the run
+  exits 0. The built-in reference, on two application-log lines carrying no
   duration with `-hm duration`: header `0ms … heatmap [duration] … 0ms`,
-  every row empty, footer ticks `0ms`. For #713 the existing `no metrics
-  produced from matching lines` notice says why the heatmap is empty; no
-  second notice is added and the column is not dropped. *Architect,
-  2026-10-13.*
+  every row empty, footer ticks `0ms`. The column is not dropped. A metric
+  whose every captured value is zero (#678) is not this case: values were
+  found, and empty rows would be wrong for it. *Architect, 2026-10-13,
+  corrected the same day to exclude the all-zero case.*
 
 ## 3. Current state (read 2026-10-13, `release/0.19.0` at b736e7b)
 
@@ -74,6 +74,13 @@ run whose heatmap metric captured no value completes without a runtime error.
 Both failing runs also print two `Use of uninitialized value $color_key`
 warnings, one pair from `emit_heatmap_palette_verbose` under `-V` and one from
 `print_heatmap_row`.
+
+**The built-in duration does not draw observed zeros either.** On the first
+two lines of `tests/fixtures/tomcat-access-single-sample-keys.txt`, whose
+durations are both `0`, `-bs 1440 -n 0 -hm duration` exits 0 with the header
+`0ms … heatmap [duration] … 0ms`, footer ticks `0ms` and the bucket's row
+empty: two durations were observed and no cell shows them. The render is the
+same as for a log carrying no duration at all.
 
 **The cause.** In the layout pass, a user-defined metric's timeline column is
 added only when its largest bucket total is above zero:
