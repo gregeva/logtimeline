@@ -172,10 +172,15 @@ Locked by the architect on 2026-10-13.
   messages and profiler lines at the same source line (§ 5). Its `--help` and
   `docs/usage.md` text says what the user sees (the standard path, slower on
   large files, for reproducing a problem or profiling), not how it works.
-- **D2.** A hidden option forces the generated path on a file of any size, so
-  the harnesses' identity comparison can prove both paths on small fixtures,
-  which the size threshold would otherwise keep on the inline path. It takes
-  the shape of the existing hidden `--detection-window=N`.
+- **D2** (decided by the architect 2026-10-13, under #721). A hidden option
+  sets the size threshold above which a file takes the generated body; 0
+  sends every file to it. The harnesses' fixtures are under the threshold,
+  so without it the suite would reach only the inline loop; with it, every
+  harness can compare both paths on its own fixtures, and a test can exercise
+  the threshold's edge. It takes the shape of the existing hidden
+  `--detection-window=N`. Chosen over a switch forcing the generated path, an
+  environment variable, and no mechanism (the generated path then tested only
+  on corpus files above the threshold).
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
@@ -225,3 +230,27 @@ that output identical:
 on macOS and Linux arm64. Writing the body's text took 5.4 to 8.1 ms on Linux
 and 49 to 77 ms on Windows; the Windows figure is Wine on an emulated amd64
 container, not a measurement of Windows.
+
+## 9. Implementation (#721)
+
+Branch `721-generated-read-loop`, cut from `release/0.19.0` c039396. The
+`before` benchmark is captured there: three runs each of
+`single-day-access-log-standard`, `single-day-application-log-standard`,
+`multi-day-application-logs-standard` and
+`single-day-access-log-heatmap-histogram`.
+
+**Contracts of the surfaces it touches, confirmed by the architect
+2026-10-13:**
+
+| surface | contract | record |
+|---|---|---|
+| Loop output | Identical on either path, for every option set and input. | § 2 |
+| One source | The inline loop stays the only source; the generated body is written from it at run start, and no block is written twice. | #721 body; § 5 |
+| Path choice | Made per file, by size: the generated body above 2 MB, the inline loop below. | § 6 |
+| `-D, --debug` | Every file takes the inline path, whatever its size; a `--help` row and a `docs/usage.md` row describe what the user sees. | § 7 D1 |
+| Hidden threshold option | Sets the size threshold; 0 sends every file to the generated body. | § 7 D2 |
+| Generated-code pattern | A fifth consumption site, recorded in `docs/architecture-patterns.md` in the same commit; the generated code is validated before use. | `docs/architecture-patterns.md` § Generated code compiled from source strings |
+| Harnesses | Every harness that reads the loop's output runs both paths and asserts identity. | § 2 |
+| `-mem` and `-V` | `format_scan_subs` stays the memory growth around the format scan-sub compiles only; the generated body's compile does not enter it. | `features/log-format-registry.md` D62 |
+| Packaged binary | Works as § 8 proved; a harness that runs `perl ltl` proves nothing about the binary. | § 8; `tests/HARNESS-DESIGN.md` § A harness that runs `perl ltl` proves nothing about the packaged binary |
+| Speed | Above the threshold, the measured saving holds: about 19 % on a day of web-server access log, 16 % on a day of application log. | #721 Done when; § 5 |
