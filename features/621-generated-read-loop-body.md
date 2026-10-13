@@ -299,6 +299,28 @@ Branch `721-generated-read-loop`, cut from `release/0.19.0` c039396. The
 | Packaged binary | Works as § 8 proved; a harness that runs `perl ltl` proves nothing about the binary. | § 8; `tests/HARNESS-DESIGN.md` § A harness that runs `perl ltl` proves nothing about the packaged binary |
 | Speed | Above the threshold, the measured saving holds: about 19 % on a day of web-server access log, 16 % on a day of application log. | #721 Done when; § 5 |
 
+**Delivery plan, agreed 2026-10-13.** (1) The 77 marker comments placed
+above the loop's gates, comment-only. (2) The generated path: generator,
+per-file path choice, `--generated-loop-threshold=N`, `-D, --debug` with its
+`--help` and `docs/usage.md` rows, the fallback notice, matching exit status,
+the timing row, the `-V read-loop` section, the architecture-patterns entry.
+(3) `tests/validate-read-loop.sh`. (4) `LTL` overridable in the 48 harnesses
+that set it; `docs/process/workflow.md` § 3 (b). (5) The release-build step
+and its committed fixture. Then the gate: the `after` benchmark, the full
+suite twice. The prototype's premise holds on the base: `ltl` changed by one
+line outside the loop since 524a66d, and all 77 markers place.
+
+**Drop 2, path choice (confirmed 2026-10-13).** Per file, after format
+detection and before the per-line loop: under `-D` the inline loop, the
+threshold not consulted; otherwise the generated body when the file's size is
+strictly above the threshold, the inline loop when not. The size is
+`$progress_file_size`, already resolved for every file at the top of the
+per-file loop (no second stat). A file that is not a regular file (a named
+pipe, a process substitution) has no size, reads as 0 and takes the inline
+loop. The body's text is written on the first file that needs it and cached
+for the run, so a run of small files only, or under `-D`, never reads its own
+source.
+
 ## Acceptance criteria
 
 Agreed with the architect 2026-10-13, for #721. `-V read-loop` is a new
