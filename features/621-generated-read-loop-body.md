@@ -447,6 +447,23 @@ scripts are where the binary is already run). That covers the Linux arm64
 binary too, which its script already runs under emulation. Shown to reject a
 run under `-D`.
 
+**Completion gate (615bd8a, 2026-10-13).** The `after` benchmark against the
+`before` of c039396, three runs each, medians with ranges:
+
+| benchmark test | before | after | change |
+|---|---|---|---|
+| `single-day-access-log-standard` | 6.239 s (6.230 to 6.287) | 5.217 s (5.124 to 5.226) | −16.4 % |
+| `single-day-application-log-standard` | 3.126 s (3.104 to 3.173) | 2.684 s (2.657 to 2.689) | −14.1 % |
+| `multi-day-application-logs-standard` | 6.965 s (6.928 to 7.094) | 6.143 s (6.084 to 6.287) | −11.8 % |
+| `single-day-access-log-heatmap-histogram` | 8.844 s (8.842 to 8.889) | 7.916 s (7.831 to 8.011) | −10.5 % |
+
+Criterion 11 holds. Peak memory rose 0.2 to 0.6 MB (median +0.55 % on the
+access log, +1.24 % on the application log, 47.50 to 48.09 MB): the compiled
+body held beside the inline loop's code while a file is read, the fixed price
+§ 5 measured (0.5 to 2 MB), not a per-line cost. The full suite, 50 harnesses,
+exits 0 with assertions run (1,114 s); the second pass on the generated path,
+run once for this issue before D3's amendment, also exits 0 on all 50 (1,111 s).
+
 **Observation, pre-existing.** A size row of `@quantity_options` accepts a
 negative: `-n -1` exits 0. The threshold refuses one through its own `min`;
 the other size options are unchanged.
