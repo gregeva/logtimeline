@@ -341,6 +341,20 @@ scope. The generator subs sit together under a `## GENERATED READ LOOP ##`
 section marker before `read_and_process_logs`. A marker that misses is a
 mismatch (D7).
 
+**Drop 2, fallback and exit status (confirmed 2026-10-13).** The fallback
+notice goes through the behavioural-notice mechanism
+(`docs/architecture-patterns.md` § Behavioural notices, deferred while
+progress owns the terminal): queued with `defer_notice()`, since the decision
+is taken while the read pass owns the terminal, printed by
+`flush_deferred_notices()`, once per run. Its text, in user terms: "Note: the
+faster read path could not be prepared, so large files are read with the
+standard path, which is slower". The reason (source unreadable, marker
+mismatch, compile failure) is recorded in `-V read-loop` only. Generation and
+the compile run under `local $!` and `local $@`, so the error state after
+them is what it was before: a `die` in the loop exits with the same status on
+both paths (§ 5 measured 25 against 1, `$!` left set by the generator's file
+reads) and names the same line under the `#line` directive.
+
 ## Acceptance criteria
 
 Agreed with the architect 2026-10-13, for #721. `-V read-loop` is a new
