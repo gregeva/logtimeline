@@ -221,7 +221,7 @@ sub generated_loop_code {
     # In a PAR-packed binary __FILE__ names the archive member (script/ltl),
     # which is not on disk; PAR runs the script from an extracted copy named
     # in PAR_0, two lines longer at the top (`package main;` and a #line
-    # directive). Read from PAR's source (PAR.pm _run_member), not yet run.
+    # directive), as PAR.pm _run_member writes it; verified in the packed binaries (#720).
     my ($read_from, $line_offset) = ($file, 0);
     if (!-e $file && defined $ENV{PAR_0} && -e $ENV{PAR_0}) { ($read_from, $line_offset) = ($ENV{PAR_0}, 2) }
     # The source is streamed and only the reading sub's lines are kept, from

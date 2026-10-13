@@ -2,7 +2,7 @@
 
 ## Status
 
-Measured (§ 3, § 4) and priced by prototype (§ 5), not planned for implementation. Branch `621-generated-read-loop-body`,
+Measured (§ 3, § 4), priced by prototype (§ 5), proven in the packed binaries (§ 8, #720); implementation is #721. Branch `621-generated-read-loop-body`,
 cut from `release/0.19.0` 524a66d. Parent: #622 (the refactoring the
 redundant-logic-surfaces audit dispatched). The hoisting it followed (#620)
 is done (`features/620-read-loop-run-constant-hoisting.md`).
@@ -132,11 +132,10 @@ held beside the generated body's); slower than the base on a 1,000-line input
 by the 7 ms fixed cost; a `die` in the generated body exits with `$!`'s value
 (25 here) where the inline loop exited 1.
 
-**Not verified:** a PAR-packed binary. The generator reads PAR's extracted
-copy of the script (named in `PAR_0`, two lines longer) when `__FILE__` is
-not on disk; that layout was simulated and works, but the packager could not
-be installed on this machine (the network proxy blocks one of its
-dependencies).
+**The packed binaries:** the generator reads PAR's extracted copy of the
+script (named in `PAR_0`, two lines longer) when `__FILE__` is not on disk.
+Simulated here; verified in the packed binaries of all four release
+packagings by #720, § 8.
 
 **Found on the way, pre-existing:** on the script log,
 `-udm durationMS::max -hg -h Things` ends the run in the histogram drawing
@@ -177,3 +176,52 @@ Locked by the architect on 2026-10-13.
   the harnesses' identity comparison can prove both paths on small fixtures,
   which the size threshold would otherwise keep on the inline path. It takes
   the shape of the existing hidden `--detection-window=N`.
+
+## 8. The packed binaries (#720, 2026-10-13)
+
+**Verdict: the generated body works in the PAR-packed binaries of all four
+release packagings.** It is taken, gives the inline loop's output, and reports
+a warning at its source line.
+
+**What was packed.** Both probes of § 5 (compiled per file, compiled per run),
+built by `prototype/621-remaining-loop-bound/make-generated.pl` from `ltl` at
+524a66d, and a copy of each with one runtime warning (an undefined value in a
+concatenation) injected as the first statement of the per-line loop. Each
+script was packed as `ltl`, so its packed member is `script/ltl` as in the
+release binaries, with PAR::Packer 1.064 on every platform:
+
+| packaging | how | Perl |
+|---|---|---|
+| macOS arm64 | `pp`, as `build/macos-package.sh` | Homebrew 5.44.0 |
+| Linux arm64, Linux amd64 | the container steps of `build/ubuntu-package.sh` (Ubuntu 20.04), `prototype/720-packed-generated-loop/pack-linux.sh`; tested in a fresh Ubuntu 20.04 container | 5.30.0 |
+| Windows amd64 | the container steps of `build/windows-package.sh` (Strawberry Perl under Wine 5.0), `pack-windows.sh`; tested under Wine there | Strawberry 5.42.3 |
+
+Checks per platform: `prototype/720-packed-generated-loop/test-pack.sh`. The
+identity comparison is § 5's (`prototype/616-observation-count-arms/prove.sh`,
+the 46 shapes of `prototype/621-remaining-loop-bound/shapes.txt` on
+20,000-line slices of their five families, hash seed fixed), against the
+packed inline loop (`LTL_GENERATED_LOOP=0`) as the reference; on macOS also
+against the unpacked base.
+
+| check | macOS arm64 | Linux arm64 | Linux amd64 | Windows amd64 |
+|---|---|---|---|---|
+| `__FILE__` is `script/<name>`; `PAR_0` names an extracted copy with `package main;` and a `#line 1` directive above the script, on a first and a cached run | yes | yes | yes | yes (a `C:\` path) |
+| the generated path is taken: the markers resolved (64 results on the access-log slice at default options, 609 body lines) and the body compiled | yes | yes | yes | yes |
+| output identical to the packed inline loop, 46 shapes, no runtime warning | 45; `-mem debug` differs in memory figures | 45; `-mem debug` differs in memory figures | 46 | 46 |
+| the injected warning reads `at script/ltl line N`, N the statement's source line, on the inline and the generated path | yes | yes | yes | yes |
+
+**The `-mem debug` differences are memory figures only**, every other line of
+that output identical:
+
+- PAR's runtime adds 14 to 15 MB of unattributed memory to every packed run on
+  macOS, inline or generated (43 MB unpacked, 57 to 58 MB packed).
+- On macOS the per-run placement reports the format scan subs at 1 MB where
+  the inline loop reports 2 MB, in three repeats, and the same unpacked: a
+  property of the per-run placement, not of packaging. Unattributed memory
+  differs by 1 MB between the paths (57 and 58 MB on macOS, 51 and 52 MB on
+  Linux arm64).
+
+**Also observed.** For the same options, the generated body is byte-identical
+on macOS and Linux arm64. Writing the body's text took 5.4 to 8.1 ms on Linux
+and 49 to 77 ms on Windows; the Windows figure is Wine on an emulated amd64
+container, not a measurement of Windows.
