@@ -185,6 +185,23 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         continue
     fi
 
+    # The -V csv-output / columns sub-section: each file's columns with the
+    # precision family the tool writes them in (#618 D4), compared by the
+    # validator with the rules TSVs' precision field.
+    v_columns="$v_capture_dir/csv-output-columns.txt"
+    awk '/=== csv-output \/ columns ===/{flag=1; next} /=== END csv-output \/ columns ===/{flag=0} flag' \
+        "$v_capture_dir/ltl.stdout" > "$v_columns"
+    if [[ ! -s "$v_columns" ]]; then
+        echo "FAIL  scenario=$scenario missing-v-csv-output-columns-block" >&2
+        echo "        -V csv-output / columns sub-section was empty or absent in ltl stdout" >&2
+        echo "        asserts: every -o run must emit -V csv-output / columns when -V csv-output is requested" >&2
+        echo "        produced_by: emit_csv_output_verbose() in ltl" >&2
+        echo "        contract: features/618-csv-column-declaration.md D4" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
     # Expected-categories file (optional 5th scenario column, Issue #312):
     # content assertions against the MESSAGES CSV, and `@cell stats` reads of
     # the STATS CSV, each validator run taking its own kind's. Path is
@@ -223,6 +240,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
             --file-kind "$kind" \
             --expected-families "$families" \
             --v-precision "$v_precision" \
+            --v-columns "$v_columns" \
             --profile-mode "$profile_mode" \
             "${kind_expected_args[@]+"${kind_expected_args[@]}"}"
         vrc=$?

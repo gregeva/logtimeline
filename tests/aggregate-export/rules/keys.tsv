@@ -103,7 +103,7 @@ series.buckets[].duration.sum	number	conditional:duration
 series.buckets[].duration.min	number	conditional:duration-family	
 series.buckets[].duration.mean	number	conditional:duration-family	
 series.buckets[].duration.max	number	conditional:duration-family	
-series.buckets[].duration.std_dev	number	conditional:duration-family	
+series.buckets[].duration.stddev	number	conditional:duration-family	
 series.buckets[].duration.p1	number	conditional:duration-family	count:occurrences
 series.buckets[].duration.p5	number	conditional:duration-family	count:occurrences
 series.buckets[].duration.p10	number	conditional:duration-family	count:occurrences

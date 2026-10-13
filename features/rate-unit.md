@@ -48,7 +48,7 @@ Replace the hardcoded `* 60` with a unit-dependent multiplier:
 
 ### CSV Output
 
-- Column headers gain a unit suffix: `err-rate_sec`, `msg-rate_sec`, `err-rate_min`, `msg-rate_min`, `err-rate_hr`, `msg-rate_hr`, `err-rate_day`, `msg-rate_day`
+- Column headers carry the unit suffix: `err_rate_<unit>` and `msg_rate_<unit>`, such as `err_rate_min`
 
 ### Documentation
 

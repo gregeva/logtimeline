@@ -409,20 +409,20 @@ if ! assert_no_runtime_warnings "$TMP_DIR/csv/run.err" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: runtime warnings")
 fi
 stats_csv=$(find "$TMP_DIR/csv" -iname '*STATS*.csv' | head -1)
-if [[ -n "$stats_csv" ]] && grep -q 'msg-rate_wk' "$stats_csv"; then
+if [[ -n "$stats_csv" ]] && grep -q 'msg_rate_wk' "$stats_csv"; then
     # With week-wide buckets, a per-week rate equals the bucket's occurrences.
-    mismatches=$(awk -F',' 'NR == 1 { for (i = 1; i <= NF; i++) { if ($i == "msg-rate_wk") r = i; if ($i == "occurrences") o = i } next }
+    mismatches=$(awk -F',' 'NR == 1 { for (i = 1; i <= NF; i++) { if ($i == "msg_rate_wk") r = i; if ($i == "occurrences") o = i } next }
                             { if ($r + 0 != $o + 0) bad++ } END { print bad + 0 }' "$stats_csv")
     if [[ "$mismatches" == 0 ]]; then
-        pass_with "msg-rate_wk equals occurrences per bucket under -bs 1w -ru w"
+        pass_with "msg_rate_wk equals occurrences per bucket under -bs 1w -ru w"
     else
-        fail_with "msg-rate_wk equals occurrences per bucket under -bs 1w -ru w" \
+        fail_with "msg_rate_wk equals occurrences per bucket under -bs 1w -ru w" \
             "-ru w scales a rate by the same length -bs 1w resolves to, so a per-week rate over week-wide buckets is the bucket count" \
             'calculate_all_statistics() in ltl (msg-rate), rate multiplier read from the ladder' \
             "$CONTRACT_D1" "mismatching rows: $mismatches" "csv: $stats_csv"
     fi
 else
-    fail_with "STATS CSV carries msg-rate_wk under -ru w" \
+    fail_with "STATS CSV carries msg_rate_wk under -ru w" \
         "the CSV rate suffix is the ladder's medium name (_wk for weeks), the terminal suffix its short name" \
         'write_stats_csv() in ltl' "$CONTRACT_D1" "csv: ${stats_csv:-none}" "header: $(head -1 "${stats_csv:-/dev/null}" | cut -c1-200)"
 fi

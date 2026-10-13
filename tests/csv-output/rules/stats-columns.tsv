@@ -1,137 +1,139 @@
-column	position	type	required	max_decimals	family
-timestamp	1	timestamp	yes	n/a	meta
-FATAL	*	int	no	0	level
-FATAL-HL	*	int	no	0	level
-EMERGENCY	*	int	no	0	level
-EMERGENCY-HL	*	int	no	0	level
-ALERT	*	int	no	0	level
-ALERT-HL	*	int	no	0	level
-CRITICAL	*	int	no	0	level
-CRITICAL-HL	*	int	no	0	level
-SEVERE	*	int	no	0	level
-SEVERE-HL	*	int	no	0	level
-ERROR	*	int	no	0	level
-ERROR-HL	*	int	no	0	level
-WARN	*	int	no	0	level
-WARN-HL	*	int	no	0	level
-WARNING	*	int	no	0	level
-WARNING-HL	*	int	no	0	level
-NOTICE	*	int	no	0	level
-NOTICE-HL	*	int	no	0	level
-INFO	*	int	no	0	level
-INFO-HL	*	int	no	0	level
-AUDIT	*	int	no	0	level
-AUDIT-HL	*	int	no	0	level
-DEBUG	*	int	no	0	level
-DEBUG-HL	*	int	no	0	level
-TRACE	*	int	no	0	level
-TRACE-HL	*	int	no	0	level
-FORCE	*	int	no	0	level
-FORCE-HL	*	int	no	0	level
-DATA	*	int	no	0	level
-DATA-HL	*	int	no	0	level
-5xx	*	int	no	0	level
-5xx-HL	*	int	no	0	level
-4xx	*	int	no	0	level
-4xx-HL	*	int	no	0	level
-3xx	*	int	no	0	level
-3xx-HL	*	int	no	0	level
-2xx	*	int	no	0	level
-2xx-HL	*	int	no	0	level
-1xx	*	int	no	0	level
-1xx-HL	*	int	no	0	level
-Pause Young	*	int	no	0	level
-Pause Young-HL	*	int	no	0	level
-Pause Full	*	int	no	0	level
-Pause Full-HL	*	int	no	0	level
-Pause Remark	*	int	no	0	level
-Pause Remark-HL	*	int	no	0	level
-Pause Cleanup	*	int	no	0	level
-Pause Cleanup-HL	*	int	no	0	level
-To-space exhausted	*	int	no	0	level
-To-space exhausted-HL	*	int	no	0	level
-Using G1	*	int	no	0	level
-Using G1-HL	*	int	no	0	level
-CONFIG	*	int	no	0	level
-CONFIG-HL	*	int	no	0	level
-CREATE	*	int	no	0	level
-CREATE-HL	*	int	no	0	level
-DESTROY	*	int	no	0	level
-DESTROY-HL	*	int	no	0	level
-START	*	int	no	0	level
-START-HL	*	int	no	0	level
-FINISH	*	int	no	0	level
-FINISH-HL	*	int	no	0	level
-err-rate_sec	*	float	no	1	level
-err-rate_min	*	float	no	1	level
-err-rate_hr	*	float	no	1	level
-err-rate_day	*	float	no	1	level
-err-rate_nsec	*	float	no	1	level
-err-rate_usec	*	float	no	1	level
-err-rate_msec	*	float	no	1	level
-err-rate_wk	*	float	no	1	level
-err-rate_mon	*	float	no	1	level
-err-rate_yr	*	float	no	1	level
-msg-rate_sec	*	float	no	1	level
-msg-rate_min	*	float	no	1	level
-msg-rate_hr	*	float	no	1	level
-msg-rate_day	*	float	no	1	level
-msg-rate_nsec	*	float	no	1	level
-msg-rate_usec	*	float	no	1	level
-msg-rate_msec	*	float	no	1	level
-msg-rate_wk	*	float	no	1	level
-msg-rate_mon	*	float	no	1	level
-msg-rate_yr	*	float	no	1	level
-occurrences	*	int	yes	0	meta
-successes	*	int	yes	0	meta
-failures	*	int	yes	0	meta
-conflicts	*	int	yes	0	meta
-sessions	*	int	no	0	meta
-sessions-HL	*	int	no	0	meta
-users	*	int	no	0	meta
-users-HL	*	int	no	0	meta
-duration	*	float	conditional:duration	9	duration
-duration_nice	*	nice	conditional:duration	n/a	duration
-bytes	*	int	conditional:bytes	0	bytes
-bytes_nice	*	nice	conditional:bytes	n/a	bytes
-bytes_occurrences	*	int	conditional:bytes	0	meta
-bytes_min	*	int	conditional:bytes	0	bytes
-bytes_mean	*	float	conditional:bytes	5	bytes
-bytes_max	*	int	conditional:bytes	0	bytes
-count_occurrences	*	int	conditional:count	0	count
-count_min	*	float	conditional:count	5	count
-count_mean	*	float	conditional:count	5	count
-count_max	*	float	conditional:count	5	count
-count_sum	*	float	conditional:count	5	count
-duration_min	*	float	conditional:duration	5	duration
-duration_mean	*	float	conditional:duration	5	duration
-duration_max	*	float	conditional:duration	5	duration
-duration_std_dev	*	float	conditional:duration	5	dispersion
-duration_p1	*	float	conditional:duration	5	percentile
-duration_p5	*	float	conditional:duration	5	percentile
-duration_p10	*	float	conditional:duration	5	percentile
-duration_p25	*	float	conditional:duration	5	percentile
-duration_p50	*	float	conditional:duration	5	percentile
-duration_p75	*	float	conditional:duration	5	percentile
-duration_iqr	*	float	conditional:duration	5	percentile
-duration_p90	*	float	conditional:duration	5	percentile
-duration_p95	*	float	conditional:duration	5	percentile
-duration_p99	*	float	conditional:duration	5	percentile
-duration_p999	*	float	conditional:duration	5	percentile
-duration_p9999	*	float	conditional:duration	5	percentile
-duration_p99999	*	float	conditional:duration	5	percentile
-duration_cv	*	float	conditional:duration	5	dispersion
-duration_skewness	*	float	conditional:duration	5	shape
-duration_kurtosis	*	float	conditional:duration	5	shape
-duration_bimodality_coef	*	float	conditional:duration	5	shape
-users_distinct	*	int	conditional:udm-counting	0	udm-counting
-actions_count	*	int	conditional:udm-counting	0	udm-counting
-repeat_ratio	*	float	conditional:udm-counting	5	udm-counting
-urate_rate_min	*	float	conditional:udm-counting	5	udm-counting
-urate_rate_sec	*	float	conditional:udm-rate	5	udm-rate
-udrate_drate_min	*	float	conditional:udm-counting	5	udm-counting
-job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric
-job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric
+column	position	type	required	max_decimals	family	precision
+timestamp	1	timestamp	yes	n/a	meta	meta
+FATAL	*	int	no	0	level	level
+FATAL-HL	*	int	no	0	level	level
+EMERGENCY	*	int	no	0	level	level
+EMERGENCY-HL	*	int	no	0	level	level
+ALERT	*	int	no	0	level	level
+ALERT-HL	*	int	no	0	level	level
+CRITICAL	*	int	no	0	level	level
+CRITICAL-HL	*	int	no	0	level	level
+SEVERE	*	int	no	0	level	level
+SEVERE-HL	*	int	no	0	level	level
+ERROR	*	int	no	0	level	level
+ERROR-HL	*	int	no	0	level	level
+WARN	*	int	no	0	level	level
+WARN-HL	*	int	no	0	level	level
+WARNING	*	int	no	0	level	level
+WARNING-HL	*	int	no	0	level	level
+NOTICE	*	int	no	0	level	level
+NOTICE-HL	*	int	no	0	level	level
+INFO	*	int	no	0	level	level
+INFO-HL	*	int	no	0	level	level
+AUDIT	*	int	no	0	level	level
+AUDIT-HL	*	int	no	0	level	level
+DEBUG	*	int	no	0	level	level
+DEBUG-HL	*	int	no	0	level	level
+TRACE	*	int	no	0	level	level
+TRACE-HL	*	int	no	0	level	level
+FORCE	*	int	no	0	level	level
+FORCE-HL	*	int	no	0	level	level
+DATA	*	int	no	0	level	level
+DATA-HL	*	int	no	0	level	level
+5xx	*	int	no	0	level	level
+5xx-HL	*	int	no	0	level	level
+4xx	*	int	no	0	level	level
+4xx-HL	*	int	no	0	level	level
+3xx	*	int	no	0	level	level
+3xx-HL	*	int	no	0	level	level
+2xx	*	int	no	0	level	level
+2xx-HL	*	int	no	0	level	level
+1xx	*	int	no	0	level	level
+1xx-HL	*	int	no	0	level	level
+Pause Young	*	int	no	0	level	level
+Pause Young-HL	*	int	no	0	level	level
+Pause Full	*	int	no	0	level	level
+Pause Full-HL	*	int	no	0	level	level
+Pause Remark	*	int	no	0	level	level
+Pause Remark-HL	*	int	no	0	level	level
+Pause Cleanup	*	int	no	0	level	level
+Pause Cleanup-HL	*	int	no	0	level	level
+To-space exhausted	*	int	no	0	level	level
+To-space exhausted-HL	*	int	no	0	level	level
+Using G1	*	int	no	0	level	level
+Using G1-HL	*	int	no	0	level	level
+CONFIG	*	int	no	0	level	level
+CONFIG-HL	*	int	no	0	level	level
+CREATE	*	int	no	0	level	level
+CREATE-HL	*	int	no	0	level	level
+DESTROY	*	int	no	0	level	level
+DESTROY-HL	*	int	no	0	level	level
+START	*	int	no	0	level	level
+START-HL	*	int	no	0	level	level
+FINISH	*	int	no	0	level	level
+FINISH-HL	*	int	no	0	level	level
+err_rate_sec	*	float	no	1	level	rate
+err_rate_min	*	float	no	1	level	rate
+err_rate_hr	*	float	no	1	level	rate
+err_rate_day	*	float	no	1	level	rate
+err_rate_nsec	*	float	no	1	level	rate
+err_rate_usec	*	float	no	1	level	rate
+err_rate_msec	*	float	no	1	level	rate
+err_rate_wk	*	float	no	1	level	rate
+err_rate_mon	*	float	no	1	level	rate
+err_rate_yr	*	float	no	1	level	rate
+msg_rate_sec	*	float	no	1	level	rate
+msg_rate_min	*	float	no	1	level	rate
+msg_rate_hr	*	float	no	1	level	rate
+msg_rate_day	*	float	no	1	level	rate
+msg_rate_nsec	*	float	no	1	level	rate
+msg_rate_usec	*	float	no	1	level	rate
+msg_rate_msec	*	float	no	1	level	rate
+msg_rate_wk	*	float	no	1	level	rate
+msg_rate_mon	*	float	no	1	level	rate
+msg_rate_yr	*	float	no	1	level	rate
+occurrences	*	int	yes	0	meta	meta
+successes	*	int	yes	0	meta	meta
+failures	*	int	yes	0	meta	meta
+conflicts	*	int	yes	0	meta	meta
+sessions	*	int	no	0	meta	meta
+sessions-HL	*	int	no	0	meta	meta
+users	*	int	no	0	meta	meta
+users-HL	*	int	no	0	meta	meta
+duration	*	float	conditional:duration	9	duration	duration
+duration_nice	*	nice	conditional:duration	n/a	duration	duration
+bytes	*	int	conditional:bytes	0	bytes	bytes
+bytes_nice	*	nice	conditional:bytes	n/a	bytes	bytes
+bytes_occurrences	*	int	conditional:bytes	0	meta	meta
+bytes_min	*	int	conditional:bytes	0	bytes	bytes
+bytes_mean	*	float	conditional:bytes	5	bytes	bytes
+bytes_max	*	int	conditional:bytes	0	bytes	bytes
+count_occurrences	*	int	conditional:count	0	count	count
+count_min	*	float	conditional:count	5	count	count
+count_mean	*	float	conditional:count	5	count	count
+count_max	*	float	conditional:count	5	count	count
+count_sum	*	float	conditional:count	5	count	count
+duration_min	*	float	conditional:duration	5	duration	duration
+duration_mean	*	float	conditional:duration	5	duration	duration
+duration_max	*	float	conditional:duration	5	duration	duration
+duration_stddev	*	float	conditional:duration	5	dispersion	shape
+duration_p1	*	float	conditional:duration	5	percentile	percentile
+duration_p5	*	float	conditional:duration	5	percentile	percentile
+duration_p10	*	float	conditional:duration	5	percentile	percentile
+duration_p25	*	float	conditional:duration	5	percentile	percentile
+duration_p50	*	float	conditional:duration	5	percentile	percentile
+duration_p75	*	float	conditional:duration	5	percentile	percentile
+duration_iqr	*	float	conditional:duration	5	percentile	percentile
+duration_p90	*	float	conditional:duration	5	percentile	percentile
+duration_p95	*	float	conditional:duration	5	percentile	percentile
+duration_p99	*	float	conditional:duration	5	percentile	percentile
+duration_p999	*	float	conditional:duration	5	percentile	percentile
+duration_p9999	*	float	conditional:duration	5	percentile	percentile
+duration_p99999	*	float	conditional:duration	5	percentile	percentile
+duration_cv	*	float	conditional:duration	5	dispersion	shape
+duration_skewness	*	float	conditional:duration	5	shape	shape
+duration_kurtosis	*	float	conditional:duration	5	shape	shape
+duration_bimodality_coef	*	float	conditional:duration	5	shape	shape
+users_distinct	*	int	conditional:udm-counting	0	udm-counting	count
+actions_count	*	int	conditional:udm-counting	0	udm-counting	count
+repeat_ratio	*	float	conditional:udm-counting	5	udm-counting	shape
+urate_rate_min	*	float	conditional:udm-counting	5	udm-counting	rate
+urate_rate_sec	*	float	conditional:udm-rate	5	udm-rate	rate
+udrate_drate_min	*	float	conditional:udm-counting	5	udm-counting	rate
+job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric	count
+job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric	count
+c:max	*	float	conditional:udm-function	5	udm-function	count
+c:mean	*	float	conditional:udm-function	5	udm-function	count

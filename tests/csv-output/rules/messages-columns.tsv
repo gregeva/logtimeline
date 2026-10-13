@@ -1,53 +1,55 @@
-column	position	type	required	max_decimals	family
-category	1	enum:plain,highlight	yes	n/a	meta
-message	2	string	yes	n/a	meta
-occurrences	3	int	yes	0	meta
-successes	4	int	yes	0	meta
-failures	5	int	yes	0	meta
-conflicts	6	int	yes	0	meta
-bytes_occurrences	7	int	conditional:bytes	0	meta
-bytes_min	8	int	conditional:bytes	0	bytes
-bytes_mean	9	float	conditional:bytes	5	bytes
-bytes_max	10	int	conditional:bytes	0	bytes
-bytes	11	int	conditional:bytes	0	bytes
-bytes_nice	12	nice	conditional:bytes	n/a	bytes
-count_occurrences	13	int	conditional:count	0	count
-count_min	14	float	conditional:count	5	count
-count_mean	15	float	conditional:count	5	count
-count_max	16	float	conditional:count	5	count
-count_sum	17	float	conditional:count	5	count
-duration_min	18	float	conditional:duration	5	duration
-duration_mean	19	float	conditional:duration	5	duration
-duration_max	20	float	conditional:duration	5	duration
-duration_std_dev	21	float	conditional:duration	5	dispersion
-duration_p1	22	float	conditional:duration	5	percentile
-duration_p5	23	float	conditional:duration	5	percentile
-duration_p10	24	float	conditional:duration	5	percentile
-duration_p25	25	float	conditional:duration	5	percentile
-duration_p50	26	float	conditional:duration	5	percentile
-duration_p75	27	float	conditional:duration	5	percentile
-duration_iqr	28	float	conditional:duration	5	percentile
-duration_p90	29	float	conditional:duration	5	percentile
-duration_p95	30	float	conditional:duration	5	percentile
-duration_p99	31	float	conditional:duration	5	percentile
-duration_p999	32	float	conditional:duration	5	percentile
-duration_p9999	33	float	conditional:duration	5	percentile
-duration_p99999	34	float	conditional:duration	5	percentile
-duration_cv	35	float	conditional:duration	5	dispersion
-duration_skewness	36	float	conditional:duration	5	shape
-duration_kurtosis	37	float	conditional:duration	5	shape
-duration_bimodality_coef	38	float	conditional:duration	5	shape
-duration	39	float	conditional:duration	9	duration
-duration_nice	40	nice	conditional:duration	n/a	duration
-impact	41	float	every-row:duration	5	duration
-users_distinct	*	int	no	0	udm-counting
-actions_count	*	int	conditional:udm-counting	0	udm-counting
-repeat_ratio	*	float	no	5	udm-counting
-urate_rate_min	*	float	no	5	udm-counting
-urate_rate_sec	*	float	no	5	udm-rate
-udrate_drate_min	*	float	no	5	udm-counting
-job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric
-job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric
-job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric
+column	position	type	required	max_decimals	family	precision
+category	1	enum:plain,highlight	yes	n/a	meta	meta
+message	2	string	yes	n/a	meta	meta
+occurrences	3	int	yes	0	meta	meta
+successes	4	int	yes	0	meta	meta
+failures	5	int	yes	0	meta	meta
+conflicts	6	int	yes	0	meta	meta
+bytes_occurrences	7	int	conditional:bytes	0	meta	meta
+bytes_min	8	int	conditional:bytes	0	bytes	bytes
+bytes_mean	9	float	conditional:bytes	5	bytes	bytes
+bytes_max	10	int	conditional:bytes	0	bytes	bytes
+bytes	11	int	conditional:bytes	0	bytes	bytes
+bytes_nice	12	nice	conditional:bytes	n/a	bytes	bytes
+count_occurrences	13	int	conditional:count	0	count	count
+count_min	14	float	conditional:count	5	count	count
+count_mean	15	float	conditional:count	5	count	count
+count_max	16	float	conditional:count	5	count	count
+count_sum	17	float	conditional:count	5	count	count
+duration_min	18	float	conditional:duration	5	duration	duration
+duration_mean	19	float	conditional:duration	5	duration	duration
+duration_max	20	float	conditional:duration	5	duration	duration
+duration_stddev	21	float	conditional:duration	5	dispersion	shape
+duration_p1	22	float	conditional:duration	5	percentile	percentile
+duration_p5	23	float	conditional:duration	5	percentile	percentile
+duration_p10	24	float	conditional:duration	5	percentile	percentile
+duration_p25	25	float	conditional:duration	5	percentile	percentile
+duration_p50	26	float	conditional:duration	5	percentile	percentile
+duration_p75	27	float	conditional:duration	5	percentile	percentile
+duration_iqr	28	float	conditional:duration	5	percentile	percentile
+duration_p90	29	float	conditional:duration	5	percentile	percentile
+duration_p95	30	float	conditional:duration	5	percentile	percentile
+duration_p99	31	float	conditional:duration	5	percentile	percentile
+duration_p999	32	float	conditional:duration	5	percentile	percentile
+duration_p9999	33	float	conditional:duration	5	percentile	percentile
+duration_p99999	34	float	conditional:duration	5	percentile	percentile
+duration_cv	35	float	conditional:duration	5	dispersion	shape
+duration_skewness	36	float	conditional:duration	5	shape	shape
+duration_kurtosis	37	float	conditional:duration	5	shape	shape
+duration_bimodality_coef	38	float	conditional:duration	5	shape	shape
+duration	39	float	conditional:duration	9	duration	duration
+duration_nice	40	nice	conditional:duration	n/a	duration	duration
+impact	41	float	every-row:duration	5	duration	shape
+users_distinct	*	int	no	0	udm-counting	count
+actions_count	*	int	conditional:udm-counting	0	udm-counting	count
+repeat_ratio	*	float	no	5	udm-counting	shape
+urate_rate_min	*	float	no	5	udm-counting	rate
+urate_rate_sec	*	float	no	5	udm-rate	rate
+udrate_drate_min	*	float	no	5	udm-counting	rate
+job_ms_ms_occurrences	*	int	conditional:udm-numeric	0	udm-numeric	count
+job_ms_ms_min	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_mean	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_max	*	float	conditional:udm-numeric	5	udm-numeric	count
+job_ms_ms_sum	*	float	conditional:udm-numeric	5	udm-numeric	count
+c:max	*	float	conditional:udm-function	5	udm-function	count
+c:mean	*	float	conditional:udm-function	5	udm-function	count

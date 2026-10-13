@@ -339,7 +339,7 @@ check_error_rate_counts_fatal() {
     cp "$fixture" "$with_fatal"
     sed 's/ FATAL / INFO  /' "$fixture" > "$without_fatal"
 
-    # The error rate is read from the stats CSV, whose err-rate column is the
+    # The error rate is read from the stats CSV, whose err_rate column is the
     # computed value rather than a rendered approximation.
     local dir_a="$TMP_DIR/rate-a" dir_b="$TMP_DIR/rate-b"
     rm -rf "$dir_a" "$dir_b"; mkdir -p "$dir_a" "$dir_b"
@@ -357,13 +357,13 @@ check_error_rate_counts_fatal() {
             return undef unless defined $hdr && defined $row;
             chomp($hdr, $row);
             my @h = split /,/, $hdr; my @r = split /,/, $row;
-            for my $i (0 .. $#h) { return $r[$i] if $h[$i] =~ /^err-rate/ }
+            for my $i (0 .. $#h) { return $r[$i] if $h[$i] =~ /^err_rate_/ }
             return undef;
         }
         my $with    = rate($da);
         my $without = rate($db);
         unless (defined $with && defined $without) {
-            print "anchor not found: err-rate column absent from one of the stats CSVs\n";
+            print "anchor not found: err_rate column absent from one of the stats CSVs\n";
             exit 1;
         }
         unless ($with > $without) {
@@ -371,7 +371,7 @@ check_error_rate_counts_fatal() {
                 $with, $without;
             exit 1;
         }
-        printf "err-rate %s with FATAL vs %s without\n", $with, $without;
+        printf "err_rate %s with FATAL vs %s without\n", $with, $without;
         exit 0;
     ' "$dir_a" "$dir_b"
 }
