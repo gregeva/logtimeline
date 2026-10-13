@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planning, 2026-10-13.** D1 to D4 are locked; the acceptance criteria are agreed. The current state (§ 3) was read on
+**Implemented, 2026-10-13, completion gate pending** (branch `678-udm-heatmap-colour`). D1 to D4 are locked; the acceptance criteria are agreed and pass. The current state (§ 3) was read on
 `release/0.19.0` at b736e7b. No code has changed.
 
 - **Issues:** #678 (a heatmap of a user-defined time metric whose every value
@@ -143,34 +143,67 @@ Agreed with the architect 2026-10-13. Every scenario named below is new in
 `tests/validate-heatmap-palette.sh` and is shown to fail on the code before
 the fix. All six are assertable.
 
-- [ ] **AC1 — An all-zero user-defined heatmap completes with its colour.**
+- [x] **AC1 — An all-zero user-defined heatmap completes with its colour.**
       Two application-log lines carrying `elapsed=0`, `-udm 'elapsed:s:max'
       -hm elapsed`: exit 0, no ` at … line N` on stderr, and `-V
       heatmap-palette` names the same `color_name` as a control run on the
       same lines carrying `elapsed=5`. Nothing about the rendered rows is
       asserted: under D4 they render as #715 leaves them.
-- [ ] **AC2 — A heatmap of a metric that captured nothing completes with its
+- [x] **AC2 — A heatmap of a metric that captured nothing completes with its
       colour.** `-udm x::max -hm x` on
       `tests/fixtures/tomcat-access-single-sample-keys.txt`, which carries no
       `x`: exit 0, no runtime warnings, a `color_name` named in `-V
       heatmap-palette`, and the zero-match notice exactly as
       `features/user-defined-metrics.md` D8 and D9 define it, once for the one
       spec.
-- [ ] **AC3 — The no-value heatmap renders as D3 says.** On the AC2 run, the
+- [x] **AC3 — The no-value heatmap renders as D3 says.** On the AC2 run, the
       header and footer read `0` in the metric's unit at both ends, and every
       heatmap cell on every row is empty. Checked on the rendered output, the
       heatmap column cut by the layout engine's offsets (`--debug-layout`,
       `timeline_cell_report`).
-- [ ] **AC4 — A user-defined column's colour does not depend on another
+- [x] **AC4 — A user-defined column's colour does not depend on another
       metric's data (D1).** Two specs, the first capturing nothing and the
       second capturing data: the second's timeline column has the same fill
       colour as in a control run where both capture. Checked on the decoded
       column fill colour, the column cut by the layout offsets.
-- [ ] **AC5 — A heatmap and its column read one colour (D1).** `-hm` on the
+- [x] **AC5 — A heatmap and its column read one colour (D1).** `-hm` on the
       AC4 run's second metric: `-V heatmap-palette` names the colour of its
       timeline column.
-- [ ] **AC6 — Runs whose user-defined metrics all captured data keep their
+- [x] **AC6 — Runs whose user-defined metrics all captured data keep their
       colours (D2).** With and without sessions and users, the rendered output
       is byte-identical before and after the change. Checked by a one-off
       reference capture on the base commit compared after the fix, not a
       harness scenario.
+
+## Implementation record
+
+Branch `678-udm-heatmap-colour`, version stamped `0.19.0-678` (3b8a5c7).
+
+- **b9cd88c, e894195 — the scenarios, before the fix.** Four scenarios in
+  `tests/validate-heatmap-palette.sh` (`udm-all-zero`, `udm-no-value`,
+  `udm-colour-by-position`, `udm-heatmap-matches-column`), the fixture
+  `tests/fixtures/udm-heatmap-colour.txt` (registered in `docs/test-logs.md`),
+  and a `fill=` field on `timeline_cell_report` (the column's fill colour; the
+  existing consumers read other fields and are unaffected). On the base:
+  AC1 and AC2 exit 255 with runtime warnings and AC1 names no colour (`-`
+  against the control's `magenta`); AC3's footer and row are never drawn;
+  AC4 reads `256:127` against the control's `256:124`. Three checks pass on
+  the base and were shown to fail otherwise: AC3's header and empty-row
+  checks fail on a heatmap with data (`2ms … 898ms`, filled cells), and AC5
+  fails when the capture's colour name is doctored to `blue` against a
+  `256:124` column. The zero-match notice check passes on the base by
+  design: the notice is unchanged (`features/user-defined-metrics.md` D8, D9).
+- **42d30b5 — the fix.** `normalize_data_for_output()` resolves each
+  user-defined metric's colour from its position among the `-udm` specs
+  (D1), from the first slot D2 keeps, whether or not the metric gets a
+  timeline column; `add_dynamic_column` and `%heatmap_metric_map` read it.
+  The histogram's colours still come from the column. The no-value
+  scenario's empty-row check was corrected to a blank, unfilled heatmap row
+  (it had expected border marks), which is how the built-in duration renders
+  with no durations. All four scenarios pass.
+- **AC6.** Twelve runs, rendered output and `-V heatmap-palette` each (24
+  files): three user-defined metrics that all capture data, on a fixture with
+  and without sessions and users, with no heatmap, `-hm` on each metric, `-hg`
+  on all three, and `-hm` with `-hg` together. Captured with the base `ltl`
+  (deterministic over two runs once the timing and memory lines are left
+  out) and compared after the fix: byte-identical.
