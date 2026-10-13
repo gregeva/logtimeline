@@ -1268,6 +1268,17 @@ my @stats_csv_columns;     # the STATS CSV declaration for this run: build_stats
 my @messages_csv_columns;  # the MESSAGES CSV declaration: build_messages_csv_columns()
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
+# The run index's columns, in file order: the header write_index_file()
+# writes, the name each of its rows is keyed by, and the lookup
+# read_index_file() reads a row by.
+my @index_columns = qw(
+    entry_type entry_date file_path file_size file_mtime
+    line_count match_count first_timestamp last_timestamp ts_precision
+    duration_occurrences duration_min duration_max duration_mean
+    file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
+    count_occurrences count_min count_max count_mean
+    read_rate memory_used processing_time filters
+);
 
 # Issue #179: index file read-back state
 my %index_preseed;        # Per-file: { lookup, matched_entry_date, freshness,
@@ -2441,14 +2452,6 @@ sub read_index_file {
         return;
     }
 
-    my @index_columns = qw(
-        entry_type entry_date file_path file_size file_mtime
-        line_count match_count first_timestamp last_timestamp ts_precision
-        duration_occurrences duration_min duration_max duration_mean
-        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
-        count_occurrences count_min count_max count_mean
-        read_rate memory_used processing_time filters
-    );
     my %col_idx;
     for my $i (0..$#index_columns) { $col_idx{$index_columns[$i]} = $i; }
 
@@ -8081,17 +8084,21 @@ sub write_aggregate_export {
     return $path;
 }
 
+# One run-index row in @index_columns order, from its cells keyed by column
+# name. A cell given for no column, or a column given no cell, is a defect
+# that stops the run.
+sub index_row {
+    my (%cell) = @_;
+    my @missing = grep { !exists $cell{$_} } @index_columns;
+    my %known   = map { $_ => 1 } @index_columns;
+    my @unknown = grep { !$known{$_} } sort keys %cell;
+    die "ltl-index.csv row: no cell for " . join( ', ', @missing ) . ( @unknown ? "; cells for no column: " . join( ', ', @unknown ) : '' ) . "\n" if @missing || @unknown;
+    return [ @cell{@index_columns} ];
+}
+
 sub write_index_file {
     my ($index_path, $temp_path, $use_absolute_paths) = locate_index_file();
 
-    my @index_columns = qw(
-        entry_type entry_date file_path file_size file_mtime
-        line_count match_count first_timestamp last_timestamp ts_precision
-        duration_occurrences duration_min duration_max duration_mean
-        file_bytes_occurrences file_bytes_min file_bytes_max file_bytes_mean
-        count_occurrences count_min count_max count_mean
-        read_rate memory_used processing_time filters
-    );
     my $col_count = scalar @index_columns;
 
     # Column indices for fields we need to inspect during read
@@ -8184,15 +8191,14 @@ sub write_index_file {
                 my $count_mean      = format_csv_value( mean_of( $fd->{count_sum},    $fd->{count_occurrences} ),      'count', 2 ) // '';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
-                my @file_row = (
-                    'file', $now_iso, $path, $fd->{file_size}, $mtime_iso,
-                    $fd->{line_count}, $fd->{match_count}, $first_ts, $last_ts, $timestamp_precision,
-                    $fd->{duration_occurrences}, $fd->{duration_min} // '-', $fd->{duration_max} // '-', $dur_avg,
-                    $fd->{file_bytes_occurrences}, $fd->{file_bytes_min} // '-', $fd->{file_bytes_max} // '-', $file_bytes_mean,
-                    $fd->{count_occurrences}, $fd->{count_min} // '-', $fd->{count_max} // '-', $count_mean,
-                    $read_rate, '-', '-', '-'
-                );
-                $index_csv->print($ofh, \@file_row);
+                $index_csv->print( $ofh, index_row(
+                    entry_type => 'file', entry_date => $now_iso, file_path => $path, file_size => $fd->{file_size}, file_mtime => $mtime_iso,
+                    line_count => $fd->{line_count}, match_count => $fd->{match_count}, first_timestamp => $first_ts, last_timestamp => $last_ts, ts_precision => $timestamp_precision,
+                    duration_occurrences   => $fd->{duration_occurrences},   duration_min   => $fd->{duration_min} // '-',   duration_max   => $fd->{duration_max} // '-',   duration_mean   => $dur_avg,
+                    file_bytes_occurrences => $fd->{file_bytes_occurrences}, file_bytes_min => $fd->{file_bytes_min} // '-', file_bytes_max => $fd->{file_bytes_max} // '-', file_bytes_mean => $file_bytes_mean,
+                    count_occurrences      => $fd->{count_occurrences},      count_min      => $fd->{count_min} // '-',      count_max      => $fd->{count_max} // '-',      count_mean      => $count_mean,
+                    read_rate => $read_rate, memory_used => '-', processing_time => '-', filters => '-',
+                ) );
             }
 
             {
@@ -8202,15 +8208,14 @@ sub write_index_file {
                 my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes', 2 ) // '';
                 my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count', 2 ) // '';
 
-                my @sel_row = (
-                    'selection', $now_iso, $path, '-', '-',
-                    '-', $fd->{sel_match_count}, $sel_first, $sel_last, $timestamp_precision,
-                    $fd->{sel_duration_occurrences}, $fd->{sel_duration_min} // '-', $fd->{sel_duration_max} // '-', $sel_dur_avg,
-                    $fd->{sel_file_bytes_occurrences}, $fd->{sel_file_bytes_min} // '-', $fd->{sel_file_bytes_max} // '-', $sel_file_bytes_mean,
-                    $fd->{sel_count_occurrences}, $fd->{sel_count_min} // '-', $fd->{sel_count_max} // '-', $sel_count_mean,
-                    '-', $max_memory_usage, sprintf("%.3f", $elapsed_total), $current_filters
-                );
-                $index_csv->print($ofh, \@sel_row);
+                $index_csv->print( $ofh, index_row(
+                    entry_type => 'selection', entry_date => $now_iso, file_path => $path, file_size => '-', file_mtime => '-',
+                    line_count => '-', match_count => $fd->{sel_match_count}, first_timestamp => $sel_first, last_timestamp => $sel_last, ts_precision => $timestamp_precision,
+                    duration_occurrences   => $fd->{sel_duration_occurrences},   duration_min   => $fd->{sel_duration_min} // '-',   duration_max   => $fd->{sel_duration_max} // '-',   duration_mean   => $sel_dur_avg,
+                    file_bytes_occurrences => $fd->{sel_file_bytes_occurrences}, file_bytes_min => $fd->{sel_file_bytes_min} // '-', file_bytes_max => $fd->{sel_file_bytes_max} // '-', file_bytes_mean => $sel_file_bytes_mean,
+                    count_occurrences      => $fd->{sel_count_occurrences},      count_min      => $fd->{sel_count_min} // '-',      count_max      => $fd->{sel_count_max} // '-',      count_mean      => $sel_count_mean,
+                    read_rate => '-', memory_used => $max_memory_usage, processing_time => sprintf("%.3f", $elapsed_total), filters => $current_filters,
+                ) );
             }
         }
 
@@ -8222,6 +8227,9 @@ sub write_index_file {
         rename($temp_path, $index_path) or warn "Cannot rename index file: $!";
     } else {
         unlink $temp_path;
+        # A file that cannot be written leaves the run without an index; a row
+        # that does not fill its columns is a defect, and stops the run.
+        die $@ if $@ =~ /^ltl-index\.csv row:/;
     }
 }
 
