@@ -91,6 +91,7 @@ with the architect on 2026-10-13.
   | `duration_std_dev` (STATS and MESSAGES) | `duration_stddev` |
   | `err-rate_<unit>` (STATS) | `err_rate_<unit>` |
   | `msg-rate_<unit>` (STATS) | `msg_rate_<unit>` |
+  | `std_dev` (aggregate export, each bucket's `duration` mapping) | `stddev` |
 
   The metric names `err` and `msg` are not changed; only the hyphen goes.
   `<unit>` is the `-ru` suffix from `%rate_csv_suffix`, every unit of the
@@ -172,7 +173,8 @@ Every place outside the audit report that names a renamed column, found by
 | `tests/validate-bucket-size-units.sh` (the `msg-rate_wk` assertion), `tests/csv-output/expected/udm-rate-cell.tsv` (the `msg-rate_sec` cell) | The column each assertion looks up |
 | `tests/statistics-drift/baselines/*/{stats,messages}.csv` (50 files) | Re-captured after the rename (D6) |
 | `features/224-validate-statistics-test-harness.md` § Decision 5, `features/503-yaml-aggregate-export.md` (the `err_rate` key's comment), `features/rate-unit.md`, `features/user-defined-metrics.md` | Current-contract mentions of the STATS rate and `std_dev` column names, trued up in the same step |
-| `releases/v0.19.0.md` | One bullet: the renamed columns |
+| `ltl`: `write_aggregate_export` (the duration family's `std_dev` key); `features/503-yaml-aggregate-export.md` (the schema example's `std_dev`) | The export's statistic key |
+| `releases/v0.19.0.md` | One bullet: the renamed columns and export key |
 
 Not changed: `-so duration_std_dev` keeps its deprecation notice
 (`tests/validate-statistics-demand.sh` asserts it); that is the sort operand,
