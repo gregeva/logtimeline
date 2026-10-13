@@ -138,6 +138,15 @@ with the architect on 2026-10-13.
   and carries its own release-notes bullet; the reference capture was retaken
   after it (`repeat_ratio` the only column that moved). *Architect,
   2026-10-13.*
+  *Extended by the architect 2026-10-13* to the second column class the
+  declaration changed: a user-defined metric typed with two functions
+  (`-udm c::max:count -udm c::mean:count`) gets one value column per
+  function, named `c:max` and `c:mean`, which matched no family and ignored
+  `-cp`. Measured on `tests/fixtures/numeric-highlight-boundary.txt` with
+  `-bs 1440 -oe -n 1`: under `-cp 3` the `c:mean` cell read `20` and reads
+  `20.389`, as `count_mean` beside it does; at the default precision it
+  reads `20` both before and after. Its family is `count`, the family of the
+  metric's own columns.
 
 **Inherited decisions this issue implements, not re-decided:**
 
@@ -254,6 +263,13 @@ decimal count, two `-ru` units, a highlight).
       *Unassertable by a harness* (it needs a defect in the tool to fire);
       verified once during development by removing one accessor from the
       declaration, with the run's output recorded in this doc.
+      *Verified 2026-10-13 (STATS):* the `occurrences` entry's cell made to
+      return nothing, run on `tests/fixtures/gated-means-access.txt` with
+      `-o -bs 1`: exit 255, stderr `STATS CSV row for 2025-05-07 00:00
+      carries 36 values under a header of 37 columns`, no row written. The
+      padding it replaces had never fired: a probe that reported any row
+      shorter than its header found none over the 36 runs of the reference
+      capture.
 - [ ] **AC6 — The rate cell is formatted under the name the header writes.**
       The rate cells carry the rate family's decimals under every `-ru` unit
       (one decimal at the default precision). *Assertable:* the CSV-output
@@ -266,6 +282,12 @@ decimal count, two `-ru` units, a highlight).
       STATS ratio cell reads `2.5`. *Assertable:* the CSV-output harness's
       `udm-ratio-cell` scenario (`tests/csv-output/expected/udm-ratio-cell.tsv`),
       shown to fail on the code before the fix.
+- [ ] **AC10 — A user-defined metric's function column honours `-cp`.**
+      Under `-cp 3`, the `c:mean` column of `-udm c::max:count -udm
+      c::mean:count` reads `20.389` on the one day bucket of the numeric
+      boundary fixture. *Assertable:* the CSV-output harness's
+      `udm-function-collision-cell` scenario, shown to fail on the code
+      before step 3.
 - [ ] **AC8 — No runtime warnings** on any run of the capture set
       (`tests/lib/runtime-warnings.sh`). *Assertable.*
 
@@ -280,9 +302,18 @@ output is read against the capture.
    the release-notes bullet is written at close-out on the release branch.
 2. **Family lists at file scope** (D1): `bytes` and `count` beside
    `@duration_family_stats`; the user-defined fallback read from
-   `udm_csv_columns`.
-3. **The STATS declaration** (D1, D3): header and row from one walk; the rate
-   name held in the declaration; the padding replaced by the hard failure.
+   `udm_csv_columns`. *Done 2026-10-13* (c6a38f1).
+   Then the ratio fix (D9, 0810cff), and the reference capture retaken.
+3. **The STATS declaration** (D1, D3, D8): header and row from one walk; the
+   rate name held in the declaration; the padding replaced by the hard
+   failure. `build_stats_csv_columns()` builds `@stats_csv_columns` after
+   the read; the statistic table carries each statistic's `precision`; a
+   user-defined value column's family comes from `udm_csv_family()`;
+   `format_csv_family_value()` formats by family, with `format_csv_value()`
+   resolving a name for the MESSAGES file until step 4. The user-defined
+   fallback list for a metric with no configuration is gone: every
+   `udm_` graph column is named from `@udm_configs` after
+   `resolve_udm_metric_names()`, so the configuration is always found.
 4. **The MESSAGES declaration** (D1): header and row from the declaration,
    shared with STATS where the column is the same statistic.
 5. **Rules `precision` field and its `-V` section** (D4, AC4): the field added
