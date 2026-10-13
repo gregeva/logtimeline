@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implemented, 2026-10-13, completion gate pending** (branch `678-udm-heatmap-colour`). D1 to D4 are locked; the acceptance criteria are agreed and pass. The current state (§ 3) was read on
+**Gate passed, 2026-10-13** (on ec98119, branch `678-udm-heatmap-colour`). D1 to D4 are locked; the acceptance criteria are agreed and pass. The current state (§ 3) was read on
 `release/0.19.0` at b736e7b. No code has changed.
 
 - **Issues:** #678 (a heatmap of a user-defined time metric whose every value
@@ -207,3 +207,15 @@ Branch `678-udm-heatmap-colour`, version stamped `0.19.0-678` (3b8a5c7).
   on all three, and `-hm` with `-hg` together. Captured with the base `ltl`
   (deterministic over two runs once the timing and memory lines are left
   out) and compared after the fix: byte-identical.
+
+## Completion gate (on ec98119, version `0.19.0`, this machine)
+
+- **Full harness suite:** 49 of 49 exit 0, no ` at … line N` in any capture;
+  `validate-heatmap-palette.sh` 95 passed, 0 failed.
+- **Before/after benchmark,** `single-day-access-log-standard`, one run each,
+  worktree beside worktree (before on the base f89b8e3, after on ec98119):
+  total 6.8 s to 6.7 s (−1.3 %), peak memory 98.4 MB to 98.2 MB.
+  `render/normalize_data`, the only stage holding changed code, reads 3 ms
+  on both. Three millisecond stages read higher on the one run:
+  `detect/registry_build` 22 to 24 ms, `finalize/calculate_statistics` 79 to
+  82 ms and its `group_calc` 19 to 21 ms; none of them holds changed code.
