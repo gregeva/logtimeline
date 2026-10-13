@@ -198,6 +198,15 @@ Locked by the architect on 2026-10-13.
   every `ltl` call in every harness running both paths (342 call sites moved
   to a shared runner, suite time doubled on every run) and the dedicated
   harness alone.
+- **D4** (locked by the architect 2026-10-13, under #721). When the generated
+  body cannot be prepared for a file (the program's source cannot be read, a
+  marker does not match the code under it, or the generated text does not
+  compile), that file is read by the inline loop; a notice prints on stderr
+  once per run saying the standard path is used, slower on large files, and
+  `-V read-loop` records the reason. The output stays correct; only speed is
+  lost. The identity harness fails on any fallback, since with the threshold
+  at 0 every file must take the generated body. Chosen over stopping the run
+  with an error.
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
