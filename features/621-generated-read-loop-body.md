@@ -2,8 +2,10 @@
 
 ## Status
 
-Measured (§ 3, § 4), priced by prototype (§ 5), proven in the packed binaries (§ 8, #720); implementation is #721. Branch `621-generated-read-loop-body`,
-cut from `release/0.19.0` 524a66d. Parent: #622 (the refactoring the
+Delivered. Measured (§ 3, § 4), priced by prototype (§ 5), proven in the
+packed binaries (§ 8, #720, PR #723), implemented by #721 (§ 9, PR #725). Branch
+`621-generated-read-loop-body`, cut from `release/0.19.0` 524a66d, merged with
+PR #723. Parent: #622 (the refactoring the
 redundant-logic-surfaces audit dispatched). The hoisting it followed (#620)
 is done (`features/620-read-loop-run-constant-hoisting.md`).
 
@@ -466,7 +468,8 @@ run once for this issue before D3's amendment, also exits 0 on all 50 (1,111 s).
 
 **Observation, pre-existing.** A size row of `@quantity_options` accepts a
 negative: `-n -1` exits 0. The threshold refuses one through its own `min`;
-the other size options are unchanged.
+the other size options are unchanged. Filed as #726 (-n and -gc accept a
+negative value).
 
 **Drop 2, records.** `docs/architecture-patterns.md` § Generated code
 compiled from source strings gains the fifth consumption site and its status
