@@ -1,0 +1,257 @@
+# One declaration per CSV column, read by the STATS and MESSAGES writers, the aggregate export and the run index (Issue #618)
+
+## Status
+
+**Specification, 2026-10-13.** Decisions D1 to D7 are locked. The audited
+current state (§ 3) was read on `release/0.19.0` at 5c03f24. No code has
+changed. The acceptance criteria (§ 5) are put to the architect before step 1
+of the plan (§ 6).
+
+- **Parent:** #622 (the refactoring the redundant-logic audit dispatched), as a
+  sub-issue; the last of its children.
+- **Blocks:** #514 (count metric explicit and off by default), which changes the
+  count arm of every copy this issue removes, and #301 (per-release correctness
+  manifest), which would freeze the family labels into a versioned record.
+- **Record of the audit findings:** `features/342-redundant-logic-surfaces-audit-report.md`
+  § Item 6 and § Review progress, stages 10 and 12.
+
+---
+
+## 1. Requirement (issue body)
+
+Every CSV column the tool writes is declared once: its name, its precision
+family, the gate that includes it, and where its value comes from. The STATS
+and MESSAGES headers and rows, the aggregate export and the run index all read
+that declaration, so a column cannot appear in a header without its value, or
+under one family in the tool and another in the test rules.
+
+**Done when:** each CSV column exists in one declaration; the two CSV files,
+the export and the run index write byte-identical output to the capture taken
+after the rename of step 1 (D6); the precision family of every column is the
+same in the tool and in the rules TSVs' `precision` field, and the tool table's
+comment is true; a deliberately dropped value fails the run rather than
+padding the row.
+
+## 2. Locked decisions
+
+D1 and D3 are the architect's locks of 2026-09-27 (stage 12 of the #342
+review), transcribed from the issue body. D2 confirms the second of those locks
+for the tool and D4 replaces its clause on the rules TSVs. D5 to D7 were taken
+with the architect on 2026-10-13.
+
+- **D1 — One declaration per CSV column.** Each column carries its name, its
+  precision family, the gate that includes it and its value accessor, derived
+  from the metric and statistic tables of #613 (`@builtin_metrics`,
+  `@statistic_names`). It is read by the STATS header and row, the MESSAGES
+  header and row, the aggregate export's walk, and the run index's writer and
+  reader. The family lists (`duration`, `bytes`, `count`, the user-defined
+  fallback) exist once at file scope. The rate column's renamed name is held
+  in the declaration itself, so the header writes what the row formats.
+  *Locked 2026-09-27.*
+- **D2 — Impact: precision family `shape`, durations gate, no new family.**
+  Impact is a log-scale ranking score (`ln(max(mean, 1)^7 × occurrences)`,
+  `docs/explain/statistics.md` § impact): unitless, so it takes the `shape`
+  decimals (three at the default precision, like `cv`), never the duration
+  unit's. Its presence follows durations: filled whenever durations are read,
+  empty under `-od` or `-d duration`
+  (`features/616-gated-mean-derivation.md` D21 and D27). The declaration keeps
+  precision family and gate as two attributes, which is what lets impact be
+  formatted as a score and gated as a duration statistic. A family of its own
+  was weighed and declined: it would add an entry to each of the three
+  decimals tables for one column that needs the decimals `shape` already has.
+  *Locked 2026-09-27, reconsidered and confirmed by the architect 2026-10-13.*
+- **D3 — The STATS row padding goes, replaced by a hard failure.** A row whose
+  value count differs from its header's is a defect that stops the run, not a
+  row padded to the header width. *Locked 2026-09-27.*
+- **D4 — The rules TSVs gain a `precision` field; `family` keeps its
+  meaning.** The rules TSVs' `family` field is not the tool's precision family:
+  it groups the columns that fill together on a row, the grouping the CSV
+  harness's group-consistency check reads (`tests/csv-output/README.md` § Rules
+  TSV schema: "Family membership follows populate conditions, not statistical
+  theme"; `dispersion` fills at two or more observations, `shape` at four or
+  more). Relabelling `duration_std_dev` and `duration_cv` from `dispersion` to
+  `shape` there would make every row with two or three durations fail on
+  correct output, since every main scenario activates both groups. The rules
+  TSVs therefore gain a `precision` field carrying the tool's label for every
+  column, checked against the tool; `family` is unchanged. Impact is
+  `precision` `shape` with `required` `every-row:duration` and `family`
+  `duration`, so #616 D21's and D27's wording ("impact stays in the duration
+  column family in the CSV rules") holds for the `family` field. The rules
+  TSVs stay hand-maintained by design and change in the same commit as the
+  tool (`tests/csv-output/README.md` § Updating rules when columns change).
+  *Replaces the rules-TSV clause of the 2026-09-27 lock ("the rules TSVs take
+  the tool's family labels"); architect, 2026-10-13.*
+- **D5 — CSV column names follow the standardized statistic and metric
+  names.** `stddev` is the typed statistic name and `std_dev` a deprecated
+  spelling (`features/613-one-name-vocabulary.md` D17; `-so duration_std_dev`
+  already prints its deprecation notice under #614). The columns renamed:
+
+  | Today | After |
+  |---|---|
+  | `duration_std_dev` (STATS and MESSAGES) | `duration_stddev` |
+  | `err-rate_<unit>` (STATS) | `err_rate_<unit>` |
+  | `msg-rate_<unit>` (STATS) | `msg_rate_<unit>` |
+
+  The metric names `err` and `msg` are not changed; only the hyphen goes.
+  `<unit>` is the `-ru` suffix from `%rate_csv_suffix`, every unit of the
+  ladder. *Architect, 2026-10-13.*
+- **D6 — The rename is the first step, on its own.** Only the column names of
+  D5 change in it. The reference capture (§ 5, AC2), the statistics-drift
+  baselines and any other snapshot are taken after it, so every later step is
+  proven against output that already carries the new names, and "byte-identical"
+  in the done-when means identical to that post-rename capture. *Architect,
+  2026-10-13.*
+- **D7 — The run index stays in scope.** The index is deprecated
+  (`features/708-run-index-deprecation.md`: off by default, `-idx` turns it
+  on) but still present, so its writer and reader read the one declaration
+  like every other CSV surface. *Architect, 2026-10-13.*
+
+**Inherited decisions this issue implements, not re-decided:**
+
+- `features/432-metric-aggregate-naming-parity.md` D3 (CSV headers take the
+  `duration_` prefix), D5 (the bytes family `occurrences min mean max` on both
+  CSVs), D7 (the index column vocabulary, metric first, `mean` and
+  `_occurrences`), D8 (the header and the row consult the same gate, so rows
+  always match the header).
+- `features/617-width-to-format-rule.md` D21: a user-defined rate metric's CSV
+  columns are in the rate family, resolved from the metric by the kind
+  resolver, never guessed from the column name's suffix. The declaration reads
+  the family from the metric.
+- `features/616-gated-mean-derivation.md` D21 and D27: impact undefined, its
+  cell empty, under `-od` or `-d duration`; required on every row while
+  durations are read, and exempt from the per-row family check.
+- `features/column-layout-refactor.md` § Required Separation: the declaration
+  is new, not the layout. The layout carries no CSV field and stays out of
+  this issue.
+
+## 3. Current state (read 2026-10-13, `release/0.19.0` at 5c03f24)
+
+Every site named in the audit still exists. Each is listed by enclosing sub
+and a snippet to grep for.
+
+| Surface | Site | What it does today |
+|---|---|---|
+| STATS header | `normalize_data_for_output` :: `push @output_columns, "timestamp";` and the walk under `# Build @populated_graph_columns and @output_columns` | An if-chain over `@populated_graph_columns` pushing each metric's columns, then `map { "duration_$_" } @duration_family_stats` behind `stats_csv_duration_columns_active` |
+| STATS header write | `pipeline_render` :: `if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }` | Renames the two rate columns at write time; the list holds the bare names |
+| STATS row | `print_bar_graph` :: `if( $key =~ /^(time\|duration)$/i ) {` | A second if-chain over the same list, kept in step with the header by a comment; the `time` arm cannot match (`@graph_columns` holds `duration`, `bytes`, `count`) |
+| STATS row padding | `print_bar_graph` :: `push @row, (undef) x ( $target_width - scalar @row ) if scalar @row < $target_width;` | Pads a short row to the header width, so a drift never reaches the harness's field-count check |
+| STATS rate cells | `print_bar_graph` :: `push @csv_data, format_csv_value($output_columns{$category_bucket}, $category_bucket);` | Formats the rate cell under the bare name, not the name the header writes |
+| MESSAGES header | `pipeline_render` :: `$csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences` | A literal list of 41 names, then `@udm_csv_headers` |
+| MESSAGES row | `print_message_summary` :: `format_csv_value($occurrences,       'occurrences'),` | A positional list of 41 values, 37 of them repeating the column name as the family tag; per-column locals such as `my $bytes_occurrences =` are a third spelling |
+| Family lists | `normalize_data_for_output` :: `push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );`; `print_bar_graph` :: `foreach my $metric ( qw( occurrences min mean max ) ) {`; `write_aggregate_export` :: `qw(occurrences min mean` | The bytes family written four times, the count family four times, the user-defined fallback `qw(occurrences min mean max sum)` three times beside `udm_csv_columns` :: `my @stats = qw(occurrences min mean max sum);` |
+| Precision family table | `my %csv_column_family = (` (file scope before `resolve_csv_column_family`) | 30 entries under a comment saying it mirrors the rules TSVs; `duration_std_dev`, `duration_cv` and `impact` are `shape` there, while the rules' `family` field has `dispersion`, `dispersion` and `duration` (a different attribute, D4) |
+| Family resolver | `resolve_csv_column_family` :: `return 'rate' if $column =~ /^(err\|msg)-rate(_(sec\|min\|hr\|day))?$/;` | Accepts both rate spellings; the suffix alternation names four units of the ladder |
+| Run index | `write_index_file` :: `my @index_columns = qw(` and `read_index_file` :: `my @index_columns = qw(` | The column list declared twice with identical contents |
+| Shared gates | `stats_csv_duration_columns_active` :: `return ($write_messages_to_csv && !$omit_durations && $durations_observed) ? 1 : 0;` and its bytes twin | Already one predicate per family, called by the header, the row and the export (D8 of #432) |
+| The template | `udm_csv_columns` :: `return { shape => 'family', stats => \@stats, columns => [ map { "${prefix}_$_" } @stats ] };` | One declaration serving five consumers: the shape the other columns follow |
+
+**Observation (no primary record line found):** the family resolver's rate
+alternation names `sec`, `min`, `hr` and `day`, while `-ru` accepts every
+token of the time-unit ladder (`%rate_csv_suffix` is built from
+`@time_unit_ladder`), so `msg-rate_wk` exists and does not match the
+alternation. No cell is affected today, because the row formats the rate under
+its bare name, which the resolver's optional suffix matches. Once the header
+and the row read one name (D1), the declaration's rate family must hold for
+every ladder suffix; it is set from the declaration, not from a pattern over
+the name.
+
+**Measured equality today:** on `tests/fixtures/tomcat-access-single-sample-keys.txt`
+with `-o`, the STATS file has 37 header fields and 37 in every row, MESSAGES 41
+and 41, both kept equal by hand.
+
+## 4. The rename (step 1) and what reads the old names
+
+Every place outside the audit report that names a renamed column, found by
+`git grep` for `duration_std_dev`, `err-rate_`, `msg-rate_` and
+`rate_csv_suffix` on 2026-10-13:
+
+| Where | What changes |
+|---|---|
+| `ltl`: `pipeline_render` (the rate header names, the MESSAGES header literal), `print_message_summary` (the `duration_std_dev` family tag), `%csv_column_family`, `resolve_csv_column_family` | The emitted names and the names the formatter resolves |
+| `tests/csv-output/rules/stats-columns.tsv`, `messages-columns.tsv` | The `column` field of the renamed rows |
+| `tests/validate-bucket-size-units.sh` (the `msg-rate_wk` assertion), `tests/csv-output/expected/udm-rate-cell.tsv` (the `msg-rate_sec` cell) | The column each assertion looks up |
+| `tests/statistics-drift/baselines/*/{stats,messages}.csv` (50 files) | Re-captured after the rename (D6) |
+| `features/224-validate-statistics-test-harness.md` § Decision 5, `features/503-yaml-aggregate-export.md` (the `err_rate` key's comment), `features/rate-unit.md`, `features/user-defined-metrics.md` | Current-contract mentions of the STATS rate and `std_dev` column names, trued up in the same step |
+| `releases/v0.19.0.md` | One bullet: the renamed columns |
+
+Not changed: `-so duration_std_dev` keeps its deprecation notice
+(`tests/validate-statistics-demand.sh` asserts it); that is the sort operand,
+not a CSV column. The user-defined rate columns (`<name>_rate_<unit>`) already
+use an underscore.
+
+## 5. Acceptance criteria
+
+Each criterion is triaged before code. "Capture set" is the reference capture
+of D6: STATS, MESSAGES, aggregate export and run index files, written after
+step 1 from inputs chosen in `docs/test-logs.md` to exercise every gate (durations on and off, `-od`, bytes, count,
+user-defined numeric, counting and rate metrics, `-cp default`, `full` and a
+decimal count, two `-ru` units, a highlight).
+
+- [ ] **AC1 — Renamed headers.** Every STATS and MESSAGES header writes
+      `duration_stddev`, and STATS writes `err_rate_<unit>` and
+      `msg_rate_<unit>` for the run's `-ru` unit, including a unit outside
+      `sec`/`min`/`hr`/`day`; no header carries `duration_std_dev`,
+      `err-rate` or `msg-rate`. *Assertable:* the CSV-output harness, whose
+      rules name every header column, and `validate-bucket-size-units.sh` for
+      `-ru w`.
+- [ ] **AC2 — Byte-identical to the post-rename capture.** After every later
+      step, each file of the capture set is byte-identical to its capture.
+      *Assertable:* `cmp` of each file against the capture, run at each step;
+      the statistics-drift baselines and the CSV-output harness re-assert it
+      in the suite.
+- [ ] **AC3 — One declaration.** No column name of either CSV is spelled in
+      the STATS or MESSAGES header or row code, the export's walk or the
+      index's writer or reader outside the declaration; the family lists
+      (`duration`, `bytes`, `count`) appear once at file scope and the
+      user-defined fallback is read from `udm_csv_columns`. *Assertable at
+      review:* a grep of the writer subs for each family's literal list
+      returns only the declaration.
+- [ ] **AC4 — The tool and the rules agree on every column's precision
+      family.** Every rules row carries a `precision` value equal to the
+      family the tool formats that column under, and `%csv_column_family`'s
+      comment states what is true. *Assertable, method to be agreed:* the
+      tool writes each emitted column's precision family into a `-V` section
+      and the CSV-output harness compares it with the rules' `precision`
+      field (cost: one `-V` section from the declaration, one harness check,
+      `tests/HARNESS-DESIGN.md` followed).
+- [ ] **AC5 — A short row fails.** A row whose value count differs from the
+      header's stops the run with a message naming the file and both counts.
+      *Unassertable by a harness* (it needs a defect in the tool to fire);
+      verified once during development by removing one accessor from the
+      declaration, with the run's output recorded in this doc.
+- [ ] **AC6 — The rate cell is formatted under the name the header writes.**
+      The rate cells carry the rate family's decimals under every `-ru` unit
+      (one decimal at the default precision). *Assertable:* the CSV-output
+      harness's cell expectations (`tests/csv-output/expected/`).
+- [ ] **AC7 — The run index reads one list.** The writer and the reader read
+      one column declaration; the index read-back harness passes unchanged.
+      *Assertable:* `validate-index-read-back.sh`.
+- [ ] **AC8 — No runtime warnings** on any run of the capture set
+      (`tests/lib/runtime-warnings.sh`). *Assertable.*
+
+## 6. Plan
+
+One step at a time, each committed and pushed on the issue branch once its
+output is read against the capture.
+
+1. **Rename** (D5, D6): § 4's sites, the rules TSVs' `column` field, the
+   statistics-drift baselines re-captured, the release-notes bullet. Then the
+   capture set is written and kept in the scratchpad as the reference.
+2. **Rules `precision` field** (D4): the field added to both rules TSVs with
+   the tool's label for every column, and the check of AC4.
+3. **Family lists at file scope** (D1): `bytes` and `count` beside
+   `@duration_family_stats`; the user-defined fallback read from
+   `udm_csv_columns`.
+4. **The STATS declaration** (D1, D3): header and row from one walk; the rate
+   name held in the declaration; the padding replaced by the hard failure.
+5. **The MESSAGES declaration** (D1): header and row from the declaration,
+   shared with STATS where the column is the same statistic.
+6. **The aggregate export's walk** reads the declaration.
+7. **The run index** (D7): one column list read by the writer and the reader.
+
+## 7. Merge gate
+
+The diff touches executable lines of `ltl`, so the full harness suite and a
+before/after benchmark (`single-day-access-log-standard`, `before` captured on
+the base commit) run on the commit being merged
+(`docs/process/workflow.md` § 3).
