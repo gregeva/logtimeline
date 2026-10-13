@@ -22109,7 +22109,7 @@ sub print_histograms {
         # Issue #42: Calculate highlight display buckets if highlight data exists
         my @display_buckets_hl = ();
         my $stats_hl = undef;
-        if ($highlight_active && @{$histogram_buckets_hl{$metric}}) {
+        if ($highlight_active && @{$histogram_buckets_hl{$metric} // []}) {
             @display_buckets_hl = calculate_histogram_display_buckets($histogram_buckets_hl{$metric}, $bar_width);
             $stats_hl = $histogram_stats_hl{$metric};
         }
