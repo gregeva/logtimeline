@@ -1,0 +1,76 @@
+# #621: the per-line loop's tests of values fixed for the run (R), fixed for a
+# file or a format (F), and first-observation latches over data (L), each
+# located by a substring of its source line (every loop line carrying it is
+# counted, each at its own execution count). tests = the number of such tests
+# the line evaluates each time it runs.
+# class	form	tests	snippet
+R	bool	1	memory_debug_sample("read_lines") if $show_memory_debug
+R	num	1	if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {
+R	list	1	if (@udm_configs && !$csv_detected) {
+R	bool	1	if( $discard_any_field ) {
+R	bool	1	if( !$omit_count && defined $message ) {
+R	stmt	1	my %udm_values;
+R	list	1	if (@udm_configs && $is_line_match && defined $message) {
+R	hash	1	$metrics_observed = 1 if %udm_values;
+R	defined	1	if (defined $duration_unit_override) {
+R	bool	1	if ($index_capture_demand) {
+R	hash	1	if (%filter_range_tod) {
+R	num	2	if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} )
+R	bool	1	if ($profile_mode) {
+R	defined	1	if( defined( $exclude_filter )
+R	defined	1	if( defined( $include_filter )
+R	bool	1	if( $outcome_filter_active ) {
+R	bool	1	if( $numeric_filter_active ) {
+R	bool	1	if ($udm_skipped) {
+R	bool	1	if( $highlight_active
+R	bool	1	if ($timestamp_capture_ns) {
+R	num	1	if ($bucket_key_scale > 1) {
+R	bool	1	$profile_included_samples++ if $profile_mode;
+R	bool	1	if( $capture_messages && defined( $message ) ) {
+R	regex	1	$log_level =~ s/-HL$//;
+R	bool	1	if( $expose_active ) {
+R	bool	1	if( $discard_active ) {
+R	bool	1	if( $mask_active ) {
+R	bool	1	if ($grouping_active) {
+R	bool	1	&& !exists $log_messages{$category}{$log_key};
+R	bool	1	if (!$consolidation_s1_matched) {
+R	bool	1	$msg_entry->{outcomes}[$line_outcome]++ if $message_outcomes_demand && $line_outcome;
+R	bool	1	if( defined $bytes && $message_bytes_demand ) {
+R	list	1	if (@udm_configs) {
+R	bool	1	if( defined $duration && !$omit_durations ) {
+R	bool	1	if( $message_duration_stats_demand ) {
+R	bool	1	push @{$msg_entry->{durations}}, 0 + $duration
+R	bool	1	if ($message_stats_bin) {
+R	defined	1	if (defined $new_key_grouping_key) {
+R	bool	1	if( $duration_observed && !$omit_durations && $duration >= 0 ) {
+R	bool	1	$bucket_entry->{'duration_sum-HL'} += $duration if $line_is_highlighted;
+R	bool	1	if( $bucket_duration_stats_demand ) {
+R	bool	1	push @{$bucket_entry->{durations}}, 0 + $duration
+R	bool	1	if ($bucket_stats_bin) {
+R	bool	1	if( $bytes_observed_line && $bucket_bytes_demand ) {
+R	bool	1	$bucket_entry->{'total_bytes-HL'} += $bytes if $line_is_highlighted;
+R	bool	1	if( $bytes_aggregate_demand ) {
+R	bool	1	if ($heatmap_enabled) {
+R	bool	1	if ($histogram_enabled) {
+# The session and user demand tests are reached only on a line carrying the
+# field, so each is counted at its block's first statement (the demand is on
+# by default, so every line that reaches the test enters the block).
+R	bool	1	$session_data_found = 1;
+R	bool	1	$user_data_found = 1;
+R	bool	1	if( $line_is_highlighted ) {
+F	list	1	if (@window_held) {
+F	bool	1	if ($csv_detected) {
+F	bool	1	if ($from_window) {
+F	hash	1	my $fdd = $format_detection{$in_file};
+F	defined	1	if (!defined $fdd->{match_type}) {
+F	bool	1	$fdd->{metrics_observed} = 1 if $metrics_observed;
+F	bool	1	$line_entry->[FR_MATCHES]++ if $line_entry;
+F	hash	1	$in_files_matched{$in_file} = 1 unless $in_files_matched{$in_file};
+F	array	1	unless ($line_entry->[FR_PCT_QUALIFYING]) {
+F	num	1	if ($line_cls_sig != $file_cls_sig) {
+F	bool	1	if( $metrics_observed ) {
+F	bool	1	if( $metrics_observed  ) {
+L	num	2	$output_timestamp_min = $bucket_epoch if $output_timestamp_min == 0
+L	num	2	$output_timestamp_max = $bucket_epoch if $output_timestamp_max == 0
+L	num	1	$durations_observed = 1 if $durations_observed != 1 && $duration_observed;
+L	stmt	1	$bytes_observed = 1;
