@@ -323,9 +323,9 @@ detection and before the per-line loop: under `-D` the inline loop, the
 threshold not consulted; otherwise the generated body when the file's size is
 strictly above the threshold, the inline loop when not. The size is
 `$progress_file_size`, already resolved for every file at the top of the
-per-file loop (no second stat). A file that is not a regular file (a named
-pipe, a process substitution) has no size, reads as 0 and takes the inline
-loop. The body's text is written on the first file that needs it and cached
+per-file loop (no second stat). A file that is not a regular file never reaches
+the read path: `ltl` refuses such an argument before reading ("unable to open
+any files"). The body's text is written on the first file that needs it and cached
 for the run, so a run of small files only, or under `-D`, never reads its own
 source.
 
@@ -376,7 +376,13 @@ marker: <source line> op=<op> kept=yes  # one per marker; kept: the code under i
 
 The marker lines serve criterion 7's coverage check: every marker shows
 `kept=yes` in at least one shape, whatever its operation. A marker is named by
-its source line, stable within one build; its expression is not printed. The
+its source line, stable within one build; its expression is not printed. A
+marker inside a block another marker dropped is never resolved and is not
+listed, so the coverage check counts the markers from the source (77), not from
+the section. The threshold option is a row of `@quantity_options` (kind
+`bytes`, a size with `min => 0`): a bare number is bytes, a byte unit is
+accepted (`2MB`), and a fraction, a negative or a non-number stops the run with
+"Invalid --generated-loop-threshold '<text>': <problem>" and exit 1. The
 text writing and every compile are summed into a `benchmark-data` row, `TIMING
 read/path_generation`, in the way `detect/scan_sub_compile` sums the scan-sub
 compiles. The section joins the reserved-names list of

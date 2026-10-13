@@ -78,7 +78,8 @@ rows and errors read their tables rather than literals.
 **Definition.** An option whose value is a count, a byte size or a duration is
 a row of `@quantity_options`: its names, its kind (`count`, `bytes` or
 `duration`), whether it is a bound (a fraction applies as written, a negative is
-refused) or a size (it must be whole), and the scalar the run reads. Every row
+refused) or a size (it must be whole), a `min` where a size has a floor, and
+the scalar the run reads. Every row
 is a string option whose text `resolve_quantity_option` reads once at
 settlement: a bare number as it stands, in the option's base unit (milliseconds,
 bytes, a count), or a number followed by a unit with no space, the unit read in
@@ -105,7 +106,7 @@ redundant-logic audit found eight hand-written copies), and one parse keeps the
 grammar, the case rule and the rejection text the same on every option.
 
 **Consumption sites.**
-- `(file scope, GLOBALS)` :: `my @quantity_options = (`: the seventeen rows (the twelve numeric bounds, `-n`, `-gc` and the three hidden consolidation counts) beside the scalars the read loop compares; `%bare_number_options` beside it.
+- `(file scope, GLOBALS)` :: `my @quantity_options = (`: the eighteen rows (the twelve numeric bounds, `-n`, `-gc`, the three hidden consolidation counts and the hidden read-path threshold, the one row with a `min`) beside the scalars the read loop compares; `%bare_number_options` beside it.
 - `resolve_quantity_option` :: `my ($number, $spelling) = $text =~ /^($quantity_number_re)([A-Za-z]*)$/`: the one number-and-unit split, reading `%quantity_kind` (each kind's canonical sub, value, noun and list).
 - `adapt_to_command_line_options` :: `( map { my $row = $_; ( quantity_option_spec($row) . '=s' => sub { $quantity_entered{ $row->{long} } = $_[1] } ) } @quantity_options ),`: the rows' `GetOptions` entries; the settlement loop beside it resolves each given row, and the `-bs` block calls `resolve_quantity_option` with its run unit as base.
 - `adapt_to_command_line_options` :: `for my $min_row (grep { $_->{bound} && $_->{bound}{end} eq 'min' } @quantity_options) {`: the inverted-range check, quoting the values as typed; `has_active_filters`, `serialize_filters` and `quantity_bounds_given` read the rows' roles and signature flags.
@@ -181,8 +182,9 @@ the sub live again, the occupant swap included, resolves through
 
 **Definition.** A sub builds Perl source text from declarations and `eval`s it
 into a closure or a sub, once per distinct configuration, and validates the
-result before use. The registry's scan sub, classifier and extractor, and the
-block each CSV file's header instantiates, are the four instances.
+result before use. The registry's scan sub, classifier and extractor, the
+block each CSV file's header instantiates, and the read path's generated
+body are the five instances.
 
 **Intended uses.** A per-line path whose shape depends on run-scoped or
 per-item configuration, where a per-line test of that configuration would
@@ -201,14 +203,16 @@ for options a run did not name.
 - `compile_format_extractor` :: `my $closure = eval $src;`
 - `compile_csv_block` :: `my $block = eval $src;` (the per-file CSV block, validated on the file's sampled rows by `csv_validate_block`).
 - `format_validate_scan_sub` :: `my $saved_cache = timestamp_date_cache_snapshot();` (validation of the generated sub against sample lines, with run state saved and restored).
+- `read_and_process_logs` :: `{ local ($!, $@); $generated_loop = eval $text; }` (the read path's body: the per-line loop's own text with its gate markers resolved once by `read_path_text`, compiled per file in the scope of the file's variables; a body that fails to generate or compile leaves its file to the loop itself, with a notice).
 
 **Owning record.** `features/log-format-registry.md` D39 and D40 (scan-sub
 generation and ordering) and D60 (zero generation at startup; generation at
 election, promotion, occupant swap or pin).
 
-**Status.** Established for the four sites. Whether the per-line loop body of
-`read_and_process_logs` becomes a fifth is the audit's item 8 question,
-measured in drop 2. The per-line loop body as a switchable generated variant is #621, not planned.
+**Status.** Established for the five sites. The read path's generated body
+(#721; record `features/621-generated-read-loop-body.md`) is the one written
+from existing source rather than from declarations: its markers name the
+values fixed for the run that decide each gate.
 
 ---
 
@@ -1016,6 +1020,7 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 - `bin_consolidation_notice` :: `print STDERR "Note: $detail, so their percentiles are approximate"`
 - `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";`: the one way a deprecation prints. A deprecated option or spelling is recorded with `record_deprecation` as it is met (with the options a spelling was given on) and printed once at option settlement (#613 D17); the `-os`, `-uuid`, `-s` and `-ms` notices route through it.
 - `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";`: a metric switched off because `-d` removed the key it reads says so, at option settlement (#613 D4, D12).
+- `read_path_fall_back` :: `defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");`: a read-path body that could not be prepared, queued once a run while the read pass owns the terminal.
 
 **Owning record.** This entry, until #412 (the notices surface) lands and
 inventories every ad-hoc notice.

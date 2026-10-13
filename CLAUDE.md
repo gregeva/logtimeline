@@ -429,9 +429,9 @@ consolidation, success/failure classification.
 Key options: `-n N`, `-b N` (bucket minutes), `-o` (CSV), `-ni` (no index),
 `-dmin/-dmax`, `-include/-exclude`, `-ipf/-epf/-hpf` (pattern files under
 `patterns/`: `metrics`, `navigate-app-calls`, `probes`, `thingworx`), `-du`,
-`-hm`, `-hg`, `-ms`, `-st/-et`, `-hses`, `-g N`, `--help`.
+`-hm`, `-hg`, `-ms`, `-st/-et`, `-hses`, `-g N`, `-D` (standard read path), `--help`.
 Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
-`--validate-layout`, `--detection-window=N`.
+`--validate-layout`, `--detection-window=N`, `--generated-loop-threshold=N`.
 
 ### Build
 
@@ -482,6 +482,13 @@ compiled into the scan block. Adding or changing a format means editing its
 spec, never hot-loop code. Records: `features/log-format-registry.md`,
 `features/453-success-failure-classification-event-ledger.md`; user surfaces
 `--help formats`, `--explain classification`.
+
+**Read path** (marker `## GENERATED READ LOOP`): a file above 2 MB is read by a
+body generated per run from the per-line loop's own text, its `#@` gate
+markers resolved once and compiled per file; at or below it, and under `-D`,
+by the loop itself, which stays the one source and the reference. A gate added
+to the loop gets its marker. Record: `features/621-generated-read-loop-body.md`;
+user surface `-D`, `-V read-path`.
 
 **Key structures:** `@format_registry` / `@format_scan_order` /
 `$format_scan_sub`; `%log_occurrences` (tallies per bucket); `%log_analysis`

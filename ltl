@@ -218,6 +218,9 @@ my %verbose_section_registry = (
     'format-registry' => {
         description => 'The compiled format registry itself: entry inventory, variant groups and their occupants, static scan order and derived ancestor constraints, and scan-sub compile state (Issue #413).',
     },
+    'read-path' => {
+        description => 'The path each file was read by: the generated body above the size threshold, the standard path at or below it and under -D, with the threshold in effect, why a generated body could not be prepared, and what each gate marker resolved to (Issue #721).',
+    },
     'heatmap-palette' => {
         description => 'Heatmap color palette resolution: active metric, light/dark selection, source of selection, gradient arrays (Issue #250).',
     },
@@ -260,6 +263,7 @@ my @verbose_section_order = qw(
     filter-summary
     format-detection
     format-registry
+    read-path
     heatmap-palette
     csv-output
     percentile-algorithm
@@ -881,7 +885,26 @@ my $format_detection_window = 0; # hidden --detection-window=N override; 0 = the
                                  # FORMAT_DETECTION_WINDOW_FALLBACK
 my %format_detection_sample;     # in_file => sample observations (sample_file_for_detection())
 my %format_detection_window_engaged;  # in_file => window size actually engaged for that file
-my %format_detection_evidence;   # in_file => per-file variant selection record (select_format_variants())
+
+# The read path (## GENERATED READ LOOP ##). A file larger than the threshold
+# is read by a body generated from the per-line loop's own text, its gates on
+# values fixed for the run resolved once; a file at or below it, and every
+# file under -D, by the loop itself, the reference. The body's text is written
+# on the first file that needs it and compiled per file, closing over that
+# file's variables. A body that cannot be prepared leaves its file to the loop,
+# with a notice (features/621-generated-read-loop-body.md D1, D2, D4, D6, D7).
+my $read_path_standard_forced = 0;          # -D, --debug
+my $read_path_threshold       = 2_097_152;  # hidden --generated-loop-threshold=N, bytes
+my %read_path_file;                          # in_file => { size, path, reason }
+my @read_path_files;                         # the files given a path, in reading order
+my $read_path_text;                          # the generated body's text, once written
+my $read_path_text_state      = 'not_needed'; # not_needed | written | failed
+my $read_path_fallback_reason;               # the first reason a body could not be prepared
+my $read_path_text_failure;                 # why the text could not be written: source_unreadable | marker_mismatch
+my $read_path_noticed        = 0;           # the fallback notice is queued once a run
+my @read_path_markers;                       # [ source line, op, kept ] per marker, in loop order
+my $elapsed_read_path_generation = 0;        # writing the text and every compile, summed
+my %format_detection_evidence;  # in_file => per-file variant selection record (select_format_variants())
 my %format_detection_formats;    # in_file => [ format names found in the file, first-bound first ] (D50)
 my %format_legend;               # format name => legend number, first-detection order across the run
 my @format_legend_order;         # legend numbers -> format names
@@ -1234,6 +1257,7 @@ my @quantity_options = (
     { long => 'consolidation-trigger',                     kind => 'count', value => 'size', target => \$consolidation_trigger },                 # hidden
     { long => 'consolidation-ceiling',                     kind => 'count', value => 'size', target => \$consolidation_occurrence_ceiling },      # hidden
     { long => 'consolidation-max-patterns',                kind => 'count', value => 'size', target => \$consolidation_max_patterns },            # hidden
+    { long => 'generated-loop-threshold',                  kind => 'bytes', value => 'size', min => 0, target => \$read_path_threshold },                 # hidden
 );
 my %quantity_option_by_long = map { $_->{long} => $_ } @quantity_options;
 # The options whose value is a number that is not a quantity, each with the
@@ -2992,7 +3016,7 @@ sub _classify_argv_provenance {
                 'mdm|message-stats-data-model',
                 'bdm|bucket-stats-data-model',
                 'terminal-width|tw', 'terminal-height|th', 'no-auto-hide|nah',
-                'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
+                'debug|D', 'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
             );
             for my $s (@specs) {
                 my @parts = split /\|/, $s;
@@ -11484,6 +11508,7 @@ sub print_help {
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
     $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
+    $out .= help_opt("-D,   --debug",           "Read every file with the standard path, slower on large files: for reproducing a problem, or profiling the run");
 
     $out .= help_heading("EXAMPLES");
     my $ex_desc_col = 68;  # description column for examples (commands are longer than options)
@@ -12117,7 +12142,8 @@ sub number_unit_canonical {
 # typed in (undef for a bare number, which is taken as it stands), and the
 # problem that stops the run, if any. A unit is read in the row's kind only. A
 # value within rounding of a whole number is that whole number, so 1.1k is
-# 1100. A bound refuses a negative; a size refuses a fraction.
+# 1100. A bound refuses a negative; a size refuses a fraction; a row carrying
+# a min refuses a value below it.
 sub resolve_quantity_option {
     my ($row, $text) = @_;
     my $kind = $quantity_kind{ $row->{kind} };
@@ -12138,6 +12164,7 @@ sub resolve_quantity_option {
     }
     return (undef, $unit, 'a bound cannot be negative')  if $row->{value} eq 'bound' && $value < 0;
     return (undef, $unit, "not a whole number $units")    if $row->{value} eq 'size'  && $value != int($value);
+    return (undef, $unit, "cannot be below $row->{min}")  if defined $row->{min} && $value < $row->{min};
     return ($value, $unit, undef);
 }
 
@@ -16135,6 +16162,7 @@ sub adapt_to_command_line_options {
         'terminal-width|tw=i' => \$terminal_width,                                  # hidden
         'terminal-height|th=i' => sub { set_terminal_height($_[1]) },               # hidden
         'no-auto-hide|nah' => \$no_auto_hide,
+        'debug|D' => \$read_path_standard_forced,
         'debug-layout' => \$debug_layout,                                           # hidden
         'detection-window=i' => \$format_detection_window,                          # hidden — D30 two-phase-store window size (default 0 until #17 sizes it)
         'validate-layout' => \$validate_layout,                                     # hidden
@@ -16921,6 +16949,232 @@ sub pause_for_keypress {
     }
 }
 
+## GENERATED READ LOOP ##
+# The read path's generated body: the per-line loop of read_and_process_logs,
+# written from the program's own source with every `#@<op> <expression>`
+# marker resolved once for the run. A line a resolution drops is left empty,
+# so the text keeps the source's line numbers and one #line directive maps
+# warnings, die messages and profiler lines back to the source. The text is
+# written once per run; read_and_process_logs compiles it per file, in the
+# scope of that file's variables. Record: features/621-generated-read-loop-body.md.
+#
+# The marker operations, applied to the statement or block below the marker:
+#   when EXPR    a block whose whole condition is EXPR: true keeps the arm
+#                without its test and drops the other arms; false drops the
+#                arm, keeping an else arm's body or turning an elsif into the
+#                if. A statement: false drops it, true keeps it.
+#   and TERM     the condition is TERM && rest (or rest && TERM): false as
+#                when-false; true removes the term's text from the condition.
+#   unless EXPR  a statement carrying `unless EXPR`: true drops the statement,
+#                false removes the modifier.
+#   true EXPR    when EXPR holds the block's condition is always true: unwrap.
+#   false EXPR   when EXPR holds the block's condition is always false: drop.
+# A marker that does not find what it names is a mismatch: generation stops
+# and the file is read by the loop itself (D7).
+
+# A marker's expression, evaluated once in the scope of the run's settings.
+sub generated_loop_flag {
+    my ($expr) = @_;
+    my $v = eval "($expr) ? 1 : 0";
+    die "marker_mismatch: marker [$expr] does not evaluate: $@" if $@;
+    return $v;
+}
+sub generated_loop_strip { (my $t = $_[0]) =~ s/(?:^|(?<=\s))#.*$//; return $t }
+# The line the block opens on at or after $i, and the line it closes on.
+sub generated_loop_block {
+    my ($t, $i) = @_;
+    my $o = $i;
+    $o++ until $o > $#$t || generated_loop_strip($t->[$o]) =~ /\{\s*$/;
+    die "marker_mismatch: no block opens at or after offset $i\n" if $o > $#$t;
+    my $depth = 1;
+    for my $j ($o + 1 .. $#$t) {
+        next unless $t->[$j] =~ /[{}]/;
+        my $s = generated_loop_strip($t->[$j]);
+        while ($s =~ /([{}])/g) {
+            if ($1 eq '{') { $depth++ }
+            elsif (--$depth == 0) { return ($o, $j) }
+        }
+    }
+    die "marker_mismatch: no close for the block opened at offset $o\n";
+}
+# What a marker governs: ('stmt', first, last) or ('block', first, [arms]).
+sub generated_loop_target {
+    my ($t, $j) = @_;
+    die "marker_mismatch: a marker ends the loop's text\n" if $j > $#$t;
+    my $s = generated_loop_strip($t->[$j]);
+    die "marker_mismatch: no statement or block below the marker at offset $j\n" if $s !~ /\S/;
+    my $opens  = () = $s =~ /\{/g;
+    my $closes = () = $s =~ /\}/g;
+    return ('stmt', $j, $j) if $opens == $closes && $s =~ /[;}]\s*$/;
+    for my $k ($j .. $#$t) {
+        my $sk = generated_loop_strip($t->[$k]);
+        last if $sk =~ /\{\s*$/;
+        return ('stmt', $j, $k) if $sk =~ /;\s*$/;
+    }
+    my ($o, $c) = generated_loop_block($t, $j);
+    my @arms = ([ 'if', $j, $o, $c ]);
+    while ($t->[$c] =~ /^\s*\}\s*(else|elsif)\b/) {
+        my $kind = $1;
+        my ($o2, $c2) = generated_loop_block($t, $c);
+        push @arms, [ $kind, $c, $o2, $c2 ];
+        $c = $c2;
+    }
+    return ('block', $j, \@arms);
+}
+sub generated_loop_blank { my ($t, $a, $b) = @_; $t->[$_] = "\n" for $a .. $b }
+# A block whose condition is known: 1 true, 0 false.
+sub generated_loop_resolve {
+    my ($t, $arms, $truth) = @_;
+    my ($first, @rest) = @$arms;
+    if ($truth) {
+        # The arm keeps its own scope as `if (1) {`: Perl folds the constant
+        # test away, the arm's declarations stay its own, and unlike a bare
+        # block it is no loop, so next and last still mean the read loop.
+        my ($ind) = $t->[ $first->[1] ] =~ /^(\s*)/;
+        generated_loop_blank($t, $first->[1], $first->[2] - 1) if $first->[2] > $first->[1];
+        $t->[ $first->[2] ] = "${ind}if (1) {\n";
+        if (@rest) {
+            $t->[ $first->[3] ] = "${ind}}\n";
+            generated_loop_blank($t, $first->[3] + 1, $arms->[-1][3]);
+        }
+    } elsif (!@rest) {
+        generated_loop_blank($t, $first->[1], $first->[3]);
+    } elsif ($rest[0][0] eq 'else') {
+        my ($ind) = $t->[ $first->[1] ] =~ /^(\s*)/;
+        generated_loop_blank($t, $first->[1], $rest[0][2] - 1);
+        $t->[ $rest[0][2] ] = "${ind}if (1) {\n";
+    } else {
+        generated_loop_blank($t, $first->[1], $rest[0][1] - 1);
+        $t->[ $rest[0][1] ] =~ s/^(\s*)\}\s*elsif\s*\(/$1if (/ or die "marker_mismatch: elsif arm not rewritten\n";
+    }
+}
+# Resolves every marker of the loop's lines in place; returns the markers as
+# [ offset, op, kept ], kept meaning the code below the marker stays.
+sub generated_loop_text {
+    my ($t) = @_;
+    my @markers;
+    for my $i (0 .. $#$t) {
+        next unless $t->[$i] =~ /^\s*#\@(when|and|unless|true|false)\s+(.+?)\s*$/;
+        my ($op, $expr) = ($1, $2);
+        $expr =~ s/\s+#\s.*$//;   # a comment after the expression
+        $t->[$i] = "\n";
+        my ($kind, $first, $span) = generated_loop_target($t, $i + 1);
+        my $last = $kind eq 'stmt' ? $span : $span->[0][2];   # the statement, or the condition through the opening line
+        my $v = generated_loop_flag($expr);
+        my $kept = 1;
+        if ($op eq 'when' || ($op eq 'and' && !$v)) {
+            if ($kind eq 'block') { generated_loop_resolve($t, $span, $v); $kept = $v }
+            elsif (!$v)           { generated_loop_blank($t, $first, $span); $kept = 0 }
+        } elsif ($op eq 'and') {
+            my $done = 0;
+            for my $k ($first .. $last) {
+                $done = 1, last if $t->[$k] =~ s/\Q$expr\E\s*&&\s*// || $t->[$k] =~ s/\s*&&\s*\Q$expr\E//;
+            }
+            die "marker_mismatch: no term [$expr] in the condition below its marker\n" unless $done;
+        } elsif ($op eq 'unless') {
+            if ($v) { generated_loop_blank($t, $first, $span); $kept = 0 }
+            else {
+                my $done = 0;
+                for my $k ($first .. $span) { $done = 1, last if $t->[$k] =~ s/\s*\bunless\s+\Q$expr\E// }
+                die "marker_mismatch: no `unless $expr` to remove\n" unless $done;
+            }
+        } else {   # true, false: a block whose condition is known when EXPR holds
+            die "marker_mismatch: $op marker above a statement\n" unless $kind eq 'block';
+            if ($v) { generated_loop_resolve($t, $span, $op eq 'true' ? 1 : 0); $kept = $op eq 'true' ? 1 : 0 }
+        }
+        push @markers, [ $i, $op, $kept ];
+    }
+    return \@markers;
+}
+# The generated body's text for this run, written on first need and cached;
+# undef when it cannot be written, with the reason recorded. The error state
+# is left as it was found, so a die in the read loop exits with the same
+# status on either path.
+sub read_path_text {
+    return $read_path_text if $read_path_text_state eq 'written';
+    return undef           if $read_path_text_state eq 'failed';
+    local ($!, $@);
+    my $t0 = [gettimeofday];
+    my $text = eval {
+        my $file = __FILE__;
+        # In a PAR-packed binary __FILE__ names the archive member
+        # (script/ltl), which is not on disk; PAR runs the script from an
+        # extracted copy named in PAR_0, two lines longer at the top
+        # (`package main;` and a #line directive).
+        my ($read_from, $line_offset) = ($file, 0);
+        ($read_from, $line_offset) = ($ENV{PAR_0}, 2)
+            if !-e $file && defined $ENV{PAR_0} && -e $ENV{PAR_0};
+        # Streamed: only the reading sub's lines are kept, from its per-line
+        # loop to the next sub.
+        open my $sfh, '<', $read_from or die "source_unreadable: $read_from: $!\n";
+        my ($in_sub, $line, @s) = (0, undef);
+        while (my $l = <$sfh>) {
+            if (!$in_sub) { $in_sub = 1 if $l =~ /^sub read_and_process_logs \{/; next }
+            last if $l =~ /^sub /;
+            if (!defined $line) {
+                next unless $l =~ /^\s*while \(1\) \{/;
+                $line = $. - $line_offset;
+            }
+            push @s, $l;
+        }
+        close $sfh;
+        die "source_unreadable: no per-line loop in $read_from\n" unless defined $line;
+        my (undef, $end) = generated_loop_block(\@s, 0);
+        my @t = @s[ 0 .. $end ];
+        my $markers = generated_loop_text(\@t);
+        @read_path_markers = map { [ $line + $_->[0], $_->[1], $_->[2] ] } @$markers;
+        "sub {\n#line $line \"$file\"\n" . join('', @t) . "}\n";
+    };
+    $elapsed_read_path_generation += tv_interval($t0);
+    if (!defined $text) {
+        ($read_path_text_failure) = $@ =~ /^(source_unreadable|marker_mismatch):/;
+        $read_path_text_failure //= 'marker_mismatch';
+        $read_path_text_state = 'failed';
+        @read_path_markers = ();
+        return undef;
+    }
+    $read_path_text_state = 'written';
+    return $read_path_text = $text;
+}
+# The path a file is read by, recorded for -V read-path: 1 for the generated
+# body, 0 for the loop itself. Under -D the threshold is not consulted.
+sub read_path_wants_generated {
+    my ($in_file, $size) = @_;
+    my ($path, $reason) = $read_path_standard_forced      ? ('standard', 'forced_standard')
+                        : $size > $read_path_threshold    ? ('generated', 'above_threshold')
+                        :                                   ('standard', 'at_or_below_threshold');
+    push @read_path_files, $in_file unless $read_path_file{$in_file};
+    $read_path_file{$in_file} = { size => $size, path => $path, reason => $reason };
+    return $path eq 'generated' ? 1 : 0;
+}
+# A body that could not be prepared for this file: it is read by the loop
+# itself, and the run says so once.
+sub read_path_fall_back {
+    my ($reason, $in_file) = @_;
+    $read_path_fallback_reason //= $reason;
+    @{ $read_path_file{$in_file} }{qw(path reason)} = ('standard', 'fallback');
+    return if $read_path_noticed++;
+    defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");
+    return;
+}
+
+sub emit_read_path_verbose {
+    return unless section_requested('read-path');
+    push @verbose_output, "=== read-path ===";
+    push @verbose_output, "threshold_bytes: $read_path_threshold ("
+        . ( defined $quantity_entered{'generated-loop-threshold'} ? 'option' : 'default' ) . ")";
+    push @verbose_output, "standard_path_forced: " . ( $read_path_standard_forced ? 'yes' : 'no' );
+    push @verbose_output, "generated_text: $read_path_text_state";
+    push @verbose_output, "fallback_reason: " . ( $read_path_fallback_reason // '-' );
+    for my $f (@read_path_files) {
+        my $r = $read_path_file{$f};
+        push @verbose_output, "file: $f", "  size_bytes: $r->{size}", "  path: $r->{path}", "  reason: $r->{reason}";
+    }
+    push @verbose_output, sprintf( "marker: %d op=%s kept=%s", $_->[0], $_->[1], ( $_->[2] ? 'yes' : 'no' ) )
+        for @read_path_markers;
+    push @verbose_output, "=== END read-path ===";
+}
+
 # Parse logs, bucket by time, and count log levels
 sub read_and_process_logs {
     %in_files_matched = map { $_ => 0 } @in_files;			# set hash key per file to match boolean = false
@@ -17082,12 +17336,28 @@ sub read_and_process_logs {
             $progress_last_paint = Time::HiRes::time();
         }
 
+        # The read path for this file: its generated body, compiled here so it
+        # closes over this file's variables, or the loop below. The error state
+        # is left as it was found, so a die in either exits alike.
+        my $generated_loop;
+        if (read_path_wants_generated($in_file, $progress_file_size)) {
+            if (defined(my $text = read_path_text())) {
+                my $t0 = [gettimeofday];
+                { local ($!, $@); $generated_loop = eval $text; }
+                $elapsed_read_path_generation += tv_interval($t0);
+                read_path_fall_back('compile_failure', $in_file) unless $generated_loop;
+            } else {
+                read_path_fall_back($read_path_text_failure, $in_file);
+            }
+        }
+
         # The per-line loop. A `#@<op> <expression>` comment above a gate names
         # the value, fixed for the run, that decides it: when, and, unless, true,
         # false. The read path writes a file's generated body from this text,
         # resolving each marker once (## GENERATED READ LOOP ##); a marker is
         # kept true to the gate below it, and one that no longer finds it stops
         # generation. The loop itself is the reference: -D reads every file here.
+        if ($generated_loop) { $generated_loop->() } else {
         while (1) {
             # Line source: held window lines replay first (carrying their
             # one-time classification), then the stream. A held line whose
@@ -18473,6 +18743,7 @@ sub read_and_process_logs {
             } else {
                 note_unmatched_line($in_file);
             }
+        }
         }
 
         close $fh;
@@ -21748,6 +22019,9 @@ sub print_verbose_output {
     # first line, promotion mid-read), so this row attributes cost within
     # them and is deliberately NOT part of the stage total below.
     printf "TIMING\tdetect/scan_sub_compile\t%.3f\n", $elapsed_detect_scan_sub_compile;
+    # Writing the read path's generated body and compiling it per file, summed.
+    # Inside parse/read_files, so not part of the stage total below.
+    printf "TIMING\tread/path_generation\t%.3f\n", $elapsed_read_path_generation;
     printf "TIMING\tparse/read_files\t%.3f\n", $elapsed_parse_read_files;
     printf "TIMING\taccumulate/initialize_buckets\t%.3f\n", $elapsed_accumulate_initialize_buckets;
     printf "TIMING\tfinalize/group_similar\t%.3f\n", $elapsed_finalize_group_similar;
@@ -24074,6 +24348,8 @@ sub pipeline_render {
     emit_format_detection_verbose();
 
     emit_format_registry_verbose();
+
+    emit_read_path_verbose();
 
     emit_heatmap_palette_verbose();
 
