@@ -1189,6 +1189,21 @@ column once per table and its decimals once per value. The timeline walk runs
 once per visible column and once per value for its decimals, a few thousand
 renders on a day of one-minute buckets.
 
+**Measured render cost at release scale** (2026-10-14, release v0.19.0). The
+`all`-tier benchmark's `render/normalize_data` summed over its 77 cases is
+0.129 s at v0.18.6 and 0.259 s at the first intermediate capture
+(`tests/baseline/results/v0.19.0-first.tsv`, code 8462ae3), and stays there
+(0.260 s, 0.256 s) at the second and third captures: about 1.7 ms more per run,
+against a total of 119 minutes. Bisected on the first 100,000 lines of the
+single-day application log, standard options, seven runs per build, the
+stage's timing printed at microsecond resolution in scratch copies: 0.56 ms
+(0.50 to 0.62) at v0.18.6, unchanged through #613 (17af958) and #617 drop 1
+(b2a8771, 0.61 ms), then rising in steps across drop 2's walk and D25 to D28
+(63546da 0.67 ms, 8269fcd 0.74 ms, 31a4562 0.80 ms) to 0.80 ms (0.70 to 1.01)
+at 8462ae3. The cost is this issue's per-column width walk and per-value
+decimals, run once per render as designed above; no single commit carries it,
+and nothing per line changed.
+
 ---
 
 ## Delivery
