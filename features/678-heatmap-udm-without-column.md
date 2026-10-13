@@ -82,6 +82,21 @@ durations are both `0`, `-bs 1440 -n 0 -hm duration` exits 0 with the header
 empty: two durations were observed and no cell shows them. The render is the
 same as for a log carrying no duration at all.
 
+**Why: no heatmap ever receives a zero.** The read loop's heatmap capture
+keeps a value only when it is above zero, for every metric, before either
+data model (raw or bin) sees it:
+
+```perl
+if (defined $heatmap_value && $heatmap_value > 0) {
+    $heatmap_min = $heatmap_value if !defined $heatmap_min || $heatmap_value < $heatmap_min;
+```
+
+So every observed zero is left out of every heatmap, in a mixed run as in an
+all-zero one, and the axis is logarithmic (`boundary[i] = min * (max/min)^(i/N)`
+in `calculate_heatmap_buckets_exact`), which has no position for zero. An
+all-zero metric therefore leaves `$heatmap_min` and `$heatmap_max` undefined,
+exactly as a metric that captured nothing does.
+
 **The cause.** In the layout pass, a user-defined metric's timeline column is
 added only when its largest bucket total is above zero:
 
