@@ -316,6 +316,19 @@ output is read against the capture.
    `resolve_udm_metric_names()`, so the configuration is always found.
 4. **The MESSAGES declaration** (D1): header and row from the declaration,
    shared with STATS where the column is the same statistic.
+   `build_messages_csv_columns()` builds `@messages_csv_columns` when the
+   file is opened; `metric_family_csv_columns()` gives both files the
+   duration, bytes and count families (each entry naming the stored key its
+   value is read under); `csv_declared_row()` writes a row of either file and
+   stops the run on a length mismatch. The per-message locals that only the
+   CSV row read are gone. `format_csv_value()` formats by family, which every
+   caller now passes; `%csv_column_family` and `resolve_csv_column_family()`
+   are gone, so no column's family is guessed from its name. The run index's
+   fixed-decimal means pass their metric's family, which the fixed decimals
+   override. *Verified 2026-10-13 (MESSAGES):* the `impact` entry's cell made
+   to return nothing, same input as the STATS probe: the run stops, stderr
+   `MESSAGES CSV row for '[200] GET /gm/order' carries 40 values under a
+   header of 41 columns`.
 5. **Rules `precision` field and its `-V` section** (D4, AC4): the field added
    to both rules TSVs with the tool's label for every column, and the check.
    It follows the two declarations because the section reports the family
