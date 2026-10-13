@@ -151,4 +151,5 @@ base where the base breaks the contract.
 on the same input renders the bucket's row two ways, three runs each: the 3xx
 segment three blocks and the 1xx segment four, or the reverse. The two families
 carry two lines each. Every before and after capture of § 3 shows one of the
-two forms. Not filed; raised with the architect.
+two forms. Filed as #717 (the timeline's category bar splits a tie between two
+categories differently from run to run).
