@@ -21142,6 +21142,10 @@ sub normalize_data_for_output {
     }
 
 
+    # Each user-defined metric's colour, by its position among the -udm specs,
+    # whether or not it has a timeline column; its column and its heatmap read it.
+    my %udm_color;
+
     # --- Layout engine (Phase 1): build and calculate but do NOT use for rendering ---
     {
         @column_layout = build_column_layout();
@@ -21173,11 +21177,14 @@ sub normalize_data_for_output {
         for my $tp (@graph_threadpools_activity) {
             add_dynamic_column(\@column_layout, $tp, $tp, 3 + $session_color_offset, hide_order => 20);
         }
-        my $udm_color_idx = 3 + $session_color_offset + scalar(@graph_threadpools_activity);
-        for my $config (@udm_configs) {
+        my $udm_color_base = 3 + $session_color_offset + scalar(@graph_threadpools_activity);
+        for my $position (0 .. $#udm_configs) {
+            my $config = $udm_configs[$position];
+            my $color_index = $udm_color_base + $position;
+            $udm_color{ $config->{name} } = $column_colors[ $color_index % scalar(@column_colors) ];
             my $key = "udm_$config->{name}";
             if (defined $max_total{$key} && $max_total{$key} > 0) {
-                add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++,
+                add_dynamic_column(\@column_layout, $key, $config->{name}, $color_index,
                     visible => $config->{hidden} ? 0 : 1);
             }
         }
@@ -21303,12 +21310,9 @@ sub normalize_data_for_output {
     }
     # B. UDM metrics
     if (defined $heatmap_udm_config) {
-        my $udm_key = "udm_$heatmap_udm_config->{name}";
-        my ($col_entry) = grep { $_->{id} eq $udm_key } @column_layout;
-        if ($col_entry && $col_entry->{color}) {
-            $heatmap_metric_map{$heatmap_metric}{color} = $col_entry->{color}{name};
-            $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $col_entry->{color}{plain_bg_num};
-        }
+        my $color = $udm_color{ $heatmap_udm_config->{name} };
+        $heatmap_metric_map{$heatmap_metric}{color} = $color->{name};
+        $heatmap_metric_map{$heatmap_metric}{highlight_bg} = $color->{plain_bg_num};
     }
     for my $udm_cfg (@histogram_udm_configs) {
         my $metric = $udm_cfg->{name};
