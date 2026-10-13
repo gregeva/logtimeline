@@ -775,7 +775,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 
 **Consumption sites.**
 - `adapt_to_command_line_options` :: `my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');`
-- `handle_histogram_option` :: `my $has_valid_metric = grep { defined builtin_metric_name($_, '-hg/--histogram') } @parts;`
+- `adapt_to_command_line_options` :: `known   => sub { resolve_metric_operand( $_[0], '-hg/--histogram' ) },`: `-hg` operands settle through the resolver `-hm` uses (#614).
 - `resolve_message_name` :: `my $metric = builtin_metric_name($name);`: the one resolution `-x` and `-d` share (#613 section 5.2): the parsed field, the identifier (`-d` only) and the built-in metric in any case, then a user-defined metric by its name, else a key written in the line, carrying the metrics it feeds (`probe_key_metric`, `udm_line_key`).
 - `resolve_mask_names` :: `my $identifier = $mask_identifier{ lc $given };`: `-m` resolves through the identifier table `-d` reads.
 - `csv_declared_row` :: `$entry->{text} ? @value : map { format_csv_value( $_, $entry->{family} ) } @value;`
@@ -787,7 +787,7 @@ the state of every vocabulary and value class in `ltl` at 0.19.0.
 `docs/percentage-presentation.md` (percentages),
 `features/524-bucket-size-unit.md` D1 (time units).
 
-**Status.** Needs refinement: the audit's items 1 to 7 list the copies. Refined by #525 (one timestamp formatter), #614, #616 and #618, each closing the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*); #605 closed the copies of the bound set and the number-and-unit split (entry *Quantity units*).
+**Status.** Established. The copies the audit's items 1 to 7 listed are closed: #525 (one timestamp formatter), #614, #616 and #618 each closed the copies its stage of the #342 review assigned to it; #613 (one vocabulary for names) closed the metric, field, identifier and statistic names; #617 (one width-to-format rule) closed the number formatters (entry *Width-to-format rule: one dispatch per metric kind*); #605 closed the copies of the bound set and the number-and-unit split (entry *Quantity units*).
 
 ---
 
@@ -1020,7 +1020,7 @@ progress-side rationale in `docs/progress-indication-best-practices.md`).
 **Owning record.** This entry, until #412 (the notices surface) lands and
 inventories every ad-hoc notice.
 
-**Status.** Needs refinement. The warning emitted inside the option parser's
+**Status.** Needs refinement, by #412 (the notices surface), which inventories every ad-hoc notice and gives them one place to render. The warning emitted inside the option parser's
 warning capture, which never printed (item 1, F1.17), is gone since #614: the
 `-hg` handler only records its value.
 The numbers inside notices render through the one dispatch since #617: each
