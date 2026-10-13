@@ -28,8 +28,9 @@ my ($close) = grep { $src[$_] =~ /^\s*close \$fh;/ } $loops[0] .. $next_sub;
 die "no close \$fh after the loop\n" unless defined $close;
 
 my $p = Devel::NYTProf::Data->new({ filename => $out, quiet => 1 });
-my ($fi) = grep { ($_->filename // '') =~ m{(^|/)ltl$} } $p->all_fileinfos;
-die "ltl not found in the profile\n" unless $fi;
+(my $name = $ltl) =~ s{.*/}{};
+my ($fi) = grep { ($_->filename // '') =~ m{(^|/)\Q$name\E$} } $p->all_fileinfos;
+die "$name not found in the profile\n" unless $fi;
 my $ld = $fi->line_time_data;
 
 for my $i ($loops[0] .. $close) {

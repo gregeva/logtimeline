@@ -2,7 +2,7 @@
 
 ## Status
 
-Measuring, not planned for implementation. Branch `621-generated-read-loop-body`,
+Measured (§ 3, § 4), not planned for implementation. Branch `621-generated-read-loop-body`,
 cut from `release/0.19.0` 524a66d. Parent: #622 (the refactoring the
 redundant-logic-surfaces audit dispatched). The hoisting it followed (#620)
 is done (`features/620-read-loop-run-constant-hoisting.md`).
@@ -57,5 +57,31 @@ of about 64 to 51 executed. The application log's lines carry no duration or
 bytes, so they skip the metric blocks and most of the tests; its share fell
 from about 19 % to 10.4 %.
 
-The bound is an upper bound: every removed test is assumed to cost a full
-slope and its removal nothing, and it covers the default options only.
+The bound assumes every removed test costs what one inserted test costs, and
+covers the default options only. § 4 measures the saving directly and finds
+the bound under-reads it.
+
+## 4. The saving measured directly (2026-10-13)
+
+A prototype, `prototype/621-remaining-loop-bound/make-specialised.pl`, writes
+the loop a generator would emit for the default options: every test of a value
+fixed for the run taken out by asserted mechanical edits, tests fixed for a
+file or a format kept, the loop 1,311 lines to 659, and a guard that stops the
+probe on any other option set. Record: `analysis.md` § The specialised loop.
+
+| | access log | application log |
+|---|---|---|
+| output against the base, full file, hash seed fixed | identical except timing, peak memory and code size | identical except timing, peak memory and code size |
+| time, ten rounds, per-round delta median (range) | **−20.50 %** (−22.73 to −18.01 %), faster in 10 of 10; 6.344 s to 4.989 s | **−15.17 %** (−18.91 to +26.43 %), faster in 9 of 10; 3.139 s to 2.663 s |
+| statements per line (NYTProf, 100,000-line slice) | 131.0 to 84.0 | 101.0 to 66.0 |
+| saving per removed statement | 36.7 ns | 28.6 ns |
+| the § 3 bound | 14.1 % | 10.4 % |
+
+A test in its real site costs about 1.5 times the inserted always-false test
+the bound was computed from, so the bound under-reads the saving. The one
+removed statement that is not a test, the per-message `-HL` suffix
+substitution, measured nothing resolvable on its own (+0.40 % and −0.05 %).
+
+The measurement covers the default options only. A run that switches options
+on needs the blocks they guard, and its generated body keeps more of the
+loop.

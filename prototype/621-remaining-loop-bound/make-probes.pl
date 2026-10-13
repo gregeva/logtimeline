@@ -7,7 +7,9 @@
 #
 #   usage: make-probes.pl <base ltl> <output dir>
 #
-# Writes <output dir>/ltl-base (a copy) and ltl-gate-{10,20,40}.
+# Writes <output dir>/ltl-base (a copy), ltl-gate-{10,20,40}, and ltl-nohl: the
+# base without the per-message `-HL` suffix substitution, which a run with no
+# -highlight never needs (the attribution of the specialised loop's saving).
 use strict;
 use warnings;
 
@@ -52,4 +54,9 @@ for my $n (10, 20, 40) {
     splice @p, $version_ln + 1, 0, $globals;
     write_probe("gate-$n", \@p);
 }
-print "done: 4 binaries\n";
+my @h = grep { $src[$_] =~ /^\s*\$log_level =~ s\/-HL\$\/\/;/ } $loop_ln .. $close_ln;
+die "make-probes: expected one -HL suffix substitution in the loop, found " . @h . "\n" unless @h == 1;
+my @n = @src;
+splice @n, $h[0], 1;
+write_probe('nohl', \@n);
+print "done: 5 binaries\n";

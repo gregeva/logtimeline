@@ -93,7 +93,59 @@ cost is not a test's. It says nothing about runs with options switched on,
 where the branches those tests guard are needed and fewer tests can go.
 
 Both files remain well above the 3 % threshold agreed for proceeding to a
-direct measurement: a copy of the loop with the 51 tests removed for the
-default options, proven identical in output and timed against the base,
-which would replace this bound with the saving a generated body would
-actually deliver on the default scenario.
+direct measurement, which follows.
+
+## The specialised loop: the saving measured directly
+
+`prototype/621-remaining-loop-bound/make-specialised.pl` writes the body a
+generator would emit for the default options: the base `ltl` with every test of
+a value fixed for the run taken out (56 asserted edits: a block whose condition
+is false deleted, a block whose condition is true unwrapped, an if/else reduced
+to the arm that runs, a fixed term dropped from a condition), and the
+declarations only those blocks used. Tests fixed for a file or a format and the
+first-observation latches stay. The loop goes from 1,311 lines to 659. A guard
+before the loop stops the probe on any run whose options differ from the values
+it was specialised for, which were read from the benchmark runner's invocation
+and are the same on both files; bare `-V` trips it, because full verbose output
+switches on demand the default run does not have.
+
+**Identity.** Under the benchmark runner's invocation on both full files, with
+the hash seed fixed (`PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0`), the rendered
+output and every `-V benchmark-data` row match the base except the timing rows,
+the peak resident size, the unattributed memory and the compiled scan sub's
+size. Without the fixed seed the bucket store's measured size differs by 192
+bytes on the access log slice; the base alone reads 2,023 or 2,215 bytes from
+one run to the next, and the two agree with the seed fixed, so the difference
+is the hash table's sizing under the per-process seed, not the store's
+content (its keys, values and scalar types are identical).
+
+**Timing.** Ten order-balanced rounds of the base and the specialised loop,
+`specialised.tsv`:
+
+| file | base median | specialised median | per-round delta, median (range) | faster in |
+|---|---|---|---|---|
+| access log | 6.344 s (6.111 to 6.428) | 4.989 s (4.967 to 5.138) | **−20.50 %**, −1.313 s (−1.461 to −1.129 s) | 10 of 10 |
+| application log | 3.139 s (3.081 to 3.303) | 2.663 s (2.582 to 4.176) | **−15.17 %**, −0.480 s (−0.615 to +0.873 s) | 9 of 10 |
+
+The application log's one slower round (round 4, 3.303 s against 4.176 s) is
+the specialised run's maximum and 1.5 s above its next-slowest run; the other
+nine rounds read −11.4 % to −18.9 %.
+
+**Attribution.** The direct saving exceeds the bound (14.1 % and 10.4 %).
+NYTProf statement counts of the specialised loop on the same 100,000-line
+slices: 84.0 statements per line against the base's 131.0 on the access log
+(47 fewer), 66.0 against 101.0 on the application log (35 fewer), matching the
+counted tests (several tests share a statement). The saving per line, 1.72 µs
+and 1.00 µs, is 36.7 ns and 28.6 ns per removed statement, against 22.8 ns and
+19.7 ns for the inserted always-false test: a test in its real site costs about
+1.5 times the probe's, because the sites are compound conditions, `defined` and
+list tests, and blocks with their own declarations rather than the probe's one
+scalar read. The `-HL` suffix substitution, the one removed statement that is
+not a test, was timed on its own (`nohl.tsv`, the base without it, proven
+identical the same way): +0.40 % (−8.42 to +2.67 %) on the access log and
+−0.05 % (−8.02 to +3.33 %) on the application log, faster in 5 of 10 on each,
+nothing resolvable.
+
+The gate-series bound therefore under-reads what removing the tests recovers;
+the measured saving on the default options is about 20 % on the access log and
+15 % on the application log.
