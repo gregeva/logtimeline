@@ -356,6 +356,7 @@ a `defined` test over a zeroed total reads "observed" when nothing was
 - `adapt_to_command_line_options` :: `$session_capture_demand = ( !$hide_session || $write_messages_to_csv ) ? 1 : 0;` and its user twin
 - `adapt_to_command_line_options` :: `$index_capture_demand = $no_index ? 0 : 1;`
 - `read_and_process_logs` :: `if ($index_capture_demand) {`
+- `adapt_to_command_line_options` :: `if ( $light_background_source eq 'default' && $heatmap_enabled ) {`: the terminal is asked for its background only when no option settled it and a reader is active, after the heatmap's on/off is final (`features/665-background-setting-global.md`). Not per-line; the same shape for a query with a side effect on the terminal.
 
 **Owning record.** `features/516-bytes-aggregate-demand-gate.md` D1 and D2;
 `features/616-gated-mean-derivation.md` D30 (a metric is processed only when a
@@ -709,6 +710,7 @@ which is the cost a flag exists to bound.
 - `read_and_process_logs` :: `if( $discard_active ) {`
 - `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
+- `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
 
 **Owning record.** This entry.
 

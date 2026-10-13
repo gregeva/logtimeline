@@ -659,9 +659,15 @@ Users can explicitly override with `-lbg` / `--light-background`:
 ```
 
 **Implementation**:
-- `$heatmap_light_bg_auto = 1` - Flag to enable auto-detection (disabled if `-lbg` explicitly set)
+- The background is a global style setting, not the heatmap's: `$light_background`
+  and `$light_background_source`, settled once in `adapt_to_command_line_options()`
+  whatever other options are given; `-dbg` wins over `-lbg` in either order
+  (`features/665-background-setting-global.md`)
 - `detect_light_terminal_background()` - Function that queries terminal using OSC 11
-- Auto-detection runs only when heatmap is enabled and `-lbg` wasn't explicitly set
+- Auto-detection runs only when neither `-lbg` nor `-dbg` was given and a reader of
+  the setting is active; the heatmap gradient is the one reader, so the query runs
+  for a heatmap that will be drawn, after a counting user-defined metric has had the
+  chance to switch it off
 - Luma threshold of 0.5 determines light vs dark (using ITU-R BT.709 coefficients)
 - **Windows**: Auto-detection is skipped entirely (`return 0 if $^O eq 'MSWin32'`); users should use `-lbg` flag explicitly
 
