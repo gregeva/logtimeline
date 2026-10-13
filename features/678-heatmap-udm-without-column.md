@@ -59,8 +59,9 @@ run whose heatmap metric captured no value completes without a runtime error.
   corrected the same day to exclude the all-zero case.*
 - **D4 — Drawing observed zeros is #715, not this work.** No heatmap
   receives a zero value (§ 3), so drawing them needs a position for zero on
-  a logarithmic axis, for every metric and every run: filed as #715 (every
-  heatmap leaves out observed zero values). Here, an all-zero user-defined
+  a logarithmic axis, for every metric and every run: filed as #715 (a heatmap
+  leaves out observed zero values, and draws nothing when every value is
+  equal). Here, an all-zero user-defined
   heatmap stops ending the run, takes its D1 colour, and otherwise renders
   as the built-in duration's all-zero heatmap does today, until #715 lands.
   *Architect, 2026-10-13.*
