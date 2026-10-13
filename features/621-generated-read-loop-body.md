@@ -159,3 +159,21 @@ released v0.18.6 as well; filed as #719.
   is known before it is read; its line count is not.
 - A command-line option shuts the runtime compile off and forces the standard
   inline flow, for development, debugging and profiling; proposed as `--debug`.
+
+## 7. Locked decisions
+
+Locked by the architect on 2026-10-13.
+
+- **D1.** `-D, --debug` is a user-facing option: under it every file takes the
+  standard (inline) path, whatever its size. It is how a user rules the
+  generated body in or out when a result looks wrong (a wrong marker can drop
+  output silently, § 5), and the path for debugging and profiling on the
+  reference code. Finding the line of a failing statement does not need it:
+  with the `#line` directive the generated body reports warnings, `die`
+  messages and profiler lines at the same source line (§ 5). Its `--help` and
+  `docs/usage.md` text says what the user sees (the standard path, slower on
+  large files, for reproducing a problem or profiling), not how it works.
+- **D2.** A hidden option forces the generated path on a file of any size, so
+  the harnesses' identity comparison can prove both paths on small fixtures,
+  which the size threshold would otherwise keep on the inline path. It takes
+  the shape of the existing hidden `--detection-window=N`.
