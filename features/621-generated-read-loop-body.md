@@ -217,6 +217,14 @@ Locked by the architect on 2026-10-13.
   by file type only, as today. Identity is not re-proven in the binary: the
   suite proves it on the source the binary is packed from. Chosen over handing
   the case to #227 (binary smoke harness) and over #720's one-time proof alone.
+- **D6** (locked by the architect 2026-10-13, under #721). The generated body
+  is compiled per file, inside the per-file loop after the file's format
+  detection, so it closes over that file's variables where they are declared
+  and nothing moves; its text is written once per run and cached, since the
+  markers resolve only values fixed for the run. A file below the threshold
+  compiles nothing. Chosen over one compile per run, which moves 13 per-file
+  variables out of the per-file loop for no measured speed gain (§ 5: −12.66 %
+  per file, −12.81 % per run, over 41 application-log files).
 
 ## 8. The packed binaries (#720, 2026-10-13)
 
