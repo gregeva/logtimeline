@@ -446,9 +446,9 @@ scenario_udm_no_value() {
         contract    'features/678-heatmap-udm-without-column.md D3 and AC3'
 
     assert_command \
-        command     "r=\$(timeline_cell_report '$UDM_TMP/none.all' '$UDM_ROW' heatmap) && [[ \$r =~ ^text=\\'\\|\\ +\\|\\' && \$r == *' extent=0 '* ]] || { echo \"\$r\"; false; }" \
+        command     "r=\$(timeline_cell_report '$UDM_TMP/none.all' '$UDM_ROW' heatmap) && [[ \$r =~ ^text=\\'\\ +\\' && \$r == *' extent=0 fill=none '* ]] || { echo \"\$r\"; false; }" \
         label       'every heatmap cell on the row is empty' \
-        asserts     'A heatmap of a metric that captured nothing draws no cell: the row holds its borders and spaces only, with no fill' \
+        asserts     'A heatmap of a metric that captured nothing draws no cell: its part of the row is blank, nothing filled, as the built-in duration renders with no durations' \
         produced_by 'print_heatmap_row() in ltl' \
         contract    'features/678-heatmap-udm-without-column.md D3 and AC3'
 }
