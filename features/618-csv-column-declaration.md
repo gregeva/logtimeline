@@ -334,7 +334,19 @@ output is read against the capture.
    It follows the two declarations because the section reports the family
    each cell is formatted under, which only the declaration holds: today the
    STATS rate cells and the user-defined cells are formatted under a name
-   other than their header's.
+   other than their header's. *Done 2026-10-13* (20c2d40).
+   **Section contract, `-V csv-output / columns`:** inside `csv-output`,
+   emitted whenever `-o` is active; a tab-separated header row `file`,
+   `column`, `precision`, then one row per column of the STATS file and then
+   of the MESSAGES file, each in file order; `file` is `stats` or
+   `messages`, `column` the header name as written, `precision` the family
+   its cells are written in (`meta`, `count`, `duration`, `percentile`,
+   `shape`, `bytes`, `level`, `rate`). Read by `validate-csv-output.pl`,
+   which fails when a file's rows are not its header in order, or when a
+   header column's rules `precision` differs. Of the rules rows, 129 took
+   the label the tool reported over the 38 capture runs; 63 STATS rows the
+   capture never emits took the label the declaration gives their kind (48
+   log-level columns `level`, 14 rate columns `rate`, `sessions-HL` `meta`).
 6. **The aggregate export's walk** reads the declaration.
 7. **The run index** (D7): one column list read by the writer and the reader.
 
