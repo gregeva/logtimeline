@@ -347,8 +347,28 @@ output is read against the capture.
    the label the tool reported over the 38 capture runs; 63 STATS rows the
    capture never emits took the label the declaration gives their kind (48
    log-level columns `level`, 14 rate columns `rate`, `sessions-HL` `meta`).
-6. **The aggregate export's walk** reads the declaration.
+6. **The aggregate export's walk** reads the declaration. *Done 2026-10-13*
+   (107cd8b): each `metric_family_csv_columns()` entry carries its
+   statistic's typed name, which the export writes as its key; the export's
+   duration, bytes and count walks read those entries, a user-defined
+   family its `udm_csv_columns()` statistics, and its gates stay the shared
+   predicates the STATS declaration asks.
 7. **The run index** (D7): one column list read by the writer and the reader.
+   *Done 2026-10-13* (55c5fcd): `@index_columns` at file scope; each row is
+   built by `index_row()` from cells keyed by column name. A row missing a
+   cell or carrying one for no column stops the run: the writer's `eval`,
+   which lets an unwritable index file pass silently, re-raises that defect.
+   Verified by a probe dropping the `filters` cell: exit 255, stderr
+   `ltl-index.csv row: no cell for filters`.
+
+**After step 7:** every file of the reference capture (38 runs, 152 files)
+byte-identical to the capture taken after the ratio fix and the step 3
+scenario; AC3 checked by grep: no column list is spelled in the STATS or
+MESSAGES writers, the export's walk or the index writer outside the
+declarations (the index reader names the six columns it reads back as
+pre-seed values, a lookup, not a list of the file's columns).
+`docs/architecture-patterns.md` names the declaration under *Declarative
+table with one resolver*.
 
 ## 7. Merge gate
 
