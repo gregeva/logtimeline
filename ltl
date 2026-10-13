@@ -1264,7 +1264,8 @@ my $consolidation_cliff_sample       = 300;    # keys sampled to locate the simi
 my $consolidation_phase              = 'streaming';  # 'streaming' or 'final_pass' — controls counter set and eviction behavior
 
 my @in_files;
-my @stats_csv_columns;  # the STATS CSV declaration for this run: build_stats_csv_columns()
+my @stats_csv_columns;     # the STATS CSV declaration for this run: build_stats_csv_columns()
+my @messages_csv_columns;  # the MESSAGES CSV declaration for this run: build_messages_csv_columns()
 my %in_files_matched;
 my %index_file_data;    # Per-file metadata for index file (Issue #46)
 
@@ -8166,9 +8167,9 @@ sub write_index_file {
 
                 # The means through the one helper and the CSV formatter at two
                 # decimals whatever -cp says, empty for no data (#616 D8, D15, D16).
-                my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration_mean', 2 ) // '';
-                my $file_bytes_mean = format_csv_value( mean_of( $fd->{bytes_sum},    $fd->{file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
-                my $count_mean      = format_csv_value( mean_of( $fd->{count_sum},    $fd->{count_occurrences} ),      'count_mean',    2 ) // '';
+                my $dur_avg         = format_csv_value( mean_of( $fd->{duration_sum}, $fd->{duration_occurrences} ),   'duration', 2 ) // '';
+                my $file_bytes_mean = format_csv_value( mean_of( $fd->{bytes_sum},    $fd->{file_bytes_occurrences} ), 'bytes', 2 ) // '';
+                my $count_mean      = format_csv_value( mean_of( $fd->{count_sum},    $fd->{count_occurrences} ),      'count', 2 ) // '';
                 my $read_rate = $fd->{read_elapsed}   > 0 ? sprintf("%.0f", $fd->{line_count}   / $fd->{read_elapsed})   : '-';
 
                 my @file_row = (
@@ -8185,9 +8186,9 @@ sub write_index_file {
             {
                 my $sel_first = $index_timestamp->($fd->{sel_first_timestamp}, exact_bound(@$fd{qw(sel_first_s sel_first_ns)}));
                 my $sel_last  = $index_timestamp->($fd->{sel_last_timestamp}, exact_bound(@$fd{qw(sel_last_s sel_last_ns)}));
-                my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration_mean', 2 ) // '';
-                my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes_mean',    2 ) // '';
-                my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count_mean',    2 ) // '';
+                my $sel_dur_avg         = format_csv_value( mean_of( $fd->{sel_duration_sum}, $fd->{sel_duration_occurrences} ),   'duration', 2 ) // '';
+                my $sel_file_bytes_mean = format_csv_value( mean_of( $fd->{sel_bytes_sum},    $fd->{sel_file_bytes_occurrences} ), 'bytes', 2 ) // '';
+                my $sel_count_mean      = format_csv_value( mean_of( $fd->{sel_count_sum},    $fd->{sel_count_occurrences} ),      'count', 2 ) // '';
 
                 my @sel_row = (
                     'selection', $now_iso, $path, '-', '-',
@@ -15105,67 +15106,6 @@ sub format_time {
                      : "$formatted_value$unit_name";
 }
 
-# Issue #268: column-to-family lookup for CSV emit formatting. Mirrors the
-# 'family' annotations in tests/csv-output/rules/{messages,stats}-columns.tsv.
-# Static columns are listed explicitly; UDM/threadpool/session columns and
-# log-level/rate columns are resolved by suffix or registry lookup in
-# resolve_csv_column_family().
-my %csv_column_family = (
-    # meta
-    'category'          => 'meta',
-    'message'           => 'meta',
-    'timestamp'         => 'meta',
-    'occurrences'       => 'meta',
-    'successes'         => 'meta',
-    'failures'          => 'meta',
-    'conflicts'         => 'meta',
-    # bytes
-    'bytes_occurrences' => 'meta',
-    'bytes_min'         => 'bytes',
-    'bytes_mean'        => 'bytes',
-    'bytes_max'         => 'bytes',
-    'bytes'             => 'bytes',
-    'bytes_nice'        => 'bytes',
-    # count
-    'count_occurrences' => 'count',
-    'count_min'         => 'count',
-    'count_mean'        => 'count',
-    'count_max'         => 'count',
-    'count_sum'         => 'count',
-    # duration
-    'duration_min'      => 'duration',
-    'duration_mean'     => 'duration',
-    'duration_max'      => 'duration',
-    'duration'          => 'duration',
-    'duration_nice'     => 'duration',
-    # percentile
-    'duration_p1'       => 'percentile',
-    'duration_p5'       => 'percentile',
-    'duration_p10'      => 'percentile',
-    'duration_p25'      => 'percentile',
-    'duration_p50'      => 'percentile',
-    'duration_p75'      => 'percentile',
-    'duration_iqr'      => 'percentile',
-    'duration_p90'      => 'percentile',
-    'duration_p95'      => 'percentile',
-    'duration_p99'      => 'percentile',
-    'duration_p999'     => 'percentile',
-    'duration_p9999'    => 'percentile',
-    'duration_p99999'   => 'percentile',
-    # shape (unitless or scale-derived; emit at fixed shape decimals)
-    'duration_stddev'   => 'shape',
-    'duration_cv'       => 'shape',
-    'duration_skewness' => 'shape',
-    'duration_kurtosis' => 'shape',
-    'impact'            => 'shape',
-    'duration_bimodality_coef' => 'shape',
-);
-
-# Resolve the family for a CSV column name. Returns 'level' for log-level
-# count columns (their names are dynamic — ERROR, WARN, 2xx, 5xx) and 'rate'
-# for rate columns. Returns the matching family for UDM dynamic columns
-# (which always have a *_min/_mean/_max/_sum/_occurrences suffix). Returns
-# undef for unknown columns; the formatter falls back to pass-through.
 # The metric a timeline value column renders: a user-defined metric's column
 # carries the udm_ prefix on its name; every other column is named for its
 # metric.
@@ -15180,24 +15120,6 @@ sub column_total_field {
     return $column_total_field{$column} // $column;
 }
 
-sub resolve_csv_column_family {
-    my ($column) = @_;
-    return undef unless defined $column;
-    return $csv_column_family{$column} if exists $csv_column_family{$column};
-    # Rate columns: the built-in message and error rates, and a user-defined
-    # metric whose kind resolves to a rate (its STATS cell is keyed udm_<name>).
-    return 'rate' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
-    return 'rate' if $column =~ /^udm_(.+)$/ && udm_config_by_name($1)
-                  && resolve_value_kind( metric => $1 )->{kind} eq 'rate';
-    # Log-level columns: matched against the configured log levels.
-    return 'level' if grep { $_ eq $column } @log_levels;
-    # UDM dynamic columns: <name>_<aggregate>; family follows the underlying
-    # metric, which for UDM today is 'count' (raw numeric) — leave to caller
-    # to override if a typed UDM lands.
-    return 'count' if $column =~ /_(min|mean|max|sum|occurrences)$/;
-    return undef;
-}
-
 # Issue #268: format a single numeric value for CSV emission, honoring
 # the --csv-precision mode resolved at startup.
 #
@@ -15206,20 +15128,13 @@ sub resolve_csv_column_family {
 #   - $value unchanged  if precision mode is 'full' (raw stored precise float)
 #   - $value unchanged  if $value is non-numeric (already-formatted strings
 #                       like 'duration_nice', rate strings, etc. pass through)
-#   - sprintf("%.<N>f") otherwise, where N is the resolved decimals for the
-#                       column's family (or 0 if family is unknown)
+#   - sprintf("%.<N>f") otherwise, where N is the decimals of the column's
+#                       precision family, as its CSV declaration gives it (0
+#                       for an unknown family)
 # An optional third argument fixes the decimals, bypassing -cp and its full
 # mode: the run index writes its means at two decimals whatever the run's
 # precision, since it is compared across runs (#616 D8, D16).
 sub format_csv_value {
-    my ($value, $column, $fixed_decimals) = @_;
-    return format_csv_family_value( $value, defined $fixed_decimals ? undef : resolve_csv_column_family($column), $fixed_decimals );
-}
-
-# Format one CSV value under a precision family, the form a declared column
-# writes through: the family's decimals under the run's --csv-precision, or the
-# fixed decimals given. An unknown family writes no decimals.
-sub format_csv_family_value {
     my ($value, $family, $fixed_decimals) = @_;
     return undef unless defined $value;
     return $value if $csv_precision eq 'full' && !defined $fixed_decimals;
@@ -20910,15 +20825,96 @@ sub histogram_value_observed {
 }
 
 # Key function used to normalize data for output, graphing, and data scaling.
+# The CSV columns of one metric's statistics family, which the STATS and the
+# MESSAGES declarations share: each column's name, its precision family and
+# the stored key its value is read under in a bucket's statistics or a
+# message's entry. A duration statistic's family comes from its statistic-table
+# row ('metric' being the duration family itself); the bytes count of
+# observations is a meta column.
+sub metric_family_csv_columns {
+    my ($metric) = @_;
+    if ( $metric eq 'duration' ) {
+        return map {
+            my $precision = $statistic_by_key{$_}{precision};
+            { name => "duration_$statistic_name_by_key{$_}", family => $precision eq 'metric' ? 'duration' : $precision, key => $_ }
+        } @duration_family_stats;
+    }
+    my @stats = $metric eq 'bytes' ? @bytes_family_stats : @count_family_stats;
+    return map { { name => "${metric}_$_", family => ( $metric eq 'bytes' && $_ eq 'occurrences' ) ? 'meta' : $metric, key => "${metric}_$_" } } @stats;
+}
+
+# One CSV row from a declaration: each entry's value, read under its stored key
+# from the record or computed by its cell, formatted under its family unless
+# the entry is text. A row whose length differs from the header is a defect
+# that stops the run, never padded over.
+sub csv_declared_row {
+    my ( $columns, $record, $cell_argument, $context, $what ) = @_;
+    my @row = map {
+        my $entry = $_;
+        my @value = exists $entry->{key} ? $record->{ $entry->{key} } : $entry->{cell}->( $cell_argument, $context );
+        $entry->{text} ? @value : map { format_csv_value( $_, $entry->{family} ) } @value;
+    } @$columns;
+    die sprintf( "%s carries %d values under a header of %d columns\n", $what, scalar @row, scalar @$columns ) if @row != @$columns;
+    return \@row;
+}
+
+# The MESSAGES CSV declaration: one entry per column in file order. Its
+# columns do not depend on what the run observed, beyond the user-defined
+# metrics configured; a cell is called with the message's entry and the row's
+# context (its grouping and key).
+sub build_messages_csv_columns {
+    my @columns = (
+        { name => 'category',    family => 'meta', text => 1, cell => sub { $_[1]{grouping} } },
+        { name => 'message',     family => 'meta', text => 1, cell => sub { $_[1]{key} } },
+        { name => 'occurrences', family => 'meta', key => 'occurrences' },
+    );
+    for my $outcome ( [ successes => 1 ], [ failures => 2 ], [ conflicts => 4 ] ) {
+        my ( $name, $slot ) = @$outcome;
+        push @columns, { name => $name, family => 'meta', cell => sub { $_[0]{outcomes} ? ( $_[0]{outcomes}[$slot] // 0 ) : 0 } };
+    }
+    # The bytes total is gated on the observation count (#432): a message whose
+    # lines never carried a bytes field has no total, not a total of nothing.
+    my $total_bytes = sub { $_[0]{bytes_occurrences} ? $_[0]{total_bytes} : undef };
+    push @columns,
+        metric_family_csv_columns('bytes'),
+        { name => 'bytes',      family => 'bytes', cell => $total_bytes },
+        { name => 'bytes_nice', family => 'bytes', text => 1,
+          cell => sub { my $v = $total_bytes->( $_[0] ); defined $v ? value_text( $v, metric => 'bytes', budget => 'nice cell' ) : undef } },
+        metric_family_csv_columns('count'),
+        metric_family_csv_columns('duration'),
+        { name => 'duration',      family => 'duration', key => 'total_duration' },
+        { name => 'duration_nice', family => 'duration', text => 1,
+          cell => sub { defined $_[0]{total_duration} ? value_text( $_[0]{total_duration}, metric => 'duration', budget => 'nice cell' ) : undef } },
+        { name => 'impact',        family => 'shape', key => 'impact' };
+    # The user-defined metrics, named as udm_csv_columns() names them. A
+    # counting metric's count is the message's occurrences of the key; its
+    # distinct, ratio and rate have no per-message value (distinct sets are
+    # bucket-scoped).
+    for my $config (@udm_configs) {
+        my $name = $config->{name};
+        my $csv  = udm_csv_columns($config);
+        if ( $config->{agg_kind} eq 'counting' ) {
+            push @columns, $config->{aggregation} eq 'count'
+                ? { name => $csv->{columns}[0], family => udm_csv_family($config), key => "udm_${name}_occurrences" }
+                : { name => $csv->{columns}[0], family => udm_csv_family($config), cell => sub { undef } };
+        } else {
+            my $family = $csv->{shape} eq 'single' ? udm_csv_family($config) : 'count';
+            push @columns, map { { name => $csv->{columns}[$_], family => $family, key => "udm_${name}_$csv->{stats}[$_]" } } 0 .. $#{ $csv->{columns} };
+        }
+    }
+    return @columns;
+}
+
 # The STATS CSV declaration for this run: one entry per column in file order,
 # each holding its header name, its precision family and the cell it writes for
 # a bucket. Built once, after the read, from what the run observed: the
 # categories that occurred, the metrics that carried a value, the bytes and
 # duration families under their shared gates. The header writes the names and
 # print_bar_graph() each bucket's cells, so a row cannot carry a value its
-# header lacks. A cell is called with the bucket and the row's context (its
-# timestamp, category counts and total occurrences, which the legend pass
-# computes); an entry marked text writes its cell as given.
+# header lacks. An entry with a key reads it from the bucket's statistics; a
+# cell is called with the bucket and the row's context (its timestamp,
+# category counts and total occurrences, which the legend pass computes); an
+# entry marked text writes its cell as given.
 sub build_stats_csv_columns {
     my ($categories) = @_;
     my @columns = ( { name => 'timestamp', family => 'meta', text => 1, cell => sub { $_[1]{timestamp} } } );
@@ -20952,7 +20948,7 @@ sub build_stats_csv_columns {
                 { name => $key, family => $key, cell => sub { $log_stats{ $_[0] }{$total} } };
         } elsif ( $key eq 'count' ) {
             next if $omit_count;
-            push @columns, map { my $stat = $_; { name => "count_$stat", family => 'count', cell => sub { $log_stats{ $_[0] }{"count_$stat"} } } } @count_family_stats;
+            push @columns, metric_family_csv_columns('count');
         } elsif ( $key =~ /^udm_(.+)$/ ) {
             my $name = $1;
             my ($config) = grep { $_->{name} eq $name } @udm_configs;
@@ -20975,15 +20971,8 @@ sub build_stats_csv_columns {
 
     # The bytes and duration families (#432): CSV-only, each under its shared
     # gate, which the export asks too.
-    if ( stats_csv_bytes_columns_active() ) {
-        push @columns, map { my $stat = $_; { name => "bytes_$stat", family => $stat eq 'occurrences' ? 'meta' : 'bytes', cell => sub { $log_stats{ $_[0] }{"bytes_$stat"} } } } @bytes_family_stats;
-    }
-    if ( stats_csv_duration_columns_active() ) {
-        for my $stat (@duration_family_stats) {
-            my $precision = $statistic_by_key{$stat}{precision};
-            push @columns, { name => "duration_$statistic_name_by_key{$stat}", family => $precision eq 'metric' ? 'duration' : $precision, cell => sub { $log_stats{ $_[0] }{$stat} } };
-        }
-    }
+    push @columns, metric_family_csv_columns('bytes')    if stats_csv_bytes_columns_active();
+    push @columns, metric_family_csv_columns('duration') if stats_csv_duration_columns_active();
     return @columns;
 }
 
@@ -22028,14 +22017,7 @@ sub print_bar_graph {
             # the header is a defect, never padded over.
             if( $write_messages_to_csv && defined $csv_fh ) {
                 my %row_context = ( timestamp => $bucket_time_str, categories => \%category_cells, occurrences => $total_occurrences );
-                my @row = map {
-                    my $entry = $_;
-                    my @cell = $entry->{cell}->( $bucket, \%row_context );
-                    $entry->{text} ? @cell : map { format_csv_family_value( $_, $entry->{family} ) } @cell;
-                } @stats_csv_columns;
-                die sprintf( "STATS CSV row for %s carries %d values under a header of %d columns\n", $bucket_time_str, scalar @row, scalar @stats_csv_columns )
-                    if @row != @stats_csv_columns;
-                $csv->print($csv_fh, \@row);
+                $csv->print( $csv_fh, csv_declared_row( \@stats_csv_columns, $log_stats{$bucket} // {}, $bucket, \%row_context, "STATS CSV row for $bucket_time_str" ) );
             }
 
             print "\n";
@@ -23455,49 +23437,10 @@ sub print_message_summary {
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
                     my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
-                    my $outcomes = $log_messages{$grouping}{$key}{outcomes};
-                    my $count_occurrences = $log_messages{$grouping}{$key}{count_occurrences};
-                    my $count_min = $log_messages{$grouping}{$key}{count_min};
-                    my $count_mean = $log_messages{$grouping}{$key}{count_mean};
-                    my $count_max = $log_messages{$grouping}{$key}{count_max};
-                    my $count_sum = $log_messages{$grouping}{$key}{count_sum};
-                    # total_bytes is 0-initialised at entry creation, so a message
-                    # whose lines never carried a bytes field would otherwise report
-                    # a measured zero. Gate the whole family on the observation count
-                    # (#432): no observation means no value, not a value of nothing.
-                    my $total_bytes_num = $log_messages{$grouping}{$key}{bytes_occurrences}
-                        ? $log_messages{$grouping}{$key}{total_bytes}
-                        : undef;
-                    my $total_bytes = defined $total_bytes_num ? value_text( $total_bytes_num, metric => 'bytes', budget => 'nice cell' ) : undef;
-                    my $bytes_occurrences = $log_messages{$grouping}{$key}{bytes_occurrences};
-                    my $bytes_min = $log_messages{$grouping}{$key}{bytes_min};
-                    my $bytes_max = $log_messages{$grouping}{$key}{bytes_max};
-                    # Stored precise by the group calculation, divided by the lines
-                    # that carried a bytes value (#432); rounded here only by
-                    # format_csv_value, as the STATS CSV rounds its own (#616 D6).
-                    my $bytes_mean = $log_messages{$grouping}{$key}{bytes_mean};
                     my $min = $log_messages{$grouping}{$key}{min};
-                    my $mean = $log_messages{$grouping}{$key}{mean};
-                    my $max = $log_messages{$grouping}{$key}{max};
-                    my $std_dev = $log_messages{$grouping}{$key}{std_dev};
-                    my $impact = $log_messages{$grouping}{$key}{impact};
-                    my $p1 = $log_messages{$grouping}{$key}{p1};
-                    my $p5 = $log_messages{$grouping}{$key}{p5};
-                    my $p10 = $log_messages{$grouping}{$key}{p10};
-                    my $p25 = $log_messages{$grouping}{$key}{p25};
                     my $p50 = $log_messages{$grouping}{$key}{p50};
-                    my $p75 = $log_messages{$grouping}{$key}{p75};
-                    my $iqr = $log_messages{$grouping}{$key}{iqr};
-                    my $p90 = $log_messages{$grouping}{$key}{p90};
-                    my $p95 = $log_messages{$grouping}{$key}{p95};
-                    my $p99 = $log_messages{$grouping}{$key}{p99};
                     my $p999 = $log_messages{$grouping}{$key}{p999};
-                    my $p9999 = $log_messages{$grouping}{$key}{p9999};
-                    my $p99999 = $log_messages{$grouping}{$key}{p99999};
                     my $cv = $log_messages{$grouping}{$key}{cv};
-                    my $skewness = $log_messages{$grouping}{$key}{skewness};
-                    my $kurtosis = $log_messages{$grouping}{$key}{kurtosis};
-                    my $bimodality_coef = $log_messages{$grouping}{$key}{bimodality_coef};
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
                     if( $statistics_variant && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
@@ -23513,78 +23456,9 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
                     }
 
-                    # Separated conditions for CSV output from printed column data
                     if( $write_messages_to_csv && defined $csv_fh ) {
-                        # Issue #268: UDM values route through format_csv_value()
-                        # like every other numeric column at this emission site.
-                        # Column names mirror the MESSAGES header construction so
-                        # each value resolves to the same precision family as its
-                        # header column.
-                        my @udm_csv_values;
-                        foreach my $config (@udm_configs) {
-                            my $name = $config->{name};
-                            my $csv = udm_csv_columns($config);
-                            if ($config->{agg_kind} eq 'counting') {
-                                # count -> per-message occurrences; distinct/ratio/rate/drate
-                                # have no per-message value (distinct sets are bucket-scoped)
-                                push @udm_csv_values, $config->{aggregation} eq 'count'
-                                    ? format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_occurrences"}, $csv->{columns}[0])
-                                    : undef;
-                            } else {
-                                push @udm_csv_values,
-                                    map { format_csv_value($log_messages{$grouping}{$key}{"udm_${name}_$csv->{stats}[$_]"}, $csv->{columns}[$_]) }
-                                        0 .. $#{ $csv->{columns} };
-                            }
-                        }
-                        # Issue #268: format each numeric column per the resolved
-                        # --csv-precision mode. Column names mirror the MESSAGES
-                        # header pipeline_render() writes, so format_csv_value()
-                        # can resolve each value's family. The nice columns (bytes_nice, duration_nice)
-                        # are rendered here from the stored numbers; they and the metadata pass through unchanged.
-                        $csv->print($csv_fh, [
-                            $grouping,
-                            $key,
-                            format_csv_value($occurrences,       'occurrences'),
-                            format_csv_value($outcomes ? ($outcomes->[1] // 0) : 0, 'successes'),
-                            format_csv_value($outcomes ? ($outcomes->[2] // 0) : 0, 'failures'),
-                            format_csv_value($outcomes ? ($outcomes->[4] // 0) : 0, 'conflicts'),
-                            format_csv_value($bytes_occurrences, 'bytes_occurrences'),
-                            format_csv_value($bytes_min,         'bytes_min'),
-                            format_csv_value($bytes_mean,        'bytes_mean'),
-                            format_csv_value($bytes_max,         'bytes_max'),
-                            format_csv_value($total_bytes_num,   'bytes'),
-                            $total_bytes,
-                            format_csv_value($count_occurrences, 'count_occurrences'),
-                            format_csv_value($count_min,         'count_min'),
-                            format_csv_value($count_mean,        'count_mean'),
-                            format_csv_value($count_max,         'count_max'),
-                            format_csv_value($count_sum,         'count_sum'),
-                            format_csv_value($min,               'duration_min'),
-                            format_csv_value($mean,              'duration_mean'),
-                            format_csv_value($max,               'duration_max'),
-                            format_csv_value($std_dev,           'duration_stddev'),
-                            format_csv_value($p1,                'duration_p1'),
-                            format_csv_value($p5,                'duration_p5'),
-                            format_csv_value($p10,               'duration_p10'),
-                            format_csv_value($p25,               'duration_p25'),
-                            format_csv_value($p50,               'duration_p50'),
-                            format_csv_value($p75,               'duration_p75'),
-                            format_csv_value($iqr,               'duration_iqr'),
-                            format_csv_value($p90,               'duration_p90'),
-                            format_csv_value($p95,               'duration_p95'),
-                            format_csv_value($p99,               'duration_p99'),
-                            format_csv_value($p999,              'duration_p999'),
-                            format_csv_value($p9999,             'duration_p9999'),
-                            format_csv_value($p99999,            'duration_p99999'),
-                            format_csv_value($cv,                'duration_cv'),
-                            format_csv_value($skewness,          'duration_skewness'),
-                            format_csv_value($kurtosis,          'duration_kurtosis'),
-                            format_csv_value($bimodality_coef,   'duration_bimodality_coef'),
-                            format_csv_value($total_duration,    'duration'),
-                            defined $total_duration ? value_text( $total_duration, metric => 'duration', budget => 'nice cell' ) : undef,
-                            format_csv_value($impact,            'impact'),
-                            @udm_csv_values,
-                        ]);
+                        $csv->print( $csv_fh, csv_declared_row( \@messages_csv_columns, $log_messages{$grouping}{$key}, $log_messages{$grouping}{$key},
+                            { grouping => $grouping, key => $key }, "MESSAGES CSV row for '$key'" ) );
                     }
 
                     print "$row\n" if $shown;
@@ -24126,12 +24000,12 @@ sub pipeline_render {
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('MESSAGES');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
-        my @udm_csv_headers = map { @{ udm_csv_columns($_)->{columns} } } @udm_configs;
         # Metric-first, aggregate-last throughout, matching the user-defined-metric
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        $csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_stddev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        @messages_csv_columns = build_messages_csv_columns();
+        $csv->print( $csv_fh, [ map { $_->{name} } @messages_csv_columns ] );
     }
 
     print_message_summary() if $capture_messages && ( !section_hidden('messages') || $write_messages_to_csv );									                    # Print and write message summaries

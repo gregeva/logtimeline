@@ -400,7 +400,7 @@ assert_command \
     command     "check_csv_header_raw_names '$CSV_DIR' 1xx 2xx 2xx-HL 3xx 4xx 4xx-HL 5xx 5xx-HL" \
     label       'stats CSV columns are named for the raw category, not the descriptive text' \
     asserts     'The CSV is a machine-readable contract consumed by external tooling and by the column-rules validator, so its column names stay the raw category names and their -HL twins. A descriptive name reaching a header would rename columns that downstream consumers address by name.' \
-    produced_by 'print_bar_graph() in ltl — the CSV header assembled from @output_columns; column families resolved by resolve_csv_column_family()' \
+    produced_by 'build_stats_csv_columns() in ltl — the STATS CSV declaration, one entry per column with its name and precision family; print_bar_graph() writes its rows' \
     contract    'features/463-friendly-log-level-category-names.md § D3 — the legend and the CSV keep the raw category name; tests/csv-output/rules/stats-columns.tsv declares the raw columns'
 
 # ---------------------------------------------------------------------------
