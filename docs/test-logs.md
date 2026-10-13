@@ -277,6 +277,7 @@ Fields: timestamp [L: level] [O: origin] [I: instance] [U: user] [S: session] [P
 | `ApplicationLog.2025-12-12.282-Windows.log` | occurrences only | 10MB | 608 | Windows ApplicationLog |
 | `ApplicationLog.log` | occurrences only | 5.8MB | 22,904 | Current ApplicationLog |
 | `ApplicationLog-improperlyRead.log` | occurrences only | 468B | 2 | Edge case - malformed reads |
+| `tests/fixtures/udm-heatmap-colour.txt` | occurrences only; key=value fields `elapsed`, `a`, `b` for `-udm` | 1KB | 2 | Synthetic ApplicationLog lines in one minute, each carrying `elapsed=0` and non-zero `a` and `b`: a user-defined metric whose every value is zero (`elapsed`), two that capture data (`a`, `b`), and any other key as one that captures nothing. The fixture for the user-defined heatmap colour scenarios of `tests/validate-heatmap-palette.sh` |
 | `HundredsOfThousandsOfUniqueErrors.log` | occurrences only | 101.7MB | 288,025 | Hundreds of thousands of unique error messages (group-similar) |
 
 ### ScriptLog (Script execution logs)
