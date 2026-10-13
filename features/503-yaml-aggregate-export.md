@@ -186,8 +186,8 @@ series:
       failure_pct: 0.0869505197
       non_qualifying_lines: 0                 # %bucket_outcomes slot 3 — explains an absent percentage
       categories: { 2xx: 1034880, 3xx: 7335, 4xx: 772, 5xx: 135 }
-      err_rate: 3.78                          # STATS CSV err-rate_<unit>; unit in series.rate_unit
-      msg_rate: 4346.34                       # STATS CSV msg-rate_<unit>
+      err_rate: 3.78                          # STATS CSV err_rate_<unit>; unit in series.rate_unit
+      msg_rate: 4346.34                       # STATS CSV msg_rate_<unit>
       duration:                               # the bucket store (%log_stats{$bucket}) — the STATS CSV duration family
         data_model: raw                       # choose_data_model('bucket-stats')
         occurrences: 1043122                  # duration_count, retained on the raw path (D15)
@@ -195,7 +195,7 @@ series:
         min: 0
         mean: 98.2
         max: 38420
-        std_dev: 412.7
+        stddev: 412.7
         cv: 4.2
         p50: 11                               # the ladder, gated (D15)
         p75: 41

@@ -19,7 +19,7 @@ count_sum	17	float	conditional:count	5	count
 duration_min	18	float	conditional:duration	5	duration
 duration_mean	19	float	conditional:duration	5	duration
 duration_max	20	float	conditional:duration	5	duration
-duration_std_dev	21	float	conditional:duration	5	dispersion
+duration_stddev	21	float	conditional:duration	5	dispersion
 duration_p1	22	float	conditional:duration	5	percentile
 duration_p5	23	float	conditional:duration	5	percentile
 duration_p10	24	float	conditional:duration	5	percentile

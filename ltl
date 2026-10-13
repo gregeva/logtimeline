@@ -447,8 +447,8 @@ my $run_file_stamp;   # the local-time stamp every output file of one run is nam
 my @duration_family_stats = qw( min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef );
 # Statistic and aggregation names: the one table of the names a user types
 # for a statistic (-so, --explain) or an aggregation (the -udm function
-# slot). Each row carries the typed name, the stored key every CSV header,
-# -V key and YAML key writes, its aliases, a deprecated spelling (with
+# slot). Each row carries the typed name, which every CSV header and YAML key
+# writes, the stored key the stores and -V keys use, its aliases, a deprecated spelling (with
 # whether its notice prints yet), the --explain topic that covers it, and its
 # place in the -udm function slot: the kind (aggregation, counting or
 # transform), the position the slot lists it at, and the note its help row
@@ -480,6 +480,9 @@ $_->{aliases} //= [] for @statistic_names;
 # Every spelling a statistic row is typed under, lower-cased: its name, its
 # aliases and its deprecated spelling. The -so and --explain lookup.
 my %statistic_by_spelling = map { my $row = $_; map { lc($_) => $row } grep { defined } $row->{name}, @{ $row->{aliases} }, $row->{deprecated} } @statistic_names;
+# The typed name of each stored statistic key: the name the CSV columns and
+# the aggregate export write for it.
+my %statistic_name_by_key = map { $_->{key} => $_->{name} } @statistic_names;
 # Duration carries every statistic the statistic table ranks by, beside its
 # sum and impact (616 D21: impact is a duration statistic).
 $builtin_metric{duration}{statistics} = [ sum => 'total_duration', ( map { $_->{name} => $_->{key} } grep { $_->{sort} } @statistic_names ), impact => 'impact' ];
@@ -7958,10 +7961,10 @@ sub write_aggregate_export {
                     for my $stat (@duration_family_stats) {
                         next unless defined $stats->{$stat};
                         if (exists $percentile_quantile{$stat}) {
-                            if (percentile_supported($stat, $stats->{duration_count})) { $block->{$stat} = aggregate_number($stats->{$stat}) }
+                            if (percentile_supported($stat, $stats->{duration_count})) { $block->{ $statistic_name_by_key{$stat} } = aggregate_number($stats->{$stat}) }
                             else { $percentiles_gated++ }
                         } else {
-                            $block->{$stat} = aggregate_number($stats->{$stat});
+                            $block->{ $statistic_name_by_key{$stat} } = aggregate_number($stats->{$stat});
                         }
                     }
                 }
@@ -15143,7 +15146,7 @@ my %csv_column_family = (
     'duration_p9999'    => 'percentile',
     'duration_p99999'   => 'percentile',
     # shape (unitless or scale-derived; emit at fixed shape decimals)
-    'duration_std_dev'  => 'shape',
+    'duration_stddev'   => 'shape',
     'duration_cv'       => 'shape',
     'duration_skewness' => 'shape',
     'duration_kurtosis' => 'shape',
@@ -21160,7 +21163,7 @@ sub normalize_data_for_output {
         push @output_columns, qw( bytes_occurrences bytes_min bytes_mean bytes_max );
     }
     if (stats_csv_duration_columns_active()) {
-        push @output_columns, map { "duration_$_" } @duration_family_stats;
+        push @output_columns, map { "duration_$statistic_name_by_key{$_}" } @duration_family_stats;
     }
 
     foreach my $bucket (keys %log_occurrences) {
@@ -22039,11 +22042,11 @@ sub print_bar_graph {
             }
 
             if( stats_csv_duration_columns_active() ) {
-                # The storage keys are the bare statistic names; the CSV column names
-                # take the duration_ prefix (#432), so the value is looked up by the
-                # bare name and formatted under the prefixed one.
+                # The value is looked up by its stored key and formatted under its
+                # column name: the duration_ prefix (#432) and the statistic's
+                # typed name.
                 foreach my $stat ( @duration_family_stats ) {
-                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, "duration_${stat}" );
+                    push @csv_data, format_csv_value( $log_stats{$bucket}{$stat}, "duration_$statistic_name_by_key{$stat}" );
                 }
             }
 
@@ -23584,7 +23587,7 @@ sub print_message_summary {
                             format_csv_value($min,               'duration_min'),
                             format_csv_value($mean,              'duration_mean'),
                             format_csv_value($max,               'duration_max'),
-                            format_csv_value($std_dev,           'duration_std_dev'),
+                            format_csv_value($std_dev,           'duration_stddev'),
                             format_csv_value($p1,                'duration_p1'),
                             format_csv_value($p5,                'duration_p5'),
                             format_csv_value($p10,               'duration_p10'),
@@ -24128,8 +24131,8 @@ sub pipeline_render {
         my $csv_file_name = build_csv_filename('STATS');
         open $csv_fh, '>', $csv_file_name or die "Could not open file '$csv_file_name': $!";            # Open a file for writing, then print the header/column names
         my @csv_columns = map {
-            if    ($_ eq 'err-rate') { "err-rate$rate_csv_suffix{$rate_unit}" }
-            elsif ($_ eq 'msg-rate') { "msg-rate$rate_csv_suffix{$rate_unit}" }
+            if    ($_ eq 'err-rate') { "err_rate$rate_csv_suffix{$rate_unit}" }
+            elsif ($_ eq 'msg-rate') { "msg_rate$rate_csv_suffix{$rate_unit}" }
             else  { $_ }
         } @output_columns;
         $csv->print($csv_fh, [ @csv_columns ] );
@@ -24158,7 +24161,7 @@ sub pipeline_render {
         # convention (#432). The duration statistics take the duration_ prefix here
         # even though the CLI keeps their bare spellings, so every column on this
         # surface names its metric.
-        $csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_std_dev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
+        $csv->print($csv_fh, [qw(category message occurrences successes failures conflicts bytes_occurrences bytes_min bytes_mean bytes_max bytes bytes_nice count_occurrences count_min count_mean count_max count_sum duration_min duration_mean duration_max duration_stddev duration_p1 duration_p5 duration_p10 duration_p25 duration_p50 duration_p75 duration_iqr duration_p90 duration_p95 duration_p99 duration_p999 duration_p9999 duration_p99999 duration_cv duration_skewness duration_kurtosis duration_bimodality_coef duration duration_nice impact), @udm_csv_headers]);
     }
 
     print_message_summary() if $capture_messages && ( !section_hidden('messages') || $write_messages_to_csv );									                    # Print and write message summaries

@@ -1080,14 +1080,16 @@ my %L3_COLUMN_SET = map { $_ => 1 } @L3_COLUMNS;
 
 # The oracle keys its output by the bare statistic name, because it computes a
 # statistic and knows nothing about CSV column naming. ltl's CSV columns carry the
-# duration_ prefix (#432). The mapping lives here rather than in the oracle so the
-# reference implementation stays a statement about statistics, not about ltl's
-# output format.
+# duration_ prefix (#432) and the statistic's typed name, which for the standard
+# deviation is stddev (features/618-csv-column-declaration.md D5). The mapping
+# lives here rather than in the oracle so the reference implementation stays a
+# statement about statistics, not about ltl's output format.
 #
 # This must stay in step with the emitted header: the comparison loop skips any
 # column absent from the row, so a stale mapping does not fail — it silently
 # compares nothing. assert_l3_columns_present() below is the guard against that.
-sub l3_csv_column { return "duration_$_[0]" }
+my %L3_CSV_STATISTIC_NAME = ( std_dev => 'stddev' );
+sub l3_csv_column { return 'duration_' . ( $L3_CSV_STATISTIC_NAME{ $_[0] } // $_[0] ) }
 
 # Load an oracle JSON dump produced by calculate-reference.py.
 sub load_oracle {
