@@ -15186,6 +15186,8 @@ sub resolve_csv_column_family {
     return 'rate' if $column =~ /^(err|msg)-rate(_(sec|min|hr|day))?$/;
     return 'rate' if $column =~ /^udm_(.+)$/ && udm_config_by_name($1)
                   && resolve_value_kind( metric => $1 )->{kind} eq 'rate';
+    # A user-defined ratio is unitless, like the coefficient of variation.
+    return 'shape' if $column =~ /^udm_(.+)$/ && ( ( udm_config_by_name($1) // {} )->{aggregation} // '' ) eq 'ratio';
     # Log-level columns: matched against the configured log levels.
     return 'level' if grep { $_ eq $column } @log_levels;
     # UDM dynamic columns: <name>_<aggregate>; family follows the underlying

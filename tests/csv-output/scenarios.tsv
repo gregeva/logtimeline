@@ -35,3 +35,5 @@ gated-means-impact-discard	tests/fixtures/gated-means-application.txt	-bs 1440 -
 gated-means-bytes-mean-default	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-default.tsv
 gated-means-bytes-mean-full	tests/fixtures/gated-means-access.txt	-bs 1 -oe -n 20 -cp full	duration,bytes,percentile,dispersion,shape,level	expected/gated-means-bytes-mean-full.tsv
 udm-rate-cell	tests/fixtures/numeric-highlight-boundary.txt	-bs 1 -n 1 -ru s -udm urate::rate:count	duration,percentile,dispersion,shape,bytes,count,level,udm-rate	expected/udm-rate-cell.tsv
+# -bs 1440 -oe -n 1: the assertion reads the one day bucket's STATS ratio cell; ten lines carry the key over four distinct values
+udm-ratio-cell	tests/fixtures/udm-counting-tokens.txt	-bs 1440 -oe -n 1 -udm repeat::ratio:userId	duration,bytes,percentile,dispersion,shape,level	expected/udm-ratio-cell.tsv
