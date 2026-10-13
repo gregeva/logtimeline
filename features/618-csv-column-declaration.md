@@ -2,7 +2,7 @@
 
 ## Status
 
-**In progress, 2026-10-13.** Decisions D1 to D9 are locked. The audited
+**Gate passed, 2026-10-13** (on 2e592f7). Decisions D1 to D9 are locked. The audited
 current state (§ 3) was read on `release/0.19.0` at 5c03f24. No code has
 changed. The acceptance criteria (§ 5) are put to the architect before step 1
 of the plan (§ 6).
@@ -376,3 +376,15 @@ The diff touches executable lines of `ltl`, so the full harness suite and a
 before/after benchmark (`single-day-access-log-standard`, `before` captured on
 the base commit) run on the commit being merged
 (`docs/process/workflow.md` § 3).
+
+**Run 2026-10-13 on 2e592f7** (version `0.19.0`): all 49 harnesses exit 0,
+none with a runtime warning, each summary showing its assertions ran.
+Benchmarks, before on the base commit (420e598, from the release worktree)
+and after on 2e592f7 (from the issue worktree), one run each:
+`single-day-access-log-standard` total 6.9 s → 6.2 s, peak RSS 98.2 →
+97.8 MB (no CSV written; the time difference is machine variance);
+`single-day-access-log-heatmap-histogram-export` (`-o`, the case that
+writes the CSVs and the export) total 8.3 s → 8.1 s, peak RSS 68.0 →
+67.7 MB. No metric worse by more than 1%. The export case runs with
+`-n 0`, so it writes no MESSAGES rows; the MESSAGES file holds at most the
+`-n` rows per grouping, so its writer's cost is bounded by `-n`.
