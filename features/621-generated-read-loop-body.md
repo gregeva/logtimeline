@@ -172,9 +172,11 @@ Locked by the architect on 2026-10-13.
   messages and profiler lines at the same source line (§ 5). Its `--help` and
   `docs/usage.md` text says what the user sees (the standard path, slower on
   large files, for reproducing a problem or profiling), not how it works.
-- **D2** (decided by the architect 2026-10-13, under #721). A hidden option
-  sets the size threshold above which a file takes the generated body; 0
-  sends every file to it. The harnesses' fixtures are under the threshold,
+- **D2** (locked by the architect 2026-10-13, under #721). The hidden option
+  `--generated-loop-threshold=N` sets the size threshold, in bytes, above
+  which a file takes the generated body: 2,097,152 (2 MB) when not given, and
+  0 sends every file to it. `-D, --debug` overrides it: every file takes the
+  inline loop. The harnesses' fixtures are under the threshold,
   so without it the suite would reach only the inline loop; with it, every
   harness can compare both paths on its own fixtures, and a test can exercise
   the threshold's edge. It takes the shape of the existing hidden
@@ -248,7 +250,7 @@ Branch `721-generated-read-loop`, cut from `release/0.19.0` c039396. The
 | One source | The inline loop stays the only source; the generated body is written from it at run start, and no block is written twice. | #721 body; § 5 |
 | Path choice | Made per file, by size: the generated body above 2 MB, the inline loop below. | § 6 |
 | `-D, --debug` | Every file takes the inline path, whatever its size; a `--help` row and a `docs/usage.md` row describe what the user sees. | § 7 D1 |
-| Hidden threshold option | Sets the size threshold; 0 sends every file to the generated body. | § 7 D2 |
+| Hidden threshold option | `--generated-loop-threshold=N`, N in bytes, default 2,097,152; 0 sends every file to the generated body. | § 7 D2 |
 | Generated-code pattern | A fifth consumption site, recorded in `docs/architecture-patterns.md` in the same commit; the generated code is validated before use. | `docs/architecture-patterns.md` § Generated code compiled from source strings |
 | Harnesses | Every harness that reads the loop's output runs both paths and asserts identity. | § 2 |
 | `-mem` and `-V` | `format_scan_subs` stays the memory growth around the format scan-sub compiles only; the generated body's compile does not enter it. | `features/log-format-registry.md` D62 |
