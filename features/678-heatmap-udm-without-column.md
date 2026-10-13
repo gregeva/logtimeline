@@ -1,0 +1,90 @@
+# A heatmap of a user-defined metric that has no timeline column (Issues #678 and #713)
+
+## Status
+
+**Planning, 2026-10-13.** D1 is locked. The current state (§ 3) was read on
+`release/0.19.0` at b736e7b. No code has changed.
+
+- **Issues:** #678 (a heatmap of a user-defined time metric whose every value
+  is zero ends the run) and #713 (a heatmap of a user-defined metric that
+  captured no value ends the run), planned together on one branch and one PR
+  that closes both (architect, 2026-10-13): one cause, one draw.
+- **Parent:** #622 (the refactoring the redundant-logic audit dispatched); both
+  are sub-issues.
+- **Found during:** #617 (one width-to-format rule,
+  `features/617-width-to-format-rule.md` § Delivery progress, findings from
+  drop 1) for #678; #614 (operand settlement) for #713.
+
+---
+
+## 1. Requirement (issue bodies)
+
+**#678.** `-hm` on a user-defined time metric whose every captured value is
+zero stops the run while the heatmap header is drawn. *Done when:* a run whose
+heatmap metric is all zeros completes without a runtime error.
+
+**#713.** `-hm` on a user-defined metric that captures no value at all in the
+run stops the run while the heatmap is drawn, exit status 255. *Done when:* a
+run whose heatmap metric captured no value completes without a runtime error.
+
+## 2. Locked decisions
+
+- **D1 — A user-defined metric's colour is fixed by its position among the
+  `-udm` specs, for its timeline column and its heatmap alike.** The colour no
+  longer depends on whether any other user-defined metric captured data, and a
+  heatmap has a colour whether or not its metric has a timeline column. This
+  keeps the record's rule that a user-defined heatmap "uses color gradient
+  matching the metric's bar graph column" (`features/user-defined-metrics.md`,
+  heatmap support) and makes it hold when the column is absent. User-observable:
+  in a run where an earlier user-defined metric captured nothing, a later
+  metric's timeline column keeps its own colour instead of taking the empty
+  one's. *Architect, 2026-10-13.*
+
+## 3. Current state (read 2026-10-13, `release/0.19.0` at b736e7b)
+
+**Reproduction**, each run captured with `-V`:
+
+| Input | Exit | `-V heatmap-palette` `color_name` |
+|---|---|---|
+| Two application-log lines in the ThingWorx shape carrying `elapsed=0`; `-ni -bs 1 -n 0 -udm 'elapsed:s:max' -hm elapsed` (#678) | 255, `Can't use an undefined value as an ARRAY reference` in `print_heatmap_row` | `-` |
+| The same two lines carrying `elapsed=5` | 0 | `magenta` |
+| `tests/fixtures/tomcat-access-single-sample-keys.txt`, which carries no `x`; `-bs 1440 -oe -udm x::max -hm x` (#713) | 255, the same error, after the `no metrics produced from matching lines` notice | — |
+| The all-zero lines with `-hg elapsed` | 0 | — |
+| The no-value fixture with `-hg x` | 0 | — |
+| The `elapsed=0` lines (no durations) with `-hm duration` | 0 | `yellow` |
+
+Both failing runs also print two `Use of uninitialized value $color_key`
+warnings, one pair from `emit_heatmap_palette_verbose` under `-V` and one from
+`print_heatmap_row`.
+
+**The cause.** In the layout pass, a user-defined metric's timeline column is
+added only when its largest bucket total is above zero:
+
+```perl
+for my $config (@udm_configs) {
+    my $key = "udm_$config->{name}";
+    if (defined $max_total{$key} && $max_total{$key} > 0) {
+        add_dynamic_column(\@column_layout, $key, $config->{name}, $udm_color_idx++,
+```
+
+An all-zero metric and a metric that captured nothing both fail the test, so
+no column is added. The heatmap holds no colour of its own for a user-defined
+metric; it copies the column's:
+
+```perl
+my ($col_entry) = grep { $_->{id} eq $udm_key } @column_layout;
+if ($col_entry && $col_entry->{color}) {
+    $heatmap_metric_map{$heatmap_metric}{color} = $col_entry->{color}{name};
+```
+
+With no column, `$heatmap_metric_map{...}{color}` stays undefined and
+`print_heatmap_row` dereferences the gradient of an undefined entry. The
+histogram takes its colours from the column the same way, but its readers fall
+back when they are missing, so `-hg` survives both inputs. The built-in
+duration's column is always in the layout, so its heatmap always has a colour.
+
+**The colour slots.** `add_dynamic_column` takes
+`$column_colors[$color_index % scalar(@column_colors)]`. The user-defined
+metrics' first index is `3`, plus one when the sessions column is added, plus
+one when the users column is added, plus the number of thread-pool columns;
+`$udm_color_idx` then advances only for a metric whose column was added.
