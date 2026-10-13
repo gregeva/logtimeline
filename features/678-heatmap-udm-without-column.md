@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planning, 2026-10-13.** D1 and D2 are locked. The current state (§ 3) was read on
+**Planning, 2026-10-13.** D1 to D3 are locked. The current state (§ 3) was read on
 `release/0.19.0` at b736e7b. No code has changed.
 
 - **Issues:** #678 (a heatmap of a user-defined time metric whose every value
@@ -47,6 +47,16 @@ run whose heatmap metric captured no value completes without a runtime error.
   read the same slot. The same `-udm` spec can still take a different colour
   on a log with sessions or users than on one without, as it does today.
   *Architect, 2026-10-13.*
+- **D3 — A user-defined heatmap with nothing to grade renders as the built-in
+  duration's does.** When every captured value is zero (#678) and when nothing
+  was captured (#713), the heatmap shows its header and footer at 0 in the
+  metric's own unit, empty rows, in the colour D1 gives it, and the run exits
+  0. The built-in reference, on two application-log lines carrying no
+  duration with `-hm duration`: header `0ms … heatmap [duration] … 0ms`,
+  every row empty, footer ticks `0ms`. For #713 the existing `no metrics
+  produced from matching lines` notice says why the heatmap is empty; no
+  second notice is added and the column is not dropped. *Architect,
+  2026-10-13.*
 
 ## 3. Current state (read 2026-10-13, `release/0.19.0` at b736e7b)
 
