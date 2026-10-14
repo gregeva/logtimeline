@@ -1227,7 +1227,7 @@ use constant {
 my @message_truncation_positions = qw(left center right);
 my $message_truncation_list      = join(', ', @message_truncation_positions);   # for the -mt usage error and help row
 my $message_truncation           = 'right';
-my $message_cut_not_at_end       = 0;       # left or center: the key site and the messages table cut a message's start or middle
+my $message_cut_marked           = 0;       # left or center: a cut key carries the ellipsis, which grouping keeps literal
 use constant MESSAGE_ELLIPSIS    => "\xe2\x80\xa6";   # the cut marker, one column wide, three bytes in the key
 
 # Consolidation configuration
@@ -13020,7 +13020,7 @@ sub cut_markers_match {
 # Derive canonical form: keep positions retain chars, variable regions become *
 sub derive_canonical {
     my ($reference_string, $mask) = @_;
-    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_not_at_end;
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_marked;
     my @chars = split //, $reference_string;
     my $result = '';
     my $in_variable = 0;
@@ -13050,7 +13050,7 @@ sub derive_canonical {
 # Derive compiled regex: keep positions become \Q..\E literals, variable regions become .+?
 sub derive_regex {
     my ($reference_string, $mask) = @_;
-    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_not_at_end;
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_marked;
     my @chars = split //, $reference_string;
     my $pattern = '^';
     my $literal_buf = '';
@@ -13591,7 +13591,7 @@ sub try_consolidation_merge_into_existing {
             my $merged_canonical = derive_canonical($entry->{canonical}, $mask);
             my $merged_regex = derive_regex($entry->{canonical}, $mask);
 
-            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex) && ( !$message_cut_not_at_end || cut_markers_match($entry->{canonical}, $new_canonical) );
+            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex) && ( !$message_cut_marked || cut_markers_match($entry->{canonical}, $new_canonical) );
 
             merge_consolidation_stats($existing, $new_cluster);
             $existing->{match_count} += $new_cluster->{match_count};
@@ -13725,7 +13725,7 @@ sub run_consolidation_pass {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_not_at_end || cut_markers_match($msg_a, $msg_b) );
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_marked || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$key} = 1;
             $consumed{$match->{key}} = 1;
@@ -13863,7 +13863,7 @@ sub process_final_pass_window {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_not_at_end || cut_markers_match($msg_a, $msg_b) );
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_marked || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$log_key} = 1;
             $consumed{$match->{key}} = 1;
@@ -14704,8 +14704,9 @@ sub shorten_filename {
     return substr($filename, 0, $left_len) . $ellipsis . substr($filename, -$right_len);
 }
 
-# Cut a message to $room at its start (left) or its middle (center), marking
-# the cut with $marker, whose length counts toward $room. A center cut keeps
+# Cut a message to $room at its end (right, unmarked), its start (left) or its
+# middle (center), marking a left or center cut with $marker, whose length
+# counts toward $room. A center cut keeps
 # equal parts, the odd character at the end. With $split, a center cut of text
 # that already carries the marker splits it there (the one nearest the centre),
 # keeps the start's beginning and the end's ending, any room one side cannot
@@ -14714,6 +14715,7 @@ sub shorten_filename {
 sub cut_message_text {
     my ($text, $room, $position, $marker, $split) = @_;
     return $text if length($text) <= $room;
+    return substr($text, 0, $room) if $position eq 'right';
     my $keep = $room - length($marker);
     return substr($text, 0, $room) if $keep < 1;
     return $marker . substr($text, -$keep) if $position eq 'left';
@@ -14741,9 +14743,9 @@ sub message_text_width {
     return length($text) - $markers * (length(MESSAGE_ELLIPSIS) - 1);
 }
 
-# A message key fitted to the messages table's column under -mt left or
-# center: the leading bracketed attributes ([level] [thread] [object]) kept,
-# the message after them cut at its start or middle to the columns left. The
+# A message key wider than the messages table's column, fitted to it: the
+# leading bracketed attributes ([level] [thread] [object]) kept, the message
+# after them cut at the -mt position to the columns left. The
 # marker is handled as one character while cutting, so a column holds as many
 # characters as it is wide.
 sub fit_message_key_to_column {
@@ -16524,7 +16526,7 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid message truncation '$message_truncation'. Valid values: $message_truncation_list (or l, c, r)"); exit 1; }
             unless defined $position;
         $message_truncation = $position;
-        $message_cut_not_at_end = $position eq 'right' ? 0 : 1;
+        $message_cut_marked = $position eq 'right' ? 0 : 1;
     }
 
     # Rate unit option validation (Issue #122): any ladder spelling
@@ -18193,28 +18195,17 @@ sub read_and_process_logs {
                     my $truncated_thread = defined($threadname) ? substr($threadname, 0, MESSAGE_KEY_THREAD_LENGTH) : undef;
                     my $truncated_object = defined($object) ? substr($object, length($object) > MESSAGE_KEY_OBJECT_LENGTH ? length($object)-MESSAGE_KEY_OBJECT_LENGTH : 0, MESSAGE_KEY_OBJECT_LENGTH) : undef;
 
-                    # the key is cut at the per-run cut (MESSAGE_KEY_CAP under -o or -g, else
-                    # the terminal width). Under -mt left or center the key is composed
-                    # whole and, only when it is longer than the cut, its message part is
-                    # cut at the start or the middle, the composed attributes kept.
-                    #@when $message_cut_not_at_end
-                    if( $message_cut_not_at_end ) {
-                        my $key_prefix = "[$log_level] " . ( defined($threadname) ? "[$truncated_thread] " : '' ) . ( defined($object) ? "[$truncated_object] " : '' );
-                        $log_key = $key_prefix . $message;
-                        if( length($log_key) > $max_log_message_length ) {
-                            my $room = $max_log_message_length - length($key_prefix);
-                            $log_key = $room > length(MESSAGE_ELLIPSIS)
-                                ? $key_prefix . cut_message_text( $message, $room, $message_truncation, MESSAGE_ELLIPSIS, 0 )
-                                : substr( $log_key, 0, $max_log_message_length );
-                        }
-                    } elsif( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
-                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, $max_log_message_length);
-                    } elsif( defined( $object ) ) {
-                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, $max_log_message_length);
-                    } elsif( defined( $threadname ) ) {
-                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, $max_log_message_length);
-                    } else {
-                        $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
+                    # The key: the composed attributes ([level] [thread] [object], each
+                    # where the format supplies it), then the message. Only a key longer
+                    # than the per-run cut (MESSAGE_KEY_CAP under -o or -g, else the
+                    # terminal width) is cut, its message part at the -mt position.
+                    my $key_prefix = "[$log_level] " . ( defined($threadname) ? "[$truncated_thread] " : '' ) . ( defined($object) ? "[$truncated_object] " : '' );
+                    $log_key = $key_prefix . $message;
+                    if( length($log_key) > $max_log_message_length ) {
+                        my $room = $max_log_message_length - length($key_prefix);
+                        $log_key = $room > length(MESSAGE_ELLIPSIS)
+                            ? $key_prefix . cut_message_text( $message, $room, $message_truncation, MESSAGE_ELLIPSIS, 0 )
+                            : substr( $log_key, 0, $max_log_message_length );
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
@@ -23957,16 +23948,13 @@ sub print_message_summary {
                 my $row = $cls_state ? $colors{ $classification_state_colour{$cls_state} } . $marker . $colors{'NC'} : $marker;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    # Under -mt left or center a key wider than the column is cut at its
-                    # start or middle and padded by the columns it occupies, each
-                    # ellipsis one; any other key is printed as it always was.
+                    # Only a key longer than the column is cut, at the -mt position, and
+                    # padded by the columns it occupies, each ellipsis one.
+                    my $message = $key;
                     my $message_pad = $col_width{1};
-                    my $message;
-                    if ( $message_cut_not_at_end && length($key) > $col_width{1} && message_text_width($key) > $col_width{1} ) {
+                    if ( length($key) > $col_width{1} ) {
                         $message = fit_message_key_to_column( $key, $col_width{1} );
                         $message_pad += length($message) - message_text_width($message);
-                    } else {
-                        $message = substr( $key, 0, $col_width{1} );                        # truncate message for printing if too long to fit in column
                     }
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
                     my $min = $log_messages{$grouping}{$key}{min};
