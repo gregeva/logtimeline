@@ -17,7 +17,7 @@
 # three on failure (tests/HARNESS-DESIGN.md section Self-documenting
 # assertions).
 #
-# Usage: ./tests/validate-value-display.sh [--scenario NAME] [--list]
+# Usage: ./tests/validate-value-display.sh [--scenario NAME]... [--list]
 
 set -euo pipefail
 

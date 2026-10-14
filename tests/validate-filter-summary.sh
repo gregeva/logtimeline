@@ -42,11 +42,6 @@ if [[ ! -x "$LTL" ]]; then
     exit 1
 fi
 
-ONLY_SCENARIO=""
-if [[ "${1:-}" == "--scenario" ]]; then
-    ONLY_SCENARIO="${2:?--scenario needs a name}"
-fi
-
 pass=0
 fail=0
 failures=()
@@ -271,8 +266,8 @@ assert_funnel_identities() {
 cause_scenario() {
     local name="$1" fixture="$2" key="$3" expected="$4" asserts="$5"
     shift 5
+    scenario_wanted "$name" || return 0
     current_scenario="$name"
-    [[ -n "$ONLY_SCENARIO" && "$ONLY_SCENARIO" != "$name" ]] && return
     local out
     out=$(run_sections "$fixture" "$@")
     assert_line "$out" pattern "^${key}: ${expected}\$" \
@@ -282,6 +277,23 @@ cause_scenario() {
     assert_funnel_identities "$out"
 }
 
+# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
+scenario_register unmatched \
+                  time-window-absolute \
+                  time-window-time-of-day \
+                  profile-fold \
+                  content-filter \
+                  outcome-filter \
+                  numeric-threshold \
+                  vocabulary-rejection \
+                  csv-unparseable-row \
+                  highlight \
+                  combined-causes \
+                  impossible-date \
+                  time-window-forms \
+                  summary-table-unchanged
+scenario_parse_args "$@"
+
 echo "Validating -V filter-summary line accounting (Issue #503)"
 echo ""
 
@@ -289,7 +301,7 @@ echo ""
 cause_scenario unmatched "$FIXTURES/message-control-characters-unmatched.txt" \
     lines_unmatched 1 \
     'The space-led continuation line no format recognises is the one unmatched line; the two matched lines are included'
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == unmatched ]]; then
+if scenario_wanted unmatched; then
     out="$TMP_DIR/unmatched.out"
     assert_line "$out" pattern '^lines_excluded: 0$' \
         asserts 'With no criterion in force nothing is excluded: unmatched is not excluded' \
@@ -316,7 +328,7 @@ cause_scenario profile-fold "$FIXTURES/profile-weekend-fold.txt" \
     excluded_profile 2 \
     'The two weekend lines fold to no day under -pr workday and are counted as profile drops' \
     -pr workday
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == profile-fold ]]; then
+if scenario_wanted profile-fold; then
     out="$TMP_DIR/profile-fold.out"
     assert_line "$out" pattern '^samples_dropped: 2$' \
         asserts 'excluded_profile reads the same counter -V profile prints as samples_dropped' \
@@ -341,7 +353,7 @@ cause_scenario numeric-threshold "$FIXTURES/numeric-highlight-boundary.txt" \
     excluded_numeric 15 \
     '-dmin 100 -dmax 200 keeps at-min, inside, at-max and cross-both; the other 15 lines, the one with no duration among them, are numeric drops' \
     -dmin 100 -dmax 200
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == numeric-threshold ]]; then
+if scenario_wanted numeric-threshold; then
     out="$TMP_DIR/numeric-threshold.out"
     assert_line "$out" pattern '^lines_included: 4$' \
         asserts 'Exactly the four in-range lines survive' \
@@ -354,16 +366,8 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
     'A matched line whose level is not in the log-level vocabulary is dropped at the category gate and counted as other'
 
 # --- unmatched: a CSV row whose timestamp cannot be placed, beside the CSV metadata line (D22) ---
-# Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
-scenario_register csv-unparseable-row \
-                  impossible-date \
-                  time-window-forms \
-                  summary-table-unchanged
-scenario_parse_args "$@"
-
 if scenario_wanted csv-unparseable-row; then
-current_scenario="csv-unparseable-row"
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    current_scenario="csv-unparseable-row"
     printf 'timestamp,latency\n2026-06-01 10:00:05,12\nnot-a-timestamp,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/bad-row.csv"
     out=$(run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean)
     assert_line "$out" pattern '^excluded_other: 0$' \
@@ -385,7 +389,7 @@ cause_scenario highlight "$FIXTURES/http-status-families.txt" \
     lines_highlighted 3 \
     'A highlight marks the three /store/orders lines without excluding anything' \
     -h orders
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == highlight ]]; then
+if scenario_wanted highlight; then
     out="$TMP_DIR/highlight.out"
     assert_line "$out" pattern '^lines_excluded: 0$' \
         asserts 'A highlight criterion drops no line' \
@@ -399,7 +403,6 @@ cause_scenario combined-causes "$FIXTURES/http-status-families.txt" \
     -e catalog -ef
 
 # --- the run summary table is unchanged: no accounting row is added ---
-fi
 
 # --- unmatched: a line whose date cannot exist, on every per-line arm ---
 # The scanned ISO arm (month 13 and 30 February), the Apache common log date
@@ -407,8 +410,7 @@ fi
 # 30 February. Each such line is read and not matched; the run continues and
 # says so once per format after the read.
 if scenario_wanted impossible-date; then
-current_scenario="impossible-date"
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    current_scenario="impossible-date"
     IMPOSSIBLE_CONTRACT='features/611-timestamp-acceptance.md C3, C4, C5 (a line whose date cannot exist is not matched, counted, and noted once per run per format); AC1, AC2, AC4'
     out=$(run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt")
     assert_line "$out" pattern '^lines_unmatched_impossible_date: 4$' \
@@ -453,15 +455,13 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
 fi
-fi
 
 # --- time window: the accepted forms of a bound, and a bound in none of them ---
 # The same 360 lines precede 12:00 on the fixture day whichever separator the
 # bound is written with; a value in no accepted form, or naming a date that
 # cannot exist, is refused before any file is read.
 if scenario_wanted time-window-forms; then
-current_scenario="time-window-forms"
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    current_scenario="time-window-forms"
     FORMS_CONTRACT='features/611-timestamp-acceptance.md C6, C7 (one parser for -st and -et, either separator, a usage error naming the forms); AC6, AC7'
     for bound in "2025-05-07T12:00:00" "2025-05-07T12:00" "2025-05-07T11:59:59.999"; do
         out=$(current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound")
@@ -496,11 +496,9 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
             contract "$FORMS_CONTRACT"
     done
 fi
-fi
 
 if scenario_wanted summary-table-unchanged; then
-current_scenario="summary-table-unchanged"
-if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
+    current_scenario="summary-table-unchanged"
     out="$TMP_DIR/summary.out"
     set +e
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -e catalog "$FIXTURES/http-status-families.txt" > "$out" 2>"$out.stderr"
@@ -522,7 +520,6 @@ if [[ -z "$ONLY_SCENARIO" || "$ONLY_SCENARIO" == "$current_scenario" ]]; then
         asserts 'No excluded or unmatched row joins the run summary; the accounting lives on -V filter-summary and in the aggregate export' \
         produced_by 'print_summary_table() in ltl' \
         contract 'features/503-yaml-aggregate-export.md D12 - the summary stays exactly as it is'
-fi
 fi
 
 

@@ -27,7 +27,7 @@
 # Each assertion records asserts / produced_by / contract, surfaced on failure
 # (tests/HARNESS-DESIGN.md § Self-documenting assertions).
 #
-# Usage: ./tests/validate-section-layout.sh [--scenario NAME] [--list]
+# Usage: ./tests/validate-section-layout.sh [--scenario NAME]... [--list]
 
 set -euo pipefail
 

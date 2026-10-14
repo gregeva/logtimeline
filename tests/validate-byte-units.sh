@@ -12,7 +12,7 @@
 # owning -V section: the criteria read the STATS CSV cells a run writes, so
 # the harness is named for the feature, as validate-bucket-size-units.sh is.
 #
-# Usage: ./tests/validate-byte-units.sh [--scenario NAME | --list]
+# Usage: ./tests/validate-byte-units.sh [--scenario NAME... | --list]
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-bucket-size-units.sh.

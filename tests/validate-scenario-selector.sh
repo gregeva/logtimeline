@@ -2,10 +2,10 @@
 # validate-scenario-selector.sh — the scenario selector contract
 # (tests/HARNESS-DESIGN.md § The scenario selector, issue #545).
 #
-# Asserts the contract every harness in the suite depends on: a scenario name
-# the harness knows runs that scenario and no other; a name it does not know,
-# and an argument it does not parse, are refused with a non-zero exit and no
-# assertion run.
+# Asserts the contract every harness in the suite depends on: the scenario
+# names the harness knows, given once or several times, run those scenarios
+# and no other; a name it does not know, and an argument it does not parse,
+# are refused with a non-zero exit and no assertion run.
 #
 # Two subjects, because the contract has two halves:
 #
@@ -22,7 +22,7 @@
 #      a guard applied to most harnesses leaves the next one to be found by an
 #      investigation rather than by a test.
 #
-# Usage: ./tests/validate-scenario-selector.sh [--scenario NAME] [--list]
+# Usage: ./tests/validate-scenario-selector.sh [--scenario NAME]... [--list]
 
 set -euo pipefail
 
@@ -50,6 +50,7 @@ failures=()
 current_scenario=""
 
 CONTRACT='tests/HARNESS-DESIGN.md section The scenario selector - a selector that matches nothing is an unasserted run; an unknown scenario name and an unknown argument are refused with a non-zero exit and no assertion run (issue #545)'
+SEVERAL_CONTRACT='tests/HARNESS-DESIGN.md section The scenario selector - --scenario given more than once runs each named scenario, in registration order, and no other; features/674-scenario-selector-several-names.md D1-D4'
 
 fail_with() {   # label, asserts, produced_by, contract, detail
     echo "  FAIL  $current_scenario :: $1"
@@ -139,6 +140,71 @@ scenario_selects_one() {
         contract    "$CONTRACT"
 }
 
+scenario_selects_several() {
+    current_scenario="selects-several"
+    echo "[$current_scenario]"
+
+    run_probe "$PROBE" --scenario alpha --scenario gamma
+    assert_equal "two names exit zero" "$probe_rc" 0 \
+        asserts     'Naming several scenarios the harness knows is not an error' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT"
+    assert_equal "each named scenario runs, and no other" "$(echo "$probe_out" | grep '^RAN:' | paste -sd' ' -)" "RAN:alpha RAN:gamma" \
+        asserts     'Every name given runs; a second --scenario adds to the selection rather than replacing the first' \
+        produced_by 'scenario_selected() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D1)"
+
+    run_probe "$PROBE" --scenario gamma --scenario alpha
+    assert_equal "they run in registration order" "$(echo "$probe_out" | grep '^RAN:' | paste -sd' ' -)" "RAN:alpha RAN:gamma" \
+        asserts     'The selection runs in the order the harness registers it, whatever order it was named in, so a scenario producing a capture precedes the one reading it' \
+        produced_by 'scenario_selected() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D2)"
+
+    run_probe "$PROBE" --scenario beta --scenario beta
+    assert_equal "a name given twice runs once" "$(echo "$probe_out" | grep '^RAN:' | paste -sd' ' -)" "RAN:beta" \
+        asserts     'Repeating a name does not run its scenario twice' \
+        produced_by 'scenario_selected() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D3)"
+
+    run_probe "$PROBE" --scenario=alpha --scenario gamma
+    assert_equal "the two spellings combine" "$(echo "$probe_out" | grep '^RAN:' | paste -sd' ' -)" "RAN:alpha RAN:gamma" \
+        asserts     '--scenario=NAME and --scenario NAME add to the same selection' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D1)"
+}
+
+scenario_inline_gated_pair() {
+    current_scenario="inline-gated-pair"
+    echo "[$current_scenario]"
+
+    # The shape of a harness that gates blocks inline, where the second
+    # scenario reads a capture the first one writes. Naming both runs the
+    # pair; naming the reader alone leaves it without its input.
+    local probe="$TMP_DIR/probe-inline.sh"
+    {
+        echo '#!/usr/bin/env bash'
+        echo 'set -euo pipefail'
+        echo "source '$LIB'"
+        echo 'scenario_register produce read unrelated'
+        echo 'scenario_parse_args "$@"'
+        echo 'WORK=$(mktemp -d); trap '"'"'rm -rf "$WORK"'"'"' EXIT'
+        echo 'if scenario_wanted produce; then echo captured > "$WORK/capture"; echo "RAN:produce"; fi'
+        echo 'if scenario_wanted read; then echo "RAN:read"; [[ -f "$WORK/capture" ]] && echo "READ:ok" || echo "READ:missing"; fi'
+        echo 'if scenario_wanted unrelated; then echo "RAN:unrelated"; fi'
+    } > "$probe"
+    chmod +x "$probe"
+
+    run_probe "$probe" --scenario read --scenario produce
+    assert_equal "the producer and its reader both run, and nothing else" "$(echo "$probe_out" | grep '^RAN:' | paste -sd' ' -)" "RAN:produce RAN:read" \
+        asserts     'Inline gates honour every selected name' \
+        produced_by 'scenario_wanted() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D1, D2)"
+    assert_equal "the reader finds the producer's capture" "$(echo "$probe_out" | grep '^READ:')" "READ:ok" \
+        asserts     'A scenario reading what another writes is run by naming both, without running the whole harness' \
+        produced_by 'scenario_wanted() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT (D1, D2)"
+}
+
 scenario_bare_run_is_every_scenario() {
     current_scenario="bare-run-is-every-scenario"
     echo "[$current_scenario]"
@@ -180,6 +246,23 @@ scenario_unknown_name_refused() {
         fail_with "the diagnostic lists the scenarios that do exist" \
             'The error prints the registered scenario names, so the operator can correct the selector without reading the harness' \
             'scenario_usage() in tests/lib/scenario-select.sh' "$CONTRACT" "$probe_out"
+    fi
+
+    run_probe "$PROBE" --scenario alpha --scenario no-such-scenario
+    assert_equal "an unknown name among known ones is refused" "$probe_rc" 2 \
+        asserts     'One unknown name refuses the whole selection rather than running the names that are known' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh (membership check)' \
+        contract    "$SEVERAL_CONTRACT (D4)"
+    assert_equal "and nothing runs" "$(echo "$probe_out" | grep -c '^RAN:')" 0 \
+        asserts     'The refusal comes before any scenario runs' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh (membership check)' \
+        contract    "$SEVERAL_CONTRACT (D4)"
+    if echo "$probe_out" | grep -q "unknown scenario 'no-such-scenario'"; then
+        pass_with "the diagnostic names the unknown one among several"
+    else
+        fail_with "the diagnostic names the unknown one among several" \
+            'The error states which of the names given was not recognised' \
+            'scenario_parse_args() in tests/lib/scenario-select.sh' "$SEVERAL_CONTRACT (D4)" "$probe_out"
     fi
 }
 
@@ -383,41 +466,102 @@ scenario_named_scenario_runs() {
     fi
 }
 
+scenario_no_harness_parses_the_selector() {
+    current_scenario="no-harness-parses-the-selector"
+    echo "[$current_scenario]"
+
+    # A harness reads the selection through scenario_wanted and
+    # scenario_selected only. One that parses --scenario itself, or reads the
+    # library's variables, keeps a second selection beside the library's and
+    # the two drift: one name of several, or a scenario the library never
+    # registered.
+    local h name code found="" checked=0
+    for h in "$SCRIPT_DIR"/validate-*.sh; do
+        name=$(basename "$h")
+        [[ "$name" == "$(basename "$0")" ]] && continue
+        checked=$((checked + 1))
+        # Capture, then match: `grep | grep -q` under pipefail reports the
+        # first grep's SIGPIPE, not the match (HARNESS-DESIGN.md Trap 1).
+        code=$(grep -vE '^[[:space:]]*#' "$h" || true)
+        if printf '%s\n' "$code" \
+             | grep -E 'SCENARIO_(SELECTED|ONLY|REGISTRY)\b|"--scenario"|(^|[[:space:]])--scenario(=\*)?\)' > /dev/null; then
+            found="$found $name"
+        fi
+    done
+
+    if [[ "$checked" -lt 2 ]]; then
+        fail_with "the check found harnesses to read" \
+            'The check reads the suite from disk; finding none means it is looking in the wrong place' \
+            'this harness (the validate-*.sh glob)' "$CONTRACT" "checked=$checked"
+        return 0
+    fi
+    assert_equal "no harness keeps a selection of its own" "$(printf '%s' "$found" | wc -w | tr -d ' ')" 0 \
+        asserts     'No harness parses --scenario or reads the selector library variables; the selection has one owner' \
+        produced_by 'each harness, against scenario_parse_args() in tests/lib/scenario-select.sh' \
+        contract    "$SEVERAL_CONTRACT"
+    if [[ -n "$found" ]]; then
+        echo "        harnesses: $found"
+    fi
+}
+
 scenario_every_harness_refuses() {
     current_scenario="every-harness-refuses"
     echo "[$current_scenario]"
 
-    local bad_name=0 bad_flag=0 no_listing=0 checked=0
-    local bad_name_list="" bad_flag_list="" no_listing_list=""
-    local h rc
+    local bad_name=0 bad_flag=0 no_listing=0 bad_mixed=0 ran_first=0 checked=0
+    local bad_name_list="" bad_flag_list="" no_listing_list="" bad_mixed_list="" ran_first_list=""
+    local h rc out listing first
+    # An assertion line in a run that was refused or only listed is the
+    # evidence that the harness ran work before reading its command line.
+    local assertion_re='(^|[^A-Za-z])(PASS|FAIL)([^A-Za-z]|$)'
 
     for h in "$SCRIPT_DIR"/validate-*.sh; do
         [[ "$(basename "$h")" == "$(basename "$0")" ]] && continue
         checked=$((checked + 1))
 
         set +e
-        "$h" --scenario definitely-not-a-registered-scenario >/dev/null 2>&1
+        out=$("$h" --scenario definitely-not-a-registered-scenario 2>&1)
         rc=$?
         set -e
         [[ "$rc" -eq 0 ]] && { bad_name=$((bad_name + 1)); bad_name_list="$bad_name_list $(basename "$h")"; }
+        printf '%s\n' "$out" | grep -E "$assertion_re" > /dev/null && { ran_first=$((ran_first + 1)); ran_first_list="$ran_first_list $(basename "$h"):unknown-name"; }
 
         set +e
-        "$h" --definitely-not-a-flag >/dev/null 2>&1
+        out=$("$h" --definitely-not-a-flag 2>&1)
         rc=$?
         set -e
         [[ "$rc" -eq 0 ]] && { bad_flag=$((bad_flag + 1)); bad_flag_list="$bad_flag_list $(basename "$h")"; }
+        printf '%s\n' "$out" | grep -E "$assertion_re" > /dev/null && { ran_first=$((ran_first + 1)); ran_first_list="$ran_first_list $(basename "$h"):unknown-flag"; }
 
         # Capture first, then match. `--list | grep -q` closes the pipe as
         # soon as it matches, and the harness still writing is killed by
         # SIGPIPE — so the pipeline's status reports the harness's death
         # rather than whether the listing was found (HARNESS-DESIGN.md
         # Trap 1: a harness never reads a status that is not the one it means).
-        local listing
         set +e
         listing=$("$h" --list 2>/dev/null)
         set -e
         if ! printf '%s\n' "$listing" | grep -q '^Scenarios:$'; then
             no_listing=$((no_listing + 1)); no_listing_list="$no_listing_list $(basename "$h")"
+        fi
+        printf '%s\n' "$listing" | grep -E "$assertion_re" > /dev/null && { ran_first=$((ran_first + 1)); ran_first_list="$ran_first_list $(basename "$h"):list"; }
+
+        # A known name beside an unknown one, in both orders. A harness that
+        # keeps one name of several — the first or the last — accepts one of
+        # the two orders; one that keeps every name refuses both.
+        first=$(printf '%s\n' "$listing" | sed -n '/^Scenarios:$/,$p' \
+                | sed -n 's/^  \([A-Za-z0-9][A-Za-z0-9:+._-]*\)$/\1/p' | head -1)
+        if [[ -n "$first" ]]; then
+            set +e
+            out=$("$h" --scenario "$first" --scenario definitely-not-a-registered-scenario 2>&1)
+            rc=$?
+            set -e
+            [[ "$rc" -eq 0 ]] && { bad_mixed=$((bad_mixed + 1)); bad_mixed_list="$bad_mixed_list $(basename "$h"):known-first"; }
+            set +e
+            out=$("$h" --scenario definitely-not-a-registered-scenario --scenario "$first" 2>&1)
+            rc=$?
+            set -e
+            [[ "$rc" -eq 0 ]] && { bad_mixed=$((bad_mixed + 1)); bad_mixed_list="$bad_mixed_list $(basename "$h"):unknown-first"; }
         fi
     done
 
@@ -445,6 +589,22 @@ scenario_every_harness_refuses() {
         echo "        harnesses:  $bad_flag_list"
     fi
 
+    assert_equal "none accepts an unknown name beside a known one" "$bad_mixed" 0 \
+        asserts     'Every harness keeps every --scenario it is given and refuses the selection when any name is unknown, in either order' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh, called by each harness' \
+        contract    "$SEVERAL_CONTRACT (D1, D4)"
+    if [[ -n "$bad_mixed_list" ]]; then
+        echo "        harnesses:  $bad_mixed_list"
+    fi
+
+    assert_equal "none runs an assertion before reading its command line" "$ran_first" 0 \
+        asserts     'A refusal and a listing report no assertion: the command line is read before any scenario runs, so what a run reports is what was named' \
+        produced_by 'scenario_parse_args() in tests/lib/scenario-select.sh, called by each harness before its first scenario' \
+        contract    "$CONTRACT"
+    if [[ -n "$ran_first_list" ]]; then
+        echo "        harnesses:  $ran_first_list"
+    fi
+
     assert_equal "every harness lists its scenarios" "$no_listing" 0 \
         asserts     'Every harness declares its scenarios under --list, so the names an operator may select are discoverable without reading the harness source' \
         produced_by 'scenario_usage() in tests/lib/scenario-select.sh, called by each harness' \
@@ -460,12 +620,15 @@ scenario_every_harness_refuses() {
 
 SCENARIO_USAGE_NOTE="  (the library's own contract, then the suite-wide sweep)"
 scenario_register selects-one \
+                  selects-several \
+                  inline-gated-pair \
                   bare-run-is-every-scenario \
                   unknown-name-refused \
                   unknown-flag-refused \
                   harness-keeps-its-own-flags \
                   duplicate-registration-refused \
                   named-scenario-runs \
+                  no-harness-parses-the-selector \
                   every-harness-refuses
 scenario_parse_args "$@"
 
@@ -476,12 +639,15 @@ echo ""
 while read -r _scenario; do
     case "$_scenario" in
         selects-one)                   scenario_selects_one ;;
+        selects-several)               scenario_selects_several ;;
+        inline-gated-pair)             scenario_inline_gated_pair ;;
         bare-run-is-every-scenario)    scenario_bare_run_is_every_scenario ;;
         unknown-name-refused)          scenario_unknown_name_refused ;;
         unknown-flag-refused)          scenario_unknown_flag_refused ;;
         harness-keeps-its-own-flags)   scenario_harness_keeps_its_own_flags ;;
         duplicate-registration-refused) scenario_duplicate_registration_refused ;;
         named-scenario-runs)           scenario_named_scenario_runs ;;
+        no-harness-parses-the-selector) scenario_no_harness_parses_the_selector ;;
         every-harness-refuses)         scenario_every_harness_refuses ;;
     esac
     echo ""

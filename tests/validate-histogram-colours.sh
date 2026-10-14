@@ -35,7 +35,7 @@
 # bucket, no empty ones; -n 1: the messages table is not read; -ni: the
 # developer's index is left alone; --terminal-width 160 pins the layout.
 #
-# Usage: ./tests/validate-histogram-colours.sh [--scenario NAME | --list]
+# Usage: ./tests/validate-histogram-colours.sh [--scenario NAME... | --list]
 
 set -euo pipefail
 
