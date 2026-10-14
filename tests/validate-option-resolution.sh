@@ -15,7 +15,7 @@
 # assertions: asserts, produced_by (function name), contract. All three are
 # surfaced on failure.
 #
-# Usage: ./tests/validate-option-resolution.sh [--list | --scenario NAME]
+# Usage: ./tests/validate-option-resolution.sh [--list | --scenario NAME...]
 
 set -euo pipefail
 

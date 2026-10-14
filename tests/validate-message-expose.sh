@@ -25,7 +25,7 @@
 # Every expected key in this file is computed from the committed fixture text,
 # never read back from ltl.
 #
-# Usage: ./tests/validate-message-expose.sh [--scenario NAME]
+# Usage: ./tests/validate-message-expose.sh [--scenario NAME]...
 #        ./tests/validate-message-expose.sh --list
 
 set -euo pipefail

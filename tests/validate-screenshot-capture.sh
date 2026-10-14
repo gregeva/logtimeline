@@ -3,7 +3,7 @@
 # documentation screenshot tool, against ltl's own output
 # (features/598-screenshot-capture.md § Acceptance criteria 1 to 8, 11, and
 # 13 to 19: the folder ltl runs in and the PNG beside each SVG).
-# Usage: ./tests/validate-screenshot-capture.sh [--scenario NAME | --list]
+# Usage: ./tests/validate-screenshot-capture.sh [--scenario NAME... | --list]
 #
 # The tool reads -V section-layout to place its crops, so a change to that
 # report or to ltl's rendered output that would break the documentation's

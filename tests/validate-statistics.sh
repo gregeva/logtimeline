@@ -23,7 +23,7 @@
 #
 # Usage:
 #   ./tests/validate-statistics.sh                       # all scenarios
-#   ./tests/validate-statistics.sh --scenario <name>     # single scenario
+#   ./tests/validate-statistics.sh --scenario <name>...     # the named scenarios
 #   ./tests/validate-statistics.sh --show-all            # include T1/T2 advisories
 #   ./tests/validate-statistics.sh --capture-baselines   # rebaseline (with prompt)
 #   ./tests/validate-statistics.sh --capture-baselines --scenario <name>

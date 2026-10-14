@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # validate-regression.sh — Validate ltl output against regression reference files
-# Usage: ./tests/validate-regression.sh [--scenario NAME] [--list] [reference_dir]
+# Usage: ./tests/validate-regression.sh [--scenario NAME]... [--list] [reference_dir]
 #
 # Re-runs the same ltl commands as capture-regression.sh and diffs against
 # the stored reference output. Any difference is a regression.

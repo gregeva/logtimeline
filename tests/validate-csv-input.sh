@@ -16,7 +16,7 @@
 # has no value as committed files. The index scenario produces a real
 # ltl-index.csv in the harness's own directory and reads it back as input.
 #
-# Usage: ./tests/validate-csv-input.sh [--scenario NAME] [--list]
+# Usage: ./tests/validate-csv-input.sh [--scenario NAME]... [--list]
 
 set -euo pipefail
 
