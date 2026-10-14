@@ -1,0 +1,3 @@
+2025-07-18 04:46:40,354 INFO  [main] wt.method.server.startup  - HEADTOS tos001 tos002 tos003 tos004 tos00 TAILTOS
+2025-07-18 04:46:41,354 INFO  [main] wt.method.server.startup  - HEADTOM tom001 tom002 tom003 tom004 tom005 tom006 tom007 tom008 tom009 tom010 tom011 tom012 tom013 tom014  TAILTOM
+2025-07-18 04:46:42,354 INFO  [main] wt.method.server.startup  - HEADTOL tol001 tol002 tol003 tol004 tol005 tol006 tol007 tol008 tol009 tol010 tol011 tol012 tol013 tol014 tol015 tol016 tol017 tol018 tol019 tol020 tol021 tol022 tol023 tol024 tol025 tol026 tol027 tol028 tol029 tol030 tol031 tol032 tol033 tol034 tol035 tol036 tol037 tol038 tol039 tol040 tol041 tol042 tol043 tol044 tol045 tol046 tol047 tol048 tol049 tol050 tol051 tol052 TAILTOL
