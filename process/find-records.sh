@@ -8,7 +8,10 @@
 #   A term starting with '-' is an option and is matched as written inside a
 #   code span (`-g`, `-g 85`, `--group-similar`); any other term (a sub name, a
 #   section name, a table name) is matched as a fixed string.
-#   --issues also searches open and closed issue bodies through gh.
+#   --issues also searches open and closed issue bodies through gh, keeping
+#   only the issues whose title or body carries the term as the records search
+#   matches it. A search that fails is named on stderr, the other terms are
+#   still searched, and the exit status is 3 so the list is known incomplete.
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
@@ -24,13 +27,21 @@ while IFS= read -r f; do records+=("$f"); done < <(
     cd "$root" && find features docs releases -name '*.md' -type f | sort
 )
 
+# The fixed strings a term is matched by: an option inside a code span, any
+# other term as written.
+term_patterns() {
+    local term="$1"
+    if [[ "$term" == -* ]]; then
+        printf '%s\n' "\`$term\`" "\`$term " "\`$term," "\`$term/" "/$term\`" "/$term "
+    else
+        printf '%s\n' "$term"
+    fi
+}
+
 declare -A hits terms_of
 for term in "$@"; do
-    if [[ "$term" == -* ]]; then
-        patterns=(-e "\`$term\`" -e "\`$term " -e "\`$term," -e "\`$term/" -e "/$term\`" -e "/$term ")
-    else
-        patterns=(-e "$term")
-    fi
+    patterns=()
+    while IFS= read -r pattern; do patterns+=(-e "$pattern"); done < <(term_patterns "$term")
     while IFS=: read -r f n; do
         [[ "$n" -gt 0 ]] || continue
         hits[$f]=$(( ${hits[$f]:-0} + n ))
@@ -46,13 +57,35 @@ else
     done | sort -rn
 fi
 
+status=0
 if [[ $search_issues -eq 1 ]]; then
     echo
-    echo "Issues whose body mentions a term:"
+    echo "Issues whose title or body mentions a term:"
+    err=$(mktemp); listed=$(mktemp); trap 'rm -f "$err" "$listed"' EXIT
+    if ! repo=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>"$err"); then
+        echo "find-records: issue search failed, the repository could not be read: $(head -1 "$err")" >&2
+        exit 3
+    fi
+    # The loop writes to a file, not a pipe, so a failed search's status
+    # survives the loop.
     for term in "$@"; do
-        gh search issues --repo "$(gh repo view --json nameWithOwner -q .nameWithOwner)" \
-            --match body --limit 50 --json number,title,state \
-            -q '.[] | "  #\(.number) \(.state) \(.title)"' -- "$term" 2>/dev/null \
-            | sed "s/\$/  [$term]/"
-    done | sort -u
+        # GitHub's search matches words, so its results are candidates only:
+        # each is kept when its title or body carries one of the term's patterns.
+        if ! found=$(gh search issues --repo "$repo" --match body --limit 100 \
+                     --json number,title,state,body -- "$term" 2>"$err"); then
+            echo "find-records: issue search failed for [$term]: $(head -1 "$err")" >&2
+            status=3
+            continue
+        fi
+        term_patterns "$term" | perl -MJSON::PP -CO -e '
+            my ( $json, $term ) = @ARGV;
+            chomp( my @patterns = <STDIN> );
+            for my $issue ( @{ decode_json($json) } ) {
+                my $text = ( $issue->{title} // "" ) . "\n" . ( $issue->{body} // "" );
+                next unless grep { index( $text, $_ ) >= 0 } @patterns;
+                print "  #$issue->{number} $issue->{state} $issue->{title}  [$term]\n";
+            }' "$found" "$term" >> "$listed"
+    done
+    sort -u "$listed"
 fi
+exit $status

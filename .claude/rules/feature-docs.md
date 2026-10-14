@@ -20,7 +20,8 @@ found while executing the work. Issue comments only point here.
   behaviour. A divergence with no such line is an observation, written as one
   and raised as a question. An audit, an issue body or another record's
   restatement is a pointer to a record, never the contract.
-- A record this doc cites was read in the session that cites it;
+- A record this doc cites, by path or by issue number alone (`#451`,
+  `451 D4`), was read in the session that cites it;
   `process/claude-hooks/guard-write.sh` refuses the write otherwise.
 - Public repository: no customer names, case numbers, incident descriptions,
   hostnames or provenance. Contributed logs are described by what they are.
