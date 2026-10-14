@@ -207,5 +207,15 @@ On branch `564-message-truncation-position`.
   number of ellipses (`cut_markers_match`), so a cut message is never grouped
   with an uncut copy of it (AC5).
 
+- **One cut path** (`13a0280`, architect, 2026-10-14): drops 2 and 3 built
+  `left` and `center` as a second pass after the unchanged right cut, and cut
+  every key and row whether it fitted or not. Corrected to the expected
+  design: a single path per position, run only when cutting is needed. The
+  key site composes the attributes and the message once and cuts only a key
+  longer than the per-run cut, its message part at the `-mt` position (`right`
+  a plain cut, unmarked); the messages table fits only a key longer than its
+  column. Output under `right` is identical to the base commit (the table on
+  three real logs, plain and grouped, and the messages CSV of 2,000 keys).
+
 ## 5. Open items
 
