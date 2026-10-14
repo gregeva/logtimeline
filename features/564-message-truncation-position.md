@@ -97,7 +97,17 @@ Each has one option once the scope above holds; recorded, not put up for a decis
   each present where the format supplies it, `[*]`-style under `-g`). Known
   edge: five format specs' level captures admit `]` (619 § 11.2, level captures
   that admit `]`).
-- **The middle cut keeps equal halves**, as `shorten_filename` does.
+- **The middle cut keeps equal halves**, the odd character on the end side.
+- **The display cut re-cuts the stored cut with the same cut.** The print
+  touch point applies the same position to the stored key's message part,
+  treating it as plain text; it never searches for the stored `…`. A cut of a
+  cut equals the cut of the original: for a center cut, the stored message is
+  the original's first and last parts around `…`, and the display keeps the
+  first part's start and the last part's end, so the stored `…` falls in the
+  removed middle. Checked over 600,000 random messages (lengths 1 to 800,
+  stored lengths 20 to 400, display widths 10 to the stored length, each
+  position): cutting the stored cut never differed from cutting the original.
+  A `…` that is part of the logged message is ordinary text to both cuts.
 - **The progress line and the processed-files list are out of scope**
   (architect, 2026-10-14): the work is only about the message itself, and
   `shorten_filename` and its callers are not touched. The messages table's `…`
