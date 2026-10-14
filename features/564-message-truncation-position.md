@@ -2,7 +2,11 @@
 
 ## Status
 
-Planning, on branch `564-message-truncation-position` off `release/0.20.0`.
+**Delivered 2026-10-14:** PR #737 merged into `release/0.20.0` as
+`2731d57`, after the completion gate on `13a0280` (§ 6). Automatic selection of
+the position is #736 (D3).
+
+Planned on branch `564-message-truncation-position` off `release/0.20.0`.
 The touched surfaces' contracts (§ 2) were confirmed by the architect on
 2026-10-14; the architect's direction of the same day is § 3, and the
 decisions locked from it are § 3.1.
@@ -176,10 +180,10 @@ width, and beyond the terminal width.
 
 On branch `564-message-truncation-position`.
 
-- **Drop 1** (`8f0870c`): the `-mt, --message-truncation` option (D2), its
+- **Drop 1** (`401f4f1`): the `-mt, --message-truncation` option (D2), its
   `--help` and `docs/usage.md` rows; `-V runtime-config` reports the resolved
   value when it is given.
-- **Drop 2** (`5669fc8`): the cut. Measured at `--terminal-width 160` against
+- **Drop 2** (`66f47e0`): the cut. Measured at `--terminal-width 160` against
   the base commit on a Windchill method-server log with `-xt`, a Tomcat access
   log of an IoT REST API with `-xqs` and an HTTP/2 access log with `-xqs`,
   each plain and with `-g`: `right` output is identical to the base; under
