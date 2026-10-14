@@ -70,6 +70,28 @@ truncated and the option that sets it. It changes no length or size of a data
 structure, and no consumer: the composed attributes stay in place, and every
 consumer, the messages CSV included, carries the key as stored.
 
+### 3.2 Settled by the scope
+
+Each has one option once the scope above holds; recorded, not put up for a decision.
+
+- **Appended exposed values are message text.** `thread=`, `session=`, `user=`
+  and `object=` appended by `-xt`, `-xs`, `-xu` and `-x object` sit in the
+  message and are cut with it; only the composed attributes at the start are
+  kept.
+- **The display finds the attributes' end in the key.** No field is carried
+  with the entry (no data structure changes size): the print cut reads the
+  leading bracketed groups the composition writes (`[level] [thread] [object] `,
+  each present where the format supplies it, `[*]`-style under `-g`). Known
+  edge: five format specs' level captures admit `]` (619 § 11.2, level captures
+  that admit `]`).
+- **The middle cut keeps equal halves**, as `shorten_filename` does.
+- **One cut helper.** `shorten_filename` becomes the one left, middle or right
+  cut, the marker passed by the caller: the progress line and the
+  processed-files list keep `...`; the messages table uses `…`, one column
+  wide, as the table's existing one-character status marker is.
+- **The thread-pool table is out of scope:** `print_threadpool_summary` cuts a
+  thread-pool name, not a message key.
+
 ## 4. Research (2026-10-14, read-only, on the worktree at `71f1116`)
 
 Measured at terminal width 160 (`--terminal-width 160`), comparing the stored
@@ -97,9 +119,5 @@ committed criteria when acceptance criteria are agreed.
 
 ## 5. Open items
 
-- Appended exposed values (`thread=`, `session=`, `user=`, `object=`) at the
-  end of the key: message text to be cut, or attributes kept like the prefix.
-- How each touch point knows where the composed attributes end, including under
-  `-g`, where they may be wildcarded.
-- The ellipsis character's width in the `%-Ns`-padded column.
+- The option's names, values and default.
 - Automatic selection: prototype here, or a dependent issue.
