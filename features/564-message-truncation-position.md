@@ -65,6 +65,11 @@ message length cap) is closed as not planned and no longer constrains this work.
   only in the part cut away, as a right cut joins those that differ only in
   their tails today.
 
+Scope (architect, 2026-10-14): the enhancement is only where a message is
+truncated and the option that sets it. It changes no length or size of a data
+structure, and no consumer: the composed attributes stay in place, and every
+consumer, the messages CSV included, carries the key as stored.
+
 ## 4. Research (2026-10-14, read-only, on the worktree at `71f1116`)
 
 Measured at terminal width 160 (`--terminal-width 160`), comparing the stored
@@ -92,8 +97,6 @@ committed criteria when acceptance criteria are agreed.
 
 ## 5. Open items
 
-- CSV: the issue's done-when says CSV output is unchanged; a position-aware
-  stored cut changes CSV column 2 for messages longer than the cap.
 - Appended exposed values (`thread=`, `session=`, `user=`, `object=`) at the
   end of the key: message text to be cut, or attributes kept like the prefix.
 - How each touch point knows where the composed attributes end, including under
