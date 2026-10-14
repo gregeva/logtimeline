@@ -1221,6 +1221,15 @@ use constant {
     MESSAGE_KEY_OBJECT_LENGTH => 25,
 };
 
+# Where a message too long for its length is cut: its end (right), its start
+# (left) or its middle (center), the composed attributes at the start of the
+# key always kept. Set by -mt; a value is named in full or by its first letter.
+my @message_truncation_positions = qw(left center right);
+my $message_truncation_list      = join(', ', @message_truncation_positions);   # for the -mt usage error and help row
+my $message_truncation           = 'right';
+my $message_cut_marked           = 0;       # left or center: a cut key carries the ellipsis, which grouping keeps literal
+use constant MESSAGE_ELLIPSIS    => "\xe2\x80\xa6";   # the cut marker, one column wide, three bytes in the key
+
 # Consolidation configuration
 my $consolidation_threshold          = 85;
 my $consolidation_trigger            = 5000;
@@ -2997,6 +3006,7 @@ sub _classify_argv_provenance {
                 'timestamp-precision|tp',
                 'version|v',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
+                'message-truncation|mt',
                 ( map { quantity_option_spec($_) } @quantity_options ),
                 'memory-usage|mem', 'timing|t', 'disable-progress', 'hide|hi', 'show|sh',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
@@ -3135,6 +3145,7 @@ sub emit_runtime_config_verbose {
         'timestamp-precision'               => $timestamp_precision,
         'rate-unit'                         => $rate_unit,
         'byte-notation'                     => $byte_notation_option,
+        'message-truncation'                => $message_truncation,
         'memory-usage'                      => $show_memory,
         'memory-usage-debug'                => $show_memory_debug,
         'timing'                            => $show_timing,
@@ -11415,6 +11426,7 @@ sub print_help {
     # Display & Output
     $out .= help_subheading("Display & Output");
     $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so. " . quantity_unit_sentence($quantity_option_by_long{'top-messages'}));
+    $out .= help_opt("-mt,  --message-truncation <position>", "Where a message too long for the messages table is cut, marked with an ellipsis: right cuts its end (default), left cuts its start so the end of the message stays visible, center cuts its middle so its start and end stay visible. The log level, thread and object at the start of the message are always kept. One of $message_truncation_list, or l, c, r.");
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the source's duration unit), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
@@ -12979,9 +12991,36 @@ sub coalesce_mask {
     return \@m;
 }
 
+# Under -mt left or center (the callers test the flag) the cut marker in a key
+# is never wildcarded: its positions are kept, so the derived pattern carries it
+# literally and a key whose marker does not line up fails the pattern.
+sub keep_ellipsis_in_mask {
+    my ($reference_string, $mask) = @_;
+    return $mask unless index($reference_string, MESSAGE_ELLIPSIS) >= 0;
+    my @kept = @$mask;
+    my $p = -1;
+    while (($p = index($reference_string, MESSAGE_ELLIPSIS, $p + 1)) >= 0) {
+        $kept[$_] = 1 for $p .. $p + length(MESSAGE_ELLIPSIS) - 1;
+    }
+    return \@kept;
+}
+
+# Under -mt left or center (the callers test the flag) two keys are grouped
+# only when they carry the same number of cut markers: with the reference's
+# markers kept literally, a key whose marker does not line up fails the
+# pattern, and a cut key is never merged with an uncut one, whose pattern
+# would wildcard the marker away.
+sub cut_markers_match {
+    my ($a, $b) = @_;
+    my $na = () = $a =~ /\xe2\x80\xa6/g;
+    my $nb = () = $b =~ /\xe2\x80\xa6/g;
+    return $na == $nb;
+}
+
 # Derive canonical form: keep positions retain chars, variable regions become *
 sub derive_canonical {
     my ($reference_string, $mask) = @_;
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_marked;
     my @chars = split //, $reference_string;
     my $result = '';
     my $in_variable = 0;
@@ -13011,6 +13050,7 @@ sub derive_canonical {
 # Derive compiled regex: keep positions become \Q..\E literals, variable regions become .+?
 sub derive_regex {
     my ($reference_string, $mask) = @_;
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_marked;
     my @chars = split //, $reference_string;
     my $pattern = '^';
     my $literal_buf = '';
@@ -13551,7 +13591,7 @@ sub try_consolidation_merge_into_existing {
             my $merged_canonical = derive_canonical($entry->{canonical}, $mask);
             my $merged_regex = derive_regex($entry->{canonical}, $mask);
 
-            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex);
+            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex) && ( !$message_cut_marked || cut_markers_match($entry->{canonical}, $new_canonical) );
 
             merge_consolidation_stats($existing, $new_cluster);
             $existing->{match_count} += $new_cluster->{match_count};
@@ -13685,7 +13725,7 @@ sub run_consolidation_pass {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex);
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_marked || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$key} = 1;
             $consumed{$match->{key}} = 1;
@@ -13823,7 +13863,7 @@ sub process_final_pass_window {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex);
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_marked || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$log_key} = 1;
             $consumed{$match->{key}} = 1;
@@ -14662,6 +14702,61 @@ sub shorten_filename {
     my $right_len = $available - $left_len;
 
     return substr($filename, 0, $left_len) . $ellipsis . substr($filename, -$right_len);
+}
+
+# Cut a message to $room at its end (right, unmarked), its start (left) or its
+# middle (center), marking a left or center cut with $marker, whose length
+# counts toward $room. A center cut keeps
+# equal parts, the odd character at the end. With $split, a center cut of text
+# that already carries the marker splits it there (the one nearest the centre),
+# keeps the start's beginning and the end's ending, any room one side cannot
+# use going to the other, and joins them with one marker: a key cut when it is
+# stored and cut again for the messages table shows one ellipsis.
+sub cut_message_text {
+    my ($text, $room, $position, $marker, $split) = @_;
+    return $text if length($text) <= $room;
+    return substr($text, 0, $room) if $position eq 'right';
+    my $keep = $room - length($marker);
+    return substr($text, 0, $room) if $keep < 1;
+    return $marker . substr($text, -$keep) if $position eq 'left';
+
+    my ($start, $end) = ($text, $text);
+    if ($split) {
+        my ($at, $p) = (undef, -1);
+        my $centre = (length($text) - length($marker)) / 2;
+        while (($p = index($text, $marker, $p + 1)) >= 0) {
+            $at = $p if !defined $at || abs($p - $centre) < abs($at - $centre);
+        }
+        ($start, $end) = (substr($text, 0, $at), substr($text, $at + length($marker))) if defined $at;
+    }
+    my $head = int($keep / 2);
+    my $tail = $keep - $head;
+    ($tail, $head) = ($tail + $head - length($start), length($start)) if $head > length($start);
+    ($head, $tail) = ($head + $tail - length($end), length($end))     if $tail > length($end);
+    return substr($start, 0, $head) . $marker . ($tail > 0 ? substr($end, -$tail) : '');
+}
+
+# The columns a message key occupies: its length, each cut marker one column.
+sub message_text_width {
+    my ($text) = @_;
+    my $markers = () = $text =~ /\xe2\x80\xa6/g;
+    return length($text) - $markers * (length(MESSAGE_ELLIPSIS) - 1);
+}
+
+# A message key wider than the messages table's column, fitted to it: the
+# leading bracketed attributes ([level] [thread] [object]) kept, the message
+# after them cut at the -mt position to the columns left. The
+# marker is handled as one character while cutting, so a column holds as many
+# characters as it is wide.
+sub fit_message_key_to_column {
+    my ($key, $width) = @_;
+    my ($prefix) = $key =~ /^((?:\[[^\]]*\] ){0,3})/;
+    my $room = $width - message_text_width($prefix);
+    return substr($key, 0, $width) if $room < 2;
+    (my $text = substr($key, length $prefix)) =~ s/\xe2\x80\xa6/\x1f/g;
+    my $cut = cut_message_text($text, $room, $message_truncation, "\x1f", 1);
+    $cut =~ s/\x1f/\xe2\x80\xa6/g;
+    return $prefix . $cut;
 }
 
 # Size the selected file set once, before the first file is opened, so the read
@@ -16123,6 +16218,7 @@ sub adapt_to_command_line_options {
         'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
         'byte-notation|bn=s' => \$byte_notation_option,
+        'message-truncation|mt=s' => \$message_truncation,
 	    'memory-usage|mem:s' => \$memory_usage_operand,
         'timing|t' => \$show_timing,
         'disable-progress' => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },   # hidden
@@ -16421,6 +16517,16 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid byte notation '$byte_notation_option'. Valid values: $byte_notation_list"); exit 1; }
             unless grep { $_ eq $notation } @byte_unit_notations;
         $byte_notation_option = $notation;
+    }
+
+    # Message truncation position: a value in full or by its first letter, in any case
+    {
+        my $given = lc $message_truncation;
+        my ($position) = grep { $_ eq $given || substr($_, 0, 1) eq $given } @message_truncation_positions;
+        do { print_usage("Invalid message truncation '$message_truncation'. Valid values: $message_truncation_list (or l, c, r)"); exit 1; }
+            unless defined $position;
+        $message_truncation = $position;
+        $message_cut_marked = $position eq 'right' ? 0 : 1;
     }
 
     # Rate unit option validation (Issue #122): any ladder spelling
@@ -18089,15 +18195,17 @@ sub read_and_process_logs {
                     my $truncated_thread = defined($threadname) ? substr($threadname, 0, MESSAGE_KEY_THREAD_LENGTH) : undef;
                     my $truncated_object = defined($object) ? substr($object, length($object) > MESSAGE_KEY_OBJECT_LENGTH ? length($object)-MESSAGE_KEY_OBJECT_LENGTH : 0, MESSAGE_KEY_OBJECT_LENGTH) : undef;
 
-                    if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
-                        # the key is cut at the per-run cut (MESSAGE_KEY_CAP under -o or -g, else the terminal width)
-                        $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, $max_log_message_length);
-                    } elsif( defined( $object ) ) {
-                        $log_key = substr("[$log_level] [$truncated_object] $message", 0, $max_log_message_length);
-                    } elsif( defined( $threadname ) ) {
-                        $log_key = substr("[$log_level] [$truncated_thread] $message", 0, $max_log_message_length);
-                    } else {
-                        $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
+                    # The key: the composed attributes ([level] [thread] [object], each
+                    # where the format supplies it), then the message. Only a key longer
+                    # than the per-run cut (MESSAGE_KEY_CAP under -o or -g, else the
+                    # terminal width) is cut, its message part at the -mt position.
+                    my $key_prefix = "[$log_level] " . ( defined($threadname) ? "[$truncated_thread] " : '' ) . ( defined($object) ? "[$truncated_object] " : '' );
+                    $log_key = $key_prefix . $message;
+                    if( length($log_key) > $max_log_message_length ) {
+                        my $room = $max_log_message_length - length($key_prefix);
+                        $log_key = $room > length(MESSAGE_ELLIPSIS)
+                            ? $key_prefix . cut_message_text( $message, $room, $message_truncation, MESSAGE_ELLIPSIS, 0 )
+                            : substr( $log_key, 0, $max_log_message_length );
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
@@ -23840,7 +23948,14 @@ sub print_message_summary {
                 my $row = $cls_state ? $colors{ $classification_state_colour{$cls_state} } . $marker . $colors{'NC'} : $marker;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
+                    # Only a key longer than the column is cut, at the -mt position, and
+                    # padded by the columns it occupies, each ellipsis one.
+                    my $message = $key;
+                    my $message_pad = $col_width{1};
+                    if ( length($key) > $col_width{1} ) {
+                        $message = fit_message_key_to_column( $key, $col_width{1} );
+                        $message_pad += length($message) - message_text_width($message);
+                    }
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
                     my $min = $log_messages{$grouping}{$key}{min};
                     my $p50 = $log_messages{$grouping}{$key}{p50};
@@ -23849,7 +23964,7 @@ sub print_message_summary {
                     my $total_duration = $log_messages{$grouping}{$key}{total_duration};
 
                     if( $statistics_variant && ( defined $log_messages{$grouping}{$key}{p50} || defined $log_messages{$grouping}{$key}{cv} || defined $log_messages{$grouping}{$key}{total_duration} ) ) {
-                        $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%-${message_pad}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{3}s", value_text( $min, metric => 'duration', budget => 'latency cell', width => $col_width{3} ) ) . " " x $table_padding_inner;
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{4}s", value_text( $p50, metric => 'duration', budget => 'latency cell', width => $col_width{4} ) ) . " " x $table_padding_inner;
@@ -23857,7 +23972,7 @@ sub print_message_summary {
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{6}s", value_text( $cv, kind => 'cv', budget => 'cv cell' ) ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{7}s", value_text( $total_duration, metric => 'duration', budget => $total_budget ) ) . " " x $table_padding_inner; 
                     } else {
-                        $row .= " " x $table_padding_inner . sprintf( "%-$col_width{1}s", $message ) . " " x $table_padding_inner; 
+                        $row .= " " x $table_padding_inner . sprintf( "%-${message_pad}s", $message ) . " " x $table_padding_inner; 
                         $row .= " " x $table_padding_inner . sprintf( "%$col_width{2}s", $occurrences ) . " " x $table_padding_inner; 
                     }
 

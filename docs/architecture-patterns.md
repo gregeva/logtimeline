@@ -714,6 +714,7 @@ which is the cost a flag exists to bound.
 - `read_and_process_logs` :: `if( $discard_active ) {`
 - `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
+- `adapt_to_command_line_options` :: `$message_cut_marked = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, where a cut key carries the ellipsis; read by the grouping passes, which keep it literal in the derived pattern (`keep_ellipsis_in_mask`) and group only keys carrying the same number of them (`cut_markers_match`) (`features/564-message-truncation-position.md`).
 - `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
 
 **Owning record.** This entry.
