@@ -23,7 +23,7 @@
 #
 # Usage:
 #   ./tests/validate-statistics.sh                       # all scenarios
-#   ./tests/validate-statistics.sh --scenario <name>     # single scenario
+#   ./tests/validate-statistics.sh --scenario <name>...     # the named scenarios
 #   ./tests/validate-statistics.sh --show-all            # include T1/T2 advisories
 #   ./tests/validate-statistics.sh --capture-baselines   # rebaseline (with prompt)
 #   ./tests/validate-statistics.sh --capture-baselines --scenario <name>
@@ -108,8 +108,8 @@ scenario_parse_args "$@"
 
 # Baseline-capture confirmation prompt. Refuses without explicit yes.
 if [[ $CAPTURE_BASELINES -eq 1 ]]; then
-    if [[ -n "$SCENARIO_ONLY" ]]; then
-        scope="scenario '$SCENARIO_ONLY' only"
+    if scenario_restricted; then
+        scope="scenarios $(scenario_selected | paste -sd' ' -) only"
     else
         scope="ALL scenarios in scenarios.tsv"
     fi

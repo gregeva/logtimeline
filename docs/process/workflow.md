@@ -187,8 +187,9 @@ actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
 each harness's output once to a scratch file and inspect the file.
 
 The suite is the gate's failsafe, never a development tool. While working, the
-check is the developer's own runs aimed at the change, and at most a single
-harness scenario. The full suite runs here, once; its second pass on the
+check is the developer's own runs aimed at the change, and the harness
+scenarios the change needs, named with `--scenario` (`tests/HARNESS-DESIGN.md`
+§ Running what the change needs), never a whole harness. The full suite runs here, once; its second pass on the
 generated read path belongs to the release gate (§ 5, step 4).
 
 ## 4. Merge and close

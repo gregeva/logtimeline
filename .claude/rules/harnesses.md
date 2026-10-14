@@ -23,12 +23,15 @@ behaviour in any harness. These are the rules that have cost time when skipped:
 - Committed fixtures are named `.txt`; `*.log` and `*.csv` are gitignored.
   Confirm with `git ls-files` before planning around a fixture.
 - Every harness declares its scenarios through `tests/lib/scenario-select.sh`
-  (`scenario_register` + `scenario_parse_args "$@"`), honours `--scenario`, and
-  refuses an unknown name or flag with a non-zero exit having run nothing
-  (`tests/HARNESS-DESIGN.md` § The scenario selector). A new harness that does
-  not fails `tests/validate-scenario-selector.sh`.
-- While iterating, run only this harness, with `--scenario` (its names are
-  under `--list`); capture the output once and grep the file. The full suite runs once,
+  (`scenario_register` + `scenario_parse_args "$@"` before its first scenario),
+  honours `--scenario` given once or several times, reads the selection only
+  through `scenario_wanted` / `scenario_selected`, and refuses an unknown name
+  or flag with a non-zero exit having run nothing (`tests/HARNESS-DESIGN.md`
+  § The scenario selector). A harness that does not fails
+  `tests/validate-scenario-selector.sh`.
+- While iterating, run only the scenarios the change needs, one `--scenario`
+  per name (names are under `--list`; a scenario reading another's capture is
+  named with it), never the whole harness; capture the output once and grep the file. The full suite runs once,
   as the completion gate (`docs/process/workflow.md` § 3), and a harness change
   puts that gate in force because what "passing" means has changed.
 - Tests are derived from the acceptance criteria in the feature doc, written
