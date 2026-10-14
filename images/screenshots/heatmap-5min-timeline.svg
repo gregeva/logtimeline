@@ -72,7 +72,7 @@
 <text x="244.8" y="71.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="280.8" y="71.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">98</text>
 <text x="302.4" y="71.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="338.4" y="71.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.9k</text>
+<text x="338.4" y="71.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3930</text>
 <text x="403.2" y="71.4" fill="#df6c5a">2</text>
 <text x="410.4" y="71.4" fill="#465c6d">:</text>
 <text x="417.6" y="71.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">807.6</text>
@@ -80,11 +80,11 @@
 <text x="489.6" y="71.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="71.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.248%</text>
 <text x="597.6" y="71.4" fill="#465c6d">│</text>
-<text x="928.8" y="71.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
-<text x="957.6" y="71.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
-<text x="972" y="71.4" fill="#e5c872">n</text>
-<text x="1044" y="71.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
-<text x="1072.8" y="71.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="71.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.39</text>
+<text x="964.8" y="71.4" fill="#35424c">m</text>
+<text x="972" y="71.4" fill="#e5c872" textLength="43.2" lengthAdjust="spacing">inutes</text>
+<text x="1044" y="71.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.9</text>
+<text x="1072.8" y="71.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="71.4" fill="#465c6d">│</text>
 <text x="1188" y="71.4" fill="#465c6d">|</text>
 <text x="1396.8" y="71.4" fill="#465c6d">|</text>
@@ -98,19 +98,19 @@
 <text x="244.8" y="86.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="280.8" y="86.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">48</text>
 <text x="302.4" y="86.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="338.4" y="86.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.5k</text>
+<text x="338.4" y="86.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5486</text>
 <text x="396" y="86.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
 <text x="417.6" y="86.4" fill="#465c6d">:</text>
-<text x="424.8" y="86.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
+<text x="424.8" y="86.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1108</text>
 <text x="453.6" y="86.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
 <text x="489.6" y="86.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="86.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.108%</text>
 <text x="597.6" y="86.4" fill="#465c6d">│</text>
-<text x="928.8" y="86.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
-<text x="957.6" y="86.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
-<text x="972" y="86.4" fill="#e5c872">n</text>
-<text x="1044" y="86.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
-<text x="1072.8" y="86.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="86.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.44</text>
+<text x="964.8" y="86.4" fill="#35424c">m</text>
+<text x="972" y="86.4" fill="#e5c872" textLength="43.2" lengthAdjust="spacing">inutes</text>
+<text x="1044" y="86.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.7</text>
+<text x="1072.8" y="86.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="86.4" fill="#465c6d">│</text>
 <text x="1159.2" y="86.4" fill="#465c6d">|</text>
 <text x="1389.6" y="86.4" fill="#465c6d">|</text>
@@ -122,7 +122,7 @@
 <text x="194.4" y="101.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="101.4" fill="#bd7bcd">7</text>
 <text x="244.8" y="101.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="101.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.8k</text>
+<text x="280.8" y="101.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3826</text>
 <text x="388.8" y="101.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
 <text x="410.4" y="101.4" fill="#465c6d">:</text>
 <text x="417.6" y="101.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">767.4</text>
@@ -130,11 +130,11 @@
 <text x="489.6" y="101.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="101.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.104%</text>
 <text x="597.6" y="101.4" fill="#465c6d">│</text>
-<text x="928.8" y="101.4" fill="#35424c">3</text>
-<text x="943.2" y="101.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="101.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.01</text>
+<text x="964.8" y="101.4" fill="#e5c872" textLength="50.4" lengthAdjust="spacing">minutes</text>
 <text x="1044" y="101.4" fill="#35424c">2</text>
-<text x="1051.2" y="101.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.3</text>
-<text x="1072.8" y="101.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1051.2" y="101.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.4</text>
+<text x="1072.8" y="101.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="101.4" fill="#465c6d">│</text>
 <text x="1159.2" y="101.4" fill="#465c6d">|</text>
 <text x="1396.8" y="101.4" fill="#465c6d">|</text>
@@ -148,7 +148,7 @@
 <text x="244.8" y="116.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="280.8" y="116.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">47</text>
 <text x="302.4" y="116.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="338.4" y="116.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.4k</text>
+<text x="338.4" y="116.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3392</text>
 <text x="388.8" y="116.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.6</text>
 <text x="410.4" y="116.4" fill="#465c6d">:</text>
 <text x="417.6" y="116.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">689.4</text>
@@ -156,12 +156,12 @@
 <text x="489.6" y="116.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="116.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.232%</text>
 <text x="597.6" y="116.4" fill="#465c6d">│</text>
-<text x="928.8" y="116.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.4</text>
-<text x="957.6" y="116.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
-<text x="972" y="116.4" fill="#e5c872">n</text>
+<text x="928.8" y="116.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.36</text>
+<text x="964.8" y="116.4" fill="#35424c">m</text>
+<text x="972" y="116.4" fill="#e5c872" textLength="43.2" lengthAdjust="spacing">inutes</text>
 <text x="1044" y="116.4" fill="#35424c">2</text>
-<text x="1051.2" y="116.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.5</text>
-<text x="1072.8" y="116.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1051.2" y="116.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.7</text>
+<text x="1072.8" y="116.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="116.4" fill="#465c6d">│</text>
 <text x="1188" y="116.4" fill="#465c6d">|</text>
 <text x="1404" y="116.4" fill="#465c6d">|</text>
@@ -173,7 +173,7 @@
 <text x="194.4" y="131.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="131.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">61</text>
 <text x="252" y="131.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="288" y="131.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.6k</text>
+<text x="288" y="131.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4566</text>
 <text x="403.2" y="131.4" fill="#df6c5a">1</text>
 <text x="410.4" y="131.4" fill="#465c6d">:</text>
 <text x="417.6" y="131.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">926.4</text>
@@ -181,11 +181,11 @@
 <text x="489.6" y="131.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="131.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.108%</text>
 <text x="597.6" y="131.4" fill="#465c6d">│</text>
-<text x="928.8" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
-<text x="957.6" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.6</text>
-<text x="1072.8" y="131.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">Mi</text>
-<text x="1087.2" y="131.4" fill="#6caa71">B</text>
+<text x="928.8" y="131.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.82</text>
+<text x="964.8" y="131.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
+<text x="979.2" y="131.4" fill="#e5c872" textLength="36" lengthAdjust="spacing">nutes</text>
+<text x="1044" y="131.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.9</text>
+<text x="1072.8" y="131.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="131.4" fill="#465c6d">│</text>
 <text x="1159.2" y="131.4" fill="#465c6d">|</text>
 <text x="1396.8" y="131.4" fill="#465c6d">|</text>
@@ -205,10 +205,11 @@
 <text x="489.6" y="146.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="146.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.197%</text>
 <text x="597.6" y="146.4" fill="#465c6d">│</text>
-<text x="928.8" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
-<text x="957.6" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
-<text x="1072.8" y="146.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="146.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.06</text>
+<text x="964.8" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="986.4" y="146.4" fill="#e5c872" textLength="28.8" lengthAdjust="spacing">utes</text>
+<text x="1044" y="146.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.3</text>
+<text x="1072.8" y="146.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="146.4" fill="#465c6d">│</text>
 <text x="1231.2" y="146.4" fill="#465c6d">|</text>
 <text x="1404" y="146.4" fill="#465c6d">|</text>
@@ -220,7 +221,7 @@
 <text x="194.4" y="161.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="161.4" fill="#bd7bcd">2</text>
 <text x="244.8" y="161.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="161.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2.5k</text>
+<text x="280.8" y="161.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2477</text>
 <text x="388.8" y="161.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
 <text x="410.4" y="161.4" fill="#465c6d">:</text>
 <text x="417.6" y="161.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">496.6</text>
@@ -228,11 +229,10 @@
 <text x="489.6" y="161.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="161.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.161%</text>
 <text x="597.6" y="161.4" fill="#465c6d">│</text>
-<text x="928.8" y="161.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">2.8</text>
-<text x="957.6" y="161.4" fill="#35424c">m</text>
-<text x="964.8" y="161.4" fill="#e5c872" textLength="14.4" lengthAdjust="spacing">in</text>
-<text x="1044" y="161.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">1.5</text>
-<text x="1072.8" y="161.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="161.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">2.82</text>
+<text x="964.8" y="161.4" fill="#e5c872" textLength="50.4" lengthAdjust="spacing">minutes</text>
+<text x="1044" y="161.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">1.6</text>
+<text x="1072.8" y="161.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="161.4" fill="#465c6d">│</text>
 <text x="1202.4" y="161.4" fill="#465c6d">|</text>
 <text x="1454.4" y="161.4" fill="#465c6d">|</text>
@@ -243,7 +243,7 @@
 <text x="194.4" y="176.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="176.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">48</text>
 <text x="252" y="176.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="288" y="176.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.9k</text>
+<text x="288" y="176.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4851</text>
 <text x="403.2" y="176.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
 <text x="424.8" y="176.4" fill="#465c6d">:</text>
 <text x="432" y="176.4" fill="#e0e0e0" textLength="21.6" lengthAdjust="spacing">981</text>
@@ -251,12 +251,12 @@
 <text x="489.6" y="176.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="176.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.122%</text>
 <text x="597.6" y="176.4" fill="#465c6d">│</text>
-<text x="928.8" y="176.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.3</text>
-<text x="957.6" y="176.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
-<text x="972" y="176.4" fill="#e5c872">n</text>
+<text x="928.8" y="176.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.34</text>
+<text x="964.8" y="176.4" fill="#35424c">m</text>
+<text x="972" y="176.4" fill="#e5c872" textLength="43.2" lengthAdjust="spacing">inutes</text>
 <text x="1044" y="176.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">2.</text>
-<text x="1058.4" y="176.4" fill="#6caa71">7</text>
-<text x="1072.8" y="176.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1058.4" y="176.4" fill="#6caa71">9</text>
+<text x="1072.8" y="176.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="176.4" fill="#465c6d">│</text>
 <text x="1159.2" y="176.4" fill="#465c6d">|</text>
 <text x="1389.6" y="176.4" fill="#465c6d">|</text>
@@ -276,11 +276,12 @@
 <text x="489.6" y="191.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="191.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
 <text x="597.6" y="191.4" fill="#465c6d">│</text>
-<text x="928.8" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
-<text x="957.6" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.2</text>
+<text x="928.8" y="191.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.43</text>
+<text x="964.8" y="191.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="191.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
+<text x="1044" y="191.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.5</text>
 <text x="1072.8" y="191.4" fill="#35424c">M</text>
-<text x="1080" y="191.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">iB</text>
+<text x="1080" y="191.4" fill="#6caa71">B</text>
 <text x="1144.8" y="191.4" fill="#465c6d">│</text>
 <text x="1159.2" y="191.4" fill="#465c6d">|</text>
 <text x="1396.8" y="191.4" fill="#465c6d">|</text>
@@ -292,7 +293,7 @@
 <text x="194.4" y="206.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="206.4" fill="#bd7bcd">7</text>
 <text x="244.8" y="206.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="206.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3.4k</text>
+<text x="280.8" y="206.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">3421</text>
 <text x="403.2" y="206.4" fill="#df6c5a">1</text>
 <text x="410.4" y="206.4" fill="#465c6d">:</text>
 <text x="417.6" y="206.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">686.6</text>
@@ -300,11 +301,12 @@
 <text x="489.6" y="206.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="206.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.146%</text>
 <text x="597.6" y="206.4" fill="#465c6d">│</text>
-<text x="928.8" y="206.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.1</text>
-<text x="957.6" y="206.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="206.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.08</text>
+<text x="964.8" y="206.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="986.4" y="206.4" fill="#e5c872" textLength="28.8" lengthAdjust="spacing">utes</text>
 <text x="1044" y="206.4" fill="#35424c">2</text>
-<text x="1051.2" y="206.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.2</text>
-<text x="1072.8" y="206.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1051.2" y="206.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">.3</text>
+<text x="1072.8" y="206.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="206.4" fill="#465c6d">│</text>
 <text x="1245.6" y="206.4" fill="#465c6d">|</text>
 <text x="1454.4" y="206.4" fill="#465c6d">|</text>
@@ -323,11 +325,11 @@
 <text x="489.6" y="221.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="221.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
 <text x="597.6" y="221.4" fill="#465c6d">│</text>
-<text x="928.8" y="221.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.5</text>
-<text x="957.6" y="221.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">mi</text>
-<text x="972" y="221.4" fill="#e5c872">n</text>
+<text x="928.8" y="221.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">3.48</text>
+<text x="964.8" y="221.4" fill="#35424c">m</text>
+<text x="972" y="221.4" fill="#e5c872" textLength="43.2" lengthAdjust="spacing">inutes</text>
 <text x="1044" y="221.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">1.3</text>
-<text x="1072.8" y="221.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1072.8" y="221.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="221.4" fill="#465c6d">│</text>
 <text x="1159.2" y="221.4" fill="#465c6d">|</text>
 <text x="1454.4" y="221.4" fill="#465c6d">|</text>
@@ -338,7 +340,7 @@
 <text x="194.4" y="236.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="236.4" fill="#bd7bcd">3</text>
 <text x="244.8" y="236.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="236.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.5k</text>
+<text x="280.8" y="236.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4455</text>
 <text x="403.2" y="236.4" fill="#df6c5a">1</text>
 <text x="410.4" y="236.4" fill="#465c6d">:</text>
 <text x="417.6" y="236.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">892.6</text>
@@ -346,11 +348,12 @@
 <text x="489.6" y="236.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="236.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.112%</text>
 <text x="597.6" y="236.4" fill="#465c6d">│</text>
-<text x="928.8" y="236.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
-<text x="957.6" y="236.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="236.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.51</text>
+<text x="964.8" y="236.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="236.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
 <text x="1044" y="236.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
-<text x="1058.4" y="236.4" fill="#6caa71">3</text>
-<text x="1072.8" y="236.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1058.4" y="236.4" fill="#6caa71">4</text>
+<text x="1072.8" y="236.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="236.4" fill="#465c6d">│</text>
 <text x="1188" y="236.4" fill="#465c6d">|</text>
 <text x="1411.2" y="236.4" fill="#465c6d">|</text>
@@ -362,7 +365,7 @@
 <text x="194.4" y="251.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="251.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">26</text>
 <text x="252" y="251.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="288" y="251.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.2k</text>
+<text x="288" y="251.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5215</text>
 <text x="424.8" y="251.4" fill="#df6c5a">1</text>
 <text x="432" y="251.4" fill="#465c6d">:</text>
 <text x="439.2" y="251.4" fill="#e0e0e0" textLength="14.4" lengthAdjust="spacing">1k</text>
@@ -370,10 +373,11 @@
 <text x="489.6" y="251.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="251.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.095%</text>
 <text x="597.6" y="251.4" fill="#465c6d">│</text>
-<text x="928.8" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.3</text>
-<text x="957.6" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">7.8</text>
-<text x="1072.8" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="251.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">5.34</text>
+<text x="964.8" y="251.4" fill="#35424c" textLength="43.2" lengthAdjust="spacing">minute</text>
+<text x="1008" y="251.4" fill="#e5c872">s</text>
+<text x="1044" y="251.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">8.1</text>
+<text x="1072.8" y="251.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="251.4" fill="#465c6d">│</text>
 <text x="1231.2" y="251.4" fill="#465c6d">|</text>
 <text x="1411.2" y="251.4" fill="#465c6d">|</text>
@@ -385,7 +389,7 @@
 <text x="201.6" y="266.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="237.6" y="266.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">60</text>
 <text x="259.2" y="266.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="295.2" y="266.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.2k</text>
+<text x="295.2" y="266.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5247</text>
 <text x="410.4" y="266.4" fill="#df6c5a">2</text>
 <text x="417.6" y="266.4" fill="#465c6d">:</text>
 <text x="424.8" y="266.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
@@ -393,10 +397,11 @@
 <text x="489.6" y="266.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="266.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.188%</text>
 <text x="597.6" y="266.4" fill="#465c6d">│</text>
-<text x="928.8" y="266.4" fill="#35424c">5</text>
-<text x="943.2" y="266.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="266.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.3</text>
-<text x="1072.8" y="266.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="266.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.98</text>
+<text x="964.8" y="266.4" fill="#35424c" textLength="36" lengthAdjust="spacing">minut</text>
+<text x="1000.8" y="266.4" fill="#e5c872" textLength="14.4" lengthAdjust="spacing">es</text>
+<text x="1044" y="266.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
+<text x="1072.8" y="266.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="266.4" fill="#465c6d">│</text>
 <text x="1202.4" y="266.4" fill="#465c6d">|</text>
 <text x="1404" y="266.4" fill="#465c6d">|</text>
@@ -408,7 +413,7 @@
 <text x="194.4" y="281.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="281.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">50</text>
 <text x="252" y="281.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="288" y="281.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.4k</text>
+<text x="288" y="281.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4409</text>
 <text x="388.8" y="281.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">0.8</text>
 <text x="410.4" y="281.4" fill="#465c6d">:</text>
 <text x="417.6" y="281.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">892.6</text>
@@ -416,11 +421,12 @@
 <text x="489.6" y="281.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="281.4" fill="#d70000" textLength="36" lengthAdjust="spacing">0.09%</text>
 <text x="597.6" y="281.4" fill="#465c6d">│</text>
-<text x="928.8" y="281.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.3</text>
-<text x="957.6" y="281.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="281.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.29</text>
+<text x="964.8" y="281.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="986.4" y="281.4" fill="#e5c872" textLength="28.8" lengthAdjust="spacing">utes</text>
 <text x="1044" y="281.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
-<text x="1058.4" y="281.4" fill="#6caa71">2</text>
-<text x="1072.8" y="281.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1058.4" y="281.4" fill="#6caa71">4</text>
+<text x="1072.8" y="281.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="281.4" fill="#465c6d">│</text>
 <text x="1159.2" y="281.4" fill="#465c6d">|</text>
 <text x="1411.2" y="281.4" fill="#465c6d">|</text>
@@ -434,7 +440,7 @@
 <text x="244.8" y="296.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="280.8" y="296.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">12</text>
 <text x="302.4" y="296.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="338.4" y="296.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.3k</text>
+<text x="338.4" y="296.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5287</text>
 <text x="396" y="296.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.4</text>
 <text x="417.6" y="296.4" fill="#465c6d">:</text>
 <text x="424.8" y="296.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.1k</text>
@@ -443,10 +449,11 @@
 <text x="547.2" y="296.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.132%</text>
 <text x="597.6" y="296.4" fill="#465c6d">│</text>
 <text x="928.8" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.1</text>
-<text x="957.6" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.8</text>
+<text x="957.6" y="296.4" fill="#35424c" textLength="43.2" lengthAdjust="spacing">minute</text>
+<text x="1000.8" y="296.4" fill="#e5c872">s</text>
+<text x="1044" y="296.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.1</text>
 <text x="1072.8" y="296.4" fill="#35424c">M</text>
-<text x="1080" y="296.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">iB</text>
+<text x="1080" y="296.4" fill="#6caa71">B</text>
 <text x="1144.8" y="296.4" fill="#465c6d">│</text>
 <text x="1231.2" y="296.4" fill="#465c6d">|</text>
 <text x="1396.8" y="296.4" fill="#465c6d">|</text>
@@ -458,7 +465,7 @@
 <text x="194.4" y="311.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="311.4" fill="#bd7bcd">9</text>
 <text x="244.8" y="311.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="311.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4.4k</text>
+<text x="280.8" y="311.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">4431</text>
 <text x="388.8" y="311.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">1.2</text>
 <text x="410.4" y="311.4" fill="#465c6d">:</text>
 <text x="417.6" y="311.4" fill="#e0e0e0" textLength="36" lengthAdjust="spacing">889.2</text>
@@ -467,9 +474,10 @@
 <text x="547.2" y="311.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.135%</text>
 <text x="597.6" y="311.4" fill="#465c6d">│</text>
 <text x="928.8" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.2</text>
-<text x="957.6" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.5</text>
-<text x="1072.8" y="311.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="957.6" y="311.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="986.4" y="311.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
+<text x="1044" y="311.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.7</text>
+<text x="1072.8" y="311.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="311.4" fill="#465c6d">│</text>
 <text x="1202.4" y="311.4" fill="#465c6d">|</text>
 <text x="1396.8" y="311.4" fill="#465c6d">|</text>
@@ -483,7 +491,7 @@
 <text x="244.8" y="326.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="280.8" y="326.4" fill="#bd7bcd" textLength="21.6" lengthAdjust="spacing">100</text>
 <text x="309.6" y="326.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="345.6" y="326.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">6.1k</text>
+<text x="345.6" y="326.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">6146</text>
 <text x="396" y="326.4" fill="#df6c5a" textLength="21.6" lengthAdjust="spacing">2.4</text>
 <text x="417.6" y="326.4" fill="#465c6d">:</text>
 <text x="424.8" y="326.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.3k</text>
@@ -491,10 +499,11 @@
 <text x="489.6" y="326.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="326.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.192%</text>
 <text x="597.6" y="326.4" fill="#465c6d">│</text>
-<text x="928.8" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.6</text>
-<text x="957.6" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">8.3</text>
-<text x="1072.8" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="326.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.55</text>
+<text x="964.8" y="326.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="326.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
+<text x="1044" y="326.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">8.7</text>
+<text x="1072.8" y="326.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="326.4" fill="#465c6d">│</text>
 <text x="1159.2" y="326.4" fill="#465c6d">|</text>
 <text x="1396.8" y="326.4" fill="#465c6d">|</text>
@@ -506,7 +515,7 @@
 <text x="194.4" y="341.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="230.4" y="341.4" fill="#bd7bcd">2</text>
 <text x="244.8" y="341.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="280.8" y="341.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5.1k</text>
+<text x="280.8" y="341.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">5089</text>
 <text x="424.8" y="341.4" fill="#df6c5a">1</text>
 <text x="432" y="341.4" fill="#465c6d">:</text>
 <text x="439.2" y="341.4" fill="#e0e0e0" textLength="14.4" lengthAdjust="spacing">1k</text>
@@ -514,11 +523,12 @@
 <text x="489.6" y="341.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="341.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.098%</text>
 <text x="597.6" y="341.4" fill="#465c6d">│</text>
-<text x="928.8" y="341.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.8</text>
-<text x="957.6" y="341.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="341.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.79</text>
+<text x="964.8" y="341.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="341.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
 <text x="1044" y="341.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
-<text x="1058.4" y="341.4" fill="#6caa71">5</text>
-<text x="1072.8" y="341.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1058.4" y="341.4" fill="#6caa71">7</text>
+<text x="1072.8" y="341.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="341.4" fill="#465c6d">│</text>
 <text x="1159.2" y="341.4" fill="#465c6d">|</text>
 <text x="1396.8" y="341.4" fill="#465c6d">|</text>
@@ -538,10 +548,12 @@
 <text x="489.6" y="356.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="356.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.116%</text>
 <text x="597.6" y="356.4" fill="#465c6d">│</text>
-<text x="928.8" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
-<text x="957.6" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.8</text>
-<text x="1072.8" y="356.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="356.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.37</text>
+<text x="964.8" y="356.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="986.4" y="356.4" fill="#e5c872" textLength="28.8" lengthAdjust="spacing">utes</text>
+<text x="1044" y="356.4" fill="#35424c">4</text>
+<text x="1058.4" y="356.4" fill="#35424c">M</text>
+<text x="1065.6" y="356.4" fill="#6caa71">B</text>
 <text x="1144.8" y="356.4" fill="#465c6d">│</text>
 <text x="1159.2" y="356.4" fill="#465c6d">|</text>
 <text x="1396.8" y="356.4" fill="#465c6d">|</text>
@@ -563,10 +575,11 @@
 <text x="489.6" y="371.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.9%</text>
 <text x="547.2" y="371.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.066%</text>
 <text x="597.6" y="371.4" fill="#465c6d">│</text>
-<text x="928.8" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.4</text>
-<text x="957.6" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.7</text>
-<text x="1072.8" y="371.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="371.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.44</text>
+<text x="964.8" y="371.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="371.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
+<text x="1044" y="371.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">3.9</text>
+<text x="1072.8" y="371.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="371.4" fill="#465c6d">│</text>
 <text x="1159.2" y="371.4" fill="#465c6d">|</text>
 <text x="1396.8" y="371.4" fill="#465c6d">|</text>
@@ -580,18 +593,18 @@
 <text x="252" y="386.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="288" y="386.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">64</text>
 <text x="309.6" y="386.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="345.6" y="386.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8.7k</text>
+<text x="345.6" y="386.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8738</text>
 <text x="388.8" y="386.4" fill="#df6c5a" textLength="28.8" lengthAdjust="spacing">10.6</text>
 <text x="417.6" y="386.4" fill="#465c6d">:</text>
-<text x="424.8" y="386.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.8k</text>
+<text x="424.8" y="386.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1771</text>
 <text x="453.6" y="386.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">/m</text>
 <text x="489.6" y="386.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.4%</text>
 <text x="547.2" y="386.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.599%</text>
 <text x="597.6" y="386.4" fill="#465c6d">│</text>
-<text x="928.8" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">5.9</text>
-<text x="957.6" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">7.7</text>
-<text x="1072.8" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="386.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">5.89</text>
+<text x="964.8" y="386.4" fill="#35424c" textLength="50.4" lengthAdjust="spacing">minutes</text>
+<text x="1044" y="386.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">8.1</text>
+<text x="1072.8" y="386.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="386.4" fill="#465c6d">│</text>
 <text x="1159.2" y="386.4" fill="#465c6d">|</text>
 <text x="1389.6" y="386.4" fill="#465c6d">|</text>
@@ -603,7 +616,7 @@
 <text x="208.8" y="401.4" fill="#bd7bcd" textLength="28.8" lengthAdjust="spacing">3xx:</text>
 <text x="244.8" y="401.4" fill="#bd7bcd" textLength="14.4" lengthAdjust="spacing">67</text>
 <text x="266.4" y="401.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">2xx:</text>
-<text x="302.4" y="401.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8.6k</text>
+<text x="302.4" y="401.4" fill="#6caa71" textLength="28.8" lengthAdjust="spacing">8568</text>
 <text x="388.8" y="401.4" fill="#df6c5a" textLength="28.8" lengthAdjust="spacing">46.4</text>
 <text x="417.6" y="401.4" fill="#465c6d">:</text>
 <text x="424.8" y="401.4" fill="#e0e0e0" textLength="28.8" lengthAdjust="spacing">1.8k</text>
@@ -611,10 +624,10 @@
 <text x="489.6" y="401.4" fill="#00af00" textLength="36" lengthAdjust="spacing">97.4%</text>
 <text x="547.2" y="401.4" fill="#d70000" textLength="36" lengthAdjust="spacing">2.62%</text>
 <text x="597.6" y="401.4" fill="#465c6d">│</text>
-<text x="928.8" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">6.2</text>
-<text x="957.6" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
-<text x="1044" y="401.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">12.8</text>
-<text x="1080" y="401.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="928.8" y="401.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">6.18</text>
+<text x="964.8" y="401.4" fill="#35424c" textLength="50.4" lengthAdjust="spacing">minutes</text>
+<text x="1044" y="401.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">13.4</text>
+<text x="1080" y="401.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="401.4" fill="#465c6d">│</text>
 <text x="1188" y="401.4" fill="#465c6d">|</text>
 <text x="1389.6" y="401.4" fill="#465c6d">|</text>
@@ -636,15 +649,16 @@
 <text x="489.6" y="416.4" fill="#00af00" textLength="36" lengthAdjust="spacing">99.8%</text>
 <text x="547.2" y="416.4" fill="#d70000" textLength="43.2" lengthAdjust="spacing">0.174%</text>
 <text x="597.6" y="416.4" fill="#465c6d">│</text>
-<text x="928.8" y="416.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">4.6</text>
-<text x="957.6" y="416.4" fill="#35424c" textLength="21.6" lengthAdjust="spacing">min</text>
+<text x="928.8" y="416.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">4.64</text>
+<text x="964.8" y="416.4" fill="#35424c" textLength="28.8" lengthAdjust="spacing">minu</text>
+<text x="993.6" y="416.4" fill="#e5c872" textLength="21.6" lengthAdjust="spacing">tes</text>
 <text x="1044" y="416.4" fill="#35424c" textLength="14.4" lengthAdjust="spacing">3.</text>
-<text x="1058.4" y="416.4" fill="#6caa71">3</text>
-<text x="1072.8" y="416.4" fill="#6caa71" textLength="21.6" lengthAdjust="spacing">MiB</text>
+<text x="1058.4" y="416.4" fill="#6caa71">4</text>
+<text x="1072.8" y="416.4" fill="#6caa71" textLength="14.4" lengthAdjust="spacing">MB</text>
 <text x="1144.8" y="416.4" fill="#465c6d">│</text>
 <text x="1231.2" y="416.4" fill="#465c6d">|</text>
 <text x="1454.4" y="416.4" fill="#465c6d">|</text>
-<text x="14.4" y="431.4" fill="#465c6d" textLength="1519.2" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms───────7.5ms───────66.7ms───────592.9ms──────6.2s</text>
+<text x="14.4" y="431.4" fill="#465c6d" textLength="1519.2" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴─1ms────────8ms─────────67ms─────────593ms───────6.2s</text>
 <text x="612" y="71.4" fill="#6caa71" textLength="129.6" lengthAdjust="spacing">██████████████████</text>
 <text x="1159.2" y="71.4" fill="#ffd700">█</text>
 <text x="1202.4" y="71.4" fill="#afaf00">█</text>
