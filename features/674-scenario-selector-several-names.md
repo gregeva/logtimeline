@@ -143,8 +143,15 @@ All assertable. The library criteria are asserted in
 
 ## Gate
 
-No `ltl` change, so no benchmark. The change alters what every harness selects,
-so the full suite runs as the completion gate (`docs/process/workflow.md` § 3).
+`ltl` is byte-identical to the base once `$version_number` is restored, but the
+diff touches `tests/validate-*.sh` and `tests/lib/`, so the scope table requires
+both the benchmark and the full suite (`docs/process/workflow.md` § 3).
+
+- **Benchmark** (`single-day-access-log-standard`, release worktree against
+  issue worktree, back to back, one run each): total 5.3 s → 5.1 s (−3.4 %),
+  `rss_peak` 100.2 → 99.7 MB. Identical code on both sides, so this is the
+  run-to-run spread, not an effect; `format_scan_subs` +48 KB is the one memory
+  row that moved, on identical code.
 
 ## Implementation
 
@@ -177,3 +184,8 @@ so the full suite runs as the completion gate (`docs/process/workflow.md` § 3).
 - **Guidance**: `tests/HARNESS-DESIGN.md` § The scenario selector, `docs/process/workflow.md` § 3 (b), `CLAUDE.md`
   § Before running a command and its test block, `.claude/rules/harnesses.md`,
   and the usage comment of 17 harnesses.
+- **Full suite** (on `54c35d2`, `CI=1`, csv-output then statistics first): all
+  50 harnesses exit 0 with assertions run; `validate-scenario-selector.sh`
+  sweeps 49 harnesses; `validate-filter-summary.sh` 146 of 146;
+  `validate-classification-states.sh` 56 of 56. The commit after it changes
+  this doc only.
