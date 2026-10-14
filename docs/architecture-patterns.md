@@ -714,7 +714,7 @@ which is the cost a flag exists to bound.
 - `read_and_process_logs` :: `if( $discard_active ) {`
 - `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
-- `adapt_to_command_line_options` :: `$message_cut_not_at_end = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, read by the key site in `read_and_process_logs` (`if( $message_cut_not_at_end && length($log_key) == $max_log_message_length ) {`, a gate marker the generated body drops under the default `right`), by `print_message_summary` and by the grouping's pattern derivation (`keep_ellipsis_in_mask`) (`features/564-message-truncation-position.md`).
+- `adapt_to_command_line_options` :: `$message_cut_not_at_end = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, read by the key site in `read_and_process_logs` (`if( $message_cut_not_at_end ) {`, a gate marker whose arm the generated body drops under the default `right`, keeping the four composition arms), by `print_message_summary` (`if ( $message_cut_not_at_end && length($key) > $col_width{1}`) and by the grouping passes, which call `keep_ellipsis_in_mask` and `cut_markers_match` only under the flag (`features/564-message-truncation-position.md`).
 - `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
 
 **Owning record.** This entry.
