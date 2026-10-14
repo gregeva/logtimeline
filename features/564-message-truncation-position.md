@@ -4,8 +4,8 @@
 
 Planning, on branch `564-message-truncation-position` off `release/0.20.0`.
 The touched surfaces' contracts (§ 2) were confirmed by the architect on
-2026-10-14; the architect's direction of the same day is § 3. No decision is
-locked yet.
+2026-10-14; the architect's direction of the same day is § 3, and the
+decisions locked from it are § 3.1.
 
 ## 1. What this is for
 
@@ -49,6 +49,22 @@ message length cap) is closed as not planned and no longer constrains this work.
    already-shortened message and adapting it to the available print width with
    the same position.
 
+### 3.1 Locked decisions
+
+- **D1 — LOCKED 2026-10-14 (architect) — The stored cut keeps its per-run
+  length and applies the chosen position.** The first touch point cuts the
+  stored key at the length 619 lock 1 (one per-run cut) resolves, the terminal
+  width or `MESSAGE_KEY_CAP` (350) under `-o` or `-g`, in the chosen position,
+  with the composed attributes kept. A left cut at the terminal width already
+  keeps the message's real tail, so the stored key does not grow; 566 D8 (the
+  message key's length limit is unchanged) holds as written. Rejected: a
+  350-character stored cut whenever left or middle is chosen, which shows
+  nothing more on the screen without `-o` or `-g` (nothing wider than the
+  terminal is printed) and grows the store. Consequence: the rows a run
+  produces follow the position, since a left cut joins messages that differ
+  only in the part cut away, as a right cut joins those that differ only in
+  their tails today.
+
 ## 4. Research (2026-10-14, read-only, on the worktree at `71f1116`)
 
 Measured at terminal width 160 (`--terminal-width 160`), comparing the stored
@@ -76,8 +92,6 @@ committed criteria when acceptance criteria are agreed.
 
 ## 5. Open items
 
-- The stored cut's length when a left or middle position is chosen without
-  `-o` or `-g` (terminal width or `MESSAGE_KEY_CAP`).
 - CSV: the issue's done-when says CSV output is unchanged; a position-aware
   stored cut changes CSV column 2 for messages longer than the cap.
 - Appended exposed values (`thread=`, `session=`, `user=`, `object=`) at the
