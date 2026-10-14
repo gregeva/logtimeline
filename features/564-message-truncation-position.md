@@ -172,5 +172,26 @@ width, and beyond the terminal width.
 | AC11 | The before/after benchmark (`single-day-access-log-standard`) shows no regression: the stored cut is composed per line, in the hot path. | assertable |
 | AC12 | The rendered table is looked at on real data, an access log with `-xqs` and a log carrying thread and object, under each position. | inspection |
 
+## 6. Delivery
+
+On branch `564-message-truncation-position`.
+
+- **Drop 1** (`8f0870c`): the `-mt, --message-truncation` option (D2), its
+  `--help` and `docs/usage.md` rows; `-V runtime-config` reports the resolved
+  value when it is given.
+- **Drop 2** (`5669fc8`): the cut. Measured at `--terminal-width 160` against
+  the base commit on a Windchill method-server log with `-xt`, a Tomcat access
+  log of an IoT REST API with `-xqs` and an HTTP/2 access log with `-xqs`,
+  each plain and with `-g`: `right` output is identical to the base; under
+  `left` and `center` every messages-table row has the same width and none
+  carries two ellipses. Under `-o`, a key cut at the 350 cap is 350 bytes, the
+  ellipsis taking three of them, so it shows 348 characters: the stored length
+  is held in bytes, as every key length is. On the method-server log with
+  `-xt`, `left` keeps the appended `thread=` whole, so the row of 1,533
+  occurrences under `right` is about 50 rows of some 30 under `left` (D1's
+  consequence); with `-g` they group back to one row ending
+  `thread=ajp-nio-127.0.0.1-8010-exec-4*`. Under `right` the generated read
+  body drops the key-site block (`-V read-path` marker `kept=no`).
+
 ## 5. Open items
 
