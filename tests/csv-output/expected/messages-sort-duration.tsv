@@ -1,0 +1,4 @@
+message_match	expected
+# -so duration ranks the MESSAGES rows by the stored total; a zero total renders in the source unit
+@non_increasing	duration
+@zero_duration_nice	0 msec

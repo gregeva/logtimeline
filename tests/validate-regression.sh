@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 REF_DIR="$SCRIPT_DIR/reference-output"
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).

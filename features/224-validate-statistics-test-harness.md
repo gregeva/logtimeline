@@ -172,7 +172,7 @@ The columns this resolves to today:
 - **percentile family**: `p1`, `p5`, `p10`, `p25`, `p50`, `p75`, `iqr`, `p90`, `p95`, `p99`, `p999`, `p9999`, `p99999`.
 - **shape family**: `cv`, `skewness`, `kurtosis`, `bimodality_coef`. May be legitimately blank when `n < 4` or `std_dev == 0` (per #222); blank-on-both-sides registers as T1.
 - **STATS-only level family**: `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `FORCE`, `DATA`, `5xx`, `4xx`, `3xx`, `2xx`, `1xx`, `Pause Young`, `Pause Full`.
-- **STATS-only rate family**: `err-rate_sec/min/hr/day`, `msg-rate_sec/min/hr/day`.
+- **STATS-only rate family**: `err_rate_<unit>`, `msg_rate_<unit>`, one column each for the run's `-ru` unit.
 
 In short: if `ltl` calculated it and emitted it as a number, the harness asserts drift on it.
 

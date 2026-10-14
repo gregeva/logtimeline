@@ -31,7 +31,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -161,8 +161,13 @@ scenario_register non-recursive-unchanged \
                   dedup-across-nesting-patterns \
                   bare-directory-matches-nothing \
                   unreadable-directory-note \
+                  unreadable-directory-count \
                   silent-when-all-readable \
-                  no-match-quoting-guidance
+                  no-match-quoting-guidance \
+                  argument-selects-nothing \
+                  expansion-before-check \
+                  directories-inside-a-pattern \
+                  nothing-selected-unchanged
 scenario_parse_args "$@"
 
 if scenario_wanted non-recursive-unchanged; then
@@ -360,6 +365,34 @@ fi
 
 fi
 
+# --- Scenario: 1,000 unreadable directories are counted exactly ---
+# The count precedes the list of the directories it counts, so it names the
+# notice exact row: 1000, never 1 thousand (features/617-width-to-format-rule.md
+# D14). Constructed at run time via chmod, as above.
+if scenario_wanted unreadable-directory-count; then
+current_scenario="unreadable-directory-count"
+echo "[$current_scenario]"
+if [[ "$(id -u)" -eq 0 ]]; then
+    echo "  SKIP  $current_scenario :: running as root, which can read a 0-mode directory"
+else
+    SWEEP_MANY="$TMP_DIR/sweep-many"
+    mkdir -p "$SWEEP_MANY"
+    touch "$SWEEP_MANY/top.888"
+    for ((i = 0; i < 1000; i++)); do mkdir "$SWEEP_MANY/locked-$i"; done
+    chmod 000 "$SWEEP_MANY"/locked-*
+    many="$TMP_DIR/unreadable-many.sel"
+    if capture_selection "$many" $SHAPE -r "$SWEEP_MANY/*.888"; then
+        assert_command \
+            command     "grep -aq 'Note: 1000 directories could not be read and were skipped during recursive file selection' '$many.stderr'" \
+            label       'the note counts 1,000 unreadable directories exactly' \
+            asserts     'A notice count that a list beside it must agree with renders exact: 1000 directories, never 1 thousand' \
+            produced_by 'read_and_process_logs() in ltl (end-of-processing note emission), through value_text() and the notice exact row' \
+            contract    'features/617-width-to-format-rule.md D14; features/420-recursive-file-selection.md § D8'
+    fi
+    chmod 755 "$SWEEP_MANY"/locked-*
+fi
+fi
+
 if scenario_wanted silent-when-all-readable; then
 # --- Scenario: a readable sweep emits no unreadable-directory note ---
 current_scenario="silent-when-all-readable"
@@ -434,6 +467,126 @@ assert_command \
     asserts     'The guidance is tied to selecting nothing, never to the use of -r: a sweep that found its files says nothing about quoting, so a correct invocation is never warned about a problem it does not have' \
     produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl (the hint is reached only on the failure path)' \
     contract    "$CONTRACT_GUIDANCE"
+fi
+
+
+# Run ltl expecting it to stop: the exit status goes to <outfile>.rc and stderr,
+# stripped of print_usage()'s bold overstrike and SGR codes, to <outfile>.stderr.
+# The runtime-warning check runs on the capture (HARNESS-DESIGN.md §
+# Runtime-warning cleanliness).
+# Usage: capture_failure <outfile> <ltl-args-and-patterns...>
+capture_failure() {
+    local outfile="$1"; shift
+    set +e
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress "$@" ) > "$outfile" 2>"$outfile.raw-stderr"
+    echo "$?" > "$outfile.rc"
+    set -e
+    sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$outfile.raw-stderr" > "$outfile.stderr"
+    if ! assert_no_runtime_warnings "$outfile.stderr" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+    fi
+}
+
+CONTRACT_SELECTS_NOTHING='features/614-operand-settlement.md § 2 D1 (place 2, file resolution) and § Acceptance criteria, phase 1 — an argument whose expansion selects no file stops the run with a usage error naming it, a directory as a directory'
+PRODUCED_BY_SELECTS_NOTHING='the file-argument expansion loop in adapt_to_command_line_options() in ltl (@selected_nothing), worded by file_argument_problem(), rendered via print_usage()'
+
+# --- Scenario: an argument that selects no file, beside one that does, stops the run ---
+# Shape: the runs stop before any file is read, so only the exit status and the
+# stderr error line are read; -bs 1440 -oe -n 1 as everywhere in this harness.
+if scenario_wanted argument-selects-nothing; then
+current_scenario="argument-selects-nothing"
+echo "[$current_scenario]"
+for variant in "with-r" "without-r"; do
+    extra=(-bs 1440 -oe -n 1)
+    [[ "$variant" == "with-r" ]] && extra+=(-r)
+    capture_failure "$TMP_DIR/dir-$variant" "${extra[@]}" "$FIXTURE_ROOT/archive" "$FIXTURE_ROOT/alpha.888"
+    assert_command \
+        command     "[ \"\$(cat '$TMP_DIR/dir-$variant.rc')\" = 2 ] && grep -aqF -- \"Error: '$FIXTURE_ROOT/archive' is a directory, not a file\" '$TMP_DIR/dir-$variant.stderr'" \
+        label       "a directory beside a file stops the run, named as a directory ($variant)" \
+        asserts     'A directory argument selects no file; beside an argument that does, the run stops with exit 2 and names it as a directory rather than reading less than was asked for' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+    capture_failure "$TMP_DIR/absent-$variant" "${extra[@]}" "$FIXTURE_ROOT/absent.888" "$FIXTURE_ROOT/alpha.888"
+    assert_command \
+        command     "[ \"\$(cat '$TMP_DIR/absent-$variant.rc')\" = 2 ] && grep -aqF -- \"Error: '$FIXTURE_ROOT/absent.888' matches no file\" '$TMP_DIR/absent-$variant.stderr'" \
+        label       "a path that does not exist beside a file stops the run, named ($variant)" \
+        asserts     'A path that does not exist selects no file; beside an argument that does, the run stops with exit 2 and names it' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+    capture_failure "$TMP_DIR/none-$variant" "${extra[@]}" "$FIXTURE_ROOT/*.none" "$FIXTURE_ROOT/alpha.888"
+    assert_command \
+        command     "[ \"\$(cat '$TMP_DIR/none-$variant.rc')\" = 2 ] && grep -aqF -- \"Error: '$FIXTURE_ROOT/*.none' matches no file\" '$TMP_DIR/none-$variant.stderr'" \
+        label       "a pattern that matches nothing beside a file stops the run, named as typed ($variant)" \
+        asserts     'A pattern ltl expands to nothing selects no file; beside an argument that does, the run stops with exit 2 and names the pattern as it was typed' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+    capture_failure "$TMP_DIR/both-$variant" "${extra[@]}" "$FIXTURE_ROOT/archive" "$FIXTURE_ROOT/absent.888" "$FIXTURE_ROOT/alpha.888"
+    assert_command \
+        command     "[ \"\$(cat '$TMP_DIR/both-$variant.rc')\" = 2 ] && grep -aqF -- \"Error: '$FIXTURE_ROOT/archive' is a directory, not a file; '$FIXTURE_ROOT/absent.888' matches no file\" '$TMP_DIR/both-$variant.stderr'" \
+        label       "every argument that selects no file is named in the one error ($variant)" \
+        asserts     'With two arguments that select no file beside one that does, the single error names both, in the order they were given' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+done
+fi
+
+# --- Scenario: a pattern is expanded before it is judged ---
+# Shape: the selection lines of -V format-detection, as the other selection scenarios.
+if scenario_wanted expansion-before-check; then
+current_scenario="expansion-before-check"
+echo "[$current_scenario]"
+expanded="$TMP_DIR/expanded.sel"
+if capture_selection "$expanded" $SHAPE "$FIXTURE_ROOT/*.888" "$FIXTURE_ROOT/charlie.123"; then
+    assert_command \
+        command     "grep -aq '^files: 3\$' '$expanded' && ! grep -aq 'matches no file' '$expanded.stderr'" \
+        label       'a quoted pattern that matches files is never reported as selecting nothing' \
+        asserts     'Each argument is judged on what its expansion selected, so a wildcard that matches files is read, never taken for a path that does not exist' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+fi
+fi
+
+# --- Scenario: directories inside a pattern that selected files stay silent ---
+# Shape: the selection lines of -V format-detection, as the other selection scenarios.
+if scenario_wanted directories-inside-a-pattern; then
+current_scenario="directories-inside-a-pattern"
+echo "[$current_scenario]"
+inside="$TMP_DIR/inside.sel"
+if capture_selection "$inside" $SHAPE "$FIXTURE_ROOT/*"; then
+    assert_command \
+        command     "grep -aq '^files: 4\$' '$inside' && ! grep -aq '^file: .*/archive\$' '$inside' && [ ! -s '$inside.stderr' ]" \
+        label       'a pattern selecting files and directories reads the files and says nothing of the directories' \
+        asserts     'Directories inside an argument that selected files are skipped without a word: the fixture root holds four files and three directories, and the four files are read with an empty stderr' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
+        contract    "$CONTRACT_SELECTS_NOTHING; docs/usage.md § Files"
+fi
+inside_r="$TMP_DIR/inside-r.sel"
+if capture_selection "$inside_r" $SHAPE -r "$FIXTURE_ROOT/*"; then
+    assert_command \
+        command     "grep -aq '^files: 18\$' '$inside_r' && [ ! -s '$inside_r.stderr' ]" \
+        label       'the same pattern under -r reads every file in the tree, silently' \
+        asserts     'Under -r the pattern selects all eighteen fixture files at every depth, and the directories it passes through raise nothing' \
+        produced_by "$PRODUCED_BY_SELECTS_NOTHING; $PRODUCED_BY_EXPAND" \
+        contract    "$CONTRACT_SELECTS_NOTHING"
+fi
+fi
+
+# --- Scenario: when no argument selects a file, the failure is today's ---
+# Shape: exit status and the stderr error only.
+if scenario_wanted nothing-selected-unchanged; then
+current_scenario="nothing-selected-unchanged"
+echo "[$current_scenario]"
+for variant in "with-r" "without-r"; do
+    extra=(-bs 1440 -oe -n 1)
+    [[ "$variant" == "with-r" ]] && extra+=(-r)
+    capture_failure "$TMP_DIR/several-$variant" "${extra[@]}" "$FIXTURE_ROOT/archive" "$FIXTURE_ROOT/absent.888"
+    assert_command \
+        command     "[ \"\$(cat '$TMP_DIR/several-$variant.rc')\" = 2 ] && grep -aqx -- 'Error: unable to open any files' '$TMP_DIR/several-$variant.stderr' && ! grep -aq 'matches no file\|is a directory' '$TMP_DIR/several-$variant.stderr'" \
+        label       "several arguments that all select nothing end in the no-files error ($variant)" \
+        asserts     'When no argument selects a file, whether one or several, the run ends in the existing could-not-open-any-files error, unchanged, rather than the per-argument error' \
+        produced_by 'the empty-@in_files guard in adapt_to_command_line_options() in ltl, rendered via print_usage()' \
+        contract    "$CONTRACT_SELECTS_NOTHING (criterion: nothing selected at all is the existing failure); features/445-unquoted-glob-consumed-by-shell-before-r.md D1 to D3"
+done
 fi
 
 

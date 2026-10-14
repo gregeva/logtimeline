@@ -1,0 +1,82 @@
+access MESSAGES b: 108 rows, 4428 cells, 137 moved
+    duration_bimodality_coef         56 cells, max rel 1.645e-14
+    duration_kurtosis                47 cells, max rel 3.552e-13
+    duration_skewness                34 cells, max rel 1.000e+00
+access MESSAGES b-hoist: 108 rows, 4428 cells, 137 moved
+    duration_bimodality_coef         56 cells, max rel 1.645e-14
+    duration_kurtosis                47 cells, max rel 3.552e-13
+    duration_skewness                34 cells, max rel 1.000e+00
+access MESSAGES c: 108 rows, 4428 cells, 0 moved (byte-identical)
+access MESSAGES c-hoist: 108 rows, 4428 cells, 0 moved (byte-identical)
+access MESSAGES hoist: 108 rows, 4428 cells, 0 moved (byte-identical)
+access STATS b: 3 rows, 117 cells, 7 moved
+    duration_bimodality_coef          3 cells, max rel 4.304e-14
+    duration_kurtosis                 2 cells, max rel 1.545e-14
+    duration_skewness                 2 cells, max rel 1.833e-14
+access STATS b-hoist: 3 rows, 117 cells, 7 moved
+    duration_bimodality_coef          3 cells, max rel 4.304e-14
+    duration_kurtosis                 2 cells, max rel 1.545e-14
+    duration_skewness                 2 cells, max rel 1.833e-14
+access STATS c: 3 rows, 117 cells, 0 moved (byte-identical)
+access STATS c-hoist: 3 rows, 117 cells, 0 moved (byte-identical)
+access STATS hoist: 3 rows, 117 cells, 0 moved (byte-identical)
+access-consolidated MESSAGES b: 34 rows, 1394 cells, 28 moved
+    duration_bimodality_coef         12 cells, max rel 9.082e-15
+    duration_kurtosis                 9 cells, max rel 1.324e-14
+    duration_skewness                 7 cells, max rel 1.000e+00
+access-consolidated MESSAGES b-hoist: 34 rows, 1394 cells, 28 moved
+    duration_bimodality_coef         12 cells, max rel 9.082e-15
+    duration_kurtosis                 9 cells, max rel 1.324e-14
+    duration_skewness                 7 cells, max rel 1.000e+00
+access-consolidated MESSAGES c: 34 rows, 1394 cells, 0 moved (byte-identical)
+access-consolidated MESSAGES c-hoist: 34 rows, 1394 cells, 0 moved (byte-identical)
+access-consolidated MESSAGES hoist: 34 rows, 1394 cells, 0 moved (byte-identical)
+access-consolidated STATS b: 3 rows, 117 cells, 7 moved
+    duration_bimodality_coef          3 cells, max rel 4.304e-14
+    duration_kurtosis                 2 cells, max rel 1.545e-14
+    duration_skewness                 2 cells, max rel 1.833e-14
+access-consolidated STATS b-hoist: 3 rows, 117 cells, 7 moved
+    duration_bimodality_coef          3 cells, max rel 4.304e-14
+    duration_kurtosis                 2 cells, max rel 1.545e-14
+    duration_skewness                 2 cells, max rel 1.833e-14
+access-consolidated STATS c: 3 rows, 117 cells, 0 moved (byte-identical)
+access-consolidated STATS c-hoist: 3 rows, 117 cells, 0 moved (byte-identical)
+access-consolidated STATS hoist: 3 rows, 117 cells, 0 moved (byte-identical)
+script MESSAGES b: 4600 rows, 188600 cells, 15 moved
+    duration_kurtosis                 9 cells, max rel 6.000e-15
+    duration_bimodality_coef          4 cells, max rel 2.213e-15
+    duration_skewness                 2 cells, max rel 5.374e-15
+script MESSAGES b-hoist: 4600 rows, 188600 cells, 15 moved
+    duration_kurtosis                 9 cells, max rel 6.000e-15
+    duration_bimodality_coef          4 cells, max rel 2.213e-15
+    duration_skewness                 2 cells, max rel 5.374e-15
+script MESSAGES c: 4600 rows, 188600 cells, 0 moved (byte-identical)
+script MESSAGES c-hoist: 4600 rows, 188600 cells, 0 moved (byte-identical)
+script MESSAGES hoist: 4600 rows, 188600 cells, 0 moved (byte-identical)
+script STATS b: 3 rows, 96 cells, 2 moved
+    duration_bimodality_coef          1 cells, max rel 2.014e-15
+    duration_kurtosis                 1 cells, max rel 1.777e-15
+script STATS b-hoist: 3 rows, 96 cells, 2 moved
+    duration_bimodality_coef          1 cells, max rel 2.014e-15
+    duration_kurtosis                 1 cells, max rel 1.777e-15
+script STATS c: 3 rows, 96 cells, 0 moved (byte-identical)
+script STATS c-hoist: 3 rows, 96 cells, 0 moved (byte-identical)
+script STATS hoist: 3 rows, 96 cells, 0 moved (byte-identical)
+script-consolidated MESSAGES b: 77 rows, 3157 cells, 4 moved
+    duration_kurtosis                 2 cells, max rel 1.391e-15
+    duration_skewness                 2 cells, max rel 3.553e-15
+script-consolidated MESSAGES b-hoist: 77 rows, 3157 cells, 4 moved
+    duration_kurtosis                 2 cells, max rel 1.391e-15
+    duration_skewness                 2 cells, max rel 3.553e-15
+script-consolidated MESSAGES c: 77 rows, 3157 cells, 0 moved (byte-identical)
+script-consolidated MESSAGES c-hoist: 77 rows, 3157 cells, 0 moved (byte-identical)
+script-consolidated MESSAGES hoist: 77 rows, 3157 cells, 0 moved (byte-identical)
+script-consolidated STATS b: 3 rows, 96 cells, 2 moved
+    duration_bimodality_coef          1 cells, max rel 2.014e-15
+    duration_kurtosis                 1 cells, max rel 1.777e-15
+script-consolidated STATS b-hoist: 3 rows, 96 cells, 2 moved
+    duration_bimodality_coef          1 cells, max rel 2.014e-15
+    duration_kurtosis                 1 cells, max rel 1.777e-15
+script-consolidated STATS c: 3 rows, 96 cells, 0 moved (byte-identical)
+script-consolidated STATS c-hoist: 3 rows, 96 cells, 0 moved (byte-identical)
+script-consolidated STATS hoist: 3 rows, 96 cells, 0 moved (byte-identical)

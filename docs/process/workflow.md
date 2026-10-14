@@ -57,7 +57,7 @@ so the gate runs on exactly the code being merged. Nothing hardcodes a version:
 
 ```bash
 git branch --show-current                          # issue number + short description
-./build/issue-status.sh set {number} "in progress"
+./process/issue-status.sh set {number} "in progress"
 # set $version_number = "X.Y.Z-{issue}" in ltl
 ```
 
@@ -102,7 +102,7 @@ Phase 1 begins only on explicit instruction. Filing a requirement
    new or changed data model, (b) a new code path, feature or capability in the
    hot path, where the most performant way to build it has to be found, (c) anything impactful by execution frequency × per-execution
    cost, (d) a key requirement whose verification method is unknown. A smaller
-   hot-path change needs no prototype: the before/after benchmark (§ 3 (b)),
+   hot-path change needs no prototype: the before/after benchmark (§ 3 (a)),
    always required for hot-path work, is its evidence. Research
    grounds the prototype; the prototype compares candidates at staged scale
    against the current code as baseline; exit requires measured justification
@@ -119,7 +119,14 @@ Phase 1 begins only on explicit instruction. Filing a requirement
    decision stands until the architect changes it; a problem discovered
    mid-implementation is brought with candidate designs, never resolved by
    substitution. Changes agreed as "one at a time, each measured" are delivered
-   one at a time.
+   one at a time. Every change is tested as it is written: `ltl` is run on
+   inputs chosen to exercise it (the case it fixes, the cases around it, the
+   inputs it could break), beside the code before the change on the same
+   inputs, and the difference is read from the captured `-V` output. Once it
+   behaves as intended, it is committed and pushed on the issue branch. The
+   harnesses do not replace this: they assert the acceptance criteria and
+   catch regressions later (`docs/test-driven-development.md` § Testing while
+   developing).
 5. **Testing.** Sample files per `docs/test-logs.md`. A visual surface is
    verified by looking at the rendered output on real data, never by grepping
    escape sequences.
@@ -130,33 +137,24 @@ Phase 1 begins only on explicit instruction. Filing a requirement
 
 The work is not done, and no PR is opened, until the gate passes **on the
 commit being merged**. A gate run that predates the last amend does not count,
-and an added commit re-applies the scope test.
+and an added commit re-applies the scope test. The `after` benchmark runs
+first, then the full harness suite.
 
 ### Scope test, applied to the diff
 
-| The diff touches | Full harness suite | Before/after benchmark |
+| The diff touches | Before/after benchmark | Full harness suite |
 |---|---|---|
 | Any executable line of `ltl` | required | required |
-| `ltl` comments or whitespace only (`git diff -w` shows only comment lines) | skip; run `perl -c ltl`; say "comment-only" in the commit message | skip |
-| Any `tests/validate-*.sh`, `tests/lib/`, or a fixture or expectation a harness reads | required (what "passing" means changed) | required |
-| Only `tests/baseline/`, `build/`, `features/`, `docs/`, `releases/`, `patterns/`, `CLAUDE.md` | skip, and record the skip in the completion comment | skip |
+| `ltl` comments or whitespace only (`git diff -w` shows only comment lines) | skip | skip; run `perl -c ltl`; say "comment-only" in the commit message |
+| Any `tests/validate-*.sh`, `tests/lib/`, or a fixture or expectation a harness reads | required | required (what "passing" means changed) |
+| Only `tests/baseline/`, `build/`, `features/`, `docs/`, `releases/`, `patterns/`, `CLAUDE.md` | skip | skip, and record the skip in the completion comment |
 | An exempt path **and** any required path, same commit | required | required |
 
 The test is about what could change behaviour or an assertion, never about how
 significant the change feels. "The harnesses this change touches" is not a
 row in this table.
 
-### (a) The complete harness suite
-
-Every `tests/validate-*.sh` exits 0, and each summary line shows assertions
-actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
-`CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
-each harness's output once to a scratch file and inspect the file.
-
-While working a single harness, the check is that harness. The full suite runs
-once, here.
-
-### (b) Before/after benchmark on this machine
+### (a) Before/after benchmark on this machine, first
 
 ```bash
 # version restored to X.Y.Z first
@@ -164,6 +162,13 @@ once, here.
 ./tests/baseline/compare-results.sh summary \
     tests/baseline/results/{issue}-before.tsv tests/baseline/results/{issue}-after.tsv
 ```
+
+`single-day-access-log-standard` is the floor, not the scope. Every benchmark
+test whose options reach the changed code (named `<selection>-<scenario>`
+from the `SCENARIOS` list in `run-benchmark.sh`; a test name runs alone) is
+captured before and after alongside it: a
+change to the statistics behind `-so` runs the `sort-*` tests, one to the
+heatmap the `heatmap*` tests.
 
 The only valid comparison is before-vs-after, same machine, same case, same
 session. A released baseline TSV (`vX.Y.Z.tsv`) was captured on another
@@ -173,6 +178,18 @@ and is investigated, so the change is as optimized as it can be (one run is not
 a median of 3).
 Delete both TSVs afterwards. The `full`, `xl` and `all` tiers and the XL file
 selections are release instruments and are never run during issue work.
+
+### (b) The complete harness suite, after the benchmark
+
+Every `tests/validate-*.sh` exits 0, and each summary line shows assertions
+actually ran. Run `CI=1 ./tests/validate-csv-output.sh` before
+`CI=1 ./tests/validate-statistics.sh` (shared cache), then the rest. Capture
+each harness's output once to a scratch file and inspect the file.
+
+The suite is the gate's failsafe, never a development tool. While working, the
+check is the developer's own runs aimed at the change, and at most a single
+harness scenario. The full suite runs here, once; its second pass on the
+generated read path belongs to the release gate (§ 5, step 4).
 
 ## 4. Merge and close
 
@@ -190,7 +207,7 @@ and gone a week later.
    "commit" are separate instructions.
 2. `git push origin {feature-branch}`
 3. `gh pr create --base release/X.Y.Z --head {feature-branch}` and immediately
-   `./build/issue-status.sh set {number} "in review"`
+   `./process/issue-status.sh set {number} "in review"`
 4. `gh pr merge {PR#} --merge`
 5. `git log origin/release/X.Y.Z --oneline -3` to confirm the merge landed.
 6. **Release notes.** `releases/v{version}.md` gets one bullet with a `(#NNN)`
@@ -280,10 +297,26 @@ architect, is a last resort after the steps have been tried singly.
 2. Verify `$version_number` reads `X.Y.Z` (no branch left its `-{issue}` marker). If wrong, fix it here and note which branch.
 3. Run every `tests/validate-*.sh`, `CI=1 ./tests/validate-csv-output.sh` first, then `CI=1 ./tests/validate-statistics.sh`, then the rest; capture once, inspect the files. The gate is the complete suite.
 4. For `validate-statistics.sh`: T3/T4 failures on any layer (L1 drift, L2 invariants, L3 NumPy/SciPy oracle) block; T1/T2 advisories are reviewed for intentional drift. Then `./tests/cleanup-test-artifacts.sh`.
+   Then the suite runs a second time, on the generated read path
+   (`features/621-generated-read-loop-body.md` D3). The harnesses' fixtures are
+   under the read path's size threshold, so the first run reads every file with
+   the standard path. `LTL` points every harness, and the shared CSV cache, at a
+   copy of `ltl` whose one difference is a threshold of 0, so each file takes the
+   generated body; the harnesses that read the source read the same source. The
+   cache is cleared before and after, since it does not know which `ltl` filled
+   it. `tests/validate-read-path.sh` runs `ltl` itself and compares the two paths
+   on its own.
+   ```bash
+   gen="$(mktemp -d)/ltl"
+   sed 's/^my \$read_path_threshold       = 2_097_152;/my $read_path_threshold       = 0;/' ltl > "$gen" && chmod +x "$gen"
+   diff ltl "$gen" | grep -c '^>'      # exactly 1, or the copy is wrong
+   LTL="$gen" CI=1 ./tests/validate-csv-output.sh   # then validate-statistics.sh, then the rest
+   ./tests/cleanup-test-artifacts.sh
+   ```
 5. `caffeinate -s ./tests/baseline/run-benchmark.sh all --label vX.Y.Z` (≈2.5 h; `all` is required, `full` is not sufficient).
 6. `./tests/baseline/compare-results.sh --save tests/baseline/results/vPREV.tsv tests/baseline/results/vX.Y.Z.tsv`
 7. Regenerate the documentation screenshots:
-   `build/capture-screenshots.pl --manifest build/screenshots.yaml`, which must
+   `process/capture-screenshots.pl --manifest process/screenshots.yaml`, which must
    exit 0. Look at every image that changed and check each one the tool marks as
    showing messages or the file list for sensitive content
    (`docs/process/screenshots.md`). Then `git add images/screenshots/`: step 9's
@@ -308,10 +341,10 @@ architect, is a last resort after the steps have been tried singly.
 
 13. `gh pr create --base main --head release/X.Y.Z --title "Release vX.Y.Z"` then `gh pr merge {PR#} --merge` — never `--delete-branch`, release branches are preserved.
 14. **The release is finished only when** `gh pr view {PR#} --json state` reports `MERGED` and `git log --oneline main..release/X.Y.Z` is empty. An open release PR is an unfinished release, and so is one whose wiki sync (step 15) has not run. Any session that finds main behind a release branch reports that first and fixes it before anything else; it never rebases new work onto the release branch to route around it.
-15. Sync the wiki: `./build/sync-wiki.sh publish --version X.Y.Z`
+15. Sync the wiki: `./process/sync-wiki.sh publish --version X.Y.Z`
 
     The `docs/` files are the source of truth; the wiki is overwritten each
-    release. `build/sync-wiki.sh` carries the source-to-page map and is the
+    release. `process/sync-wiki.sh` carries the source-to-page map and is the
     only place it is written down — a `docs/` file the wiki should carry gets
     a line in that map and nowhere else. Each page is a byte-for-byte copy of
     its source, so a link to a sibling page is written in the source as its
@@ -320,7 +353,7 @@ architect, is a last resort after the steps have been tried singly.
     asserts it against what is on disk, so a mirror added without a map line,
     or a map line naming a file that does not exist, fails before the release.
 
-    Then `./build/sync-wiki.sh verify --version X.Y.Z`, which must exit 0: the
+    Then `./process/sync-wiki.sh verify --version X.Y.Z`, which must exit 0: the
     release is not finished while it fails. Content equality is not enough on
     its own — a release that changed no `docs/` file leaves every page matching
     its source whether or not the publish ran, so the check also reads the

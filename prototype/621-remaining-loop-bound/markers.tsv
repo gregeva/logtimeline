@@ -1,0 +1,67 @@
+# #621: the gate markers make-generated.pl places in the per-line loop, one
+# marker comment line above each line the snippet finds (a snippet starting
+# re: is a regular expression). The expression is evaluated once per run by
+# the generator; the operations are described in make-generated.pl.
+# op	count	snippet	expression
+when	1	memory_debug_sample("read_lines") if $show_memory_debug	$show_memory_debug
+and	1	if ($total_lines_read % PROGRESS_LINE_STRIDE == 0 && !$disable_progress) {	!$disable_progress
+and	1	if (@udm_configs && !$csv_detected) {	@udm_configs
+when	1	if( $discard_any_field ) {	$discard_any_field
+and	1	if( !$omit_count && defined $message ) {	!$omit_count
+unless	1	 count=?/g unless $expose_count;	$expose_count
+when	1	my %udm_values;	@udm_configs || $heatmap_enabled || $histogram_enabled
+when	1	my $udm_skipped;	@udm_configs
+and	1	if (@udm_configs && $is_line_match && defined $message) {	@udm_configs
+when	1	$metrics_observed = 1 if %udm_values;	@udm_configs
+when	1	if (defined $duration_unit_override) {	defined $duration_unit_override
+when	3	if ($index_capture_demand) {	$index_capture_demand
+when	2	if ($timestamp_capture_ns) {	$timestamp_capture_ns
+when	1	if (%filter_range_tod) {	%filter_range_tod
+when	1	if( $timestamp_epoch < $filter_range_epoch{'start'} || $timestamp_epoch >= $filter_range_epoch{'end'} )	$filter_range_epoch{start} != 0 || $filter_range_epoch{end} != 2521843200 # %filter_range_epoch's unbounded values
+when	1	if ($profile_mode) {	$profile_mode
+and	1	if( defined( $exclude_filter )	defined( $exclude_filter )
+and	1	if( defined( $include_filter )	defined( $include_filter )
+when	1	if( $outcome_filter_active ) {	$outcome_filter_active
+when	1	if( $numeric_filter_active ) {	$numeric_filter_active
+when	1	if ($udm_skipped) {	@udm_configs
+and	1	if( $highlight_active	$highlight_active
+when	1	my $line_is_highlighted = 0;	$highlight_active || $histogram_enabled
+when	1	re:^\s*\$line_is_highlighted = 0;	$highlight_active
+when	1	if ($bucket_key_scale > 1) {	$bucket_key_scale > 1
+when	1	$profile_included_samples++ if $profile_mode;	$profile_mode
+and	1	if( $capture_messages && defined( $message ) ) {	$capture_messages
+when	1	$log_level =~ s/-HL$//;	$highlight_active
+when	1	if( $expose_active ) {	$expose_active
+when	1	if( $discard_active ) {	$discard_active
+when	1	if( $mask_active ) {	$mask_active
+when	1	my $consolidation_s1_matched = 0;	$grouping_active
+when	1	if ($grouping_active) {	$grouping_active
+and	1	$new_key_grouping_key = $log_level // ""	$message_grouping_section_wanted
+when	1	my $new_key_grouping_key;	$grouping_active || $message_grouping_section_wanted
+true	1	if (!$consolidation_s1_matched) {	!$grouping_active
+false	1	if (defined $new_key_grouping_key) {	!$grouping_active && !$message_grouping_section_wanted
+and	2	++ if $message_outcomes_demand && $line_outcome;	$message_outcomes_demand
+and	1	if( defined $bytes && $message_bytes_demand ) {	$message_bytes_demand
+when	3	if (@udm_configs) {	@udm_configs
+and	1	if( defined $duration && !$omit_durations ) {	!$omit_durations
+when	1	if( $message_duration_stats_demand ) {	$message_duration_stats_demand
+unless	1	push @{$msg_entry->{durations}}, 0 + $duration	$message_stats_bin
+unless	1	$stats_source->{durations} = [0 + $duration] unless $message_stats_bin;	$message_stats_bin
+when	2	if ($message_stats_bin) {	$message_stats_bin
+and	1	if( $duration_observed && !$omit_durations && $duration >= 0 ) {	!$omit_durations
+when	1	if( $bucket_duration_stats_demand ) {	$bucket_duration_stats_demand
+unless	1	push @{$bucket_entry->{durations}}, 0 + $duration	$bucket_stats_bin
+when	1	if ($bucket_stats_bin) {	$bucket_stats_bin
+and	1	if( $bytes_observed_line && $bucket_bytes_demand ) {	$bucket_bytes_demand
+when	2	if( $bytes_aggregate_demand ) {	$bytes_aggregate_demand
+when	5	re:^\s*(?!if\b)\S.* if \$line_is_highlighted;\s*(?:#.*)?$	$highlight_active
+when	1	counter_update(\%heatmap_counters_hl, $bucket, $heatmap_value, $heatmap_stream_bpd)	$highlight_active
+when	3	if( $line_is_highlighted ) {	$highlight_active
+when	2	if ($line_is_highlighted) {	$highlight_active
+when	1	if ($heatmap_enabled) {	$heatmap_enabled
+when	1	if ($heatmap_raw) {	$heatmap_raw
+when	1	if ($histogram_enabled) {	$histogram_enabled
+when	1	if ($histogram_raw) {	$histogram_raw
+false	1	if( ( defined $threadpool && $threadpool ne "" ) && ( ( defined $threadpool_activity_regex	!defined $threadpool_activity_regex && !$include_threadpool_summary
+and	1	 && $session_capture_demand ) {	$session_capture_demand
+and	1	 && $user_capture_demand ) {	$user_capture_demand

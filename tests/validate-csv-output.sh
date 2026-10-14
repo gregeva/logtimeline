@@ -34,7 +34,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 HARNESS_DIR="$SCRIPT_DIR/csv-output"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): each
 # scenario's options and fixture in scenarios.tsv are the subject (the CSV
@@ -63,7 +63,8 @@ neutralize_colour_env
 
 # End-of-run cleanup runs only when standalone (CI unset). Trap covers
 # both clean exit and error paths.
-trap csv_cache_maybe_cleanup EXIT
+KEY_CUT_DIR=""
+trap 'csv_cache_maybe_cleanup; [[ -n "$KEY_CUT_DIR" ]] && rm -rf "$KEY_CUT_DIR"; true' EXIT
 
 # Sanity: required files exist. A missing file would silently skip work and
 # falsely pass, so fail loudly here.
@@ -82,6 +83,8 @@ while IFS=$'\t' read -r scenario _rest; do
     [[ -z "$scenario" || "$scenario" =~ ^# || "$scenario" == "scenario" ]] && continue
     scenario_register "$scenario"
 done < "$SCENARIOS_TSV"
+# The message-key cut scenarios (#619) run outside the TSV loop.
+scenario_register key-cut-csv key-cut-csv-grouping key-cut-csv-no-retention
 scenario_parse_args "$@"
 
 # Profile scenarios reference @PROFILE_LOG@ in scenarios.tsv. Generate the
@@ -182,8 +185,26 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         continue
     fi
 
+    # The -V csv-output / columns sub-section: each file's columns with the
+    # precision family the tool writes them in (#618 D4), compared by the
+    # validator with the rules TSVs' precision field.
+    v_columns="$v_capture_dir/csv-output-columns.txt"
+    awk '/=== csv-output \/ columns ===/{flag=1; next} /=== END csv-output \/ columns ===/{flag=0} flag' \
+        "$v_capture_dir/ltl.stdout" > "$v_columns"
+    if [[ ! -s "$v_columns" ]]; then
+        echo "FAIL  scenario=$scenario missing-v-csv-output-columns-block" >&2
+        echo "        -V csv-output / columns sub-section was empty or absent in ltl stdout" >&2
+        echo "        asserts: every -o run must emit -V csv-output / columns when -V csv-output is requested" >&2
+        echo "        produced_by: emit_csv_output_verbose() in ltl" >&2
+        echo "        contract: features/618-csv-column-declaration.md D4" >&2
+        total_fail=$((total_fail + 1))
+        scenarios_run=$((scenarios_run + 1))
+        continue
+    fi
+
     # Expected-categories file (optional 5th scenario column, Issue #312):
-    # categorical content assertions against the MESSAGES CSV. Path is
+    # content assertions against the MESSAGES CSV, and `@cell stats` reads of
+    # the STATS CSV, each validator run taking its own kind's. Path is
     # relative to the harness dir; a declared-but-missing file is a hard
     # failure, not a silent skip.
     expected_args=()
@@ -208,7 +229,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         else
             rules="$RULES_STATS"
             csv="$stats_csv"
-            kind_expected_args=()
+            kind_expected_args=("${expected_args[@]+"${expected_args[@]}"}")
         fi
 
         set +e
@@ -219,6 +240,7 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
             --file-kind "$kind" \
             --expected-families "$families" \
             --v-precision "$v_precision" \
+            --v-columns "$v_columns" \
             --profile-mode "$profile_mode" \
             "${kind_expected_args[@]+"${kind_expected_args[@]}"}"
         vrc=$?
@@ -238,6 +260,81 @@ while IFS=$'\t' read -r scenario logfile options families expected_categories; d
         total_fail=$((total_fail + 1))
     fi
 done < <(tail -n +2 "$SCENARIOS_TSV")
+
+# ---------------------------------------------------------------------------
+# The message-key cut a CSV run uses (#619).
+#
+# A run writing CSV cuts every message key at the message-key cap (350) whatever
+# the terminal width, and -V benchmark-data reports that cut; with -n 0 no
+# message is kept, but the cut reported is still the cap. The fixture holds one
+# request line longer than the cap and one short. Every run is -ni -bs 1440 -oe
+# -n 3 --terminal-width 120: the assertions read only the CONFIG row and the
+# MESSAGES keys, and the width is below the cap so the two cuts differ.
+# ---------------------------------------------------------------------------
+KEY_CUT_FIXTURE="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
+KEY_CUT_SHAPE="-bs 1440 -oe -n 3 --terminal-width 120"
+KEY_CUT_PRODUCED_BY='adapt_to_terminal_settings() in ltl (the per-run cut $max_log_message_length), read by the key sites in read_and_process_logs() and reported by print_verbose_output()'
+KEY_CUT_CONTRACT='features/619-per-run-key-cut.md § 7 (the CONFIG max_log_message_length row), AC1, AC2'
+
+key_cut_assert() {
+    local label="$1" rc="$2" detail="$3" asserts="$4"
+    if [[ "$rc" -eq 0 ]]; then
+        echo "PASS  scenario=$current_scenario :: $label"
+        total_pass=$((total_pass + 1))
+    else
+        echo "FAIL  scenario=$current_scenario :: $label"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $KEY_CUT_PRODUCED_BY"
+        echo "        contract:    $KEY_CUT_CONTRACT"
+        echo "$detail" | sed 's/^/        | /'
+        total_fail=$((total_fail + 1))
+    fi
+}
+
+# Usage: key_cut_scenario <name> <expect-longest-key: 350 or none> <ltl-args...>
+key_cut_scenario() {
+    local name="$1" longest_expected="$2"; shift 2
+    scenario_wanted "$name" || return 0
+    current_scenario="$name"
+    scenarios_run=$((scenarios_run + 1))
+    rm -rf "$KEY_CUT_DIR"; mkdir -p "$KEY_CUT_DIR"
+    set +e
+    ( cd "$KEY_CUT_DIR" && "$LTL" --disable-progress -ni $KEY_CUT_SHAPE "$@" -V benchmark-data "$KEY_CUT_FIXTURE" ) \
+        > "$KEY_CUT_DIR/ltl.stdout" 2> "$KEY_CUT_DIR/ltl.stderr"
+    local rc=$?
+    set -e
+    if [[ $rc -ne 0 ]]; then
+        key_cut_assert 'ltl runs' 1 "ltl exited $rc: $(cat "$KEY_CUT_DIR/ltl.stderr")" 'The key-cut run completes'
+        return 0
+    fi
+    if grep -qE ' at .+ line [0-9]+' "$KEY_CUT_DIR/ltl.stderr"; then
+        key_cut_assert 'no runtime warnings' 1 "$(grep -E ' at .+ line [0-9]+' "$KEY_CUT_DIR/ltl.stderr" | sort | uniq -c)" \
+            'A Perl runtime warning on stderr is an unguarded data path (tests/HARNESS-DESIGN.md § Runtime-warning cleanliness)'
+        return 0
+    fi
+    local cut
+    cut="$(perl -ne 'print $1 if /^CONFIG\tmax_log_message_length\t(\d+)$/' "$KEY_CUT_DIR/ltl.stdout")"
+    key_cut_assert 'the reported cut is the message-key cap' \
+        "$([[ "$cut" == 350 ]] && echo 0 || echo 1)" \
+        "CONFIG max_log_message_length=${cut:-<row missing>}" \
+        'A run writing CSV cuts message keys at the message-key cap (350), not the terminal width (120 here), and -V benchmark-data reports the cut the run used'
+    [[ "$longest_expected" == none ]] && return 0
+    local messages longest
+    messages="$(find "$KEY_CUT_DIR" -maxdepth 1 -name '*-LTL-MESSAGES-*.csv' | head -1)"
+    longest=""
+    if [[ -n "$messages" ]]; then
+        longest="$(perl -MText::ParseWords -ne 'next if $. == 1; my @f = parse_line(",", 0, $_); $m = length $f[1] if defined $f[1] && length $f[1] > ($m // 0); END { print $m // "" }' "$messages")"
+    fi
+    key_cut_assert "the longest message key is $longest_expected characters" \
+        "$([[ "$longest" == "$longest_expected" ]] && echo 0 || echo 1)" \
+        "messages_csv=${messages:-<none written>} longest_key=${longest:-<none>}" \
+        'The request line longer than the cap is kept as a key of exactly the cap: the key sites cut at the cut the run reports'
+}
+
+KEY_CUT_DIR="$(mktemp -d)"
+key_cut_scenario key-cut-csv 350 -o
+key_cut_scenario key-cut-csv-grouping 350 -o -g
+key_cut_scenario key-cut-csv-no-retention none -n 0 -o
 
 # ---------------------------------------------------------------------------
 # Cache validity (#448).
@@ -302,7 +399,7 @@ set -e
 cache_assert 'a freshly captured artifact is read back rather than produced again' \
     "$([[ $rc -eq 1 ]] && echo 0 || echo 1)" \
     "staleness_rc=$rc reason=${reason:-<none>}" \
-    'The cache must still do its job: within the validity period, and with the CSV-emitting code unchanged, the artifact is reused. An expiry that refuses everything would turn a chained CI run into two full captures and the sharing this helper exists for would be gone.'
+    'The cache must still do its job: within the validity period, and with ltl and the column rules unchanged, the artifact is reused. An expiry that refuses everything would turn a chained CI run into two full captures and the sharing this helper exists for would be gone.'
 
 # 2. Past the validity period.
 cache_backdate "$CACHE_MSG" $(( (_CSV_CACHE_MAX_AGE_MINUTES + 5) * 60 ))
@@ -314,16 +411,16 @@ cache_assert 'an artifact older than the validity period is stale' \
     "staleness_rc=$rc reason=${reason:-<none>}" \
     'Age alone expires an artifact. This is the case that shipped the incident: the artifacts were left behind by a CI=1 run days earlier and were read back without anything noticing that the tool had moved on.'
 
-# 3. The CSV-emitting code changed since the capture.
+# 3. ltl or the column rules changed since the capture.
 "$CACHE_PERL" -e 'my $t = time; utime($t, $t, $ARGV[0]) or die;' "$CACHE_MSG"
 printf 'not-the-signature-that-produced-this\n' > "$CACHE_SIG"
 set +e
 reason="$(csv_cache_staleness_reason "$CACHE_MSG")"; rc=$?
 set -e
-cache_assert 'an artifact whose producing CSV code has changed is stale whatever its age' \
+cache_assert 'an artifact whose producing ltl has changed is stale whatever its age' \
     "$([[ $rc -eq 0 && "$reason" == *"changed after it was captured"* ]] && echo 0 || echo 1)" \
     "staleness_rc=$rc reason=${reason:-<none>}" \
-    'A minutes-old artifact is still wrong if the CSV columns moved under it. The signature covers the CSV-emitting code of ltl and the column-rule spec, so an edit to either expires the capture while an edit elsewhere in the tool leaves it alone — the cache would be worthless if every touch of ltl threw it away.'
+    'A minutes-old artifact is still wrong if the tool changed under it. The signature covers the whole of ltl and the column-rule spec, so an edit to either expires the capture: a statistic, a total or a projection computed upstream of the writers changes what a column holds as surely as the writer does.'
 
 # 4. No record of what produced it.
 rm -f "$CACHE_SIG"

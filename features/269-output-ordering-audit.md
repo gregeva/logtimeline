@@ -129,6 +129,8 @@ columns. Ties on `occurrences` → column ordering randomized.
 
 ### F7. `ltl:4579` — discriminative trigram selection (consolidation)
 
+*The code this finding covers was removed: D569-1 replaced the discriminative pre-filter with the candidate search of #569, whose index orders keys by integer id (`features/fuzzy-message-consolidation.md` § Design: candidate search that finds every partner (#569)).*
+
 ```perl
 my @disc_trigrams = sort { ($ps->{$a} // 0) <=> ($ps->{$b} // 0) }
                     grep { exists $consolidation_ngram_index{$cat_gk}{$_} }

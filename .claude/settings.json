@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/build/claude-hooks/session-start.sh",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/process/claude-hooks/session-start.sh",
             "timeout": 60
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/build/claude-hooks/guard-bash.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/process/claude-hooks/guard-bash.sh"
           }
         ]
       },
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/build/claude-hooks/guard-write.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/process/claude-hooks/guard-write.sh"
           }
         ]
       }

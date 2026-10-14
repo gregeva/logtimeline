@@ -176,7 +176,8 @@ render_row_report() {
 # Echoes one line of decoded facts about a single timeline COLUMN's cells on
 # the first timeline row whose plain text matches ROW_MATCH (a Perl regex,
 # matched against the escape-stripped line):
-#   text='...' fg=<colour(s)|none> extent=<filled cells> centred=<centred|...>
+#   text='...' fg=<colour(s)|none> extent=<filled cells> fill=<colour|none|MIXED:...>
+#   centred=<centred|...>
 # The column is located by the offsets the layout engine itself reports, so
 # the capture MUST be produced with --debug-layout. Row not found, column not
 # visible, or a capture without the debug table are hard failures (non-zero),
@@ -196,9 +197,10 @@ timeline_cell_report() {
             # legend or summary line matching the regex is never selected.
             my $cells = decode_line($line);
             my $slice = column_slice($cells, $layout, $col_id);
-            printf "text=%s fg=%s extent=%d centred=%s\n",
+            printf "text=%s fg=%s extent=%d fill=%s centred=%s\n",
                 "\x27" . row_text($slice) . "\x27",
-                text_colour($slice), fill_extent($slice), centred_report($slice);
+                text_colour($slice), fill_extent($slice), fill_colour($slice),
+                centred_report($slice);
             exit 0;
         }
         die "no timeline row matching /$row_match/ in $file\n";

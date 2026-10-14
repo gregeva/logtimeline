@@ -8,7 +8,10 @@ cd "$(dirname "$0")/../.."
 python3 - "$1" <<'PY'
 import re, sys
 out_path = sys.argv[1]
-src = open('ltl').read().splitlines()
+# The search this experiment measured is the one ltl shipped when the experiment
+# was built (85dd318), so ltl is read from that commit: ltl itself has moved on.
+import subprocess
+src = subprocess.run(['git', 'show', '85dd318:ltl'], capture_output=True, text=True, check=True).stdout.splitlines()
 
 consts = ['consolidation_message_length_cap', 'consolidation_discriminative_topk',
           'consolidation_prefilter_ratio', 'uuid_re']

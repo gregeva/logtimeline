@@ -23,7 +23,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 EXPLAIN_MD="$REPO_DIR/docs/explain/statistics.md"
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -337,7 +337,7 @@ assert_max_line_width() {
 # Scenarios
 # ============================================================================
 
-TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef heatmap histogram classification)
+TOPICS=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef impact heatmap histogram classification)
 
 # Analysis-technique topics (#504). TECHNIQUE_GROUPS are the group pages,
 # one per group; TECHNIQUE_TOPICS are the technique leaf pages. The two
@@ -457,6 +457,34 @@ scenario_aliases() {
         asserts     "ltl --explain p99999 produces output identical to ltl --explain percentiles" \
         produced_by 'resolve_explain_topic() in ltl' \
         contract    'Issue #261: p99999 is routed to the shared percentiles topic'
+}
+
+# --- Scenario: a -so name that names a statistic explains it (#614 D4). ---
+scenario_so_names_explain() {
+    current_scenario="so-names-explain"
+    echo "[$current_scenario]"
+    local contract='features/614-operand-settlement.md § 2 D4 (--explain resolves statistic names through the statistic table -so reads) and § Acceptance criteria phase 5'
+    local pair so_name topic r1 r2
+    for pair in duration_p95:percentiles bytes_mean:mean count_avg:mean duration_avg:mean duration_stddev:std_dev duration_impact:impact bytes_min:min count_max:max duration_iqr:iqr; do
+        IFS=: read -r so_name topic <<< "$pair"
+        r1=$(run_ltl "so-name-$topic" --explain "$topic")
+        r2=$(run_ltl "so-name-$so_name" --explain "$so_name")
+        check_capture_warnings "${r1#*:}"
+        check_capture_warnings "${r2#*:}"
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain $so_name produces the $topic topic, the statistic -so $so_name ranks by" \
+            produced_by 'resolve_explain_topic() in ltl (through %so_spelling and %statistic_by_spelling)' \
+            contract    "$contract"
+    done
+    local result
+    for so_name in bytes_sum bytes_occurrences; do
+        result=$(run_ltl "so-name-$so_name" --explain "$so_name")
+        check_capture_warnings "${result#*:}"
+        assert_exit "${result%%:*}" 1 \
+            asserts     "ltl --explain $so_name stays an unknown topic: neither a sum nor a metric's occurrences has a topic" \
+            produced_by 'resolve_explain_topic() in ltl' \
+            contract    "$contract"
+    done
 }
 
 # --- Scenario 3: --explain with no arg lists the topic registry. ---
@@ -585,7 +613,7 @@ scenario_help_statistics() {
 
     # Every statistics topic appears in the index. heatmap and histogram
     # are excluded per the narrowing rule.
-    local stats_topics=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef)
+    local stats_topics=(min max mean std_dev cv iqr percentiles skewness kurtosis bimodality_coef impact)
     for topic in "${stats_topics[@]}"; do
         assert_line "$out" \
             pattern     "^    ${topic}[[:space:]]" \
@@ -1756,35 +1784,35 @@ scenario_technique_mirror() {
 #   3. The release procedure no longer runs the script that owns the map, so
 #      the map is current and nothing applies it.
 #
-# The map is read out of build/sync-wiki.sh, which is the single place it is
+# The map is read out of process/sync-wiki.sh, which is the single place it is
 # written down, so this scenario cannot drift from the script it guards.
 scenario_wiki_sync_map() {
     current_scenario="wiki-sync-map"
     echo "[$current_scenario]"
-    local sync_script="$REPO_DIR/build/sync-wiki.sh"
+    local sync_script="$REPO_DIR/process/sync-wiki.sh"
     local workflow="$REPO_DIR/docs/process/workflow.md"
 
     if [[ ! -x "$sync_script" ]]; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The wiki sync map is read from the executable script that owns it."
-        echo "        produced_by: build/sync-wiki.sh (the source-to-page map)"
-        echo "        contract:    Issue #539: build/sync-wiki.sh is the single source of the map; the release procedure and this harness both read it from there"
+        echo "        produced_by: process/sync-wiki.sh (the source-to-page map)"
+        echo "        contract:    Issue #539: process/sync-wiki.sh is the single source of the map; the release procedure and this harness both read it from there"
         echo "        (not found or not executable: $sync_script)"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: build/sync-wiki.sh missing or not executable")
+        failures+=("$current_scenario :: process/sync-wiki.sh missing or not executable")
         return
     fi
 
     # The map, straight from the script: one "<source> <page>" pair per line.
     local map_file="$TMP_DIR/wiki-sync-map.txt"
-    if ! ( cd "$REPO_DIR" && ./build/sync-wiki.sh map ) > "$map_file" 2>"$TMP_DIR/wiki-sync-map.err"; then
+    if ! ( cd "$REPO_DIR" && ./process/sync-wiki.sh map ) > "$map_file" 2>"$TMP_DIR/wiki-sync-map.err"; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The sync script prints its source-to-page map on demand."
-        echo "        produced_by: build/sync-wiki.sh (cmd_map)"
+        echo "        produced_by: process/sync-wiki.sh (cmd_map)"
         echo "        contract:    Issue #539: the map is machine-readable so its consumers read it rather than restating it"
         sed 's/^/        /' "$TMP_DIR/wiki-sync-map.err"
         fail=$((fail + 1))
-        failures+=("$current_scenario :: ./build/sync-wiki.sh map failed")
+        failures+=("$current_scenario :: ./process/sync-wiki.sh map failed")
         return
     fi
 
@@ -1793,7 +1821,7 @@ scenario_wiki_sync_map() {
     if [[ "$mapped" -eq 0 ]]; then
         echo "  FAIL  $current_scenario"
         echo "        asserts:     The sync script carries a map naming a source and a page per copy."
-        echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+        echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
         echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors: a lookup matching nothing is a failure, never a pass"
         fail=$((fail + 1))
         failures+=("$current_scenario :: the sync map is empty")
@@ -1813,7 +1841,7 @@ scenario_wiki_sync_map() {
             echo "  FAIL  $current_scenario"
             echo "        the sync map copies '$src', which does not exist"
             echo "        asserts:     Every source the wiki sync map copies is a file that exists, so the release step cannot fail part-way through."
-            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
             echo "        contract:    Issue #504 R9: the wiki is overwritten from docs/ each release; a map line naming a moved or deleted file breaks that release"
             fail=$((fail + 1))
             failures+=("$current_scenario :: sync source missing: $src")
@@ -1833,7 +1861,7 @@ scenario_wiki_sync_map() {
             echo "  FAIL  $current_scenario"
             echo "        '$base' has no line in the wiki sync map"
             echo "        asserts:     Every docs/explain mirror is copied to the wiki by the release step, so a topic family reachable in the terminal is reachable on the wiki."
-            echo "        produced_by: build/sync-wiki.sh (WIKI_PAGE_MAP)"
+            echo "        produced_by: process/sync-wiki.sh (WIKI_PAGE_MAP)"
             echo "        contract:    Issue #504 R9, AC11: the mirror exists so a wiki reader reaches the same content as the terminal; a mirror the sync map does not name never gets there"
             fail=$((fail + 1))
             failures+=("$current_scenario :: mirror not in the sync map: $base")
@@ -1985,6 +2013,7 @@ echo ""
 
 scenario_register all-topics-render \
                   aliases \
+                  so-names-explain \
                   registry:no-arg \
                   error:unknown-explain-topic \
                   help-statistics \
@@ -2017,6 +2046,7 @@ while read -r _scenario; do
     case "$_scenario" in
         all-topics-render                 ) scenario_all_topics_render ;;
         aliases                           ) scenario_aliases ;;
+        so-names-explain                  ) scenario_so_names_explain ;;
         registry:no-arg                   ) scenario_registry ;;
         error:unknown-explain-topic       ) scenario_unknown_topic ;;
         help-statistics                   ) scenario_help_statistics ;;

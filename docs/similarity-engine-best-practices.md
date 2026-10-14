@@ -46,14 +46,18 @@ These parameters (min keep=3, ratio=40%, boundary=10) proved stable across all t
 
 ## Similarity Scoring
 
-### Separate Similarity Scope from Storage Scope
+### Score the Whole Key; Separate Groups by a Grouping Key
 
-Similarity scoring should operate on the **message content only**, not the full storage key. Metadata fields (log level, thread, object) should serve as exact-match grouping keys — two messages are only consolidation candidates if all their metadata fields match.
+Similarity is scored on the **whole message key as one contiguous string**: level, thread, object and message alike. Every part of it may vary and be wildcarded, so keys whose thread names differ (`[http-thread-1]`, `[http-thread-2]`) consolidate into `[http-thread-*]`. Do not hold metadata fields out as exact-match fields.
 
-**Why:** When the full key (including `[ERROR] [http-thread-1] [ClassName]` prefix) is used for Dice scoring, the ~50-char metadata prefix dominates the trigram set. On messages with short bodies (< ~20 chars), cross-level pairs score above 80% and would be incorrectly merged:
-- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5% (incorrect merge)
+Keys that must never consolidate are kept apart by a **grouping key**, not by the scoring. In `ltl` the grouping key is the category (plain or highlighted) plus the log level, or the HTTP status on an access log. A key is compared and grouped only with keys of its own group, in every pass that groups.
 
-**Grouping key pattern:** `"$log_level|$thread|$object"` — only messages sharing the same grouping key enter pairwise comparison.
+**Why the level is a grouping key and not left to the scoring:** the metadata prefix dominates the trigram set of a short message, so keys of different levels score above the threshold:
+- `[WARN] ... SUCCEEDED - Foo` vs `[ERROR] ... SUCCEEDED - Foo` → Dice 91.5 %
+
+**Why the thread and object are not grouping keys:** thread names can be unique per instance, which creates hundreds of tiny groups that never reach a batch size worth processing.
+
+Record: `features/fuzzy-message-consolidation.md` § Grouping Key Design, PF-09 (similarity on the full message key) and IQ-01 (category model).
 
 ### Score the Message as Written; Masking Is the Analyst's Step
 
@@ -97,11 +101,11 @@ Every bound follows from T and the two key sizes, so a key with a partner scorin
 
 ## Pattern Management
 
-### Merge-First + Stall Detection
+### Merge-First + Adaptive Eviction
 
-Before adding a new pattern, check existing patterns for similarity. If a similar pattern exists, merge the new one into it (generalizing the existing pattern further). This keeps pattern count bounded while improving coverage.
+Before adding a new pattern, check existing patterns for similarity. If a similar pattern exists, merge the new one into it (generalizing the existing pattern further). This keeps pattern count low while improving coverage.
 
-Pattern growth stops naturally via stall detection: when 2 consecutive checkpoints produce no new patterns, stop triggering discovery. This replaces a hard cap, which caused problems at production scale (50 patterns couldn't cover URL diversity in access logs with 45K+ unique URLs).
+Pattern count is not capped. What bounds the work is adaptive per-key eviction: each unmatched key survives a number of checkpoints set by its group's rolling absorption rate, so where little is being absorbed, keys leave the working set quickly. They stay in the output as their own rows. Eviction replaced stall detection (stopping discovery after 2 unproductive checkpoints), which had itself replaced a hard cap of 50 patterns that could not cover URL diversity in access logs with 45K+ unique URLs. Record: `features/fuzzy-message-consolidation.md`, Outstanding Decision 5 (unmatched key eviction).
 
 ### Generalization Must Be Idempotent
 
@@ -130,13 +134,13 @@ Messages already appearing N or more times are excluded from discovery. They are
 
 ### Final Pass (on by default, threshold follows `-g`, ceiling 1M)
 
-A separate pass after main processing that consolidates ceiling-excluded stragglers sharing obvious patterns (e.g., same message across 16 thread pools). A 95% threshold missed access-log targets entirely: their keys are shorter with smaller variable regions and score 85-87%.
+A pass after the streaming checkpoints over every key still ungrouped, with no eviction: the last chance to group. It runs the same discovery, matching and merging functions in sorted windows, each holding one group's keys (`features/fuzzy-message-consolidation.md` § Process Flow). Its first design cleaned up only ceiling-excluded stragglers at a 95% threshold, which missed access-log targets entirely: their keys are shorter, with smaller variable regions, and score 85-87%.
 
 The final pass scores at the same threshold as main discovery: the `-g` value, or its default. A separate final-pass threshold silently loosens or tightens the requested grouping for every key the final pass handles. The hidden `--final-threshold` remains as an explicit diagnostic override. At high sensitivity the final pass absorbs less per pattern and makes more candidate searches, so it is slower; that cost is accepted and tracked with final-pass performance in #142. Measurements: `features/fuzzy-message-consolidation.md` § Final pass follows the sensitivity (#571).
 
 ### Message Length Cap
 
-Cap message length before trigram indexing. Trigram structures are the dominant memory cost (~206 MB peak for a 5000-key batch). Longer messages generate proportionally more trigrams. An adaptive cap — `min($max_observed_length, $upper_bound)` — avoids wasting memory on short messages while allowing full context on long ones.
+Cap message length before trigram indexing. Trigram structures are the dominant memory cost (~206 MB peak for a 5000-key batch). Longer messages generate proportionally more trigrams. `ltl` cuts each key once per run, at 350 characters under `-g`. An adaptive cap (the smaller of the longest key observed and the upper bound) was considered and closed. Every use of the cap is a first-N-characters cut, so a smaller observed maximum changes no key and no trigram (`features/fuzzy-message-consolidation.md` IQ-02).
 
 ## Applicability to Message Identity (#54)
 

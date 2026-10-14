@@ -1664,7 +1664,7 @@ The consumer-name strings are part of the locked feature contract. The two highl
 
 The name is contractual, and the reason is the epoch it distinguishes: every field in the per-consumer blocks above describes the **streaming** partitions as they stood when the telemetry snapshot was taken, before the display projection; the lines in this sub-section describe the geometry that projection produced. The two are different by design on this surface, and without the name the section would present them as one measurement. `total_buckets` here is not comparable with the parent's `max_partition_bins` — different epochs, different geometry.
 
-The raw path emits the same per-metric line shape as `=== histogram-array / dimensions ===`. That name is unqualified because its parent section reports nothing measured at another moment.
+Each line is `  metric: <metric> samples=<n> min=<v> max=<v> decades=<d> buckets_per_decade=<n> total_buckets=<n>` (`features/605-input-units.md` D26). The raw path emits the same per-metric line shape as `=== histogram-array / dimensions ===`. That name is unqualified because its parent section reports nothing measured at another moment.
 
 **Section presence**: always emitted when `-V` is active. When no consumer is computing percentiles or bin counts, the section consists of the run-level header followed by the full block order, every block reporting `path: feature_not_active`. There is no run-level no-consumer line. An invocation that reaches the state, on a fixture whose lines carry an occurrence tally and no duration, bytes or count value:
 

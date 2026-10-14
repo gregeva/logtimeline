@@ -27,7 +27,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 USAGE_MD="$REPO_DIR/docs/usage.md"
 # Test log: tiny clean access log (~83 KB). Per repo memory
 # (feedback_test_logs.md) avoid the corrupt 2025-03-21 file; Codebeamer's
@@ -229,13 +229,24 @@ fi
 # `# hidden` annotation on the line marks intentionally hidden flags.
 GETOPTS_TSV="$TMP_DIR/getopts.tsv"
 perl -ne '
-    BEGIN { $in_block = 0 }
-    if (/GetOptions\(/)         { $in_block = 1; next }
-    # End of the GetOptions(...) call: either a trailing `) or die ...` or the
-    # closing `);` on its own line (the call is wrapped in a warning-capturing
-    # do-block). Mid-line `);` inside single-line option callbacks is not at
-    # line start, so `^\s*\);` only matches the real close.
-    if ($in_block && (/\)\s*or\s+die/ || /^\s*\);\s*$/)) { $in_block = 0; next }
+    BEGIN { $in_block = 0; $in_rows = 0 }
+    # The options that take a quantity are rows of @quantity_options, which the
+    # GetOptions spec reads through a map: each row names its long and short
+    # form, and a hidden row carries the annotation.
+    if (/^my \@quantity_options = \(/) { $in_rows = 1; next }
+    if ($in_rows && /^\);/)             { $in_rows = 0; next }
+    if ($in_rows) {
+        next unless /\blong\s*=>\s*\x27([^\x27]+)\x27/;
+        my $long = $1;
+        my ($short) = /\bshort\s*=>\s*\x27([^\x27]+)\x27/;
+        print join("\t", $long, $short // "", (/#\s*hidden\b/ ? 1 : 0)), "\n";
+        next;
+    }
+    if (/my \@getopt_spec = \(/)  { $in_block = 1; next }
+    # End of the spec list: the closing `);` on its own line. Mid-line `);`
+    # inside single-line option callbacks is not at line start, so
+    # `^\s*\);` only matches the real close.
+    if ($in_block && /^\s*\);\s*$/) { $in_block = 0; next }
     next unless $in_block;
     next if /^\s*$/ || /^\s*#/;
     next unless /^\s*[\x27"]([^\x27"]+)[\x27"]\s*=>/;
@@ -625,7 +636,561 @@ scenario_G_udm_function_list_parity() {
         asserts     'The docs/usage.md UDM function row mirrors the --help counting keyword list (the two surfaces must agree per the documentation-alignment rule)' \
         produced_by 'docs/usage.md UDM spec table - manually maintained alongside print_help()' \
         contract    'CLAUDE.md section Before writing or changing code (help and usage.md must carry consistent descriptions)'
+
+    assert_line "$help_out" \
+        pattern     'Transforms: delta \(keeps negative differences\), idelta \(drops negative differences, as at a counter reset\)\.' \
+        asserts     'The --help -udm function line describes delta as keeping a negative difference and idelta as dropping it, as the transform applies them' \
+        produced_by 'print_help() in ltl (User-Defined Metrics subheading, function row, udm_note of the delta and idelta rows of @statistic_names)' \
+        contract    'features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 and acceptance criterion 1'
+
+    assert_line "$USAGE_MD" \
+        pattern     'Transforms:\*\* `delta` \(keeps negative differences\), `idelta` \(drops negative differences, as at a counter reset\)' \
+        asserts     'The docs/usage.md UDM function row describes delta and idelta as --help does' \
+        produced_by 'docs/usage.md UDM spec table - manually maintained alongside print_help()' \
+        contract    'features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 and acceptance criterion 2'
 }
+
+# Unit-list parity (issue #608, one byte-unit ladder, D8): a help row that
+# names a unit vocabulary carries the list the tool's own messages print,
+# derived from the ladder, never a literal; docs/usage.md carries the same.
+CONTRACT_UNIT_LISTS='features/608-byte-unit-ladder.md D4 (the records say what -udm accepts) and D8 (help rows interpolate the ladder list, with a help-content scenario asserting it)'
+UNIT_FIXTURE="$REPO_DIR/tests/fixtures/udm-byte-units.txt"
+
+# assert_row_carries FILE ROW_REGEX TEXT label L asserts A produced_by P contract C
+# The first line matching ROW_REGEX must contain TEXT verbatim; a row that
+# is not found is a failure, never a pass.
+assert_row_carries() {
+    local file="$1" row_regex="$2" text="$3"
+    shift 3
+    local label asserts produced_by contract row
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            label)       label="$2";       shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            *) echo "assert_row_carries: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    row=$(grep -E -- "$row_regex" "$file" | head -1 || true)
+    if [[ -n "$row" && -n "$text" && "$row" == *"$text"* ]]; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario"
+        echo "        label:       $label"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        echo "        expected:    $text"
+        echo "        row:         ${row:-(no row matches $row_regex in $file)}"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+# "ns, us" -> "`ns`, `us`": a list as docs/usage.md writes it.
+backticked_list() {
+    sed -E 's/([^, ]+)/`\1`/g' <<< "$1"
+}
+
+scenario_J_unit_list_parity() {
+    current_scenario="J-unit-list-parity"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-units.txt"
+    "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+
+    # The lists the tool's own rejections and warning print. Each run exits
+    # non-zero by design (a usage error) except the -udm one, which warns.
+    local err="$TMP_DIR/unit-errors"
+    mkdir -p "$err"
+    "$LTL" --disable-progress -ni -du xyz "$UNIT_FIXTURE" > "$err/du" 2>&1 || true
+    "$LTL" --disable-progress -ni -ru xyz "$UNIT_FIXTURE" > "$err/ru" 2>&1 || true
+    "$LTL" --disable-progress -ni -bs 5qq "$UNIT_FIXTURE" > "$err/bs" 2>&1 || true
+    "$LTL" --disable-progress -ni -bn xyz "$UNIT_FIXTURE" > "$err/bn" 2>&1 || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v:xyz:max' "$UNIT_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    local f
+    for f in du ru bs bn udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local du_list ru_list bs_list udm_time udm_bytes
+    du_list=$(sed -n "s/^Error: Invalid duration unit 'xyz'\. Valid values: //p" "$err/du")
+    ru_list=$(sed -n "s/^Error: Invalid rate unit 'xyz'\. Valid values: //p" "$err/ru")
+    bs_list=$(sed -n "s/^Error: Invalid bucket size '5qq'.* with a unit of //p" "$err/bs")
+    local bn_list
+    bn_list=$(sed -n "s/^Error: Invalid byte notation 'xyz'\. Valid values: //p" "$err/bn")
+    udm_time=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*(time units: \(.*\); byte units: .*)$/\1/p" "$err/udm")
+    udm_bytes=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*; byte units: \(.*\))$/\1/p" "$err/udm")
+
+    assert_equal "$( [[ -n "$du_list" && -n "$ru_list" && -n "$bs_list" && -n "$bn_list" && -n "$udm_time" && -n "$udm_bytes" ]] && echo found )" "found" \
+        label       'the -du, -ru, -bs and -bn rejections and the -udm unknown-unit warning each print their list' \
+        asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
+        produced_by 'adapt_to_command_line_options() and parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_equal "$ru_list|$bs_list|$udm_time" "$du_list|$du_list|$du_list" \
+        label       'the four messages print one time-unit list' \
+        asserts     'Every time-unit message derives its list from the one time-unit ladder' \
+        produced_by '$time_unit_list over @time_unit_ladder in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # --help rows
+    assert_row_carries "$help_out" '^ +-du, +--duration-unit' "($du_list)" \
+        label       'the --help -du row carries the -du rejection list' \
+        asserts     'The -du help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +-ru, +--rate-unit' "any of $ru_list; default m (the minute)" \
+        label       'the --help -ru row carries the -ru rejection list and names its default' \
+        asserts     'The -ru help row interpolates the time-unit list and names the minute as the default' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +-bs, +--bucket-size' "(units: $bs_list;" \
+        label       'the --help -bs row carries the -bs rejection list' \
+        asserts     'The -bs help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$help_out" '^ +unit +Time: ' "Time: $udm_time. " \
+        label       'the --help -udm unit row carries the warning time-unit list' \
+        asserts     'The -udm unit help row interpolates the time-unit list' \
+        produced_by 'print_help() in ltl (User-Defined Metrics subheading, unit row)' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # The byte list: the row gives it by notation; together the two are the
+    # list the warning prints.
+    local unit_row si_list iec_list
+    unit_row=$(grep -E '^ +unit +Time: ' "$help_out" | head -1 || true)
+    si_list=$(sed -n 's/.*Bytes: \(.*\) are powers of 1000, .*/\1/p' <<< "$unit_row")
+    iec_list=$(sed -n 's/.* are powers of 1000, \(.*\) powers of 1024;.*/\1/p' <<< "$unit_row")
+    assert_equal "$si_list, $iec_list" "$udm_bytes" \
+        label       'the --help -udm unit row byte lists are the warning byte list' \
+        asserts     'The -udm unit help row names the SI tokens as powers of 1000 and the IEC tokens as powers of 1024, from the byte-unit ladder' \
+        produced_by 'print_help() in ltl ($byte_unit_si_list, $byte_unit_iec_list over @byte_unit_ladder)' \
+        contract    "$CONTRACT_UNIT_LISTS"
+
+    # The -bn row names the values its usage error accepts and the two
+    # notations' byte lists.
+    assert_row_carries "$help_out" '^ +-bn, +--byte-notation' "SI units ($si_list; powers of 1000) or IEC units ($iec_list; powers of 1024): one of $bn_list." \
+        label       'the --help -bn row carries the -bn usage-error values and both byte lists' \
+        asserts     'The -bn help row interpolates the notation names and the ladder byte lists' \
+        produced_by 'print_help() in ltl ($byte_notation_list, $byte_unit_si_list, $byte_unit_iec_list)' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
+
+    # docs/usage.md rows: the same lists, each token in backticks
+    assert_row_carries "$USAGE_MD" '^\| `-du, --duration-unit' "($(backticked_list "$du_list"))" \
+        label       'the docs/usage.md -du row carries the -du rejection list' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-ru, --rate-unit' "any of $(backticked_list "$ru_list"); default \`m\` (the minute)" \
+        label       'the docs/usage.md -ru row carries the -ru rejection list and names its default' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-bs, --bucket-size' "(units: $(backticked_list "$bs_list");" \
+        label       'the docs/usage.md -bs row carries the -bs rejection list' \
+        asserts     'docs/usage.md agrees with the ladder list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-bn, --byte-notation' "SI units ($(backticked_list "$si_list"); powers of 1000) or IEC units ($(backticked_list "$iec_list"); powers of 1024): one of $(backticked_list "$bn_list")." \
+        label       'the docs/usage.md -bn row carries the -bn values and both byte lists' \
+        asserts     'docs/usage.md agrees with the ladder lists the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_UNIT_LISTS; features/608-byte-unit-ladder.md D17 (the -bn option)"
+    assert_row_carries "$USAGE_MD" '^\| `unit` \| \*\*Time:\*\*' "**Time:** $(backticked_list "$udm_time") — **Bytes:** $(backticked_list "$si_list") are powers of 1000, $(backticked_list "$iec_list") powers of 1024;" \
+        label       'the docs/usage.md -udm unit row carries the time and byte lists' \
+        asserts     'docs/usage.md agrees with the ladder lists the tool prints' \
+        produced_by 'docs/usage.md UDM spec table' \
+        contract    "$CONTRACT_UNIT_LISTS"
+}
+
+# Name-list parity (issue #613, one vocabulary for names, D5 and D10): a help
+# row that names a metric, field, identifier or statistic vocabulary carries
+# the list the tool's own rejection or warning prints, both derived from the
+# vocabulary's one table; docs/usage.md carries the same. The same helpers as
+# the unit lists above, not a second mechanism.
+CONTRACT_NAME_LISTS='features/613-one-name-vocabulary.md D5 (one built-in metric table every list derives from), D8 (one statistic-name table) and D10 (every error and help row naming a vocabulary derives it from the table it validates against); criterion 19'
+NAME_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+
+# "legend (leg), session or sessions (ses)" -> "`legend` (`leg`), `session` or `sessions` (`ses`)"
+backticked_aliased_list() {
+    sed -E 's/([a-z-]+) or ([a-z-]+) \(([a-z]+)\)/`\1` or `\2` (`\3`)/g; s/([a-z-]+) \(([a-z]+)\)/`\1` (`\2`)/g' <<< "$1"
+}
+
+scenario_K_name_list_parity() {
+    current_scenario="K-name-list-parity"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-names.txt"
+    "$LTL" --disable-progress --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+
+    # The lists the tool's own rejections and warning print: -hm's value that
+    # names no metric is given back as a file argument and named, with the
+    # metrics, when it selects no file; -hg's comma list with an unknown
+    # member is rejected with the metrics. Each run but the -udm one exits
+    # non-zero by design.
+    local err="$TMP_DIR/name-errors"
+    mkdir -p "$err"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hm foo "$NAME_FIXTURE" > "$err/hm.out" 2> "$err/hm" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg duration,foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
+    local f
+    for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local hm_list hg_list hide_columns udm_functions
+    hm_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hm" | sed -n "s/^Error: 'foo' matches no file (it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\), x)$/\1/p")
+    hg_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hg" | sed -n "s/^Error: 'foo' given to -hg\/--histogram is not a metric; the metrics are \(.*\), x$/\1/p")
+    hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
+    udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
+    local mask_list mask_or_list
+    mask_list=$(sed -n "s/^Error: Unknown mask name 'foo' for -m\. Valid values: //p" "$err/mask")
+    mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
+
+    assert_equal "$( [[ -n "$hm_list" && -n "$hg_list" && -n "$hide_columns" && -n "$udm_functions" && -n "$mask_list" ]] && echo found )" "found" \
+        label       'the -hm and -hg metric errors, the --hide unknown-name error and the -udm invalid-function warning each print their list' \
+        asserts     'Each message the help rows are compared against names its vocabulary; an unmatched message is a failure, not a pass' \
+        produced_by 'settle_optional_operand() and file_argument_problem() (via metric_operand_expects()), apply_output_visibility() and parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_equal "$hg_list" "$hm_list" \
+        label       'the -hm and -hg errors print one built-in metric list' \
+        asserts     'Every unknown-metric message derives its list from the one built-in metric table' \
+        produced_by 'available_metric_names() over @builtin_metric_names in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # --help rows
+    assert_row_carries "$help_out" '^ +-hm, +--heatmap \[metric\]' "($hm_list, or a -udm metric name;" \
+        label       'the --help -hm row carries the -hm error list' \
+        asserts     'The -hm help row interpolates the built-in metric list' \
+        produced_by 'print_help() in ltl ($builtin_metric_list)' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$help_out" '^ +-hg, +--histogram \[metric\]' "($hg_list, or a -udm metric name;" \
+        label       'the --help -hg row carries the -hg error list' \
+        asserts     'The -hg help row interpolates the built-in metric list' \
+        produced_by 'print_help() in ltl ($builtin_metric_list)' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$help_out" '^ +-hi, +--hide <column>' "Hide a timeline column: $hide_columns, or a -udm metric by its column heading;" \
+        label       'the --help --hide column row carries the --hide error column list' \
+        asserts     'The --hide help row and its unknown-name error print one column list, the built-in metrics among them' \
+        produced_by 'visibility_column_list() over @visibility_columns in ltl' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # The -m row names each identifier with its placeholder, or what it
+    # names; stripped of those, it is the list the -m error prints. The -d
+    # row names the same identifiers (613 D7).
+    local mask_row mask_row_names
+    mask_row=$(grep -E '^ +-m, +--mask <name>' "$help_out" | head -1 || true)
+    mask_row_names=$(sed -E 's/.*<name> is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /' <<< "$mask_row")
+    assert_equal "$mask_row_names" "$mask_list" \
+        label       'the --help -m row names the identifiers the -m error lists, in its order' \
+        asserts     'The -m help row interpolates the identifier table' \
+        produced_by 'print_help() in ltl ($mask_identifier_help over @mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7 (identifiers through one table)"
+    # The -d row wraps even at this width: its lines are joined first.
+    local discard_row="$TMP_DIR/help-discard-row.txt"
+    awk '/^ +-d, +--discard <name>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$discard_row"
+    assert_row_carries "$discard_row" '-d, +--discard <name>' "; $mask_or_list, removed wherever it sits in the message" \
+        label       'the --help -d row names the identifiers the -m error lists' \
+        asserts     'The -d help row interpolates the identifier table -m reads' \
+        produced_by 'print_help() in ltl (@mask_identifiers)' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    local usage_mask_row usage_mask_names
+    usage_mask_row=$(grep -E '^\| `-m, --mask <name>`' "$USAGE_MD" | head -1 || true)
+    usage_mask_names=$(sed -E 's/.*`<name>` is (.*), in any case\..*/\1/; s/ \([^)]*\)//g; s/ for both address versions//; s/ or /, /; s/`//g' <<< "$usage_mask_row")
+    assert_equal "$usage_mask_names" "$mask_list" \
+        label       'the docs/usage.md -m row names the identifiers the -m error lists, in its order' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+    assert_row_carries "$USAGE_MD" '^\| `-d, --discard <name>`' "; $(backticked_list "$mask_or_list" | sed 's/`or`/or/'), removed wherever it sits in the message" \
+        label       'the docs/usage.md -d row names the identifiers the -m error lists' \
+        asserts     'docs/usage.md agrees with the identifier list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS; D7"
+
+    # The -so row and the -so error say what -so takes in the same words,
+    # generated from the metric and statistic tables (614 D3); docs/usage.md
+    # lists each metric's statistics and the deprecated spellings to match.
+    local so_row="$TMP_DIR/help-so-row.txt" so_err="$TMP_DIR/so-error.txt"
+    awk '/^ +-so, +--sort-on <field>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$so_row"
+    "$LTL" --disable-progress -bs 1440 -oe -so bogus "$NAME_FIXTURE" > /dev/null 2> "$so_err.raw" || true
+    check_stderr_warnings "$so_err.raw" "$current_scenario/so"
+    sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$so_err.raw" | sed -n "s/^Error: invalid sort type 'bogus'\. -so takes //p" > "$so_err"
+    local so_takes
+    so_takes=$(cat "$so_err")
+    assert_row_carries "$so_row" '-so, +--sort-on <field>' "Choose what ranks the messages in the summary: $so_takes Deprecated: " \
+        label       'the --help -so row states what -so takes in the words of the -so error' \
+        asserts     'The -so help row and the -so error read one generated vocabulary text' \
+        produced_by 'print_help() and the -so resolution in adapt_to_command_line_options(), both through so_vocabulary_text() in ltl' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3 (the help row and the error read the generated set)"
+    local metric statistics usage_row
+    for metric in duration bytes count; do
+        statistics=$(sed -E "s/.* ${metric}_ followed by ([^;.]*)[;.].*/\1/; s/ or /, /" <<< "$so_takes")
+        assert_row_carries "$USAGE_MD" "^\\| \`$metric\` \\| " "| \`$metric\` | $(backticked_list "$statistics") |" \
+            label       "the docs/usage.md -so table lists the statistics $metric carries, as the -so error does" \
+            asserts     'docs/usage.md agrees with the generated -so vocabulary, metric by metric and in order' \
+            produced_by 'docs/usage.md -so metric table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
+    done
+    local so_deprecated usage_deprecated
+    so_deprecated=$(sed -E 's/.* Deprecated: ([^.]*)\..*/\1/' "$so_row")
+    usage_deprecated=$(awk '/^Deprecated, accepted for this release with a notice on stderr: / { f = 1 } f { printf "%s ", $0 } f && /^$/ { exit }' "$USAGE_MD" | sed -E 's/^Deprecated, accepted for this release with a notice on stderr: ([^.]*)\..*/\1/; s/`//g; s/  +/ /g')
+    assert_equal "$usage_deprecated" "$so_deprecated" \
+        label       'docs/usage.md names the deprecated -so spellings the --help -so row names, in order' \
+        asserts     'docs/usage.md agrees with the deprecated spellings the tool lists' \
+        produced_by 'so_deprecated_text() in ltl; docs/usage.md -so section' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D3"
+
+    # The --help row names every topic the unknown-topic error lists, each
+    # with its description, from one topic table (614 D5); docs/usage.md
+    # matches it.
+    local help_row="$TMP_DIR/help-help-row.txt" topic_err="$TMP_DIR/help-topic-error.txt" topics topic
+    awk '/^ +-\?, +--help \[<topic>\]/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$help_row"
+    "$LTL" --disable-progress --help bogus > /dev/null 2> "$topic_err.raw" || true
+    check_stderr_warnings "$topic_err.raw" "$current_scenario/help-topic"
+    topics=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$topic_err.raw" | sed -n "s/^Error: unknown --help topic 'bogus' (try: \(.*\))$/\1/p")
+    assert_equal "$( [[ -n "$topics" ]] && echo found )" "found" \
+        label       'the unknown --help topic error lists the topics' \
+        asserts     'The error names the topics from the topic table; an unmatched message is a failure, not a pass' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    local usage_help_row
+    usage_help_row=$(grep -E '^\| `-\?, --help \[<topic>\]`' "$USAGE_MD" | head -1 || true)
+    for topic in ${topics//,/ }; do
+        assert_row_carries "$help_row" '-\?, +--help \[<topic>\]' "'$topic' (" \
+            label       "the --help row names the $topic topic with its description" \
+            asserts     'The --help row names every topic the dispatch knows, from the one topic table' \
+            produced_by 'print_help() in ltl (@help_topics)' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5 (as extended: name, description, renderer)"
+        local description
+        description=$(sed -E "s/.*'$topic' \(([^)]*)\).*/\1/" "$help_row")
+        assert_row_carries "$USAGE_MD" '^\| `-\?, --help \[<topic>\]`' "\`$topic\` ($description)" \
+            label       "the docs/usage.md --help row names the $topic topic in the words of --help" \
+            asserts     'docs/usage.md agrees with the topics and descriptions the tool prints' \
+            produced_by 'docs/usage.md option table' \
+            contract    "$CONTRACT_NAME_LISTS; features/614-operand-settlement.md D5"
+    done
+
+    assert_equal "$(grep -cE 'elsif \(\$help_topic eq' "$LTL")" "0" \
+        label       'the --help dispatch has no branch per topic' \
+        asserts     'dispatch_informational_options() finds a topic in the topic table; no elsif names a topic' \
+        produced_by 'dispatch_informational_options() in ltl (@help_topics)' \
+        contract    "features/614-operand-settlement.md D5 (one topic table read by the dispatch, its error and the help row)"
+
+    # The -pr row names the modes from the mode table, in its order, and says
+    # which have an -alt variant: day has none (256), so it is not claimed to
+    # (614 D6 as extended). docs/usage.md matches. The -pr error names the
+    # value and points to --help profile, naming no mode (451 D4).
+    local pr_row="$TMP_DIR/help-pr-row.txt" pr_err="$TMP_DIR/pr-error.txt"
+    awk '/^ +-pr, +--profile <mode>/ { f = 1; print; next } f && /^ +-[A-Za-z]/ { exit } f' "$help_out" | tr -s ' \n' '  ' > "$pr_row"
+    assert_row_carries "$pr_row" '-pr, +--profile <mode>' "The singular modes (day, workday, weekday, weekend) stack their days onto one 24-hour axis; the plural ones (week, workweek, weekdays, weekends) keep each day's identity on the axis. Every mode but day has an -alt variant using the Sunday-anchored calendar." \
+        label       'the --help -pr row names the modes in table order and does not claim day has an -alt variant' \
+        asserts     'The -pr row is generated from the mode table, so it names the one-day and one-week modes the table holds and leaves out the -alt variant day lacks' \
+        produced_by 'profile_modes_text() over @profile_mode_rows in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md (there is no day-alt)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "The singular modes (\`day\`, \`workday\`, \`weekday\`, \`weekend\`)" \
+        label       'the docs/usage.md -pr row names the singular modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "the plural ones (\`week\`, \`workweek\`, \`weekdays\`, \`weekends\`)" \
+        label       'the docs/usage.md -pr row names the plural modes as --help does' \
+        asserts     'docs/usage.md agrees with the mode table' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended)'
+    assert_row_carries "$USAGE_MD" '^\| `-pr, --profile <mode>`' "Every mode but \`day\` has an \`-alt\` variant" \
+        label       'the docs/usage.md -pr row does not claim day has an -alt variant' \
+        asserts     'docs/usage.md agrees with the mode table on which modes have an -alt variant' \
+        produced_by 'docs/usage.md option table' \
+        contract    'features/614-operand-settlement.md D6 (as extended); features/256-time-axis-folding.md'
+    "$LTL" --disable-progress -bs 1440 -oe -pr bogus "$NAME_FIXTURE" > /dev/null 2> "$pr_err" || true
+    check_stderr_warnings "$pr_err" "$current_scenario/pr"
+    assert_equal "$(grep -c "'bogus' is not a valid profile mode. Run 'ltl --help profile'" "$pr_err")/$(grep -cE 'workweek|weekends|-alt variant' "$pr_err")" "1/0" \
+        label       'the -pr error names the value, points to --help profile and names no mode' \
+        asserts     'The invalid-mode error points to --help profile rather than listing the modes' \
+        produced_by '_validate_profile() in ltl' \
+        contract    'features/614-operand-settlement.md D6 (as changed); features/451-weekday-weekend-profile-modes.md D4'
+
+    # The -udm function row gives the names grouped by kind, each with its
+    # note; stripped of the notes and the group labels, it is the list the
+    # warning prints.
+    local function_row row_names
+    function_row=$(grep -E '^ +function +Aggregations: ' "$help_out" | head -1 || true)
+    row_names=$(sed -E 's/.*Aggregations: (.*)\. Combined:.*/\1/; s/ \([^)]*\)//g; s/(Counting|Transforms): //g; s/\. /, /g' <<< "$function_row")
+    assert_equal "$row_names" "$udm_functions" \
+        label       'the --help -udm function row names the functions the invalid-function warning lists, in its order' \
+        asserts     'The -udm function help row interpolates the function names from the statistic-name table' \
+        produced_by 'print_help() in ltl (@udm_functions)' \
+        contract    "$CONTRACT_NAME_LISTS"
+
+    # docs/usage.md rows: the same lists, each name in backticks
+    assert_row_carries "$USAGE_MD" '^\| `-hm, --heatmap \[metric\]`' "($(backticked_list "$hm_list"), or a \`-udm\` metric name;" \
+        label       'the docs/usage.md -hm row carries the -hm error list' \
+        asserts     'docs/usage.md agrees with the metric list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-hg, --histogram \[metric\]`' "($(backticked_list "$hg_list"), or a \`-udm\` metric name;" \
+        label       'the docs/usage.md -hg row carries the -hg error list' \
+        asserts     'docs/usage.md agrees with the metric list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    assert_row_carries "$USAGE_MD" '^\| `-hi, --hide <column>`' "Hide a timeline column: $(backticked_aliased_list "$hide_columns"), or a \`-udm\` metric by its column heading;" \
+        label       'the docs/usage.md --hide column row carries the --hide error column list' \
+        asserts     'docs/usage.md agrees with the column list the tool prints' \
+        produced_by 'docs/usage.md option table' \
+        contract    "$CONTRACT_NAME_LISTS"
+    local usage_function_row usage_names
+    usage_function_row=$(grep -E '^\| `function` \| \*\*Aggregations:\*\*' "$USAGE_MD" | head -1 || true)
+    usage_names=$(sed -E 's/.*\*\*Aggregations:\*\* (.*) — \*\*Combined:\*\*.*/\1/; s/ \([^)]*\)//g; s/\*\*(Counting|Transforms):\*\* //g; s/ — /, /g; s/`//g' <<< "$usage_function_row")
+    assert_equal "$usage_names" "$udm_functions" \
+        label       'the docs/usage.md -udm function row names the functions the invalid-function warning lists, in its order' \
+        asserts     'docs/usage.md agrees with the function list the tool prints' \
+        produced_by 'docs/usage.md UDM spec table' \
+        contract    "$CONTRACT_NAME_LISTS"
+}
+
+# #605 criteria AC4 and AC16: the twelve numeric bound rows, generated from
+# the one declaration of the bound set, read in one phrasing that states the
+# bare number's unit and points to the units topic; docs/usage.md carries each
+# row with the same text, pointing to its Units section instead.
+bound_row_text() {
+    local short="$1" metric unit end text
+    case "$short" in
+        *dmin|*dmax) metric="duration";      unit=" A bare N is in milliseconds; N also takes a time unit (see 'ltl --help units')." ;;
+        *bmin|*bmax) metric="response size"; unit=" A bare N is in bytes; N also takes a byte unit (see 'ltl --help units')." ;;
+        *cmin|*cmax) metric="count";         unit=" N also takes a count unit (see 'ltl --help units')." ;;
+    esac
+    end="${short: -3}"
+    case "$short" in
+        h*) if [[ "$end" == min ]]; then text="Highlight log entries whose $metric is at or above N, without filtering anything out."
+            else text="Highlight log entries whose $metric is at or below N, without filtering anything out."; fi ;;
+        *)  if [[ "$end" == min ]]; then text="Hide log entries whose $metric is below N; an entry at N is kept."
+            else text="Hide log entries whose $metric is above N; an entry at N is kept."; fi ;;
+    esac
+    printf '%s%s' "$text" "$unit"
+}
+
+scenario_L_bound_option_rows() {
+    current_scenario="L-bound-option-rows"
+    echo "[$current_scenario]"
+
+    local help_out="$TMP_DIR/help-bounds.txt"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+
+    local pair short long text
+    for pair in dmin:duration-min dmax:duration-max bmin:bytes-min bmax:bytes-max cmin:count-min cmax:count-max \
+                hdmin:highlight-duration-min hdmax:highlight-duration-max hbmin:highlight-bytes-min \
+                hbmax:highlight-bytes-max hcmin:highlight-count-min hcmax:highlight-count-max; do
+        short="${pair%%:*}"; long="${pair#*:}"
+        text="$(bound_row_text "$short")"
+        assert_row_carries "$help_out" "^\s+-$short,\s+--$long <N>\s" "$text" \
+            label       "--help -$short row: $text" \
+            asserts     'Each numeric bound row is written in the one phrasing (filter: hide below/above N, an entry at N kept; highlight: at or above/below N, nothing filtered out) and states the unit of a bare N' \
+            produced_by 'print_help() in ltl (rows generated from @quantity_options)' \
+            contract    'features/605-input-units.md section 5.8 and section 6 AC4 (D1: one phrasing for the twelve rows)'
+        assert_row_carries "$USAGE_MD" "^\| \`-$short, --$long <N>\` \| " "| ${text//"'ltl --help units'"/[Units](#units)} |" \
+            label       "docs/usage.md -$short row matches --help" \
+            asserts     'docs/usage.md carries each numeric bound row with the text --help prints' \
+            produced_by 'docs/usage.md option table - maintained alongside print_help()' \
+            contract    'features/605-input-units.md section 6 AC4; CLAUDE.md section Before writing or changing code (help and usage.md edited together)'
+    done
+}
+
+# #605 criterion AC16: ltl --help units prints the three kinds with the lists
+# the tool's own rejections print, and no long byte word; docs/usage.md's Units
+# section lists the words; the count rows of -n and -gc point to the topic.
+scenario_M_units_topic() {
+    current_scenario="M-units-topic"
+    echo "[$current_scenario]"
+
+    local units_out="$TMP_DIR/help-units-topic.txt" help_out="$TMP_DIR/help-units-rows.txt" err="$TMP_DIR/units-errors"
+    mkdir -p "$err"
+    local rc=0
+    "$LTL" --disable-progress --terminal-width 400 --help units > "$units_out" 2>"$units_out.stderr" || rc=$?
+    check_stderr_warnings "$units_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$units_out"
+    "$LTL" --disable-progress -ni --terminal-width 400 --help > "$help_out" 2>"$help_out.stderr" || true
+    check_stderr_warnings "$help_out.stderr" "$current_scenario"
+    perl -i -pe 's/\e\[[0-9;]*[a-zA-Z]//g' "$help_out"
+    "$LTL" --disable-progress -ni -bmin 5s "$UNIT_FIXTURE" > "$err/bmin" 2>&1 || true
+    "$LTL" --disable-progress -ni -cmin 5x "$UNIT_FIXTURE" > "$err/cmin" 2>&1 || true
+    "$LTL" --disable-progress -ni -dmin 5x "$UNIT_FIXTURE" > "$err/dmin" 2>&1 || true
+    local f
+    for f in bmin cmin dmin; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
+
+    local byte_list count_list time_list
+    byte_list=$(sed -n "s/^Error: Invalid -bmin '5s': 's' is not a byte unit (\(.*\))$/\1/p" "$err/bmin")
+    count_list=$(sed -n "s/^Error: Invalid -cmin '5x': 'x' is not a count unit (\(.*\))$/\1/p" "$err/cmin")
+    time_list=$(sed -n "s/^Error: Invalid -dmin '5x': 'x' is not a time unit (\(.*\))$/\1/p" "$err/dmin")
+    assert_equal "$( [[ "$rc" -eq 0 && -n "$byte_list" && -n "$count_list" && -n "$time_list" ]] && echo found )" "found" \
+        label       '--help units exits 0, and the -bmin, -cmin and -dmin rejections each print their list' \
+        asserts     'The units topic exists; each rejection names the units of its kind (an unmatched message is a failure, not a pass)' \
+        produced_by 'dispatch_informational_options() and print_help_units(); resolve_quantity_option() in ltl' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_line "$units_out" \
+        pattern     "^Units: ${time_list}\\. " \
+        asserts     'The units topic lists the time units the rejection prints' \
+        produced_by 'print_help_units() in ltl ($time_unit_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    local si_list iec_list
+    si_list=$(sed -n 's/^Units: \(.*\) (powers of 1000) and .*/\1/p' "$units_out")
+    iec_list=$(sed -n 's/^Units: .* (powers of 1000) and \(.*\) (powers of 1024)\..*/\1/p' "$units_out")
+    assert_equal "$si_list, $iec_list" "$byte_list" \
+        label       '--help units byte lists are the -bmin rejection list' \
+        asserts     'The units topic names the SI tokens as powers of 1000 and the IEC tokens as powers of 1024, together the list a byte option prints' \
+        produced_by 'print_help_units() in ltl ($byte_unit_si_list, $byte_unit_iec_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_line "$units_out" \
+        pattern     "^Units: ${count_list} \\(" \
+        asserts     'The units topic lists the count units the rejection prints' \
+        produced_by 'print_help_units() in ltl ($number_unit_list)' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    assert_equal "$(grep -ciE 'kilobyte|megabyte|gigabyte|terabyte|kibibyte|mebibyte|gibibyte|tebibyte' "$units_out" || true)" "0" \
+        label       'no long byte word in --help units' \
+        asserts     'The long byte words are accepted on input but listed in docs/usage.md only, not in --help' \
+        produced_by 'print_help_units() in ltl' \
+        contract    'features/605-input-units.md section 4 D24'
+    local word
+    for word in kilobytes megabytes gigabytes terabytes kibibytes mebibytes gibibytes tebibytes; do
+        assert_row_carries "$USAGE_MD" '^\| Byte size \| ' "\`$word\`" \
+            label       "docs/usage.md Units lists $word" \
+            asserts     'The Units section of docs/usage.md lists every long byte word a byte option accepts' \
+            produced_by 'docs/usage.md section Units' \
+            contract    'features/605-input-units.md section 4 D23 and D24'
+    done
+    assert_row_carries "$USAGE_MD" '^\| Count \| ' "| $(backticked_list "$count_list") (" \
+        label       'docs/usage.md Units count row carries the count list' \
+        asserts     'docs/usage.md agrees with the count list the tool prints' \
+        produced_by 'docs/usage.md section Units' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+    # The -n description wraps at any width, so the help text is collapsed to
+    # one line before the sentence is looked for.
+    local collapsed="$TMP_DIR/help-units-collapsed.txt" pair flag tail
+    tr -s ' \n' '  ' < "$help_out" > "$collapsed"
+    for pair in "-n, --top-messages <N>|with a note saying so." "-gc, --group-ceiling <N>|(default: 1000000)."; do
+        flag="${pair%%|*}"; tail="${pair#*|}"
+        assert_equal "$(grep -cF -- "$tail N also takes a count unit (see 'ltl --help units')." "$collapsed" || true)" "1" \
+            label       "--help ${flag%%,*} row points to the units topic" \
+            asserts     'A count option row says it takes a unit and points to the units topic' \
+            produced_by 'print_help() in ltl (quantity_unit_sentence)' \
+            contract    "$CONTRACT_UNITS_TOPIC"
+        assert_row_carries "$USAGE_MD" "^\| \`$flag\` \| " "$tail N also takes a count unit (see [Units](#units))" \
+            label       "docs/usage.md ${flag%%,*} row points to Units" \
+            asserts     'A count option row in docs/usage.md says it takes a unit and points to the Units section' \
+            produced_by 'docs/usage.md option table' \
+            contract    "$CONTRACT_UNITS_TOPIC"
+    done
+    assert_row_carries "$help_out" '^ +-\?, +--help \[<topic>\]' "or 'units'" \
+        label       'the --help row names the units topic' \
+        asserts     'The help row lists units among the topics it can show' \
+        produced_by 'print_help() in ltl' \
+        contract    "$CONTRACT_UNITS_TOPIC"
+}
+CONTRACT_UNITS_TOPIC='features/605-input-units.md section 4 D23 (one Units section; option rows point to it; ltl --help units) and section 6 AC16'
 
 scenario_register A-help-contains-visible-longs \
                   B-usage-contains-visible-longs \
@@ -635,6 +1200,10 @@ scenario_register A-help-contains-visible-longs \
                   G-udm-function-list-parity \
                   H-mask-option-rows \
                   I-discard-option-rows \
+                  J-unit-list-parity \
+                  K-name-list-parity \
+                  L-bound-option-rows \
+                  M-units-topic \
                   F-description-quality-soft
 scenario_parse_args "$@"
 
@@ -648,6 +1217,10 @@ while read -r _scenario; do
         G-udm-function-list-parity      ) scenario_G_udm_function_list_parity ;;
         H-mask-option-rows              ) scenario_H_mask_option_rows ;;
         I-discard-option-rows           ) scenario_I_discard_option_rows ;;
+        J-unit-list-parity              ) scenario_J_unit_list_parity ;;
+        K-name-list-parity              ) scenario_K_name_list_parity ;;
+        L-bound-option-rows             ) scenario_L_bound_option_rows ;;
+        M-units-topic                   ) scenario_M_units_topic ;;
         F-description-quality-soft      ) scenario_F_description_quality_warnings ;;
     esac
     echo ""

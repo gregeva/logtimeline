@@ -112,7 +112,7 @@ Do not use `--break-system-packages` unless you understand the consequence — i
 After cloning, activate the tracked pre-commit guard once:
 
 ```bash
-./build/setup-hooks.sh
+./process/setup-hooks.sh
 ```
 
 This sets `core.hooksPath` to `.githooks/` and enables `pre-commit`, which blocks accidentally staging Claude Code state (`.claude/`), secret-bearing files (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `.npmrc`, etc.), and content matching common token patterns. Override with `git commit --no-verify` only when you've verified the match is a false positive.
@@ -138,7 +138,7 @@ Verify the install landed for the Perl that will run the profiler:
 
 ```bash
 perl -MDevel::NYTProf::Data -e 'print "module ok\n"'
-./build/profiling-preflight.sh
+./tests/profile/profiling-preflight.sh
 ```
 
 The first line checks the module. The second also checks that the HTML report tool resolves, which is the part that fails quietly: `cpanm` installs scripts into the Perl keg's own `bin`, which Homebrew does not put on your PATH.

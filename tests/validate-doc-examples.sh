@@ -28,7 +28,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 EXTRACTOR="$SCRIPT_DIR/extract-doc-examples.pl"
 
 # shellcheck source=lib/runtime-warnings.sh

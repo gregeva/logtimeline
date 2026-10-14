@@ -36,7 +36,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
@@ -48,6 +48,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/run-dir.sh
+source "$SCRIPT_DIR/lib/run-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts against
 # (HARNESS-DESIGN.md § Colour rendering is controlled, never inherited).
@@ -176,7 +178,10 @@ RUN_DIR=""; RUN_OUT=""; RUN_ERR=""; MSG_CSV=""
 run_messages() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"; MSG_CSV=""
     local rc
     set +e
@@ -214,7 +219,10 @@ RUN_EXIT=0
 run_expect_error() {
     local label="$1"; shift
     RUN_DIR="$TMP_DIR/$current_scenario/$label"
-    mkdir -p "$RUN_DIR"
+    if ! claim_run_dir "$RUN_DIR"; then
+        record_failure "run directory reused ($label)"
+        return 1
+    fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"
     set +e
     ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe "$@" > run.out 2> run.err )
@@ -665,6 +673,25 @@ scenario_ip_spellings() {
         asserts     'A comma-separated list and a repeated option name the same identifiers as ip does, and the substitutions run in the same fixed order whatever order the names were given in.' \
         produced_by "$PRODUCED_RESOLVE" \
         contract    "$CONTRACT_DOC section D5 - a comma-separated list names several identifiers; section Acceptance criteria 8"
+
+    # Issue #613 criterion 6 (D15): an identifier name matches in any case
+    # and is listed in its canonical spelling.
+    run_messages ip-upper -m IP -V runtime-config "$FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$ip_csv' '$MSG_CSV' messages && grep -qx 'mask: ip' '$RUN_DIR/run.out'" \
+        label       '-m IP is -m ip, listed as ip' \
+        asserts     'An identifier name matches in any case through the identifier table, and -V runtime-config lists the canonical spelling.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/613-one-name-vocabulary.md D7 and D15; criterion 6'
+    run_messages uuid-lower -m uuid "$FIXTURE" || return 0
+    local uuid_csv="$MSG_CSV"
+    run_messages uuid-upper -m UUID "$FIXTURE" || return 0
+    assert_command \
+        command     "check_same_csv '$uuid_csv' '$MSG_CSV' messages" \
+        label       '-m UUID is -m uuid' \
+        asserts     'An identifier name matches in any case.' \
+        produced_by "$PRODUCED_RESOLVE" \
+        contract    'features/613-one-name-vocabulary.md D15; criterion 6'
 }
 
 # Criterion 9: masking runs after the exposed values are added.
@@ -737,7 +764,7 @@ scenario_unknown_name() {
     current_scenario="unknown-name"
     echo "[$current_scenario]"
 
-    run_expect_error foo -m foo "$FIXTURE"
+    run_expect_error foo -m foo "$FIXTURE" || return 0
     assert_command \
         command     "[[ $RUN_EXIT -ne 0 ]] && grep -q 'foo' '$RUN_ERR' && grep -q 'uuid' '$RUN_ERR' && grep -qw 'ip' '$RUN_ERR' && grep -qw 'ipv4' '$RUN_ERR' && grep -qw 'ipv6' '$RUN_ERR' && echo \"exit $RUN_EXIT, accepted values named\"" \
         label       '-m foo exits non-zero and the error names uuid, ip, ipv4 and ipv6' \

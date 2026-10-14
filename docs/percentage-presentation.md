@@ -17,7 +17,7 @@ The formatter takes:
 
 **A trailing zero is never printed.** `digits` is a target, not a padding instruction: zeros at the right-hand end of the decimals carry no information, and a reader takes a printed digit as a measured one, so `20.0%` claims a precision the value does not have. Zeros are trimmed from the right, and when trimming removes the last of them the decimal point goes too — `20.0%` is `20%`, `0.3400%` is `0.34%`, `99.950%` is `99.95%`. Digits that are not trailing are untouched: `0.034%` and `0.002%` keep every digit they carry, because those zeros are inside the number. This is ordinary numeric formatting and applies in every mode, on every surface.
 
-Degradation, when the formatted value does not fit `width`: drop decimals one at a time, never below a whole percent; the `%` sign is always retained. What happens when even the whole percent does not fit is the surface's decision (the category rows drop the percentage and keep the count; a layout column truncates like any other column).
+Degradation, when the formatted value does not fit `width`: drop decimals one at a time, never below a whole percent; the `%` sign is always retained. Since #617 (one width-to-format rule) this is the one decimals rule of `value_text()`, which renders every number; `format_percentage()` is that dispatch's arm for the percentage kind and renders at the decimals it is given. What happens when even the whole percent does not fit is the surface's decision (the category rows drop the percentage and keep the count; a layout column truncates like any other column).
 
 ## The surfaces
 
@@ -27,6 +27,10 @@ Degradation, when the formatted value does not fit `width`: drop decimals one at
 | Success/failure percentage columns (#452) | significant, 3 digits — the same rule the category and classified summary shares use (architect, 2026-08-31, superseding the 2026-08-29 3-decimals decision) | the column's budget | round | sheds digits with the layout engine, `%` kept at every width |
 | Progress line (#446): per-file and overall | integer | 3 characters, fixed | floor | — |
 | Memory breakdown rows (`-mem`) | integer with a `<1%` floor | 5 characters, fixed, parenthesised | round | — (unchanged; it fits its space) |
+| Histogram y-axis percent ticks and the `0%` corner (#617) | integer | 4 characters including `%`, right-aligned | round | — |
+| The share in a notice (#617: the unclassified-lines warning) | 3 significant digits | unbounded | round | — (`(100%)`, never `(100.0%)`) |
+
+Each surface's parameters are a row of the budget table `%value_budget` in `ltl` (`progress percent`, `share cell`, `share row`, `memory share`, `axis percent`, `notice share`); a caller names its row and, where the row's width is the surface's own, passes that width (`features/617-width-to-format-rule.md` D13).
 
 ## Why one sub
 
@@ -41,7 +45,7 @@ Decided 2026-08-29. No separate issue; each site moves as part of the drop that 
 | `SUCCESS/FAILURE CLASSIFIED` rows (`print_summary_table()`) | 3 significant digits, fit-to-row | #448 — **done**: the logic became `format_percentage()`, and the row calls it through `share_row_text()` |
 | Memory breakdown rows (`print_summary_table()`) | integer, `(<1%)` floor, 5 characters | #448 — **done**: a call-site swap, output byte-identical |
 | Per-file progress percentage (`read_and_process_logs()`) | integer, clamped | #446 — replaced by the reshaped line, which calls the formatter |
-| Histogram y-axis ticks and `0%` baseline corner | integer, 3 characters | already conforms in shape; swapped to the formatter at the next touch of that renderer |
+| Histogram y-axis ticks and `0%` baseline corner | integer, 3 characters | #617 — **done**: the ticks name the `axis percent` row, output byte-identical |
 
 The formatter shipped under #448 as `format_percentage( $value, %params )`, where `$value` is the percentage itself. Beyond the four parameters above it takes `parens` (wrap the figure in brackets), `floor_at` with `floor_text` (below `floor_at`, the marker replaces the figure — the memory rows' `<1%` is a threshold on the raw value, not a rounds-to-zero test), and `pad` (right-align within `width`, inside the brackets where they are in use, which is what keeps `( 3%)` aligned with `(97%)`).
 

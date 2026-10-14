@@ -2,9 +2,10 @@
 
 ## Status
 
+- **The time contract's `precision` field has its first reader (2026-10-02, #525).** `resolve_timestamp_precision()` clamps the run's timestamp precision to what a file's timestamps carry: a format declaring `frac => 'none'` or `'fixed3'` gives its declared `precision`; a `'generic'` one gives the precision of the most fractional digits among the detection sample's timestamps (`sample_file_for_detection()` records them per format), so its declared field is not read. Record: `features/525-timestamp-precision-option.md` § 6.4 and § 10, D4 and D10.
 - **Release re-cut (2026-08-23, D59): 0.17.0 ships now, without #387 and #60.** Architect decision: the value already merged (registry #58, variant groups #384, WGM format #395, Drop 0, bug fixes) ships immediately; #387 (Drop 1.75) and #60 (Drop 2) are design-heavy and unstarted, and the architect wants real-world exposure with the built parts before designing on top of them. They move to the 0.18.0 merge train unchanged in order and gating (#387 → #60, `#60 blocked_by #387` stands). Next: cut v0.17.0 per the release process, then #387 opens 0.18.0.
 - **Train re-sequenced (2026-08-23): #387 slotted as Drop 1.75 ahead of Drop 2.** User YAML format definitions require a home configuration directory and file convention for `ltl` (location, naming, discovery order), which does not exist yet; #60's configuration cascade has a registry/user-configuration layer that must wire to that directory rather than invent it. Native edges: #387's dead `blocked_by #58` dropped; `#60 blocked_by #387` recorded. Train order: #58 ✅ → #388 ✅ → #384 ✅ (Drop 1.5) → #387 (Drop 1.75) → #60 (Drop 2). Next: #387. **Same day: native sub-issue tree built under #23** — sub-issues had never been used in this repo (the phase issues predate native-linkage adoption; "Parent: #23" existed as prose only); #180, #58, #388, #384, #387, #60 (0.17.0 train), #57, #59, #61, #55 (Phase 2+4 release), and #386 (follow-up) are now native children of #23 in that order. Extended later the same day with the consumer arc: #17 (unit sampling half), #154 → #155 (timezone chain), #401, #372, #218 (derived/paired-metric consumers of Phase 4) — 17 children total; sequencing carried by the native `blocked_by` graph. #57/#55 statuses trued up to `on hold` (the D21 deferral that already governs #59/#61).
-- **Drop 1.5 (#384) planned (2026-08-22):** filename provenance evidence and variant groups specified in this document (§ "Drop 1.5 — #384" below; #384 has no feature file of its own — this umbrella is its record). Architect decisions D44–D52 and implementation decisions I1–I8 locked through interview (I1–I8 proposed and locked the same day). #60 (Drop 2) re-gated on #384. #388 (detection-window N sizing) becomes a native prerequisite and carries the constraints it must settle; #385 (Integration Runtime `yyyy-dd-MM`) lands as the first variant group. Train order: #58 ✅ → #388 → #384 (Drop 1.5) → #60 (Drop 2). Next: #388's N sizing, then #384's research → prototype phase (the variant-group scan-sub selection and the probe costs are hot-path-adjacent and must be measured, per the mandatory workflow). **Later the same day (#388 kickoff): D53 locked** — a multi-spot sampling pass (a few kilobytes at the front, middle and end of the file by byte offset; fully decorrelated from the production read) replaces the front window as the evidence source, the #58 held-line window becomes the fallback for non-seekable input, and D48 and the constraints handed to #388 are amended to match; #388 re-titled to "Design and size the detection evidence sampling pass".
+- **Drop 1.5 (#384) planned (2026-08-22):** filename provenance evidence and variant groups specified in this document (§ "Drop 1.5 — #384" below; #384 has no feature file of its own — this umbrella is its record). Architect decisions D44–D52 and implementation decisions I1–I8 locked through interview (I1–I8 proposed and locked the same day); D52 (a)'s "decisive against that layout" is Claude's wording, contrary to D44, and was never locked (§ "Finding (2026-10-10)"). #60 (Drop 2) re-gated on #384. #388 (detection-window N sizing) becomes a native prerequisite and carries the constraints it must settle; #385 (Integration Runtime `yyyy-dd-MM`) lands as the first variant group. Train order: #58 ✅ → #388 → #384 (Drop 1.5) → #60 (Drop 2). Next: #388's N sizing, then #384's research → prototype phase (the variant-group scan-sub selection and the probe costs are hot-path-adjacent and must be measured, per the mandatory workflow). **Later the same day (#388 kickoff): D53 locked** — a multi-spot sampling pass (a few kilobytes at the front, middle and end of the file by byte offset; fully decorrelated from the production read) replaces the front window as the evidence source, the #58 held-line window becomes the fallback for non-seekable input, and D48 and the constraints handed to #388 are amended to match; #388 re-titled to "Design and size the detection evidence sampling pass".
 - **Drop 1 (#58) implemented and gate-closed (2026-08-21):** the per-line match-type cascade is replaced by the format registry — declarative specs (pattern, field map, transforms, three-part time contract, duration unit + ambiguity flag, guards, head_class, samples with expected records) compiled at startup into a single generated scan sub per MTF order (D39/D40: eager precompilation, order-signature cache, pinned-closure recency promotion), validated by the D24 gates on every run. Byte parity proven (shadow mode 241 runs / 0 divergences; post-swap full-output diffs); every 1m fixture family net faster (pure-access −13.1%, concat-pair −11.0%, interleave −6.0%); #369's access read-phase regression removed as a class (read_files −13.6% vs v0.16.0). Scan telemetry shipped in `-V format-detection / scan`; format-carried units + the D18 unit-ambiguity note shipped (R5). Follow-ups filed: #386 (analysis precision), #387 (user YAML formats — the D37 re-sequenced R4 surface), #388 (detection-window N sizing, D38). Full record: `features/58-format-registry-staged-detection.md`. Next: Drop 2 (#60).
 - **Drop 1 (#58) research + prototype phase complete (2026-08-20):** the mandatory pre-implementation cycle ran end to end on branch `58-format-registry-staged-detection` — research F1–F8, application audit A1–A11, prototype findings P1–P9, decisions D24–D34 locked. Full record in `features/58-format-registry-staged-detection.md`; umbrella summary in the Decision Log entry below. Q2 (pattern priority) resolved by D26; Q3 (inheritance) and Q5 (strict mode) deferred to #58 implementation planning. Backlog side-findings: #382 (GC pause-form gap), #383 (timestamp-cache growth). Next: #58 implementation planning against the locked decisions.
 - **Drop 1 (#58) implementation planning complete (2026-08-20):** Q3 resolved as sparse-override (D35), Q5 resolved as no-strict-mode (D36), R4's user-facing YAML surface re-scoped to a follow-up issue with YAML::PP as a hard dependency when it lands (D37 — see the D12 true-up in the Decision Log), detection-window N-sizing split to a follow-up prototyping issue (D38). Full record in `features/58-format-registry-staged-detection.md`; staged implementation underway on branch `58-format-registry-staged-detection`.
@@ -44,7 +45,7 @@ elsif ($_ =~ /Access log pattern/) {
 
 #### Adjacent state worth noting (added 2026-05-09)
 
-- **#46 Index file (`ltl-index.csv`)** — `write_index_file()` at `ltl:524-668` *writes* per-file metadata (line/match counts, first/last timestamps, duration/bytes/count min/max/avg, ts_precision) on every run. **No code path reads it back today.** Issue #179 will add read-back so prior-run metadata can pre-seed bound discovery.
+- **#46 Index file (`ltl-index.csv`)** — `write_index_file()` at `ltl:524-668` *writes* per-file metadata (line/match counts, first/last timestamps, duration/bytes/count min/max/avg, ts_precision) on every run. Issue #179 added read-back so prior-run metadata could pre-seed bound discovery. Both are deprecated and off by default (#708, turned on by `-idx`/`--index`); removal is tracked by #710 (`features/708-run-index-deprecation.md`).
 - **#22 UDM (custom metrics + units + simple delta)** — shipped at `ltl:3905-3955`. Includes a *global, last-value-only* `delta()`/`idelta()` (`ltl:3933-3946`, state in `%udm_last_value` `ltl:157`). Phase 4 of this issue replaces it with the per-message-identity engine (decision D10, 2026-05-09).
 - **#96 Fuzzy message consolidation** — shipped v0.13.0. Established the S1-S5 staged pipeline pattern, the architectural template Phase 2 reuses (see "Architectural Template" section below). State in `%consolidation_*` persists across the entire run.
 - **Implicit pipeline order** — the call sequence in `## MAIN ##` (`ltl:7677`) is: `read_and_process_logs` → `initialize_empty_time_windows` → `group_similar_messages` → `calculate_all_statistics` → `calculate_heatmap_buckets` → `calculate_histogram_buckets` → `normalize_data_for_output` → `print_bar_graph` → `print_histograms` → `write_index_file`. Issue #180 will name these stages explicitly (detect / parse / accumulate / finalize / render).
@@ -125,7 +126,7 @@ The S1-S5 staged pipeline shipped in #96 (v0.13.0, fuzzy message consolidation) 
 - **Deterministic ordering via `sort keys %hash`.** Perl's hash iteration is randomized per process. Any ordering-sensitive loop must use `sort keys` to produce reproducible results. Violated → PF-23 in #96 produced different consolidations per run. Phase 4's per-message-identity state tracking has the same risk.
 - **Hot-sort for hot-path lookups.** Frequently-matched entries bubble up by one position per hit (`match_consolidation_patterns()` in #96). Phase 1's format-detection cache and Phase 4's per-identity state cache should adopt this.
 - **Profile-ready counter contract.** Every staged function emits a per-run counter visible in `-V` output (e.g., `S1=282081, S4=4416, S5=24`). The tracking invariant `S1 + S2 + S3 + S4 + S5 = keys_seen` is a built-in sanity check. Phase 2's per-bucket lifecycle and Phase 4's derived-metric calculations must emit equivalent counters.
-- **Per-checkpoint memory release.** `%key_trigrams`, `%ngram_index`, `%key_trigrams_norm` are freed at each checkpoint boundary (`run_checkpoint()` in #96). Phase 2's sliding window does the same for raw bucket data once stats are computed.
+- **Per-checkpoint memory release.** `%key_trigrams`, `%ngram_index`, `%key_trigrams_norm` are freed at each checkpoint boundary (`run_checkpoint()` in #96; the normalised set was later removed, D569-2). Phase 2's sliding window does the same for raw bucket data once stats are computed.
 
 ### Specific subroutines from #96 that Phase 4 will reuse
 
@@ -153,7 +154,8 @@ Each log format definition must include:
 - **Field mapping**: Which capture groups correspond to which fields (timestamp, message, duration, bytes, etc.)
 - **Timestamp format**: How to parse the timestamp
 - **Duration field**: Which field contains duration (if any)
-- **Duration unit**: The unit for duration values (ns, us, ms, s) - this is format-specific knowledge
+- **Duration unit** (`duration_unit`): the unit for duration values (a time-unit ladder token: ns, us, ms, s) - this is format-specific knowledge; or `line` when each line names its own unit beside the value and the entry's transform converts it (`access_common_duration_bracketed`, `[150us]`). A `line` format declares no unit: the read loop does not convert its durations again, and nothing that compares against the log's unit (the note on a duration bound finer than the log records) reads one from it (`features/605-input-units.md` D30)
+- **Byte notation** (`byte_notation`, optional): `si` or `iec`, the notation the format's own producer writes byte sizes in; anything else fails the build. Carried onto the entry as `FR_BYTE_NOTATION` and read once per run, after the read, to choose the run's byte notation when `-bn` is not given (every file's format declaring the same notation decides; otherwise SI, with a notice when the declarations differ). The same declaration gives a bare size letter written by the format's producer its meaning: a transform that reads such sizes (`gc_heap_delta`) is compiled with the entry's notation, and an entry that lists one without declaring `byte_notation` fails the build. The Java GC entry declares `iec`, HotSpot's `K`, `M`, `G` being powers of 1024; no other entry declares one (`features/608-byte-unit-ladder.md` D7, D12, D13, D20; `features/609-gc-heap-suffix-convention.md` D1, D2)
 - **Event ledger flag** and **success/failure classification**: whether the format has maximal coverage of the operations it describes, and how its lines are recognised as successes or failures — specified in `features/453-success-failure-classification-event-ledger.md` (#453); this replaces the former access-log flag
 - **Declared levels** (optional): the category names the format writes, when they are not the usual severity names — the G1 pause kinds, the HTTP status families the access family folds a status code into, the Workgroup Manager names its letter map produces, a producer's own severity names beside the standard ones. An entry may declare them or not; nothing is inferred from an entry that declares none, and the static vocabulary stays the base a run works from. A declared level joins the run's category vocabulary at the moment its entry binds a file, not at build, so a run pays for the vocabularies of the formats its files use rather than for every format defined. Specified in `features/476-per-format-log-level-declarations.md` (#476)
 - **Format name/description**: Human-readable identifier
@@ -307,7 +309,7 @@ Requirements:
 
 Every metric — raw or derived — carries a unit type. The system must know how to accept user-specified units, normalize values to a canonical internal form, and format values for display.
 
-**Scope boundary (2026-07-15, D18):** Unit *auto-detection* — statistical determination of a unit by sampling values — and speculative unit tracking are **not** part of the #23 rewrite. The rewrite's contribution to the unit problem is declarative only: a detected format carries its known units as registry metadata (e.g., Tomcat 9 `%D` = milliseconds), which for unambiguous formats makes auto-detection unnecessary. Statistical sampling remains #17's separate, simpler follow-on for ambiguous format variants. Unit knowledge sources, in precedence order: (1) explicit `-du` override → (2) format-carried unit from the registry (this rewrite) → (3) prior-run knowledge via index read-back (#179) → (4) sample-based auto-detection (#17, follow-on; its ~100-line sampling window is the same buffered detection window described in #181).
+**Scope boundary (2026-07-15, D18):** Unit *auto-detection* — statistical determination of a unit by sampling values — and speculative unit tracking are **not** part of the #23 rewrite. The rewrite's contribution to the unit problem is declarative only: a detected format carries its known units as registry metadata (e.g., Tomcat 9 `%D` = milliseconds), which for unambiguous formats makes auto-detection unnecessary. Statistical sampling remains #17's separate, simpler follow-on for ambiguous format variants. Unit knowledge sources, in precedence order: (1) explicit `-du` override → (2) format-carried unit from the registry (this rewrite) → (3) sample-based auto-detection (#17, follow-on; its ~100-line sampling window is the same buffered detection window described in #181). The index read-back is not a source: the index records no unit, and it is deprecated (#708, 2026-10-12).
 
 ##### Unit Types
 
@@ -316,7 +318,7 @@ Three fundamental unit categories, plus raw:
 | Category | Internal baseline | Existing functions |
 |----------|------------------|--------------------|
 | Time/Duration | milliseconds | `convert_duration_to_ms()`, `format_time()` |
-| Bytes | bytes | `convert_bytes()`, `format_bytes()` |
+| Bytes | bytes | `@byte_unit_ladder` with `byte_unit_canonical()` and `%byte_unit_bytes`, `format_bytes()` |
 | Count | raw number | `format_number()` |
 | Percent | raw (0-100) | none |
 | Raw (unitless) | as-is | none |
@@ -333,7 +335,7 @@ Three fundamental unit categories, plus raw:
 
 The following functions already exist in `ltl` and provide a solid base:
 - `convert_duration_to_ms()` (line ~559) — handles s, ms, us, ns
-- `convert_bytes()` (line ~726) — handles B, kB, KB, MB, GB, TB; accepts "100 MB" string format
+- `@byte_unit_ladder` — the one byte-unit table: each step's SI token and byte count (`B`, `kB`, `MB`, `GB`, `TB`, powers of 1000) and IEC token and byte count (`KiB`, `MiB`, `GiB`, `TiB`, powers of 1024); `byte_unit_canonical()` resolves a spelling case-insensitively, `%byte_unit_bytes` gives a token's multiplier, `byte_prefix_bytes()` gives the byte count of the step a bare prefix letter names in a given notation (through `%byte_unit_by_prefix`, a view of the ladder), and `gc_heap_size_bytes()` reads a GC log's heap sizes through it at the entry's declared notation (`features/608-byte-unit-ladder.md` D5; `features/609-gc-heap-suffix-convention.md` D1, D2)
 - `format_time()` (line ~894) — display formatting with short/medium/long styles, handles us through days
 - `format_bytes()` (line ~757) — display formatting with automatic unit promotion
 - `format_number()` (line ~864) — SI-style abbreviations (k, Mil, Bil, Tril)
@@ -342,7 +344,7 @@ The following functions already exist in `ltl` and provide a solid base:
 ##### TODOs for Issue #22
 
 - [ ] Audit existing conversion functions for gaps and edge cases
-- [ ] Known issue: `format_bytes()` uses string length comparison instead of numeric thresholds for unit promotion (line ~779)
+- [x] `format_bytes()` climbs by comparing the value against each ladder step's byte count, in the run's notation (`features/608-byte-unit-ladder.md` D6, D16)
 - [ ] Determine if percent formatting function is needed
 - [ ] Ensure conversion functions handle edge cases (negative values, zero, very large values)
 - [ ] Verify that all conversion functions can be called uniformly (consistent interface for any unit type)
@@ -449,7 +451,8 @@ The new model stores raw data per bucket before processing, which adds overhead 
 If derived metric expressions are user-defined (via configuration files), and we evaluate them in Perl, there's a risk of code injection through crafted expressions.
 - **Mitigation**: The expression engine must parse and evaluate a restricted grammar, never `eval()` raw user input. Use a proper parser.
 
-### 8. Index Drift Correctness — MEDIUM (added 2026-05-09)
+### 8. Index Drift Correctness — RETIRED (added 2026-05-09; retired 2026-10-12)
+The index is deprecated and off by default (#708); nothing in this rewrite reads it, so the risk below no longer applies. The read-back's seeded heatmap range was found wrong on a repeat run in two cases (`features/708-run-index-deprecation.md` § 3).
 Once #179 (index read-back) ships, ltl pre-seeds heatmap/histogram boundary structures from `ltl-index.csv` when fresh. If live values exceed the index bounds and the index isn't refreshed at end-of-run, the *next* run will silently compute boundaries against incorrect ranges and produce visualizations that omit out-of-range values.
 - **Mitigation**: #179's hard requirement is end-of-run drift detection and refresh — compare live captured min/max/timestamps to the pre-seeded values, and atomically update the index entry on any drift. Documented and tested before this issue's Phase 1 begins.
 
@@ -512,7 +515,7 @@ Drivers: #385 (the Integration Runtime case, `on hold` pending the mechanism), #
 ### Status
 
 - **Issue:** #384 — Drop 1.5 of the 0.17.0 merge train (parent #23; after #58, before #60). **No feature file of its own** — this section is the repo-side record; the issue body is its snapshot.
-- **Planned:** 2026-08-22 interview session (architect + Claude). Decisions D44–D52 and implementation decisions I1–I8 locked as written.
+- **Planned:** 2026-08-22 interview session (architect + Claude). Decisions D44–D52 and implementation decisions I1–I8 locked as written, except D52 (a)'s "decisive against that layout": Claude wrote it into this record, contrary to D44, and the architect never locked it (§ "Finding (2026-10-10)").
 - **Blocks:** #60 (Drop 2) — native `blocked_by` #384 recorded 2026-08-22 (architect: Drop 2 waits for Drop 1.5).
 - **Prerequisites (native `blocked_by`):** #388 — detection evidence sampling pass (D53), which now carries the constraints in § "Constraints handed to #388".
 - **Unblocks:** #385 (Integration Runtime `yyyy-dd-MM` dates — first variant group; its `timegm()` guard and once-per-file diagnostic ship here), the Tomcat/httpd `%D` unit split (#17's declarative half completes), and #387's user-defined variants (the group contract is designed to be extended from YAML).
@@ -555,12 +558,12 @@ Observations that shaped the decisions: Tomcat's `.txt` versus httpd's `.log` is
 - **D49 — A run-level format pin tops the precedence chain.** A CLI option (`-lf` / `--log-format <slug>`, name a proposal below) names the format to use for every file in the run, overriding any classification; an unknown slug is a usage error listing the known slugs. Precedence, top first: **pin → `-du` (unit only) → evidence-selected variant → group default → index read-back hints (#179) → sample-based auto-detection (#17, follow-on)**. The pin is the analyst's escape hatch when evidence is absent or wrong; no separate "disable filename evidence" switch exists — the pin covers it. Industry precedent F5 (explicit pinning outranks detection).
 - **D50 — The console summary names the formats used; confidence stays in `-V`.** In the per-file list of the summary block, each file name is followed by `[n]` or `[n,m,…]` — every format found in that file, numbered against a single-line legend printed once below the list (`1 thingworx_standard  2 tomcat_access_with_duration`, numbered in order of first detection across the run). The file name is truncated through `shorten_filename()` with the bracket width reserved (width derived from the widest bracket in the run), so a long path never pushes the bracket off the line; a no-match file shows `[-]`. The legend and brackets speak the slug vocabulary — one identity surface shared with `-V format-detection` and the pin. Confidence, evidence and flips appear only in `-V format-detection`.
 - **D51 — Detection scenarios run on committed fixtures staged under producer-true names.** `logs/` is gitignored, so assertions that depend on it run only where those files happen to exist. New fixtures live under `tests/fixtures/format-detection/` as `.txt`, each with a manifest row naming the producer-true name the harness stages it under in `$TMP_DIR` before invoking `ltl` (the committed name is never fed to the tool). Slices are cut from real specimens and scrubbed, source recorded in the manifest — the Integration Runtime specimen is the only known true positive for the date transposition, and a synthesized one would prove the synthesizer. Existing `logs/`-dependent scenarios remain; new scenarios are committed-fixture only.
-- **D52 — Content corroboration probes: impossibility is hard evidence; silence is inconclusive.** Three probes feed confidence: (a) an out-of-range date component under the current layout (month token > 12) — decisive against that layout; (b) monotonicity of parsed timestamps against file order — violations lower confidence in the current layout; (c) the filename-date cross-check — the first (and last) parsed timestamp against the date declared in the filename, which **breaks the ≤12-day ceiling for date-rolled files**: `ApplicationLog.2025-05-06.0.log` with content `2025-05-06` is May 6 under `yyyy-MM-dd` and June 5 under `yyyy-dd-MM`, so any day ≠ month resolves the ordering at zero per-line cost. A probe that proves an impossibility outranks name evidence. Absence of contradiction proves nothing and is recorded as such. The `timegm()` guard and #385's once-per-file stderr diagnostic (file, line, offending value; never an ` at … line` suffix) are the out-of-range probe's user-visible half and ship with this drop.
+- **D52 — Content corroboration probes: impossibility is hard evidence; silence is inconclusive.** Three probes feed confidence: (a) an out-of-range date component under the current layout (month token > 12) — decisive against that layout *(Claude's wording, contrary to D44; never locked by the architect: § "Finding (2026-10-10)")*; (b) monotonicity of parsed timestamps against file order — violations lower confidence in the current layout; (c) the filename-date cross-check — the first (and last) parsed timestamp against the date declared in the filename, which **breaks the ≤12-day ceiling for date-rolled files**: `ApplicationLog.2025-05-06.0.log` with content `2025-05-06` is May 6 under `yyyy-MM-dd` and June 5 under `yyyy-dd-MM`, so any day ≠ month resolves the ordering at zero per-line cost. A probe that proves an impossibility outranks name evidence. Absence of contradiction proves nothing and is recorded as such. The `timegm()` guard and #385's once-per-file stderr diagnostic (file, line, offending value; never an ` at … line` suffix) are the out-of-range probe's user-visible half and ship with this drop. **Amended by the architect 2026-09-30:** a line whose date is impossible under every live layout is **not matched**: it is read, counted as unmatched, and contributes nothing to any bucket, statistic or metric. Counting it at the previous line's time (or, on a file's first line, at epoch 0) is data corruption: the line's time is unknown, and attributing its occurrence, duration, bytes and metrics to the population just processed misplaces them. The probe signal (a) is unchanged: the impossibility still eliminates the layout and still drives a flip to a live alternative, with the line re-scanned under it. The once-per-file diagnostic is also withdrawn (no outcome is reported per line or per file); both changes are delivered by #611 (one application-wide timestamp acceptance pattern): the line is returned as no match from the generated block, counted, and noted once per run per format after the read (`features/611-timestamp-acceptance.md` C2 to C5).
 - **D53 — Evidence is gathered by a multi-spot sampling pass; the held-line window is the fallback for non-seekable input.** Before the first line of a file is processed, the detect stage takes a separate, read-only look at the file: it divides the file's byte size into a few parts (front, middle, end), reads a few kilobytes at each, resynchronises to line boundaries, and the first decision (variant, unit) is made on that evidence. The sample operates in bytes — "the last line of the file" is not addressable, a byte offset is — and how many lines land in a spot is incidental. **The sample is completely decorrelated from the production read**: its own file handle, its own counters, no holding or replaying of lines, no effect on the scan order, on `scan_attempts:`, or on any existing telemetry; it exists only for detection signals and confidence building. **This is a dual process — a primary methodology and a fallback mechanism — and both ship.** Where the input cannot be repositioned (a pipe, a compressed stream — neither read today), the detect stage falls back to the #58 two-phase-store window (D30, `features/58-format-registry-staged-detection.md` D30/D38/P7): hold the first N lines, decide, replay. **The fallback ships with a number: N = 1,000** (architect's estimate, 2026-08-22; parity at that N already proven in #58 S4/S5) — it is never left at 0 on the assumption the primary path always runs. Probes consume a list of sample lines, never a file position, so the two sources are interchangeable to the decision logic. The sample was expected to become the basis of a percentage-based progress indicator, from the file size it knows and the average line length it observes; it did not. Both the per-file percentage (#397) and the overall one (#446) read the production handle's own byte position against a size taken by `stat`, which is exact rather than estimated and does not depend on the sample having run — the sampling pass supplies no progress input at all. Rationale: a front-only window of any size cannot see the far end of a file, and the date-layout case is usually decided by the span between the first and last timestamps (a file spanning days under one layout spans months, runs backwards, or hits an impossible month under the other), not by a single line; one specimen's decision line (571 of 5,416 in the Integration Runtime file) says nothing about the next file's. Confidence is progressive: the sample yields the best assumption available without hard indications, and the steady-loop probes correct it when hard evidence arrives. Locked 2026-08-22.
 
 ### Implementation decisions I1–I8 (proposed 2026-08-22; LOCKED by the architect the same day)
 
-1. **Evidence classes and weights (one table in source, D46) — values locked 2026-08-23 from the prototype (F7).** Every signal is additive and independent of every other — no signal is gated on another, so a renamed stem still leaves the extension counting and vice versa. Content shape match is necessary and earns every group member 1.0; filename stem 3.0; extension 1.0; filename date agreeing with the content 0.5; rotation suffix present 0.25. The group default holds a standing credit of 1.0 — equal to the extension — so an extension alone produces a tie, and ties stay on the default: detection never moves off the default on an extension by itself (the explicit pin `-lf` and `-du` are the overrides for that case). Probe (a) (impossible date component) and a filename-date mismatch eliminate a member; probe (b) is a graded, comparative penalty (F4). Confidence = selected member's score ÷ the sum of the live members' scores, reported only in `-V`. Verified against the D51 cases: Tomcat content as `whatever.log` → Tomcat by default at 0.50; as `renamed.txt` → Tomcat by default at 0.75; httpd content as `access.log-20260609` → httpd at 0.71, as `access_log` → httpd at 0.67; IR/Connection Server content decided by probe (a) at 1.00 either way.
+1. **Evidence classes and weights (one table in source, D46) — values locked 2026-08-23 from the prototype (F7).** Every signal is additive and independent of every other — no signal is gated on another, so a renamed stem still leaves the extension counting and vice versa. Content shape match is necessary and earns every group member 1.0; filename stem 3.0; extension 1.0; filename date agreeing with the content 0.5; rotation suffix present 0.25. The group default holds a standing credit of 1.0 — equal to the extension — so an extension alone produces a tie, and ties stay on the default: detection never moves off the default on an extension by itself (the explicit pin `-lf` and `-du` are the overrides for that case). Probe (a) (impossible date component) and a filename-date mismatch eliminate a member; probe (b) is a graded, comparative penalty (F4). **Amended by the architect 2026-10-10 (#704, one line decides a file's day/month order):** probe (a) no longer eliminates a member; a date valid only with day and month swapped is a weighted signal like the others, its weight set by the F7 method (each D51 fixture resolving as required). A filename-date mismatch still eliminates a member. The elimination by probe (a) was Claude's wording, carried from D52 (a), contrary to D44. Confidence = selected member's score ÷ the sum of the live members' scores, reported only in `-V`. Verified against the D51 cases: Tomcat content as `whatever.log` → Tomcat by default at 0.50; as `renamed.txt` → Tomcat by default at 0.75; httpd content as `access.log-20260609` → httpd at 0.71, as `access_log` → httpd at 0.67; IR/Connection Server content decided by probe (a) at 1.00 either way.
 2. **Steady-loop probes live in the generated block's timestamp memo-miss branch** — amended 2026-08-23 from 1-in-N loop sampling on the prototype's measurements (F3/F4): (a) the out-of-range month test and (b) monotonicity over distinct timestamps both run only when a line's timestamp string differs from the previous line's (the last-seen memo misses; under #383's date-keyed cache there is no per-second cache behind the memo) — (b) only in variant-group members' blocks (IF2b, 2026-08-23) (once per change of timestamp between consecutive lines, never once per line on dense streams), measured at +0.003–0.016 s/M against +0.05–0.06 s/M for 1-in-256 sampling, and (b) observes every distinct timestamp instead of a 1-in-N subset. (b) is graded and comparative — violations per distinct timestamp under this layout vs the alternative — because completion-ordered and multi-threaded logs violate strict monotonicity benignly. The no-match-timing idiom is not used for probes. (c) is head/tail only.
 3. **Option name:** `-lf <slug>` / `--log-format <slug>` (both forms free today); `--help` and `docs/usage.md` updated in the same commit.
 4. **Filename `date` layout vocabulary:** `iso` (`YYYY-MM-DD`), `compact` (`YYYYMMDD`), extensible; `index` forms: `dot_n` (`.N`), `dash_n_n` (`.N-N`), `dot_n_dash_n` (either — added at implementation for the Connection Server's `.1` / `.1-16` pair); each entry also declares the suffix `placement` — `before` (`stem[.date][.index]ext`, logback/Tomcat) or `after` (`stem ext[-date][.index]`, httpd logrotate/HotSpot GC). **Locked 2026-08-23 (F8):** the index form is declared so the resolver knows what to consume to reach the date and the extension; it never discriminates between formats — seventeen producer-true names showed zero cross-entry collisions with or without forms — so `index` contributes its present/absent credit (0.25) only.
@@ -610,9 +613,9 @@ Sampling barely halves the cost because the counter and mask test still run per 
 
 **F5 — Full probes over the D53 sample are sub-millisecond per file; the many-small-files case is ~0.2 s per 200 files.** Probes (a)/(b)/(c) under both layouts over the 3×8 KB sample: IR specimen 305 µs (164 lines), cxserver 427 µs (233 lines), httpd 11 µs (147 lines, no ISO timestamps so nothing to probe), ApplicationLog 233 µs (58 lines); with the sample read itself (194–784 µs, #388) that is 0.9–1.1 ms per file → 85–212 ms per 200 files. Retained per file: the conclusions hash, 1,112 bytes (`Devel::Size`); no lines.
 
-**F6 — The sample decides the date layout on its own for both real specimens — in both directions.** IR specimen: 53 of 164 sampled lines have an impossible month under `yyyy-MM-dd`, 0 under `yyyy-dd-MM` (span 807.6 d under the right layout — the file covers 2023-11 → 2025-01). cxserver specimen: 39 impossible under `yyyy-dd-MM`, 0 under `yyyy-MM-dd` (spans 2.8 d vs 31.1 d). So for this group, any file whose sample contains a day > 12 is decided by probe (a) before line 1 regardless of its name: `app.log` with cxserver content selects the default by *evidence*, not by default. The D51 table row "same IR slice as `app.log` → no evidence → default; probe contradiction reported" is corrected: it selects `integration_runtime_standard` from the sample with basis `evidence` (the I1 run shows it). The name matters for the ≤12-day case, and there probe (c)'s filename date is the only other discriminator — neither motivating producer carries a date in its name, so a short-span, day≤12 Connection Server/IR file with no name evidence is the one case that stays on the default with the ambiguity note, as D44 accepts.
+**F6 — The sample decides the date layout on its own for both real specimens — in both directions.** IR specimen: 53 of 164 sampled lines have an impossible month under `yyyy-MM-dd`, 0 under `yyyy-dd-MM` (span 807.6 d under the right layout — the file covers 2023-11 → 2025-01). cxserver specimen: 39 impossible under `yyyy-dd-MM`, 0 under `yyyy-MM-dd` (spans 2.8 d vs 31.1 d). So for this group, any file whose sample contains a day > 12 is decided by probe (a) before line 1 regardless of its name: `app.log` with cxserver content selects the default by *evidence*, not by default. The D51 table row "same IR slice as `app.log` → no evidence → default; probe contradiction reported" is corrected: it selects `integration_runtime_standard` from the sample with basis `evidence` (the I1 run shows it). The name matters for the ≤12-day case, and there probe (c)'s filename date is the only other discriminator — neither motivating producer carries a date in its name, so a short-span, day≤12 Connection Server/IR file with no name evidence is the one case that stays on the default with the ambiguity note, as D44 accepts. *This finding reported one sampled line deciding a file's order as a result, without raising that it contradicts D44 (§ "Finding (2026-10-10)").*
 
-**F7 — I1 weights (locked 2026-08-23; all D51 cases resolve as required).** A first candidate gated the extension on a stem match; the architect rejected it — every signal must count independently (a renamed stem must not silence the extension). Final table: `shape 1.0`, `stem 3.0`, `ext 1.0` (always counted), `filename-date match 0.5`, `index present 0.25`, `group default 1.0` standing credit so an extension alone ties and ties stay on the default; probe (a) or a filename-date mismatch eliminates the member; probe (b) −0.5 per violation capped at −1.0, comparative per F4. Confidence = selected score ÷ sum of live members' scores. Outcomes (name → member, basis, confidence): `cxserver.1.log` → cs 1.00 evidence (probe a); IR-named → IR 1.00 evidence; `app.log`+IR content → IR 1.00 evidence (probe a); `app.log`+cxserver content → cs 1.00 evidence (probe a); `localhost_access_log.2025-05-05.txt` → tomcat 0.86 evidence; `access.log-20260609` → httpd 0.71 evidence; `access_log` → httpd 0.67 evidence (stem alone); `renamed.txt` → tomcat 0.75 default; `whatever.log` + Tomcat content → tomcat 0.50 default (tie on extension alone — the extension shows in the confidence, never in the selection).
+**F7 — I1 weights (locked 2026-08-23; all D51 cases resolve as required).** A first candidate gated the extension on a stem match; the architect rejected it — every signal must count independently (a renamed stem must not silence the extension). Final table: `shape 1.0`, `stem 3.0`, `ext 1.0` (always counted), `filename-date match 0.5`, `index present 0.25`, `group default 1.0` standing credit so an extension alone ties and ties stay on the default; probe (a) or a filename-date mismatch eliminates the member *(probe (a)'s elimination withdrawn by the architect 2026-10-10: it becomes a weighted signal set by this method; I1 as amended)*; probe (b) −0.5 per violation capped at −1.0, comparative per F4. Confidence = selected score ÷ sum of live members' scores. Outcomes (name → member, basis, confidence): `cxserver.1.log` → cs 1.00 evidence (probe a); IR-named → IR 1.00 evidence; `app.log`+IR content → IR 1.00 evidence (probe a); `app.log`+cxserver content → cs 1.00 evidence (probe a); `localhost_access_log.2025-05-05.txt` → tomcat 0.86 evidence; `access.log-20260609` → httpd 0.71 evidence; `access_log` → httpd 0.67 evidence (stem alone); `renamed.txt` → tomcat 0.75 default; `whatever.log` + Tomcat content → tomcat 0.50 default (tie on extension alone — the extension shows in the confidence, never in the selection).
 
 **F8 — I4: the rotation index needs no declared form for discrimination; the form is needed only to compose the matcher.** Seventeen producer-true names (incl. `.gz`) decomposed through the D45 component matcher with `placement` (`before`: `stem[.date][.index]ext`, logback/Tomcat; `after`: `stem ext[-date][.index]`, httpd logrotate/GC): zero cross-entry collisions with declared forms **and** zero with index as present/absent-only. Answer: `index` is declared as a form (`dot_n`, `dash_n_n`) because the resolver must know what to consume to reach the extension, but it carries present/absent weight only (0.25) — no producer pair is separated by its index form. Decomposition results: `ApplicationLog.2025-05-05.0.log.gz` → stem ThingWorx, date 2025-05-05, index 0, ext match; `cxserver.1-16.log` → index 1-16; `access.log-20260609` → httpd, date 20260609, ext match; `access_log` → httpd stem, ext absent.
 
@@ -622,18 +625,18 @@ Sampling barely halves the cost because the counter and mask test still run per 
 
 ### Implementation notes N1–N10 (2026-08-23; mechanism-level, below the Dxx/Ixx decisions — strike or lock)
 
-Mechanism choices the locked decisions leave to the implementer, recorded here before any production code. N5 and N9 were settled in dialog with the architect on 2026-08-23; the rest were approved with the implementation plan the same day and are implemented as written (N6 merged into N5). Two additions found during implementation: the `index` vocabulary gains `dot_n_dash_n` (`.N` or `.N-N`, the Connection Server's `cxserver.1.log` / `cxserver.1-16.log` pair); the fallback-window prefill classifies held lines under the previous occupant, so probe signals raised during prefill only count until the held lines are scored (the selection that follows sees the same evidence).
+Mechanism choices the locked decisions leave to the implementer, recorded here before any production code. N5 and N9 were settled in dialog with the architect on 2026-08-23, except N5's elimination of the current member by one impossible month, which is Claude's, contrary to D44, and was never put to the architect (§ "Finding (2026-10-10)"); the rest were approved with the implementation plan the same day and are implemented as written (N6 merged into N5). Two additions found during implementation: the `index` vocabulary gains `dot_n_dash_n` (`.N` or `.N-N`, the Connection Server's `cxserver.1.log` / `cxserver.1-16.log` pair); the fallback-window prefill classifies held lines under the previous occupant, so probe signals raised during prefill only count until the held lines are scored (the selection that follows sees the same evidence).
 
 - **N1 — Group as a registry field.** Every entry carries `FR_GROUP` (an entry without variants is a group of one keyed by its own name). Spec keys: `variant_group => '<group>'`, `variant_default => 1` on the default member. Ancestor sets (`FR_ANC_SET`, `expect_ancestors`, `derive_format_constraints()`, gate 4) are keyed by **group** (F1); `derive_format_constraints()` treats a same-group first match as the owner (in-group identical-pattern overlap is expected, D47). `@format_registry` / `@format_scan_order` hold **one occupant per group slot** (the default member at build); all members live in `%format_registry_entry`. The D40 cache signature stays `join ',', FR_NAME` — the occupant's name changes on selection, so "selected members in the key" (D47) falls out of the existing signature with no second key. The eager precompile covers default occupants only (F2).
 - **N2 — Per-file selection is an in-place slot swap.** `select_format_variants($path, \@sample_lines)` runs at the sampling attach point in `read_and_process_logs()`, returns per group `{selected, basis, confidence, candidates, probes, evidence}`; for each group whose selection differs from the current occupant, the occupant is replaced at its position in `@format_scan_order` (F1) and `$format_scan_sub` is taken from the cache or compiled once.
 - **N3 — Timestamp cache invalidation.** `%timestamp_date_cache` (#383: one midnight epoch per distinct date, capped at `TIMESTAMP_DATE_CACHE_MAX` = 100 entries with oldest-insertion eviction; time of day added arithmetically) is keyed by the date string alone and the two date layouts disagree on the epoch for the same string, so any occupant change (per-file or mid-file) clears the cache and its insertion stamps (`timestamp_date_cache_clear()`) and resets the last-seen memo (`$format_last_ts_str` / `$format_last_ts_epoch`). Output-neutral for same-layout runs (the cache is a memo); cost is one `timegm()` per distinct day after a swap.
 - **N4 — Fallback-window path.** When no sample was taken, the held lines are the evidence: `select_format_variants()` runs on them after prefill and before replay; each held `[line, entry]` whose group changed occupant is remapped to the new occupant (same pattern ⇒ the classification stands; the extraction closure differs).
-- **N5 — One selection mechanism, continuously re-evaluated (architect, 2026-08-23).** Per group, every signal updates candidate scores; the best live candidate is the selected member; a change of best is a flip. The steady-loop probes are signal sources feeding that same mechanism — there is no separate flip rule or threshold. The generated block's timestamp memo-miss branch (ISO layouts only, I2) calls a cold sub on the rare events: an **impossible month** eliminates the current member (score 0); a **monotonicity violation** over distinct timestamps applies the I1 penalty (−0.5 per violation, capped at −1.0) to the current member. The group then re-selects; if the best changed → swap occupant (N2), invalidate the cache (N3), `flips++`, and the block returns `$format_scan_sub->($_[0])` so the triggering line is re-scanned under the new member (no recursion: a group with no better live member does not flip). An impossible month with no alternative left → the once-per-file #385 stderr diagnostic (file, line number, offending value; never an ` at … line` suffix) and the epoch falls back to the previous distinct epoch (`// 0`) — this is the `timegm()` guard. Per-file counts and the live confidence are reported in `-V`.
+- **N5 — One selection mechanism, continuously re-evaluated (architect, 2026-08-23; the impossible-month elimination below is Claude's, contrary to D44, never locked: § "Finding (2026-10-10)").** Per group, every signal updates candidate scores; the best live candidate is the selected member; a change of best is a flip. The steady-loop probes are signal sources feeding that same mechanism — there is no separate flip rule or threshold. The generated block's timestamp memo-miss branch (ISO layouts only, I2) calls a cold sub on the rare events: an **impossible month** eliminates the current member (score 0); a **monotonicity violation** over distinct timestamps applies the I1 penalty (−0.5 per violation, capped at −1.0) to the current member. The group then re-selects; if the best changed → swap occupant (N2), invalidate the cache (N3), `flips++`, and the block returns `$format_scan_sub->($_[0])` so the triggering line is re-scanned under the new member (no recursion: a group with no better live member does not flip). An impossible month with no alternative left → the line is not matched and contributes nothing (D52 as amended 2026-09-30; delivered by #611: the block returns no match, the memo does not move, and the line is counted for the run's note). Per-file counts and the live confidence are reported in `-V`.
 - **N6 — (merged into N5).**
 - **N7 — `formats:` per file at zero per-line cost.** Every entry's `FR_MATCHES` is snapshotted at file start; the file's format set is the entries whose count grew (plus `csv` when confirmed). Legend numbering = first-detection order across the run (D50).
 - **N8 — `entries:` keeps meaning occupants in the scan sub** (13 today). New keys in the contract: run-level `format_pin:`, `legend:`; sub-section `variant_groups:`.
 - **N9 — Pin semantics (`-lf <format-name>`, architect 2026-08-23).** The pin overrides automatic detection for every file in the run (the industry-standard override, #388 R1). The operand is a user-facing format name and resolves to **every registry entry carrying that name** — `thingworx_standard` names both its strict and generic entries, and choosing it is still choosing something more specific than detection; a group has no user-facing name and is never pinnable. The scan for the run is restricted to the resolved entries (one compiled sub, no evidence pass, no selection, no probes, no MTF alternation); lines not matching are unmatched as usual; `-du` still governs the unit. An unknown name is a usage error listing the known names. `-V`: `format_pin: <name>`; per-file `selection_basis: pin`, `confidence: 1.00`.
-- **N10 — New time layout `iso_ms_ddmm`** (same `frac fixed3`), emitted by `format_entry_block_src()` and `compile_format_time_parser()` from the layout declaration (day/month `substr` offsets 5/8 swapped) — never by patching generated source as the prototype did.
+- **N10 — New time layout `iso_ms_ddmm`** (same `frac fixed3`), emitted by `format_timestamp_src()` (the timestamp part of every generated block) from the layout declaration (day/month `substr` offsets 5/8 swapped) — never by patching generated source as the prototype did. The day-first CSV layout `csv_ddmm` takes the same offsets (`features/615-csv-registry-entry.md` D9, D15).
 
 ### Implementation findings (2026-08-23)
 
@@ -646,6 +649,192 @@ Mechanism choices the locked decisions leave to the implementer, recorded here b
 - **IF6 — All nine F7 outcomes reproduce** on staged specimens through `-V format-detection` (IR 1.00 evidence by stem and, as `app.log`, by probe; `app.log` with cxserver content 1.00 by probe; httpd 0.71 / 0.67; Tomcat 0.86; `renamed.txt` 0.75 default; `whatever.log` 0.50 tie-on-default).
 - **IF7 — Sabotage proofs.** Build gates: in-group filename overlap, a filename sample failing its matcher, a variant member declared before its default — each fails the build with its diagnostic. Harness: a copy with the stem weight zeroed and probe (a) disabled is caught by the selection/basis/confidence/candidates/absence assertions of five scenarios; a copy with the bracket, legend, `formats:` and `format_pin:` suppressed is caught by their four assertions.
 - **IF8 — Pre-existing, not this drop's:** `ltl /dev/stdin < file` reports 0 matched lines since #388 (the sample's own handle on a redirected regular file shares the offset with the main read). Pipes are refused before reading. Neither is a path this drop changes; noted for the umbrella's non-seekable-input work.
+
+### Finding (2026-10-10): one line decides a file's date order, contrary to D44
+
+D44 is the architect's direction: detection accumulates signals, confidence
+moves and is never 100%, and the choice may change as lines accumulate. What
+was built decides on one line and cannot move back:
+
+- **In the sample, before line 1.** One sampled line whose date is valid only
+  with day and month swapped eliminates the order it is impossible under
+  (`format_sample_probes()` counts it; `select_format_variants()` eliminates).
+  Measured on a synthetic Connection Server log of 1.2 million lines, every
+  line dated 5 April 2024, 12 of them reading `2024-13-05`, the first on line
+  1: of 444 sampled lines one was impossible month first and none day first;
+  the file was read day first, every line placed on 4 May, with no line left
+  out and no message.
+- **During the read.** At the first line whose date is valid only swapped,
+  the current order is eliminated for the rest of the file and the other takes
+  over (`format_probe_signal()` :: `$g->{live}{$name} = 0;`); nothing in the
+  read raises a score, so the eliminated order never returns. Measured on a
+  synthetic Connection Server log whose sampled front, middle and end hold
+  days up to the 12th and whose unsampled middle holds 40 lines dated
+  `2024-25-04`: the file switched day first at the first of them (`flips: 1`),
+  and month first was eliminated for the rest of the file, so no later line,
+  whatever its date, could move the order back. (The switch itself is not the
+  defect: the file's 840 lines hold 40 valid only day first, none valid only
+  month first and 800 valid either way, so the evidence favours day first;
+  D70.)
+
+**Cause: Claude built this against the architect's locked design.** On
+2026-08-22, in the interview for #384 (filename provenance evidence and
+variant groups), the architect locked D44: detection accumulates signals,
+confidence is never 100%, and the choice may change as lines accumulate. D53,
+locked the same day, says the date order is decided by the span between a
+file's first and last timestamps, "not by a single line". In the same commit
+that recorded D44 (b03d15d), Claude wrote D52 (a) as "decisive against that
+layout", summarised it in the interview log as "out-of-range component
+(decisive)", and recorded D44 to D52 as "locked as written". The architect
+never locked those words, and they contradict D44. On 2026-08-23 Claude wrote
+N5's rule that one impossible month eliminates the current member, under a
+heading reading "(architect, 2026-08-23)", in a commit (76ad558) whose message
+calls its notes "for strike-or-lock"; the conflict with D44 was never put to
+the architect. F6 then reported one sampled line deciding a file's order as a
+result, not as a contradiction of D44. The code was built on D52 (a) and N5
+instead of D44: `format_sample_probes()` and `select_format_variants()` in the
+sample, `format_probe_signal()` during the read. ("I don't see how evidence,
+especially as it is on one line, should be deterministic for the entire
+file", architect, 2026-10-10.) #704 (one line decides a file's day/month
+order, and a dropped order can never return) fixes the implementation to
+D44, D48 and D53 as locked on 2026-08-22, with the architect's amendment of
+I1 (2026-10-10: probe (a) becomes a weighted signal, set by the F7 method, and
+no longer eliminates an order) and the architect's D70 to D72 below.
+
+### #704: the day/month order accumulates evidence (2026-10-10)
+
+**Delivered**, issue closed: PR #706 merged into `release/0.19.0` as 800db00 on 2026-10-10.
+
+The fix for the finding above. The implementation follows D44, D48 and D53 as
+locked on 2026-08-22, with I1 as amended by the architect on 2026-10-10: a date
+valid only with day and month swapped is a weighted signal, its weight set by
+the F7 method, and no longer eliminates an order. Branch
+`704-date-order-evidence`.
+
+**Decisions (architect, 2026-10-10)**
+
+- **D70 — #704 is fixed when the mechanism follows D44, not when a given file
+  keeps a given date.** No single line decides a file's day/month order;
+  enough lines move the choice; lines favouring the earlier order move it
+  back. A file whose only distinguishing lines all favour the other order may
+  move to it and stay there: that is the evidence's verdict (D44, a wrong
+  choice is visible or good enough; `-lf` corrects it). Counted on the two
+  reproduction files of the finding above: the 1.2-million-line file holds 12
+  lines valid only day first, none valid only month first and 1,199,988 valid
+  either way; the 840-line file holds 40 valid only day first, none valid only
+  month first and 800 valid either way. In both, every distinguishing line
+  favours day first; month first is held only by the group default's standing
+  credit (1.0). *Locked ("Lock A").* **Amended by D72 (the order holds until a
+  fading bucket of contrary lines fills) the same day:** distinguishing lines
+  too far apart to fill the bucket do not move the order, so the
+  1.2-million-line file, whose 12 day-first lines are 100,000 lines apart,
+  stays month first; the 840-line file, whose 40 are consecutive, moves.
+- **D71 — A line whose date is valid only in the other order, when it does
+  not move the choice, is left out and counted like an impossible date.** It
+  adds to the other order's bucket (D72); if the order moves, the line is re-read
+  under the new order and matched; if it holds, the line is not matched and is
+  counted for the run's impossible-date note (#611), which names the other
+  order's `-lf`. One order per file at a time stands (D47), and the time axis
+  is not stretched by single lines read in the other order (D48). D52's
+  amendment of 2026-09-30 ("impossible under every live layout is not
+  matched") is read as "impossible under the order the file is being read
+  with". *Locked ("Lock A").*
+- **D72 — The order a file is read in holds until a fading bucket of contrary
+  lines reaches a threshold.** The architect's design: a scale that, once
+  tipped, holds until enough further proof tips it back. While a file is read
+  in one day/month order, each line whose date is valid only in the other
+  order adds one to that order's bucket. The bucket fades as lines are read, so
+  recent lines outweigh old ones and one line 100,000 lines back weighs
+  nothing. When the bucket reaches the threshold, the file switches to the
+  other order and the bucket starts again, now filling only with lines against
+  the new order. A line valid in both orders adds nothing. Modelled on the
+  reading loop with a threshold of 5 lines and a bucket halving every 1,000
+  lines read: one contrary line (sampled or not) moves nothing and is left
+  out; 40 consecutive day-first lines in 840 switch at the 6th, 5 left out;
+  40 day-first lines then 40 month-first switch twice and end month first;
+  1.2 million lines with one day-first line every 100,000 never switch, 12
+  left out. Thresholds of 10 lines, or a bucket halving every 100 lines, give
+  the same outcomes. *Locked ("Yes").*
+
+**Design (Claude's, 2026-10-10; no architect lock, reviewed at the PR).**
+Three entries of `%format_evidence_weights` (D46): `order_line`, the weight of
+one distinguishing line (0.25, set by the F7 method); `order_switch_lines`,
+D72's threshold (5); `order_fade_lines`, the lines read over which the bucket
+halves (1,000).
+
+- *The sample chooses the order a file starts in* (`select_format_variants()`).
+  Each order gains `order_line` for every sampled line whose date is valid only
+  in it, against the default's standing credit (1.0), so a file starts in the
+  non-default order only on five more sampled lines for it than against it. A
+  date impossible in both orders is no evidence (#611). The sample does not
+  seed the bucket: the read meets the sampled lines again.
+- *The read applies D72* in `format_probe_signal()`, reached from the
+  generated block's timestamp memo-miss branch once per new timestamp string. A
+  date impossible in the order being read and valid in another member's adds
+  one to that member's bucket, after the bucket fades for the lines read since
+  it last changed. The fade is computed there from the file's line count, so the
+  generated block carries no per-line cost. At the threshold the occupant
+  changes and the line is re-read, the bucket's lines are credited to the new
+  member's score (`order_line` each) so `candidates:` and `confidence:` agree
+  with the selection, and every bucket of the group empties. Below it the line
+  is left out and counted (D71).
+- In a group whose members read different day/month orders, only the bucket
+  changes the occupant during the read: a monotonicity violation still lowers
+  the occupant's score, and so the confidence, but does not re-rank. Every
+  other group re-ranks on each signal as before.
+- Lines valid in both orders, and lines valid only in the order being read,
+  add nothing (D72).
+
+Out of scope: a CSV file's date order, settled once from its sampled rows by
+`features/615-csv-registry-entry.md` D15 and D18, not by D44.
+
+#### Acceptance criteria (agreed by the architect 2026-10-10)
+
+All assertable. Scenarios 1 to 4 are new in `tests/validate-format-detection.sh`,
+on Connection Server lines generated by the harness and staged with no name
+evidence; 5 and 6 are existing scenarios.
+
+- [ ] **1. One sampled line does not decide.** A file whose sample holds one
+      line valid only day first, every other line valid either way, is read
+      month first: `selected: mt10`, `flips: 0`; that line is left out and
+      counted (`impossible_date_lines: 1`) and the run's impossible-date note
+      is printed.
+- [ ] **2. One line during the read does not decide.** A file whose sampled
+      spots hold only days of 12 or less and whose unsampled middle holds one
+      line valid only day first: `flips: 0`, `selected: mt10`, that line left
+      out and counted.
+- [ ] **3. Enough lines move the choice.** The 840-line file of the finding
+      above (40 unsampled lines valid only day first): `flips: 1`,
+      `selected: mt10ir`; more than none and fewer than all of the 40 are left
+      out before the switch.
+- [ ] **4. Lines favouring the earlier order move it back.** An unsampled block
+      valid only day first followed by a block valid only month first:
+      `flips: 2`, the file ends `selected: mt10`.
+- [ ] **5. The real specimens resolve as before.** The Integration Runtime
+      slice named and as `app.log`, and the Connection Server slice as
+      `cxserver.1.log`: the same member with `selection_basis: evidence`. The
+      confidence falls from 1.00 to its weighted value, recorded here when set,
+      and the assertions that the other member scores 0.00 become assertions
+      that it scores lower. Set 2026-10-10 with `order_line` at 0.25: the
+      Connection Server slice as `cxserver.1.log` 0.93 (Integration Runtime
+      scores 2.50); the Integration Runtime slice named 0.82 and as `app.log`
+      0.78 (Connection Server scores 3.50); the eight-line fixtures of lines
+      carrying "N milliseconds" 0.58 for Integration Runtime and 0.75 for
+      Connection Server.
+- [ ] **6. Every other variant group is unchanged.** Tomcat/httpd units,
+      ThingWorx, Windchill method server and the mixed-legend scenarios keep
+      their selection, basis and confidence.
+- [ ] **7. No single date eliminates an order.** No elimination by a date
+      valid only in the other order remains in `select_format_variants()` or
+      `format_probe_signal()`; the weight, the threshold and the fade are
+      entries of `%format_evidence_weights` only. Verified by review of the diff.
+- [ ] **8. No regression on the paths that reach the change.** Before/after on
+      this machine: `single-day-access-log-standard` and
+      `single-day-application-log-standard` (the generated ISO timestamp
+      block), base captured as `704-before` and `704-app-before`.
+
+`-V format-detection` keeps its keys; only the values of `candidates:` and
+`confidence:` move.
 
 ### Constraints handed to #388 (must be settled and landed before this drop implements)
 
@@ -759,8 +948,8 @@ The **first/last-timestamp span** — the signal that decides the date-layout ca
 - `-V format-detection`: the owning contract is § "`-V format-detection` section-contract" below (consumer: `tests/validate-format-detection.sh`); the #384 keys (I5, I8, N8) are drafted there and lock at implementation.
 - Console summary (D50, rendering settled by the architect 2026-08-23): each file line ends with ` [n,m]` / ` [-]` — brackets in the file-list white, the numbers in the new color-map entry `periwinkle` (`38;5;111`); the bracket width is reserved before `shorten_filename()`. Below the list, after a blank line, the title **Log Formats** in the file-list heading style (`white-underline`), a blank line, then one legend line `1 <name>  2 <name> …` (numbers periwinkle, names white) in first-detection order across the run. Consumed by `validate-regression.sh` references (re-blessed in this drop) and asserted by `validate-format-detection.sh` scenario `variant-mixed-legend`.
 - stderr — two intentional diagnostics, never an ` at … line` suffix, both asserted by `validate-format-detection.sh`:
-  - **Variant ambiguity note (I6)**, once per run, first file binding a variant-group member whose selection basis is `default`; suppressed under `-lf`, and for unit groups under `-du`: `Note: the detected log format (<name>) is written by more than one producer and the duration unit differs between them (assumed ms); nothing in the file names or content decided which - use -du <unit> or -lf <other member> if the files come from the other producer` (date-layout groups: `… and the date layout differs between them; … use -lf <other member> …`).
-  - **Impossible-date diagnostic (D52/#385)**, once per file, when a month > 12 or day > 31 is met under the selected (or pinned) layout and no live alternative remains: `Note: <file> line <N>: timestamp '<ts>' has an impossible date component under the <name> format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format`.
+  - **Variant ambiguity note (I6)**, once per run after the read, naming every file that bound a variant-group member by the `default` selection basis (`features/605-input-units.md` D31); suppressed under `-lf`, and for unit groups under `-du`: `Note: the detected log format (<name>) is written by more than one producer and the duration unit differs between them (assumed ms); nothing in the file names or content decided which - use -du <unit> or -lf <other member> if the files come from the other producer` (date-layout groups: `… and the date layout differs between them; … use -lf <other member> …`).
+  - **Impossible-date note (#611, replacing the D52/#385 per-file diagnostic)**, once per run after the read, one per format whose lines were not matched because their date cannot exist: `Note: <N> of <M> lines of the <name> format were not matched because their date cannot exist under its date layout` (M: every line the format recognised; `features/611-timestamp-acceptance.md` D2), followed, for a member of a variant group, by ` - if the day and month are read the wrong way round, use -lf <other member>`. No file name, line number or value: no outcome is reported per line or per file (#640 D1, the architect's rule of 2026-09-30). Record: `features/611-timestamp-acceptance.md` C5.
 
 ### Fixtures (D51) — `tests/fixtures/format-detection/`
 
@@ -868,6 +1057,34 @@ Record: `features/656-gc-log-tagless-decorations.md` (findings, D1-D10, acceptan
 - **The tagged entry's level bracket admits padding** (D1 as amended): `\[info\s*\]`, as the tag bracket already did; the tagged corpus reads the same 3,865,527 lines with the same tuples.
 - Counts that moved: `entries` 27 to 31, `scanned_entries` 25 to 29, `scan_slots` and the `format-detection / scan` `entries` 24 to 28; the four slots sit after `mt6` in `static_order`, ahead of the connector slots at the tail.
 
+## Java and ECS logging layouts named by their source (#695, #696, #687)
+
+Filed 2026-10-09, backlog; the decisions below were locked by the architect at filing. Not started.
+
+### Findings: what each library and framework writes (2026-10-09, read from each project's source)
+
+| Source | Pattern | Example |
+|---|---|---|
+| Logback 1.3 and later, built-in default (`BasicConfigurator` → `TTLLLayout`) | `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} -%kvp- %msg%n`, level unpadded in the layout's code | `16:08:16.276 [main] INFO c.e.Demo -- Started` |
+| Logback up to 1.2, built-in default; Log4j2 `DefaultConfiguration.DEFAULT_PATTERN`, every version | `%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n` | `16:08:16.276 [main] INFO  c.e.Demo - Started` |
+| Products' own configuration (ThingWorx Connection Server, Integration Runtime with `yyyy-dd-MM`, a Windchill plugin's `logback-spring.xml`) | `%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n` | `2026-03-18 16:08:16.276 [main] INFO  c.e.Demo - Started` |
+| Spring Boot 2.x default (`defaults.xml` `FILE_LOG_PATTERN`) | `%d{yyyy-MM-dd HH:mm:ss.SSS} %5p ${PID} --- [%t] %-40.40logger{39} : %m%n` | `2026-03-18 16:08:16.276  INFO 4488 --- [main] c.e.Demo : Started` |
+| Spring Boot 3.x and 4.x default | `%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p ${PID} --- [%t] %-40.40logger{39} : %m%n`; the application name in brackets before the thread by 3.3, the application group by 3.5, trace and span IDs when tracing is on | `2026-03-18T16:08:16.276+01:00  INFO 4488 --- [demo] [main] c.e.Demo : Started` |
+| Log4j2 `JsonTemplateLayout` with `EcsLayout.json`; Elastic's `ecs-logging-java` encoders | ECS JSON with dotted keys | `{"@timestamp":…,"log.level":"INFO","message":…,"process.thread.name":…,"log.logger":…}` |
+| Spring Boot 3.5 and later, built-in ECS structured logging | ECS JSON with nested objects | `{"@timestamp":…,"log":{"level":"INFO","logger":…},"process":{"thread":{"name":…}},"message":…}` |
+
+- The full-date TTLL line identifies the layout, not whether Logback or Log4j2 wrote it, nor whether Spring Boot is involved. Only the file name identifies the producer.
+- On 0.19.0 every log in the full-date TTLL shape is reported as `connection_server_standard`.
+- On 0.19.0 synthetic Spring Boot 2.x and 3.x default lines bind `thingworx_rac_client` and none is included: its pattern accepts any text between the timestamp and the first bracket and reads the thread bracket as the level. The two time-only shapes bind nothing.
+
+### Locked decisions (architect, 2026-10-09)
+
+- **D65 — The full-date TTLL shape is a generic entry with producers as its variants (#695).** The group is `java_ttll`; its default is `java_ttll_datetime`, reported for a file whose name identifies no producer. The members, each selected by file-name evidence (D45, D47): `thingworx_connection_server` (replacing `connection_server_standard`), `thingworx_integration_runtime` (replacing `integration_runtime_standard`), and `windchill_ai_parts_rationalization` (new; files named `${appName}-${serverPort}-${PID}-%d{yyyyMMdd}-%i.log`). Neither library is named, because both write the layout; `datetime` separates it from the time-only defaults.
+- **D66 — The default shapes are entries named by their source (#696).** `spring_boot_2`; `spring_boot_3` (4.x keeps the 3.x shape); `java_ttll_time` for the Log4j2 and Logback-up-to-1.2 default, naming no library because both write it; `logback_ttll_kvp` for Logback 1.3 and later, the only writer of the `-kvp-` separator.
+- **D67 — A time-only log takes its date from its file name, or has none (#696).** No date is assumed. A file's modification time is never evidence of its date, because collecting, moving or copying a log changes it. Without a date, output leaves the date out, as the profile view (`-pr`) already does.
+- **D68 — Spring Boot lines are never claimed by `thingworx_rac_client` (#696).** A requirement only: the RAC client entry is not a variant of the Spring Boot shape (its own lines are `[timestamp] [LEVEL] message`), and its structure is unchanged by this work.
+- **D69 — ECS only, dotted and nested as two entries (#687).** The group is `elastic_common_schema`; its default is `elastic_common_schema_json`, the dotted-key form, with `windchill_ai_assistant` as a variant selected by file-name evidence (files named `${appName}-%d{yyyyMMdd}-${serverPort}-${startTime}-${pid}-%i.log`). The nested-object form is its own entry, `elastic_common_schema_nested_json`. JSON lines from other encoders are out of scope. The bare abbreviation `ecs` was rejected as a name because it says nothing.
+
 ## `-V format-detection` section-contract
 
 This section is the owning contract for the `format-detection` `-V` section and its `format-detection / scan` sub-section, both emitted by `emit_format_detection_verbose()` and consumed by `tests/validate-format-detection.sh`. All pre-existing keys of the parent section (per-file `format:`, `match_type:`, `metrics_observed:`, `matched_lines:`, `unmatched_lines:`, `first_match_line:`; run-level `duration_unit_override:`, `files:`) are byte-preserved from their pre-registry shapes, with one exception: the per-file key `metrics_observed: yes|no` was renamed from `is_access_log:` under #453 (D18) with byte-identical semantics — any line of the file observed a metric, or the format is statistics-eligible. The `format-detection / classification` sub-section and the `event_ledger:` per-file key are owned by `features/453-success-failure-classification-event-ledger.md` § *`-V` section-contract changes*. Everything below is additive. Renames and removals are breaking per `tests/HARNESS-DESIGN.md` § Stability contract.
@@ -918,11 +1135,16 @@ Per-file keys:
   - `selection_basis: evidence|default` — `evidence` when a non-default signal decided (stem, filename date, an elimination, a steady-loop flip); `default` when the standing credit or a tie held the default.
   - `confidence: 0.NN` — selected member's score ÷ the sum of the live members' scores at emission time; `0.00` when no member survived (default holds).
   - `flips: N` — occupant changes after the first decision (N5).
-  - `probes: sample_out_of_range=N sample_monotonic_violations=N out_of_range=N monotonic_violations=N filename_date=match|mismatch|-` — the sample's counts under the selected member's layout, the steady-loop counts for the file (distinct timestamps, selected layout), and the sample's filename-date cross-check under that layout.
+  - `probes: sample_out_of_range=N sample_monotonic_violations=N out_of_range=N monotonic_violations=N filename_date=match|mismatch|-` — the sample's counts under the selected member's layout, the steady-loop counts for the file under the selected layout (`out_of_range`: every line whose date has a component out of range, since such a line never enters the timestamp memo, #611; `monotonic_violations`: distinct timestamps), and the sample's filename-date cross-check under that layout.
+
+**#611 addition (one application-wide timestamp acceptance pattern, `features/611-timestamp-acceptance.md` C4).** Per-file `impossible_date_lines: N`, emitted after `unmatched_lines:` on every file block, the unbound one included: the file's lines not matched because their date cannot exist under the layout read (a part of `unmatched_lines`). Asserted by the `format-pin` and `impossible-date` scenarios of `tests/validate-format-detection.sh`.
+
+Per-file key (after `event_ledger:`): `byte_notation: si|iec|-` — the byte notation the file's format declares, `-` when it declares none or no format recognised the file (#608 one byte-unit ladder).
 
 Run-level keys (parent section, after `format_pin:`):
 
 - `format_pin: -|<name>` — the `-lf` value (emitted after `duration_unit_override:`).
+- `byte_notation: si|iec (<source>)` — the run's byte notation (emitted after `format_pin:`) and what decided it: `-bn` (the option, command line or `LTL_CONFIG`), `format <name>[,<name>…]` (every file's format declares that notation; the names are the format names `--help formats` lists), `default` (no file's format declares one), or `mixed` (the declarations differ, a file no format recognised counting as declaring none; SI, with the notice) (`features/608-byte-unit-ladder.md` § 5.5, #608 one byte-unit ladder).
 - `legend: 1=<name>,2=<name>|-` — the console legend, numbered in first-detection order across the run (I8).
 
 Sub-section `format-detection / scan` additions:
@@ -937,7 +1159,7 @@ This section is the owning contract for the `format-registry` `-V` section, emit
 
 Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry orders and compiles entries, and two entries can share a slug (mt1std/mt1gen → `thingworx_standard`), the same vocabulary rule the `format-detection / scan` sub-section follows.
 
-**Pin-only entries (#456 D12, 2026-09-03).** Two spec keys govern an entry that exists to produce states no shipping format can reach, so a harness can verify them: `scanned => 0` together with a `pattern_src` makes the entry *compiled but not scanned* — its pattern, extractor and generated block are built and it passes gates 1 (samples match) and 2 (extraction and classification parity), but it takes no slot in the cascade, no clobber set (it scans alone), no cross-shadow ancestor constraint, no filename evidence, and the sample pass never sees it, so no file binds it by detection; `-lf <slug>` seats it exactly as it seats a scanned member. `verification => 1` keeps the entry out of every user-facing listing: `--help formats` and the known-format list a mistyped `-lf` is answered with. The live registry keeps such entries in `@format_registry_pin_only`; the stateful `csv` entry (no pattern) is neither scanned nor compiled. One entry today: `mtvfy` (`classification_verification`), whose four samples declare the four `expect_outcomes` values 1, 4, 2, 0. The fixture that exercises it is `tests/fixtures/classification-states.txt` and its harness `tests/validate-classification-states.sh`.
+**Pin-only entries (#456 D12, 2026-09-03).** Two spec keys govern an entry that exists to produce states no shipping format can reach, so a harness can verify them: `scanned => 0` together with a `pattern_src` makes the entry *compiled but not scanned* — its pattern, extractor and generated block are built and it passes gates 1 (samples match) and 2 (extraction and classification parity), but it takes no slot in the cascade, no clobber set (it scans alone), no cross-shadow ancestor constraint, no filename evidence, and the sample pass never sees it, so no file binds it by detection; `-lf <slug>` seats it exactly as it seats a scanned member. `verification => 1` keeps the entry out of every user-facing listing: `--help formats` and the known-format list a mistyped `-lf` is answered with. The live registry keeps such entries in `@format_registry_pin_only`; the stateful `csv` entry (no pattern) is not scanned; it is compiled per header shape, one block alive at a time (`features/615-csv-registry-entry.md` D11). One entry today: `mtvfy` (`classification_verification`), whose four samples declare the four `expect_outcomes` values 1, 4, 2, 0. The fixture that exercises it is `tests/fixtures/classification-states.txt` and its harness `tests/validate-classification-states.sh`.
 
 **Inventory** — what was compiled from the declarative specs:
 
@@ -956,16 +1178,16 @@ Entry names (`mt1std`, `mt3us`, …) throughout, never slugs — the registry or
 
 **Compile state** — what codegen the run actually paid for. Under D60 nothing is generated at startup, so these are the run's real registry cost:
 
-- `scan_subs_compiled: N` — generated scan subs minted this run, counted at the codegen boundary in `compile_format_scan_sub()`. The election invariants: a single-format file ⇒ ≤ 2; `-lf` ⇒ exactly 1; an invalid `-lf` ⇒ 0 (the operand is validated before any codegen). A multi-format file compiles one sub per distinct recency order its stream visits, never one per registry entry.
-- `scan_sub_cache_hits: N` — resolves served from the order-signature cache (`format_scan_sub_resolve()` found the order already compiled). A run that revisits an order it has scanned with before pays a cache hit (~52 ns), not a compile (~2.5 ms).
-- `scan_subs_rss_bytes: N` — the accumulated compile-boundary RSS delta (D62), bytes. **Nondeterministic** — harnesses assert its shape, never its value. Read against `scan_subs_compiled` it gives the per-sub cost, which calibrates at ~0.6 MB. `0` when measurement was not armed.
+- `scan_subs_compiled: N` — generated subs minted this run, counted at the codegen boundary: the scan subs `compile_format_scan_sub()` generates and the CSV blocks `compile_csv_block()` generates from each CSV file's header (`features/615-csv-registry-entry.md` D11; every generation counts, a day-first retry and a month-first fallback included). The election invariants: a single-format scanned file ⇒ ≤ 2; `-lf` to a scanned format ⇒ exactly 1; an invalid `-lf` ⇒ 0 (the operand is validated before any codegen). A multi-format file compiles one sub per distinct recency order its stream visits, never one per registry entry. A run pinned to `csv` ⇒ its scan sub plus one CSV block; a second CSV file of the same header shape and date order adds no compile, one of another shape adds one. A file's date order is settled starting month first whatever file came before it (`features/615-csv-registry-entry.md` D18), so a second day-first file adds two: its month-first block, which fails, then its day-first block.
+- `scan_sub_cache_hits: N` — resolves served from the signature cache: `format_scan_sub_resolve()` found the order already compiled, or `csv_block_for_file()` found the live CSV block of the file's header shape and it passed the file's sampled rows. A run that revisits an order it has scanned with before pays a cache hit (~52 ns), not a compile (~2.5 ms).
+- `scan_subs_rss_bytes: N` — the accumulated compile-boundary RSS delta (D62), bytes, the CSV blocks' included. **Nondeterministic** — harnesses assert its shape, never its value. Read against `scan_subs_compiled` it gives the per-sub cost, which calibrates at ~0.6 MB. `0` when measurement was not armed.
 - `scan_sub_rss_measured: yes|no` — whether the D62 measurement was armed at option parse (a memory-reporting surface was requested: `-mem`, `-V benchmark-data`, or this section). `no` is why `scan_subs_rss_bytes` reads 0 on a plain run; the two keys are read together so a zero is never mistaken for a measurement.
-- `compiled_orders: sig;...|-` — every compiled order's signature (joined entry names), sorted. The compile count read against which orders the run actually needed.
+- `compiled_orders: sig;...|-` — every signature in the cache, sorted: each scan order's (joined entry names; the empty order a `-lf csv` pin leaves is the empty signature) and the live CSV block's, `csv:<layout>:sep=<separator>:ts=<column>:udm=<column>/...:msg=<column>/...|-` (layout `csv`, `csv_ddmm` for a file read day first, or `csv_epoch`; the separator named `comma`, `semicolon`, `tab` or `x` and its hex; `-1` for a metric the header does not carry). At most one CSV signature: a block of another shape replaces it. The compile count read against which orders and shapes the run actually needed.
 
 **Timing rows (D64, emitted by `benchmark-data`, not by this section):**
 
 - `TIMING detect/registry_build` keeps its name and meaning: `build_format_registry()` inside `pipeline_detect()` — the declarative build and D24 gates 1–4 plus gate 5's interpreted startup half. Under D60 it no longer contains any codegen, which is the bulk of the 0.101 s → 0.008 s it drops by.
-- `TIMING detect/scan_sub_compile` — an **accumulator** summing every `compile_format_scan_sub()` call wherever it fires: election before a file's first line, promotion mid-read, the pin. It is not a pipeline stage and not a sub-stage — those compiles happen *inside* other stages, so the row attributes cost within stages it does not own and is deliberately excluded from `TIMING total` (which sums disjoint stage timings). See `features/180-named-pipeline-stages.md` § stage-coherent timing nomenclature for the row-kind taxonomy.
+- `TIMING detect/scan_sub_compile` — an **accumulator** summing every `compile_format_scan_sub()` call wherever it fires: election before a file's first line, promotion mid-read, the pin; and every `compile_csv_block()` call at CSV confirmation, its validation on the file's sampled rows included. It is not a pipeline stage and not a sub-stage — those compiles happen *inside* other stages, so the row attributes cost within stages it does not own and is deliberately excluded from `TIMING total` (which sums disjoint stage timings). See `features/180-named-pipeline-stages.md` § stage-coherent timing nomenclature for the row-kind taxonomy.
 - **The boundary excludes D62's RSS readings** (finding F12). One timer pair spans the whole compile — building the generated source, the `eval`, and per-compile validation — while `get_memory_usage()` is called outside it on both sides. Each of those readings is a `ps` subprocess on macOS costing several times the compile it measures; inside the boundary they made an armed run report ~10.7 ms per compile against a real 3.7 ms, and only on the runs that read the row. Measured split per compile on the mixed fixture: source build 0.2 ms, `eval` 3.2 ms, per-compile validation 0.3 ms. The row therefore reports the same value armed or not.
 
 **Re-emission (one source, two surfaces per `tests/HARNESS-DESIGN.md`):** `benchmark-data` emits `COUNTS format_scan_subs_compiled` and `COUNTS format_scan_sub_cache_hits` from the same variables this section reads, and `MEMORY format_scan_subs` from the same accumulator — never an independent recount. The `MEMORY` row is emitted whenever measurement was armed, including without `-mem`: it is a compile-boundary RSS delta, not a structure walk, so it does not depend on the `Devel::Size` pass the other `MEMORY` rows are gated on. Under `-mem` the category rides `%memory_high_water_marks` (appearing in the `-mem` terminal breakdown) and the standalone row stands down, so exactly one row is emitted either way.
@@ -993,7 +1215,7 @@ This refactor is staged into phases with independent deliverables. Each phase bu
 | #53 | Automated test suite with golden files | **COMPLETE** (delivered with #56, v0.14.2) |
 | #54 | Fuzzy matching engine research | **COMPLETE** — implemented in #96 (v0.13.0). See `docs/similarity-engine-best-practices.md` |
 | #56 | Memory baseline profiling | **COMPLETE** (v0.14.2) |
-| #179 | Index read-back with drift detection and refresh | **COMPLETE** (shipped v0.15.x), with a **narrowed role** under the #187 contract: partitions auto-resize online, so the index is no longer load-bearing for histogram/heatmap bound pre-seed. Remaining value to this rewrite: timestamp-range / `ts_precision` hints to the `detect` stage, and prior-run unit knowledge (see D18 precedence order). |
+| #179 | Index read-back with drift detection and refresh | **COMPLETE** (shipped v0.15.x); **not used by this rewrite.** The bin counters capture their counts without bounds known up front, and the index holds no detection hint or unit knowledge (`features/708-run-index-deprecation.md`). Deprecated and off by default (#708); removal tracked by #710. |
 | #180 | Name the implicit pipeline stages (detect/parse/accumulate/finalize/render) | **COMPLETE — shipped 2026-08-20** (PR #380 into `release/0.17.0`). Phase 1 inserts the registry into the `detect` stage (`pipeline_detect()`/`pipeline_parse()` now exist); Phase 2 adds per-bucket lifecycle inside `finalize`. |
 | #181 | Decouple file I/O from processing via a buffered read pipeline | **REFRAMED (2026-07-10 / 2026-07-15, D17) — architecture guidance, not a deliverable.** Perf testing showed file I/O is not a bottleneck. Phase 1 needs only a minimal detection window (hold the first ~N lines during format detection, per-line re-detect on cache-miss); that window is also the future substrate for #17's unit sampling. No full reader/processor decoupling is built. |
 | ~~#41~~ | ~~Heatmap/histogram unified binning~~ | **CLOSED — superseded by #187/#189**: heatmap and histogram run the same unified bin-counter primitives at the same precision. |
@@ -1031,6 +1253,10 @@ Each drop lands on its own branch off `release/0.17.0`, merges back via PR throu
 
 ## Design Decisions Log
 
+### 2026-10-09: Java and ECS logging layouts named by their source — D65–D69
+
+Architect-locked at filing of #695, #696 and #687 (see § Java and ECS logging layouts named by their source): D65 the full-date TTLL shape becomes the generic `java_ttll_datetime` heading the `java_ttll` group, with the Connection Server, Integration Runtime and AI Parts Rationalization plugin as file-name-selected members; D66 the Spring Boot, Log4j2 and Logback default shapes become entries named by source; D67 a time-only log's date comes from its file name or not at all; D68 Spring Boot lines are never claimed by the ThingWorx RAC client entry; D69 ECS JSON only, dotted and nested as two entries in the `elastic_common_schema` group, the AI Assistant plugin a member of the dotted one.
+
 ### 2026-08-24: #413 — lazy scan-sub compilation (elevation by election), D60–D64
 
 Architect-locked after audit + prototype (see the #413 section above): D60 elevation by election supersedes D40's eager precompile (three startup compile sources measured: eager loop, gate-5 warming, pin — 28 compiles / +20 MB / ~0.1 s); D61 gate restructure (gates 1–4 startup-unchanged, gate 5 split into interpreted startup classification + per-compile validation under promotion suppression); D62 `format_scan_subs` -mem category measured by compile-boundary RSS delta (technique fits the structure — Devel::Size is ~55% blind to closures); D63 new `-V format-registry` section + `tests/validate-format-registry.sh` (registry-level observability was a #58 miss); D64 `detect/scan_sub_compile` timing accumulator. #415's drift re-measure is downstream (`blocked_by` this issue) and explicitly NOT in scope here.
@@ -1049,10 +1275,10 @@ Filename provenance evidence and variant groups specified through an architect i
 4. **D47 — Variant groups as full entries**, one member per identical pattern in the scan per file (selected by evidence, default member = today's behaviour); different-pattern members scan normally — the shape #387's user variants extend. Tomcat/httpd and Connection Server/Integration Runtime become the first two groups; `unit_ambiguous` retires in favour of "default-selected without deciding evidence".
 5. **D48 — First decision made before line 1 from sampled evidence (D53); late flips accepted and reported**; #388 is a native prerequisite and receives six constraints.
 6. **D53 — Multi-spot sampling pass is the evidence source; the held-line window is the fallback for non-seekable input** (pipes, compressed streams); probes are fed lines, never file positions. Locked 2026-08-22, amending D48 and the #388 constraints.
-6. **D49 — Run-level format pin** tops the chain: pin → `-du` → evidence → group default → index hints → #17 sampling.
+6. **D49 — Run-level format pin** tops the chain: pin → `-du` → evidence → group default → #17 sampling (the index-hints rung removed 2026-10-12: the index is deprecated, #708).
 7. **D50 — Console summary brackets `[n,m]` + numbered legend**, slug vocabulary; confidence only in `-V`.
 8. **D51 — Committed fixtures staged under producer-true names**; `logs/` is gitignored and is not a test substrate.
-9. **D52 — Content probes**: out-of-range component (decisive), monotonicity (graded), filename-date cross-check (breaks the ≤12-day ceiling for date-rolled files); silence is inconclusive; #385's guard and diagnostic ship here.
+9. **D52 — Content probes**: out-of-range component (decisive: Claude's wording, contrary to item 1, D44; never locked by the architect, § "Finding (2026-10-10)"), monotonicity (graded), filename-date cross-check (breaks the ≤12-day ceiling for date-rolled files); silence is inconclusive; #385's guard and diagnostic ship here.
 
 Process: #384 had been left `on hold` with a prose-only "blocked by #58" after #58 closed — recorded in docs/process/workflow.md § Merge and close, step 9 (release the dependents). Recorded directly on `release/0.17.0` (planning artifact; architect instruction 2026-08-22).
 
@@ -1096,8 +1322,8 @@ Decisions locked 2026-08-20 (full statements and evidence tables in the #58 feat
 5. **D28 — Cheap superset guards are per-entry, opt-in, measured data**: shipped on the three access-family siblings (−1.29 s/M access lines, −31%); blanket guards are a measured net loss; atomic heads subsumed.
 6. **D29 — Registry container: array-of-arrayrefs with constant indices**; build 161–188 µs, 73–82 KB — startup non-factors.
 7. **D30 — Detection window (D17): two-phase-store** — free at scale (≤ +54 ns/line), sized by detection needs not throughput.
-8. **D31 — Time contract compiled to per-layout parse closures** with exact parity; per-second `%timestamp_cache` semantics unchanged this drop (sparse-stream unbounded growth — 100.7 MB/1M GC lines — filed as #383).
-9. **D32 — CSV stays a per-file stage outside the scan array** with a non-scanned `csv` registry entry (the matcher-kind-in-array shape is structurally inexpressible under pinned promotion).
+8. **D31 — Time contract compiled to per-layout parse closures** with exact parity; per-second `%timestamp_cache` semantics unchanged this drop (sparse-stream unbounded growth — 100.7 MB/1M GC lines — filed as #383). **Closure form retired (#615 D4, 2026-10-08):** the parse lives only in the source `format_timestamp_src()` emits into each generated scan block and each CSV block; `compile_format_time_parser()` and the `FR_TIME_PARSE` slot are gone (`features/615-csv-registry-entry.md` § 9, drop 5).
+9. **D32 — CSV stays a per-file stage outside the scan array** with a non-scanned `csv` registry entry (the matcher-kind-in-array shape is structurally inexpressible under pinned promotion). **Data lines (#615, 2026-10-08):** once confirmed, a CSV file's lines are read by a block generated from its header through the scanned formats' timestamp emitter, validated on the file's sampled rows, one block alive at a time (`features/615-csv-registry-entry.md` D1, D9, D11); the stash-and-confirm mechanics are unchanged.
 10. **D33 — Probes: per-probe `index()` guards behind one `=` superset gate**, closure-compiled; fusion into the recognition regex rejected on measurement (+1.09 s/M miss path).
 11. **D34 — No no-match pre-filter in Drop 1** (resolves D20's open pre-filter point): the no-match population is the *cheapest* class, not the most expensive.
 
@@ -1110,8 +1336,8 @@ Implementation scheduled for release 0.17.0 as a merge train of section drops on
 1. **D15 — Memory design target reframed.** The rewrite does not pursue minimal memory footprint. Two distinct obligations replace it: (a) **eliminate waste** — never store what has no remaining consumer (aligned with the shipped demand registry #305 and the #349 demand contract); (b) **spend available memory on fidelity** — raw values are exact, a histogram only ever approximates, so representation degradation is purely a memory-policy decision. Persistent per-key representation policy (raw vs partition, head/body split, promotion thresholds) is owned by the **#2 memory-ceiling umbrella and is NOT a dependency of this rewrite** — the pipeline feeds whatever message-stats data model is in effect. Phase 2's per-bucket holding is transient working state: structurally bounded, freed at bucket close, visible in `-V`/`-mem`. Grounding: the #323 investigation record in `features/189-histogram-bin-counter-primitives.md` (both directions).
 2. **D16 — Phase 4 (#61) out of 0.17.0.** The 0.17.0 scope is Phases 1–3 (#180 → #58 → #57 → #59 → #60). Derived metrics and the expression parser (#55) are a release-sized feature sitting on top of the rewritten engine, deferred to a later release.
 3. **D17 — #181 reframed to architecture guidance.** Perf evidence (2026-07-10 note on #181) shows file I/O is not a bottleneck; no full reader/processor decoupling is built. Phase 1's D13 detect-fallback needs only a minimal detection window: hold the first ~N lines during format detection, per-line re-detect on cache-miss. That same window is the future substrate for #17's unit-detection sampling (~100 lines) when no prior-run knowledge exists — the design tie recorded on #181 and #17 (2026-07-15 comments).
-4. **D18 — Unit scope boundary.** No unit auto-detection and no speculative unit tracking inside the rewrite. The registry's contribution is declarative: format definitions carry known units as metadata. Knowledge precedence: `-du` override → format-carried unit → index read-back (#179) → sample-based auto-detection (#17, follow-on).
-5. **D19 — #187/#189 outcome absorbed.** #34, #41, #51 are closed (superseded/resolved under the unified bin-counter contract); Phase 2 inherits one already-unified binning/memory model instead of reconciling three. #179 shipped with a narrowed role (detect-stage hints; no longer load-bearing for bounds pre-seed).
+4. **D18 — Unit scope boundary.** No unit auto-detection and no speculative unit tracking inside the rewrite. The registry's contribution is declarative: format definitions carry known units as metadata. Knowledge precedence: `-du` override → format-carried unit → sample-based auto-detection (#17, follow-on). (The index read-back rung removed 2026-10-12: the index records no unit and is deprecated, #708.)
+5. **D19 — #187/#189 outcome absorbed.** #34, #41, #51 are closed (superseded/resolved under the unified bin-counter contract); Phase 2 inherits one already-unified binning/memory model instead of reconciling three. #179 shipped; not used by this rewrite, and deprecated with the index (#708).
 
 6. **D21 — Phase 2 out of 0.17.0; Phases 2+4 ship together (added same session, drop-walkthrough dialog).** Phase 2's deferred-per-bucket model exists *for* Phase 4's inter-line derived metrics (2026-02-06 decision 2: "the streaming single-pass model cannot support inter-line derived metrics"). With Phase 4 deferred (D16), shipping Phase 2 alone would build holding machinery a release ahead of its only consumer — while v0.15.x–v0.16.0's streaming bin-mode accumulation has already absorbed part of its secondary justification (inline stats finalization). Re-cut: **0.17.0 = #180 → #58 → #60** (Drops 0/1/2); **#57, #59, #61, #55 form the next release** as one coherent bucketed-computation + derived-metrics line. Native dependencies re-cut accordingly (#60 now blocked by #58, not #59).
 7. **D22 — Account-at-read-time locked; temporal interpolation not planned (added same session).** The universal time-attribution semantic is: a line's contribution lands in the bucket of the line's timestamp — for UDM deltas exactly as for durations (a one-hour request lands in its completion bucket). Inter-line state retains last value + **exact timestamp** per (metric × log key), so `rate()` divides by true elapsed time and magnitudes stay correct; placement is the read bucket. Interpolation (linear spreading across intervening buckets) rejected as a planned capability — it fabricates smoothness, splits the tool's time semantics, and is the sole consumer forcing finalized buckets to be reopenable (collapsing that requirement radically simplifies Phase 2's window: buckets close aggressively and permanently). Spec'd for the record as a **general capability across all metrics** (counters *and* durations — any index of elapsed activity), not UDM-specific, in **#370, open and labeled not planned**. If ever revisited: per-metric opt-in (linear / last-bucket-only / none), never a default change. Section 7b and Risk 3 updated to match.
@@ -1132,7 +1358,7 @@ Dependency graph after this session: #372 ← #61 (added), #372 ← #59 (kept; #
 After ~4 months gap, picked up #23 to refresh requirements and structure work breakdown. Significant work shipped in the interim (#46 index file, #22 UDM with simple delta, #96 fuzzy consolidation S1-S5 pipeline) materially changes the planning picture. Decisions reached:
 
 1. **D5 — Sequencing.** Pre-requisite "staging primitives" land on separate branches against today's architecture *before* #23 implementation begins. Shrinks the rewrite's surface area; when the engine rewrite begins, it migrates between named primitives rather than inventing them. New issues: #179 (index read-back), #180 (named pipeline stages), #181 (buffered read pipeline). Existing issues #41/#34/#51 updated with Phase 2 alignment requirements.
-2. **D6/D7 — Index read-back (#179).** Read silently when entry is fresh (file_size + mtime match). Pre-seed heatmap/histogram bounds and timestamp range. **At end of execution, compare live values to index; on drift, refresh the index entry atomically.** No new CLI flag in v1. Drift detection is a hard requirement — without it, next-run boundaries are silently wrong.
+2. **D6/D7 — Index read-back (#179).** Read silently when entry is fresh (file_size + mtime match). Pre-seed heatmap/histogram bounds and timestamp range. **At end of execution, compare live values to index; on drift, refresh the index entry atomically.** No new CLI flag in v1. Drift detection is a hard requirement — without it, next-run boundaries are silently wrong. *(Superseded 2026-10-12: the index is deprecated and off by default, #708.)*
 3. **D8 — Named pipeline stages (#180).** Coarse 5-stage shape: detect / parse / accumulate / finalize / render. Light-touch refactor that names the implicit pipeline; no intra-stage restructuring. Phase 1 (#58) inserts the format registry into `detect`; Phase 2 (#59) adds per-bucket lifecycle hooks inside `finalize`.
 4. **D9 — Heatmap/histogram pre-work (#41/#34/#51).** Land independently before Phase 2. Each existing issue updated with a "Phase 2 Alignment Requirements" comment specifying: reusable binning subroutine, bounds as parameters, structures live inside the named stages from #180, structures compose across the three issues. When Phase 2 begins, it inherits a coherent memory model — not three competing ones.
 5. **D10 — #22 simple delta migration.** Phase 4 silently replaces the global last-value-only `delta()`/`idelta()` (`ltl:3933-3946`) with per-message-identity delta. Same `-udm` syntax, correct results on interleaved messages. Documented as a behavior fix in release notes.
@@ -1160,7 +1386,7 @@ Discussion established that derived metrics require a fundamental change to the 
 ## Related
 
 ### Prerequisites (status as of 2026-07-15)
-- **Issue #179**: Index read-back — **COMPLETE** (shipped v0.15.x); narrowed role: detect-stage hints + unit knowledge precedence, not bounds pre-seed
+- **Issue #179**: Index read-back — **COMPLETE** (shipped v0.15.x); not used by this rewrite; deprecated with the index (#708), removal #710
 - **Issue #180**: Name the implicit pipeline stages — **COMPLETE** (merged 2026-08-20, PR #380), Drop 0 of the 0.17.0 merge train
 - **Issue #181**: Buffered read pipeline — **REFRAMED (D17)**: architecture guidance only; minimal detection window replaces full decoupling
 - **Issue #41**: Align heatmap with histogram binning — **CLOSED**, superseded by #187/#189
@@ -1168,7 +1394,7 @@ Discussion established that derived metrics require a fundamental change to the 
 - **Issue #51**: Highlight-data memory optimization — **CLOSED**, resolved under #187/#189
 
 ### Already-shipped foundations
-- Issue #46: Index file (`ltl-index.csv`) — provides the data #179 will consume
+- Issue #46: Index file (`ltl-index.csv`) — provides the data #179 reads; deprecated (#708), removal #710
 - Issue #22: User-defined metrics with simple delta — Phase 4 replaces its global delta with per-identity
 - Issue #54: Fuzzy matching engine research — **COMPLETE**, resolved by #96
 - Issue #96: Fuzzy message consolidation — **SHIPPED** (v0.13.0), provides the similarity engine for Phase 4 message identity and the architectural template (S1-S5 pipeline) for Phase 2
@@ -1179,7 +1405,7 @@ Discussion established that derived metrics require a fundamental change to the 
 - Issue #17: Duration unit autodetection — the declarative path (format-carried units) ships with Phase 1; the sampling fallback stays #17's own follow-on (D18)
 - Issue #369: Access-log read-phase regression (v0.16.0) — fixed by Phase 1's staged detection (removes the per-line sequential pattern cascade)
 - Issue #2: Memory ceiling umbrella — owns persistent storage/representation policy; explicitly NOT a dependency of this rewrite (D15)
-- Issue #44: Source file heuristics — depends on #179 (index read-back)
+- Issue #44: Source file heuristics — its file investigation is the per-file pre-read sampling pass (`sample_file_for_detection()`), not the index
 - Issue #48: Performance profiling (provided evidence for processing model changes)
 
 ### Per-drop feature docs (0.17.0 merge train — repo-side source of truth per drop)

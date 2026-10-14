@@ -27,7 +27,7 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **Result:** Phase 4 regressed from 2.9s to 64.25s — a **22× regression**.
 
-**What replaced it:** Interleaved discovery + re-scan, with key partitioning to reduce per-scan scope. Discover one pattern, immediately scan remaining keys, absorb matches, then discover the next pattern from the reduced set.
+**What replaced it:** Interleaved discovery + re-scan within each group (category plus level). Discover one pattern, immediately scan remaining keys, absorb matches, then discover the next pattern from the reduced set.
 
 **Lesson:** For power-law distributions, the cascading reduction from immediate absorption IS the core performance mechanism. Any optimization that defers absorption to batch it up will destroy this mechanism. The "fewer passes" savings from batching was negligible compared to the expanded discovery cost.
 
@@ -37,9 +37,9 @@ What didn't work, wrong assumptions, dead ends, and things to avoid. Extracted f
 
 **Why it failed:** At production scale (7.9 GB, 45K+ unique URLs per access log file), 50 patterns couldn't cover the URL diversity. Hundreds of unproductive checkpoints fired, each re-scanning 5000 keys against patterns that couldn't match. Server-0 alone took 3+ hours (vs 77s baseline).
 
-**What replaced it:** Removed the hard cap. Patterns grow naturally until stall detection (2 consecutive unproductive checkpoints) stops discovery. More patterns = more S1 absorption = less memory.
+**What replaced it:** Removed the hard cap. Patterns grow naturally; first stall detection (2 consecutive unproductive checkpoints) stopped discovery, and adaptive per-key eviction (#135) has since replaced it. More patterns = more S1 absorption = less memory.
 
-**Lesson:** Hard caps are brittle. They work for the data you tested with and fail on data you didn't. Stall detection adapts to the data's actual diversity.
+**Lesson:** Hard caps are brittle. They work for the data you tested with and fail on data you didn't. A bound that adapts to the data's actual diversity does not.
 
 ## Wrong Assumptions
 

@@ -203,7 +203,7 @@ if ($mode eq 'compare') {
     my @map = (
         [occurrences => 'occurrences'], [successes => 'successes'], [failures => 'failures'],
         [sessions => 'sessions'],
-        (map { my $s = $_; ["duration.$s" => "duration_$s"] } qw(min mean max std_dev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef)),
+        (map { my $s = $_; ["duration.$s" => "duration_$s"] } qw(min mean max stddev p1 p5 p10 p25 p50 p75 iqr p90 p95 p99 p999 p9999 p99999 cv skewness kurtosis bimodality_coef)),
         ['duration.sum' => 'duration'],
         (map { ["bytes.$_" => "bytes_$_"] } qw(occurrences min mean max)), ['bytes.sum' => 'bytes'],
         (map { ["count.$_" => "count_$_"] } qw(occurrences min mean max sum)),

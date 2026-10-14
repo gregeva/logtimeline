@@ -81,7 +81,7 @@ message retained there is nothing ranked at all, so a fallback notice would repo
 substitution that never happened — the inert-option notice above is the accurate
 statement, and it is the only one printed. `-V statistics-demand` still records the
 operand and its family truthfully (`sort_gate: operand=<key> family=<family>
-observed=n/a fallback=none`), so the diagnostic surface still shows what the user
+observed=- fallback=none`), so the diagnostic surface still shows what the user
 asked for.
 
 ### D4 — No MESSAGES CSV file is created, and the user is told
@@ -142,7 +142,7 @@ needed a guard, and none produces a warning, a division by zero or an empty head
 | `finalize_message_stats_unified()` | returns on an empty counter store |
 | `print_message_summary()` | not called (D4/D5 render gating) |
 | MESSAGES CSV | not opened (D4) |
-| `-V statistics-demand` | `store: message` reports `store_demand: 0`, `population: 0`, every group `demanded=0`, `stats_calls: 0` |
+| `-V statistics-demand` | `store: message` reports `store_demand: no`, `population: 0`, every group `demanded=no`, `stats_calls: 0` |
 | `-V benchmark-data` | `COUNTS log_messages_entries 0`, `COUNTS log_messages_population 0` |
 | `measure_memory_structures()` / `-mem` | sizes an empty hash |
 | index file write side (#46) | does not read the message store |
@@ -208,8 +208,8 @@ belongs to the release-cut benchmark run (release steps 13–14), not to this br
 `tests/validate-statistics-demand.sh`:
 
 - **scenario-9-no-message-retention** (`-n 0`): message store reports
-  `store_demand: 0`, `population: 0`, every group `demanded=0`, `stats_calls: 0`;
-  the bucket store is untouched (`store_demand: 1`); `benchmark-data` reports both
+  `store_demand: no`, `population: 0`, every group `demanded=no`, `stats_calls: 0`;
+  the bucket store is untouched (`store_demand: yes`); `benchmark-data` reports both
   message-store counts as 0; neither messages-table header is rendered; the timeline
   header row and the latency percentiles are present. Stderr is checked for Perl
   runtime warnings by the shared capture check.
@@ -217,7 +217,7 @@ belongs to the release-cut benchmark run (release steps 13–14), not to this br
   the inert-option notice names all three options; `sort_gate` records the operand
   with `fallback=none`.
 - **scenario-11-negative-top-messages-retains-nothing** (`-n -5`): a negative count
-  takes the same path as zero (D2) — the message store reports `store_demand: 0` and
+  takes the same path as zero (D2) — the message store reports `store_demand: no` and
   `population: 0`. Proved to fail with `-n 5` substituted: both assertions failed with
   their `asserts`/`produced_by`/`contract` triple surfaced.
 - **scenario-12-no-message-retention-csv-request** (`-bs 1440 -oe -n 0 -o`): the

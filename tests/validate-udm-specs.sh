@@ -21,7 +21,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence): the
 # subject is per-spec interpretation and run-wide production, which is the
 # same at any bucket size, so one bucket (-bs 1440) with -oe on a 4-line
@@ -43,6 +43,9 @@ COLLISION_FIXTURE="$REPO_DIR/tests/fixtures/udm-collision.txt"
 MS_IR_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-integration-runtime.txt"
 MS_CS_FIXTURE="$REPO_DIR/tests/fixtures/format-detection/milliseconds-connection-server.txt"
 MS_SPEC='elapsed:ms::/ (\d+) milliseconds/'
+# Byte units on the unit slot: three lines in one bucket whose query strings
+# carry v=1, 2 and 3, so max is 3 x the unit's byte count and sum 6 x it.
+BYTE_FIXTURE="$REPO_DIR/tests/fixtures/udm-byte-units.txt"
 # A Windchill MethodServer log4j log carrying a multi-line entry between two
 # timestamped lines: the timestamped lines carry dataQueue size10 and size30,
 # the entry's continuation lines (no timestamp) carry " dataQueue size : 22440"
@@ -65,6 +68,13 @@ NN_SPEC='v::sum:/v=(\S*)/'
 # docs/usage.md teach.
 FORMS_FIXTURE="$REPO_DIR/tests/fixtures/udm-number-forms.txt"
 FORMS_SPEC='q::sum:/queue size[\s:=]*(\S+)/'
+# A log4j application log, four lines one minute apart, each carrying a
+# cumulative counter "COMPLETED: <value>" that resets between its second and
+# third readings: 5, 8, 2, 10. The first reading seeds the state, so the
+# differences are 3, -6, 8. Under delta all three are recorded (sum 5, min -6,
+# max 8); under idelta the -6 is dropped and not counted (sum 11 over 2).
+RESET_FIXTURE="$REPO_DIR/tests/fixtures/udm-counter-reset.txt"
+CONTRACT_698='features/user-defined-metrics.md section delta and idelta described the wrong way round (Issue #698), D1 (delta keeps a negative difference, idelta drops it) and acceptance criterion 3; section Functions, Transforms'
 CONTRACT_638='features/638-udm-non-numeric-capture.md section Decisions D1 (a capture that is not entirely a number is skipped for a numeric aggregation), D6 (the written forms of a number that are accepted), D3 (a partly skipped /regex/ metric is reported with its share), D4 (the skipped figure exists only once something is skipped), D5 (-V udm-specs reports what the run did) and section Acceptance criteria'
 
 # shellcheck source=lib/runtime-warnings.sh
@@ -79,7 +89,7 @@ if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
     exit 1
 fi
-for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$CONT_FIXTURE" "$NN_FIXTURE" "$FORMS_FIXTURE"; do
+for f in "$FIXTURE" "$COLLISION_FIXTURE" "$MS_IR_FIXTURE" "$MS_CS_FIXTURE" "$BYTE_FIXTURE" "$CONT_FIXTURE" "$NN_FIXTURE" "$FORMS_FIXTURE" "$RESET_FIXTURE"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"
         exit 1
@@ -103,6 +113,12 @@ CONTRACT='features/user-defined-metrics.md section Diagnostics and -V udm-specs 
 # refused, and a repeated identical argument is dropped with a notice.
 CONTRACT_482='features/user-defined-metrics.md section Colliding metric names become separate metrics (Issue #482) - decisions D1-D13; section content stability-contracted per tests/HARNESS-DESIGN.md'
 
+# Issue #608 (one byte-unit ladder): a byte spelling on the unit slot resolves
+# case-insensitively to one canonical ladder token, SI tokens powers of 1000
+# and IEC tokens powers of 1024, and the metric carries that token everywhere.
+CONTRACT_608='features/608-byte-unit-ladder.md D1 (case-insensitive lookup), D2 (SI and IEC meanings), D3 (no assumed base), D5 (one byte ladder), D14 (the canonical token everywhere)'
+CONTRACT_525_D6='features/525-timestamp-precision-option.md D6 (the long sub-second spellings join the time-unit ladder for every time-unit option, the -udm unit slot included) and features/524-bucket-size-unit.md D2 (the ladder and its spellings)'
+
 # Run ltl with the given args against the fixture; stdout to the echoed file,
 # stderr beside it as <capture>.stderr.
 run_ltl() {
@@ -122,6 +138,14 @@ run_collision() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
     LAST_EXIT=$?
     set -e
+    echo "$outfile"
+}
+
+# Same shape against the byte-unit fixture.
+run_bytes() {
+    local outfile
+    outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
+    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs "$@" "$BYTE_FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
     echo "$outfile"
 }
 
@@ -352,7 +376,7 @@ scenario_absent_field() {
         produced_by 'parse_udm_configs() (extraction) + udm_read_as() in ltl' \
         contract    "$CONTRACT"
     assert_line "$out" \
-        pattern     '  pattern[1]: ' \
+        pattern     '  pattern_1: ' \
         asserts     'A numeric default-pattern metric lists both compiled patterns' \
         produced_by 'emit_udm_specs_verbose() in ltl' \
         contract    "$CONTRACT"
@@ -472,6 +496,37 @@ scenario_delta_single_match() {
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
     rm -f "$out" "$out.stderr"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: delta-counter-reset — a counter that resets (5, 8, 2, 10): delta
+# records every difference, the negative one included; idelta drops the
+# negative difference, which is then neither summed nor counted.
+# ---------------------------------------------------------------------------
+scenario_delta_counter_reset() {
+    current_scenario="delta-counter-reset"
+    echo "[$current_scenario]"
+    local fn out
+    for fn in delta idelta; do
+        out="$TMP_DIR/reset-$fn.out"
+        run_nn "$out" -udm "completed::$fn:/COMPLETED: (\S+)/" "$RESET_FIXTURE"
+        check_capture_warnings "$out"
+        assert_section_present "$out"
+    done
+
+    assert_command \
+        command     "produced_is '$TMP_DIR/reset-delta.out' completed '  produced: occurrences=3 buckets=1 sum=5 min=-6 max=8'" \
+        label       'delta over 5 8 2 10 records 3 -6 8' \
+        asserts     'delta keeps a negative difference: the reset is recorded and counted' \
+        produced_by 'read_and_process_logs() (delta/idelta transform) + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_698"
+    assert_command \
+        command     "produced_is '$TMP_DIR/reset-idelta.out' completed '  produced: occurrences=2 buckets=1 sum=11 min=3 max=8'" \
+        label       'idelta over 5 8 2 10 records 3 8' \
+        asserts     'idelta drops a negative difference: the reset is neither summed nor counted' \
+        produced_by 'read_and_process_logs() (delta/idelta transform) + derive_udm_production() in ltl' \
+        contract    "$CONTRACT_698"
+    rm -f "$TMP_DIR"/reset-*.out "$TMP_DIR"/reset-*.out.stderr
 }
 
 # ---------------------------------------------------------------------------
@@ -806,6 +861,33 @@ scenario_no_collision_names_as_typed() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario: function-aliases — issue #613 criterion 18 (D8: one statistic-name
+# table read by the -udm function slot). Each alias the slot accepts resolves
+# to the function the table names it for: avg to mean, dcount and unique to
+# distinct.
+# ---------------------------------------------------------------------------
+CONTRACT_613_D8='features/613-one-name-vocabulary.md D8 (one table of statistic names and aliases, read by the -udm function slot, -so and --explain); criterion 18'
+
+scenario_function_aliases() {
+    current_scenario="function-aliases"
+    echo "[$current_scenario]"
+    local alias function out
+    for alias in avg:mean dcount:distinct unique:distinct; do
+        function="${alias#*:}"
+        alias="${alias%%:*}"
+        out=$(run_ltl -udm "b::$alias")
+        check_capture_warnings "$out"
+        assert_section_present "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=none(raw)  aggregation=$function  transform=none  extraction=name  key='b'  source=line" \
+            asserts     "The -udm function alias $alias resolves to the $function aggregation" \
+            produced_by 'parse_udm_configs() in ltl (%udm_function_aliases over @statistic_names)' \
+            contract    "$CONTRACT_613_D8"
+        rm -f "$out" "$out.stderr"
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Scenario: delta-shorthand-canonical — 'delta' and 'sum(delta)' are the same
 # spec, so a resolved name must not depend on which the user wrote.
 # ---------------------------------------------------------------------------
@@ -939,27 +1021,31 @@ scenario_collision_operands() {
         command     "grep -q 'rows:sum Distribution' '$hg' && grep -q 'rows:delta Distribution' '$hg'" \
         label       'two distribution panels render, titled by their resolved names' \
         asserts     'A base name shared by two specs resolves to both panels rather than one merged panel' \
-        produced_by 'resolve_metric_operand() + print_histograms() in ltl' \
+        produced_by 'the -hg binding in adapt_to_command_line_options() (a base name binds every config carrying it) + print_histograms() in ltl' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$hg' | grep -o 'P50: 30   P99: 100' | grep -c .)\" -ge 1 ] && [ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$control' | grep -o 'P50: 30' | grep -c .)\" -ge 1 ]" \
+        command     "[ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$hg' | grep -oE 'P50: 30 +(P[0-9.]+: [0-9.]+ +)*P99: 100 ' | grep -c .)\" -ge 1 ] && [ \"\$(sed 's/\\x1b\\[[0-9;]*m//g' '$control' | grep -o 'P50: 30' | grep -c .)\" -ge 1 ]" \
         label       'the raw panel percentiles match the single-spec control' \
-        asserts     'The separated metric distributes its own values, not a mixture of both specs' \
+        asserts     'The separated metric distributes its own values, not a mixture of both specs: the rows:sum panel reads P50 30 and P99 100, as the single-spec control does, whatever percentiles the panel width shows between them' \
         produced_by 'print_histograms() in ltl' \
         contract    "$CONTRACT_482"
 
     unknown="$TMP_DIR/unknown.out"
     "$LTL" --disable-progress -ni -bs 1440 -oe -hm nosuchmetric \
         -udm rows -udm 'rows::delta' "$COLLISION_FIXTURE" > "$unknown" 2>"$unknown.stderr" || true
+    # -hm's value names no metric, so it is given back as a file argument and,
+    # selecting no file, named with the metrics this run knows.
+    local metric_list="$TMP_DIR/metric-list.txt"
+    sed -n "s/.*it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\))$/\1/p" "$unknown.stderr" | tr ',' '\n' | sed 's/ //g' > "$metric_list"
     assert_command \
-        command     "cat '$unknown' '$unknown.stderr' | grep 'Available:' | grep -q 'rows:sum, rows:delta'" \
-        label       'the unknown-metric error lists both resolved names' \
+        command     "[ -s '$metric_list' ] && tr '\\n' ',' < '$metric_list' | grep -q 'rows:sum,rows:delta'" \
+        label       'the metric list the -hm error prints names both resolved names' \
         asserts     'available_metric_names() reports the separated metrics under their resolved names' \
-        produced_by 'available_metric_names() in ltl' \
+        produced_by 'available_metric_names() in ltl, via metric_operand_expects() and file_argument_problem()' \
         contract    "$CONTRACT_482"
     assert_command \
-        command     "[ \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | grep -c .)\" = \"\$(cat '$unknown' '$unknown.stderr' | grep 'Available:' | sed 's/.*Available: //' | tr ',' '\\n' | sed 's/ //g' | sort -u | grep -c .)\" ]" \
-        label       'the Available list contains no repeated name' \
+        command     "[ -s '$metric_list' ] && [ \"\$(grep -c . '$metric_list')\" = \"\$(sort -u '$metric_list' | grep -c .)\" ]" \
+        label       'the metric list contains no repeated name' \
         asserts     'Resolved names are unique, so the operand list no longer shows one name twice' \
         produced_by 'available_metric_names() in ltl' \
         contract    "$CONTRACT_482"
@@ -1060,6 +1146,200 @@ scenario_milliseconds_replacement() {
 }
 
 # ---------------------------------------------------------------------------
+# Scenario: byte-unit-one-meaning — one byte spelling gives the same unit,
+# value and CSV column on every run (criterion 1 of the byte-unit ladder).
+# Twenty fresh processes: with the spelling folded by hash order, as it was,
+# the chance of twenty identical runs is about one in two thousand.
+# ---------------------------------------------------------------------------
+scenario_byte_unit_one_meaning() {
+    current_scenario="byte-unit-one-meaning"
+    echo "[$current_scenario]"
+    local work="$TMP_DIR/one-meaning" i out stats
+    mkdir -p "$work"
+    : > "$TMP_DIR/one-meaning.results"
+    for i in $(seq 1 20); do
+        mkdir -p "$work/$i"
+        out="$work/$i/run.out"
+        ( cd "$work/$i" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -o -V udm-specs \
+            -udm 'v:KB:max' "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        stats=$(ls "$work/$i"/*STATS*.csv 2>/dev/null | head -1)
+        printf '%s|%s|%s\n' \
+            "$(grep -o 'unit=[^ ]*' "$out" | head -1)" \
+            "$(grep -o 'max=[^ ]*' "$out" | head -1)" \
+            "$( [ -n "$stats" ] && head -1 "$stats" | tr ',' '\n' | grep '^v_.*_max$' )" >> "$TMP_DIR/one-meaning.results"
+    done
+    assert_command \
+        command     "[ \"\$(grep -c . '$TMP_DIR/one-meaning.results')\" = 20 ] && [ \"\$(sort -u '$TMP_DIR/one-meaning.results' | grep -c .)\" = 1 ]" \
+        label       'twenty runs of -udm v:KB:max report one unit, one value and one column name' \
+        asserts     'The same -udm command gives the same unit, value and CSV column on every run' \
+        produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+        contract    "$CONTRACT_608"
+    assert_command \
+        command     "[ \"\$(sort -u '$TMP_DIR/one-meaning.results')\" = 'unit=kB(bytes)|max=3000|v_kB_max' ]" \
+        label       'that one reading is kB, 3000 bytes, column v_kB_max' \
+        asserts     'KB is a spelling of the SI kilobyte: 1000 bytes, reported and named by its canonical token kB' \
+        produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -rf "$work"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: byte-unit-meanings — every ladder token, in any case, reads as its
+# SI or IEC byte count (criterion 2). Values 1, 2, 3: max is 3 x the count.
+# ---------------------------------------------------------------------------
+scenario_byte_unit_meanings() {
+    current_scenario="byte-unit-meanings"
+    echo "[$current_scenario]"
+    local row spelling token expected out
+    local rows=(
+        "B|B|3" "b|B|3"
+        "kB|kB|3000" "KB|kB|3000" "kb|kB|3000" "Kb|kB|3000"
+        "KiB|KiB|3072" "kib|KiB|3072" "KIB|KiB|3072"
+        "MB|MB|3000000" "mb|MB|3000000" "MiB|MiB|3145728" "mib|MiB|3145728"
+        "GB|GB|3000000000" "gb|GB|3000000000" "GiB|GiB|3221225472" "GIB|GiB|3221225472"
+        "TB|TB|3000000000000" "tb|TB|3000000000000" "TiB|TiB|3298534883328" "tib|TiB|3298534883328"
+    )
+    for row in "${rows[@]}"; do
+        IFS='|' read -r spelling token expected <<< "$row"
+        out=$(run_bytes -udm "v:$spelling:max")
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$token(bytes)" \
+            asserts     "The spelling $spelling resolves to the ladder token $token" \
+            produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_line "$out" \
+            pattern     "  produced: occurrences=3 buckets=1 sum=$((expected * 2)) min=$((expected / 3)) max=$expected" \
+            asserts     "The spelling $spelling multiplies each value by the byte count of $token" \
+            produced_by 'parse_udm_configs() (the byte converter closure) + derive_udm_production() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -f "$out" "$out.stderr"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: byte-unit-canonical-token — the metric carries the canonical token
+# in the section, the CSV column and the rendered heading, and a
+# non-canonical spelling prints no notice (criterion 3).
+# ---------------------------------------------------------------------------
+scenario_byte_unit_canonical_token() {
+    current_scenario="byte-unit-canonical-token"
+    echo "[$current_scenario]"
+    local spelling work out stats
+    for spelling in KB kb kB; do
+        work="$TMP_DIR/canonical-$spelling"
+        mkdir -p "$work"
+        out="$work/run.out"
+        ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -o -V udm-specs \
+            -udm "v:$spelling:max" "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     '  read_as: unit=kB(bytes)' \
+            asserts     "-udm v:$spelling reports the canonical token kB" \
+            produced_by 'parse_udm_configs() + byte_unit_canonical() in ltl' \
+            contract    "$CONTRACT_608"
+        stats=$(ls "$work"/*STATS*.csv 2>/dev/null | head -1)
+        assert_command \
+            command     "[ -n '$stats' ] && head -1 '$stats' | tr ',' '\\n' | grep -qx 'v_kB_max'" \
+            label       "-udm v:$spelling names the STATS column v_kB_max" \
+            asserts     'The CSV column carries the canonical token for any spelling of it' \
+            produced_by 'parse_udm_configs() + udm_csv_columns() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_command \
+            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            label       "-udm v:$spelling prints no notice or warning" \
+            asserts     'A non-canonical spelling of a byte unit is accepted silently' \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -rf "$work"
+    done
+
+    # Two metrics of one name told apart by unit: the heading carries each
+    # canonical token (a pinned width keeps the heading on one line).
+    work="$TMP_DIR/canonical-heading"
+    mkdir -p "$work"
+    out="$work/run.out"
+    ( cd "$work" && "$LTL" --disable-progress -ni -bs 1440 -oe -du ms --terminal-width 200 \
+        -udm 'v:KB:max' -udm 'v:MiB:max' "$BYTE_FIXTURE" ) > "$out" 2>"$out.stderr" || true
+    check_capture_warnings "$out"
+    assert_command \
+        command     "sed -E 's/\\x1b\\[[0-9;]*m//g' '$out' | grep -E ' v:kB +v:MiB '" \
+        label       'the rendered headings read v:kB and v:MiB' \
+        asserts     'The heading of a unit-disambiguated metric carries the canonical token, not the spelling typed' \
+        produced_by 'resolve_udm_metric_names() + add_dynamic_column() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -rf "$work"
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: time-unit-long-spellings — millisecond(s), microsecond(s) and
+# nanosecond(s) in the unit slot, in any case, read as their step's token.
+# ---------------------------------------------------------------------------
+scenario_time_unit_long_spellings() {
+    current_scenario="time-unit-long-spellings"
+    echo "[$current_scenario]"
+    local pair spelling want out
+    for pair in millisecond:ms Milliseconds:ms microsecond:us MICROSECONDS:us nanosecond:ns Nanoseconds:ns; do
+        spelling=${pair%%:*}; want=${pair##*:}
+        out="$TMP_DIR/long-spelling-$spelling.out"
+        "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -V udm-specs \
+            -udm "v:$spelling:max" "$BYTE_FIXTURE" > "$out" 2>"$out.stderr" || true
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$want(time)" \
+            asserts     "-udm v:$spelling reads the metric in the canonical time unit $want" \
+            produced_by 'parse_udm_configs() + time_unit_canonical() in ltl' \
+            contract    "$CONTRACT_525_D6"
+        assert_command \
+            command     "! grep -qE '^(Note|Warning)' '$out.stderr'" \
+            label       "-udm v:$spelling prints no notice or warning" \
+            asserts     'A long spelling of a time unit is accepted silently' \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_525_D6"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Scenario: number-multiplier-and-unknown-unit — k and K stay number
+# multipliers (x1000), not bytes; an unknown spelling warns, naming both
+# ladders' vocabularies, and reads the metric as a raw number (criterion 4).
+# ---------------------------------------------------------------------------
+scenario_number_multiplier_and_unknown_unit() {
+    current_scenario="number-multiplier-and-unknown-unit"
+    echo "[$current_scenario]"
+    local spelling out
+    for spelling in k K; do
+        out=$(run_bytes -udm "v:$spelling:max")
+        check_capture_warnings "$out"
+        assert_line "$out" \
+            pattern     "  read_as: unit=$spelling(number)" \
+            asserts     "$spelling on the unit slot is a number multiplier, not a byte unit: a metric assumes no base" \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        assert_line "$out" \
+            pattern     '  produced: occurrences=3 buckets=1 sum=6000 min=1000 max=3000' \
+            asserts     "$spelling multiplies by 1000" \
+            produced_by 'parse_udm_configs() in ltl' \
+            contract    "$CONTRACT_608"
+        rm -f "$out" "$out.stderr"
+    done
+
+    out=$(run_bytes -udm 'v:KBytes:max')
+    check_capture_warnings "$out"
+    assert_line "$out.stderr" \
+        pattern     "Warning: Unknown unit 'KBytes' in -udm 'v:KBytes:max', treating as raw number (time units: ns, us, ms, s, m, h, d, w, month, year; byte units: B, kB, MB, GB, TB, KiB, MiB, GiB, TiB)" \
+        asserts     'An unknown unit warns and names the time and byte vocabularies the slot accepts' \
+        produced_by 'parse_udm_configs() in ltl (the lists are the ladders own)' \
+        contract    "$CONTRACT_608"
+    assert_line "$out" \
+        pattern     '  produced: occurrences=3 buckets=1 sum=6 min=1 max=3' \
+        asserts     'A metric with an unknown unit is read as a raw number' \
+        produced_by 'parse_udm_configs() in ltl' \
+        contract    "$CONTRACT_608"
+    rm -f "$out" "$out.stderr"
+}
+
 # Scenario: continuation-lines — a metric's pattern matches continuation lines
 # of a multi-line entry, one with a non-numeric capture and one with a numeric
 # one. Neither is tried: no runtime warning, the delta state is untouched, and
@@ -1383,6 +1663,7 @@ scenario_register milliseconds-replacement \
                   absent-field \
                   parse-time-rejections \
                   delta-single-match \
+                  delta-counter-reset \
                   no-udm \
                   collision-transform \
                   collision-unit \
@@ -1393,9 +1674,15 @@ scenario_register milliseconds-replacement \
                   collision-safe-boundary \
                   no-collision-names-as-typed \
                   delta-shorthand-canonical \
+                  function-aliases \
                   collision-csv-and-export \
                   collision-operands \
                   collision-columnar \
+                  byte-unit-one-meaning \
+                  byte-unit-meanings \
+                  byte-unit-canonical-token \
+                  time-unit-long-spellings \
+                  number-multiplier-and-unknown-unit \
                   continuation-lines \
                   non-numeric-capture \
                   non-numeric-not-masked \
@@ -1415,6 +1702,7 @@ while read -r _scenario; do
         absent-field               ) scenario_absent_field ;;
         parse-time-rejections      ) scenario_parse_time_rejections ;;
         delta-single-match         ) scenario_delta_single_match ;;
+        delta-counter-reset        ) scenario_delta_counter_reset ;;
         no-udm                     ) scenario_no_udm ;;
         collision-transform        ) scenario_collision_transform ;;
         collision-unit             ) scenario_collision_unit ;;
@@ -1425,9 +1713,15 @@ while read -r _scenario; do
         collision-safe-boundary    ) scenario_collision_safe_boundary ;;
         no-collision-names-as-typed) scenario_no_collision_names_as_typed ;;
         delta-shorthand-canonical  ) scenario_delta_shorthand_canonical ;;
+        function-aliases           ) scenario_function_aliases ;;
         collision-csv-and-export   ) scenario_collision_csv_and_export ;;
         collision-operands         ) scenario_collision_operands ;;
         collision-columnar         ) scenario_collision_columnar ;;
+        byte-unit-one-meaning      ) scenario_byte_unit_one_meaning ;;
+        byte-unit-meanings         ) scenario_byte_unit_meanings ;;
+        byte-unit-canonical-token  ) scenario_byte_unit_canonical_token ;;
+        time-unit-long-spellings   ) scenario_time_unit_long_spellings ;;
+        number-multiplier-and-unknown-unit) scenario_number_multiplier_and_unknown_unit ;;
         continuation-lines         ) scenario_continuation_lines ;;
         non-numeric-capture        ) scenario_non_numeric_capture ;;
         non-numeric-not-masked     ) scenario_non_numeric_not_masked ;;

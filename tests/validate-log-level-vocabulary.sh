@@ -48,7 +48,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 
@@ -339,7 +339,7 @@ check_error_rate_counts_fatal() {
     cp "$fixture" "$with_fatal"
     sed 's/ FATAL / INFO  /' "$fixture" > "$without_fatal"
 
-    # The error rate is read from the stats CSV, whose err-rate column is the
+    # The error rate is read from the stats CSV, whose err_rate column is the
     # computed value rather than a rendered approximation.
     local dir_a="$TMP_DIR/rate-a" dir_b="$TMP_DIR/rate-b"
     rm -rf "$dir_a" "$dir_b"; mkdir -p "$dir_a" "$dir_b"
@@ -357,13 +357,13 @@ check_error_rate_counts_fatal() {
             return undef unless defined $hdr && defined $row;
             chomp($hdr, $row);
             my @h = split /,/, $hdr; my @r = split /,/, $row;
-            for my $i (0 .. $#h) { return $r[$i] if $h[$i] =~ /^err-rate/ }
+            for my $i (0 .. $#h) { return $r[$i] if $h[$i] =~ /^err_rate_/ }
             return undef;
         }
         my $with    = rate($da);
         my $without = rate($db);
         unless (defined $with && defined $without) {
-            print "anchor not found: err-rate column absent from one of the stats CSVs\n";
+            print "anchor not found: err_rate column absent from one of the stats CSVs\n";
             exit 1;
         }
         unless ($with > $without) {
@@ -371,7 +371,7 @@ check_error_rate_counts_fatal() {
                 $with, $without;
             exit 1;
         }
-        printf "err-rate %s with FATAL vs %s without\n", $with, $without;
+        printf "err_rate %s with FATAL vs %s without\n", $with, $without;
         exit 0;
     ' "$dir_a" "$dir_b"
 }
@@ -659,6 +659,7 @@ scenario_register method-server-levels \
                   extended-severity-vocabulary \
                   unregistered-level-report \
                   edge-c-sdk-unregistered-levels \
+                  unregistered-level-numbers \
                   connector-level-words \
                   declared-levels-in-help
 scenario_parse_args "$@"
@@ -870,6 +871,32 @@ assert_command \
 # Scenario: the Edge C SDK tokens, the real-data case the report exists for.
 # ---------------------------------------------------------------------------
 
+fi
+
+# The report's numbers above 1,000 lines: the number of levels names the
+# notice exact row (it must agree with the list it precedes), each level's
+# line count the prose notice row (the full word, a digit given up within
+# 25%). Generated from the Edge C SDK fixture's shape: 1,500 AUTH lines and
+# 300 TRAFFIC_CONTROL lines between a START and an INFO line.
+# `-bs 1440 -oe -n 1`: the assertion reads the report on stderr.
+if scenario_wanted unregistered-level-numbers; then
+current_scenario="unregistered-level-numbers"
+echo "[$current_scenario]"
+GEN_LEVELS="$TMP_DIR/edge-1800.txt"
+perl -e 'print "START 2025-08-09 18:19:01,100 8012 agent_main.cpp:14 Startup agent starting up\n"; for my $i (0..1499) { printf "AUTH 2025-08-09 18:%02d:%02d,200 8012 agent_auth.cpp:27 Authenticate credential exchange completed\n", 20 + int($i/60) % 30, $i % 60 } for my $i (0..299) { printf "TRAFFIC_CONTROL 2025-08-09 18:%02d:%02d,300 8012 agent_traffic.cpp:41 Throttle outbound rate adjusted\n", 20 + int($i/60), $i % 60 } print "INFO 2025-08-09 18:59:04,400 8012 agent_main.cpp:55 Ready agent ready for work\n"' > "$GEN_LEVELS"
+STDERR_LEVELS="$TMP_DIR/edge-1800.stderr"
+set +e
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$GEN_LEVELS" ) > /dev/null 2> "$STDERR_LEVELS"
+set -e
+if ! assert_no_runtime_warnings "$STDERR_LEVELS" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+fi
+assert_command \
+    command     "grep -qF 'lines carried 2 levels ltl does not recognise: AUTH (1500 lines), TRAFFIC_CONTROL (300 lines) - 1800 lines were not counted' '$STDERR_LEVELS'" \
+    label       'the report counts its levels exactly, and the lines of each level and their total in prose, which agree' \
+    asserts     'The number of levels agrees with the list it precedes (notice exact); the line count of each level renders through the one dispatch at the prose notice row (1,500 reads 1500 and the total 1800, unclimbed: exact and narrower than any scaled spelling, so the parts and the total agree)' \
+    produced_by 'read_and_process_logs() in ltl, the unregistered-level report, through value_text() and the notice exact and notice rows' \
+    contract    'features/617-width-to-format-rule.md D14, D23, D25'
 fi
 
 if scenario_wanted edge-c-sdk-unregistered-levels; then

@@ -142,7 +142,7 @@ def _cap_log_key(s):
 
 # ---------------------------------------------------------------------
 # Tomcat access log parser — mirrors prototype/189-bin-counter-primitives.pl
-# which itself mirrors prototype/96-fuzzy-consolidation.pl, which mirrors
+# which itself mirrors prototype/96-fuzzy-consolidation.pl as of d0bc49a, which mirrors
 # ltl's match_type 3 (production regex at ltl:6999).
 # ---------------------------------------------------------------------
 

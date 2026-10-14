@@ -24,6 +24,31 @@
 #    differ only in a hex UUID sharing its first 18 characters: Dice 73 on the
 #    keys as written, 100 with the UUIDs replaced by one placeholder.
 #
+# 3. The message-key cut a run uses. Message grouping cuts every key at the
+#    message-key cap whatever the terminal width; a run that neither groups nor
+#    writes CSV cuts at the terminal width; -n 0 switches grouping off, so the
+#    cut falls back to the width. -V benchmark-data reports the cut the run
+#    used. The fixture holds one request line longer than the cap and one short.
+#
+# 4. The grouping key separates messages. A message is compared and grouped
+#    only with messages of its own category and level, in the streaming
+#    checkpoints and the final pass. One fixture holds an ERROR and a WARN line
+#    with the same body, beside two INFO lines that do group; the other holds a
+#    lone ERROR key that sorts first by body ahead of five similar WARN keys,
+#    each line three times so every key reaches the final pass.
+#
+# 5. Consolidation's core mandate: merging similar messages while every
+#    occurrence and its data is accounted for exactly once. Each scenario runs
+#    the same input grouped and ungrouped and checks, through the accounting
+#    and cluster-membership sub-sections (tests/message-grouping/
+#    check-accounting.pl): the data is conserved across the two runs and
+#    through every consolidation pass, every key is in exactly one row, and a
+#    row holds each duration once. The inputs: a synthetic access log built to
+#    exercise every way consolidation moves data (streaming checkpoints, the
+#    inline match, the final pass), under the raw and the bin data models; an
+#    application log with levels; and one day of a Tomcat access log from the
+#    corpus, whose volume reaches cross-cluster merges.
+#
 # Each assertion records, per HARNESS-DESIGN.md § Self-documenting assertions:
 #   - asserts:     the invariant being tested
 #   - produced_by: where in ltl it is produced (function name)
@@ -36,7 +61,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -44,6 +69,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/logs-dir.sh
+source "$SCRIPT_DIR/lib/logs-dir.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -53,11 +80,16 @@ neutralize_colour_env
 FIXTURE="$REPO_DIR/tests/fixtures/grouping-final-pass-threshold.txt"
 FIXTURE_DOWNLOADS="$REPO_DIR/tests/fixtures/grouping-signed-downloads.txt"
 FIXTURE_UUID="$REPO_DIR/tests/fixtures/grouping-uuid-pair.txt"
+FIXTURE_KEY_CUT="$REPO_DIR/tests/fixtures/message-key-long-request.txt"
+FIXTURE_LEVEL_PAIR="$REPO_DIR/tests/fixtures/grouping-level-pair.txt"
+FIXTURE_TWO_LEVEL_WINDOW="$REPO_DIR/tests/fixtures/grouping-two-level-window.txt"
+FIXTURE_ACCOUNTING="$REPO_DIR/tests/fixtures/grouping-accounting.txt"
+CHECK_ACCOUNTING="$SCRIPT_DIR/message-grouping/check-accounting.pl"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"; exit 1
 fi
-for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID"; do
+for f in "$FIXTURE" "$FIXTURE_DOWNLOADS" "$FIXTURE_UUID" "$FIXTURE_KEY_CUT" "$FIXTURE_LEVEL_PAIR" "$FIXTURE_TWO_LEVEL_WINDOW" "$FIXTURE_ACCOUNTING" "$CHECK_ACCOUNTING"; do
     if [[ ! -f "$f" ]]; then
         echo "ERROR: fixture not found: $f"; exit 1
     fi
@@ -74,7 +106,7 @@ CONTRACT='features/fuzzy-message-consolidation.md § Final pass follows the sens
 CONTRACT_SEARCH='features/fuzzy-message-consolidation.md § Design: candidate search that finds every partner (#569) — acceptance criteria'
 HEADER_PRODUCER='pipeline_finalize() in ltl (message-grouping header line)'
 FINAL_PASS_PRODUCER='group_similar_messages() in ltl (final-pass threshold), counted per group by process_final_pass_window()'
-REDUCTION_PRODUCER='pipeline_finalize() in ltl (per-group Reduction line), over the patterns run_consolidation_checkpoint() and process_final_pass_window() form from find_consolidation_candidates() results'
+REDUCTION_PRODUCER='pipeline_finalize() in ltl (per-category reduction_keys and reduction_rows), over the patterns run_consolidation_checkpoint() and process_final_pass_window() form from find_consolidation_candidates() results'
 PATTERNS_PRODUCER='run_consolidation_checkpoint() (streaming) and process_final_pass_window() via group_similar_messages() (final pass) in ltl, candidates from find_consolidation_candidates(); reported by pipeline_finalize()'
 MEMBERSHIP_PRODUCER='group_similar_messages() in ltl (message-grouping-membership buffer), emitted by pipeline_finalize()'
 
@@ -142,40 +174,42 @@ assert_command() {
     fi
 }
 
-# Prints one counter from a group's phase block; exits non-zero when the block
-# or the counter is absent (HARNESS-DESIGN.md Trap 4: a missing anchor is never
-# an empty value).
-# Usage: block_counter <file> <group> <Streaming Phase|Final Pass> <counter label>
+# Prints one counter from a category's phase block (an entity block
+# "category: <group>", its "  phase: <phase>" block, its "    <key>: <value>"
+# facts); exits non-zero when the block or the counter is absent
+# (HARNESS-DESIGN.md Trap 4: a missing anchor is never an empty value).
+# Usage: block_counter <file> <group> <streaming|final_pass> <key>
 block_counter() {
-    awk -v grp="--- $2: $3" -v key="$4:" '
-        index($0, "  --- ") == 1 { inblock = (index($0, grp) > 0) }
-        inblock && index($0, key) { sub(/^.*: */, ""); split($0, v, " "); print v[1]; found = 1; exit }
+    awk -v grp="category: $2" -v phase="  phase: $3" -v key="    $4: " '
+        /^[^ ]/ { ingroup = ($0 == grp); inphase = 0; next }
+        ingroup && /^  [^ ]/ { inphase = ($0 == phase); next }
+        ingroup && inphase && index($0, key) == 1 { print substr($0, length(key) + 1); found = 1; exit }
         END { if (!found) exit 1 }
     ' "$1"
 }
 
-# Prints "<keys> <rows>" from a group's "Reduction: N -> M" line; exits
-# non-zero when the group has no Reduction line.
+# Prints "<keys> <rows>" from a category's reduction_keys and reduction_rows
+# facts; exits non-zero when the category has no block or either fact.
 # Usage: group_reduction <file> <group>
 group_reduction() {
-    awk -v grp="  --- $2: " '
-        index($0, "===") == 1 { ingroup = 0 }
-        index($0, "  --- ") == 1 { ingroup = (index($0, grp) == 1) }
-        ingroup && $1 == "Reduction:" && $3 == "->" { print $2, $4; found = 1; exit }
-        END { if (!found) exit 1 }
+    awk -v grp="category: $2" '
+        /^[^ ]/ { ingroup = ($0 == grp); next }
+        ingroup && /^  reduction_keys: / { keys = $2 }
+        ingroup && /^  reduction_rows: / { rows = $2 }
+        END { if (keys == "" || rows == "") exit 1; print keys, rows }
     ' "$1"
 }
 
 # Passes when the group's reduction ends at no more than <max> rows from
-# <keys> keys; prints the observed line on failure.
+# <keys> keys; prints the observed reduction on failure.
 # Usage: check_rows_at_most <file> <group> <keys> <max>
 check_rows_at_most() {
     local r
     if ! r=$(group_reduction "$1" "$2"); then
-        echo "no 'Reduction:' line for group $2 in $1"; return 1
+        echo "no reduction for group $2 in $1"; return 1
     fi
     set -- "$@" $r
-    echo "observed: Reduction $5 -> $6 (expected $3 keys, at most $4 rows)"
+    echo "observed: reduction $5 -> $6 (expected $3 keys, at most $4 rows)"
     [[ "$5" -eq "$3" && "$6" -le "$4" ]]
 }
 
@@ -184,33 +218,29 @@ check_rows_at_most() {
 check_rows_equal() {
     local r
     if ! r=$(group_reduction "$1" "$2"); then
-        echo "no 'Reduction:' line for group $2 in $1"; return 1
+        echo "no reduction for group $2 in $1"; return 1
     fi
     set -- "$@" $r
-    echo "observed: Reduction $5 -> $6 (expected $3 -> $4)"
+    echo "observed: reduction $5 -> $6 (expected $3 -> $4)"
     [[ "$5" -eq "$3" && "$6" -eq "$4" ]]
 }
 
 # Passes when the group has at least one phase block and every block reports
-# zero patterns: the streaming block's "(N checkpoints, P patterns)" and the
-# final-pass block's "New patterns created:". A block whose count cannot be
-# read fails. Prints each block's count.
+# zero patterns: the streaming block's patterns and the final-pass block's
+# pass1_patterns_created. A block whose count cannot be read fails. Prints
+# each block's count.
 # Usage: check_no_patterns <file> <group>
 check_no_patterns() {
-    awk -v grp="  --- $2: " '
+    awk -v grp="category: $2" '
         function close_block() {
             if (inblock != "" && !(inblock in count)) { missing = 1; print inblock ": no pattern count" }
             inblock = ""
         }
-        index($0, "===") == 1 { close_block() }
-        index($0, "  --- ") == 1 {
-            close_block()
-            if (index($0, grp) == 1) { inblock = $0; blocks++ }
-        }
-        inblock ~ /Streaming Phase/ && $1 == "Keys" && match($0, /, [0-9]+ patterns\)/) {
-            p = substr($0, RSTART + 2, RLENGTH - 2); sub(/ .*/, "", p); count[inblock] = p
-        }
-        inblock ~ /Final Pass/ && $1 == "New" && $2 == "patterns" { count[inblock] = $4 }
+        /^[^ ]/ { close_block(); ingroup = ($0 == grp); next }
+        ingroup && /^  phase: / { close_block(); inblock = $2; blocks++; next }
+        ingroup && /^  [^ ]/ { close_block(); next }
+        inblock == "streaming" && /^    patterns: / { count[inblock] = $2 }
+        inblock == "final_pass" && /^    pass1_patterns_created: / { count[inblock] = $2 }
         END {
             close_block()
             if (blocks == 0) { print "no phase block for group"; exit 1 }
@@ -256,19 +286,19 @@ check_membership_identical() {
 check_scenario() {
     local out="$1" t="$2" f="$3" patterns="$4" why="$5"
     assert_command \
-        command     "grep -Eq '^  Threshold: ${t}%  .*Final pass: on \\(threshold=${f}%,' '$out'" \
+        command     "grep -qx 'threshold_pct: ${t}' '$out' && grep -qx 'final_pass: yes' '$out' && grep -qx 'final_threshold_pct: ${f}' '$out'" \
         label       "header reports sensitivity ${t}% and final pass at ${f}%" \
         asserts     "The message-grouping header reports the resolved -g sensitivity and the threshold the final pass scored at ($why)" \
         produced_by "$HEADER_PRODUCER" \
         contract    "$CONTRACT"
     assert_command \
-        command     "[ \"\$(block_counter '$out' 'plain|200' 'Final Pass' 'Keys seen')\" = 4 ]" \
+        command     "[ \"\$(block_counter '$out' 'plain|200' 'final_pass' 'keys_seen')\" = 4 ]" \
         label       'the final pass receives all 4 keys' \
         asserts     'Every fixture key reaches the occurrence ceiling, so streaming groups none of them and all 4 reach the final pass; any pattern counted in the final-pass block was formed there, at its own threshold' \
         produced_by 'group_similar_messages() in ltl (fp_keys_seen), after run_consolidation_pass() skips ceiling keys' \
         contract    "$CONTRACT"
     assert_command \
-        command     "[ \"\$(block_counter '$out' 'plain|200' 'Final Pass' 'New patterns created')\" = $patterns ]" \
+        command     "[ \"\$(block_counter '$out' 'plain|200' 'final_pass' 'pass1_patterns_created')\" = $patterns ]" \
         label       "final pass creates $patterns pattern(s)" \
         asserts     "With pairs at Dice 77 and 89, a final pass scoring at ${f}% groups exactly $patterns pair(s) ($why)" \
         produced_by "$FINAL_PASS_PRODUCER" \
@@ -292,7 +322,17 @@ scenario_register sensitivity-70 \
                   signed-downloads-75-repeat \
                   skip-final-pass-fires \
                   skip-final-pass-population-below-floor \
-                  skip-final-pass-absorbing-data
+                  skip-final-pass-absorbing-data \
+                  skip-final-pass-notice-count \
+                  key-cut-grouping \
+                  key-cut-no-retention \
+                  key-cut-terminal-width \
+                  levels-same-body-pair \
+                  levels-lone-key-not-carried \
+                  accounting-fixture-raw \
+                  accounting-fixture-bin \
+                  accounting-levels \
+                  accounting-corpus-day
 scenario_parse_args "$@"
 
 if scenario_wanted sensitivity-70; then
@@ -445,7 +485,7 @@ echo "[$current_scenario]"
 out="$TMP_DIR/skip-fires.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    yes\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: yes\$' '$out'" \
         label       'the final pass is skipped when streaming absorbed nothing and the population is above the floor' \
         asserts     "A group whose streaming phase absorbed at or below the absorption floor, and which would hand at least the floor number of keys to the final pass, has that pass skipped" \
         produced_by "$SKIP_PRODUCER" \
@@ -473,7 +513,7 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 1, criterion 5)"
 
     assert_command \
-        command     "grep -qE '^    Similarity cliff edge: [0-9]+%\$' '$out' && awk '/^    Similarity cliff edge:/ { gsub(/[^0-9]/, \"\", \$4); exit (\$4 < 85 && \$4 >= 50) ? 0 : 1 }' '$out'" \
+        command     "grep -qE '^  similarity_cliff_edge_pct: [0-9]+\$' '$out' && awk '/^  similarity_cliff_edge_pct: [0-9]/ { exit (\$2 < 85 && \$2 >= 50) ? 0 : 1 }' '$out'" \
         label       'a similarity cliff edge is reported, below the requested sensitivity' \
         asserts     "When the skip fires, the run reports the similarity the data clusters at, and it falls below the requested sensitivity (the data does not group at what was asked for)" \
         produced_by "$CLIFF_PRODUCER" \
@@ -491,13 +531,38 @@ fi
 
 fi
 
+# The notice's message count above 1,000 renders through the one dispatch at
+# the prose notice row (the full word, a digit given up within 25%), the
+# threshold echoed verbatim. Generated: 1,500 access-log keys whose paths are
+# random letters, so none pairs at -g 85 and streaming absorbs none.
+# `-bs 1440 -oe -n 1`: the assertion reads the notice on stderr.
+if scenario_wanted skip-final-pass-notice-count; then
+current_scenario="skip-final-pass-notice-count"
+echo "[$current_scenario]"
+gen="$TMP_DIR/skip-count-1500.txt"
+perl -e 'srand(617); my @c = ("a".."z"); for my $i (0..1499) { my $p = join "", map { $c[rand @c] } 1..24; printf "192.0.2.10 - - [19/May/2026:12:%02d:%02d +0000] \"GET /store/%s/fetch HTTP/1.1\" 200 512 5\n", int($i/60) % 60, $i % 60, $p }' > "$gen"
+errfile="$TMP_DIR/skip-count.stderr"
+set +e
+"$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -g 85 --skip-final-min-keys 100 "$gen" > "$TMP_DIR/skip-count.out" 2> "$errfile"
+set -e
+if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+    fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
+fi
+assert_command \
+    command     "grep -qF 'the final consolidation pass was skipped over 1500 messages: grouping at 85% similarity' '$errfile'" \
+    label       'the notice counts 1,500 skipped messages as 1500 and echoes the threshold verbatim' \
+    asserts     "A notice's measured count renders through the one dispatch at the prose notice row (1,500 unclimbed: exact and narrower than 1.5 thousand); an echoed setting (the -g similarity) stays verbatim" \
+    produced_by "report_skipped_final_pass() in ltl, through value_text() and the notice row" \
+    contract    "features/617-width-to-format-rule.md D14, D23, D25"
+fi
+
 if scenario_wanted skip-final-pass-population-below-floor; then
 current_scenario="skip-final-pass-population-below-floor"
 echo "[$current_scenario]"
 out="$TMP_DIR/skip-below-floor.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100000 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: no\$' '$out'" \
         label       'a group below the population floor keeps its final pass' \
         asserts     "Absorbing nothing is not on its own a reason to skip: a group handing fewer keys forward than the floor runs its final pass, because skipping a cheap pass saves nothing and costs grouping" \
         produced_by "$SKIP_PRODUCER" \
@@ -519,11 +584,267 @@ echo "[$current_scenario]"
 out="$TMP_DIR/skip-absorbing.out"
 if capture_section "$out" $SHAPE -du us -xqs -g 75 --skip-final-min-keys 100 "$FIXTURE_DOWNLOADS"; then
     assert_command \
-        command     "grep -q '^    Final pass skipped:    no\$' '$out'" \
+        command     "grep -q '^  final_pass_skipped: no\$' '$out'" \
         label       'a sensitivity the data does reach keeps its final pass' \
         asserts     "At a sensitivity whose partners the data does have, streaming absorbs and the final pass runs: the skip is governed by absorption, not by population size alone" \
         produced_by "$SKIP_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 2, criterion 3)"
+fi
+fi
+
+
+# The message-key cut (system 3). Every run is -ni -bs 1440 -oe -n 3
+# --terminal-width 120: the assertions read only the CONFIG row of
+# -V benchmark-data, and the width is the value a run that cuts at the
+# terminal width must report.
+KEY_CUT_SHAPE="-bs 1440 -oe -n 3 --terminal-width 120"
+KEY_CUT_PRODUCER='adapt_to_terminal_settings() in ltl (the per-run cut $max_log_message_length), reported by print_verbose_output()'
+KEY_CUT_CONTRACT='features/619-per-run-key-cut.md § 7 (the CONFIG max_log_message_length row), AC2'
+
+# Run ltl for a key-cut scenario; fail hard on a failed run, a runtime warning
+# or a missing CONFIG row (HARNESS-DESIGN.md Trap 1 and Runtime-warning
+# cleanliness).
+# Usage: capture_key_cut <outfile> <ltl-args...>
+capture_key_cut() {
+    local outfile="$1"; shift
+    local errfile="$outfile.stderr"
+    set +e
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$outfile" 2>"$errfile"
+    local rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc" >&2
+        sed 's/^/        /' "$errfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl run failed"); return 1
+    fi
+    if ! grep -qE $'^CONFIG\tmax_log_message_length\t[0-9]+$' "$outfile"; then
+        echo "  FAIL  $current_scenario :: CONFIG max_log_message_length row missing from $outfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: CONFIG row missing"); return 1
+    fi
+    if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
+    fi
+}
+
+if scenario_wanted key-cut-grouping; then
+current_scenario="key-cut-grouping"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-grouping.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -g -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t350\$' '$out'" \
+        label       'a grouping run reports the message-key cap as its cut' \
+        asserts     "Under -g every message key is cut at the message-key cap (350) whatever the terminal width, and -V benchmark-data reports that cut, not the terminal width" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+if scenario_wanted key-cut-no-retention; then
+current_scenario="key-cut-no-retention"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-no-retention.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -n 0 -g -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t120\$' '$out'" \
+        label       'grouping switched off by -n 0 leaves the cut at the terminal width' \
+        asserts     "-n 0 retains no message and switches -g off at option settlement, so the cut is resolved after it: the terminal width, not the cap" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+if scenario_wanted key-cut-terminal-width; then
+current_scenario="key-cut-terminal-width"
+echo "[$current_scenario]"
+out="$TMP_DIR/key-cut-terminal-width.out"
+if capture_key_cut "$out" $KEY_CUT_SHAPE -V benchmark-data "$FIXTURE_KEY_CUT"; then
+    assert_command \
+        command     "grep -q \$'^CONFIG\\tmax_log_message_length\\t120\$' '$out'" \
+        label       'a run that neither groups nor writes CSV cuts at the terminal width' \
+        asserts     "Without -g or -o a message key is cut at the terminal width, the most the messages table can print without wrapping, and -V benchmark-data reports it" \
+        produced_by "$KEY_CUT_PRODUCER" \
+        contract    "$KEY_CUT_CONTRACT"
+fi
+fi
+
+
+# The grouping key separates messages (system 4). Every run is
+# -bs 1440 -oe -n 20 -g -V message-grouping: the assertions read only the
+# cluster membership, and -n 20 keeps every row of the small fixtures.
+LEVELS_SHAPE="-bs 1440 -oe -n 20 -g -V message-grouping"
+LEVELS_PRODUCER='group_similar_messages() in ltl (the final pass: keys sorted by grouping key then body, a window cleared at each grouping-key change), membership emitted by pipeline_finalize()'
+LEVELS_CONTRACT='features/fuzzy-message-consolidation.md § Grouping Key Design; features/619-per-run-key-cut.md § 4.4 (D1 restated, D10) and AC15'
+
+# Passes when every cluster in the membership lists members of one grouping
+# key (the bracketed level each member key starts with); prints each cluster
+# that mixes levels. Fails when the membership lists no cluster.
+# Usage: check_members_one_level <capture>
+check_members_one_level() {
+    membership_section "$1" "$1.membership" || return 1
+    awk '
+        function close_cluster() { if (cl != "" && n > 1) { print "mixed levels in: " cl; bad = 1 } }
+        /^  cluster: / { close_cluster(); cl = $0; n = 0; delete seen; next }
+        /^    member: \[/ { lv = $2; if (!(lv in seen)) { seen[lv] = 1; n++ } }
+        END { close_cluster(); exit bad ? 1 : 0 }
+    ' "$1.membership"
+}
+
+if scenario_wanted levels-same-body-pair; then
+current_scenario="levels-same-body-pair"
+echo "[$current_scenario]"
+out="$TMP_DIR/levels-pair.out"
+if capture_section "$out" $LEVELS_SHAPE "$FIXTURE_LEVEL_PAIR"; then
+    assert_command \
+        command     "check_members_one_level '$out'" \
+        label       'every group holds members of one level' \
+        asserts     "A message is grouped only with messages of its own category and level: no cluster lists members of two levels" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+
+    assert_command \
+        command     "membership_section '$out' '$out.membership' && ! grep -q '^    member: \\[ERROR\\] .*Job purge completed' '$out.membership' && ! grep -q '^    member: \\[WARN\\] .*Job purge completed' '$out.membership'" \
+        label       'an ERROR and a WARN line with the same body stay two rows' \
+        asserts     "Two lines with the same thread, logger and body, one at ERROR and one at WARN, are each the only key of their level: neither is grouped, so each prints as its own row" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+fi
+fi
+
+if scenario_wanted levels-lone-key-not-carried; then
+current_scenario="levels-lone-key-not-carried"
+echo "[$current_scenario]"
+out="$TMP_DIR/levels-lone.out"
+if capture_section "$out" $LEVELS_SHAPE "$FIXTURE_TWO_LEVEL_WINDOW"; then
+    assert_command \
+        command     "check_members_one_level '$out'" \
+        label       'every group holds members of one level' \
+        asserts     "The final pass compares a key only within its own level: no cluster lists members of two levels" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+
+    assert_command \
+        command     "membership_section '$out' '$out.membership' && ! grep -q '^    member: \\[ERROR\\] ' '$out.membership' && [[ \$(grep -c '^    member: \\[WARN\\] .*Batch 100[2-6] failed' '$out.membership') -eq 5 ]]" \
+        label       'the lone ERROR key stays its own row; the five WARN keys group' \
+        asserts     "A level whose only key reaches the final pass on its own (the ERROR key, sorted first by body) is not carried into the next level's window: it stays its own row, and the five similar WARN keys group among themselves" \
+        produced_by "$LEVELS_PRODUCER" \
+        contract    "$LEVELS_CONTRACT"
+fi
+fi
+
+
+# Consolidation's core mandate (system 5). Each scenario runs one input twice,
+# grouped and ungrouped, with -bs 1440 -oe -n 99999999 -o -V message-grouping,
+# filter-summary: the assertions read only the accounting and cluster-membership
+# records and lines_included; every row is kept so every key is reported; -o
+# makes both runs cut keys at the message-key cap, so a key reads the same in
+# both. -o writes its files, so each run has a directory of its own.
+ACCOUNTING_SHAPE="-bs 1440 -oe -n 99999999 -o -V message-grouping,filter-summary"
+ACCOUNTING_CONTRACT='features/619-per-run-key-cut.md § 6 (AC18 to AC21) and § 7 (message-grouping / accounting); tests/HARNESS-DESIGN.md § A feature'"'"'s core requirement is observable and asserted'
+ACCOUNTING_PRODUCER='consolidation_accounting_stage() and consolidation_accounting_reported() in ltl, called from run_consolidation_checkpoint(), group_similar_messages() and pipeline_finalize(); emitted by emit_message_grouping_accounting()'
+MEMBERS_PRODUCER='the cluster member_keys sets written by merge_log_message_entry_into_cluster(), consolidation_process_key() (inline match), try_consolidation_merge_into_existing() and merge_consolidation_overlapping_patterns() in ltl; emitted by group_similar_messages()'
+
+# Runs one ltl invocation in a directory of its own under TMP_DIR, failing hard
+# on a failed run, a missing section or a runtime warning.
+# Usage: capture_accounting <outfile> <ltl-args...>
+capture_accounting() {
+    local outfile="$1"; shift
+    local dir="$outfile.d"
+    mkdir -p "$dir"
+    local errfile="$outfile.stderr"
+    set +e
+    ( cd "$dir" && "$LTL" --disable-progress -ni "$@" ) > "$outfile" 2>"$errfile"
+    local rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc" >&2
+        sed 's/^/        /' "$errfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: ltl run failed"); return 1
+    fi
+    if ! grep -q '^=== message-grouping / accounting ===$' "$outfile"; then
+        echo "  FAIL  $current_scenario :: accounting sub-section missing from $outfile" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: accounting missing"); return 1
+    fi
+    if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr"); return 1
+    fi
+}
+
+# The four mandate assertions over one grouped and one ungrouped capture.
+# Usage: assert_mandate <grouped> <ungrouped> <raw|bin> <min checkpoints>
+assert_mandate() {
+    local g="$1" u="$2" model="$3" min_cp="$4"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' across-runs --grouped '$g' --ungrouped '$u'" \
+        label       'grouping conserves the data across runs' \
+        asserts     "A grouped and an ungrouped run of the same input hold equal occurrences, duration count, duration total, bytes count and bytes total per category and grouping key, and the grouped run's occurrences equal the lines included (AC18)" \
+        produced_by "$ACCOUNTING_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' per-pass --grouped '$g' --min-checkpoints $min_cp" \
+        label       'every consolidation pass conserves the data' \
+        asserts     "At every streaming checkpoint and at the final pass, the five totals of each category and grouping key, over the message store and the clusters, are the same before and after the pass (AC19)" \
+        produced_by "$ACCOUNTING_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' one-row --grouped '$g' --ungrouped '$u'" \
+        label       'every key is in exactly one row' \
+        asserts     "No key is a member of two clusters or both a member and a row of its own, and the members with the rows left alone are exactly the ungrouped run's keys (AC20)" \
+        produced_by "$MEMBERS_PRODUCER" \
+        contract    "$ACCOUNTING_CONTRACT"
+    assert_command \
+        command     "perl '$CHECK_ACCOUNTING' durations-once --grouped '$g' --ungrouped '$u' --model $model" \
+        label       'a row holds each duration once' \
+        asserts     "Under the raw data model every row retains as many durations as its duration count (under bin it retains none), and a cluster's duration count is the sum of its members' (AC21)" \
+        produced_by "$ACCOUNTING_PRODUCER; merge_consolidation_stats() in ltl (the durations a merge carries)" \
+        contract    "$ACCOUNTING_CONTRACT"
+}
+
+# --consolidation-trigger 50: on 1,200 lines the streaming checkpoints fire and
+# discover patterns that the inline match then absorbs whole keys into.
+for model in raw bin; do
+if scenario_wanted "accounting-fixture-$model"; then
+current_scenario="accounting-fixture-$model"
+echo "[$current_scenario]"
+g="$TMP_DIR/accounting-fixture-$model-grouped.out"
+u="$TMP_DIR/accounting-fixture-$model-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -mdm "$model" --consolidation-trigger 50 -g "$FIXTURE_ACCOUNTING" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE -mdm "$model" "$FIXTURE_ACCOUNTING"; then
+    assert_mandate "$g" "$u" "$model" 2
+fi
+fi
+done
+
+# The application log with levels: the grouping key is the level, and every
+# key reaches the end-of-file checkpoint and the final pass.
+if scenario_wanted accounting-levels; then
+current_scenario="accounting-levels"
+echo "[$current_scenario]"
+g="$TMP_DIR/accounting-levels-grouped.out"
+u="$TMP_DIR/accounting-levels-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -g "$FIXTURE_TWO_LEVEL_WINDOW" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE "$FIXTURE_TWO_LEVEL_WINDOW"; then
+    assert_mandate "$g" "$u" raw 1
+fi
+fi
+
+# One day of a Tomcat access log carrying the thread name (docs/test-logs.md,
+# the thirty-day set), -m uuid as the benchmark's consolidating scenarios run
+# it: its volume reaches the cross-cluster merges the fixture does not.
+if scenario_wanted accounting-corpus-day; then
+current_scenario="accounting-corpus-day"
+echo "[$current_scenario]"
+day_log="$(resolve_log_path "logs/AccessLogs/really-big/localhost_access_log-twx01-twx-thingworx-1.2026-01-02.txt")"
+if [[ ! -f "$day_log" ]]; then
+    echo "  FAIL  $current_scenario :: corpus log not found: $day_log" >&2
+    fail=$((fail + 1)); failures+=("$current_scenario :: corpus log missing")
+else
+g="$TMP_DIR/accounting-corpus-day-grouped.out"
+u="$TMP_DIR/accounting-corpus-day-ungrouped.out"
+if capture_accounting "$g" $ACCOUNTING_SHAPE -m uuid -g "$day_log" \
+   && capture_accounting "$u" $ACCOUNTING_SHAPE -m uuid "$day_log"; then
+    assert_mandate "$g" "$u" raw 2
+fi
 fi
 fi
 

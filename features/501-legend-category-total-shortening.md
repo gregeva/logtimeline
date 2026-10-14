@@ -15,6 +15,8 @@ number formatter keeps the magnitude of a large count visible while leaving a
 small count exact — `52` errors beside `1.2M` info messages — and stops the
 column widening as volumes grow.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the legend's tiers are rows of the budget table `%value_budget`: *legend total* (short, tight, exact under `-pv`) and *legend rate* (medium, tight). D1's signature is the count arm `value_text()` calls, `format_number( $value, $tier, $space, $decimals, $floor )`; no surface calls it directly. Record: `features/617-width-to-format-rule.md`.
+
 ## GitHub Issue
 
 - #501 (FEATURE: shorten log level category totals in the legend column using the

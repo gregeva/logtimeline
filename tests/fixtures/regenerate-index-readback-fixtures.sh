@@ -99,11 +99,11 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 (
     cd "$BUILD_DIR"
     # Unfiltered runs for both files (writes file rows + filters=- selection rows)
-    "$LTL" --disable-progress -osum -n 1 "$TOMCAT_SAMPLE" > /dev/null
-    "$LTL" --disable-progress -osum -n 1 "$SCRIPT_SAMPLE" > /dev/null
+    "$LTL" --disable-progress -idx -osum -n 1 "$TOMCAT_SAMPLE" > /dev/null
+    "$LTL" --disable-progress -idx -osum -n 1 "$SCRIPT_SAMPLE" > /dev/null
     # Filtered runs for both files (writes filters=-dmin=50 selection rows)
-    "$LTL" --disable-progress -osum -n 1 -dmin 50 "$TOMCAT_SAMPLE" > /dev/null
-    "$LTL" --disable-progress -osum -n 1 -dmin 50 "$SCRIPT_SAMPLE" > /dev/null
+    "$LTL" --disable-progress -idx -osum -n 1 -dmin 50 "$TOMCAT_SAMPLE" > /dev/null
+    "$LTL" --disable-progress -idx -osum -n 1 -dmin 50 "$SCRIPT_SAMPLE" > /dev/null
 )
 
 if [[ ! -f "$BUILD_DIR/ltl-index.csv" ]]; then

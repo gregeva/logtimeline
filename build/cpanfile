@@ -13,7 +13,6 @@ requires 'Text::CSV_PP';
 requires 'Text::ParseWords';
 requires 'Time::HiRes';
 requires 'Time::Local';
-requires 'Time::Piece';
 requires 'YAML::PP';
 requires 'YAML::PP::Common';
 requires 'YAML::PP::Schema::Core';

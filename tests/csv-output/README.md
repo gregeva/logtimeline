@@ -62,9 +62,15 @@ One row per column:
 | `column` | Exact column name as emitted by `ltl` |
 | `position` | 1-based index (fixed) or `*` (dynamic, match by name) |
 | `type` | `int`, `float`, `nice`, `string`, `timestamp`, `enum:a,b,c` |
-| `required` | `yes`, `no`, or `conditional:<family>` |
+| `required` | `yes`, `no`, `conditional:<family>` or `every-row:<family>` |
 | `max_decimals` | Integer 0–5, or `n/a` for non-numeric types |
 | `family` | `meta`, `duration`, `bytes`, `count`, `percentile`, `dispersion`, `shape`, `level`, `udm` |
+| `precision` | The precision family the tool writes the column's cells in: `meta`, `count`, `duration`, `percentile`, `shape`, `bytes`, `level`, `rate`. Compared with what `ltl -V csv-output` reports for every header column (`csv-output / columns`); a mismatch fails |
+
+`family` and `precision` are two attributes. `precision` decides a cell's
+decimals and is the tool's label (`features/618-csv-column-declaration.md`
+D4). `family` groups the columns that fill together on a row, which the
+group-consistency check reads.
 
 Family membership follows populate conditions, not statistical theme: `dispersion`
 (`std_dev`, `cv`) populates at n≥2 observations, `shape` (`skewness`, `kurtosis`,
@@ -74,6 +80,10 @@ belongs to `duration` because it populates whenever `mean` does (Issue #330).
 `conditional:<family>` columns are required to be populated when the family
 is declared active in the scenario; the group-consistency check then enforces
 that all `conditional:<family>` columns are uniformly populated within a row.
+`every-row:<family>` columns (`impact`) take no part in that per-row check:
+they are required on every row while the family is active, whatever the row's
+other cells in the family hold, and like a conditional column are absent or
+empty when the family is switched off.
 
 ## Scenarios TSV schema
 
@@ -84,7 +94,28 @@ One row per scenario:
 | `scenario` | Short identifier; pass to `--scenario` |
 | `logfile` | Path under repo root |
 | `options` | `ltl` command-line options (excluding `--disable-progress` and `-o`, which the harness adds) |
-| `expected_families` | Comma-separated families expected to be active for this scenario |
+| `expected_families` | Comma-separated families expected to be active for this scenario. A family prefixed `-` is switched off (`-duration` under `-od`): every column the rules make `conditional:<family>` or `every-row:<family>` must be absent from the header where its position is dynamic (STATS) and empty in every row where it is fixed (MESSAGES) |
+| `expected_categories` | Optional. Path under `tests/csv-output/` of a TSV of content assertions on the MESSAGES rows (below) |
+
+### Expected-categories TSV
+
+Header `message_match<TAB>expected`, then one assertion per row: a fixed
+substring of the `message` column and the category every matching row carries
+(`highlight`, `plain`) or `absent` (no row may match). Directive rows:
+
+| Directive | Asserts |
+|---|---|
+| `@no_highlight_rows` | no row carries category `highlight` |
+| `@non_increasing<TAB><column>` | rows are in non-increasing numeric order of the column (the `-so` sort) |
+| `@zero_duration_nice<TAB><value>` | every row whose `duration` is 0 carries that `duration_nice` (a zero total in the source's unit) |
+| `@cell<TAB><kind><TAB><key_column>=<key_value><TAB><column><TAB><value><TAB><contract>` | the one row of the `messages` or `stats` file whose key column equals the key value carries `value` in `column` (`(empty)` for an empty cell); the last field is the contract a failure reports |
+
+The file is handed to both validator runs of a scenario: a `stats` cell
+directive is asserted against the STATS CSV, every other row against the
+MESSAGES CSV.
+
+A directive whose rows are missing (no zero-duration row, fewer than two rows
+to order) fails; an unknown directive stops the validator.
 
 ## Known outstanding finding
 

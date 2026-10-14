@@ -1,5 +1,10 @@
 # #639 — ltl reads its own index file, and its `-o` outputs, as input logs
 
+> **The run index is off by default** (2026-10-12, #708): `ltl-index.csv` is read and
+> written only under `-idx, --index`; `-ni` is accepted and has no effect
+> (`features/708-run-index-deprecation.md`). What this record says about the
+> index being written on every run describes the behaviour before that change.
+
 Sub-issue of #629 (defects with a user-defined metric using a custom regex and
 capture group); umbrella record `features/629-udm-custom-regex-defects.md`.
 Owning areas: `features/index-file.md`, `features/179-index-read-back.md`.

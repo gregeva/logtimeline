@@ -10,7 +10,7 @@ repository, so a release that ended without it looked exactly like a release
 that included it. Some releases ended without it, and the published wiki fell
 behind.
 
-This work turns the copy into `build/sync-wiki.sh`, which carries the
+This work turns the copy into `process/sync-wiki.sh`, which carries the
 source-to-page map, publishes from it, and verifies what is published against
 `docs/`. The release is not finished while that verification fails.
 
@@ -49,7 +49,7 @@ matching its source while the sync is skipped, which is the state
 
 Verification therefore also reads the wiki's most recent commit subject and
 asserts it names the version being released. Demonstrated against the live wiki:
-`./build/sync-wiki.sh verify` exits 0, and `./build/sync-wiki.sh verify
+`./process/sync-wiki.sh verify` exits 0, and `./process/sync-wiki.sh verify
 --version 0.18.1` exits 1 reporting the last commit is `Sync wiki docs from
 v0.18.0`.
 
@@ -80,11 +80,11 @@ rejected: it would clone a remote on every session start, resume, clear and
 compaction, to guard a step that runs a few times a year. This is release
 mechanics and it belongs in the release procedure alone.
 
-### D3 — `build/sync-wiki.sh` is the single source of the map
+### D3 — `process/sync-wiki.sh` is the single source of the map
 
 The map is written in the script and nowhere else. The release procedure runs
 the script instead of restating the map; `tests/validate-explain.sh` reads the
-map by running `./build/sync-wiki.sh map` instead of parsing it out of the
+map by running `./process/sync-wiki.sh map` instead of parsing it out of the
 procedure. A `docs/` file the wiki should carry gets a line in that map and no
 other edit.
 
@@ -98,11 +98,11 @@ time, without the risk of publishing something unintended.
 
 - **AC1** — every page the map names carries the byte-for-byte content of its
   source, checkable by a command that exits non-zero when one does not.
-  *Assertable*: `./build/sync-wiki.sh verify`, probed by appending a line to
+  *Assertable*: `./process/sync-wiki.sh verify`, probed by appending a line to
   `docs/explain/heatmap.md` and observing `[behind] Heatmap-Reference.md differs
   ... (2 changed line(s))` with exit 1.
 - **AC2** — a release whose publish never ran fails verification even when every
-  page matches its source. *Assertable*: `./build/sync-wiki.sh verify --version
+  page matches its source. *Assertable*: `./process/sync-wiki.sh verify --version
   0.18.1` against the live wiki reports the last commit is the v0.18.0 sync and
   exits 1.
 - **AC3** — a map line naming a file that does not exist is reported before any
@@ -118,7 +118,7 @@ time, without the risk of publishing something unintended.
 
 ## Implementation
 
-`build/sync-wiki.sh` with three commands: `publish --version X.Y.Z` (copy, stage,
+`process/sync-wiki.sh` with three commands: `publish --version X.Y.Z` (copy, stage,
 commit as `Sync wiki docs from vX.Y.Z`, push; pushes nothing when no page
 changed), `verify [--version X.Y.Z]` (read-only diff of every page against its
 source, plus the last-commit assertion when a version is named), and `map`

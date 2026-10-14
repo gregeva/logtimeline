@@ -55,6 +55,8 @@ For each of the four surfaces, at the point the surface decides which data model
 2. Else if `-dm` is set → use its value.
 3. Else → the surface's existing internal logic decides, unchanged from today (this includes the existing `--exact-percentiles` consultation for surfaces 1 and 2).
 
+Step 3 is held by the resolver: `resolve_data_model()` returns the surface's default from `%data_model_default` (heatmap and histogram `bin`, the per-message and per-bucket statistics stores `raw`), so it never returns undef and no call site applies a default of its own (`features/620-read-loop-run-constant-hoisting.md` D2 step 6).
+
 ### Validation
 
 `raw` and `bin` are the only accepted values. Any other value (`--data-model dense`, `--message-stats-data-model 7`) causes `ltl` to die at option-parse time with a clear error.
@@ -178,7 +180,7 @@ All five flags have explicit short forms per the project convention (`feedback_s
 7. **Surface 4 selector accepted but not honored** — Same with `-bdm bin -o`, observed via the per-time-bucket statistics in CSV.
 8. **Invalid value** — Run with `--data-model dense`; ltl exits non-zero with the validation error message.
 9. **Conflicting last-wins** — Run with `-dm raw -dm bin -hg`; histogram output matches a `-hg` invocation without any new flag (because no new flag survives → step 3 → existing internal logic → bin per histogram's baked-in default).
-10. **`-V runtime-config` rows** — Run with `-V runtime-config -dm raw -hgdm bin`; output contains `data-model: raw` and `histogram-data-model: bin` in the command-line sub-section; no `(--…)` annotations on either row.
+10. **`-V runtime-config` rows** — Run with `-V runtime-config -dm raw -hgdm bin`; output contains `data_model: raw` and `histogram_data_model: bin` in the command-line sub-section; no `(--…)` annotations on either row.
 11. **Deprecation warning text** — Run with `--exact-percentiles`; STDERR contains the updated warning naming the new flags.
 
 ## Acceptance criteria mapping (issue body → this doc)

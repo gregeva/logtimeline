@@ -1,0 +1,7 @@
+message_match	expected
+# The bucket whose line carries '-' for its size leaves bytes empty; a zero-byte response and a zero duration are measured zeros
+@cell	stats	timestamp=2025-05-07 00:01	bytes	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2025-05-07 00:01	bytes_nice	(empty)	features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total; its cell is empty on the STATS CSV)
+@cell	stats	timestamp=2025-05-07 00:02	bytes	0	features/616-gated-mean-derivation.md § 6, observed zeros still print (a count of one observation of zero is a measured zero)
+@cell	stats	timestamp=2025-05-07 00:02	bytes_occurrences	1	features/616-gated-mean-derivation.md § 6, observed zeros still print (a count of one observation of zero is a measured zero)
+@cell	stats	timestamp=2025-05-07 00:04	duration	0	features/616-gated-mean-derivation.md § 6, observed zeros still print (a count of one observation of zero is a measured zero)

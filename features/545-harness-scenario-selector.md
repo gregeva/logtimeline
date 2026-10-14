@@ -145,7 +145,7 @@ selector can exist, and that is a design decision per harness, not a sweep step.
 
 ### The suite is not at risk
 
-Release step 11 and `docs/process/workflow.md` § 3(a) both invoke every
+Release step 11 and `docs/process/workflow.md` § 3 (b) both invoke every
 `tests/validate-*.sh` with no arguments. Strict argument parsing changes
 nothing for a bare invocation, so the sweep cannot break the gate by
 construction.

@@ -2,7 +2,7 @@
 
 **GitHub Issue:** #137
 **Branch:** `137-final-pass-log-messages`
-**Status:** Design phase
+**Status:** Implemented under #137, then replaced by the final-pass redesign (`features/150-final-pass-scalability.md`). The final pass as built is described in `features/fuzzy-message-consolidation.md` § Process Flow; this record is the #137 design.
 
 ## Problem
 

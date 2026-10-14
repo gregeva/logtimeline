@@ -1,0 +1,4 @@
+2025-05-05 00:00:07.006+0000 [L: ERROR] [O: c.e.JobRunner] [I: ] [U: admin] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed with leftover records in the archive partition
+2025-05-05 00:00:14.006+0000 [L: WARN] [O: c.e.JobRunner] [I: ] [U: admin] [S: ] [P: ] [T: pool-1-thread-1] Job purge completed with leftover records in the archive partition
+2025-05-05 00:00:21.006+0000 [L: INFO] [O: c.e.Cache] [I: ] [U: admin] [S: ] [P: ] [T: pool-1-thread-1] Cache refresh completed for region alpha-0001 holding 120 entries
+2025-05-05 00:00:28.006+0000 [L: INFO] [O: c.e.Cache] [I: ] [U: admin] [S: ] [P: ] [T: pool-1-thread-1] Cache refresh completed for region alpha-0002 holding 121 entries

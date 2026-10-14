@@ -10,7 +10,7 @@ feature doc — not code that later becomes the implementation.
 
 Every change to the hot path is taken carefully and proven not to regress: a
 before/after benchmark on this machine is required whenever the work adds cost
-per line or per key (`docs/process/workflow.md` § 3 (b)). For a small change to
+per line or per key (`docs/process/workflow.md` § 3 (a)). For a small change to
 an existing path, such as a test, a cleared value or a substitution, that
 comparison is the evidence, and no prototype is needed.
 
@@ -76,6 +76,20 @@ implementation candidates at staged scale (1k → 10k → 100k → millions) aga
 the current code as the baseline. Exit requires **measured justification**
 (medians with ranges) and lessons learned recorded *before* implementation
 begins.
+
+Code can be logically correct and still work against the structures it runs
+on. A prototype establishes how the structures the design relies on behave in
+Perl, and checks that the design uses them the way its intent expects:
+
+- how a scalar is stored and what an operation does to it: stored integers
+  read by floating-point arithmetic cache the float and double in size;
+- how memory is laid out and reused: sorting in place saves a copy but
+  scatters the values, so later passes miss the CPU cache.
+
+Where intent and mechanism diverge, the cost lands silently in the back end and
+nothing in the source shows it. The findings report records these mechanisms,
+observed with `Devel::Peek` and `Devel::Size` and by measuring each store's
+size and each pass's time, not only the process peak.
 
 Two rules that have cost time here when broken:
 

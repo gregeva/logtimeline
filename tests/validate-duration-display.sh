@@ -25,7 +25,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 CHECKER="$SCRIPT_DIR/duration-display/check-duration-cells.pl"
 # Invocation shape (tests/HARNESS-DESIGN.md section Invocation coherence):
 # the render invariants read duration CELLS - their unit, zero form and
@@ -52,6 +52,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/rendered-output.sh
+source "$SCRIPT_DIR/lib/rendered-output.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -200,21 +202,21 @@ run_scenario() {
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check unit" \
         label       "every duration cell carries a unit ($unit source) on both surfaces" \
         asserts     'Every populated duration cell in the summary table (Min/P50/P99.9) and the timeline (P50/P95/P99/P999) renders as <number><unit>; no value prints bare. This is the invariant Bug 2 violated, where small magnitudes (e.g. 58, 166, 1) printed with no unit.' \
-        produced_by 'format_duration() in ltl - the single helper both surfaces route through; always passes through format_time so a unit is always present (no length>=4 bare-number bypass).' \
-        contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses. format_duration() is the locked rendering entry point for duration cells.'
+        produced_by 'value_text() in ltl, the latency cell budget row - the one dispatch both surfaces route through; its duration arm format_time always appends a unit.' \
+        contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses; features/617-width-to-format-rule.md D9 (the latency cells name one budget).'
 
     assert_command \
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check zero" \
         label       "zero renders as 0$unit (resolved unit), never bare or auto-scaled" \
-        asserts     'A zero duration renders in the resolved source unit (0ms for a ms source), never bare 0 and never auto-scaled down to 0us. format_time would scale 0 to the smallest unit; format_duration special-cases zero to the resolved unit.' \
-        produced_by 'format_duration() in ltl - the `return "0$unit" if $value == 0` zero special-case.' \
+        asserts     'A zero duration renders in the resolved source unit (0ms for a ms source), never bare 0 and never auto-scaled down to 0us. The climb starts at the resolved unit, so zero never scales below it.' \
+        produced_by 'value_text() in ltl, the latency cell budget row - format_time climbs from the floor step (the resolved source unit), so zero renders in it.' \
         contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses.'
 
     assert_command \
         command     "$PERL '$CHECKER' --render '$render' --resolved-unit '$unit' --check precision" \
         label       "<=1 decimal everywhere; 0 decimals when displayed in the source unit ($unit)" \
         asserts     'Duration cells follow the display precision rule: (a) at most one fractional digit on any cell (ltls one-decimal display convention); (b) zero fractional digits when a cell is displayed in the source resolution unit, since one decimal there fabricates sub-unit precision the input never had (a ms source shows 58ms not 58.2ms - Bug 1). A value that auto-scales to a coarser unit (ms source -> 1.2s; us source -> 47.2ms) legitimately keeps its single decimal. Applies to duration cells only; CV and other columns have their own formatting regime and are not extracted.' \
-        produced_by 'format_duration() in ltl - rounds the ms-valued statistic to %duration_display_decimals{resolved-unit} before format_time auto-scales and applies its single-decimal render.' \
+        produced_by 'value_text() in ltl, the latency cell budget row - format_time rounds the ms-valued statistic to the resolved unit step decimals before it climbs, then renders at the short tier maximum of one decimal.' \
         contract    'Issue #292 + tests/HARNESS-DESIGN.md section Render-invariant harnesses. The precision rule is a function of displayed-unit vs resolved-unit (read from -V duration_unit_resolved).'
 }
 
@@ -306,12 +308,72 @@ run_jboss_duration_scenario() {
         contract    'docs/usage.md section Metric extraction - columns appear only for metrics detected in the data; issue #365'
 }
 
+# Unobserved-metric cells: a time bucket in which no line carried a metric
+# shows that metric's total cell blank, and a bucket whose lines carried a zero
+# shows the zero. Two committed fixtures, one-minute buckets: an application
+# script log whose buckets carry a duration only, bytes only, or a zero
+# duration, and an access log with a bucket whose size is '-' and one with a
+# zero-byte response. Run with bucket statistics demanded (the timeline's
+# latency column) and not demanded (-hm duration without -o), under each bucket
+# model, so the count behind the blank exists without a statistics consumer.
+# Invocation shape: -bs 1 -oe -n 1 --debug-layout at width 200: the assertions
+# read single timeline cells located by the layout engine's own offsets.
+# Usage: run_unobserved_scenario <tag> <ltl-args...>
+run_unobserved_scenario() {
+    local tag="$1"; shift
+    current_scenario="$tag"
+    echo "[$current_scenario]"
+    local app="$REPO_DIR/tests/fixtures/gated-means-application.txt"
+    local acc="$REPO_DIR/tests/fixtures/gated-means-access.txt"
+    local r_app="$TMP_DIR/render-$tag-application.txt" r_acc="$TMP_DIR/render-$tag-access.txt"
+    # The debug-layout table prints on stderr; the column selector reads it
+    # from the capture, so the delimited block (and only it) is appended.
+    local r f
+    for r in app acc; do
+        if [[ $r == app ]]; then f="$r_app"; else f="$r_acc"; fi
+        capture_render "$f" "${!r}" -bs 1 -oe -n 1 --debug-layout --terminal-width 200 "$@" || return 0
+        sed -n '/^--- Layout Engine Debug/,/^---$/p' "$TMP_DIR/render.stderr" >> "$f"
+        if ! grep -q '^--- Layout Engine Debug' "$f"; then
+            echo "  FAIL  $current_scenario :: no debug-layout table on stderr for ${!r}" >&2
+            fail=$((fail + 1)); failures+=("$current_scenario :: missing debug-layout table"); return 0
+        fi
+    done
+
+    local blank_asserts='A time bucket in which no line carried the metric carries no total for it, so its total cell on the timeline is blank rather than a zero indistinguishable from a measured one.'
+    local zero_asserts='A time bucket whose lines carried the metric with the value zero shows the measured zero in its total cell.'
+    local produced='calculate_all_statistics() in ltl (the per-bucket projection gated on the observation count) and print_bar_graph() (the total cells)'
+    local contract='features/616-gated-mean-derivation.md D1 and D4 (every accumulator keeps its observation count unconditionally; a bucket with no observation of a metric carries no total and its cell is empty on the timeline)'
+
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:01 ' duration | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "application log: the bytes-only bucket's duration cell is blank" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:00 ' bytes | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "application log: the duration-only bucket's bytes cell is blank" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_app' '^ *2026-01-26 10:04 ' duration | tee /dev/stderr | grep -qE \"^text=' *0 [a-z]\"" \
+        label       "application log: the zero-duration bucket's duration cell shows the zero" \
+        asserts     "$zero_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:01 ' bytes | tee /dev/stderr | grep -qE \"^text=' *' \"" \
+        label       "access log: the bucket whose size is '-' has a blank bytes cell" \
+        asserts     "$blank_asserts" produced_by "$produced" contract "$contract"
+    assert_command \
+        command     "timeline_cell_report '$r_acc' '^ *2025-05-07 00:02 ' bytes | tee /dev/stderr | grep -qE \"^text=' *0 ?(B|bytes) \"" \
+        label       "access log: the zero-byte bucket's bytes cell shows a zero in bytes (0 B, 0B or 0 bytes, by the tier the column resolves)" \
+        asserts     "$zero_asserts" produced_by "$produced" contract "$contract"
+}
+
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 # The data-model/width matrix names one scenario per combination; the two
 # format-specific cases carry the names they already print.
 SCENARIO_USAGE_NOTE="  (data-model x width matrix, plus the absence and enhanced-format cases)"
 scenario_register dm-bin-w200 dm-bin-w120 dm-raw-w200 dm-raw-w120 \
-                  du-us-bin-w200 no-duration-w200 jboss-duration-w200
+                  du-us-bin-w200 no-duration-w200 jboss-duration-w200 \
+                  unobserved-blank-raw unobserved-blank-bin \
+                  unobserved-blank-hm-raw unobserved-blank-hm-bin
 scenario_parse_args "$@"
 
 echo "Validating duration-statistic display invariants (Issue #292)"
@@ -352,6 +414,18 @@ if scenario_wanted jboss-duration-w200; then
     run_jboss_duration_scenario
     echo ""
 fi
+
+# Unobserved metrics render blank, observed zeros render (#616).
+for model in raw bin; do
+    if scenario_wanted "unobserved-blank-$model"; then
+        run_unobserved_scenario "unobserved-blank-$model" -bdm "$model"
+        echo ""
+    fi
+    if scenario_wanted "unobserved-blank-hm-$model"; then
+        run_unobserved_scenario "unobserved-blank-hm-$model" -bdm "$model" -hm duration
+        echo ""
+    fi
+done
 
 echo "Results: $pass passed, $fail failed"
 if [[ "$fail" -gt 0 ]]; then

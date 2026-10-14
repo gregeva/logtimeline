@@ -199,3 +199,18 @@ CSV data row was assembled from only the *visible* `@column_layout` columns — 
 or heatmap-replaced metric column silently dropped its CSV value and misaligned the row. The
 proportional-metric CSV values are now emitted from `%log_stats` in `@output_columns` order,
 independent of render visibility; `_nice` columns use a stable width-independent format.
+
+## The running-mean update and the model's status (#616)
+
+The per-line update and the consolidation merge use one sub, `welford_update()`:
+a target with no observation adopts the source, a one-observation source takes
+the one-observation Welford-Pébay update, and a larger source the Chan-Pébay
+parallel combine, chosen on a measured comparison of four forms (byte-identical
+to the previous inline code, about 2.8 percent of a bin-model run on a day of
+access log). It reads the entry's `duration_count` and never writes it; the
+count is kept beside the total. The statistics are derived by the one
+`derive_moment_statistics()` shared with the raw model. The bin model is an
+officially supported model on both statistics stores, its parity with the raw
+model proved as each model unchanged against its own drift baseline
+(features/616-gated-mean-derivation.md D9, D12, D14, D28, D29).
+

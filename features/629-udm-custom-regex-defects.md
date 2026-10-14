@@ -1,5 +1,10 @@
 # #629 — Multiple defects when using a user-defined metric with a custom regex and capture group
 
+> **The run index is off by default** (2026-10-12, #708): `ltl-index.csv` is read and
+> written only under `-idx, --index`; `-ni` is accepted and has no effect
+> (`features/708-run-index-deprecation.md`). What this record says about the
+> index being written on every run describes the behaviour before that change.
+
 Umbrella record for #629. The report's four observations were investigated on
 release 0.18.5 (v0.18.4 plus the version stamp) and on release/0.19.0; every
 finding below behaves identically on both. Each defect has its own sub-issue
@@ -88,7 +93,7 @@ blocked by #637, #640 is blocked by #638. Start with #637.
 Next steps, per issue, following `docs/process/workflow.md`:
 
 1. Check out `release/0.18.5` and sync it; branch `{issue}-{short-description}`
-   from it; `./build/issue-status.sh set {issue} "in progress"`; set
+   from it; `./process/issue-status.sh set {issue} "in progress"`; set
    `$version_number` to `0.18.5-{issue}`.
 2. All three touch the read loop: capture the `before` benchmark on the base
    commit (`./tests/baseline/run-benchmark.sh single-day-access-log-standard --label {issue}-before`).

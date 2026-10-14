@@ -662,10 +662,10 @@ sub oracle_percentiles {
 # Parsers
 # =============================================================================
 
-# Tomcat access log regex — verbatim from prototype/96-fuzzy-consolidation.pl:228
+# Tomcat access log regex — verbatim from prototype/96-fuzzy-consolidation.pl:228 as of d0bc49a
 my $access_log_regex = qr/^(.+? ){3}[\[]([^\]]+)[\]] "([^"]+)" (\d{3}) (\d+|-)[ ]?([0-9.]+)?[ ]?(\S+)?[ ]?(\S+)?/;
 
-# ThingWorx ApplicationLog regex — verbatim from prototype/96:225 (kept for future use; durations come from access logs in V5/V2)
+# ThingWorx ApplicationLog regex — verbatim from prototype/96:225 as of d0bc49a (kept for future use; durations come from access logs in V5/V2)
 my $twx_regex = qr/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})[\+\-]\d{4} \[L: ([^\]]*)\] \[O: ([^\]]*)] \[I: ([^\]]*)] \[U: ([^\]]*)] \[S: ([^\]]*)] \[P: ([^\]]*)] \[T: ((?:\](?! )|[^\]])*)] (.*)/;
 
 # VERBATIM: prototype/189-bin-counter-primitives.pl parse_line (lines 113-165),
@@ -709,6 +709,9 @@ sub parse_access_line {
 
     # ThingWorx fallback (durations come from `durationMs=N` in the message body)
     if (my ($ts, $cat, $object, undef, undef, undef, undef, $thread, $message) = $line =~ $twx_regex) {
+        # Restated from ltl's read_and_process_logs as of 3483bbb; ltl now names these
+        # lengths MESSAGE_KEY_THREAD_LENGTH and MESSAGE_KEY_OBJECT_LENGTH and cuts
+        # every key at the per-run cut, $max_log_message_length (#619).
         my $truncated_thread = substr($thread, 0, 20);
         my $max_object_length = 25;
         my $truncated_object = substr($object, length($object) > $max_object_length ? length($object) - $max_object_length : 0, $max_object_length);

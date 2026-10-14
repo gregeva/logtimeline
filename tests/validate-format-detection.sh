@@ -43,7 +43,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -273,6 +273,30 @@ assert_variant_selection() {
         contract 'features/log-format-registry.md section Drop 1.5 I1 (evidence weights)'
 }
 
+# The selected member outscores its sibling on the candidates line, and the
+# sibling scores above zero: a date valid in one day/month order only is
+# weighed, never eliminating (I1 as amended 2026-10-10).
+assert_member_outscores() {
+    local out="$1" selected="$2" other="$3"
+    assert_command \
+        command     "perl -ne 'if (/^  candidates: (.*)/) { %s = map { split /=/ } split /,/, \$1; \$f = 1 } END { exit !(\$f && \$s{$selected} > \$s{$other} && \$s{$other} > 0) }' '$out'" \
+        label       "candidates: $selected outscores $other, which scores above zero" \
+        asserts     "The sample weighs dates valid in one day/month order only: $selected scores higher and $other stays live with a score above zero" \
+        produced_by 'select_format_variants() in ltl (order_line weight per sampled line)' \
+        contract    'features/log-format-registry.md section "#704: the day/month order accumulates evidence", acceptance criterion 5'
+}
+
+# Write a Connection Server log from runs of lines: <date>@<hour>x<count>,
+# one line per second from the hour, so every line carries a new timestamp
+# string and reaches the timestamp memo-miss branch once. Staged as app.log:
+# no name evidence, content alone decides.
+generate_connection_server_runs() {
+    local dir="$TMP_DIR/$current_scenario"
+    mkdir -p "$dir"
+    perl -e 'for (@ARGV) { my ($d, $h, $n) = /^(\S+)\@(\d+)x(\d+)$/ or die "bad run $_\n"; printf "%s %02d:%02d:%02d.000 [main] INFO  c.e.Foo - message\n", $d, $h + int($_ / 3600), int($_ / 60) % 60, $_ % 60 for 0 .. $n - 1 }' "$@" > "$dir/app.log"
+    echo "$dir/app.log"
+}
+
 # Helper: stage the first 300 lines of a corpus file under $TMP_DIR. The
 # corpus scenarios assert only which entry bound (slug + match_type), and
 # detection samples the file rather than scanning it, so a 300-line head
@@ -465,7 +489,7 @@ scenario_family_shapes() {
     # all-optional tail no longer exists to swallow a quoted "-" (R13).
     log=$(stage_fixture access-combined.txt access.log) || return
     out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
-    assert_absent "$out" pattern '^bucket: [0-9]+  sessions: ' \
+    assert_absent "$out" pattern '^bucket: [0-9]+ sessions=' \
         asserts 'a combined line yields no session: the quoted "-" of the user-agent position is never captured as one (R13)' \
         produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
     # A bare - session is absent, not a session, on the thread-session shape (R14).
@@ -473,7 +497,7 @@ scenario_family_shapes() {
     # A counting metric makes the section walk the buckets, where the sessions
     # oracle line is printed.
     out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
-    assert_line "$out" pattern '^bucket: [0-9]+  sessions: 2  sessions_hl: 0$' \
+    assert_line "$out" pattern '^bucket: [0-9]+ sessions=2 sessions_hl=0$' \
         asserts 'six lines carry a session id over two distinct values and six carry a bare -, which is absent: the sessions count is 2 (R14)' \
         produced_by 'read_and_process_logs() session accumulation in ltl (skips empty and -)' contract "$FAMILY_CONTRACT D14"
     # A bare - thread is absent from the message (R14); a literal null is the
@@ -553,25 +577,44 @@ scenario_family_bracketed_unit() {
         label 'bracketed [Nus] durations read as microseconds: bucket duration sum 258 ms' \
         asserts 'the first bracketed token is the duration and its unit is the one written on the line (us here), converted to milliseconds before any statistic' \
         produced_by 'the duration_from_unit_token transform in the access_common_duration_bracketed entry in ltl' contract "$FAMILY_CONTRACT D7"
+
+    # The format names the unit on each line (duration_unit 'line'), so -du is
+    # not applied to it: the sum stays 258 ms, not 0.258, and one notice says
+    # so for the two files read.
+    local dir2="$TMP_DIR/$current_scenario-du"; mkdir -p "$dir2"
+    cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/one.txt"; cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/two.txt"
+    ( cd "$dir2" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o -du us one.txt two.txt > out 2> out.stderr ) || true
+    check_capture_warnings "$dir2/out"
+    local csv2; csv2=$(ls "$dir2"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
+    assert_command \
+        command "[ -n '$csv2' ] && col=\$(head -1 '$csv2' | tr ',' '\n' | grep -nx duration | cut -d: -f1) && [ \"\$(awk -F, -v c=\"\$col\" 'NR==2{print \$c}' '$csv2')\" = 516 ]" \
+        label '-du us leaves [Nus] durations as the line wrote them: duration sum 516 ms over two copies' \
+        asserts 'a format whose lines name their own duration unit declares line, and -du is not applied on top of the unit each line names' \
+        produced_by 'read_and_process_logs() in ltl (the -du branch skips an entry declaring line)' contract 'features/605-input-units.md D30'
+    assert_command \
+        command "[ \"\$(grep -c -- '^Note: -du us is not applied to one.txt, two.txt: their format names the duration unit on each line (access_common_duration_bracketed)\$' '$dir2/out.stderr')\" = 1 ] && [ \"\$(grep -c -- '-du us is not applied' '$dir2/out.stderr')\" = 1 ]" \
+        label 'one notice names every file -du is not applied to' \
+        asserts 'the notice that -du is not applied to a format naming its unit per line is printed once per run, naming each file, never per line or per file' \
+        produced_by 'defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D30 and D31'
 }
 
-scenario_family_ambiguity_note_per_file() {
-    current_scenario="ambiguity-note-per-file"
+scenario_family_ambiguity_note_once() {
+    current_scenario="ambiguity-note-once"
     echo "[$current_scenario]"
     # Two files of the connection-server group with no name evidence and no
     # deciding content (a day-3 date eliminates neither member) both fall to
-    # the group default: the note prints twice, each naming its file
-    # and the alternative member (R15/D15).
+    # the group default: one note for the run names both files and the
+    # alternative member (#605 D31, superseding the once-per-file rule of D15).
     local a b out
     local dir="$TMP_DIR/$current_scenario"; mkdir -p "$dir"
     a="$dir/one.txt"; b="$dir/two.txt"
     sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
     out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
     assert_command \
-        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 2 ] && grep -q 'one.txt: the detected' '$out.stderr' && grep -q 'two.txt: the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
-        label 'the ambiguity note prints once per file that fell to a default, naming the file and the alternative' \
-        asserts 'a two-file run where both files fall to the group default prints the note twice, each naming its file and every other member (R15/D15)' \
-        produced_by 'format_variant_ambiguity_note() in ltl (per-file latch)' contract "$FAMILY_CONTRACT D15"
+        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 1 ] && grep -qE '(one\.txt, [^:]*two\.txt|two\.txt, [^:]*one\.txt): the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
+        label 'the ambiguity note prints once per run, naming every file that fell to a default and the alternative' \
+        asserts 'a two-file run where both files fall to the group default prints the note once, naming both files and every other member' \
+        produced_by 'format_variant_ambiguity_note() and defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D31 (superseding the once-per-file rule of features/444-access-log-format-family-and-user-surface.md D15)'
 }
 
 scenario_codebeamer() {
@@ -1995,15 +2038,12 @@ scenario_variant_connection_server() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" connection_server_standard mt10 evidence '1\.00'
+    assert_variant_selection "$out" connection_server_standard mt10 evidence '0\.93'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
         asserts 'cxserver.1.log decomposes to the Connection Server stem, the declared extension and a rotation index (D45/I4)' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^  candidates: mt10=[0-9.]+,mt10ir=0\.00$' \
-        asserts 'The Integration Runtime member is eliminated: day tokens > 12 are impossible under yyyy-dd-MM (D52 probe a)' \
-        produced_by 'format_sample_probes() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    assert_member_outscores "$out" mt10 mt10ir
 }
 
 # Neither member of the connection_server group reads a duration from, or
@@ -2013,16 +2053,16 @@ scenario_variant_connection_server() {
 scenario_milliseconds_not_read() {
     current_scenario="milliseconds-not-read"
     echo "[$current_scenario]"
-    local log out member slug fixture staged
+    local log out member slug fixture staged confidence
     for member in mt10ir mt10; do
         if [[ "$member" == mt10ir ]]; then
-            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt
+            slug=integration_runtime_standard; fixture=milliseconds-integration-runtime.txt; staged=milliseconds-ir.txt; confidence='0\.58'
         else
-            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt
+            slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt; confidence='0\.75'
         fi
         log=$(stage_fixture "$fixture" "$staged") || return
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
-        assert_variant_selection "$out" "$slug" "$member" evidence '1\.00'
+        assert_variant_selection "$out" "$slug" "$member" evidence "$confidence"
         assert_line "$out" pattern '^  matched_lines: 8$' \
             asserts "Every line of the $slug fixture is recognised" \
             produced_by 'emit_format_detection_verbose() in ltl (per-file matched_lines field)' \
@@ -2039,7 +2079,8 @@ scenario_variant_integration_runtime_named() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.82'
+    assert_member_outscores "$out" mt10ir mt10
     assert_line "$out" pattern '^  filename_evidence: stem=mt10ir ext=match date=- index=-$' \
         asserts 'The IntegrationRuntime-<uuid>.log name matches the Integration Runtime stem' \
         produced_by 'format_filename_evidence() in ltl' \
@@ -2059,15 +2100,70 @@ scenario_variant_integration_runtime_unnamed() {
     echo "[$current_scenario]"
     local log; log=$(stage_fixture integration-runtime.txt app.log) || return
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
-    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '1\.00'
+    assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.78'
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'app.log carries no name evidence for any entry' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_line "$out" pattern '^  candidates: mt10=0\.00,mt10ir=[0-9.]+$' \
-        asserts 'With no name evidence the sample alone decides: the default is eliminated by impossible months under yyyy-MM-dd (F6)' \
-        produced_by 'format_sample_probes() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 F6'
+    assert_member_outscores "$out" mt10ir mt10
+}
+
+# The day/month order a file is read in (acceptance criteria 1 to 4 of the
+# #704 record): each scenario generates Connection Server lines staged as
+# app.log. `-bs 1440 -oe`: detection assertions only. The files are about
+# 46 KB, so a line past the 150th and before the 420th sits outside every
+# sampled part.
+DATE_ORDER_CONTRACT='features/log-format-registry.md section "#704: the day/month order accumulates evidence", D72'
+assert_date_order() {
+    local out="$1" criterion="$2" selected="$3" flips="$4" impossible="$5" why="$6"
+    assert_line "$out" pattern "^  selected: $selected\$" \
+        asserts "$why: the file ends read by $selected" \
+        produced_by 'format_probe_signal() in ltl (the day/month bucket)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+    assert_line "$out" pattern "^  flips: $flips\$" \
+        asserts "$why: the order switches $flips time(s)" \
+        produced_by 'format_probe_signal() in ltl (the day/month bucket)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+    assert_line "$out" pattern "^  impossible_date_lines: $impossible\$" \
+        asserts "$why: the lines valid only in the order not being read, below the threshold, are left out and counted (D71)" \
+        produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion $criterion"
+}
+
+scenario_date_order_one_sampled_line() {
+    current_scenario="date-order-one-sampled-line"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-13-05@9x1 2024-04-05@10x300)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 1 mt10 0 1 'One sampled line valid only day first, every other line valid either way'
+    assert_line "$out.stderr" pattern '^Note: 1 of 301 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout' \
+        asserts 'The left-out line is reported in the run'"'"'s impossible-date note, which names the other order'"'"'s -lf' \
+        produced_by 'the impossible-date note in ltl (timestamp_impossible_lines)' \
+        contract "$DATE_ORDER_CONTRACT; acceptance criterion 1; features/611-timestamp-acceptance.md C4"
+}
+
+scenario_date_order_one_read_line() {
+    current_scenario="date-order-one-read-line"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x220 2024-25-04@10x1 2024-04-05@11x620)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 2 mt10 0 1 'One unsampled line valid only day first'
+}
+
+scenario_date_order_enough_lines() {
+    current_scenario="date-order-enough-lines"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-05@11x600)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 3 mt10ir 1 '([1-9]|[1-3][0-9])' '40 consecutive unsampled lines valid only day first'
+}
+
+scenario_date_order_moves_back() {
+    current_scenario="date-order-moves-back"
+    echo "[$current_scenario]"
+    local log; log=$(generate_connection_server_runs 2024-04-05@9x200 2024-25-04@10x40 2024-04-20@11x40 2024-04-05@12x600)
+    local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
+    assert_date_order "$out" 4 mt10 2 '([1-9]|[1-7][0-9])' '40 unsampled lines valid only day first, then 40 valid only month first'
 }
 
 scenario_unit_tomcat_named() {
@@ -2356,6 +2452,21 @@ scenario_wgm_filename_family() {
         contract 'features/395-wgm-client-log-format.md section D55 (filename family)'
 }
 
+scenario_impossible_date() {
+    current_scenario="impossible-date"
+    echo "[$current_scenario]"
+    local fx="$REPO_DIR/tests/fixtures"
+    local f name expect out
+    for f in application:2 access:1 connector:1; do
+        name=${f%%:*}; expect=${f#*:}
+        out=$(run_format_detection "$fx/impossible-date-$name.txt"); check_capture_warnings "$out"
+        assert_line "$out" pattern "^  impossible_date_lines: $expect\$" \
+            asserts "The file counts its own lines not matched because their date cannot exist ($expect in impossible-date-$name.txt)" \
+            produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+            contract 'features/611-timestamp-acceptance.md C4, AC1, AC2'
+    done
+}
+
 scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
@@ -2377,10 +2488,18 @@ scenario_format_pin() {
         asserts 'The scan is restricted to the entries carrying the pinned name' \
         produced_by 'apply_format_pin() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 N9'
-    assert_line "$out.stderr" pattern "^Note: .*line [0-9]+: timestamp '[0-9 :-]+' has an impossible date component under the connection_server_standard format's date layout; such lines are kept at the previous line's time - use -lf to pin the correct log format\$" \
-        asserts 'An impossible date under the pinned layout is reported once per file (D52/#385) and never crashes' \
-        produced_by 'format_probe_signal() in ltl' \
-        contract 'features/log-format-registry.md section Drop 1.5 D52'
+    assert_line "$out" pattern '^  impossible_date_lines: 86$' \
+        asserts 'Under the pin to the other date layout, the 86 records whose day token exceeds 12 have a month out of range: each is not matched and counted, and the run continues' \
+        produced_by 'the impossible-date branch format_timestamp_src() emits; emit_format_detection_verbose() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C3, C4, AC3'
+    assert_line "$out" pattern '^  matched_lines: 38$' \
+        asserts 'Only the 38 records whose date exists under the pinned layout are matched; no record is kept at the previous line time' \
+        produced_by 'read_and_process_logs() in ltl' \
+        contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md AC3'
+    assert_line "$out.stderr" pattern "^Note: 86 of 124 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout - if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
+        asserts 'The run is told once, with the count and the other member of the date-layout group to pin, never per file or per line' \
+        produced_by 'defer_timestamp_impossible_notes() in ltl' \
+        contract 'features/611-timestamp-acceptance.md C5, AC3'
     local out2; out2=$(run_format_detection "$log" -lf thingworx_standard); check_capture_warnings "$out2"
     assert_line "$out2" pattern '^entries: 2$' \
         asserts 'A name carried by two registry entries pins both (N9)' \
@@ -2655,6 +2774,119 @@ echo "Validating format-detection -V section (issue #228)"
 echo "  ltl:       $LTL"
 echo ""
 
+# ---------------------------------------------------------------------------
+# Scenario: byte-notation — the run-level byte_notation key names the run's
+# notation and what decided it (-bn, the formats that declare it, the SI
+# default, or a mix of declarations), and the per-file key names the
+# declaration of the file's format (features/608-byte-unit-ladder.md,
+# criteria 8 to 10, the -V format-detection half).
+# ---------------------------------------------------------------------------
+BYTE_NOTATION_CONTRACT='features/608-byte-unit-ladder.md D7, D12, D13, D17, D20 and section 5.5 (-V surface); features/log-format-registry.md -V format-detection section contract - additions are non-breaking'
+
+# run_byte_notation TAG ARGS... — the section for a run over several files
+# (run_format_detection takes one); same invocation shape.
+run_byte_notation() {
+    local tag="$1"; shift
+    local outfile="$TMP_DIR/byte-notation-$tag.out"
+    set +e
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection "$@" > "$outfile" 2>"$outfile.stderr"
+    local ec=$?
+    set -e
+    if [[ "$ec" -ne 0 ]] || ! grep -qE '^=== format-detection ===$' "$outfile"; then
+        echo "FAIL: ltl exited $ec or printed no format-detection section for byte-notation/$tag" >&2
+        sed 's/^/    /' "$outfile.stderr" >&2
+        exit 1
+    fi
+    echo "$outfile"
+}
+
+scenario_byte_notation() {
+    current_scenario="byte-notation"
+    echo "[$current_scenario]"
+    local boundary="$REPO_DIR/tests/fixtures/byte-boundary.txt"
+    local gc="$REPO_DIR/tests/fixtures/gc-g1-categories.txt"
+    local plain="$TMP_DIR/byte-notation-plain.txt"
+    printf 'first line of plain text\nsecond line of plain text\n' > "$plain"
+    local out
+
+    out=$(run_byte_notation default "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(default\)$' \
+        asserts     'A run whose formats declare no notation, with no -bn, renders SI by default' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: -$' \
+        asserts     'An access-log file declares no byte notation' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file, from the bound entry FR_BYTE_NOTATION)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation option -bn IEC "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(-bn\)$' \
+        asserts     '-bn in any case sets the notation and is named as its source' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation declared "$gc")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(format java_gc_g1\)$' \
+        asserts     'A run of GC logs alone takes the notation the GC format declares, and names the format' \
+        produced_by 'resolve_byte_notation() + emit_format_detection_verbose() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: iec$' \
+        asserts     'The GC file reports its format declaration, IEC' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation declared-overridden -bn si "$gc")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(-bn\)$' \
+        asserts     '-bn overrides the format declaration' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  byte_notation: iec$' \
+        asserts     'The per-file key reports the declaration even when -bn decides the run' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation mixed "$gc" "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(mixed\)$' \
+        asserts     'Files whose formats declare different notations render SI, and the source says the declarations were mixed' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+    assert_command \
+        command     "[ \"\$(grep -E '^  byte_notation: ' '$out' | tr -d ' ' | tr '\n' ,)\" = 'byte_notation:iec,byte_notation:-,' ]" \
+        label       'the mixed run reports iec for the GC file and - for the access log, in input order' \
+        asserts     'Each file reports its own format declaration' \
+        produced_by 'emit_format_detection_verbose() in ltl (per-file)' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation mixed-option -bn iec "$gc" "$boundary")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: iec \(-bn\)$' \
+        asserts     'With -bn given, the option decides a mixed run' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+
+    out=$(run_byte_notation unrecognised "$gc" "$plain")
+    check_capture_warnings "$out"
+    assert_line "$out" \
+        pattern     '^byte_notation: si \(mixed\)$' \
+        asserts     'A file no format recognised declares nothing, so a GC log beside it does not decide the run' \
+        produced_by 'resolve_byte_notation() in ltl' \
+        contract    "$BYTE_NOTATION_CONTRACT"
+}
+
 scenario_register tomcat9-ms \
                   tomcat-common \
                   jboss-enhanced \
@@ -2664,7 +2896,7 @@ scenario_register tomcat9-ms \
                   family-fields-evidence \
                   family-pin-names \
                   family-bracketed-unit \
-                  ambiguity-note-per-file \
+                  ambiguity-note-once \
                   thingworx-standard \
                   thingworx-with-metrics \
                   tw-edge-c-sdk \
@@ -2701,6 +2933,10 @@ scenario_register tomcat9-ms \
                   milliseconds-not-read \
                   variant-integration-runtime-named \
                   variant-integration-runtime-unnamed \
+                  date-order-one-sampled-line \
+                  date-order-one-read-line \
+                  date-order-enough-lines \
+                  date-order-moves-back \
                   unit-tomcat-named \
                   unit-httpd-named \
                   variant-thingworx-rolled \
@@ -2714,6 +2950,8 @@ scenario_register tomcat9-ms \
                   wgm-client-localtime \
                   unregistered-levels-per-file \
                   format-pin \
+                  impossible-date \
+                  byte-notation \
                   apache-mod-jk \
                   apache-mod-jk-microseconds \
                   apache-mod-jk-seconds \
@@ -2736,7 +2974,7 @@ while read -r _scenario; do
         family-fields-evidence                 ) scenario_family_fields_evidence ;;
         family-pin-names                       ) scenario_family_pin_names ;;
         family-bracketed-unit                  ) scenario_family_bracketed_unit ;;
-        ambiguity-note-per-file                ) scenario_family_ambiguity_note_per_file ;;
+        ambiguity-note-once                    ) scenario_family_ambiguity_note_once ;;
         thingworx-standard                     ) scenario_thingworx_standard ;;
         thingworx-with-metrics                 ) scenario_thingworx_with_metrics ;;
         tw-edge-c-sdk                          ) scenario_tw_edge_c_sdk ;;
@@ -2773,6 +3011,10 @@ while read -r _scenario; do
         milliseconds-not-read                  ) scenario_milliseconds_not_read ;;
         variant-integration-runtime-named      ) scenario_variant_integration_runtime_named ;;
         variant-integration-runtime-unnamed    ) scenario_variant_integration_runtime_unnamed ;;
+        date-order-one-sampled-line            ) scenario_date_order_one_sampled_line ;;
+        date-order-one-read-line               ) scenario_date_order_one_read_line ;;
+        date-order-enough-lines                ) scenario_date_order_enough_lines ;;
+        date-order-moves-back                  ) scenario_date_order_moves_back ;;
         unit-tomcat-named                      ) scenario_unit_tomcat_named ;;
         unit-httpd-named                       ) scenario_unit_httpd_named ;;
         variant-thingworx-rolled               ) scenario_variant_thingworx_rolled ;;
@@ -2786,6 +3028,8 @@ while read -r _scenario; do
         wgm-client-localtime                   ) scenario_wgm_client_localtime ;;
         unregistered-levels-per-file           ) scenario_unregistered_levels_per_file ;;
         format-pin                             ) scenario_format_pin ;;
+        impossible-date                        ) scenario_impossible_date ;;
+        byte-notation                          ) scenario_byte_notation ;;
         apache-mod-jk                          ) scenario_apache_mod_jk ;;
         apache-mod-jk-microseconds             ) scenario_apache_mod_jk_microseconds ;;
         apache-mod-jk-seconds                  ) scenario_apache_mod_jk_seconds ;;

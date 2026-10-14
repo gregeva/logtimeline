@@ -27,7 +27,7 @@ about anything else, these still hold.
    hand-forwards go into the owning `features/*.md` first; the issue comment
    points at it. A decision recorded only on a closed PR is invisible.
 5. **The completion gate runs before the PR, whole and on this machine.** The
-   full harness suite plus a before/after benchmark, per the scope table in
+   `after` benchmark first, then the full harness suite, per the scope table in
    `docs/process/workflow.md` § 3. Not a subset, not against a released baseline,
    not after the merge.
 6. **Capture once, inspect the file.** Any output looked at more than once is
@@ -37,19 +37,36 @@ about anything else, these still hold.
 
 - **The way is found on the path.** Small steps, one idea or change at a time,
   confirmation before the next. Do not solve everything up front.
+- **Work in parallel, so neither of us holds the other up.** When a change
+  alters what the architect is reviewing, first put what needs review in front
+  of the architect, with whatever it takes to reach it, then run the
+  validation (harnesses, golden captures, benchmarks) in the background and
+  report when it lands. Validation still completes before anything is
+  committed; it is the waiting that goes, not the check.
 - **Challenge and contribute.** Question assumptions; push back when something
   seems wrong; say "I have not read X yet" rather than frame from a guess.
+  A locked decision that measurement shows costing or blocking is brought back
+  with the evidence and a recommendation, never worked around or silently
+  accepted, whoever worded it.
 - **When stuck, ask.** A technical snag (precision, a toolchain trap, an
   unexpected result) gets one question, not a run of failed attempts; the
   architect often has the answer.
 - **Ask when the readings diverge; execute when the process is settled.** A
   step inside a named workflow (`docs/process/*.md`) runs without asking, as
   part of the step that causes it. Anything outside a named workflow waits for
-  direction. Starting new work always waits.
+  direction. Starting new work always waits. Once an issue's work has started,
+  the drops of its agreed delivery plan, then its completion gate, PR, merge
+  and close-out, run in sequence without asking between them; the run stops
+  only for a decision that is the architect's, a failure, or a finding.
 - **No unsolicited implementation.** No production code, no "here is what it
   would look like", until asked.
 - **Short and plain.** Lead with the outcome. Plain words over internal jargon.
   Bookkeeping gets one line. A reply that is running long stops and asks.
+- **Show the situation before discussing it.** A problem that spans several
+  stores, phases, paths or options is drawn first (swim lane, flow, matrix),
+  and every guideline and decision is then placed on the picture. Shorthand
+  prose is not a substitute, and a fix scoped from one routine is checked
+  against the whole picture before it is proposed.
 - **The one licensed long message** is the findings report after measured
   work: what was built, correctness proof, measured tables (medians with
   ranges), attribution of the mechanism, ceiling analysis of alternatives, and
@@ -73,13 +90,16 @@ about anything else, these still hold.
 ### At session start, or whenever context begins mid-stream
 
 - [ ] Reconstruct outstanding state before anything else: `gh pr list --state open`,
-      `git branch -a --no-merged main`, `./build/issue-status.sh list`, uncommitted
+      `git branch -a --no-merged main`, `./process/issue-status.sh list`, uncommitted
       or unpushed work in every worktree. Everything found is potentially this
       session's.
 - [ ] Any issue still labelled `status: in review` whose PR reports `MERGED` is
       a close-out that did not finish: complete § 4 for it before new work.
       `git branch --no-merged` answers by commit identity, so cross it against
       the issue's state rather than reading it as work outstanding.
+- [ ] The converse is normal: a branch merged into the release while its issue
+      stays `in progress` has usually merged its specification before
+      implementation. Read what the merge carried before calling it a finding.
 - [ ] The open release branch is the base: new work, reads and comparisons start
       from `release/X.Y.Z`, never from main, which trails it until the release
       merges. Main behind a *tagged* release branch is the finding: report it
@@ -97,12 +117,20 @@ about anything else, these still hold.
       same sentence, or is rewritten to name the thing.
 - [ ] First sentence is the verdict and its scope: caused by this work,
       pre-existing, or environmental. Evidence follows.
-- [ ] A decision being asked for is stated in what it means: what the tool will
-      do, will not do, and the consequence. The sentence stands without its IDs.
+- [ ] A decision being asked for is presented, never just requested: the
+      situation in a concise explanation; a diagram or flowchart of the code
+      path or flow concerned, named by its sub, and a table of the options;
+      the architectural constraints and trade-offs; each option precise about
+      what the tool will do, will not do, and the consequence. The sentence
+      stands without its IDs.
 - [ ] Nothing the architect has not read is narrated in order to be argued
       against. No retracted framings, no self-orienting context.
 - [ ] One question at a time. A clarification gets a short explanation plus a
       small table, not a discourse.
+- [ ] Only a real choice goes to the architect: two or more viable options, or
+      a tension not already settled by the records. A step with one sensible
+      option is recorded and taken, never put up for sign-off, and a walkthrough
+      does not pause on it.
 - [ ] A decision that needs the architect's lock is asked as a direct question
       in the same message ("Do you lock D33: <what it means>?"), never written
       into a record as "awaiting lock" or parked as an open question in a feature doc.
@@ -113,19 +141,43 @@ about anything else, these still hold.
 - [ ] A waiver question lists every decision that depends on the step being waived.
 - [ ] A claim about tool output was read from the tool's output, not derived
       from its inputs.
+- [ ] A claim about a structure's size or cost comes from a measurement: the
+      `-mem` high-water marks in the at-scale benchmark records
+      (`tests/baseline/results/*.tsv`) or a run made for it, never from code reading.
 
 ### Before planning, scoping, or stating a design view
 
 - [ ] Name the surfaces the work touches, the feature docs and research that own
       them, and the locked decisions that govern them. Read them. Then speak.
+- [ ] The owning records are found by search (`./process/find-records.sh
+      --issues <terms>`), not taken from the issue's links:
+      every option (short and long form), sub and user-visible message the work
+      touches is searched across `features/`, `docs/`, `releases/` and the issue
+      bodies (a surface with no option, such as file arguments, by the subs and
+      messages that implement it), and each
+      record found is read or dismissed in the feature doc with its reason.
 - [ ] Read every feature file and doc the issue references; investigation
-      findings live there, not in the thread.
+      findings live there, not in the thread. An audit, an issue body or another
+      record's restatement points at a record; it is never the record.
+- [ ] A divergence is a finding only when it quotes the primary record line that
+      defines the expected behaviour, after a search for a record that makes the
+      behaviour deliberate. Without one it is an observation, raised as a
+      question, never stated as a correction or a defect.
+- [ ] The first message on a new issue states each touched surface's contract,
+      with the record line behind it, for the architect to confirm. Gaps,
+      findings and questions follow his confirmation.
 - [ ] Verify every sub name, path and artifact the issue cites exists; note
       corrections on the issue. Audit the current code the plan touches.
 - [ ] Lead with the motivating consumer: what this is *for* precedes what it does.
 - [ ] Acceptance criteria are derived from the requirements and agreed in the
       feature doc before code (`docs/test-driven-development.md`). An "unknown"
       verification method is prototyping scope, proposed with its cost.
+- [ ] A criterion is only as strong as its validation. One that states an
+      invariant ("the store does not grow", "every output unchanged") is
+      validated on every path that reads or writes what it names, enumerated
+      from the code when the criterion is written and listed beside it; one
+      option never stands for its family. The before/after benchmark adds each
+      benchmark test that reaches the changed code to the standard case.
 - [ ] Hot-path work always gets a before/after benchmark. A prototype
       (`prototype/README.md`) is for a new or changed data model, a new code
       path or capability in the hot path, high frequency × cost, or an unknown
@@ -170,6 +222,9 @@ about anything else, these still hold.
       artifact: no `rm`, `mv`, `git clean`, `git checkout -- .`, truncating
       redirect. `./tests/cleanup-test-artifacts.sh` is the only cleanup. A corpus
       that looks missing is a finding to report, never a state to repair.
+      The exception is Claude's own leftovers: output files an `ltl` run made
+      while testing (CSVs, the aggregate export, the run index) are deleted
+      without asking, never offered to the architect as a question.
 - [ ] Subagents and workflow agents run Opus 5 at medium effort, set explicitly
       on every call.
 - [ ] A step that publishes (a tag push, a release, a PR) is its own command,
@@ -223,6 +278,9 @@ about anything else, these still hold.
 - [ ] Grep for the domain nouns first. One resolution surface per vocabulary:
       parsing, matching, validation and formatting of a value class call the
       existing sub. Near-duplicates found on the way are converged in the same change.
+- [ ] Consult `docs/architecture-patterns.md` for a pattern that fits before
+      building. A change that adds a consumption site of a pattern, or
+      introduces a new one, records it there in the same commit.
 - [ ] Every accumulator tracks an observation count; derived output is gated on
       `count > 0`, never on `defined` over a zero-initialised field.
 - [ ] Any ` at <file> line <N>` on `ltl`'s stderr is a bug. Every harness that
@@ -240,6 +298,17 @@ about anything else, these still hold.
       same commit, and execute each affected harness to see it assert.
 - [ ] A visual surface is verified by looking at rendered output on real data.
 
+### After each change, before committing it
+
+- [ ] Run `ltl` on inputs chosen by critical thinking to exercise the change:
+      the case it fixes, the cases around it, the inputs it could break. Run
+      the code before the change (`git show <base>:ltl`) on the same inputs,
+      capture both with `-V`, and read the difference. Harnesses guard against
+      regressions later; they are not how a change is proven while it is written.
+- [ ] A drop, a fix or a decision's change is committed and pushed on the
+      issue branch as soon as these runs show it behaves as intended. It is
+      never held back for the completion gate, and the gate is never the test.
+
 ### Before deviating from an instruction, a locked decision, or a written process
 
 - [ ] Did the architect name the mechanism? Then it is the decision; use it or ask.
@@ -255,8 +324,8 @@ about anything else, these still hold.
 
 ### Before opening a PR
 
-- [ ] Scope test applied to the diff (`docs/process/workflow.md` § 3): full suite
-      and before/after benchmark, or a recorded skip.
+- [ ] Scope test applied to the diff (`docs/process/workflow.md` § 3): the `after`
+      benchmark, then the full suite, or a recorded skip.
 - [ ] `$version_number` restored to `X.Y.Z` before the gate ran.
 - [ ] The gate ran on the commit being merged; an amend re-runs it.
 - [ ] `--help` and `docs/usage.md` agree (`tests/validate-help-content.sh`).
@@ -301,18 +370,20 @@ about anything else, these still hold.
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
-| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `build/screenshots.yaml`, generated, never captured or edited by hand) |
+| Creating or changing a documentation screenshot | `docs/process/screenshots.md` (every screenshot is an entry in `process/screenshots.yaml`, generated, never captured or edited by hand) |
+| Building on, or adding to, a recurring mechanism (a registry, a gate, a generated sub, the layout, a notice) | `docs/architecture-patterns.md` |
 | Format detection, extraction, classification | `features/log-format-registry.md` (system of record), `features/453-success-failure-classification-event-ledger.md` |
 | Column rendering | `features/column-layout-refactor.md` |
 | Heatmap and histogram | `features/heatmap.md`, `features/histogram-charts.md`, `docs/explain/` |
 | Bin-counter substrate and precision tiers | `features/189-histogram-bin-counter-primitives.md`, `features/293-precision-lever-unification.md` |
 | Performance work and profiling | `docs/perl-performance-optimization.md`, `features/nytprof-profiling-workflow.md`, `tests/baseline/README.md` |
 | Regex ordering and patterns | `docs/regex-best-practices.md` |
-| What is enforced automatically, and how | `.claude/rules/`, `build/claude-hooks/` |
+| What is enforced automatically, and how | `.claude/rules/`, `process/claude-hooks/` |
+| Tools of the development process (issue status, hooks, record finder, wiki sync, screenshots, root check) | `process/`; `build/` holds only building and packaging the binary |
 
 ## Repository hygiene
 
-Public repository. `./build/setup-hooks.sh` activates the tracked pre-commit
+Public repository. `./process/setup-hooks.sh` activates the tracked pre-commit
 guard at `.githooks/pre-commit`, which blocks staging anything under `.claude/`
 except the two shared, reviewed files named below, plus `.env*`, key and
 credential files, and common token patterns; `.gitignore` is the primary
@@ -325,13 +396,15 @@ rules in this file are enforced rather than advised:
   `paths` is read or edited (harnesses, `ltl`, user docs, feature docs,
   prototypes, release notes, benchmark tooling).
 - `.claude/settings.json`: hooks. At session start, resume, clear and compaction
-  `build/claude-hooks/session-start.sh` prints the outstanding-state sweep into
-  context. Before every Bash call `build/claude-hooks/guard-bash.sh` blocks
+  `process/claude-hooks/session-start.sh` prints the outstanding-state sweep into
+  context. Before every Bash call `process/claude-hooks/guard-bash.sh` blocks
   destructive operations against `logs/`, `ltl` without `--disable-progress`,
   `git merge`, pushes to main, `--delete-branch`, and model-versioned commit
   trailers, and asks before release-only benchmark tiers or `--no-verify`.
-  Before every file write `build/claude-hooks/guard-write.sh` blocks writes
-  under `logs/`, to released baseline TSVs, and of problem reports into the repo.
+  Before every file write `process/claude-hooks/guard-write.sh` blocks writes
+  under `logs/`, to released baseline TSVs, and of problem reports into the repo,
+  and a feature doc write that cites a `features/` or `docs/` record the
+  session's transcript shows no read of.
 
 A rule that a hook can check belongs in a hook; a rule that needs judgement
 belongs in a checkpoint. `.claude/settings.local.json` stays machine-local and
@@ -356,9 +429,9 @@ consolidation, success/failure classification.
 Key options: `-n N`, `-b N` (bucket minutes), `-o` (CSV), `-ni` (no index),
 `-dmin/-dmax`, `-include/-exclude`, `-ipf/-epf/-hpf` (pattern files under
 `patterns/`: `metrics`, `navigate-app-calls`, `probes`, `thingworx`), `-du`,
-`-hm`, `-hg`, `-ms`, `-st/-et`, `-hses`, `-g N`, `--help`.
+`-hm`, `-hg`, `-ms`, `-st/-et`, `-hses`, `-g N`, `-D` (standard read path), `--help`.
 Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
-`--validate-layout`, `--detection-window=N`.
+`--validate-layout`, `--detection-window=N`, `--generated-loop-threshold=N`.
 
 ### Build
 
@@ -380,9 +453,9 @@ export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnes
 perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                   # its scenario names
 ./tests/validate-<name>.sh --scenario <name>        # one scenario while iterating
-# Full suite (completion gate only): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
-./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after
+./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after, first in the gate
 ./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
+# Full suite (completion gate only, after the benchmark): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest
 ./tests/cleanup-test-artifacts.sh                   # the only sanctioned cleanup
 ```
 
@@ -410,6 +483,13 @@ spec, never hot-loop code. Records: `features/log-format-registry.md`,
 `features/453-success-failure-classification-event-ledger.md`; user surfaces
 `--help formats`, `--explain classification`.
 
+**Read path** (marker `## GENERATED READ LOOP`): a file above 2 MB is read by a
+body generated per run from the per-line loop's own text, its `#@` gate
+markers resolved once and compiled per file; at or below it, and under `-D`,
+by the loop itself, which stays the one source and the reference. A gate added
+to the loop gets its marker. Record: `features/621-generated-read-loop-body.md`;
+user surface `-D`, `-V read-path`.
+
 **Key structures:** `@format_registry` / `@format_scan_order` /
 `$format_scan_sub`; `%log_occurrences` (tallies per bucket); `%log_analysis`
 (bucket statistics); `%log_messages`; `%log_stats`; `%heatmap_data`;
@@ -430,7 +510,7 @@ bucket boundaries, gradients yellow/green/cyan by metric.
 An observation from a session is recorded by editing the checkpoint or
 principle it belongs to, in one or two lines, in the section where the check is
 performed; a rule that can be checked mechanically goes into a hook under
-`build/claude-hooks/` or a path-scoped rule under `.claude/rules/` instead. Incident narratives, dates, issue numbers and severity markers do
+`process/claude-hooks/` or a path-scoped rule under `.claude/rules/` instead. Incident narratives, dates, issue numbers and severity markers do
 not go here; the commit message that makes the edit carries the incident.
 After each release, the checkpoints are reviewed against what actually went
 wrong, and anything that never fired is removed.

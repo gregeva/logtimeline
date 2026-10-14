@@ -30,6 +30,10 @@ when filed:
 
 The label drives release-notes classification (`What's New` vs `Bug Fixes`).
 
+A defect in code not yet released is not a new issue: the issue that introduced
+it is reopened (`in progress`), the finding goes into its feature doc, and the
+fix is delivered on that issue.
+
 ## Filing a requirement
 
 When the architect asks for an enhancement request or bug report to be filed,
@@ -86,6 +90,12 @@ The **`not planned` label** marks an *open* issue retained as a decision or
 spec record (e.g. #370, temporal interpolation). Such issues are not closed:
 "label as not planned" and "close as not planned" are different dispositions.
 
+The **`next-up` label** groups the issues selected for the next round of
+roadmap planning, so a request such as "review all of the next-up issues and
+put together an ordering plan" works over that set. It is a selection, not an
+order: it does not say which issue comes next, and it is never cited as the
+reason one issue precedes another. It is removed when an issue completes.
+
 ## Issue status
 
 Every open issue carries exactly one `status:` label. Closed issues carry none.
@@ -99,14 +109,14 @@ Every open issue carries exactly one `status:` label. Closed issues carry none.
 
 Status changes at the moment the state changes, never batched. The transitions
 are embedded in the steps that cause them (branch verification, PR creation,
-close). `build/issue-status.sh` is the only sanctioned writer; `set` swaps
+close). `process/issue-status.sh` is the only sanctioned writer; `set` swaps
 labels atomically.
 
 ```bash
-./build/issue-status.sh set {number} "in progress"
-./build/issue-status.sh show {number}
-./build/issue-status.sh list
-./build/issue-status.sh sweep      # strips status from closed issues; proposes, never applies, elsewhere
+./process/issue-status.sh set {number} "in progress"
+./process/issue-status.sh show {number}
+./process/issue-status.sh list
+./process/issue-status.sh sweep      # strips status from closed issues; proposes, never applies, elsewhere
 ```
 
 Status is a deliberate decision, never a computed value. A recorded status
@@ -120,6 +130,7 @@ goes to `in progress` when work has started; `backlog` is reachable only by
 explicit instruction, and an issue never returns to `backlog` once work has
 begun unless the architect says so. A parent issue is `in progress` once work
 has started on it or any child, and stays so until closed or deliberately held.
+Reopening an issue sets it to `in progress` in the same action.
 
 Status is orthogonal to blocking and to `not planned`.
 

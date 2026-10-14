@@ -24,7 +24,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -206,13 +206,13 @@ scenario_runtime_config_command_line() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - command-line sub-section always emits'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^bucket-size: 60$' \
+        pattern     '^bucket_size: 60$' \
         asserts     'A flag supplied on the CLI with a valid value appears in the command-line sub-section with the resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section body)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - value with no annotation means user-supplied, valid, unchanged'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^data-model-precision: 7$' \
+        pattern     '^data_model_precision: 7$' \
         asserts     'Multi-flag invocation surfaces each supplied flag as its own row in command-line sub-section.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -238,7 +238,7 @@ scenario_runtime_config_env_only() {
         contract    'features/225-test-harness-coverage-gaps.md section #231 - env-var sub-section always emits'
 
     assert_line "$TMP_DIR/rc-env.stdout" \
-        pattern     '^bucket-size: 30$' \
+        pattern     '^bucket_size: 30$' \
         asserts     'A flag supplied via LTL_CONFIG with no CLI override appears in the environment-variable sub-section with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section body)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231'
@@ -252,42 +252,434 @@ scenario_runtime_config_env_overridden() {
     check_stderr_warnings "$TMP_DIR/rc-over.stderr"
 
     assert_line "$TMP_DIR/rc-over.stdout" \
-        pattern     '^bucket-size: 60$' \
+        pattern     '^bucket_size: 60$' \
         asserts     'When the same flag appears in both env and CLI, the command-line sub-section row carries the resolved (CLI-supplied) value with no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl (command-line sub-section)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - CLI wins; env-side carries override annotation'
 
     assert_line "$TMP_DIR/rc-over.stdout" \
-        pattern     '^bucket-size: 60; overridden$' \
+        pattern     '^bucket_size: 60; overridden$' \
         asserts     'When the same flag appears in both env and CLI, the environment-variable sub-section row carries `; overridden` annotation. (The displayed value is the resolved CLI value; reconstructing the original env value is out of scope.)' \
         produced_by 'emit_runtime_config_verbose() in ltl (environment-variable sub-section)' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - annotation grammar uses semicolon-separated `; overridden`'
 }
 
-scenario_warning_g_non_numeric() {
-    current_scenario="warning-g-non-numeric"
+# Issue #614 phase 2 (D1's shape: one optional-operand helper). A value that
+# is not in an optional-operand option's vocabulary goes back as a file
+# argument, silently, and the option takes its bare default; a value that is
+# then no file is named at file resolution with the option it followed.
+# `-bs 1440 -oe`: stderr, exit status and the runtime-config defaults only;
+# the twelve-line access fixture.
+CONTRACT_PUSHBACK='features/614-operand-settlement.md § 2 D1 (two-place shape; silent pushback locked 2026-10-12) and § Acceptance criteria, phase 2'
+PRODUCED_BY_PUSHBACK='settle_optional_operand() in ltl, called from adapt_to_command_line_options() for -hm, -hg, -V, -g and -mem'
+
+scenario_pushback_silent() {
+    current_scenario="pushback-silent"
     echo "[$current_scenario]"
+    local option
+    for option in -hm -hg -g -mem; do
+        run_ltl "pushback$option" -bs 1440 -oe -V runtime-config,format-detection "$option" "$METRIC_FIXTURE"
+        assert_exit "$RUN_EXIT" 0 \
+            asserts     "ltl $option <file> reads the file: a value outside $option's vocabulary is a file argument." \
+            produced_by "$PRODUCED_BY_PUSHBACK" \
+            contract    "$CONTRACT_PUSHBACK"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^file: .*tomcat-access-single-sample-keys\\.txt\$" \
+            asserts     "The value $option took back is selected as the run's file." \
+            produced_by "$PRODUCED_BY_PUSHBACK; the file-argument expansion loop in adapt_to_command_line_options()" \
+            contract    "$CONTRACT_PUSHBACK"
+        assert_command \
+            command     "[ ! -s '$RUN_STDERR' ]" \
+            label       "ltl $option <file> says nothing on stderr" \
+            asserts     'The pushback is silent for every optional-operand option: a file after the option is the normal invocation.' \
+            produced_by "$PRODUCED_BY_PUSHBACK" \
+            contract    "$CONTRACT_PUSHBACK"
+    done
+    assert_line "$TMP_DIR/pushback-hm.stdout" pattern '^heatmap: duration$' \
+        asserts 'A pushed-back -hm value leaves -hm on its default metric, duration.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+    assert_line "$TMP_DIR/pushback-g.stdout" pattern '^group_similar: 85$' \
+        asserts 'A pushed-back -g value leaves -g on its default threshold, 85.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+    assert_line "$TMP_DIR/pushback-mem.stdout" pattern '^memory_usage: 1$' \
+        asserts 'A pushed-back -mem value leaves the memory report on, without its debug detail.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
 
-    run_ltl "warn-g" -g bogus_value "$TEST_LOG"
-
-    assert_line "$RUN_STDERR" \
-        pattern     "^-g value 'bogus_value' is not numeric; treating as positional argument and using default threshold 85\\.$" \
-        asserts     'When -g is given a non-numeric value, ltl now warns to stderr that the value was treated as a positional argument and the default threshold 85 was used. Was previously silent.' \
-        produced_by 'adapt_to_command_line_options() in ltl (group-similar non-numeric branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
+    run_ltl "pushback-V" -bs 1440 -oe -V "$METRIC_FIXTURE"
+    assert_exit "$RUN_EXIT" 0 \
+        asserts     'ltl -V <file> reads the file with every section.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+    assert_line "$RUN_STDOUT" pattern '^=== statistics-demand ===$' \
+        asserts 'A pushed-back -V value leaves -V bare: every section is emitted.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+    assert_command \
+        command     "[ ! -s '$RUN_STDERR' ]" \
+        label       'ltl -V <file> says nothing on stderr' \
+        asserts     'The -V pushback is silent, as every option'"'"'s is.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
 }
 
-scenario_warning_hm_non_builtin() {
-    current_scenario="warning-hm-non-builtin"
+scenario_pushback_not_a_file() {
+    current_scenario="pushback-not-a-file"
+    echo "[$current_scenario]"
+    local -a cases=(
+        "-V|foo|Error: 'foo' matches no file (it followed -V/--verbose and is not a verbose section; 'ltl -V list' lists them)"
+        "-g|85%|Error: '85%' matches no file (it followed -g/--group-similar and is not a similarity threshold, a whole number from 50 to 99)"
+        "-mem|foo|Error: 'foo' matches no file (it followed -mem/--memory-usage and is not debug)"
+        "-hm|foo|Error: 'foo' matches no file (it followed -hm/--heatmap and is not a metric; the metrics are duration, bytes, count)"
+        "-hg|foo|Error: 'foo' matches no file (it followed -hg/--histogram and is not a metric; the metrics are duration, bytes, count)"
+    )
+    local entry option value message
+    for entry in "${cases[@]}"; do
+        IFS='|' read -r option value message <<< "$entry"
+        run_ltl "not-a-file$option" -bs 1440 -oe "$option" "$value" "$METRIC_FIXTURE"
+        assert_exit "$RUN_EXIT" 2 \
+            asserts     "ltl $option $value <file>: the value is given back as a file argument and selects no file, so the run stops at file resolution." \
+            produced_by "$PRODUCED_BY_PUSHBACK; file_argument_problem() in ltl" \
+            contract    "$CONTRACT_PUSHBACK"
+        assert_command \
+            command     "grep -aqxF -- \"$message\" '$RUN_STDERR'" \
+            label       "the error names $value, the option it followed and what $option takes" \
+            asserts     'The file-resolution error says which option the value followed and that it is not in that option'"'"'s vocabulary.' \
+            produced_by "file_argument_problem() in ltl (%pushed_back_operand)" \
+            contract    "$CONTRACT_PUSHBACK"
+    done
+}
+
+scenario_list_member_unknown() {
+    current_scenario="list-member-unknown"
+    echo "[$current_scenario]"
+    run_ltl "list-V" -bs 1440 -oe -V format-detection,foo "$METRIC_FIXTURE"
+    assert_exit "$RUN_EXIT" 1 \
+        asserts     'A -V comma list with a known section is the option'"'"'s; its unknown member stops the run.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+    assert_command \
+        command     "grep -aqxF -- \"Error: 'foo' given to -V/--verbose is not a verbose section; 'ltl -V list' lists them\" '$RUN_STDERR'" \
+        label       'the -V list rejection names the unknown member and points to -V list' \
+        asserts     'The rejection names the member that is not a section and says where the sections are listed.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+
+    run_ltl "list-V-known" -bs 1440 -oe -V format-detection,csv-output "$METRIC_FIXTURE"
+    assert_exit "$RUN_EXIT" 0 \
+        asserts     'A -V comma list of known sections is taken whole.' \
+        produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
+}
+
+# Issue #614 phase 2 criterion 7 and phase 3 criterion 6: the decision has one
+# home. Read from the source, where the requirement lives: every unshift onto
+# @ARGV sits in settle_optional_operand() or the environment-argument merge in
+# adapt_to_command_line_options(); -V keeps no path test of its own; the -hg
+# handler records its value and resolves nothing.
+scenario_optional_operand_source() {
+    current_scenario="optional-operand-source"
+    echo "[$current_scenario]"
+    local unshift_subs
+    unshift_subs=$(awk '/^sub [A-Za-z_]+/ { sub_name = $2 } /unshift @ARGV/ { print sub_name }' "$LTL" | sort | tr '\n' ' ')
+    assert_command \
+        command     "[ '$unshift_subs' = 'adapt_to_command_line_options settle_optional_operand ' ] && [ \"\$(grep -c 'unshift @ARGV' '$LTL')\" = 2 ]" \
+        label       'unshift @ARGV occurs only in settle_optional_operand() and the environment-argument merge' \
+        asserts     'One sub gives a value back as a file argument for every optional-operand option; the only other unshift is the merge of LTL_* environment arguments (found: '"$unshift_subs"').' \
+        produced_by 'settle_optional_operand() in ltl' \
+        contract    "$CONTRACT_PUSHBACK; docs/architecture-patterns.md § Optional-operand options and the filename pushback"
+    assert_command \
+        command     "! grep -qF 'm{[/.]} || -e \$name' '$LTL'" \
+        label       '-V keeps no path test of its own' \
+        asserts     'The -V settlement no longer guesses whether a value looks like a path; the helper decides by the section vocabulary alone.' \
+        produced_by 'adapt_to_command_line_options() in ltl (the -V settlement)' \
+        contract    "$CONTRACT_PUSHBACK"
+    assert_command \
+        command     "awk '/^sub handle_histogram_option/ { f = 1 } f && /^}/ { exit } f' '$LTL' > '$TMP_DIR/hg-handler.pl' && grep -q 'push @histogram_operands' '$TMP_DIR/hg-handler.pl' && ! grep -qE 'builtin_metric_name|resolve_metric_operand|warn ' '$TMP_DIR/hg-handler.pl'" \
+        label       'the -hg handler records its value and resolves nothing' \
+        asserts     'handle_histogram_option() only records each -hg value; resolution happens at settlement, after the -udm metrics are parsed.' \
+        produced_by 'handle_histogram_option() in ltl' \
+        contract    'features/614-operand-settlement.md § 2 D2 (a handler only records the operand) and phase 3 criteria'
+}
+
+# Issue #613 criterion 1 (D5: one built-in metric table): each unknown-metric
+# message interpolates the table's list, and none names time, which is not a
+# metric name. -udm comes first on the -hg run: without one, -hg pushes an
+# operand it does not recognise back as a file name. `-bs 1440 -oe`: stderr
+# diagnostics only, no bucket read; the twelve-line access fixture.
+METRIC_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+CONTRACT_METRIC_LIST='features/613-one-name-vocabulary.md D5 (every unknown-metric message derives its list from the built-in metric table) and D1 (time is not a metric name); criterion 1'
+
+scenario_error_unknown_metric_lists() {
+    current_scenario="error-unknown-metric-lists"
+    echo "[$current_scenario]"
+    local contract="$CONTRACT_METRIC_LIST; features/614-operand-settlement.md § 2 D2 (one metric list for every consumer) and phase 3 criteria"
+
+    run_ltl "metric-list-hg" -bs 1440 -oe -udm x::max -hg duration,foo "$METRIC_FIXTURE"
+    assert_exit "$RUN_EXIT" 1 \
+        asserts     'An -hg comma list naming a metric and a word that is none is a rejection, exit 1, before any file is read.' \
+        produced_by 'settle_optional_operand() in ltl (the -hg settlement), reported via print_usage()' \
+        contract    "$contract"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'foo' given to -hg/--histogram is not a metric; the metrics are duration, bytes, count, x$" \
+        asserts     'The -hg rejection names the unknown member and lists the built-in metrics from the table, then the -udm names.' \
+        produced_by 'settle_optional_operand() and metric_operand_expects() in ltl, via available_metric_names()' \
+        contract    "$contract"
+    assert_command \
+        command     "grep -a '^Error:' '$RUN_STDERR' | grep -q . && ! grep -a '^Error:' '$RUN_STDERR' | grep -qE '(^|[^a-z])time([^a-z]|\\$)'" \
+        label       'the -hg rejection does not name time among the metrics' \
+        asserts     'The -hg rejection does not name time among the metrics (the usage synopsis above it carries <time> for -st and -et, so only the Error line is read).' \
+        produced_by 'available_metric_names() in ltl' \
+        contract    "$contract"
+
+    run_ltl "metric-list-hg-no-udm" -bs 1440 -oe -hg duration,foo "$METRIC_FIXTURE"
+    assert_exit "$RUN_EXIT" 1 \
+        asserts     'Without -udm the same comma list is the same rejection: whether -udm was given changes nothing about the rule.' \
+        produced_by 'settle_optional_operand() in ltl (the -hg settlement)' \
+        contract    "$contract"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'foo' given to -hg/--histogram is not a metric; the metrics are duration, bytes, count$" \
+        asserts     'Without -udm the list is the built-in metrics alone, from the same source.' \
+        produced_by 'metric_operand_expects() in ltl, via available_metric_names()' \
+        contract    "$contract"
+
+    run_ltl "metric-list-hm-pushback" -bs 1440 -oe -udm x::max -hm foo "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'foo' matches no file \\(it followed -hm/--heatmap and is not a metric; the metrics are duration, bytes, count, x\\)$" \
+        asserts     'An -hm value that names no metric is given back as a file argument; selecting no file, it is named with the metrics from the one list, built-in then -udm.' \
+        produced_by 'settle_optional_operand(), metric_operand_expects() and file_argument_problem() in ltl' \
+        contract    "$contract"
+}
+
+# Issue #614 phase 2 criterion 5, phase 3 criterion 3: user-defined metrics are
+# parsed before the optional operands are settled, so -udm's position on the
+# line does not matter. Stdout of the two orders is compared whole.
+scenario_udm_position() {
+    current_scenario="udm-position"
+    echo "[$current_scenario]"
+    local contract='features/614-operand-settlement.md § Acceptance criteria, phase 2 (user-defined names are in the vocabulary wherever -udm stands) and phase 3'
+    run_ltl "udm-after" -bs 1440 -oe -hg duration,sz -udm 'sz::max:/" 200 ([0-9]+) /' "$METRIC_FIXTURE"
+    local after="$RUN_STDOUT" after_exit="$RUN_EXIT"
+    run_ltl "udm-before" -bs 1440 -oe -udm 'sz::max:/" 200 ([0-9]+) /' -hg duration,sz "$METRIC_FIXTURE"
+    assert_exit "$after_exit" 0 \
+        asserts     '-hg naming a user-defined metric before its -udm is accepted.' \
+        produced_by 'parse_udm_configs() ahead of settle_optional_operand() in adapt_to_command_line_options()' \
+        contract    "$contract"
+    assert_command \
+        command     "grep -aq 'sz Distribution' '$after' && diff <(grep -aE 'Distribution|P[0-9]+:' '$after') <(grep -aE 'Distribution|P[0-9]+:' '$RUN_STDOUT')" \
+        label       '-hg duration,sz renders the same panels whichever side of -udm it stands' \
+        asserts     'The user-defined metric is in -hg'"'"'s vocabulary wherever -udm stands; both orders render the sz panel (the fixture'"'"'s 200 responses carry its values) with identical titles and percentiles; the banner echoing the command line and the run timing differ by nature.' \
+        produced_by 'parse_udm_configs() ahead of settle_optional_operand() in adapt_to_command_line_options()' \
+        contract    "$contract"
+}
+
+# Issue #613 criteria 2 and 3 (D1, D8, D17): time and size still name the
+# duration and bytes metrics on the options their table entry lists, for one
+# release, and say so in one deprecation line per spelling however many
+# options it was given to. Each spelling's run is compared with the run under
+# the canonical name; only the surface the option drives is rendered, so the
+# comparison reads that surface and nothing timing-dependent. `-bs 1440 -oe`:
+# no assertion reads a bucket.
+CONTRACT_DEPRECATED='features/613-one-name-vocabulary.md D1 (time is not a metric name; -hm, -hg and -so print a deprecation notice for a release), D8 (size deprecated on -so), D17 (one deprecation-notice helper); criteria 2 and 3'
+TIME_NOTICE='^Warning: time is deprecated as a metric name \(given to [^)]*\): use duration$'
+
+# Run ltl rendering only the named section, stdout to <label>.stdout.
+run_section_only() {
+    local label="$1" section="$2"; shift 2
+    local hide
+    hide=$(printf '%s\n' title timeline histogram options messages summary | grep -vx "$section" | paste -sd, -)
+    run_ltl "$label" -bs 1440 -oe --terminal-width 200 --hide "$hide" "$@"
+}
+
+assert_one_line() {
+    local file="$1" pattern="$2" label="$3" produced_by="$4"
+    local count
+    count=$(grep -cE "$pattern" "$file" || true)
+    if [[ "$count" == "1" ]]; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        expected:    exactly one line matching $pattern"
+        echo "        actual:      $count"
+        echo "        asserts:     $label"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $CONTRACT_DEPRECATED"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+# Self-documenting assertion for checks that are not one line in one file
+# (HARNESS-DESIGN.md § When the assertion isn't a simple line grep): runs
+# `command`; PASS on exit 0, FAIL otherwise, surfacing the command and the
+# asserts/produced_by/contract fields.
+assert_command() {
+    local command label asserts produced_by contract
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            command)     command="$2";     shift 2 ;;
+            label)       label="$2";       shift 2 ;;
+            asserts)     asserts="$2";     shift 2 ;;
+            produced_by) produced_by="$2"; shift 2 ;;
+            contract)    contract="$2";    shift 2 ;;
+            *) echo "assert_command: unknown field '$1'"; exit 2 ;;
+        esac
+    done
+    local cmd_out cmd_rc
+    set +e
+    cmd_out=$(eval "$command" 2>&1); cmd_rc=$?
+    set -e
+    if [[ "$cmd_rc" -eq 0 ]]; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        command:     $command"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        echo "$cmd_out" | sed 's/^/        | /'
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+assert_same_file() {
+    local one="$1" two="$2" label="$3" produced_by="$4" contract="$5"
+    if [[ -s "$one" ]] && diff -q "$one" "$two" >/dev/null; then
+        echo "  PASS  $current_scenario :: $label"
+        pass=$((pass + 1))
+    else
+        echo "  FAIL  $current_scenario :: $label"
+        echo "        asserts:     $label"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        if [[ -s "$one" ]]; then diff "$one" "$two" | head -10 | sed 's/^/        | /' || true; else echo "        (empty capture $one)"; fi
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: $label")
+    fi
+}
+
+scenario_deprecated_metric_spellings() {
+    current_scenario="deprecated-metric-spellings"
     echo "[$current_scenario]"
 
-    run_ltl "warn-hm" -hm bogus_metric "$TEST_LOG"
+    local spelling
+    for spelling in time TIME; do
+        run_ltl "dep-hm-$spelling" -bs 1440 -oe -V runtime-config -hm "$spelling" "$METRIC_FIXTURE"
+        assert_line "$RUN_STDOUT" \
+            pattern     '^heatmap: duration$' \
+            asserts     "-hm $spelling draws the duration heatmap: time is a deprecated spelling of duration on -hm, in any case." \
+            produced_by 'builtin_metric_name() in ltl (the deprecated spellings of @builtin_metrics)' \
+            contract    "$CONTRACT_DEPRECATED"
+        assert_one_line "$RUN_STDERR" "$TIME_NOTICE" "-hm $spelling prints exactly one deprecation line naming time and duration" \
+            'record_deprecation() and print_deprecation_notices() in ltl'
+    done
 
+    run_section_only "dep-hg-duration" histogram -hg duration "$METRIC_FIXTURE"
+    local hg_duration="$RUN_STDOUT"
+    run_section_only "dep-hg-time" histogram -hg time "$METRIC_FIXTURE"
+    assert_same_file "$hg_duration" "$RUN_STDOUT" '-hg time renders the histogram -hg duration renders' \
+        'handle_histogram_option() in ltl, through builtin_metric_name()' "$CONTRACT_DEPRECATED"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-hg time prints exactly one deprecation line, though -hg is read inside the option parser' \
+        'handle_histogram_option() records it; print_deprecation_notices() prints it at option settlement'
+
+    run_section_only "dep-so-duration" messages -so duration "$METRIC_FIXTURE"
+    local so_duration="$RUN_STDOUT"
+    run_section_only "dep-so-time" messages -so time "$METRIC_FIXTURE"
+    assert_same_file "$so_duration" "$RUN_STDOUT" '-so time ranks the messages as -so duration does' \
+        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-so time prints exactly one deprecation line' \
+        'record_deprecation() and print_deprecation_notices() in ltl'
+
+    run_ltl "dep-all-three" -bs 1440 -oe -hm time -hg time -so time "$METRIC_FIXTURE"
+    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" 'time given to -hm, -hg and -so in one run prints one line, not three' \
+        'record_deprecation() in ltl (one notice per spelling, naming every option it was given to)'
     assert_line "$RUN_STDERR" \
-        pattern     "^-hm value 'bogus_metric' is not a built-in metric \\(duration\\|bytes\\|count\\) and no -udm configs are defined; treating as positional argument and using default metric 'duration'\\.$" \
-        asserts     'When -hm is given a value that is neither a built-in metric nor matchable to a -udm config (because no -udm was given), ltl now warns that the value was treated as a positional argument and the default metric was used. Was previously silent.' \
-        produced_by 'adapt_to_command_line_options() in ltl (heatmap non-builtin pushback branch)' \
-        contract    'features/225-test-harness-coverage-gaps.md section #231 - silent-override gap closure'
+        pattern     '^Warning: time is deprecated as a metric name \(given to -hm/--heatmap, -hg/--histogram, -so/--sort-on\): use duration$' \
+        asserts     'The one line names each option the deprecated spelling was given to, in the order the options are settled (-hm, -hg, -so).' \
+        produced_by 'print_deprecation_notices() in ltl' \
+        contract    "$CONTRACT_DEPRECATED"
+
+    # -so size against -so bytes: the MESSAGES CSV, written into a directory
+    # this harness owns, carries the whole ranking.
+    local size_dir="$TMP_DIR/dep-so-size" bytes_dir="$TMP_DIR/dep-so-bytes"
+    mkdir -p "$size_dir" "$bytes_dir"
+    ( cd "$bytes_dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so bytes "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    ( cd "$size_dir"  && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so size  "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    check_stderr_warnings "$bytes_dir/run.err"
+    check_stderr_warnings "$size_dir/run.err"
+    local bytes_csv size_csv
+    bytes_csv=$(find "$bytes_dir" -name '*-LTL-MESSAGES-*.csv' -print -quit)
+    size_csv=$(find "$size_dir" -name '*-LTL-MESSAGES-*.csv' -print -quit)
+    assert_same_file "$bytes_csv" "$size_csv" '-so size writes the MESSAGES CSV -so bytes writes' \
+        'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
+    assert_one_line "$size_dir/run.err" '^Warning: size is deprecated as a metric name \(given to -so/--sort-on\): use bytes$' \
+        '-so size prints exactly one deprecation line naming size and bytes' 'record_deprecation() and print_deprecation_notices() in ltl'
+    assert_no_line "$bytes_dir/run.err" \
+        pattern     'deprecated' \
+        asserts     'The canonical name prints no deprecation line.' \
+        produced_by 'builtin_metric_name() in ltl' \
+        contract    "$CONTRACT_DEPRECATED"
+}
+
+# Issue #613 criterion 23 (D15): a built-in metric name matches in any case on
+# every option that takes one.
+scenario_metric_name_case() {
+    current_scenario="metric-name-case"
+    echo "[$current_scenario]"
+    local contract='features/613-one-name-vocabulary.md D15 (every built-in name matches in any case on every option); criterion 23'
+
+    run_ltl "case-hm" -bs 1440 -oe -V runtime-config -hm Bytes "$METRIC_FIXTURE"
+    assert_line "$RUN_STDOUT" \
+        pattern     '^heatmap: bytes$' \
+        asserts     '-hm Bytes draws the bytes heatmap.' \
+        produced_by 'builtin_metric_name() in ltl' \
+        contract    "$contract"
+
+    run_section_only "case-hg-lower" histogram -hg bytes "$METRIC_FIXTURE"
+    local hg_lower="$RUN_STDOUT"
+    run_section_only "case-hg-upper" histogram -hg BYTES "$METRIC_FIXTURE"
+    assert_same_file "$hg_lower" "$RUN_STDOUT" '-hg BYTES renders the histogram -hg bytes renders' 'builtin_metric_name() in ltl' "$contract"
+
+    run_section_only "case-so-lower" messages -so bytes "$METRIC_FIXTURE"
+    local so_lower="$RUN_STDOUT"
+    run_section_only "case-so-upper" messages -so Bytes "$METRIC_FIXTURE"
+    assert_same_file "$so_lower" "$RUN_STDOUT" '-so Bytes ranks the messages as -so bytes does' 'builtin_metric_name() in ltl' "$contract"
+
+    run_section_only "case-hide-lower" timeline --hide bytes "$METRIC_FIXTURE"
+    local hide_lower="$RUN_STDOUT"
+    run_section_only "case-hide-upper" timeline --hide Bytes "$METRIC_FIXTURE"
+    assert_same_file "$hide_lower" "$RUN_STDOUT" '--hide Bytes hides the column --hide bytes hides' 'resolve_visibility_name() in ltl' "$contract"
+}
+
+# Issue #613 criterion 15 (D3): durationMs is a key spelling, not a metric
+# name, so -hm takes it down the unknown-name path of any other word.
+scenario_metric_key_spelling_unknown() {
+    current_scenario="metric-key-spelling-unknown"
+    echo "[$current_scenario]"
+    local contract='features/613-one-name-vocabulary.md D3 (durationMs and durationMS are key spellings, not metric names: an unknown name on -hm and -hg); criterion 15; features/614-operand-settlement.md phase 2'
+
+    run_ltl "key-hm-pushback" -bs 1440 -oe -hm durationMs "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'durationMs' matches no file \\(it followed -hm/--heatmap and is not a metric; the metrics are duration, bytes, count\\)$" \
+        asserts     '-hm durationMs is given back as any unknown word is, and named as no metric when it selects no file.' \
+        produced_by 'settle_optional_operand() and file_argument_problem() in ltl' \
+        contract    "$contract"
+
+    run_ltl "key-hg-list" -bs 1440 -oe -udm x::max -hg duration,durationMs "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'durationMs' given to -hg/--histogram is not a metric; the metrics are duration, bytes, count, x$" \
+        asserts     'Inside an -hg list, durationMs is the rejection any unknown member gets.' \
+        produced_by 'settle_optional_operand() in ltl (the -hg settlement)' \
+        contract    "$contract"
+}
+
+# Issue #613 criterion 16 (D4): a user-defined metric is named by its name,
+# so the key it reads is not a metric name on -hm.
+scenario_udm_key_not_a_name() {
+    current_scenario="udm-key-not-a-name"
+    echo "[$current_scenario]"
+    run_ltl "udm-key-hm" -bs 1440 -oe -udm 'lat::max:elapsed' -hm elapsed "$METRIC_FIXTURE"
+    assert_line "$RUN_STDERR" \
+        pattern     "^Error: 'elapsed' matches no file \\(it followed -hm/--heatmap and is not a metric; the metrics are duration, bytes, count, lat\\)$" \
+        asserts     '-hm elapsed is not a metric when the metric reading elapsed is named lat: it is given back, and named with the vocabulary when it selects no file.' \
+        produced_by 'resolve_metric_operand() and udm_config_by_name() in ltl' \
+        contract    'features/613-one-name-vocabulary.md D4 (a user-defined metric is named by its name on every option); criterion 16'
 }
 
 scenario_error_unknown_exact_percentiles() {
@@ -319,19 +711,19 @@ scenario_runtime_config_data_model_selectors() {
     run_ltl "rc-dm" -V runtime-config -mdm bin -bdm bin -dm bin "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^message-stats-data-model: bin$' \
+        pattern     '^message_stats_data_model: bin$' \
         asserts     'A user-supplied -mdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for message-stats-data-model' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/287-message-stats-bin-counter-data-model.md section R8.3 - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^bucket-stats-data-model: bin$' \
+        pattern     '^bucket_stats_data_model: bin$' \
         asserts     'A user-supplied -bdm bin appears in the runtime-config / command-line sub-section with its resolved value and no annotation, per #266 + #231 (Issue #289 honors -bdm bin end-to-end).' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for bucket-stats-data-model' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing + features/289-bucket-stats-bin-counter-data-model.md - selector row format is locked.'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^data-model: bin$' \
+        pattern     '^data_model: bin$' \
         asserts     'A user-supplied omnibus -dm bin appears as the data-model row in the command-line sub-section, alongside any per-surface override.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/266-data-model-selectors.md section -V runtime-config surfacing.'
@@ -344,26 +736,26 @@ scenario_runtime_config_numeric_highlight() {
     run_ltl "rc-hl" -V runtime-config -hdmin 100 -hbmax 5000 -hcmin 2 "$TEST_LOG"
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-duration-min: 100$' \
+        pattern     '^highlight_duration_min: 100$' \
         asserts     'A user-supplied -hdmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-duration-min' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config - the six highlight criteria join the resolved-values registry'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-bytes-max: 5000$' \
+        pattern     '^highlight_bytes_max: 5000$' \
         asserts     'A user-supplied -hbmax appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-bytes-max' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight-count-min: 2$' \
+        pattern     '^highlight_count_min: 2$' \
         asserts     'A user-supplied -hcmin appears in the runtime-config / command-line sub-section with its resolved value and no annotation.' \
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for highlight-count-min' \
         contract    'features/312-numeric-criteria-highlight-selection.md section -V runtime-config'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^highlight \(merged\): \(not set\)$' \
-        asserts     'The merged highlight regex line reports (not set) when only numeric highlight criteria are given - numeric criteria do not synthesize a regex.' \
+        pattern     '^highlight_merged: -$' \
+        asserts     'The merged highlight regex line reports - (nothing set) when only numeric highlight criteria are given - numeric criteria do not synthesize a regex.' \
         produced_by 'emit_runtime_config_verbose() in ltl (merged-regex display line)' \
         contract    'features/312-numeric-criteria-highlight-selection.md section The defined-highlight_regex gate sweep - the runtime-config merged line stays regex-only'
 }
@@ -383,20 +775,20 @@ scenario_runtime_config_expose() {
         contract    'features/566-preserve-named-values-in-message.md section D2 (command-line order) and section D3 (one option names anything to expose; the existing options are its aliases)'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^expose-query-string: 1$' \
+        pattern     '^expose_query_string: yes$' \
         asserts     'The alias still reports its own state: -xqs sets expose-query-string, whose row is unchanged by the new expose row.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
 
     assert_line "$RUN_STDOUT" \
-        pattern     '^expose-user: 1$' \
+        pattern     '^expose_user: yes$' \
         asserts     'The alias still reports its own state: -xu sets expose-user, whose row is unchanged by the new expose row.' \
         produced_by 'emit_runtime_config_verbose() in ltl' \
         contract    'features/566-preserve-named-values-in-message.md section D3 - the existing options are kept as aliases'
 }
 
 # Issue #580 criterion 11: the resolved mask names, in command-line order, a
-# comma-separated list split and a repeated name kept once, and the mask-uuid
+# comma-separated list split and a repeated name kept once, and the mask_uuid
 # row reporting whether UUIDs are masked by either spelling.
 scenario_runtime_config_mask() {
     current_scenario="runtime-config-mask"
@@ -409,10 +801,10 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for mask, filled by resolve_mask_names() from the ordered mask list' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - a new mask key lists the resolved names in command-line order'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 1$' \
-        asserts     'mask-uuid reports 1 when UUIDs are masked through -m uuid, not only through the deprecated -uuid spelling.' \
-        produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
-        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid reports 1 when UUIDs are masked by either spelling'
+        pattern     '^mask_uuid: yes$' \
+        asserts     'mask_uuid reports yes when UUIDs are masked through -m uuid, not only through the deprecated -uuid spelling.' \
+        produced_by 'emit_runtime_config_verbose() in ltl - the mask_uuid row, given command-line provenance whenever -m was supplied' \
+        contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask_uuid reports yes when UUIDs are masked by either spelling'
 
     run_ltl "rc-mask-uuid" -V runtime-config -uuid "$TEST_LOG"
     assert_line "$RUN_STDOUT" \
@@ -421,8 +813,8 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - the mask row, given command-line provenance whenever -uuid was supplied' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - -V runtime-config reports the effective configuration'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 1$' \
-        asserts     '-uuid still reports mask-uuid: 1, as it did before -m existed.' \
+        pattern     '^mask_uuid: yes$' \
+        asserts     '-uuid still reports mask_uuid: yes, as it did before -m existed.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 - mask-uuid stays'
 
@@ -433,8 +825,8 @@ scenario_runtime_config_mask() {
         produced_by 'emit_runtime_config_verbose() in ltl - the mask row' \
         contract    'features/580-mask-uuid-and-ip-address.md section D5 and section Acceptance criteria 11'
     assert_line "$RUN_STDOUT" \
-        pattern     '^mask-uuid: 0$' \
-        asserts     'A mask that does not name uuid reports mask-uuid: 0 rather than omitting the row, so a reader of the section sees that UUIDs are not masked.' \
+        pattern     '^mask_uuid: no$' \
+        asserts     'A mask that does not name uuid reports mask_uuid: no rather than omitting the row, so a reader of the section sees that UUIDs are not masked.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the mask-uuid row, given command-line provenance whenever -m was supplied' \
         contract    'features/580-mask-uuid-and-ip-address.md section Acceptance criteria 11 - -m ip reports mask: ip, mask-uuid: 0'
 }
@@ -457,7 +849,7 @@ scenario_runtime_config_discard() {
         produced_by 'apply_discard_precedence() in ltl - the exposed names a discard removes' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D13 and D18'
     assert_no_line "$RUN_STDOUT" \
-        pattern     '^omit-durations:' \
+        pattern     '^omit_durations:' \
         asserts     'runtime-config reports the configuration the user provided: -d duration is reported by the discard row, and the omit row is not printed for an option the user did not give.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the rows are emitted from %option_provenance, which records what was supplied' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
@@ -471,7 +863,7 @@ scenario_runtime_config_discard() {
 
     run_ltl "rc-discard-omit" -V runtime-config -od -d duration "$TEST_LOG"
     assert_line "$RUN_STDOUT" \
-        pattern     '^omit-durations: 1$' \
+        pattern     '^omit_durations: yes$' \
         asserts     'An omit option the user did give is reported on its own row, whether or not --discard names the same metric: each option surfaces itself.' \
         produced_by 'emit_runtime_config_verbose() in ltl - the omit-durations row, given command-line provenance because -od was supplied' \
         contract    'features/567-discard-named-values-from-message.md section Decisions D18, revised 2026-09-19'
@@ -501,6 +893,55 @@ scenario_error_unknown_so() {
         asserts     'The user-visible diagnostic (emitted via print_usage to stderr) identifies the failed validation (sort type).' \
         produced_by 'print_usage("invalid sort type used") in adapt_to_command_line_options()' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - pinning current diagnostic surface; Issue #308 routes the error block to stderr'
+}
+
+# Issue #525 D9: -tp is reported by its canonical token whatever spelling
+# was given; a run that does not supply it emits no row.
+scenario_runtime_config_timestamp_precision() {
+    current_scenario="runtime-config-timestamp-precision"
+    echo "[$current_scenario]"
+
+    # Application logs whose timestamps carry milliseconds and microseconds,
+    # so a request at or above the log's precision is reported unclamped.
+    local ms_log="$TMP_DIR/tp-millis.log" us_log="$TMP_DIR/tp-micros.log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' > "$ms_log"
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456789 [main] INFO  com.example.Service - second line' > "$us_log"
+
+    local row spelling log want
+    for row in "Millisecond|$ms_log|ms" "MSEC|$ms_log|ms" "microseconds|$us_log|us" "second|$ms_log|s"; do
+        IFS='|' read -r spelling log want <<< "$row"
+        run_ltl "rc-tp-$spelling" -V runtime-config -tp "$spelling" "$log"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp_precision: $want\$" \
+            asserts     "-tp $spelling appears in the runtime-config / command-line sub-section as its canonical token $want, with no annotation when the log carries that precision." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %resolved_values lookup for timestamp-precision, resolved by adapt_to_command_line_options()' \
+            contract    'features/525-timestamp-precision-option.md D9 (a -V runtime-config key naming the precision) and features/225-test-harness-coverage-gaps.md section #231'
+    done
+
+    # Clamped: the resolved precision, and the request in the annotation.
+    for row in "nanosecond|$us_log|us; clamped from ns|the finest the parse keeps" \
+               "ms|$TEST_LOG|s; clamped from ms|the whole seconds the access log carries" \
+               "us|$ms_log|ms; clamped from us|the milliseconds the log carries"; do
+        local why
+        IFS='|' read -r spelling log want why <<< "$row"
+        run_ltl "rc-tp-clamp-$spelling" -V runtime-config -tp "$spelling" "$log"
+        assert_line "$RUN_STDOUT" \
+            pattern     "^timestamp_precision: $want\$" \
+            asserts     "-tp $spelling resolves to $why; the row names the resolved precision and the request in the clamp annotation." \
+            produced_by 'emit_runtime_config_verbose() in ltl - %option_overrides clamped_from; the row is resolved by resolve_timestamp_precision() after the read' \
+            contract    'features/525-timestamp-precision-option.md D4 and D9 (the requested and the resolved precision, machine-readable) and features/225-test-harness-coverage-gaps.md section #231 (the clamped-from annotation)'
+    done
+
+    run_ltl "rc-tp-absent" -V runtime-config "$TEST_LOG"
+    assert_no_line "$RUN_STDOUT" \
+        pattern     '^timestamp_precision:' \
+        asserts     'A run that does not supply -tp emits no timestamp-precision row: defaults are documented, not duplicated in the section.' \
+        produced_by 'emit_runtime_config_verbose() in ltl (provenance partitioning)' \
+        contract    'features/225-test-harness-coverage-gaps.md section #231'
 }
 
 scenario_error_unknown_du() {
@@ -570,7 +1011,7 @@ scenario_no_warning_on_clean_run() {
 
     # None of the silent-override warnings should fire on a clean run.
     assert_no_line "$RUN_STDERR" \
-        pattern     "is not numeric|is not a built-in metric" \
+        pattern     "matches no file|is not a metric|given to" \
         asserts     'A clean run produces none of the silent-override warnings. This guards against the warnings firing on inputs they were not designed for.' \
         produced_by 'adapt_to_command_line_options() in ltl' \
         contract    'features/225-test-harness-coverage-gaps.md section #231 - warnings are gated on specific input shapes'
@@ -636,11 +1077,20 @@ echo ""
 scenario_register runtime-config-command-line \
                   runtime-config-env-only \
                   runtime-config-env-overridden \
-                  warning-g-non-numeric \
-                  warning-hm-non-builtin \
+                  pushback-silent \
+                  pushback-not-a-file \
+                  list-member-unknown \
+                  udm-position \
+                  optional-operand-source \
+                  error-unknown-metric-lists \
+                  deprecated-metric-spellings \
+                  metric-name-case \
+                  metric-key-spelling-unknown \
+                  udm-key-not-a-name \
                   error-unknown-exact-percentiles \
                   runtime-config-data-model-selectors \
                   runtime-config-numeric-highlight \
+                  runtime-config-timestamp-precision \
                   runtime-config-expose \
                   runtime-config-mask \
                   runtime-config-discard \
@@ -659,11 +1109,20 @@ while read -r _scenario; do
         runtime-config-command-line        ) scenario_runtime_config_command_line ;;
         runtime-config-env-only            ) scenario_runtime_config_env_only ;;
         runtime-config-env-overridden      ) scenario_runtime_config_env_overridden ;;
-        warning-g-non-numeric              ) scenario_warning_g_non_numeric ;;
-        warning-hm-non-builtin             ) scenario_warning_hm_non_builtin ;;
+        pushback-silent                    ) scenario_pushback_silent ;;
+        pushback-not-a-file                ) scenario_pushback_not_a_file ;;
+        list-member-unknown                ) scenario_list_member_unknown ;;
+        udm-position                       ) scenario_udm_position ;;
+        optional-operand-source            ) scenario_optional_operand_source ;;
+        error-unknown-metric-lists         ) scenario_error_unknown_metric_lists ;;
+        deprecated-metric-spellings        ) scenario_deprecated_metric_spellings ;;
+        metric-name-case                   ) scenario_metric_name_case ;;
+        metric-key-spelling-unknown        ) scenario_metric_key_spelling_unknown ;;
+        udm-key-not-a-name                 ) scenario_udm_key_not_a_name ;;
         error-unknown-exact-percentiles    ) scenario_error_unknown_exact_percentiles ;;
         runtime-config-data-model-selectors) scenario_runtime_config_data_model_selectors ;;
         runtime-config-numeric-highlight   ) scenario_runtime_config_numeric_highlight ;;
+        runtime-config-timestamp-precision ) scenario_runtime_config_timestamp_precision ;;
         runtime-config-expose              ) scenario_runtime_config_expose ;;
         runtime-config-mask                ) scenario_runtime_config_mask ;;
         runtime-config-discard             ) scenario_runtime_config_discard ;;

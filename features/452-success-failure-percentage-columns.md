@@ -33,6 +33,8 @@ Out of scope, inherited: the filtered-subset caution is #454 (notice that statis
 describe a filtered subset); the general notices *surface* is #412; access-log variant
 detection quality is #444.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** notice 2 (the leakage warning) is producible: the verification format seated with `-lf classification_verification` produces it, and `tests/validate-classification-percentages.sh` scenario *leakage-warning-numbers* asserts its numbers (`1 thousand included line(s) (100%)` for 1,200 lines). Notice 1 remains unproducible (F13). Record: `features/617-width-to-format-rule.md` correction 10, D14.
+
 ## What already ships — the substrate audit
 
 The issue was written before #453 landed; much of what it specifies already exists.

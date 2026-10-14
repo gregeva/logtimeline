@@ -105,6 +105,10 @@ issue body. D4–D7 were taken on 2026-08-27 during the audit walkthrough.
 
 `bytes` = sum of bytes, `duration` / `time` = total duration, `count` = sum of the
 count metric. The rule already holds uniformly in the code; it is now stated.
+*Amended by #613 (one vocabulary for names) D1, 2026-10-04:* `time` is not a
+metric name; on `-so` it still ranks by total duration for one release and
+prints a deprecation notice, as does `size` for bytes. The stored key each
+bare word ranks by is the built-in metric table's `sort_key` column.
 `occurrences` is not an exception to it — it is not a metric, it is how many messages
 matched, so there is nothing to sum.
 
@@ -147,6 +151,9 @@ the wall one step along, since `bytes_max` would fail exactly as `bytes_mean` do
 today.
 
 On Surface B these are **not** rendered columns — see D8.
+
+Both CSVs round the bytes mean through `format_csv_value` from a value stored
+precise, so they print one value for one mean (features/616-gated-mean-derivation.md D6).
 
 ### D6 — Basic aggregates only; no bytes distribution statistics
 
@@ -194,6 +201,10 @@ not metric aggregates. A naive `_count` → `_occurrences` sweep corrupts them. 
 columns in scope are `duration_count`, `duration_avg`, `bytes_count`, `bytes_avg`,
 `count_count`, `count_avg` — and the bytes pair is subject to D4's scope renaming as
 well.
+
+The index's six means are written through the CSV formatter at two decimals
+whatever `-cp` says, trailing zeros stripped, and empty for no data
+(features/616-gated-mean-derivation.md D8, D15, D16).
 
 ## Prototyping obligation
 
@@ -273,6 +284,10 @@ From the audit of the harness surface. All are consequences of existing rules in
 - ~~**O3 — Alias normalisation point for D3.**~~ **Closed** — `duration_` is stripped
   once, ahead of both the whitelist and the ladder, so a prefixed spelling reaches
   neither the identity arm nor the `%STAT_FIELD_GROUP` membership test.
+  **Replaced by #614** (`features/614-operand-settlement.md` § 5 observation 4):
+  the strip accepted `duration_` before any word, so `duration_bytes` ranked by
+  bytes. The `-so` vocabulary is now generated as `<metric>_<statistic>` for the
+  statistics each metric carries, and nothing is stripped.
 - ~~**O4 — Oracle key space.**~~ **Closed** — the oracle keeps its bare statistic keys
   and the mapping to the prefixed CSV columns lives in the comparator, guarded by a
   paired-rows-but-zero-cells check so a stale mapping fails loudly instead of

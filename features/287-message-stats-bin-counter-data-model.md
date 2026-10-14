@@ -525,3 +525,18 @@ Additionally:
 The contract surface (R1–R13) tracks #187's locked unified contract. Changes to the locked contract in #187 cascade here; this feature does not lock decisions independently of #187.
 
 The code touch points table is the technical inventory at the time of writing against `release/0.15.0` HEAD. Line numbers may shift; subroutine names (`calculate_all_statistics`, `calculate_statistics`, `merge_consolidation_stats`, `emit_bin_counter_mode_verbose`, `emit_percentile_algorithm_verbose`, `choose_data_model`) and global identifiers (`%log_messages`, `%bin_counter_telemetry`, `$data_model_message`, `$exact_percentiles_optout`) are the stable anchors.
+
+## The running-mean update and the model's status (#616)
+
+The per-line update and the consolidation merge use one sub, `welford_update()`:
+a target with no observation adopts the source, a one-observation source takes
+the one-observation Welford-Pébay update, and a larger source the Chan-Pébay
+parallel combine, chosen on a measured comparison of four forms (byte-identical
+to the previous inline code, about 2.8 percent of a bin-model run on a day of
+access log). It reads the entry's `duration_count` and never writes it; the
+count is kept beside the total. The statistics are derived by the one
+`derive_moment_statistics()` shared with the raw model. The bin model is an
+officially supported model on both statistics stores, its parity with the raw
+model proved as each model unchanged against its own drift baseline
+(features/616-gated-mean-derivation.md D9, D12, D14, D28, D29).
+

@@ -152,6 +152,140 @@ Added to `named_structure_sizes()`. It is O(total keys × key length) under larg
 - Per-structure attribution of allocator-retained churn: impossible from an in-process structure walk; quantified as ~76 B/line (bin-vs-raw delta, consistent from 240k to 8M lines).
 - The O(`-n`) slice fix — #362.
 
+## Issue #709: unmeasured stores and a peak that misses working memory
+
+**Status:** filed 2026-10-12, `status: backlog`; no work started. Found while
+reading the third `all`-tier benchmark round of 0.19.0. Nothing here is a
+locked decision.
+
+### The architect's direction (2026-10-12)
+
+- **The aim is a correct peak, not full attribution.** Attributing a routine's
+  working memory to a named store is not a goal.
+- **No measurement with an iterative cost.** Nothing is read per line, per row
+  or per call of a routine that runs many times. A reading taken once per run,
+  or a few times, costs nothing that matters.
+- **Two aims, two expectations.** The size of each store matters only under
+  `-mem`. The overall peak RSS is the one memory figure every run reports, with
+  or without `-mem`. So where a routine holds a very large local variable, a
+  reading inside it at the right moment is relevant to every run. No single
+  condition covers both cases.
+- **Where the reading goes.** A reading just before a routine returns is too
+  late, because deletions usually happen at a routine's end. The high-water
+  reading is taken before a deletion. A deletion made one item at a time inside
+  a loop cannot be read there, so the reading goes in front of the loop.
+- **Inside a loop, at most once.** One option raised: a single conditional
+  reading at the moment of highest pressure. The evaluation of that condition
+  runs on every pass and is not free, so it is placed with care and its
+  overhead is measured with a before/after benchmark. Another option raised: a
+  compiled routine that includes the condition or omits it, chosen by the
+  run's parameters, noted as possibly over-complicated.
+- **Prototype first.** A prototype compares the options on timing overhead,
+  complexity, simplicity and readability before anything is built
+  (`prototype/README.md`). The focus is the cases where a local copy is known
+  to grow very large, read while it exists.
+
+### Findings
+
+All measured on macOS, one run per case unless stated. The step-by-step
+figures come from a scratch copy of `ltl` that adds `-mem debug` decomposition
+samples inside `group_similar_messages()` and `calculate_all_statistics()` and
+adds every input-sized global store to the named map; the tracked `ltl` was
+not changed.
+
+**The highlighted raw histogram values are not measured.** On a one-day web
+application access log carrying execution time in the duration field (148 MB,
+761,698 lines), with `-V benchmark-data -mem`:
+
+| Options | Histogram raw values | Highlighted raw values (scratch copy) | Unattributed, as shipped | Unattributed, scratch copy |
+|---|---|---|---|---|
+| `-hg -hgdm raw` | 68.1 MB | 0 | 76.8 MB | 77.1 MB |
+| `-hg -hgdm raw -h HTTP` (every line highlighted) | 68.1 MB | 68.1 MB | 132.6 MB | 73.4 MB |
+| `-hg -hgdm raw -h POST` | 68.1 MB | 59.0 MB | 123.0 MB | 69.9 MB |
+| `-hg -h HTTP` (default data model) | 0 | 0 | 51.0 MB | 48.7 MB |
+
+The highlighted copy costs about 94 bytes a value, as the unhighlighted one
+does, and grows with the highlighted population, which can be the whole input.
+It has been missing from the named map since at least 0.18.0.
+
+**No other global store is a meaningful gap.** Across the eleven benchmark
+scenarios on one month of one server's web application access logs (1.5 GB,
+28 files, `-bs 1440`), no unmeasured global store reached 256 KB. That covers
+the per-message maps that streaming consolidation keeps, plus the per-group,
+per-file, index, verbose-output and telemetry stores.
+
+**Working memory held inside a routine is the larger gap.** Same input and
+scenarios. These are the steps where RSS rose while no measured store grew:
+
+| Step | Scenarios | RSS rise outside every measured store |
+|---|---|---|
+| Reading the files | every scenario with a message table | +106 to +147 MB (+12 and +13 MB with `-n 0`) |
+| Time-bucket statistics | every scenario without a heatmap | RSS +23 to +59 MB while the 242 MB time-bucket store is freed |
+| Ranking every message row on an available value | standard, top25, histogram | +89 MB |
+| | heatmap, heatmap-histogram | +145 MB |
+| The walk over every row to rank on a calculated statistic | sort-p99 | +109 MB |
+| | sort-skewness | +42 MB |
+| Selecting the displayed rows after that walk | sort-p99 | +49 MB |
+| Statistics of the displayed rows | top25-consolidate | +197 MB |
+| | heatmap-histogram-consolidate | +223 MB |
+
+The displayed rows' rise is the sorted copy of each row's durations, the
+behaviour accepted under #680 (statistics over raw values copy each array;
+`features/680-statistics-duration-copies.md` § 5.0). In the grouped runs the
+largest displayed row is a consolidated group of 3,751,230 durations. Copying
+and sorting that many integer values costs 144 MB in a standalone Perl
+measurement.
+
+**Message grouping's own working memory is measured.** The final grouping pass
+raises RSS by about 80 MB. Its window index (50 MB high-water) and trigram cache
+(26 MB) are named stores, measured inside each window before they are freed,
+so their high-water marks already cover that rise. Its skip decision and full
+key sort add about 1 MB.
+
+**The reported peak missed the true peak by 95 MB in one scenario.** In
+heatmap-histogram-consolidate, RSS read 733 MB at the end of the displayed
+rows' statistics, inside the routine. After the routine returned it read
+638 MB, which is the peak `-mem` would report; `time -l` reports 733 MB. In the
+other ten scenarios the reported peak was within 1 MB of the operating
+system's: the allocator kept the pages, so the peak was right and only its
+attribution was missing. On the one-day log, with every line highlighted, the
+reported peak was 252.7 MB against 276.3 MB from the operating system.
+
+**Where measurement happens today.** Only the grouping checkpoint
+(`run_consolidation_checkpoint()`) and the final pass's window
+(`process_final_pass_window()`) call `measure_memory_structures()` from inside,
+before freeing their working structures. Every other reading is taken in the
+pipeline steps after the work routine has returned (`pipeline_parse`,
+`pipeline_accumulate`, `pipeline_finalize`, `pipeline_render`). No reading
+follows `group_similar_messages()`: the next is after statistics.
+
+**Routines that free large amounts of memory while they run:**
+
+| Routine | What it frees | Where the direction above would place the reading |
+|---|---|---|
+| `calculate_all_statistics()` | each time bucket's durations, one bucket at a time (the store fell from 244 MB to under 4 MB); per-bucket sessions and thread pools; each displayed row's sorted copy; its local ranking lists when each category's pass ends | in front of the bucket loop (also the missing after-grouping point); before the ranking lists go out of scope |
+| `group_similar_messages()` | the streaming consolidation maps, cleared at the start of the final pass; the key-sort maps; rows absorbed into groups, deleted one at a time | before the clear; before the key-sort maps are freed; in front of the absorbing loop |
+
+A copy allocated and freed inside a loop, such as each displayed row's sorted
+durations, is neither a deletion before a loop nor one at a routine's end, so
+neither placement reads it. The largest row and the largest bucket are known
+before their loops start, from each one's observation count.
+
+**"Unattributed" mixes instants.** It is peak RSS minus the sum of every named
+store's high-water mark, and those marks come from different moments. The
+time-bucket store (242 MB) peaks during reading and is freed during statistics,
+before the run's peak, yet it is still subtracted. On the one-server month
+top25-consolidate case the figure read 348, 43 and 196 MB across three
+benchmark rounds of the same code; three identical runs peaked at 932, 936 and
+969 MB, each equal to `time -l`.
+
+**An RSS reading against a size walk.** A standalone Perl script copied and
+sorted 3,751,230 non-integer values. Reading the process's RSS the way `ltl`
+does on macOS (launching `ps`) took 8.8 ms (mean of 20); the process grew
+276 MB. `Devel::Size::total_size` of the copy took 198 ms and reported 229 MB:
+22 times the cost, and 47 MB short of what the copy cost the process. The Linux
+reading is a file read and was not measured.
+
 ## Memory Diagnostic Method (from the #356 investigation)
 
 Recorded for future memory investigations; the temporary #356 instrumentation is not retained beyond what S4 specifies.
@@ -161,4 +295,14 @@ Recorded for future memory investigations; the temporary #356 instrumentation is
 - **Undef probe.** At exit: measure RSS, `undef` every named structure, re-measure. The amount that does not drop is retained-freed memory (at dev scale: freeing 244 MB of structures released zero pages).
 - **Devel::MAT recipe.** `cpanm --notest Devel::MAT`; call `Devel::MAT::Dumper::dump($path)` at the phase of interest; `pmat-counts $path` gives live-heap totals by SV kind. Devel::SizeMe does not build on perl 5.42.
 - **Probe gotcha.** Constant ranges (`0..1999999`) are folded at compile time; a standalone probe of range-list cost must use a runtime-variable bound or it will silently measure nothing.
+- **Step probes on a scratch copy.** Copy `ltl` to the scratchpad and insert
+  `memory_debug_decomposition("<tag>")` at the points of interest inside a
+  routine; compare each sample's RSS with its named sum, and read a rise in
+  RSS with no rise in the named sum as untracked working memory. Run the
+  benchmark's own `-V benchmark-data`: bare `-V` makes grouping keep member
+  keys, which enlarges the clusters (211 MB against 239 MB on the one-server
+  month).
+- **Size-walk gotcha.** `Devel::Size::total_size` on a store holding compiled
+  code (the scan-sub cache, the format registry) segfaults the process, exit
+  139. Leave those stores to the compile-boundary RSS figure.
 - **Churn-rate technique.** Compute the unattributed residual per line at two workload scales; a matching B/line rate attributes the residual to per-line transient allocation (76.2 B/line dev vs 77.5 B/line production for the bin-vs-raw delta).

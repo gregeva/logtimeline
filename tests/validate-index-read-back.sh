@@ -19,7 +19,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -57,7 +57,11 @@ INDEX_FIXTURE="$SCRIPT_DIR/fixtures/ltl-index-readback.csv"
 # bucket size is not part of the selection signature (serialize_filters()),
 # so the timeline collapses to one non-empty bucket - the two-file scenarios
 # pair fixtures 25 days apart - and the summary table is suppressed.
-COMMON="--disable-progress -bs 1440 -oe -osum -n 1"
+# The index is off by default; COMMON turns it on with -idx, and
+# COMMON_DEFAULT is the same run without it, for the scenarios asserting
+# that a default run leaves the index alone.
+COMMON_DEFAULT="--disable-progress -bs 1440 -oe -osum -n 1"
+COMMON="$COMMON_DEFAULT -idx"
 
 if [[ ! -x "$LTL" ]]; then
     echo "ERROR: ltl not found or not executable at $LTL"
@@ -1190,11 +1194,379 @@ scenario_filtered_tier2_no_leak() {
 }
 
 # ---------------------------------------------------------------------------
+# #616: the index's means, its bytes population and the bytes heatmap pre-seed.
+# Committed fixtures, one-day bucket: the twelve-line access fixture (one
+# request per endpoint, one zero-byte response, no count lines) and the
+# gated-means access fixture (one path whose two durations average to 50).
+# ---------------------------------------------------------------------------
+SINGLE_SAMPLE_FIXTURE="$REPO_DIR/tests/fixtures/tomcat-access-single-sample-keys.txt"
+GATED_ACCESS_FIXTURE="$REPO_DIR/tests/fixtures/gated-means-access.txt"
+IDX616_CONTRACT='features/616-gated-mean-derivation.md D8, D15 and D16 (the index means are written through the CSV formatter at two decimals whatever -cp says, trailing zeros stripped, empty for no data; the bounds keep -)'
+IDX616_PRODUCER='write_index_file() in ltl (the six means through mean_of() and format_csv_value() at a fixed two decimals)'
+
+scenario_index_means_fixed_precision() {
+    current_scenario="index-means-fixed-precision"
+    echo "[$current_scenario]"
+    local cp out v row
+    for cp in default 0 4 full; do
+        rm -f ltl-index.csv
+        if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
+        else out=$(run_ltl $COMMON -cp "$cp" "$SINGLE_SAMPLE_FIXTURE"); fi
+        check_capture_warnings "$out"
+        v=$(read_index_column duration_mean 'entry_type=file')
+        assert_command \
+            command     "[ \"$v\" = 128.75 ]" \
+            label       "-cp $cp: the file row's duration_mean is 128.75 ('$v')" \
+            asserts     'The index writes its means at two decimals whatever -cp the run was given: the index is a durable file compared across runs, so a per-run precision must not change what it holds for the same file' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+    done
+    for row in file selection; do
+        v=$(read_index_column entry_type "entry_type=$row")
+        assert_command command "[ \"$v\" = $row ]" label "the index holds a $row row" \
+            asserts 'The rows the cell reads below address exist, so an empty read is the cell and not a missing row' \
+            produced_by 'write_index_file() in ltl' contract "$IDX616_CONTRACT"
+        v=$(read_index_column count_mean "entry_type=$row")
+        assert_command command "[ -z \"$v\" ]" label "$row row: count_mean is empty for a file with no count lines ('$v')" \
+            asserts 'A mean with no observation writes the empty cell every CSV surface writes for no data, not a placeholder' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+        v=$(read_index_column count_min "entry_type=$row")
+        assert_command command "[ \"$v\" = - ]" label "$row row: the count_min bound keeps '-' ('$v')" \
+            asserts 'A missing bound keeps the - the read-back side reads as no bound' \
+            produced_by 'write_index_file() in ltl' contract 'features/179-index-read-back.md (a missing bound is -); features/616-gated-mean-derivation.md D15'
+    done
+}
+
+scenario_index_means_integral() {
+    current_scenario="index-means-integral"
+    echo "[$current_scenario]"
+    local cp out v
+    for cp in default full; do
+        rm -f ltl-index.csv
+        if [[ "$cp" == default ]]; then out=$(run_ltl $COMMON -i /gm/order "$GATED_ACCESS_FIXTURE")
+        else out=$(run_ltl $COMMON -cp "$cp" -i /gm/order "$GATED_ACCESS_FIXTURE"); fi
+        check_capture_warnings "$out"
+        v=$(read_index_column duration_mean 'entry_type=selection')
+        assert_command command "[ \"$v\" = 50 ]" label "-cp $cp: a whole-number selection mean writes 50, not 50.00 ('$v')" \
+            asserts 'The formatter strips trailing zeros, so a mean that is a whole number carries no decimals' \
+            produced_by "$IDX616_PRODUCER" contract "$IDX616_CONTRACT"
+    done
+}
+
+scenario_index_bytes_counted() {
+    current_scenario="index-bytes-counted"
+    echo "[$current_scenario]"
+    local out occ bmin bmean stats smean
+    out=$(run_ltl $COMMON -o -cp 2 "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    occ=$(read_index_column file_bytes_occurrences 'entry_type=file')
+    bmin=$(read_index_column file_bytes_min 'entry_type=file')
+    bmean=$(read_index_column file_bytes_mean 'entry_type=file')
+    stats=$(ls ./*-LTL-STATS-*.csv 2>/dev/null | head -1)
+    smean=$([[ -n "$stats" ]] && perl -MText::CSV -e 'my $c=Text::CSV->new({binary=>1}); open my $f,"<",$ARGV[0] or die; my $h=$c->getline($f); my %i; @i{@$h}=0..$#$h; my $r=$c->getline($f); print $r->[$i{bytes_mean}] // ""' "$stats")
+    assert_command command "[ \"$occ\" = 12 ] && [ \"$bmin\" = 0 ] && [ \"$bmean\" = 18683.33 ]" \
+        label "the index counts the zero-byte response: occurrences $occ, min $bmin, mean $bmean" \
+        asserts 'A zero-byte response is a bytes observation in the index as it is in both statistics stores: the count, the minimum and the mean include it' \
+        produced_by 'read_and_process_logs() in ltl (the per-file index bytes accumulation) and write_index_file()' \
+        contract 'features/616-gated-mean-derivation.md D17 (the index bytes population is the stores)'
+    assert_command command "[ \"$smean\" = \"$bmean\" ]" \
+        label "the STATS CSV under -cp 2 writes the same bytes mean ('$smean')" \
+        asserts 'The index and the STATS CSV hold one bytes mean for one file' \
+        produced_by 'write_index_file() and print_bar_graph() in ltl' \
+        contract 'features/616-gated-mean-derivation.md D17'
+}
+
+scenario_index_heatmap_bytes_preseed() {
+    current_scenario="index-heatmap-bytes-preseed"
+    echo "[$current_scenario]"
+    local out v
+    out=$(run_ltl $COMMON "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    edit_index_row 'entry_type=file' 'file_bytes_max=999999'
+    edit_index_row 'entry_type=selection' 'file_bytes_max=999999'
+    out=$(run_ltl_v -hm bytes "$SINGLE_SAMPLE_FIXTURE")
+    check_capture_warnings "$out"
+    v=$(extract_v_value "$out" heatmap_preseed_max)
+    assert_command command "[ \"$v\" = 999999 ]" \
+        label "-hm bytes is pre-seeded from the index's bytes bound ($v)" \
+        asserts 'The bytes heatmap takes its starting range from the bytes bounds the index writes (file_bytes_min, file_bytes_max), as the duration heatmap does from its duration bounds' \
+        produced_by 'read_index_file() in ltl (heatmap pre-seed) + emit_index_readback_verbose() (heatmap_preseed_max)' \
+        contract 'features/616-gated-mean-derivation.md D24'
+}
+
+# ---------------------------------------------------------------------------
+# #708: the index is off by default, -idx turns it on, -ni has no effect
+# ---------------------------------------------------------------------------
+IDX708_CONTRACT='features/708-run-index-deprecation.md D1 (nothing printed about the index), D2 (off by default), D3 (-idx turns it on), D8 (-ni accepted and without effect)'
+
+# The index's modification time is set back to a fixed past instant before
+# a run, so a rewrite within the same second still shows as a change.
+INDEX_PAST_STAMP=202001011200
+index_mtime() { stat -f %m ltl-index.csv 2>/dev/null || stat -c %Y ltl-index.csv; }
+
+scenario_default_writes_no_index() {
+    current_scenario="default-writes-no-index"
+    echo "[$current_scenario]"
+    local out
+    out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
+    check_capture_warnings "$out"
+    assert_command \
+        command     '[[ ! -e ltl-index.csv ]] && ! compgen -G ".ltl-index.*.tmp" >/dev/null' \
+        label       'a default run leaves no ltl-index.csv and no temp index behind' \
+        asserts     'A run without -idx does not write the index: neither ltl-index.csv nor its write-side temp file exists afterwards in a directory that held neither' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^index_used: no$' \
+        asserts     'A run without -idx does not read an index, so the read-back reports index_used=no' \
+        produced_by 'emit_index_readback_verbose() in ltl; read_index_file() not called without -idx' \
+        contract    "$IDX708_CONTRACT"
+}
+
+scenario_default_leaves_index_untouched() {
+    current_scenario="default-leaves-index-untouched"
+    echo "[$current_scenario]"
+    local out sum_before sum_after mtime_before
+    seed_from_fixture
+    touch -t "$INDEX_PAST_STAMP" ltl-index.csv
+    sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
+    mtime_before=$(index_mtime)
+    out=$(run_ltl $COMMON_DEFAULT -V index-read-back "$ACCESS_LOG")
+    check_capture_warnings "$out"
+    sum_after=$(shasum ltl-index.csv | cut -d' ' -f1)
+    assert_command \
+        command     "[[ '$sum_after' == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
+        label       'a default run leaves an existing ltl-index.csv byte-identical, its modification time unchanged' \
+        asserts     'A run without -idx neither rewrites nor touches an index already in the directory, even one holding a fresh entry for the file being read' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^index_used: no$' \
+        asserts     'A run without -idx does not read the index beside it: the fixture holds a fresh entry for this file, which an -idx run would use' \
+        produced_by 'read_index_file() call in the MAIN section of ltl, gated on $index_enabled; emit_index_readback_verbose()' \
+        contract    "$IDX708_CONTRACT"
+    assert_line "$out" \
+        pattern     '^  lookup: none$' \
+        asserts     'With the index not read, the file reports no lookup tier' \
+        produced_by 'emit_index_readback_verbose() in ltl (no %index_preseed entry: lookup none)' \
+        contract    "$IDX708_CONTRACT"
+    assert_command \
+        command     "! grep -qi 'index' '$out.stderr'" \
+        label       'nothing about the index on stderr' \
+        asserts     'The deprecation is silent: a default run beside an existing index prints no notice, warning or other line about the index' \
+        produced_by 'ltl (no notice is emitted for the index; print_deprecation_notices() carries none)' \
+        contract    "$IDX708_CONTRACT"
+}
+
+scenario_no_index_is_noop() {
+    current_scenario="no-index-is-noop"
+    echo "[$current_scenario]"
+    local out_default out_ni out_both sum_before mtime_before
+    seed_from_fixture
+    touch -t "$INDEX_PAST_STAMP" ltl-index.csv
+    sum_before=$(shasum ltl-index.csv | cut -d' ' -f1)
+    mtime_before=$(index_mtime)
+    out_default=$(run_ltl $COMMON_DEFAULT "$ACCESS_LOG")
+    check_capture_warnings "$out_default"
+    out_ni=$(run_ltl $COMMON_DEFAULT -ni "$ACCESS_LOG")
+    check_capture_warnings "$out_ni"
+    assert_command \
+        command     "grep -Eq 'command-line options: .* -ni([^a-z-]|\$)' '$out_ni' && cmp -s <(grep -v 'command-line options:' '$out_default') <(grep -v 'command-line options:' '$out_ni') && cmp -s '$out_default.stderr' '$out_ni.stderr'" \
+        label       'a -ni run prints what a default run prints, its echoed options line apart, on stdout and stderr' \
+        asserts     '-ni is accepted and has no effect: no notice and no difference in output, except that the options line under the timeline echoes -ni as typed' \
+        produced_by "the 'no-index|ni' GetOptions entry in ltl, read by nothing" \
+        contract    "$IDX708_CONTRACT"
+    assert_command \
+        command     "[[ \"\$(shasum ltl-index.csv | cut -d' ' -f1)\" == '$sum_before' && \"\$(index_mtime)\" == '$mtime_before' ]]" \
+        label       'neither the default nor the -ni run touched the existing index' \
+        asserts     'A run with -ni, like a default run, leaves an existing index byte-identical with its modification time unchanged' \
+        produced_by 'the write_index_file() call in the MAIN section of ltl, gated on $index_enabled' \
+        contract    "$IDX708_CONTRACT"
+    rm -f ltl-index.csv
+    out_both=$(run_ltl $COMMON -ni "$ACCESS_LOG")
+    check_capture_warnings "$out_both"
+    assert_command \
+        command     '[[ "$(grep -c "^file," ltl-index.csv 2>/dev/null || true)" -ge 1 ]]' \
+        label       '-idx -ni writes the index, as -idx alone does' \
+        asserts     '-ni does not switch off an index that -idx turns on: the run writes ltl-index.csv with a file row' \
+        produced_by "write_index_file() in ltl; the 'index|idx' and 'no-index|ni' GetOptions entries" \
+        contract    "$IDX708_CONTRACT"
+}
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 # Parsed before the helper self-tests, so a rejected argument runs no assertion.
+# ---------------------------------------------------------------------------
+# #525: the index at the run's precision; drift at the runtime precision
+# ---------------------------------------------------------------------------
+IDX525_CONTRACT='features/525-timestamp-precision-option.md D13 (the index at the run'"'"'s resolved precision; drift follows the runtime options), D15 (compared at the run'"'"'s precision, or the row'"'"'s when coarser), D16 (a minute run writes whole seconds under m), D17 (every row states its precision), D18 (numbers, never strings), D19 (a row with - is read at its digits'"'"' precision)'
+
+# Application-log fixtures in the scenario directory: three lines with
+# millisecond fractions (.123, .456, .789), and three with six-digit ones.
+write_precision_fixtures() {
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,456 [main] INFO  com.example.Service - second line' \
+        '2026-01-26 10:00:03,789 [main] ERROR com.example.Service - third line' > three.log
+    printf '%s\n' \
+        '2026-01-26 10:00:00,000250 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:00,000750 [main] INFO  com.example.Service - second line' \
+        '2026-01-26 10:00:00,999999 [main] INFO  com.example.Service - third line' > six.log
+    printf '%s\n' \
+        '2026-01-26 10:00:01,123456789 [main] INFO  com.example.Service - first line' \
+        '2026-01-26 10:00:02,999999999 [main] INFO  com.example.Service - second line' > nine.log
+}
+
+scenario_index_run_precision() {
+    current_scenario="index-run-precision"
+    echo "[$current_scenario]"
+    write_precision_fixtures
+    local row tp file first want_first want_tp out row_first row_tp
+    for row in "ms|three.log|2026-01-26T10:00:01.123|ms" "-|three.log|2026-01-26T10:00:01|m" "s|three.log|2026-01-26T10:00:01|s" "us|six.log|2026-01-26T10:00:00.000250|us"; do
+        IFS='|' read -r tp file want_first want_tp <<< "$row"
+        rm -f ltl-index.csv
+        if [[ "$tp" == - ]]; then out=$(run_ltl $COMMON "$file"); else out=$(run_ltl $COMMON -tp "$tp" "$file"); fi
+        check_capture_warnings "$out"
+        for entry in file selection; do
+            row_first=$(read_index_column first_timestamp "entry_type=$entry")
+            row_tp=$(read_index_column ts_precision "entry_type=$entry")
+            assert_command \
+                command     "[ \"$row_first\" = \"$want_first\" ] && [ \"$row_tp\" = \"$want_tp\" ]" \
+                label       "-tp $tp: the $entry row writes $want_first under $want_tp ('$row_first', '$row_tp')" \
+                asserts     'The index writes first and last timestamps at the precision the run resolved (whole seconds at minute precision, the date-time form having nothing coarser), and every row, selection rows included, states that precision' \
+                produced_by 'write_index_file() in ltl (index_timestamp_precision(), format_timestamp())' \
+                contract    "$IDX525_CONTRACT"
+        done
+    done
+}
+
+# drift_case LABEL WRITE_TP EDIT READ_TP WANT — write the index with a run at
+# WRITE_TP (- for none), apply EDIT to the selection row (empty for none),
+# read it back with a run at READ_TP and assert WANT, a regex over the
+# -V index-read-back capture.
+drift_case() {
+    local label="$1" write_tp="$2" edit="$3" read_tp="$4" want="$5" out
+    rm -f ltl-index.csv
+    if [[ "$write_tp" == - ]]; then out=$(run_ltl $COMMON three.log); else out=$(run_ltl $COMMON -tp "$write_tp" three.log); fi
+    check_capture_warnings "$out"
+    if [[ -n "$edit" ]]; then edit_index_row 'entry_type=selection' "$edit"; fi
+    out=$(run_ltl_v -tp "$read_tp" three.log)
+    check_capture_warnings "$out"
+    assert_command \
+        command     "grep -q '^index_used: yes\$' '$out' && grep -qE '$want' '$out'" \
+        label       "$label" \
+        asserts     'Drift is judged at the run'"'"'s precision, or at the stored row'"'"'s precision when that is coarser, with each row read at the precision it states (or its digits carry, for a row with -), comparing numbers' \
+        produced_by 'detect_index_drift() and index_row_precision() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
+scenario_drift_runtime_precision() {
+    current_scenario="drift-runtime-precision"
+    echo "[$current_scenario]"
+    write_precision_fixtures
+    drift_case "a millisecond row read by a whole-second run: no drift" ms "" s '^drift_detected: no$'
+    drift_case "a whole-second row read by a millisecond run: compared at the row's second, no drift" s "" ms '^drift_detected: no$'
+    drift_case "a minute run's row read by a millisecond run: compared at the minute, no drift" - "" ms '^drift_detected: no$'
+    drift_case "a row with - and whole-second timestamps read by a millisecond run: compared at the second, no drift" s "ts_precision=-" ms '^drift_detected: no$'
+    drift_case "a row with - and three-digit timestamps, last narrowed by 1 ms: compared at the millisecond, drifted" ms "ts_precision=-,last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
+    drift_case "a millisecond row narrowed by 1 ms read by a millisecond run: drifted" ms "last_timestamp=2026-01-26T10:00:03.788" ms '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes$'
+    drift_case "a millisecond row narrowed by 1 ms read by a whole-second run: no drift" ms "last_timestamp=2026-01-26T10:00:03.788" s '^drift_detected: no$'
+
+    # Nanosecond: a row narrowed by one nanosecond drifts under -tp ns and not
+    # under -tp us, where both round to the same microsecond.
+    local nine_out
+    for read_tp in ns us; do
+        rm -f ltl-index.csv
+        nine_out=$(run_ltl $COMMON -tp ns nine.log); check_capture_warnings "$nine_out"
+        edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:02.999999998'
+        nine_out=$(run_ltl_v -tp "$read_tp" nine.log); check_capture_warnings "$nine_out"
+        local want='^drift_detected: no$'
+        [[ "$read_tp" == ns ]] && want='^  last_timestamp: live=2026-01-26T10:00:02\.999999999 preseed=2026-01-26T10:00:02\.999999998 drifted=yes$'
+        assert_command \
+            command     "grep -q '^index_used: yes\$' '$nine_out' && grep -qE '$want' '$nine_out'" \
+            label       "a nanosecond row narrowed by 1 ns read by a -tp $read_tp run: $([[ $read_tp == ns ]] && echo drifted || echo no drift)" \
+            asserts     'At nanosecond precision the stored and live timestamps are compared exactly, as whole seconds and nanoseconds; at a coarser precision both round to it first' \
+            produced_by 'detect_index_drift(), timestamp_ticks() and iso_timestamp_parts() in ltl' \
+            contract    "$IDX525_CONTRACT; features/525-timestamp-precision-option.md D23"
+    done
+
+    # A selection row written at another precision than the file row beside
+    # it is judged at its own: run 1 writes both at s, run 2 (file unchanged,
+    # so its row is kept) rewrites the selection row at ms.
+    local out file_tp sel_tp
+    rm -f ltl-index.csv
+    out=$(run_ltl $COMMON -tp s three.log); check_capture_warnings "$out"
+    out=$(run_ltl $COMMON -tp ms three.log); check_capture_warnings "$out"
+    file_tp=$(read_index_column ts_precision 'entry_type=file')
+    sel_tp=$(read_index_column ts_precision 'entry_type=selection')
+    edit_index_row 'entry_type=selection' 'last_timestamp=2026-01-26T10:00:03.788'
+    out=$(run_ltl_v -tp ms three.log); check_capture_warnings "$out"
+    assert_command \
+        command     "[ \"$file_tp\" = s ] && [ \"$sel_tp\" = ms ] && grep -qE '^  last_timestamp: live=2026-01-26T10:00:03\.789 preseed=2026-01-26T10:00:03\.788 drifted=yes\$' '$out'" \
+        label       "a selection row at ms beside a file row at s is judged at its own millisecond (file '$file_tp', selection '$sel_tp')" \
+        asserts     'A selection row states its own precision, so a later run that rewrote it at a finer precision than the preserved file row is judged at the selection row'"'"'s precision' \
+        produced_by '_preseed_from_row() and detect_index_drift() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
+scenario_drift_numeric_structure() {
+    current_scenario="drift-numeric-structure"
+    echo "[$current_scenario]"
+    perl -ne '
+        $sub = $1 if /^sub (\w+)/;
+        next if /^\s*#/;
+        print "$sub:$.: $_" if $sub =~ /^(read_index_file|detect_index_drift)$/ && /\b(lt|gt|le|ge|cmp)\b|\b_(lt|gt)\(/;
+        print "$sub:$.: $_" if /^sub _(lt|gt)\b/;
+    ' "$LTL" > stray-comparisons.txt
+    assert_command \
+        command     "[ ! -s stray-comparisons.txt ]" \
+        label       "read_index_file() and detect_index_drift() compare no timestamp as a string" \
+        asserts     'Timestamps read back from the index are compared as the instants they name, never by string order' \
+        produced_by 'read_index_file() and detect_index_drift() in ltl' \
+        contract    "$IDX525_CONTRACT"
+}
+
+# ---------------------------------------------------------------------------
+# #605: the filter part of the index signature is written from the one
+# declaration of the bound set. For every command line valid before it, the
+# signature is byte-identical to the base build's (captured from the build at
+# f7c5daa on these same command lines), so an index an earlier release wrote
+# is still reused; highlight bounds stay out of it.
+# Boundary fixture, one-day bucket; the assertion reads index_filter_signature.
+# ---------------------------------------------------------------------------
+BOUNDARY_FIXTURE="$REPO_DIR/tests/fixtures/numeric-highlight-boundary.txt"
+IDX605_CONTRACT='features/605-input-units.md section 6 AC5 and section 5.2 (the signature string stays byte-identical for every command line valid today; highlights carry signature 0)'
+
+scenario_bound_signature_unchanged() {
+    current_scenario="bound-signature-unchanged"
+    echo "[$current_scenario]"
+    local -a cases=(
+        '-dmin 200 -bmax 5000|-bmax=5000;-dmin=200'
+        '-dmin 1 -dmax 2 -bmin 3 -bmax 4 -cmin 5 -cmax 6|-bmax=4;-bmin=3;-cmax=6;-cmin=5;-dmax=2;-dmin=1'
+        '-dmin 10 -hdmin 20 -hbmax 30 -hcmin 1|-dmin=10'
+        '-hdmin 20 -hbmax 30|-'
+        '-dmin 0 -cmax 0|-cmax=0;-dmin=0'
+    )
+    local c args expected out sig
+    for c in "${cases[@]}"; do
+        args="${c%%|*}"; expected="${c#*|}"
+        rm -f ltl-index.csv
+        # shellcheck disable=SC2086
+        out=$(run_ltl $COMMON -V index-read-back $args "$BOUNDARY_FIXTURE")
+        check_capture_warnings "$out"
+        sig=$(extract_v_value "$out" 'index_filter_signature')
+        assert_command \
+            command     "[ \"$sig\" = \"$expected\" ]" \
+            label       "$args -> $expected (got ${sig:-MISSING-ANCHOR})" \
+            asserts     'The filter signature of a bound command line valid before the bound declaration is byte-identical to the base build: filter bounds sorted by short name as -<short>=<value>, highlight bounds absent' \
+            produced_by 'serialize_filters() in ltl (rows of @quantity_options with signature 1), surfaced by emit_index_readback_verbose()' \
+            contract    "$IDX605_CONTRACT"
+    done
+    rm -f ltl-index.csv
+}
+
 scenario_register cold-no-index \
                   warm-unfiltered \
                   cold-filtered-tier2-fallback \
@@ -1212,7 +1584,18 @@ scenario_register cold-no-index \
                   missing-bound-column \
                   expired-selection-entry \
                   signature-canonicalization \
-                  filtered-tier2-no-leak
+                  filtered-tier2-no-leak \
+                  index-means-fixed-precision \
+                  index-means-integral \
+                  index-bytes-counted \
+                  index-heatmap-bytes-preseed \
+                  index-run-precision \
+                  drift-runtime-precision \
+                  drift-numeric-structure \
+                  bound-signature-unchanged \
+                  default-writes-no-index \
+                  default-leaves-index-untouched \
+                  no-index-is-noop
 scenario_parse_args "$@"
 
 echo "Validating index read-back against ltl at $LTL"
@@ -1244,6 +1627,17 @@ while read -r _scenario; do
         expired-selection-entry              ) _fn=scenario_expired_selection_entry ;;
         signature-canonicalization           ) _fn=scenario_signature_canonicalization ;;
         filtered-tier2-no-leak               ) _fn=scenario_filtered_tier2_no_leak ;;
+        index-means-fixed-precision          ) _fn=scenario_index_means_fixed_precision ;;
+        index-means-integral                 ) _fn=scenario_index_means_integral ;;
+        index-bytes-counted                  ) _fn=scenario_index_bytes_counted ;;
+        index-heatmap-bytes-preseed          ) _fn=scenario_index_heatmap_bytes_preseed ;;
+        index-run-precision                  ) _fn=scenario_index_run_precision ;;
+        drift-runtime-precision              ) _fn=scenario_drift_runtime_precision ;;
+        drift-numeric-structure              ) _fn=scenario_drift_numeric_structure ;;
+        bound-signature-unchanged            ) _fn=scenario_bound_signature_unchanged ;;
+        default-writes-no-index              ) _fn=scenario_default_writes_no_index ;;
+        default-leaves-index-untouched       ) _fn=scenario_default_leaves_index_untouched ;;
+        no-index-is-noop                     ) _fn=scenario_no_index_is_noop ;;
     esac
     echo ""
     in_scenario_dir "$_fn"

@@ -28,6 +28,8 @@ The conversion is the one the user-defined-metric unit slot already uses, so one
 place owns the vocabulary and the multipliers on both surfaces. `--help` and
 `docs/usage.md` document the accepted forms in the same change.
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the note below that a zero duration renders `0ns` no longer describes any surface: a value never renders below its floor unit, so a zero reads in the source's resolved unit. Record: `features/617-width-to-format-rule.md` D4, D16.
+
 ## What exists today (audited on the base commit of this branch)
 
 - `-bs` is declared `bucket-size|bs=i` in `GetOptions`; a non-integer value is
@@ -91,9 +93,9 @@ class and are not part of the time ladder.
 
 | step | canonical | also accepted | length |
 |---|---|---|---|
-| nanosecond | `ns` | `nsec` | 10⁻⁶ ms |
-| microsecond | `us` | `usec` | 10⁻³ ms |
-| millisecond | `ms` | `msec` | 1 ms |
+| nanosecond | `ns` | `nsec`, `nanosecond`, `nanoseconds` | 10⁻⁶ ms |
+| microsecond | `us` | `usec`, `microsecond`, `microseconds` | 10⁻³ ms |
+| millisecond | `ms` | `msec`, `millisecond`, `milliseconds` | 1 ms |
 | second | `s` | `sec`, `second`, `seconds` | 1 000 ms |
 | minute | `m` | `min`, `minute`, `minutes` | 60 s |
 | hour | `h` | `hr`, `hour`, `hours` | 60 min |
@@ -101,6 +103,11 @@ class and are not part of the time ladder.
 | week | `w` | `wk`, `week`, `weeks` | 7 d |
 | month | `month` | `mo`, `mon`, `months` | 30 d |
 | year | `year` | `y`, `yr`, `years` | 365 d |
+
+The long sub-second spellings (`millisecond(s)`, `microsecond(s)`,
+`nanosecond(s)`) are the amendment of `features/525-timestamp-precision-option.md`
+D6 (the precision values resolve through this ladder, which carries them for
+every time-unit option).
 
 Matching is case-insensitive on this table (`1D`, `1H`, `1M` read as day, hour,
 minute). `m` is minute on every time-unit surface; no spelling that could be read
@@ -139,7 +146,7 @@ zero or negative width with a unit. A bare number is never in this set. `-bs 0` 
 The resolved value may be fractional in the run's unit (`-bs 90s` on a
 minute-display run is 1.5). `$bucket_size_seconds` carries it exactly. The two
 `-V` rows that print `$time_bucket_size` print the resolved value in the run's
-unit, with decimals only when the value is fractional (`bucket-size: 1440`,
+unit, with decimals only when the value is fractional (`bucket_size: 1440`,
 `time_bucket_size 1.5`); the `%d` in `-V benchmark-data` goes.
 
 ### D4 — Bucket width and timestamp precision are separate (locked)
@@ -155,6 +162,13 @@ bare `-bs` number.
 A single option that names the timestamp precision outright (minute, second,
 millisecond, nanosecond), instead of the two switches, is a separate
 enhancement request, filed as issue #525.
+
+That option is `-tp, --timestamp-precision`. Under
+`features/525-timestamp-precision-option.md` D5 (`-s` and `-ms` deprecated
+with a notice for one release, keeping their jobs) and D11 (precision and
+width separate; a bare `-bs` number is minutes), `-s` and `-ms` print a
+deprecation notice pointing at `-tp` and at a unit on `-bs`; their removal is
+#630.
 
 ### D5 — Documentation (locked)
 
@@ -217,7 +231,7 @@ are the contracts, both existing).
    same as `-ms -bs 500`; `-bs 1d` on a plain run renders the same as
    `-bs 1440`.
 8. **`-V` rows report the resolved value** (assertable): `-V runtime-config`
-   shows `bucket-size: 1440` for `-bs 1d` and `bucket-size: 1.5` for `-bs 90s`
+   shows `bucket_size: 1440` for `-bs 1d` and `bucket_size: 1.5` for `-bs 90s`
    on a minute run; `-V benchmark-data` `time_bucket_size` agrees.
    `tests/validate-runtime-config.sh` keeps passing (its bucket-size assertions
    use bare numbers).
@@ -247,6 +261,11 @@ Recorded on the tree as implemented (2026-09-03).
   `$bucket_size_unit` and read by the seconds conversion in
   `adapt_to_terminal_settings()`, which no longer restates the minute and
   millisecond multipliers.
+- **Each step carries its decimals** (#608 one byte-unit ladder, D18): the
+  rounding precision relative to millisecond storage, derived from the step's
+  length when the table is built (`ns` 6, `us` 3, `ms` and every longer step
+  0). `format_duration()` and the default `-cp` duration and percentile
+  families read it; no sub keeps a decimals table of its own.
 - **A zero duration now renders `0ns`, not `0us`.** `format_time()` climbs
   the ladder from its lowest step, and a value that reaches no step renders in
   that step; the old scaler started at microseconds, so zero read `0us`. One

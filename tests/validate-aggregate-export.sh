@@ -25,7 +25,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 FIXTURES="$REPO_DIR/tests/fixtures"
 CHECKER="$REPO_DIR/tests/aggregate-export/validate-aggregate-export.pl"
 RULES="$REPO_DIR/tests/aggregate-export/rules/keys.tsv"
@@ -71,6 +71,7 @@ scenario_register histogram-n0 \
                   directories-absolute \
                   environment-options \
                   heatmap-vs-bucket-store-pinned \
+                  unobserved-metric-absent \
                   oracle-chain
 scenario_parse_args "$@"
 
@@ -219,7 +220,7 @@ if want "$current_scenario"; then
         # histogram: the chart's selected percentiles at full precision
         ticks="$TMP_DIR/$current_scenario.ticks"; sed -n '/=== histogram-percentile-ticks ===/,/=== END histogram-percentile-ticks ===/p' "$OUT" > "$ticks"
         for p in P50:p50 P75:p75 P90:p90 P95:p95; do
-            tv="$(grep -E "^\s+${p%%:*}=" "$ticks" | head -1 | sed 's/.*=//')"; fv="$(yget measurements.histogram.duration.${p##*:})"
+            tv="$(grep -E "^\s+percentile: ${p%%:*} value=" "$ticks" | head -1 | sed 's/.*=//')"; fv="$(yget measurements.histogram.duration.${p##*:})"
             assert_near "histogram ${p##*:} = ticks ${p%%:*}" "$fv" "$tv" asserts 'The population-wide percentile is the value the histogram computed, as -V histogram-percentile-ticks prints it' produced_by "$PRODUCER; finalize_histogram_unified() in ltl" contract "$CONTRACT (D3)"
         done
         assert_equal "histogram occurrences excludes non-positive values" "$(yget measurements.histogram.duration.occurrences)" "$(section_value "$OUT" 'lines_included' | awk -v z=0 '{print $1}' | xargs -I{} sh -c 'echo $(( {} - 85 ))')" asserts 'Of the 444 included lines, 85 carry a zero duration the histogram capture gate excludes (10 in the status fixture, 75 in the spread fixture)' produced_by "$PRODUCER; read_and_process_logs() in ltl (histogram capture gate)" contract "$CONTRACT (D3, F1)"
@@ -235,7 +236,7 @@ if want "$current_scenario"; then
         if perl "$CHECKER" compare --yaml "$YAML_FILE" --csv "$STATS_CSV" > "$cmp" 2>&1; then pass_with "file = STATS CSV under -cp full: $(grep PASS "$cmp" | sed 's/^ *PASS *//')"; else fail_with "file = STATS CSV under -cp full" 'Every per-bucket value both surfaces carry is equal to the last digit' "$PRODUCER; print_bar_graph() in ltl" "$CONTRACT (D14)" "$(grep -A1 FAIL "$cmp" | head -4 | tr '\n' ' ')"; fi
         # timestamps: file = CSV column 1
         stamps=""; i=0; while v="$(yget series.buckets.$i.timestamp)" && [[ -n "$v" ]]; do stamps="${stamps:+$stamps|}$v"; i=$((i+1)); done
-        assert_equal "bucket timestamps = CSV timestamps" "$stamps" "$(awk -F, 'NR>1{gsub(/"/,"",$1); print $1}' "$STATS_CSV" | paste -sd'|' -)" asserts 'Every bucket timestamp is the STATS CSV timestamp of the same row' produced_by "$PRODUCER; format_bucket_timestamp() in ltl" contract "$CONTRACT (D7/D14)"
+        assert_equal "bucket timestamps = CSV timestamps" "$stamps" "$(awk -F, 'NR>1{gsub(/"/,"",$1); print $1}' "$STATS_CSV" | paste -sd'|' -)" asserts 'Every bucket timestamp is the STATS CSV timestamp of the same row' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7/D14)"
         # options string
         opt_line="$(strip_colour < "$OUT" | grep -E '^command-line options: ' | head -1 | sed 's/^command-line options: //')"
         assert_equal "options.command-line = echoed line" "$(yget provenance.determining.options.command-line)" "$opt_line" asserts 'The option string is byte-identical to the terminal echo, colour stripped' produced_by "$PRODUCER; build_run_options_string() in ltl" contract "$CONTRACT (D5)"
@@ -275,6 +276,8 @@ if want "$current_scenario"; then
         assert_equal "section blocks" "$(section_value "$agg" blocks)" "provenance,population,measurements,series" asserts 'Only the four blocks are written' produced_by "$PRODUCER (-V aggregate-export)" contract 'features/503-yaml-aggregate-export.md section -V aggregate-export section contract'
         assert_absent_key population.lines.highlighted asserts 'No highlight, no highlighted count' produced_by "$PRODUCER" contract "$CONTRACT (R9)"
         assert_absent_key population.lines.excluded.time_window asserts 'No window given, no time_window key' produced_by "$PRODUCER" contract "$CONTRACT (D12: a key is present when its cause was active)"
+        assert_equal "excluded.numeric = 0 with no bound" "$(yget population.lines.excluded.numeric)" 0 asserts 'The numeric exclusion count is written on every run, zero when no bound was given' produced_by "$PRODUCER" contract 'features/605-input-units.md section 4 D3 (the numeric exclusion count is reported by every consumer whenever the filter surface exists)'
+        assert_equal "excluded.numeric = filter-summary excluded_numeric" "$(yget population.lines.excluded.numeric)" "$(section_value "$OUT" excluded_numeric)" asserts 'The export and -V filter-summary report the same numeric exclusion count' produced_by "$PRODUCER; emit_filter_summary_verbose() in ltl" contract 'features/605-input-units.md section 4 D3'
     fi
 fi
 
@@ -285,12 +288,12 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         heading="$(strip_colour < "$OUT" | grep 'spanning' | head -1 | sed 's/.*spanning //' | sed 's/ *$//' || true)"
-        assert_equal "observation.start/end = heading" "$(yget population.observation.start) to $(yget population.observation.end)" "$heading" asserts 'The window is the two strings the run summary heading prints; under -pr the heading reads spanning <start> to <end> in the folded day/time form' produced_by "$PRODUCER; format_observation_timestamp() in ltl" contract "$CONTRACT (D7, D8)"
+        assert_equal "observation.start/end = heading" "$(yget population.observation.start) to $(yget population.observation.end)" "$heading" asserts 'The window is the two strings the run summary heading prints; under -pr the heading reads spanning <start> to <end> in the folded day/time form' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7, D8)"
         assert_equal "duration_seconds" "$(yget population.observation.duration_seconds)" 345600 asserts 'Wednesday 10:00 to Sunday 10:00 is four days' produced_by "$PRODUCER" contract "$CONTRACT (D13)"
         assert_equal "duration" "$(yget population.observation.duration)" "4 days" asserts 'The long form at three significant digits, plural' produced_by "$PRODUCER; format_time() in ltl" contract "$CONTRACT (D13)"
         assert_equal "profile" "$(yget provenance.determining.profile)" week asserts 'The fold mode is recorded' produced_by "$PRODUCER" contract "$CONTRACT (D8)"
         assert_equal "excluded.profile = samples_dropped" "$(yget population.lines.excluded.profile)" "$(section_value "$OUT" samples_dropped)" asserts 'The fold cause reads -V profile samples_dropped' produced_by "$PRODUCER; emit_profile_verbose() in ltl" contract "$CONTRACT (D12)"
-        assert_equal "bucket timestamp = CSV timestamp (folded)" "$(yget series.buckets.0.timestamp)" "$(awk -F, 'NR==2{gsub(/"/,"",$1); print $1}' "$STATS_CSV")" asserts 'Under -pr the bucket timestamp is the folded string the CSV writes' produced_by "$PRODUCER; format_bucket_timestamp() in ltl" contract "$CONTRACT (D8)"
+        assert_equal "bucket timestamp = CSV timestamp (folded)" "$(yget series.buckets.0.timestamp)" "$(awk -F, 'NR==2{gsub(/"/,"",$1); print $1}' "$STATS_CSV")" asserts 'Under -pr the bucket timestamp is the folded string the CSV writes' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D8)"
     fi
 fi
 
@@ -301,7 +304,7 @@ if want "$current_scenario"; then
     if [[ -n "$YAML_FILE" ]]; then
         assert_checker
         heading="$(strip_colour < "$OUT" | grep -A1 'results between' | tail -1 | sed 's/[─ ]*//' | sed 's/^ *//;s/ *$//' || true)"
-        assert_equal "observation.start/end = heading (-s)" "$(yget population.observation.start) and $(yget population.observation.end)" "$heading" asserts 'Under -s the bounds carry seconds, as the heading does' produced_by "$PRODUCER; format_observation_timestamp() in ltl" contract "$CONTRACT (D7)"
+        assert_equal "observation.start/end = heading (-s)" "$(yget population.observation.start) and $(yget population.observation.end)" "$heading" asserts 'Under -s the bounds carry seconds, as the heading does' produced_by "$PRODUCER; format_timestamp() in ltl" contract "$CONTRACT (D7)"
         assert_equal "duration_seconds" "$(yget population.observation.duration_seconds)" 9 asserts 'Ten lines one second apart span nine seconds' produced_by "$PRODUCER" contract "$CONTRACT (D13)"
         assert_equal "duration" "$(yget population.observation.duration)" "9 seconds" asserts 'The long form' produced_by "$PRODUCER; format_time() in ltl" contract "$CONTRACT (D13)"
     fi
@@ -427,6 +430,33 @@ if want "$current_scenario"; then
             assert_near "heatmap.$p = duration.$p" "$hv" "$dv" asserts 'Same model, same bins per decade, same values: the two ladders agree' produced_by "$PRODUCER; finalize_heatmap_unified() and calculate_statistics_bin() in ltl" contract "$CONTRACT (D4)"; n=$((n+1))
         done
         [[ $n -gt 0 ]] || fail_with "heatmap vs bucket store" 'At least one percentile compared' "$PRODUCER" "$CONTRACT (D4)" "no shared percentile present"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+current_scenario="unobserved-metric-absent"
+if want "$current_scenario"; then
+    # #616 D4: a time bucket in which no line carried a metric writes no block
+    # for it; a bucket whose lines carried the metric at zero keeps its block
+    # with the measured zero. -bs 1 -oe -n 1: the assertions read one-minute
+    # buckets of two committed fixtures whose minutes separate the metrics.
+    UNOBS_CONTRACT='features/616-gated-mean-derivation.md D4 (a bucket with no observation of a metric carries no total) and features/503-yaml-aggregate-export.md section Conventions (absent means not produced, not observed, or not eligible, never null or 0)'
+    UNOBS_PRODUCER="$PRODUCER (series blocks) from calculate_all_statistics() (the per-bucket projection gated on the observation count)"
+    run_export -bs 1 -oe -n 1 "$FIXTURES/gated-means-application.txt" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "application log: bucket 0 is 10:00" "$(yget series.buckets.0.timestamp)" "2026-01-26 10:00" asserts 'The bucket indices the assertions below read are the fixture minutes they name' produced_by "$PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.0.bytes asserts 'The duration-only minute carried no bytes: no bytes block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.1.duration asserts 'The bytes-only minute carried no duration: no duration block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the duration-only minute keeps its duration sum" "$(yget series.buckets.0.duration.sum)" 40 asserts 'An observed metric keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the bytes-only minute keeps its bytes sum" "$(yget series.buckets.1.bytes.sum)" 60 asserts 'An observed metric keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "application log: the zero-duration minute keeps a zero duration sum" "$(yget series.buckets.4.duration.sum)" 0 asserts 'A measured zero is a value, and keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+    fi
+    current_scenario="unobserved-metric-absent/access"
+    run_export -bs 1 -oe -n 1 "$FIXTURES/gated-means-access.txt" || true
+    if [[ -n "$YAML_FILE" ]]; then
+        assert_equal "access log: bucket 1 is 00:01" "$(yget series.buckets.1.timestamp)" "2025-05-07 00:01" asserts 'The bucket indices the assertions below read are the fixture minutes they name' produced_by "$PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_absent_key series.buckets.1.bytes asserts "The minute whose size is '-' carried no bytes: no bytes block" produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
+        assert_equal "access log: the zero-byte minute keeps a zero bytes sum" "$(yget series.buckets.2.bytes.sum)" 0 asserts 'A zero-byte response is a measured zero, and keeps its block' produced_by "$UNOBS_PRODUCER" contract "$UNOBS_CONTRACT"
     fi
 fi
 

@@ -6,7 +6,7 @@ release. Written for the agent doing the work. Specification and decisions:
 `features/598-screenshot-capture.md` (the Dxx numbers below are its decisions).
 
 **Every screenshot in the documentation is generated.** It is an entry in
-`build/screenshots.yaml`, rendered by `build/capture-screenshots.pl` into
+`process/screenshots.yaml`, rendered by `process/capture-screenshots.pl` into
 `images/screenshots/` as an SVG with a PNG of the same size beside it. Nothing is captured from a terminal window by hand, and no
 image under `images/screenshots/` is edited: a change is a change to its entry,
 then a regeneration. A request for a new screenshot is a new entry.
@@ -154,7 +154,7 @@ with `--debug-layout` that no column was hidden (*Resolution: the terminal size*
 Run the tool with no crop and `--trace`, into a scratch directory:
 
 ```bash
-build/capture-screenshots.pl --name look --trace --out-dir <scratch> -- <ltl options> <log>
+process/capture-screenshots.pl --name look --trace --out-dir <scratch> -- <ltl options> <log>
 ```
 
 `look.svg` (and `look.png`) is the whole output; the trace prints both `ltl` command lines and the
@@ -274,7 +274,7 @@ is written: one bad crop writes none of the entry's images.
 ```
 
 ```bash
-build/capture-screenshots.pl --manifest build/screenshots.yaml --only heatmap-5min
+process/capture-screenshots.pl --manifest process/screenshots.yaml --only heatmap-5min
 ```
 
 then look at every image it wrote before it is committed (*Looking at an image*
@@ -294,7 +294,7 @@ and the heatmap narrowed so it does not crowd the timeline (`-hm -hmw 60 -ov`).
 The whole output, to see what it prints:
 
 ```bash
-build/capture-screenshots.pl --name look --trace --out-dir <scratch> -- \
+process/capture-screenshots.pl --name look --trace --out-dir <scratch> -- \
     -du us logs/AccessLogs/<log> -hm -hmw 60 -ov -hg -hgh 8
 ```
 
@@ -363,7 +363,7 @@ width (a positive `R` is a width), each with a label so the two names differ:
         label: bytes
 ```
 
-**6. Run it and look.** `--manifest build/screenshots.yaml --only access` printed
+**6. Run it and look.** `--manifest process/screenshots.yaml --only access` printed
 
 ```
 <repository>/images/screenshots/access-histogram-duration.svg + .png  rows 35-48 (histogram)  cols 12-101
@@ -384,7 +384,7 @@ than zooming.
 
 ## The manifest
 
-`build/screenshots.yaml` is a mapping with one key, `screenshots`, a list of
+`process/screenshots.yaml` is a mapping with one key, `screenshots`, a list of
 entries. The comment above each entry says what the screenshot is for.
 
 | Key | Required | Meaning |
@@ -400,8 +400,8 @@ entries. The comment above each entry says what the screenshot is for.
 The tool's own `--width`, `--height` and `--pad` override every entry for one run.
 
 ```bash
-build/capture-screenshots.pl --manifest build/screenshots.yaml             # every entry
-build/capture-screenshots.pl --manifest build/screenshots.yaml --only NAME # one entry
+process/capture-screenshots.pl --manifest process/screenshots.yaml             # every entry
+process/capture-screenshots.pl --manifest process/screenshots.yaml --only NAME # one entry
 ```
 
 Images are written to `images/screenshots/`, or to `--out-dir`. A failing entry is reported and the
@@ -420,7 +420,8 @@ others still run; the run exits non-zero naming the failures.
   such file is deleted, including an earlier `ltl -o` export of your own left
   there, so keep exports elsewhere. In a folder the entry names, only the files
   the run wrote are deleted; an export already there is left alone.
-- `ltl` writes its index file, `ltl-index.csv`, in the folder it runs in. In the
+- An entry whose options include `-idx` makes `ltl` write its index file,
+  `ltl-index.csv`, in the folder it runs in; without `-idx` none is written. In the
   repository root it is ignored by git and left. In a folder the entry names it
   is deleted after the entry's runs when they created it; one already there is
   left, with `ltl`'s rows added to it.
@@ -448,7 +449,7 @@ screenshots:
 ```
 
 ```bash
-build/capture-screenshots.pl --manifest <other repository>/screenshots.yaml --out-dir <other repository>/images
+process/capture-screenshots.pl --manifest <other repository>/screenshots.yaml --out-dir <other repository>/images
 ```
 
 `--out-dir` is needed: a manifest's images otherwise go to this repository's

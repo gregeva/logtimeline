@@ -81,6 +81,10 @@ FILE_SELECTIONS+=("multi-day-custom-logs|std|463 MB, 5 files|ThingworxLogs/Custo
 FILE_SELECTIONS+=("single-day-access-log|std|148 MB, 1 file|AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt|")
 FILE_SELECTIONS+=("month-single-server-access-logs|xl|1.5 GB, 28 files|AccessLogs/really-big/*thingworx-1.2026-01-*|-bs 1440")
 FILE_SELECTIONS+=("month-many-servers-access-logs|xl|7.6 GB, 140 files|AccessLogs/really-big/*.2026-01-*|-bs 1440")
+# Tier "named": run only when the test is named, never by quick, full, xl or all.
+# CSV input read through -udm: an epoch timestamp with a six-digit fraction in
+# the first column, one metric column read.
+FILE_SELECTIONS+=("network-latency-csv|named|9.8 MB, 1 file, 166,912 CSV rows|UDM/results_data_idonly-timestampMs.csv|-udm latency_ms")
 
 # --- Scenarios ---
 # Format: scenario_name|scenario_options
@@ -123,7 +127,7 @@ should_run_test() {
         quick) [[ "$test_name" == "single-day-application-log-standard" ]] ;;
         full)  [[ "$tier" == "std" ]] ;;
         xl)    [[ "$tier" == "xl" ]] ;;
-        all)   return 0 ;;
+        all)   [[ "$tier" != "named" ]] ;;
         *)     [[ "$test_name" == "$TARGET" ]] ;;
     esac
 }

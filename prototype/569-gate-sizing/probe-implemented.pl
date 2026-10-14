@@ -22,17 +22,19 @@ $n_src //= 500;
 
 my $ltl_text = do { local $/; open my $fh, '<', $ltl or die "$ltl: $!"; <$fh> };
 # The message cap decides the trigram sets, so it is sliced from ltl too, not restated.
-$ltl_text =~ /^(my \$consolidation_message_length_cap\s*=[^\n]*)$/m
-    or die "\$consolidation_message_length_cap not found in $ltl\n";
-my $cap = $1 =~ s/^my /our /r;
+# get_consolidation_trigrams() cuts at the per-run cut, $max_log_message_length,
+# which under -g is the message-key cap, MESSAGE_KEY_CAP.
+$ltl_text =~ /^\s+MESSAGE_KEY_CAP\s*=>\s*(\d+)\s*,/m
+    or die "MESSAGE_KEY_CAP not found in $ltl\n";
+my $cap = "our \$max_log_message_length = $1;";
 my @subs = map {
     $ltl_text =~ /^(sub \Q$_\E \{.*?^\})/ms or die "sub $_ not found in $ltl\n";
     $1;
 } qw(get_consolidation_trigrams dice_coefficient build_consolidation_ngram_index find_consolidation_candidates);
 our (%consolidation_key_message, %consolidation_key_trigrams, %consolidation_id_index);
-our $consolidation_message_length_cap;
+our $max_log_message_length;
 eval join("\n\n", $cap, @subs) . "\n1;" or die $@;
-die "sliced cap did not take effect\n" unless $consolidation_message_length_cap;
+die "sliced cap did not take effect\n" unless $max_log_message_length;
 
 open my $fh, '<', $batch or die "$batch: $!";
 my @keys = grep { length } map { chomp; $_ } <$fh>;

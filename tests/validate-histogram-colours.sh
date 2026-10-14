@@ -15,7 +15,11 @@
 #     metric carries in the same run (C1, AC2);
 #   - with two metrics, each highlighted row sits on a band of its own metric's
 #     highlight colour, carries the black text, and lists the same percentiles
-#     in the same order as the population row above it (C1, C2, AC3).
+#     in the same order as the population row above it (C1, C2, AC3);
+#   - a user-defined metric's histogram under a highlight that matches none of
+#     the lines carrying that metric draws without a highlight overlay and
+#     without a notice, as a built-in metric's does
+#     (features/histogram-charts.md, criterion 27).
 #
 # Locating the rows. The histogram section's row range comes from
 # -V section-layout (the rows of the same run without -V): its last row is the
@@ -38,7 +42,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 PERL="${PERL:-/opt/homebrew/bin/perl}"
 command -v "$PERL" >/dev/null 2>&1 || PERL=perl
 export PERL
@@ -60,8 +64,9 @@ scenario_register legend-text-light \
                   legend-text-dark \
                   legend-text-default \
                   legend-matches-timeline \
-                  legend-each-metric
-SCENARIO_USAGE_NOTE="Scenarios follow features/653-histogram-highlight-row-light-background.md § Acceptance criteria."
+                  legend-each-metric \
+                  udm-highlight-matches-none
+SCENARIO_USAGE_NOTE="Scenarios follow features/653-histogram-highlight-row-light-background.md § Acceptance criteria, and features/histogram-charts.md criterion 27."
 scenario_parse_args "$@"
 
 neutralize_colour_env
@@ -264,6 +269,35 @@ legend_report() {
     ' "$SCRIPT_DIR/lib/rendered-output.pl" "$capture" "$layout"
 }
 
+# histogram_row_counts CAPTURE METRIC — over the histogram section's rows (from
+# -V section-layout), ANSI stripped: how many carry METRIC's
+# "<metric> Distribution" title and how many a percentile label (P50: ...).
+# Printed as "title_rows=N percentile_rows=M". A missing section-layout table
+# or no rendered histogram row is a hard failure, never a zero count.
+histogram_row_counts() {
+    "$PERL" -e '
+        my ($file, $metric) = @ARGV;
+        open my $fh, "<", $file or die "cannot open $file: $!\n";
+        my @lines = <$fh>;
+        close $fh;
+        my ($in, $start, $rows);
+        for (@lines) {
+            if (/^=== section-layout ===$/)     { $in = 1; next }
+            if (/^=== END section-layout ===$/) { $in = 0; next }
+            next unless $in;
+            chomp(my $l = $_);
+            my ($name, $state, $s, $r) = split /\t/, $l;
+            ($start, $rows) = ($s, $r) if $name eq "histogram" && $state eq "rendered";
+        }
+        die "no rendered histogram row in -V section-layout of $file\n"
+            unless defined $rows && $start =~ /^\d+$/ && $rows > 0;
+        my @text = map { (my $t = $_) =~ s/\e\[[0-9;]*m//g; $t } @lines[$start - 1 .. $start + $rows - 2];
+        my $title = grep { /\Q$metric\E Distribution/ } @text;
+        my $pct   = grep { /P[0-9.]+:/ } @text;
+        print "title_rows=$title percentile_rows=$pct\n";
+    ' "$1" "$2"
+}
+
 # report_for CAPTURE [LAYOUT] -> writes CAPTURE.report; a failed report is a
 # hard failure of the scenario, printed with its reason.
 report_for() {
@@ -348,6 +382,43 @@ if report_for "$cap"; then
             contract "$CONTRACT_653 C2, AC3; features/histogram-charts.md Decisions Log, Two legend lines when highlight exists"
     done
 fi
+fi
+
+# A user-defined metric whose values sit on lines the highlight never matches.
+# The pattern reads the bytes field of the catalog lines only (two non-zero
+# values); -h stays on the orders path, which carries none, so the metric's
+# highlighted subset is empty while the highlight itself is live. The run is
+# captured here rather than through capture_run, because its exit status is
+# what is asserted.
+if scenario_wanted udm-highlight-matches-none; then
+current_scenario="udm-highlight-matches-none"
+cap="$TMP_DIR/udm-highlight-none.out"
+set +e
+with_ansi_colour "$LTL" --disable-progress --terminal-width "$WIDTH" \
+    -ni -bs 1440 -oe -n 1 -h "$HIGHLIGHT" -V section-layout \
+    -udm 'catalog_bytes::max:/catalog HTTP\/1\.1" \d+ (\d+)/' -hg catalog_bytes "$FIXTURE" \
+    > "$cap" 2> "$cap.stderr"
+rc=$?
+set -e
+CONTRACT_719="features/histogram-charts.md Acceptance Criteria 27; Decisions Log, A highlight that matches none of a metric's values draws no overlay"
+assert_command \
+    label "the run exits 0" \
+    command "echo \"exit status: $rc\"; sed 's/^/stderr: /' '$cap.stderr'; [[ $rc -eq 0 ]]" \
+    asserts "a histogram of a user-defined metric drawn under a highlight that matches none of that metric's lines completes like any other run" \
+    produced_by "print_histograms() in ltl (reads each metric's highlighted bars; absent for a user-defined metric no highlighted line carried)" \
+    contract "$CONTRACT_719"
+assert_command \
+    label "nothing is printed on stderr" \
+    command "sed 's/^/stderr: /' '$cap.stderr'; [[ ! -s '$cap.stderr' ]]" \
+    asserts "the histogram draws without a highlight overlay silently: no notice, no Perl error, as a built-in metric whose values the highlight matches none of" \
+    produced_by "print_histograms() in ltl" \
+    contract "$CONTRACT_719"
+assert_command \
+    label "the catalog_bytes histogram renders with one percentile row (the population's)" \
+    command "histogram_row_counts '$cap' catalog_bytes > '$cap.counts' && cat '$cap.counts' && grep -qx 'title_rows=1 percentile_rows=1' '$cap.counts'" \
+    asserts "the user-defined metric's histogram is drawn, carrying the population's percentile row and no highlighted percentile row, because no highlighted line carried a value for it" \
+    produced_by "print_histograms() in ltl (the highlighted row is drawn only when the metric's highlighted bars hold an observation)" \
+    contract "$CONTRACT_719"
 fi
 
 # ---------------------------------------------------------------------------

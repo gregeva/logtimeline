@@ -24,7 +24,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LTL="$REPO_DIR/ltl"
+LTL="${LTL:-$REPO_DIR/ltl}"
 
 # shellcheck source=lib/runtime-warnings.sh
 source "$SCRIPT_DIR/lib/runtime-warnings.sh"
@@ -230,8 +230,9 @@ inspect_output() {
                     ""    => 1,          "us" => 1,        "\x{00B5}s" => 1,
                     "ms"  => 1e3,        "s"  => 1e6,      "m" => 6e7,
                     "h"   => 3.6e9,      "d"  => 8.64e10,
-                    "B"   => 1,          "KiB" => 1024,    "MiB" => 1048576,
-                    "GiB" => 1073741824, "KB" => 1000,     "MB" => 1e6, "GB" => 1e9,
+                    # the byte-unit ladder tokens, SI and IEC: a run renders one notation
+                    "B"   => 1,          "kB"  => 1e3,     "MB"  => 1e6,     "GB"  => 1e9,     "TB"  => 1e12,
+                    "KiB" => 1024,       "MiB" => 1048576, "GiB" => 1073741824, "TiB" => 1099511627776,
                 );
                 my @vals;
                 my $unparsed = 0;
@@ -283,7 +284,7 @@ inspect_output() {
 # itself and assert nothing.
 #
 # Equality, no tolerance. An earlier form of this assertion predicted from the
-# rendered legend, whose values are rounded by format_heatmap_value() to one
+# rendered legend, whose values are rounded by value_text() (the chart label budget row) to one
 # decimal and a unit -- that mispredicted 3 of 9 columns on this fixture and
 # forced a tolerance wide enough to be inert on the widest histograms. With the
 # unrounded inputs the prediction is exact, so a single-column drift now fails,
@@ -313,7 +314,7 @@ assert_tick_positions() {
             next unless $in;
             if ($line =~ /^\s+metric:\s+(\S+)\s+bar_width=(\d+)\s+min=(\S+)\s+max=(\S+)/) {
                 push @blocks, { metric => $1, w => $2, min => $3, max => $4, vals => [] };
-            } elsif (@blocks && $line =~ /^\s+(P[\d.]+)=(\S+)/) {
+            } elsif (@blocks && $line =~ /^\s+percentile:\s+(P[\d.]+)\s+value=(\S+)/) {
                 push @{ $blocks[-1]{vals} }, [$1, $2];
             }
         }

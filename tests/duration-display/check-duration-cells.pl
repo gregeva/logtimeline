@@ -70,14 +70,14 @@ for my $line (@lines) {
 #
 # Anchor on the occurrences integer: the first pure-integer field followed by
 # three stat-shaped (number, optionally with a unit, or empty) fields and then
-# a bare-decimal CV field. The CV anchor is what disambiguates the triple from
+# a bare-number CV field. The CV anchor is what disambiguates the triple from
 # the trailing Duration column (which carries a space: "2.4 hr"). The triple
 # guard deliberately does NOT require a unit on the stat cells — that is the
 # very invariant under test; requiring it here would make a bare-number bug
 # cell invisible to the extractor instead of caught (HARNESS-DESIGN.md § "A
 # grep that matches nothing is a failure").
 my $stat_or_empty = qr/^(?:[0-9]+(?:\.[0-9]+)?(?:$UNIT)?)?$/;  # number +/- unit, or empty
-my $cv_shaped     = qr/^[0-9]+\.[0-9]+$/;                       # bare decimal, no unit
+my $cv_shaped     = qr/^[0-9]+(?:\.[0-9]+)?$/;                  # bare number, no unit (a CV of 3 or 0 carries no point)
 for my $line (@lines) {
     # A bracketed-category data row: the marker position (one character: the
     # classification indicator, the consolidation ~, or blank) precedes the

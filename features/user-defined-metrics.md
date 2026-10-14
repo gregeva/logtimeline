@@ -5,6 +5,8 @@
 - **Branch**: `22-user-defined-metrics`
 - **Phase**: Implementation
 
+**Since #617 (one width-to-format rule, 2026-10-04):** a user-defined metric renders through the one dispatch: `resolve_value_kind()` resolves its kind from its unit type and aggregation, its declared unit is the floor of every rendering, and a rate's STATS CSV cell belongs to the rate family (one decimal by default, as the built-in rates: 0.3 per second prints `0.3`). Record: `features/617-width-to-format-rule.md` D15, D16, D21.
+
 ## Overview
 
 User-defined metrics (`-udm`) allow users to extract arbitrary numeric values from log lines, track them across time buckets, and display them as additional bar graph columns alongside the built-in duration/bytes/count metrics.
@@ -25,28 +27,35 @@ Multiple metrics can be specified with repeated `-udm` flags:
 | Field | Required | Description | Examples |
 |-------|----------|-------------|----------|
 | `name` | Yes | Metric identifier (used in column headers); also the default extraction key when no `key` or `/pattern/` is given | `rows`, `latency`, `tcp_errors` |
-| `unit` | No | Measurement unit for conversion/display; ignored (with a warning) for counting aggregations | `ms`, `s`, `m`, `min`, `h`, `us`, `ns`, `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`, `k`, `K`, `M`, `G`, `T` |
+| `unit` | No | Measurement unit for conversion/display; ignored (with a warning) for counting aggregations | `ms`, `s`, `m`, `min`, `h`, `us`, `ns`, `B`, `kB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`, `k`, `K`, `M`, `G`, `T` |
 | `function` | No | Transform and/or aggregation function | `delta`, `max`, `mean(delta)`, `distinct` |
 | `key` | No | Token key: default patterns are built from this token instead of the name, leaving the name a pure display label. Mutually exclusive with `/pattern/` (both → warn + skip) | `exception_variety::distinct:JavaException` |
 | `/pattern/` | No | Custom regex with capture group for value extraction | `/in (\d+\.\d+)/` |
 
 ### Unit Types
 
-- **Time units**: `ns`, `us`, `ms`, `s`, `m` (or `min`), `h` — converted to milliseconds internally, displayed via `format_time()`
-- **Byte units**: `B`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` — converted to bytes internally, displayed via `format_bytes()`. Case-insensitive matching (e.g., `kb` = `KB`). All byte units currently use base-1024 (see #63 — `kB` should use base-1000 per SI convention).
-- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), displayed via `format_number()`. Case-sensitive (`m` = minutes, `M` = mega).
+- **Time units**: the tokens of the time-unit ladder (`@time_unit_ladder`): `ns`, `us`, `ms`, `s`, `m`, `h`, `d`, `w`, `month`, `year`, each also by its longer names (`min`, `minute`, `microsecond`, ...); converted to milliseconds internally, displayed via `format_time()`
+- **Byte units**: the tokens of the byte-unit ladder (`@byte_unit_ladder`), SI `B`, `kB`, `MB`, `GB`, `TB` (powers of 1000) and IEC `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024), converted to bytes internally, displayed via `format_bytes()`. Each token is its own only spelling, matched case-insensitively through `byte_unit_canonical()`: `kb`, `KB`, `Kb` and `kB` are the one SI kilobyte, 1000 bytes. The metric keeps the canonical token as its unit (`-V udm-specs` `unit=kB`, CSV column `v_kB_max`, heading `v:kB` when the unit tells two metrics apart). A metric assumes no base: the base comes from the unit given (`features/608-byte-unit-ladder.md` D1, D2, D3, D14).
+- **SI number units**: `k`, `K`, `M`, `G`, `T` — unitless SI multipliers (base-1000), the `udm` symbols of the number ladder (`@number_unit_ladder`, `features/605-input-units.md` § 5.4), displayed via `format_number()`. Case-sensitive and checked first (`m` = minutes, `M` = mega); `K` is a number ×1000, not a byte unit.
+- **Unknown unit**: warns, naming the time and byte vocabularies the slot accepts (the ladders' own lists), and reads the metric as a raw number.
 - **No unit**: displayed as raw numbers via `format_number()`
 
 ### Functions
 
 Functions control how extracted values are transformed and aggregated per time bucket.
+The function slot's names, aliases and kinds are rows of the statistic-name table
+(`@statistic_names`, #613 D8), which `-so` and `--explain` read too; the
+invalid-function warning and the `--help` function row list them from it.
 
 #### Transforms (applied per-line to raw values)
 
 - **`delta`**: Computes difference between consecutive values. Useful for monotonic counters.
 - **`idelta`**: Like delta but discards negative values (counter resets). "Increase delta."
 
+How `--help` and `docs/usage.md` describe the two: § `delta` and `idelta` described the wrong way round (Issue #698).
+
 Delta state is reset between files to avoid spurious deltas at file boundaries.
+#697 (delta and idelta carry the previous value across files) reopens this: the reset drops the first reading of every file and makes a single-reading file produce nothing; why the reset exists, and what boundary is correct, is to be investigated there.
 
 #### Aggregations (applied per time bucket)
 
@@ -151,15 +160,15 @@ Counting aggregations get a single token-capture pattern:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Stats model | Count-style (min/max/mean/sum) | Avoids memory cost of storing individual values; percentiles deferred to #23 |
-| Delta state | Reset between files | Avoids spurious deltas at file boundaries |
+| Delta state | Reset between files | Avoids spurious deltas at file boundaries. Reopened by #697 (delta and idelta carry the previous value across files): a counter split over rotated files loses each file's first increment |
 | Delta on raw vs converted | Delta on raw, then convert | Preserves counter semantics |
 | Column key prefix | `udm_` prefix internally | Avoids collision with existing keys; stripped for display headers |
-| CSV column naming | `name[_unit]_stat` lowercase | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined (e.g., `latency_ms_min`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
-| Unit auto-detection | Not implemented | Users declare units explicitly |
+| CSV column naming | `name[_unit]_stat` | Consistent pattern across count and UDM metrics in both STATS and MESSAGES CSVs. Unit included when defined, as its canonical ladder token in that token's case (e.g., `latency_ms_min`, `w_m_max` for `-udm w:minutes:max`, `resp_kB_max` for any spelling of `kB`, `resp_KiB_max`), omitted when unitless (e.g., `rows_min`). Count columns use `count_stat` (not PascalCase). Counting aggregations emit one column per metric, `{base_name}_{agg}` (e.g. `users_distinct`), with the `-ru` CSV suffix for `rate`/`drate` (e.g. `logins_rate_min`); in MESSAGES, `count` carries per-message occurrences and the distinct-derived columns are blank (distinct is bucket-scoped). |
+| Unit auto-detection | Not implemented | Users declare units explicitly; #694 adds `auto`, an opt-in that reads type and magnitude from each line (§ A metric's unit read from each line) |
 | Non-access-log support | Set `$is_access_log = 1` when UDM values captured | Follows count metric precedent (line 1593); enables storage in time-bucket and per-message blocks |
 | Latency stats suppression | `$durations_observed` only set when a duration value is observed | Prevents empty or fabricated-zero P50/P95/P99/P999 columns when the source carries no durations (bytes/count alone do not activate latency surfaces; issue #345) |
 | Default aggregation | `sum` | Consistent with pre-aggregation behavior; `delta` without explicit aggregation means `sum(delta)` |
-| Case normalization | Normalize in `parse_udm_configs()` before lookup | Avoids changing `convert_bytes()` / `convert_duration_to_ms()` which are used elsewhere |
+| Case normalization | `parse_udm_configs()` resolves the unit through the ladders' resolvers (`time_unit_canonical()`, `byte_unit_canonical()`) after the case-sensitive number multipliers | One resolution surface per vocabulary: the slot keeps no unit table of its own |
 | Aggregation affects display only | Bar graph column driven by aggregation; CSV always outputs all five stats | CSV preserves full data regardless of display selection |
 
 ## Data Model
@@ -191,7 +200,7 @@ $log_messages{$cat}{$key}{"udm_${name}_max"}
 $log_messages{$cat}{$key}{"udm_${name}_mean"}   # numeric aggregations only
 ```
 
-The per-message mean is derived in `calculate_all_statistics()` as `sum / occurrences` and exists only for numeric aggregations. Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) track `udm_${name}_occurrences` without ever writing `udm_${name}_sum`, so the mean derivation skips `agg_kind eq 'counting'` configs entirely and guards against an undefined sum (Issue #326).
+The per-message mean is derived in `calculate_all_statistics()` by `mean_of(sum, occurrences)`, the one gated mean derivation (features/616-gated-mean-derivation.md D3), and exists only for numeric aggregations. Counting aggregations (`count`, `distinct`, `ratio`, `rate`, `drate`) track `udm_${name}_occurrences` without ever writing `udm_${name}_sum`, so the mean derivation skips `agg_kind eq 'counting'` configs entirely and guards against an undefined sum (Issue #326).
 
 ### Statistics (`%log_stats`)
 ```
@@ -202,6 +211,7 @@ $log_stats{$bucket}{"udm_${name}_min"}
 $log_stats{$bucket}{"udm_${name}_max"}
 $log_stats{$bucket}{"udm_${name}_mean"}
 $log_stats{$bucket}{"udm_${name}_sum"}
+# udm_${name}_mean is derived once by mean_of(); a `mean` aggregation's display value reads it
 ```
 
 Counting configs additionally store (consumed by the `-V udm-counting` section):
@@ -255,20 +265,20 @@ Added IEC binary units and case-insensitive unit matching.
 - [x] Add `KiB`, `MiB`, `GiB`, `TiB` to `parse_udm_configs()` unit recognition and `convert_bytes()`
 - [x] Case normalization: `kb` → `KB`, `kib` → `KiB`, `ms` → `ms`, etc.
 - [ ] Test each time unit: `-udm "metric:ns"`, `us`, `ms`, `s`, `m`, `min`, `h`
-- [ ] Test each byte unit: `-udm "metric:B"`, `kB`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB`
+- [x] Test each byte unit: every ladder token in several cases (`tests/validate-udm-specs.sh` scenario `byte-unit-meanings`, #608 one byte-unit ladder)
 - [ ] Test SI number units: `-udm "metric:k"`, `K`, `M`, `G`, `T` — verify base-1000 conversion
 - [ ] Case edge: `-udm "metric:m"` = minutes, `-udm "metric:M"` = mega
 - [ ] Alias: `-udm "metric:min"` = same as `m`
-- [ ] Verify unknown unit warning: `-udm "metric:xyz"`
-- [ ] GC log regression: verify `convert_bytes("512M")` still works (non-UDM path)
+- [x] Verify unknown unit warning: `-udm "metric:xyz"` (`tests/validate-udm-specs.sh` scenario `number-multiplier-and-unknown-unit`, #608 one byte-unit ladder)
+- [x] GC log regression: the GC heap sizes read through the byte ladder at unchanged values (`tests/validate-byte-units.sh` scenario `gc-heap-values-unchanged`, #608 one byte-unit ladder)
 
 ### CSV Columnar Input — DONE
 
-When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from the first line (header row), maps UDM metric names to column headers, and extracts values directly by column index instead of regex matching.
+When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from the first line (header row), maps UDM metric names to column headers, and extracts values directly by column index instead of regex matching. The header builds the routine that reads every row: a block generated from it, with the timestamp, metric and message columns compiled in, its timestamp parse emitted by the same source as every scanned format's, validated on rows sampled from the front, middle and end of the file before it reads line 2, one block alive at a time (`features/615-csv-registry-entry.md` D1, D9, D10, D11).
 
 **Options:**
-- `-ucm "col1 col2"` — specify CSV columns to use as the message grouping key (space-separated names, repeatable flag)
-- `-ucs ","` — override auto-detected separator (auto-detects `,`, `;`, `\t`)
+- `-ucm "col1 col2"` — name the CSV header columns whose values form the message (space-separated names, repeatable flag); without it, a fixed label
+- `-ucs ","` — set the delimiter, overriding the one detected from the header (auto-detects `,`, `;`, `\t`), with or without `-ucm` (#615 D14)
 
 **Behavior:**
 - CSV detection only triggers when `-udm` is present and the first line looks like a header (has separators)
@@ -277,7 +287,9 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - All transforms (`delta`, `idelta`) and aggregations (`min`, `max`, `avg`) work with CSV input
 - CSV lines use fixed category `DATA` (no log levels in CSV)
 - Without `-ucm`, all CSV rows group under a single "CSV data" message
-- A row is placed on the timeline only when its timestamp column holds epoch seconds (when the file's first data row did) or an ISO `YYYY-MM-DD HH:MM:SS` date and time. Any other row is a line no format matched: read, counted as unmatched, never reported, and never passed to the metric capture or the date parse (`csv_timestamp_placeable()`; #640 D1, `features/640-csv-unplaced-rows-silent.md`). The date-parse guard is what keeps a quoted-timestamp CSV from a previous `ltl -o` run, swept into a multi-file glob, from dying with `Month '-1' out of range` (Issue #328). A CSV none of whose rows is placed shows as nothing matched.
+- A row is placed on the timeline only when its timestamp column holds an epoch number (when the file's first data row did) or an ISO date and time: `YYYY-MM-DD`, a space or `T`, `HH:MM` with or without `:SS` and a fraction, optionally in double quotes, which is how ltl's own STATS CSV writes it at every precision (#611 C8). Any other row is a line no format matched: read, counted as unmatched, never reported, and never passed to the metric capture or the date parse (the shape test of the file's block, `csv_block_src()`; #640 D1, `features/640-csv-unplaced-rows-silent.md`). A STATS CSV from a previous `ltl -o` run, swept into a multi-file glob, is read as data (Issue #328 was its crash). A CSV none of whose rows is placed shows as nothing matched.
+- A file's dates are read year, month, day; or year, day, month when the file's own sampled rows are real dates only that way, settled once per file, starting month first whatever file came before it (#615 D9, D15, D18). A row whose date cannot exist under the order the file is read with (30 February) is not matched, counted, and noted once per run (#611 C3 to C5, superseding #615 D7).
+- A CSV timestamp is read under the run's standard capture rules: its fraction only when the run uses one, up to nine digits, kept as written under `-tp ns`; and a CSV file bounds the precision `-tp` shows as any log file does (#615 D16, D17).
 - A metric whose column is missing from the header of CSV files whose rows matched is reported once per run, after the read, with the count of such files and never their names: `Note: -udm '<spec>': no column named '<name>' in the header of N CSV file(s)` (`emit_udm_csv_unbound_notices()`; #640 D1).
 - Covered by `tests/validate-csv-input.sh`.
 
@@ -286,7 +298,7 @@ When a CSV file is processed with `-udm`, ltl auto-detects the CSV format from t
 - Timestamp column must be named `timestamp` (case-insensitive) or defaults to column 0
 - ~~Same metric name with different aggregation functions~~ — Resolved (#99, extended by #482: two `-udm` specs with the same name and aggregation but different transforms collapse into one column): specs sharing a name are separated, each name carrying the fields that differ within the group — the function field then the unit field (e.g. `request_size:min`, `request_size:mean`, `request_size:max`; `rows:sum` and `rows:delta`; `rows` and `rows:s`). The columnar path resolves names through the same rule as the line-oriented path
 
-**Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The `-du` flag overrides the epoch unit if values aren't seconds (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
+**Epoch timestamps** (Issue #98): Numeric epoch timestamps (e.g., `1771078373.207929`) are auto-detected on the first CSV data line. No new flags needed. The unit is read from the digits before any fraction: 10 seconds, 13 milliseconds, 16 microseconds, 19 nanoseconds, each the count of digits that unit has from 2001 to 2286 (#611 D3); any other count reads as seconds. The `-du` flag overrides the epoch unit (`-du ms` for milliseconds, `-du us` for microseconds, `-du ns` for nanoseconds).
 
 ## Counting Aggregations (Issue #313)
 
@@ -323,7 +335,7 @@ Adds counting aggregation functions to the UDM function field: `count` (occurren
 | Transform combinations | `distinct(delta)` etc. rejected at parse: warn + skip config | Transforms are numeric-only concepts |
 | Unit field with counting agg | Warn + ignore unit | Matches the existing unknown-unit warn-and-continue tone |
 | Column headers | Today's rule unchanged: header = user-chosen name; `:agg` suffix only on duplicate-name collision (#99) | Same pattern for all aggregations; user controls the name; sessions precedent (label the meaning, not the mechanism) |
-| STATS CSV | Single value column per counting UDM, named `{name}_{agg}` (`userId_distinct`, `logins_count`); `rate`/`drate` additionally append the `-ru` CSV suffix (`logins_rate_min`). Gated on `agg_kind` at the four single-column sites that today test `name ne base_name` | Reads as the existing `name[_unit]_stat` family pattern with the aggregation as the stat (unit slot empty — units are ignored for counting); rate columns mirror `msg-rate_min`. The bare-name #99 path stays as-is for collision disambiguation; the agg suffix also means two counting configs on the same base name never collide in CSV |
+| STATS CSV | Single value column per counting UDM, named `{name}_{agg}` (`userId_distinct`, `logins_count`); `rate`/`drate` additionally append the `-ru` CSV suffix (`logins_rate_min`). Gated on `agg_kind` at the four single-column sites that today test `name ne base_name` | Reads as the existing `name[_unit]_stat` family pattern with the aggregation as the stat (unit slot empty — units are ignored for counting); rate columns mirror `msg_rate_min`. The bare-name #99 path stays as-is for collision disambiguation; the agg suffix also means two counting configs on the same base name never collide in CSV |
 | MESSAGES CSV | `count` → occurrences; `distinct`/`ratio`/`rate`/`drate` → blank, documented | Per-message distinct is not tracked (would need per-key sets plus set-union in consolidation merges) |
 | Default pattern for counting configs | Token capture, form-1 only: `\bkey\s*[=:]\s*([^\s,;"'\])&?]+)` — `]` and `)` excluded from the token; `&` and `?` end it (revised 2026-09-15, § *Query-string separators end a counted value (Issue #574)*); `key` is the token key when given, else the metric name | The numeric default patterns can never match `userId=abc123`; the reversed form-2 pattern is too greedy for arbitrary tokens; excluding `]`/`)` keeps bracket-delimited fields clean (ThingWorx `[U: Administrator]` yields `Administrator`, not `Administrator]`) |
 | Token key field (decided 2026-07-08) | Syntax becomes `name[:unit[:function]][:key|:/pattern/]`: a bare fourth field is the token key — default patterns (numeric form-1/form-2, counting token capture) are built from the key instead of the name. `/…/` = regex as today; bare word = token key; absent = name is the key. Supplying both a key and a regex (`name::agg:key:/re/`) warns + skips the config | The name otherwise does double duty as label and extraction key; wanting a readable column header forced a fall from zero-regex to full-regex (found while writing the #313 demo use cases). Applies to all UDMs, not just counting |
@@ -445,7 +457,7 @@ udm: spec='<raw argument>' rejected=<reason-token>                        # pars
 |---|---|
 | `name` | the resolved metric name; on a duplicate-name collision it carries the fields that differ within the colliding group, the function field then the unit field, each as the spec carries it (the naming rule of #482 — two `-udm` specs with the same name and aggregation but different transforms collapse into one column) |
 | `spec` | the argument as given, unmodified |
-| `read_as` | every field of the interpretation the extraction loop acts on: unit and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source: every source the run read the metric from, noted as each file binds and listed `line` first, comma-separated: `line` (log lines), `csv:<column>` (a columnar file whose header binds the metric to that column), `csv:unbound` (a columnar file with no column for it). The same whichever file is read last; `line` when no file bound at all (#638 D5) |
+| `read_as` | every field of the interpretation the extraction loop acts on: unit (the canonical ladder token the spelling resolves to; a number multiplier as typed) and its type, aggregation, transform, extraction method (`name` = default patterns built from the name; `token_key` = built from the fourth field; `regex` = the delimited pattern), the key those patterns were built from, and the source: every source the run read the metric from, noted as each file binds and listed `line` first, comma-separated: `line` (log lines), `csv:<column>` (a columnar file whose header binds the metric to that column), `csv:unbound` (a columnar file with no column for it). The same whichever file is read last; `line` when no file bound at all (#638 D5) |
 | `pattern[i]` | the source of each compiled pattern, in scan order — as compiled, not as typed |
 | `produced` | the D7 fold over all buckets: `occurrences` summed, `buckets` = number of buckets with occurrences > 0, `sum` summed, `min` = min of bucket mins, `max` = max of bucket maxes; counting metrics carry `distinct_max` = the largest per-bucket distinct instead of sum/min/max. `occurrences=0` is exactly the condition that fires the D8 notice. `skipped` (numeric metrics only, and only once one line was skipped): retained lines where a `/regex/` metric's pattern matched but the capture is not entirely a number, so its aggregation could not use it (#638 D1, D3, D4) |
 | `hint` | the token of the D6 rule that fired; absent otherwise |
@@ -875,7 +887,7 @@ the third column; triage in the second.
 | 16 | assertable | A command line with no duplicate names produces resolved names identical to the metric names as typed, with no suffix on any of them. | `-V udm-specs` `name=` on a multi-metric run with distinct names |
 | 17 | assertable | Every `-udm` harness that does not put two specs on one name emits no new stderr line. | the runtime-warning check plus a stderr-empty assertion in the nine `-udm` harnesses |
 | 18 | assertable | The `-ucm` CSV columnar path behaves identically: two same-name specs on a columnar input produce two metrics, and two identical `ratio` specs exit 0. | `-V udm-specs` and exit status on a columnar fixture |
-| 19 | assertable | `-hm` and `-hg` naming a base name that two specs share resolve without ambiguity, and the unknown-metric error's `Available:` list contains no repeated name. | an `-hm` run with a deliberately unknown metric, reading the error line |
+| 19 | assertable | `-hm` and `-hg` naming a base name that two specs share resolve without ambiguity, and the unknown-metric error's `Available:` list contains no repeated name. Since #614 the list is the one the `-hm` file-resolution error and the `-hg` comma-list rejection print (`features/614-operand-settlement.md` § 2 D2). | an `-hm` run with a deliberately unknown metric, reading the error line |
 | 20 | assertable | The two spellings of the delta shorthand resolve identically: `-udm 'rows::sum(delta)' -udm rows::max` and `-udm rows::delta -udm rows::max` produce the same pair of resolved names, `rows:delta` and `rows:max`. | `-V udm-specs` `name=` on both runs |
 | 21 | unassertable | The message masking that replaces a matched value in the message text behaves for separated metrics as it does for two metrics with different names. See § *Message masking* below: the behaviour is identical by construction once names are unique, but the masking runs per config on one message string and no surface reports which config masked what. Recorded as a known gap; the observable consequence (message grouping) is covered indirectly by criterion 3's CSV and by the TOP MESSAGES render being compared by eye on the fixture. | see below |
 
@@ -1155,6 +1167,174 @@ negated character class already evaluated on the same lines.
 An executable line of `ltl` changes: full harness suite and before/after
 `single-day-access-log-standard` benchmark (before captured on the release
 branch head, 2026-09-15).
+
+## A metric's unit read from each line: `auto` (Issue #694)
+
+### Status
+- **Issue**: #694 (a user-defined metric reads each value's unit from its line, time and byte sizes)
+- **Phase**: Filed 2026-10-09, backlog; decisions below locked by the architect at filing. Acceptance criteria not yet derived.
+
+### Motivating consumer
+
+A performance baseline of a long-running batch process: counting each event
+type per bucket, when it occurs, and the total time it takes, from INFO lines
+of the form `Batch submitted in <value> <unit>`. Applications that write a
+measurement as a value followed by a unit often choose the unit by magnitude:
+`850 ms`, `1.2 s`, `3 min`; `512 KB`, `1.5 MB`, `2 GB`.
+
+### Problem (measured 2026-10-09)
+
+The unit field is a placeholder configured once for the whole run. It carries
+two dimensions: the type of the value (time, bytes, or a plain number) and its
+magnitude. Every value the metric extracts is read through that one setting.
+On a synthetic log carrying `Batch submitted in 850 ms`, `… 1.2 s` and
+`… 3 min`, run on 0.19.0 with `-V -bs 1440 -oe`, `-V udm-specs` reports:
+
+| Spec | Produced |
+|---|---|
+| `batch_submit:ms:sum:/Batch submitted in (\S+) ms/` | `occurrences=1 sum=850`: the lines in other units do not match |
+| `batch_submit:ms:sum:/Batch submitted in (\S+)/` | `occurrences=3 sum=854.2`: every value read as milliseconds |
+| `batch_submit:ms:sum:/Batch submitted in (\S+ ?\S+)/` | `occurrences=0 skipped=3`: the capture with its unit is not a number |
+
+The correct total is 182,050 ms.
+
+### Decisions (architect, 2026-10-09)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — `auto` in the unit field takes type and magnitude from each line | `-udm 'batch_submit:auto:mean:/\] Batch submitted in (\S+ ?\S+)/'`: the capture group takes the value with its unit, and `auto` classifies what it captured. A metric without `auto` behaves exactly as today. | The placeholder's two dimensions are read per value instead of once per run, so one metric reads lines in microseconds and milliseconds alike. |
+| D2 — Type is resolved bytes, then time, then count | The indication captured with the value is looked for first as a byte unit, then as a time unit; a value carrying either is read as that type in that magnitude. Anything else is a count, and a count has no unit (`12 widgets` is the count 12). How counts are rendered is outside this issue. | A unit the byte and time ladders do not know is not an error: it is what a count looks like. |
+| D3 — A value with no unit is a count, as today | Read exactly as it is today when the unit field is left empty. | No evidence of a type means no type is assumed. |
+| D4 — The extraction without a pattern reads the unit too, only under `auto` | `-udm my_key:auto:delta` reads `my_key=1.2ms`. Never on by default. | Reading a unit off the default `name=value` extraction risks parsing errors, so it is the user's explicit opt-in. The `/regex/` capture is the primary case. |
+
+## `delta` and `idelta` described the wrong way round (Issue #698)
+
+### Status
+- **Issue**: #698 (`--help` and usage.md describe delta as clamped and idelta as unclamped, the opposite of what ltl does)
+- **Branch**: `698-delta-idelta-descriptions`
+- **Target release**: v0.19.0
+- **Phase**: Implemented 2026-10-09; acceptance criteria passing
+
+### Motivating consumer
+
+A user tracking a cumulative counter that an application restarts from zero,
+such as jobs processed since start-up, who wants the work done per bucket.
+They read `--help` to choose the transform that absorbs the reset. Following
+it, they choose `delta`, receive the negative difference at every reset, and
+the bucket totals are understated.
+
+### Problem (measured 2026-10-09)
+
+The two user surfaces describe the transforms the wrong way round:
+
+- `--help`, function row: `Transforms: delta (clamped >=0), idelta (unclamped).`
+  The notes are the `udm_note` fields of the `delta` and `idelta` rows of
+  `@statistic_names`, which `print_help()` reads through `$udm_function_row`.
+  Nothing else reads `udm_note`.
+- `docs/usage.md`, User-Defined Metrics, `function` row:
+  ``**Transforms:** `delta` (clamped ≥0), `idelta` (unclamped)``, maintained by hand.
+
+What ltl does is the per-line transform in `read_and_process_logs()`
+(`# Apply delta/idelta transform on raw value before conversion`). The
+difference is this reading minus the previous one. `delta` records every
+difference. `idelta` skips a negative difference: it is neither recorded nor
+counted. "Clamped" is therefore wrong for either transform: a clamped
+difference would be recorded as 0 and counted. § Functions → Transforms above
+describes the behaviour correctly.
+
+The input is a Java application log line carrying a cumulative counter that
+resets between its second and third readings (5, 8, 2, 10), one reading per
+line. On 0.19.0, `-ni -bs 1440 -oe -V udm-specs` with
+`-udm 'completed::<function>:/COMPLETED: (\S+)/'` reports:
+
+| Function | `produced:` | Differences recorded |
+|---|---|---|
+| `delta` | `occurrences=3 buckets=1 sum=5 min=-6 max=8` | 3, −6, 8: the negative difference is kept |
+| `idelta` | `occurrences=2 buckets=1 sum=11 min=3 max=8` | 3, 8: the negative difference is dropped |
+
+The first reading seeds the state and records nothing. That is the subject of
+#697 (delta and idelta carry the previous value across files). This issue's
+wording does not describe it. #697 does not gate this issue: the descriptions
+are wrong whatever #697 decides.
+
+### Decisions (architect, 2026-10-09)
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 — Describe each transform by what it does with a negative difference | `--help`: `Transforms: delta (keeps negative differences), idelta (drops negative differences, as at a counter reset).` `docs/usage.md`: ``**Transforms:** `delta` (keeps negative differences), `idelta` (drops negative differences, as at a counter reset)`` | A negative difference is the only case where the two transforms differ. "Drops" is exact where "clamped" is not, because a dropped difference is not counted. The counter reset is named because it is the reason to choose `idelta`. |
+
+Unchanged: the transform itself, the combined forms
+(`sum(delta)`, `mean(delta)`, `max(idelta)`), and the rest of the function row.
+
+### Surfaces touched
+
+| Surface | Change |
+|---|---|
+| `ltl`, `@statistic_names`, the `delta` and `idelta` rows | `udm_note` carries the D1 `--help` notes |
+| `docs/usage.md`, User-Defined Metrics, `function` row | the D1 `usage.md` notes |
+| `tests/validate-help-content.sh`, `scenario_G_udm_function_list_parity()` | two assertions added (criteria 1 and 2) |
+| `tests/validate-udm-specs.sh` | a new scenario `delta-counter-reset` (criterion 3) |
+| `tests/fixtures/udm-counter-reset.txt` | new fixture |
+
+### Acceptance criteria
+
+All three are assertable.
+
+1. **`--help` describes the transforms as ltl applies them.** `--terminal-width 400 --help`
+   carries `Transforms: delta (keeps negative differences), idelta (drops negative differences, as at a counter reset).`
+   on the `-udm` function row. Assertion: `assert_line` in
+   `scenario_G_udm_function_list_parity()`, `produced_by` `print_help()`
+   (User-Defined Metrics subheading, function row), contract D1. Fails on the
+   current code.
+2. **`docs/usage.md` agrees with `--help`.** The User-Defined Metrics `function`
+   row carries ``**Transforms:** `delta` (keeps negative differences), `idelta` (drops negative differences, as at a counter reset)``.
+   Assertion: `assert_line` on `$USAGE_MD` in the same scenario, `produced_by`
+   the docs/usage.md UDM spec table, contract D1 and the help/usage alignment
+   rule. Fails on the current code.
+3. **The behaviour the two surfaces now describe is pinned.** On a counter that
+   resets (5, 8, 2, 10), `-udm 'completed::delta:/COMPLETED: (\S+)/'` reports
+   `  produced: occurrences=3 buckets=1 sum=5 min=-6 max=8` and
+   `-udm 'completed::idelta:/COMPLETED: (\S+)/'` reports
+   `  produced: occurrences=2 buckets=1 sum=11 min=3 max=8` on `-V udm-specs`.
+   Assertion: a new `validate-udm-specs.sh` scenario `delta-counter-reset`,
+   using `run_nn` (`-ni -bs 1440 -oe -V udm-specs`) and `produced_is`. It
+   checks stderr for runtime warnings. `produced_by` is
+   `read_and_process_logs()` (delta/idelta transform) + `derive_udm_production()`,
+   and the contract is D1 together with § Functions → Transforms. It passes on
+   the current code by design: it locks the behaviour against a later change
+   such as #697. Before it is trusted, it is shown to fail by swapping the two
+   expected `produced:` lines.
+
+Fixture: `tests/fixtures/udm-counter-reset.txt`, four lines, one bucket,
+in the line shape the other `udm-*` fixtures use
+(`2026-01-26 10:00:00,000 INFO  [poller-1] com.example.jobs.StatusPoller  - Overall jobs processed: COMPLETED: 5`).
+It is read as a method server log with no format notice and no stderr, and it
+gives the same `produced:` lines as the measurement above. The shape in the
+issue body is read as a connection server log, and that run prints a notice
+that the format is ambiguous between two producers.
+
+### Prototype triggers
+
+None. No data model change and no per-line cost: the change is two help strings
+and a documentation row.
+
+### Completion gate scope
+
+An executable line of `ltl` changes (the `udm_note` strings), so the
+`single-day-access-log-standard` before/after benchmark runs, then the full
+harness suite. The before run was captured on the release branch head
+`9d0589f`, 2026-10-09.
+
+Passed on `ac85f01`, 2026-10-09. Benchmark, one before run against three
+after runs: total 8.7 s before, 8.6 s on each after run (−0.8%, −1.3%, −1.3%).
+Peak RSS was 99.8 MB before and 101.2, 99.9 and 98.2 MB after, a median of 99.9 MB:
+run-to-run spread, not a regression. Full suite: 49 harnesses, every one
+exiting 0 with its assertions run, and no runtime warning on stderr.
+
+### Release note
+
+Bug Fixes: "Correct the `--help` and usage descriptions of `delta` and
+`idelta`: `delta` keeps negative differences, `idelta` drops them (#698)."
 
 ## Future Enhancements (Out of Scope)
 

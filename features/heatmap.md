@@ -3,6 +3,8 @@
 ## Branch
 `feature/heatmap`
 
+**Since #617 (one width-to-format rule, 2026-10-04):** the header and footer labels render through the one dispatch at the *chart label* row; a user-defined metric's labels keep its own unit, never below its declared unit (a seconds metric's 0.25 reads `0.2s`, not `250ms`). Record: `features/617-width-to-format-rule.md` D15, D16.
+
 ## Overview
 Add a heatmap visualization mode to LogTimeLine that replaces the latency statistics column with a visual heat distribution showing request density across latency ranges. This feature is inspired by SRE best practices for analyzing load profiles and latency distributions, providing at-a-glance visibility into request population distribution patterns that percentile numbers alone cannot convey.
 
@@ -168,7 +170,7 @@ Based on research from industry leaders in observability and SRE:
 - [x] `-hm` and `--heatmap` command line options are recognized
 - [x] Default metric is `duration` when no metric specified
 - [x] `bytes` and `count` metrics work when specified
-- [x] Heatmap replaces latency statistics column (not shown together)
+- [x] Heatmap takes the latency statistics column's place by default; `--show stats` shows both (`features/597-section-visibility.md` D27)
 - [x] Column heading changes to "heatmap [duration]", "heatmap [bytes]", or "heatmap [count]"
 - [x] Heatmap cells show density with block characters
 - [x] Color gradient reflects density (dark=low, bright=high)
@@ -547,11 +549,7 @@ Based on prototype evaluation and user feedback, the following decisions have be
 
 **Root Cause**: `format_bytes()` uses string length comparison to determine unit. Float values like `801.000765678898` have string length 16, which exceeds the TB threshold (13 characters).
 
-**Fix**: Use `int($bytes)` for the length comparison:
-```perl
-my $bytes_int = int($bytes);
-if( length( $bytes_int ) >= length( $units{$u} ) ) {
-```
+**Fix**: `format_bytes()` compares the value itself against each byte-ladder step's byte count, in the run's notation, so a float's string length plays no part (`features/608-byte-unit-ladder.md` D6).
 
 #### 3. Heatmap Width Not Affecting Layout
 **Symptom**: Using `-hmw 80` didn't adjust other graph columns.
@@ -661,9 +659,15 @@ Users can explicitly override with `-lbg` / `--light-background`:
 ```
 
 **Implementation**:
-- `$heatmap_light_bg_auto = 1` - Flag to enable auto-detection (disabled if `-lbg` explicitly set)
+- The background is a global style setting, not the heatmap's: `$light_background`
+  and `$light_background_source`, settled once in `adapt_to_command_line_options()`
+  whatever other options are given; `-dbg` wins over `-lbg` in either order
+  (`features/665-background-setting-global.md`)
 - `detect_light_terminal_background()` - Function that queries terminal using OSC 11
-- Auto-detection runs only when heatmap is enabled and `-lbg` wasn't explicitly set
+- Auto-detection runs only when neither `-lbg` nor `-dbg` was given and a reader of
+  the setting is active; the heatmap gradient is the one reader, so the query runs
+  for a heatmap that will be drawn, after a counting user-defined metric has had the
+  chance to switch it off
 - Luma threshold of 0.5 determines light vs dark (using ITU-R BT.709 coefficients)
 - **Windows**: Auto-detection is skipped entirely (`return 0 if $^O eq 'MSWin32'`); users should use `-lbg` flag explicitly
 

@@ -15,10 +15,11 @@ into a TSV; `compare-results.sh` reports one TSV against another. A captured TSV
 | `quick` | one test | smoke |
 | `full` | the five standard file selections × all scenarios (55 tests) | development |
 | `xl` | the two extra-large selections (1.5 GB and 7.6 GB) × all scenarios | release |
-| `all` | everything (77 tests) | release |
+| `all` | every tier above (77 tests); not the named selections | release |
 
 A single selection can be named directly — `run-benchmark.sh single-day-access-log-standard`
-— which is what the per-feature completion gate uses.
+— which is what the per-feature completion gate uses. A selection in the `named` tier
+runs only this way: no tier includes it.
 
 ## Same-machine comparability
 
@@ -89,6 +90,33 @@ a step change at that boundary on UUID-bearing selections**: on one day of the a
 corpus the mask takes the same run from 37,597 surviving rows to 286,
 `finalize/group_similar` from 1.14 s to 0.43 s and `rss_peak` from 166 MB to 119 MB. That
 is the scenario being fixed, not the tool improving.
+
+## Boundary notes
+
+A value that moves at a known change, and that a comparison across the change would
+otherwise read as a regression or an improvement.
+
+**`CONFIG max_log_message_length` reads the cut each run used, from release 0.19.0
+(#619).** The row reports the length message keys are cut to. A run that writes CSV or
+groups messages cuts every key at the message-key cap, 350 characters, and always did;
+the row used to report the terminal width there. From 0.19.0 it reads `350` on
+`top25-consolidate` and `heatmap-histogram-consolidate` (`-g`) and on
+`heatmap-histogram-export` (`-o`), and stays at the terminal width (`200` under
+`run-benchmark.sh`) on every other scenario. **Expect `compare-results.sh detailed` to
+print `200 → 350` labelled as a regression on those three scenarios** across that
+boundary: the keys are the same length on both sides, and only the report changed.
+
+**`CONFIG timestamp_fraction_capture` is new from release 0.19.0 (#525).** It reports
+whether the run read the sub-second part of its timestamps (1) or skipped it (0). Every
+standard scenario reads 0 except `heatmap-histogram-export` (`-o`), which reads 1.
+**Expect `compare-results.sh` to list it under New In This Version** across that boundary.
+
+**`network-latency-csv` is a named selection from release 0.19.0 (#615).** It reads a
+CSV file through `-udm` (166,912 rows, an epoch timestamp with a six-digit fraction, one
+metric column) and belongs to no tier, so `quick`, `full`, `xl` and `all` never run it
+and no release baseline carries it. Name the test to run it:
+`run-benchmark.sh network-latency-csv-standard`. Its series starts with the captures of
+the change that added it, so there is nothing earlier to compare against.
 
 ## Results naming
 

@@ -1,0 +1,54 @@
+# #621: the option shapes of the generated body's identity comparison, one per
+# line, label=options@FAMILY, for prototype/616-observation-count-arms/prove.sh
+# (run with PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0). FAMILY is a 20,000-line
+# slice of: ACCESS a day of web-server access log carrying duration and bytes;
+# ACCESS_TS a web-server access log carrying thread and session; APP an
+# application server log carrying thread and user; SCRIPT a script log carrying
+# durationMS and count fields; METRICS a CSV of system metrics with a
+# system_cpu_total column (whole file).
+default=-bs 1@ACCESS
+no-messages=-n 0 -bs 1@ACCESS
+group=-g 50 -bs 5@ACCESS
+grouping-section=-V message-grouping -bs 5@ACCESS
+heatmap-duration=-hm duration -bs 5@ACCESS
+heatmap-bytes-raw=-hm bytes -hmdm raw -bs 5@ACCESS
+histogram=-hg -bs 5@ACCESS
+histogram-raw=-hg -hgdm raw -bs 5@ACCESS
+highlight=-h Things -bs 5@ACCESS
+highlight-numeric=-hdmin 100 -bs 5@ACCESS
+highlight-failure=-hf -bs 5@ACCESS
+highlight-heatmap-histogram=-h Things -hm duration -hg -bs 5@ACCESS
+include=-i Things -bs 5@ACCESS
+exclude=-e Metrics -bs 5@ACCESS
+window-absolute=-st 2025-05-07T00:05 -et 2025-05-07T00:20 -bs 5@ACCESS
+window-time-of-day=-st 00:05 -et 00:20 -bs 5@ACCESS
+profile=-pr day -bs 5@ACCESS
+outcome-filter=-if -bs 5@ACCESS
+numeric-filter=-dmin 50 -bmax 100000 -bs 5@ACCESS
+duration-unit=-du us -bs 5@ACCESS
+bin-models=-mdm bin -bdm bin -bs 5@ACCESS
+csv-out=-o -bs 5@ACCESS
+omit-metrics=-od -ob -oc -bs 5@ACCESS
+milliseconds=-bs 100ms -tp ms@ACCESS
+nanosecond-precision=-tp ns -bs 5@ACCESS
+index=-idx -bs 5@ACCESS
+memory-debug=-mem debug -bs 5@ACCESS
+mask-expose-discard=-m uuid -x query-string -d ip -bs 5@ACCESS
+sort-bytes=-so bytes -bs 5@ACCESS
+ts-default=-bs 5@ACCESS_TS
+ts-hide-session-user=-hses -hu -bs 5@ACCESS_TS
+ts-threadpool=-tpa http -bs 5@ACCESS_TS
+ts-threadpool-summary=-tpas -bs 5@ACCESS_TS
+ts-expose-discard=-x session -d thread -bs 5@ACCESS_TS
+ts-highlight=-h Things -bs 5@ACCESS_TS
+app-default=-bs 5@APP
+app-highlight-user=-h Error -bs 5@APP
+app-discard-user=-d user -bs 5@APP
+script-default=-bs 5@SCRIPT
+script-count=-x count -hm count -bs 5@SCRIPT
+script-omit-count=-oc -bs 5@SCRIPT
+script-udm=-udm durationMS::max -bs 5@SCRIPT
+script-udm-heatmap-histogram=-udm durationMS::max -hm durationMS -hg durationMS -bs 5@SCRIPT
+script-udm-heatmap-highlight=-udm durationMS::max -hm durationMS -h Things -bs 5@SCRIPT
+script-udm-group=-udm durationMS::max -g 50 -bs 5@SCRIPT
+csv-udm=-udm system_cpu_total -bs 5@METRICS
