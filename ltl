@@ -18193,8 +18193,21 @@ sub read_and_process_logs {
                     my $truncated_thread = defined($threadname) ? substr($threadname, 0, MESSAGE_KEY_THREAD_LENGTH) : undef;
                     my $truncated_object = defined($object) ? substr($object, length($object) > MESSAGE_KEY_OBJECT_LENGTH ? length($object)-MESSAGE_KEY_OBJECT_LENGTH : 0, MESSAGE_KEY_OBJECT_LENGTH) : undef;
 
-                    if( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
-                        # the key is cut at the per-run cut (MESSAGE_KEY_CAP under -o or -g, else the terminal width)
+                    # the key is cut at the per-run cut (MESSAGE_KEY_CAP under -o or -g, else
+                    # the terminal width). Under -mt left or center the key is composed
+                    # whole and, only when it is longer than the cut, its message part is
+                    # cut at the start or the middle, the composed attributes kept.
+                    #@when $message_cut_not_at_end
+                    if( $message_cut_not_at_end ) {
+                        my $key_prefix = "[$log_level] " . ( defined($threadname) ? "[$truncated_thread] " : '' ) . ( defined($object) ? "[$truncated_object] " : '' );
+                        $log_key = $key_prefix . $message;
+                        if( length($log_key) > $max_log_message_length ) {
+                            my $room = $max_log_message_length - length($key_prefix);
+                            $log_key = $room > length(MESSAGE_ELLIPSIS)
+                                ? $key_prefix . cut_message_text( $message, $room, $message_truncation, MESSAGE_ELLIPSIS, 0 )
+                                : substr( $log_key, 0, $max_log_message_length );
+                        }
+                    } elsif( defined( $threadname ) && defined( $object ) ) {				# ThingWorx log line parsed and usable for additional analysis
                         $log_key = substr("[$log_level] [$truncated_thread] [$truncated_object] $message", 0, $max_log_message_length);
                     } elsif( defined( $object ) ) {
                         $log_key = substr("[$log_level] [$truncated_object] $message", 0, $max_log_message_length);
@@ -18202,18 +18215,6 @@ sub read_and_process_logs {
                         $log_key = substr("[$log_level] [$truncated_thread] $message", 0, $max_log_message_length);
                     } else {
                         $log_key = substr("[$log_level] $message", 0, $max_log_message_length);
-                    }
-
-                    # Under -mt left or center a key that reached the per-run cut is
-                    # composed again with its message part cut at the start or the
-                    # middle, the composed attributes kept, so the stored key keeps the
-                    # end of a message too long for it.
-                    #@and $message_cut_not_at_end
-                    if( $message_cut_not_at_end && length($log_key) == $max_log_message_length ) {
-                        my $key_prefix = "[$log_level] " . ( defined($threadname) ? "[$truncated_thread] " : '' ) . ( defined($object) ? "[$truncated_object] " : '' );
-                        my $room = $max_log_message_length - length($key_prefix);
-                        $log_key = $key_prefix . cut_message_text( $message, $room, $message_truncation, MESSAGE_ELLIPSIS, 0 )
-                            if $room > length(MESSAGE_ELLIPSIS);
                     }
 
                     ## CONSOLIDATION: S1 INLINE MATCH (Issue #96) ##
@@ -23956,13 +23957,16 @@ sub print_message_summary {
                 my $row = $cls_state ? $colors{ $classification_state_colour{$cls_state} } . $marker . $colors{'NC'} : $marker;
 
                 if (defined $key && exists $log_messages{$grouping}{$key}) {
-                    my $message = substr( $key, 0, $col_width{1} );                         # truncate message for printing if too long to fit in column
-                    # Under -mt left or center the message is cut at its start or middle
-                    # and padded by the columns it occupies, each ellipsis one.
+                    # Under -mt left or center a key wider than the column is cut at its
+                    # start or middle and padded by the columns it occupies, each
+                    # ellipsis one; any other key is printed as it always was.
                     my $message_pad = $col_width{1};
-                    if ( $message_cut_not_at_end ) {
+                    my $message;
+                    if ( $message_cut_not_at_end && length($key) > $col_width{1} && message_text_width($key) > $col_width{1} ) {
                         $message = fit_message_key_to_column( $key, $col_width{1} );
                         $message_pad += length($message) - message_text_width($message);
+                    } else {
+                        $message = substr( $key, 0, $col_width{1} );                        # truncate message for printing if too long to fit in column
                     }
                     my $occurrences = $log_messages{$grouping}{$key}{occurrences};
                     my $min = $log_messages{$grouping}{$key}{min};
