@@ -21,19 +21,30 @@
 #       Registering the same name twice is a harness defect and exits 2.
 #
 #   scenario_parse_args "$@"
-#       Parse the harness command line. Handles --scenario NAME, --list,
-#       -h/--help; rejects an unknown flag and an unknown scenario name with a
-#       diagnostic and exit 2, before any assertion runs. A harness with its
+#       Parse the harness command line. Handles --scenario NAME (repeatable:
+#       each name given runs), --list, -h/--help; rejects an unknown flag and
+#       an unknown scenario name with a diagnostic and exit 2, before any
+#       assertion runs. A harness with its
 #       own extra flags passes a handler via SCENARIO_EXTRA_ARG_HANDLER (see
 #       below) rather than parsing around this function.
 #
 #   scenario_selected
 #       Echoes the scenarios to run, in registration order: every registered
-#       scenario, or just the selected one.
+#       scenario, or just the selected ones. Registration order, not the order
+#       they were named in, because an inline-gated harness can only run its
+#       blocks in file order, and it is the order a scenario producing a
+#       capture precedes the one reading it.
 #
 #   scenario_wanted NAME
 #       True when NAME should run. For harnesses that gate blocks inline
 #       rather than dispatching from a list.
+#
+#   scenario_restricted
+#       True when the command line named scenarios, false on a bare run.
+#
+# A harness reads the selection only through scenario_selected and
+# scenario_wanted, never through this library's variables, and never parses
+# --scenario itself.
 #
 #   scenario_usage
 #       Prints usage and the registered scenario names.
@@ -63,7 +74,7 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/require-bash.sh"
 
 SCENARIO_REGISTRY=()
-SCENARIO_ONLY=""
+SCENARIO_SELECTED=()
 SCENARIO_USAGE_NOTE="${SCENARIO_USAGE_NOTE:-}"
 SCENARIO_EXTRA_ARG_HANDLER="${SCENARIO_EXTRA_ARG_HANDLER:-}"
 SCENARIO_ARGS_CONSUMED=0
@@ -82,7 +93,7 @@ scenario_register() {
 }
 
 scenario_usage() {
-    echo "Usage: $0 [--scenario NAME] [--list]"
+    echo "Usage: $0 [--scenario NAME]... [--list]"
     if [[ ${#SCENARIO_REGISTRY[@]} -eq 0 ]]; then
         echo "  (this harness registers no scenarios)"
         return 0
@@ -102,16 +113,16 @@ scenario_parse_args() {
                     scenario_usage >&2
                     exit 2
                 fi
-                SCENARIO_ONLY="$2"
+                SCENARIO_SELECTED+=("$2")
                 shift 2
                 ;;
             --scenario=*)
-                SCENARIO_ONLY="${1#--scenario=}"
-                if [[ -z "$SCENARIO_ONLY" ]]; then
+                if [[ -z "${1#--scenario=}" ]]; then
                     echo "ERROR: --scenario needs a scenario name" >&2
                     scenario_usage >&2
                     exit 2
                 fi
+                SCENARIO_SELECTED+=("${1#--scenario=}")
                 shift
                 ;;
             --list)
@@ -140,29 +151,44 @@ scenario_parse_args() {
 
     # An unknown scenario name matches nothing, so it must be refused here:
     # letting it through means every gate evaluates false and the harness
-    # reports a full pass over zero assertions (#545).
-    if [[ -n "$SCENARIO_ONLY" ]]; then
-        local s found=0
-        for s in ${SCENARIO_REGISTRY[@]+"${SCENARIO_REGISTRY[@]}"}; do
-            [[ "$s" == "$SCENARIO_ONLY" ]] && found=1 && break
-        done
-        if [[ "$found" -ne 1 ]]; then
-            echo "ERROR: unknown scenario '$SCENARIO_ONLY'" >&2
+    # reports a full pass over zero assertions (#545). One unknown name among
+    # several refuses the whole selection.
+    local name
+    for name in ${SCENARIO_SELECTED[@]+"${SCENARIO_SELECTED[@]}"}; do
+        if ! _scenario_registered "$name"; then
+            echo "ERROR: unknown scenario '$name'" >&2
             scenario_usage >&2
             exit 2
         fi
-    fi
+    done
     return 0
 }
 
+_scenario_registered() {
+    local s
+    for s in ${SCENARIO_REGISTRY[@]+"${SCENARIO_REGISTRY[@]}"}; do
+        [[ "$s" == "$1" ]] && return 0
+    done
+    return 1
+}
+
 scenario_selected() {
-    if [[ -n "$SCENARIO_ONLY" ]]; then
-        echo "$SCENARIO_ONLY"
-    else
-        printf '%s\n' ${SCENARIO_REGISTRY[@]+"${SCENARIO_REGISTRY[@]}"}
-    fi
+    local s
+    for s in ${SCENARIO_REGISTRY[@]+"${SCENARIO_REGISTRY[@]}"}; do
+        scenario_wanted "$s" && echo "$s"
+    done
+    return 0
+}
+
+scenario_restricted() {
+    [[ ${#SCENARIO_SELECTED[@]} -gt 0 ]]
 }
 
 scenario_wanted() {
-    [[ -z "$SCENARIO_ONLY" || "$SCENARIO_ONLY" == "$1" ]]
+    [[ ${#SCENARIO_SELECTED[@]} -eq 0 ]] && return 0
+    local s
+    for s in "${SCENARIO_SELECTED[@]}"; do
+        [[ "$s" == "$1" ]] && return 0
+    done
+    return 1
 }
