@@ -1221,6 +1221,13 @@ use constant {
     MESSAGE_KEY_OBJECT_LENGTH => 25,
 };
 
+# Where a message too long for its length is cut: its end (right), its start
+# (left) or its middle (center), the composed attributes at the start of the
+# key always kept. Set by -mt; a value is named in full or by its first letter.
+my @message_truncation_positions = qw(left center right);
+my $message_truncation_list      = join(', ', @message_truncation_positions);   # for the -mt usage error and help row
+my $message_truncation           = 'right';
+
 # Consolidation configuration
 my $consolidation_threshold          = 85;
 my $consolidation_trigger            = 5000;
@@ -2997,6 +3004,7 @@ sub _classify_argv_provenance {
                 'timestamp-precision|tp',
                 'version|v',
                 'duration-unit|du', 'rate-unit|ru', 'byte-notation|bn',
+                'message-truncation|mt',
                 ( map { quantity_option_spec($_) } @quantity_options ),
                 'memory-usage|mem', 'timing|t', 'disable-progress', 'hide|hi', 'show|sh',
                 'output-csv|o', 'csv-precision|cp', 'sort-on|so', 'sort-ascending|sa',
@@ -3135,6 +3143,7 @@ sub emit_runtime_config_verbose {
         'timestamp-precision'               => $timestamp_precision,
         'rate-unit'                         => $rate_unit,
         'byte-notation'                     => $byte_notation_option,
+        'message-truncation'                => $message_truncation,
         'memory-usage'                      => $show_memory,
         'memory-usage-debug'                => $show_memory_debug,
         'timing'                            => $show_timing,
@@ -11415,6 +11424,7 @@ sub print_help {
     # Display & Output
     $out .= help_subheading("Display & Output");
     $out .= help_opt("-n,   --top-messages <N>",      "Number of unique messages to show in the top-messages table (default: 10). 0 keeps no individual message at all: no message table, no message CSV and no per-message statistics, so a log with many distinct messages costs far less memory. The timeline and the statistics over the whole population are unchanged, and inclusion/exclusion filtering still applies. Message grouping (-g), the message statistics data model (-mdm) and the message ranking (-so) then have nothing to act on and are ignored, with a note saying so. " . quantity_unit_sentence($quantity_option_by_long{'top-messages'}));
+    $out .= help_opt("-mt,  --message-truncation <position>", "Where a message too long for the messages table is cut, marked with an ellipsis: right cuts its end (default), left cuts its start so the end of the message stays visible, center cuts its middle so its start and end stay visible. The log level, thread and object at the start of the message are always kept. One of $message_truncation_list, or l, c, r.");
     $out .= help_opt("-o,   --output-csv",            "Write the analysed data to files for external analysis: a STATS CSV per time bucket, a MESSAGES CSV per message, and a YAML aggregate export describing the whole population with no per-message content. The YAML file's name carries no argument text; which blocks it holds follows the run's options (-hg for population-wide percentiles, -hm for per-bucket heatmap percentiles)");
     $out .= help_opt("-cp,  --csv-precision <mode>",  "Control CSV decimal precision: 'default' (per-family decimals derived from the source's duration unit), 'full' (raw precise floats), or an integer N (cap all numeric columns at N decimals)");
     $out .= help_opt("-osum, --omit-summary",         "Hide the run summary printed at the end of the output");
@@ -16123,6 +16133,7 @@ sub adapt_to_command_line_options {
         'log-format|lf=s'    => \$log_format_pin,
         'rate-unit|ru=s' => \$rate_unit,
         'byte-notation|bn=s' => \$byte_notation_option,
+        'message-truncation|mt=s' => \$message_truncation,
 	    'memory-usage|mem:s' => \$memory_usage_operand,
         'timing|t' => \$show_timing,
         'disable-progress' => sub { push @section_visibility_ops, [ 'hide', 'progress' ] },   # hidden
@@ -16421,6 +16432,15 @@ sub adapt_to_command_line_options {
         do { print_usage("Invalid byte notation '$byte_notation_option'. Valid values: $byte_notation_list"); exit 1; }
             unless grep { $_ eq $notation } @byte_unit_notations;
         $byte_notation_option = $notation;
+    }
+
+    # Message truncation position: a value in full or by its first letter, in any case
+    {
+        my $given = lc $message_truncation;
+        my ($position) = grep { $_ eq $given || substr($_, 0, 1) eq $given } @message_truncation_positions;
+        do { print_usage("Invalid message truncation '$message_truncation'. Valid values: $message_truncation_list (or l, c, r)"); exit 1; }
+            unless defined $position;
+        $message_truncation = $position;
     }
 
     # Rate unit option validation (Issue #122): any ladder spelling
