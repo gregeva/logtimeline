@@ -64,6 +64,16 @@ message length cap) is closed as not planned and no longer constrains this work.
   produces follow the position, since a left cut joins messages that differ
   only in the part cut away, as a right cut joins those that differ only in
   their tails today.
+- **D2 — LOCKED 2026-10-14 (architect) — The option is
+  `-mt, --message-truncation <left|middle|right>`, default `right`.** The
+  default is today's behaviour. It follows the enumerated-option pattern of
+  `-bn, --byte-notation`: a short and a long form, a `print_help()` row and a
+  `docs/usage.md` row.
+- **D3 — LOCKED 2026-10-14 (architect) — Automatic selection is a separate
+  issue.** Filed as #736 (choose the truncation position automatically from
+  the shape of the top messages), blocked by this issue; § 4's measurements of
+  where the varying part sits by log family are its starting evidence. This
+  issue delivers the analyst's choice only.
 
 Scope (architect, 2026-10-14): the enhancement is only where a message is
 truncated and the option that sets it. It changes no length or size of a data
@@ -119,5 +129,4 @@ committed criteria when acceptance criteria are agreed.
 
 ## 5. Open items
 
-- The option's names, values and default.
-- Automatic selection: prototype here, or a dependent issue.
+- Acceptance criteria, agreed before code.
