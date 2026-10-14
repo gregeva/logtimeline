@@ -28,7 +28,7 @@
 # from a figure measured and recorded in the feature doc, never read back from
 # ltl.
 #
-# Usage: ./tests/validate-message-mask.sh [--scenario NAME]
+# Usage: ./tests/validate-message-mask.sh [--scenario NAME]...
 #        ./tests/validate-message-mask.sh --list
 
 set -euo pipefail

@@ -198,10 +198,11 @@ about anything else, these still hold.
       `-V` and is captured, so a later question is answered from the file, not a
       re-run. Harness assertions stay shaped to what they read.
 - [ ] A failing child process is invoked directly on minimal input, not through
-      the parent harness. A harness under iteration uses `--scenario`; every
-      harness honours it and lists its scenario names under `--list`. An
-      unknown name or flag exits non-zero having run nothing, so a run that
-      reports assertions is a run of what was named.
+      the parent harness. A harness under iteration runs only the scenarios
+      the change needs, one `--scenario` per name (a scenario reading another's
+      capture is named with it), never the whole harness; names are under
+      `--list`. An unknown name or flag exits non-zero having run nothing, so a
+      run that reports assertions is a run of what was named.
 - [ ] Only the harness under discussion runs while working it. The full suite
       runs once, as the completion gate. Before launching any gate: name the
       behaviour this change could have altered; if none, there is nothing to prove.
@@ -452,7 +453,7 @@ GitHub Actions builds all platforms on `v*` tags (`.github/workflows/release-bui
 export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"  # harnesses need bash 4+ and Homebrew Perl
 perl -c ltl                                         # syntax check; the whole gate for a comment-only diff
 ./tests/validate-<name>.sh --list                   # its scenario names
-./tests/validate-<name>.sh --scenario <name>        # one scenario while iterating
+./tests/validate-<name>.sh --scenario <a> --scenario <b>   # the scenarios the change needs, while iterating
 ./tests/baseline/run-benchmark.sh single-day-access-log-standard --label <issue>-before   # and -after, first in the gate
 ./tests/baseline/compare-results.sh summary tests/baseline/results/<issue>-before.tsv tests/baseline/results/<issue>-after.tsv
 # Full suite (completion gate only, after the benchmark): CI=1 validate-csv-output.sh, then CI=1 validate-statistics.sh (shared cache), then the rest

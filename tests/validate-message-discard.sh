@@ -29,7 +29,7 @@
 # 350-character cut: a key cut after a removal cannot be predicted by removing
 # from the uncut key.
 #
-# Usage: ./tests/validate-message-discard.sh [--scenario NAME]
+# Usage: ./tests/validate-message-discard.sh [--scenario NAME]...
 #        ./tests/validate-message-discard.sh --list
 
 set -euo pipefail

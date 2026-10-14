@@ -289,11 +289,12 @@ cases names them scenarios.
 
 The contract, in full:
 
-- `--scenario NAME` runs that scenario and no other.
+- `--scenario NAME` runs that scenario and no other. Given more than once, it
+  runs each named scenario, in registration order, and no other.
 - `--list` (and `-h`/`--help`) prints the registered scenario names.
 - A scenario name the harness does not know is an **error**: a diagnostic
   naming the unknown name, the scenario list, a non-zero exit, and **no
-  assertion run**.
+  assertion run**. One unknown name among several refuses the whole selection.
 - An argument the harness does not parse is an error on the same terms.
 - A bare invocation runs every scenario. This is how the suite runs, so strict
   parsing never changes the gate.
@@ -305,10 +306,29 @@ order, and calls `scenario_parse_args "$@"`. A harness with options of its own
 supplies `SCENARIO_EXTRA_ARG_HANDLER` rather than parsing around the library,
 so unknown-argument rejection stays in one place.
 
+The selection has one owner. A harness reads it only through `scenario_wanted`
+and `scenario_selected` (`scenario_restricted` says whether names were given),
+never through the library's variables, and never parses `--scenario` itself:
+a second selection kept beside the library's drifts from it, keeping one name
+of several or gating a scenario the library never registered. And it calls
+`scenario_parse_args` before its first scenario runs, so a refusal or a
+`--list` runs nothing.
+
 The scenario names and the dispatch that runs them come from **one** registry.
 Where the two were written separately — a `SCENARIOS=(...)` array beside a
 dispatch `case` repeating the same names — they drift, and a scenario silently
 stops being reachable by name while still running in the full pass.
+
+### Running what the change needs
+
+The selector exists so that iteration runs the scenarios a change can affect,
+and no others. Choosing them is the work: which behaviour could this change
+alter, and which scenarios observe it. Name each one with its own `--scenario`;
+a scenario that reads a capture another scenario writes is run by naming both,
+and registration order runs the producer first. The bare run is the suite's
+form and the completion gate's (`docs/process/workflow.md` § 3), never the
+default while iterating: it spends the time of every scenario the change cannot
+touch, and it skips the question of what the change needs proving.
 
 This is the selector-shaped form of *Harnesses must fail on missing anchors*
 below: a selector that matches nothing is an unasserted run. Two failure modes
@@ -329,7 +349,9 @@ uses `--scenario`. That checkpoint depends on this contract holding in every
 harness, not most of them, which is why `tests/validate-scenario-selector.sh`
 asserts both halves: the library's own behaviour, through probe harnesses that
 report which scenarios ran; and a sweep of every `tests/validate-*.sh` for the
-two refusals and the listing. A harness added later without the selector fails
+two refusals, an unknown name beside a known one in either order, no assertion
+reported by a refusal or a listing, the listing itself, and a static check that
+no harness keeps a selection of its own. A harness added later without the selector fails
 that sweep rather than waiting to be found by an investigation.
 
 ## Harnesses must fail on missing anchors

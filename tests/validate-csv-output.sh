@@ -25,7 +25,7 @@
 #
 # Usage:
 #   ./tests/validate-csv-output.sh                       # all scenarios
-#   ./tests/validate-csv-output.sh --scenario <name>     # single scenario
+#   ./tests/validate-csv-output.sh --scenario <name>...     # the named scenarios
 
 set -euo pipefail
 
