@@ -193,5 +193,19 @@ On branch `564-message-truncation-position`.
   `thread=ajp-nio-127.0.0.1-8010-exec-4*`. Under `right` the generated read
   body drops the key-site block (`-V read-path` marker `kept=no`).
 
+- **Drop 3** (`b7a7603`): `tests/validate-message-truncation.sh` and its
+  fixtures, reading the rendered table and the messages CSV and holding both
+  to one standard: each fixture message is exactly the cut of its original,
+  computed in the harness from the fixture lines. Every new assertion was
+  shown to fail against a copy of `ltl` with one mechanism removed (the stored
+  cut, the kept attributes, the literal ellipsis in the grouping pattern, the
+  ellipsis-count rule, the split at the stored ellipsis, an unmarked right
+  cut). Writing the grouping cases found that keeping the reference's
+  ellipsis literal was not enough: when the uncut key of a similar pair was
+  the reference, its pattern wildcarded the cut key's ellipsis away. Under
+  `left` or `center` keys are now grouped only when they carry the same
+  number of ellipses (`cut_markers_match`), so a cut message is never grouped
+  with an uncut copy of it (AC5).
+
 ## 5. Open items
 
