@@ -8,7 +8,7 @@
 # run summary heading, the timeline, the run index and the aggregate export
 # print for the same line, so its file name tracks the feature.
 #
-# Usage: ./tests/validate-timestamp-precision.sh [--list] [--scenario NAME]
+# Usage: ./tests/validate-timestamp-precision.sh [--list] [--scenario NAME]...
 #
 # Implements the self-documenting-assertion design from
 # tests/HARNESS-DESIGN.md. Reference: tests/validate-bucket-size-units.sh.

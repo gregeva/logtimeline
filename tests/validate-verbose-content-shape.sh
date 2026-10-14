@@ -13,7 +13,7 @@
 # Each assertion records, per tests/HARNESS-DESIGN.md § Self-documenting
 # assertions: asserts, produced_by (function name), contract.
 #
-# Usage: ./tests/validate-verbose-content-shape.sh [--list | --scenario NAME]
+# Usage: ./tests/validate-verbose-content-shape.sh [--list | --scenario NAME...]
 
 set -euo pipefail
 

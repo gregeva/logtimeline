@@ -23,7 +23,7 @@
 # assertions: asserts, produced_by (function name), contract. All three are
 # surfaced on failure.
 #
-# Usage: ./tests/validate-read-path.sh [--list | --scenario NAME]
+# Usage: ./tests/validate-read-path.sh [--list | --scenario NAME...]
 
 set -euo pipefail
 
