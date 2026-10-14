@@ -29,7 +29,7 @@ analyst uses as signposts (log level, thread, object) still shown.
 | CSV | Column 2 of the messages CSV is the stored key verbatim | `features/447-message-control-character-normalisation.md` surfaces table: "Messages CSV (column 2 is the key verbatim)" |
 | Column budget | The message column is budgeted in characters and padded with `%-Ns` | 447 § Overview |
 | Line width | No printed line exceeds the terminal width; 100 columns is the minimum supported | `features/column-layout-refactor.md` § Minimum supported terminal width |
-| Existing shortener | `shorten_filename` (middle cut with `...`, used by the progress line and the processed-files list) is reused, not duplicated | `features/532-progress-line-file-path.md` § Requirements: "One resolution surface: the existing shortener is reused, not duplicated." |
+| Existing shortener | `shorten_filename` (middle cut with `...`, used by the progress line and the processed-files list) is reused, not duplicated | `features/532-progress-line-file-path.md` § Requirements: "One resolution surface: the existing shortener is reused, not duplicated." Out of scope by § 3.2 (the progress line and the processed-files list are not touched). |
 
 Corrections to the issue's links: the issue describes DD-08 (similarity on the
 message text, the metadata prefix held apart) as current; the record marks it
@@ -64,9 +64,12 @@ message length cap) is closed as not planned and no longer constrains this work.
   produces follow the position, since a left cut joins messages that differ
   only in the part cut away, as a right cut joins those that differ only in
   their tails today.
-- **D2 — LOCKED 2026-10-14 (architect) — The option is
-  `-mt, --message-truncation <left|middle|right>`, default `right`.** The
-  default is today's behaviour. It follows the enumerated-option pattern of
+- **D2 — LOCKED 2026-10-14 (architect), values amended the same day — The
+  option is `-mt, --message-truncation <left|center|right>`, accepting `l`,
+  `c` and `r`, default `right`.** The value names where the cut is made:
+  `right` cuts the end of the message (today's behaviour), `left` cuts its
+  start so the end survives, `center` cuts its middle so the start and the end
+  survive. It follows the enumerated-option pattern of
   `-bn, --byte-notation`: a short and a long form, a `print_help()` row and a
   `docs/usage.md` row.
 - **D3 — LOCKED 2026-10-14 (architect) — Automatic selection is a separate
@@ -127,7 +130,7 @@ key against `-o` keys capped at 350:
 Evidence: the session scratchpad's `733-research/` captures; to be re-run into
 committed criteria when acceptance criteria are agreed.
 
-## Acceptance criteria (draft, for agreement)
+## Acceptance criteria (agreed 2026-10-14)
 
 Verified by a new harness, `tests/validate-message-truncation.sh`, reading both
 the rendered messages table at a pinned `--terminal-width`, as
@@ -143,16 +146,15 @@ width, and beyond the terminal width.
 |---|---|---|
 | AC1 | Without `-mt`, and with `-mt right`, the messages table, the messages CSV and `-V benchmark-data` are identical to the base commit's on the fixture, plain, with `-g`, with `-o` and with `-xt`. | assertable |
 | AC2 | With `-mt left`, a message longer than the column shows its composed attributes as written, then `…`, then the message's last characters running to the column's end. | assertable |
-| AC3 | With `-mt middle`, the same message shows its attributes, the message's first part, `…`, and its last part; the two parts differ in length by at most one character. | assertable |
+| AC3 | With `-mt center`, the same message shows its attributes, the message's first part, `…`, and its last part; the two parts differ in length by at most one character. | assertable |
 | AC4 | A message that fits the column is shown unchanged, with no `…`, under every position. | assertable |
 | AC5 | AC2 and AC3 hold for each of the four composition variants, and under `-g` where an attribute is wildcarded (`[*]`); under `-g` the `…` is never grouped or consolidated. | assertable |
 | AC6 | Under each position every row of the messages table occupies the same column count, `…` occupies one column, and no line exceeds `--terminal-width`. | assertable |
 | AC7 | A message longer than the terminal width shows its real last characters under `-mt left` without `-o` or `-g` (the stored cut applies the position, D1), and a message longer than 350 does under `-o`. | assertable |
 | AC8 | The stored key never exceeds the per-run length: `-V benchmark-data` `CONFIG max_log_message_length` is the same under every position, and every messages-CSV key is at most that long. | assertable |
-| AC9 | `-mt` and `--message-truncation` accept `left`, `middle` and `right`; any other value exits non-zero having run nothing, naming the accepted values; `-V runtime-config` reports the resolved value; the `--help` and `docs/usage.md` rows agree (`tests/validate-help-content.sh`). | assertable |
+| AC9 | `-mt` and `--message-truncation` accept `left`, `center` and `right`, and `l`, `c` and `r`; any other value exits non-zero having run nothing, naming the accepted values; `-V runtime-config` reports the resolved value; the `--help` and `docs/usage.md` rows agree (`tests/validate-help-content.sh`). | assertable |
 | AC11 | The before/after benchmark (`single-day-access-log-standard`) shows no regression: the stored cut is composed per line, in the hot path. | assertable |
 | AC12 | The rendered table is looked at on real data, an access log with `-xqs` and a log carrying thread and object, under each position. | inspection |
 
 ## 5. Open items
 
-- Agreement of the acceptance criteria above.
