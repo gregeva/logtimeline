@@ -95,10 +95,10 @@ Each has one option once the scope above holds; recorded, not put up for a decis
   edge: five format specs' level captures admit `]` (619 § 11.2, level captures
   that admit `]`).
 - **The middle cut keeps equal halves**, as `shorten_filename` does.
-- **One cut helper.** `shorten_filename` becomes the one left, middle or right
-  cut, the marker passed by the caller: the progress line and the
-  processed-files list keep `...`; the messages table uses `…`, one column
-  wide, as the table's existing one-character status marker is.
+- **The progress line and the processed-files list are out of scope**
+  (architect, 2026-10-14): the work is only about the message itself, and
+  `shorten_filename` and its callers are not touched. The messages table's `…`
+  is one column wide, as the table's existing one-character status marker is.
 - **The thread-pool table is out of scope:** `print_threadpool_summary` cuts a
   thread-pool name, not a message key.
 
@@ -129,9 +129,11 @@ committed criteria when acceptance criteria are agreed.
 
 ## Acceptance criteria (draft, for agreement)
 
-Verified by a new harness, `tests/validate-message-truncation.sh`, reading the
-rendered messages table at a pinned `--terminal-width`, as
-`tests/validate-message-control-characters.sh` does, on a committed fixture
+Verified by a new harness, `tests/validate-message-truncation.sh`, reading both
+the rendered messages table at a pinned `--terminal-width`, as
+`tests/validate-message-control-characters.sh` does, and the messages CSV: the
+two lengths, the column width and the stored length, are each held to the same
+standard. The fixture is a committed
 `tests/fixtures/message-truncation.txt` holding one message per composition
 variant (level only; level and thread; level and object; level, thread and
 object) and lengths below the column, between the column and the terminal
@@ -143,12 +145,11 @@ width, and beyond the terminal width.
 | AC2 | With `-mt left`, a message longer than the column shows its composed attributes as written, then `…`, then the message's last characters running to the column's end. | assertable |
 | AC3 | With `-mt middle`, the same message shows its attributes, the message's first part, `…`, and its last part; the two parts differ in length by at most one character. | assertable |
 | AC4 | A message that fits the column is shown unchanged, with no `…`, under every position. | assertable |
-| AC5 | AC2 and AC3 hold for each of the four composition variants, and under `-g` where an attribute is wildcarded (`[*]`). | assertable |
+| AC5 | AC2 and AC3 hold for each of the four composition variants, and under `-g` where an attribute is wildcarded (`[*]`); under `-g` the `…` is never grouped or consolidated. | assertable |
 | AC6 | Under each position every row of the messages table occupies the same column count, `…` occupies one column, and no line exceeds `--terminal-width`. | assertable |
 | AC7 | A message longer than the terminal width shows its real last characters under `-mt left` without `-o` or `-g` (the stored cut applies the position, D1), and a message longer than 350 does under `-o`. | assertable |
 | AC8 | The stored key never exceeds the per-run length: `-V benchmark-data` `CONFIG max_log_message_length` is the same under every position, and every messages-CSV key is at most that long. | assertable |
 | AC9 | `-mt` and `--message-truncation` accept `left`, `middle` and `right`; any other value exits non-zero having run nothing, naming the accepted values; `-V runtime-config` reports the resolved value; the `--help` and `docs/usage.md` rows agree (`tests/validate-help-content.sh`). | assertable |
-| AC10 | The progress line and the processed-files list, the other users of `shorten_filename`, are unchanged and keep `...` (`tests/validate-progress-line.sh`). | assertable |
 | AC11 | The before/after benchmark (`single-day-access-log-standard`) shows no regression: the stored cut is composed per line, in the hot path. | assertable |
 | AC12 | The rendered table is looked at on real data, an access log with `-xqs` and a log carrying thread and object, under each position. | inspection |
 
