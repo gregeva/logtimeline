@@ -12991,12 +12991,12 @@ sub coalesce_mask {
     return \@m;
 }
 
-# Under -mt left or center the cut marker in a key is never wildcarded: its
-# positions are kept, so the derived pattern carries it literally and a key
-# whose marker does not line up fails the pattern and is not grouped with it.
+# Under -mt left or center (the callers test the flag) the cut marker in a key
+# is never wildcarded: its positions are kept, so the derived pattern carries it
+# literally and a key whose marker does not line up fails the pattern.
 sub keep_ellipsis_in_mask {
     my ($reference_string, $mask) = @_;
-    return $mask unless $message_cut_not_at_end && index($reference_string, MESSAGE_ELLIPSIS) >= 0;
+    return $mask unless index($reference_string, MESSAGE_ELLIPSIS) >= 0;
     my @kept = @$mask;
     my $p = -1;
     while (($p = index($reference_string, MESSAGE_ELLIPSIS, $p + 1)) >= 0) {
@@ -13005,13 +13005,13 @@ sub keep_ellipsis_in_mask {
     return \@kept;
 }
 
-# Under -mt left or center two keys are grouped only when they carry the same
-# number of cut markers: with the reference's markers kept literally, a key
-# whose marker does not line up fails the pattern, and a cut key is never
-# merged with an uncut one, whose pattern would wildcard the marker away.
+# Under -mt left or center (the callers test the flag) two keys are grouped
+# only when they carry the same number of cut markers: with the reference's
+# markers kept literally, a key whose marker does not line up fails the
+# pattern, and a cut key is never merged with an uncut one, whose pattern
+# would wildcard the marker away.
 sub cut_markers_match {
     my ($a, $b) = @_;
-    return 1 unless $message_cut_not_at_end;
     my $na = () = $a =~ /\xe2\x80\xa6/g;
     my $nb = () = $b =~ /\xe2\x80\xa6/g;
     return $na == $nb;
@@ -13020,7 +13020,7 @@ sub cut_markers_match {
 # Derive canonical form: keep positions retain chars, variable regions become *
 sub derive_canonical {
     my ($reference_string, $mask) = @_;
-    $mask = keep_ellipsis_in_mask($reference_string, $mask);
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_not_at_end;
     my @chars = split //, $reference_string;
     my $result = '';
     my $in_variable = 0;
@@ -13050,7 +13050,7 @@ sub derive_canonical {
 # Derive compiled regex: keep positions become \Q..\E literals, variable regions become .+?
 sub derive_regex {
     my ($reference_string, $mask) = @_;
-    $mask = keep_ellipsis_in_mask($reference_string, $mask);
+    $mask = keep_ellipsis_in_mask($reference_string, $mask) if $message_cut_not_at_end;
     my @chars = split //, $reference_string;
     my $pattern = '^';
     my $literal_buf = '';
@@ -13591,7 +13591,7 @@ sub try_consolidation_merge_into_existing {
             my $merged_canonical = derive_canonical($entry->{canonical}, $mask);
             my $merged_regex = derive_regex($entry->{canonical}, $mask);
 
-            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex) && cut_markers_match($entry->{canonical}, $new_canonical);
+            next unless ($entry->{canonical} =~ $merged_regex) && ($new_canonical =~ $merged_regex) && ( !$message_cut_not_at_end || cut_markers_match($entry->{canonical}, $new_canonical) );
 
             merge_consolidation_stats($existing, $new_cluster);
             $existing->{match_count} += $new_cluster->{match_count};
@@ -13725,7 +13725,7 @@ sub run_consolidation_pass {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && cut_markers_match($msg_a, $msg_b);
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_not_at_end || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$key} = 1;
             $consumed{$match->{key}} = 1;
@@ -13863,7 +13863,7 @@ sub process_final_pass_window {
             my $canonical = derive_canonical($msg_a, $mask);
             my $regex = derive_regex($msg_a, $mask);
 
-            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && cut_markers_match($msg_a, $msg_b);
+            next unless ($msg_a =~ $regex) && ($msg_b =~ $regex) && ( !$message_cut_not_at_end || cut_markers_match($msg_a, $msg_b) );
 
             $consumed{$log_key} = 1;
             $consumed{$match->{key}} = 1;
