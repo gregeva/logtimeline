@@ -127,6 +127,31 @@ key against `-o` keys capped at 350:
 Evidence: the session scratchpad's `733-research/` captures; to be re-run into
 committed criteria when acceptance criteria are agreed.
 
+## Acceptance criteria (draft, for agreement)
+
+Verified by a new harness, `tests/validate-message-truncation.sh`, reading the
+rendered messages table at a pinned `--terminal-width`, as
+`tests/validate-message-control-characters.sh` does, on a committed fixture
+`tests/fixtures/message-truncation.txt` holding one message per composition
+variant (level only; level and thread; level and object; level, thread and
+object) and lengths below the column, between the column and the terminal
+width, and beyond the terminal width.
+
+| # | Condition and outcome | State |
+|---|---|---|
+| AC1 | Without `-mt`, and with `-mt right`, the messages table, the messages CSV and `-V benchmark-data` are identical to the base commit's on the fixture, plain, with `-g`, with `-o` and with `-xt`. | assertable |
+| AC2 | With `-mt left`, a message longer than the column shows its composed attributes as written, then `…`, then the message's last characters running to the column's end. | assertable |
+| AC3 | With `-mt middle`, the same message shows its attributes, the message's first part, `…`, and its last part; the two parts differ in length by at most one character. | assertable |
+| AC4 | A message that fits the column is shown unchanged, with no `…`, under every position. | assertable |
+| AC5 | AC2 and AC3 hold for each of the four composition variants, and under `-g` where an attribute is wildcarded (`[*]`). | assertable |
+| AC6 | Under each position every row of the messages table occupies the same column count, `…` occupies one column, and no line exceeds `--terminal-width`. | assertable |
+| AC7 | A message longer than the terminal width shows its real last characters under `-mt left` without `-o` or `-g` (the stored cut applies the position, D1), and a message longer than 350 does under `-o`. | assertable |
+| AC8 | The stored key never exceeds the per-run length: `-V benchmark-data` `CONFIG max_log_message_length` is the same under every position, and every messages-CSV key is at most that long. | assertable |
+| AC9 | `-mt` and `--message-truncation` accept `left`, `middle` and `right`; any other value exits non-zero having run nothing, naming the accepted values; `-V runtime-config` reports the resolved value; the `--help` and `docs/usage.md` rows agree (`tests/validate-help-content.sh`). | assertable |
+| AC10 | The progress line and the processed-files list, the other users of `shorten_filename`, are unchanged and keep `...` (`tests/validate-progress-line.sh`). | assertable |
+| AC11 | The before/after benchmark (`single-day-access-log-standard`) shows no regression: the stored cut is composed per line, in the hot path. | assertable |
+| AC12 | The rendered table is looked at on real data, an access log with `-xqs` and a log carrying thread and object, under each position. | inspection |
+
 ## 5. Open items
 
-- Acceptance criteria, agreed before code.
+- Agreement of the acceptance criteria above.
