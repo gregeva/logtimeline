@@ -174,6 +174,6 @@ so the full suite runs as the completion gate (`docs/process/workflow.md` § 3).
   against it: `grep | grep -q` under `pipefail` read the first grep's SIGPIPE as
   no match (`tests/HARNESS-DESIGN.md` Trap 1). It now captures before matching,
   and the sweep's new checks read their whole input.
-- **Guidance**: `tests/HARNESS-DESIGN.md` § The scenario selector, `CLAUDE.md`
+- **Guidance**: `tests/HARNESS-DESIGN.md` § The scenario selector, `docs/process/workflow.md` § 3 (b), `CLAUDE.md`
   § Before running a command and its test block, `.claude/rules/harnesses.md`,
   and the usage comment of 17 harnesses.
