@@ -355,6 +355,24 @@ size comes from `Devel::Size` and is unaffected.
   it was validated; #146 is that validation, after which Windows meets the
   § Default Behavior contract as macOS and Linux do. One reading costs about
   52 µs (three runs of 1,000 calls: 52.0, 52.2, 52.5 µs).
+- **D3 (locked 2026-10-15): the cpanfile drift is fixed within #146.** See
+  Scope 3.
+- **D4 (locked 2026-10-15): memory readings are observable in a new
+  `-V memory-usage` section.** Every call of `get_memory_usage()` is counted
+  and timed per caller, and `benchmark-data` repeats the totals (one source,
+  two surfaces, `tests/HARNESS-DESIGN.md`). The context: v0.14.3 took the
+  Windows reading out of default runs because the WMI call it then used was so
+  slow it degraded the whole run; the count and cost of the replacement are
+  measured through a very large run before the gate.
+- **D5 (locked 2026-10-15): the `-mem debug` output moves into the
+  `memory-usage / debug` sub-section.** Its diagnostic lines no longer go to
+  stderr.
+- **D6 (locked 2026-10-15): `-mem debug` stays the switch and requests the
+  section.** `ltl -mem debug <file>` prints `memory-usage` with its `debug`
+  sub-section at the end of the run without `-V` being named. Plain `-V` and
+  `-V memory-usage` carry the reading counts only, so the structure walks at
+  each phase boundary run only when `-mem debug` asks for them. The lines no
+  longer stream while the run goes; they arrive together at its end.
 
 ### Scope
 
@@ -378,11 +396,77 @@ size comes from `Devel::Size` and is unaffected.
      CR LF once no `grep` stripped them, and launched from PowerShell its
      `sort` followed the locale (`PerlIO::via` before `POSIX`, `YAML::PP` after
      its submodules). It writes LF and sorts in byte order.
+4. The `-V memory-usage` section and its `debug` sub-section (D4 to D6), their
+   consumers and records: `get_memory_usage()` and its callers, the `-mem debug`
+   emitters, `print_help()` and `docs/usage.md` for `-mem`,
+   `tests/HARNESS-DESIGN.md` § Reserved section names, the `benchmark-data`
+   contract (`features/memory-baseline-profiling.md`), the comparison's
+   within-parent rule in `tests/baseline/compare-results.sh`, the `memory-debug`
+   option set of `tests/validate-read-path.sh`, and a new
+   `tests/validate-memory-usage.sh`.
+
+### `-V memory-usage` section contract
+
+Printed once, after the run's last reading (`pipeline_render()` returns), when
+`-V` selects the section or `-mem debug` is given (D6). A count is of calls of
+the system interface: a reading the platform branch skips before calling it is
+not counted.
+
+Built on the established patterns (`docs/architecture-patterns.md`), each
+consumption site recorded there in the same commit:
+
+- **`-V` telemetry sections as the test surface.** `memory-usage` is registered
+  in `%verbose_section_registry` and `@verbose_section_order`, emitted by
+  `emit_memory_usage_verbose()` gated on `section_requested('memory-usage')`,
+  in the content shape. Like `section-layout` and `aggregate-export` it prints
+  at its own site, after the run's last reading, rather than through
+  `print_verbose_output()`, which flushes before the render's readings.
+- **Run-scoped activation flags resolved once.** Whether readings are counted
+  is one flag settled with the options (the section requested, which `-mem
+  debug` does); each reading tests that flag and nothing else. With the flag
+  off, no counting or timing code runs.
+- **Hot-loop discipline.** No counting code is in the per-line loop: readings
+  happen at phase boundaries, grouping checkpoints and windows, compiles and
+  the debug samples. The read loop's debug sample keeps its existing
+  `#@when $show_memory_debug` gate marker, so a generated read body without
+  `-mem debug` carries none of it.
+
+```
+=== memory-usage ===
+readings: <N>
+readings_us: <N>
+site: <name> readings=<N> elapsed_us=<N>
+...
+=== memory-usage / debug ===
+kind	elapsed_s	tag	rss	named_sum	unattributed
+...
+=== END memory-usage / debug ===
+=== END memory-usage ===
+```
+
+- `readings` and `readings_us`: every call of `get_memory_usage()` in the run and
+  the wall time spent inside them, in whole microseconds. They equal the sums of
+  the `site` lines.
+- `site` lines, one per caller that read at least once, in this order:
+  `phase_boundary` (the pipeline steps' `measure_memory_structures()`),
+  `grouping_checkpoint` (`run_consolidation_checkpoint()`),
+  `grouping_final_pass` (`process_final_pass_window()`),
+  `format_scan_compile` (`compile_format_scan_sub()`), `csv_block_compile`
+  (`compile_csv_block()`), `debug_decomposition`, `debug_sample`.
+- The `debug` sub-section is present only under `-mem debug`: one record per
+  diagnostic reading in the order taken. `kind` is `decomposition` (a phase
+  boundary: all columns) or `sample` (inside a loop: `named_sum` and
+  `unattributed` are `-`). `elapsed_s` is seconds since the first diagnostic
+  reading, three decimals; `rss`, `named_sum` and `unattributed` are bytes.
+- When the section is armed, `benchmark-data` repeats the totals as `COUNTS memory_readings` and
+  `TIMING memory/readings` (seconds), read from the same counters at the moment
+  `benchmark-data` prints, during the render, as its `MEMORY rss_peak` is. They
+  can therefore be lower than the section's totals by the readings taken after
+  that point. `memory/readings` is time spent within the stages, so the
+  comparison marks it within parent and leaves it out of the stage sum.
 
 ### Acceptance criteria
 
-| # | Condition and observable outcome | Triage | Validation |
-|---|---|---|---|
 The target is `ltl` run by Strawberry Perl on a Windows development host; a
 packaged executable carries the same interpreter and modules and is not
 validated separately.
@@ -390,12 +474,40 @@ validated separately.
 | # | Condition and observable outcome | Triage | Validation |
 |---|---|---|---|
 | 1 | On Windows x64 Perl, on every run, with or without `-mem`, `-V benchmark-data` `MEMORY rss_peak` on the one-day web application access log (148 MB) is not above the operating system's peak working set for that process and is within 5% below it | assertable | PowerShell launches each run and samples the process's `PeakWorkingSet64` until exit; compared with `rss_peak` |
-| 2 | Under `-mem debug`, the `rss=` readings follow the run: they rise from startup on the 148 MB log rather than staying constant | assertable | `-mem debug` stderr captured on the 148 MB log |
+| 2 | Under `-mem debug`, the `rss` readings follow the run: they rise from startup on the 148 MB log rather than staying constant | assertable | Held on stderr before D5 (Results); after it, the `memory-usage / debug` records on the same log |
 | 3 | The 32-bit branch reads `WorkingSetSize` at offset 12 | unassertable | Strawberry Perl is x64 only; the offset is derived from the structure layout (`cb` 4 + `PageFaultCount` 4 + `PeakWorkingSetSize` 4). Recorded gap |
-| 4 | macOS and Linux readings unchanged | assertable | The diff touches only the `MSWin32` branch of `get_memory_usage()` |
+| 4 | macOS and Linux readings unchanged | assertable | The diff changes no line of the `darwin` or `linux` branch of `get_memory_usage()`; the counting (D4) wraps the branches and changes no value they return |
 | 5 | Neither cpanfile names `Win32::Process::Info`, and `build/generate-cpanfile.sh` regenerates both byte-identical to the committed files | assertable | Regenerate, `git diff --exit-code build/` |
 | 6 | `git grep` finds `Win32::Process::Info` and `Proc::ProcessTable` only in the historical records named in Scope and in this section | assertable | `git grep` |
 | 7 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
+| 8 | Every call of `get_memory_usage()` is counted under its caller, and `readings` / `readings_us` equal the sums of the `site` lines | assertable | `tests/validate-memory-usage.sh`, one scenario per site on the smallest fixture that reaches it: phase boundaries on any run, grouping checkpoint and final pass under `-g`, format-scan compile under `-V benchmark-data`, CSV block compile on a CSV input, both debug kinds under `-mem debug` |
+| 9 | Without `-mem debug` there is no `debug` sub-section, no structure walk at a phase boundary, and no `debug_*` site | assertable | Same harness, a plain `-V memory-usage` run |
+| 10 | `ltl -mem debug <file>`, with no `-V`, prints `memory-usage` with its `debug` sub-section after the run's output, and nothing of it on stderr | assertable | Same harness; stderr captured separately |
+| 11 | The `debug` sub-section holds one `decomposition` record per phase boundary the run reached, from `startup` to `end`, and a `sample` record every 75,000 lines read | assertable | Same harness, on a fixture or log with more than 75,000 lines for the sample |
+| 12 | `benchmark-data` carries `COUNTS memory_readings` and `TIMING memory/readings`, not above the section's totals; the comparison reports `memory/readings` within parent | assertable | Same harness; `compare-results.sh summary` on two captures |
+| 13 | The read-path comparison still holds under `-mem debug`: the generated read body and the standard loop give the same output | assertable | `tests/validate-read-path.sh --scenario` for its `-mem debug` option set, its consumer updated to the sub-section |
+| 14 | `--help` and `docs/usage.md` describe `-mem debug` as printing the `memory-usage` section at the end of the run | assertable | `tests/validate-help-content.sh` |
+| 15 | The new section meets the content shape | assertable | `tests/validate-verbose-content-shape.sh` |
+| 16 | The cost of the readings is measured and recorded, before and after the fix: the number of readings and the time spent in them per caller, the total time spent reading memory, and that total against the run's total time | assertable (a measurement, recorded under Results) | One server of the thirty-day, five-server access-log folder, the common-plus-duration shape, ramped 1, 3, 7 and 15 days (2026-01-02 onward; 33 MB, 65 MB, 327 MB, 852 MB), `-g -V benchmark-data`. Six variants: before and after the fix, each without `-mem`, with `-mem`, and with `-mem -V memory-usage`. Three runs per point, medians with ranges |
+| 17 | The counters cost nothing unless the section is selected (the activation-flag and hot-loop patterns above): no counting or timing code runs, and the generated read body carries none of it | assertable | Code review of the flag, `-V read-path` gate-marker lines on a run without the section, and criterion 16's variants without the section |
+
+### Delivery plan
+
+Each drop is committed and pushed on the issue branch before the next starts.
+
+1. **Observability on the code before the fix.** The fix's two `ltl` changes
+   (the offset, D1, and the gate, D2) are backed out, so the section first
+   measures the reading as it shipped. Then the `-V memory-usage` section, its
+   `debug` sub-section, the `benchmark-data` rows, the comparison's
+   within-parent rule, the harness and its consumers (criteria 8 to 15, 17).
+   The counters run only when the section is selected; a reading the Windows
+   gate skips is not a call of the system interface and is not counted.
+2. **Before benchmarks.** Criterion 16's three `before` variants at each ramp
+   point, starting at one day and stepping up only once the previous point
+   reads sensibly.
+3. **The fix.** D1 and D2 re-applied.
+4. **After benchmarks.** The three `after` variants at the same points.
+5. **Analysis.** The findings report under Results; then the completion gate.
 
 ### Results
 
