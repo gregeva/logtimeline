@@ -438,7 +438,7 @@ readings_us: <N>
 site: <name> readings=<N> elapsed_us=<N>
 ...
 === memory-usage / debug ===
-kind	elapsed_s	tag	rss	named_sum	unattributed
+kind	elapsed_s	tag	rss	named_sum	unattributed	structure	bytes
 ...
 === END memory-usage / debug ===
 === END memory-usage ===
@@ -454,10 +454,14 @@ kind	elapsed_s	tag	rss	named_sum	unattributed
   `format_scan_compile` (`compile_format_scan_sub()`), `csv_block_compile`
   (`compile_csv_block()`), `debug_decomposition`, `debug_sample`.
 - The `debug` sub-section is present only under `-mem debug`: one record per
-  diagnostic reading in the order taken. `kind` is `decomposition` (a phase
-  boundary: all columns) or `sample` (inside a loop: `named_sum` and
-  `unattributed` are `-`). `elapsed_s` is seconds since the first diagnostic
-  reading, three decimals; `rss`, `named_sum` and `unattributed` are bytes.
+  diagnostic reading in the order taken, eight columns. `kind` is
+  `decomposition` (a phase boundary: `rss`, `named_sum`, `unattributed`),
+  `sample` (inside a loop: `rss` only), or `structure` (each structure of
+  1 MiB or more at the decomposition before it: `structure` and `bytes`); a
+  column a kind does not carry is `-`. `elapsed_s` is seconds since the first
+  diagnostic reading, three decimals; `rss`, `named_sum`, `unattributed` and
+  `bytes` are bytes. The `structure` records carry what `-mem debug` printed
+  as its third line form; the contract first agreed omitted them.
 - When the section is armed, `benchmark-data` repeats the totals as `COUNTS memory_readings` and
   `TIMING memory/readings` (seconds), read from the same counters at the moment
   `benchmark-data` prints, during the render, as its `MEMORY rss_peak` is. They
