@@ -441,6 +441,7 @@ Hidden: `--disable-progress`, `--terminal-width N`, `--debug-layout`,
 ./build/macos-setup.sh                      # macOS: Homebrew Perl, never system Perl
 sudo apt-get install build-essential perl perl-base perl-modules libperl-dev cpanminus \
   && cpanm PAR::Packer && cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # Windows dev host, AMD64 or ARM64 (docs/toolchain-guidance.md)
 ./build/macos-package.sh arm64|x86_64       # static binaries
 ./build/ubuntu-package.sh amd64|arm64       # Docker
 ./build/windows-package.sh                  # Docker + Wine
