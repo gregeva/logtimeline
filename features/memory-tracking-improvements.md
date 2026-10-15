@@ -286,6 +286,19 @@ does on macOS (launching `ps`) took 8.8 ms (mean of 20); the process grew
 22 times the cost, and 47 MB short of what the copy cost the process. The Linux
 reading is a file read and was not measured.
 
+**The structure walks under `-mem` are an iterative cost (handed forward from
+#146, 2026-10-15).** Each grouping checkpoint and each final-pass window calls
+`measure_memory_structures()`, which under `-mem` walks every named store with
+`Devel::Size`; the checkpoints multiply with the input and each walk grows with
+the stores. On one server's web application access log (one day, 33 MB, and
+three days, 65 MB; `-g -V benchmark-data`, Windows, three runs), `-mem` added
+8% and then 17% to the run, all of it in the reading and grouping stages, and a
+scratch probe put the walks there: 14 checkpoint walks of 0.77 to 0.81 s and 6
+final-pass walks of 0.61 to 0.64 s at one day, 17 of 1.66 s and 6 of 2.05 s at
+three days. The process-memory readings over the same runs cost 26 to 28 ms.
+Measured in § Issue #146 › Drop 2. This conflicts with the direction above (no
+measurement with an iterative cost) and belongs with the placement it sets.
+
 ## Issue #146: Windows process memory, validated before the old dependency goes
 
 **Status:** in progress, branch `146-windows-process-memory`.
