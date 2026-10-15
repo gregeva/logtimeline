@@ -41,8 +41,7 @@ use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
-# Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
-# On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
+# get_memory_usage() loads Win32::API at runtime on Windows only
 use List::Util qw(min max);
 use Scalar::Util qw(looks_like_number);
 use File::Glob qw(bsd_glob);
@@ -62,7 +61,7 @@ if ($^O eq 'MSWin32') {            # Change code page to UTF-8 on Windows to sup
 }
 
 ## GLOBALS ##
-my $version_number = "0.20.0";
+my $version_number = "0.20.0-146";
 my $start_time = [gettimeofday];
 my $log_base = 2;
 my ( @ORIGINAL_ARGV, @files_processed );
@@ -12315,10 +12314,7 @@ sub get_memory_usage {
             }
         }
     } elsif ($^O eq 'MSWin32') {                                # Windows
-        # Memory tracking disabled by default on Windows — use -mem to opt in.
-        # Direct kernel32.dll syscall via Win32::API — replaces Win32::Process::Info
-        # which used WMI (extremely slow, ~15-20s per call). See #143.
-        return 0 unless $show_memory;
+        # Working set read through kernel32's K32GetProcessMemoryInfo (Win32::API)
         eval {
             require Win32::API;
             my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
@@ -12331,7 +12327,7 @@ sub get_memory_usage {
             my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
             if ($get_mem_info->Call($handle, $buf, $struct_size)) {
                 # WorkingSetSize: after cb(4) + PageFaultCount(4) + PeakWorkingSetSize(SIZE_T)
-                my $offset = $is_64bit ? 24 : 16;
+                my $offset = $is_64bit ? 16 : 12;
                 $memory_usage = $is_64bit ? unpack('Q', substr($buf, $offset, 8))
                                           : unpack('V', substr($buf, $offset, 4));
             }
