@@ -593,6 +593,48 @@ grouping stage's, at both sizes. Each walk grows with the stores it measures:
 about 56 ms a checkpoint walk at 1 day and 98 ms at 3 days, 103 ms and 342 ms a
 final-pass walk. The walks run under `-mem` on every platform, whatever the
 reading costs; on this host the reading is 0.5 to 2% of the `-mem` overhead.
+Handed forward to #709 (§ Issue #709, *The structure walks under `-mem` are an
+iterative cost*).
+
+### Drops 4 and 5: after the fix, and the analysis (criterion 16)
+
+The same runs on the code of drop 3 (the offset fixed, the gate removed): same
+host, checkout, files and options, three runs per variant, interleaved.
+Medians with ranges.
+
+| Size | Variant | Before: total | After: total | Before: `rss_peak` | After: `rss_peak` | Readings (time in them) |
+|---|---|---|---|---|---|---|
+| 1 day | no `-mem` | 14.14 s [13.79–15.14] | 13.46 s [13.43–13.80] | 0 | 183.0 MB [181.7–184.3] | before none; after the same 27 as below |
+| 1 day | `-mem` | 15.33 s [15.15–15.54] | 14.32 s [14.21–15.19] | 0.2 MB | 184.4 MB [182.4–185.2] | |
+| 1 day | `-mem -V memory-usage` | 15.26 s [15.18–16.56] | 15.35 s [14.44–15.38] | 0.2 MB | 182.9 MB [181.7–185.2] | 27 (before 27.6 ms [26.3–27.6], after 28.2 ms [28.2–30.6]) |
+| 3 days | no `-mem` | 23.99 s [23.95–24.31] | 23.42 s [22.97–23.65] | 0 | 281.6 MB [280.8–288.0] | before none; after the same 30 as below |
+| 3 days | `-mem` | 28.03 s [27.47–28.24] | 27.12 s [26.77–27.13] | 0.2 MB | 287.8 MB [287.6–288.2] | |
+| 3 days | `-mem -V memory-usage` | 27.36 s [25.34–27.87] | 28.18 s [27.02–29.71] | 0.2 MB | 286.4 MB [282.2–288.5] | 30 (before 28.0 ms [27.7–28.0], after 30.2 ms [27.6–30.3]) |
+
+- **Correct.** Before the fix a run reported 0 without `-mem` and 0.2 MB (the
+  paged-pool quota) with it. After, it reports 183 MB at one day and 282 to
+  288 MB at three days, with and without `-mem`. On the one-day file the
+  reported peak was 99.9% of the operating system's peak working set without
+  `-mem` and 98.8% under `-mem debug` (drop 3's runs).
+- **The reading costs 28 to 30 ms a run.** The readings are the same calls with
+  and without `-mem` (the phase boundaries, the grouping checkpoints and
+  windows, and the compile pair `-V benchmark-data` arms): 27 at one day, 30 at
+  three. About 22 to 25 ms of it is the first reading, which loads `Win32::API`
+  and binds the kernel32 calls; each later reading costs 0.15 to 0.25 ms. Over a
+  run that is 0.2% at one day and 0.1% at three, below the spread of three runs
+  of any variant (0.4 s and more). Removing the gate (D2) adds that to every
+  Windows run; the totals without `-mem` measured 13.46 s against 14.14 s and
+  23.42 s against 23.99 s, the difference inside the noise.
+- **The counting costs nothing measurable.** `-mem -V memory-usage` against
+  `-mem` overlaps at both sizes, before and after.
+- **What `-mem` costs is the structure walks** (Drop 2), unchanged by the fix:
+  0.86 s at one day and 3.70 s at three after the fix, against 1.19 s and
+  4.04 s before.
+- **Ceiling of the alternative.** The WMI reading #143 replaced took 15 to 20 s a
+  call (#143's change record); at 27 to 30 readings a run that would be 7 to 10
+  minutes, which is the degradation v0.14.3 avoided by turning the reading off.
+  The reading in place now costs four orders of magnitude less, so the reason
+  for the Windows exception no longer holds.
 
 ## Memory Diagnostic Method (from the #356 investigation)
 
