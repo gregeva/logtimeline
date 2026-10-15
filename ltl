@@ -12328,8 +12328,7 @@ sub get_memory_usage {
             }
         }
     } elsif ($^O eq 'MSWin32') {                                # Windows
-        # Read through kernel32's K32GetProcessMemoryInfo (Win32::API), under -mem only
-        return 0 unless $show_memory;
+        # Working set read through kernel32's K32GetProcessMemoryInfo (Win32::API)
         eval {
             require Win32::API;
             my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
@@ -12342,7 +12341,7 @@ sub get_memory_usage {
             my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
             if ($get_mem_info->Call($handle, $buf, $struct_size)) {
                 # WorkingSetSize: after cb(4) + PageFaultCount(4) + PeakWorkingSetSize(SIZE_T)
-                my $offset = $is_64bit ? 24 : 16;
+                my $offset = $is_64bit ? 16 : 12;
                 $memory_usage = $is_64bit ? unpack('Q', substr($buf, $offset, 8))
                                           : unpack('V', substr($buf, $offset, 4));
             }
