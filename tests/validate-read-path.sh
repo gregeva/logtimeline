@@ -202,11 +202,20 @@ paths() {
 # run (timings, memory, the echoed options) and the read-path section set
 # aside, so two runs of one shape compare byte for byte. Colour escapes are
 # kept: a highlight renders through colour, so stripping them would hide it.
+# The memory-usage section keeps what is counted, never what is measured: each
+# caller's reading count, and each debug record's kind, tag and structure, so
+# the in-loop sample the gate marker keeps is compared between the paths.
 normalise() {
     local dir="$1" f
     perl -ne '
         my $plain = $_; $plain =~ s/\e\[[0-9;]*m//g;
         if ($plain =~ /^=== read-path ===$/ .. $plain =~ /^=== END read-path ===$/) { next }
+        if ($plain =~ /^=== memory-usage ===$/ .. $plain =~ /^=== END memory-usage ===$/) {
+            next if $plain =~ /^readings_us: /;
+            $plain =~ s/ elapsed_us=\d+$//;
+            if ($plain =~ /^(sample|decomposition|structure)\t/) { my @c = split /\t/, $plain; $plain = "$c[0]\t$c[2]\t$c[6]\n" }
+            print $plain; next;
+        }
         next if $plain =~ /command-line options|TOTAL TIME|MAXIMUM MEMORY USED|^(TIMING|MEMORY)\t|^\s*(sample_us|total_time|max_memory_used): |^scan_subs_rss_bytes: /;
         next if $plain =~ /\(\s*(?:<1|\d+)%\)\s+[\d.]+ (?:B|kB|MB|GB)\s*$/;
         print;

@@ -481,9 +481,10 @@ run_comparison() {
 # carry equal weight in a stage's verdict.
 #
 # Containment: a TIMING label with a third stage/step/sub_step segment
-# measures time INSIDE its parent row, and detect/scan_sub_compile measures
-# compile cost that fires within whichever stage triggered it. Neither is
-# part of TIMING total. Both are marked "(within parent)" and excluded from
+# measures time INSIDE its parent row; detect/scan_sub_compile measures
+# compile cost that fires within whichever stage triggered it, and
+# memory/readings the memory readings taken within the stages. None is
+# part of TIMING total. Each is marked "(within parent)" and excluded from
 # the additive stage sum, so a sub-stage can never read as exceeding the
 # stage that contains it.
 run_rollup() {
@@ -566,7 +567,7 @@ run_rollup() {
 
     function is_contained(type, name,    parts) {
         if (type != "TIMING") return 0
-        if (name == "detect/scan_sub_compile") return 1
+        if (name == "detect/scan_sub_compile" || name == "memory/readings") return 1
         return (split(name, parts, "/") >= 3)
     }
 
