@@ -6,6 +6,7 @@ requires 'JSON::PP';
 requires 'List::Util';
 requires 'POSIX';
 requires 'PerlIO::via';
+requires 'Scalar::Util';
 requires 'Term::ANSIColor';
 requires 'Term::ReadKey';
 requires 'Text::CSV';
