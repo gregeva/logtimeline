@@ -364,6 +364,20 @@ size comes from `Devel::Size` and is unaffected.
    the comments in `ltl`, `CLAUDE.md` § Platform, `features/windows-automated-build.md`,
    `build/packaging-notes`. Historical records (`releases/`, the redundant-logic
    audit report, `prototype/memory-benchmark.pl`) stay as written.
+3. The cpanfiles are generated inputs, never the source of truth (architect,
+   2026-10-15). Found while regenerating them for criterion 5:
+   - The committed files lacked `Scalar::Util`, which `ltl` loads, and the
+     generator emitted the `integer` pragma as a CPAN requirement. `integer`
+     joins the generator's pragma list; both files are regenerated (D3, locked
+     2026-10-15).
+   - `build/windows-setup.ps1` installed from the committed
+     `build/cpanfile.windows` without generating it first, so a setup after
+     `ltl` gained a module installed from a stale list. It now runs the
+     generator first.
+   - The generator's output depended on the caller: under Windows Perl it wrote
+     CR LF once no `grep` stripped them, and launched from PowerShell its
+     `sort` followed the locale (`PerlIO::via` before `POSIX`, `YAML::PP` after
+     its submodules). It writes LF and sorts in byte order.
 
 ### Acceptance criteria
 
