@@ -47,6 +47,32 @@ Run `./tests/validate-x.sh` or `bash ./tests/validate-x.sh`. Never `sh ./tests/v
 
 The harnesses share one scratch directory, the `logs/` corpus and the `CI=1` cache. Two suites running at once — a gate in a worktree while another check runs in the main checkout — corrupt each other's intermediate CSVs and produce failures that belong to neither tree. Before starting a suite, check nothing else is running (`pgrep -fl validate-`), and treat any failure observed during a concurrent run as unattributed until it is reproduced alone.
 
+## Windows development host
+
+`./build/windows-setup.ps1` sets up a Windows machine, AMD64 or ARM64, and is safe to re-run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # -DevDeps adds the profiler, -Package adds PAR::Packer
+```
+
+It installs Git, GitHub CLI, jq, Python 3.13 (with NumPy and SciPy) and Strawberry Perl through WinGet, installs `build/cpanfile.windows`, and configures Git and Git Bash as below. It asks Windows for administrator approval once, for the two steps that write under Program Files. Afterwards run `gh auth login`. Harnesses and `ltl` run from Git Bash; the traps it removes:
+
+**1. Git for Windows checks files out with CR LF.** Its system config sets `core.autocrlf=true`, so `ltl`, the harnesses and the hook scripts arrive with CR LF endings and fail as `bad interpreter` or as syntax errors on a stray `\r`. The script sets `core.autocrlf=false` in the repository and re-checks the tracked files out. A fresh clone should be made with `git clone -c core.autocrlf=false`, then the script run.
+
+**2. Claude Code runs hook commands as `bash <file>`, ignoring the shebang.** A hook written in Perl but named `.sh` is then interpreted as shell and exits 2, which blocks every Bash, Write and Edit call. `.claude/settings.json` therefore starts the two Perl hooks with `perl` explicitly.
+
+**3. `./ltl` names `/opt/homebrew/bin/perl`.** Git Bash resolves `/opt` under the Git install, so the script writes a one-line wrapper at `C:\Program Files\Git\opt\homebrew\bin\perl` that runs Strawberry Perl.
+
+**4. Git Bash puts its own Perl first.** That MSYS Perl lacks the CPAN modules `ltl` needs. The script prepends Strawberry Perl to `PATH` in `~/.bashrc`, and makes `~/.bash_profile` read it.
+
+**5. ARM64 hosts.** WinGet installs native ARM64 builds of Git, GitHub CLI, jq and Python (NumPy and SciPy have ARM64 wheels). Strawberry Perl is x64 only and runs under emulation. Read the machine's architecture from the processor record, not `PROCESSOR_ARCHITECTURE`: a shell started from Git Bash is an emulated x64 process and reports AMD64 on an ARM64 host.
+
+**6. The `python` on a fresh Windows is a Microsoft Store stub.** It prints "Python was not found" and exits non-zero. Install Python through WinGet; the new `PATH` applies to shells opened afterwards.
+
+**7. In the agent shell, backslashes are eaten.** Under `!` and Bash tool commands, write paths with forward slashes (`./build/windows-setup.ps1`).
+
+**8. A Windows checkout has no `logs/` corpus** unless one is copied in; the symlink the macOS checkouts carry needs Developer Mode or administrator rights to create. Point harnesses at a corpus with `LTL_LOGS_DIR`.
+
 ## grep and non-ASCII output
 
 `grep` switches to binary mode when a stream contains non-ASCII bytes, printing `Binary file matches` (or nothing) instead of matching lines. The symptom is a grep returning **nothing** for a line plainly visible in `head`, which reads as "the feature is broken" rather than "the encoding broke the match". This cost hours during #289, grepping captured harness output whose `contract:` / `produced_by:` strings carried `§` and `—`.

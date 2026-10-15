@@ -51,6 +51,13 @@ cpanm PAR::Packer
 cd build && ./generate-cpanfile.sh && cpanm --notest --installdeps .
 ```
 
+```powershell
+# Windows, AMD64 or ARM64 (installs with WinGet; asks for administrator approval once)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1
+```
+
+On Windows the script installs Git, GitHub CLI, jq, Python with NumPy and SciPy, and Strawberry Perl, then configures Git Bash so `./ltl` and the test harnesses run from it. Clone with `git clone -c core.autocrlf=false` so scripts keep their LF line endings. Run `gh auth login` afterwards.
+
 #### Test-harness dependencies
 
 The test harnesses run under Homebrew Perl and Homebrew bash, never the macOS system versions. `./build/macos-setup.sh` installs both; the shell you run the harnesses from must then find them first on its PATH:
@@ -66,6 +73,8 @@ A harness started under bash older than 4 stops at once and names the interprete
 Some test harnesses require Python 3, NumPy, and SciPy. A harness that needs one of these fails fast with an install hint if it is missing — it does not silently skip the work that depends on it.
 
 **macOS:** `./build/macos-setup.sh` installs Homebrew Python with NumPy and SciPy (`brew install python numpy scipy`; Homebrew's NumPy and SciPy do not pull in Homebrew Python themselves). With Homebrew first on PATH, as above, `python3` is that Python, not the system one.
+
+**Windows:** `build\windows-setup.ps1` installs Python 3.13 through WinGet with NumPy and SciPy. Windows' own `python` is a Microsoft Store stub that installs nothing; open a new terminal after the script so the real one is first on PATH.
 
 **Linux:** the right install command depends on which `python3` your harness will invoke. Run `which python3` from the shell that will run the harness (a non-interactive shell — PATH ordering can differ from your interactive shell), and pick the matching case below.
 
