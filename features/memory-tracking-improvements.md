@@ -636,6 +636,24 @@ Medians with ranges.
   The reading in place now costs four orders of magnitude less, so the reason
   for the Windows exception no longer holds.
 
+### Completion gate
+
+- **Benchmark,** `single-day-access-log-standard`, one run each, on this
+  Windows 11 ARM64 host, main checkout: before on the base (7746f41), after on
+  the version-restored commit (16133b5). Total 27.6 s before, 24.7 s after,
+  inside the spread of repeated runs measured above. `rss_peak` 168.6 KB
+  before, 117.7 MB after: the fix itself, a peak that was not being read.
+- **Full harness suite: skipped, by the architect's decision.** It ran once on
+  this Windows host (91cf248): 32 of 52 harnesses passed. Each of the 20
+  failures came from the host, not from this change: Perl writing CR LF, Git
+  Bash rewriting arguments that start with `/` into Windows paths, the system
+  code page altering non-ASCII text on command lines, `ltl`'s Windows bar
+  character against references captured on macOS, and `chmod` not making a
+  directory unreadable. The harnesses do not run on Windows
+  (`docs/toolchain-guidance.md` § Windows development host), and the gate was
+  not re-run on macOS. The commit after the run (23cd2e2) changes only
+  `docs/toolchain-guidance.md`.
+
 ## Memory Diagnostic Method (from the #356 investigation)
 
 Recorded for future memory investigations; the temporary #356 instrumentation is not retained beyond what S4 specifies.
