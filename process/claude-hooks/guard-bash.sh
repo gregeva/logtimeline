@@ -66,6 +66,16 @@ deny "run-benchmark.sh full/xl/all without 'caffeinate -s' - the host sleeps mid
     if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/
     && $cmd !~ /\bcaffeinate\b[^;&|]*run-benchmark\.sh/;
 
+# --- harnesses run by scenario while working; a whole harness, or a loop over
+# them, is the completion gate's form (CLAUDE.md § Before running a command)
+for my $segment (split /[;&|\n()]+/, $cmd) {
+    next unless $segment =~ /^\s*(?:\w+=\S*\s+)*(?:(?:bash|sh|time|caffeinate(?:\s+-\S+)*)\s+)*(?:\S*\/)?validate-[\w-]+\.sh\b(.*)$/;
+    ask "a harness run without --scenario is the completion gate's form, never a development check - confirm this is the gate"
+        unless $1 =~ /--scenario\b|--list\b/;
+}
+ask "a loop over every harness is the completion gate - confirm this is the gate"
+    if $cmd =~ /\bfor\s+\w+\s+in\s+[^;]*validate-\*\.sh/;
+
 # --- release-only instruments and guard overrides need the architect's yes
 ask "run-benchmark.sh full/xl/all is a release-gate instrument (about 2.5 h), never a development tool - confirm this is the release cut"
     if $cmd =~ /(?:^|[;&|(]\s*|\b(?:nohup|time|sudo|caffeinate(?:\s+-\S+)*)\s+)(?:\.\/|\S*\/)?run-benchmark\.sh\s+(?:full|xl|all)\b/;

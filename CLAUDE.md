@@ -57,7 +57,13 @@ about anything else, these still hold.
   direction. Starting new work always waits. Once an issue's work has started,
   the drops of its agreed delivery plan, then its completion gate, PR, merge
   and close-out, run in sequence without asking between them; the run stops
-  only for a decision that is the architect's, a failure, or a finding.
+  only for a decision that is the architect's, a failure, or a finding. The
+  gate follows the last drop of a plan the architect agreed; Claude's own sense
+  that the work is done never starts it, and an issue with no agreed plan has
+  one agreed first.
+- **A drop is not a release.** It ends with the developer's own runs on chosen
+  inputs, a commit and a push. No harness sweep, no gate, no consumer check
+  beyond the scenarios that read what the drop changed.
 - **No unsolicited implementation.** No production code, no "here is what it
   would look like", until asked.
 - **Short and plain.** Lead with the outcome. Plain words over internal jargon.
@@ -172,7 +178,9 @@ about anything else, these still hold.
 - [ ] Lead with the motivating consumer: what this is *for* precedes what it does.
 - [ ] Acceptance criteria are derived from the requirements and agreed in the
       feature doc before code (`docs/test-driven-development.md`). An "unknown"
-      verification method is prototyping scope, proposed with its cost.
+      verification method is prototyping scope, proposed with its cost. A
+      criterion's validation names the scenario that asserts it; those scenarios
+      run when the change is written, never in place of the developer's own runs.
 - [ ] A criterion is only as strong as its validation. One that states an
       invariant ("the store does not grow", "every output unchanged") is
       validated on every path that reads or writes what it names, enumerated
@@ -204,9 +212,11 @@ about anything else, these still hold.
       capture is named with it), never the whole harness; names are under
       `--list`. An unknown name or flag exits non-zero having run nothing, so a
       run that reports assertions is a run of what was named.
-- [ ] Only the harness under discussion runs while working it. The full suite
-      runs once, as the completion gate. Before launching any gate: name the
-      behaviour this change could have altered; if none, there is nothing to prove.
+- [ ] Only the harness under discussion runs while working it, and only its
+      scenarios the change needs. The full suite runs once, as the completion
+      gate. Before launching any gate: name the behaviour this change could have
+      altered; if none, there is nothing to prove. A harness run without
+      `--scenario` asks the architect first (`process/claude-hooks/guard-bash.sh`).
 - [ ] Every `ltl` invocation in a test is shaped to the assertion that reads it:
       smallest fixture carrying the signal, everything unread switched off via
       documented options (`-bs 1440 -oe` for detection and selection assertions).
@@ -297,7 +307,8 @@ about anything else, these still hold.
       and `contract`; a lookup that matches nothing is a failure, never a pass.
 - [ ] Any `-V` section or key change: read `tests/HARNESS-DESIGN.md` first,
       update every consumer and the owning feature doc's section contract in the
-      same commit, and execute each affected harness to see it assert.
+      same commit, and run the scenarios that read the changed section or key,
+      each named with `--scenario`, to see them assert. Never a whole harness.
 - [ ] A visual surface is verified by looking at rendered output on real data.
 
 ### After each change, before committing it
