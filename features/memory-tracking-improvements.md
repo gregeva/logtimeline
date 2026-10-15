@@ -383,6 +383,31 @@ validated separately.
 | 6 | `git grep` finds `Win32::Process::Info` and `Proc::ProcessTable` only in the historical records named in Scope and in this section | assertable | `git grep` |
 | 7 | No ` at <file> line <N>` on stderr in any run above | assertable | Captured stderr grepped |
 
+### Results
+
+The one-day web application access log (148 MB, 761,698 lines),
+`-V benchmark-data`, Strawberry Perl 5.42 x64 on a Windows 11 ARM64 host, one
+run each. The operating system's peak is the process's `PeakWorkingSet64`,
+sampled every 100 ms until exit.
+
+| Code | Options | OS peak working set | `rss_peak` | `rss_peak` / OS peak |
+|---|---|---|---|---|
+| before | (none) | 126,742,528 | 0 | 0% |
+| before | `-mem` | 128,450,560 | 184,936 | 0.14% |
+| after | (none) | 128,688,128 | 125,067,264 | 97.19% |
+| after | `-mem` | 128,421,888 | 125,943,808 | 98.07% |
+| after | `-mem debug` | 127,750,144 | 125,272,064 | 98.06% |
+
+Criterion 1 holds: 1.9 to 2.8% below the operating system's peak, never above.
+Criterion 2 holds: the `-mem debug` phase readings were 58,949,632 at startup,
+122,404,864 after reading, 125,251,584 after statistics and 125,313,024 at the
+end. Criterion 7 holds: no run's stderr carries ` at <file> line <N>`.
+
+Criterion 6 leaves one mention outside the historical records: the macOS branch
+of `get_memory_usage()` explains that it launches `ps` to avoid the
+`Proc::ProcessTable` crashes. That is the reason for the current design, and
+criterion 4 keeps the macOS branch untouched.
+
 ## Memory Diagnostic Method (from the #356 investigation)
 
 Recorded for future memory investigations; the temporary #356 instrumentation is not retained beyond what S4 specifies.

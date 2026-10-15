@@ -294,4 +294,4 @@ To resume testing this feature:
 - Full build typically takes 5-10 minutes depending on network and CPU
 - cpanfile.windows must be generated before running build (run `./build/generate-cpanfile.sh`)
 - The generate-cpanfile.sh script now generates both Unix and Windows cpanfiles by default
-- Platform-specific modules: Unix uses Proc::ProcessTable, Windows uses Win32::Process::Info
+- Platform-specific modules: Windows uses Win32::API (process memory); Unix needs none
