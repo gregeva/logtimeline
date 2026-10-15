@@ -44,7 +44,7 @@ generate_cpanfile() {
             next if $m eq "perl";
             print "requires \x27$m\x27", ($ver ? ", \x27>= $ver\x27" : ""), ";\n";
         }
-    ' ${SCRIPT_NAME} | sort -u
+    ' ${SCRIPT_NAME} | LC_ALL=C sort -u    # byte order, whatever the caller's locale
 }
 
 # Development-only dependencies, appended verbatim after the scanned runtime

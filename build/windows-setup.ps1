@@ -155,6 +155,11 @@ if ($LASTEXITCODE -ne 0) { throw 'pip install numpy scipy failed (no wheel for t
 & $pyExe -c "import platform,numpy,scipy;print('[info] python',platform.python_version(),platform.machine(),'numpy',numpy.__version__,'scipy',scipy.__version__)"
 
 Write-Step '[4/7] Perl packages from build/cpanfile.windows'
+$bash = Join-Path $GitRoot 'bin\bash.exe'
+$repoPosix = $RepoRoot -replace '\\', '/'
+# The cpanfile is generated from the modules ltl loads; generate it before reading it.
+& $bash -lc "cd '$repoPosix' && ./build/generate-cpanfile.sh ltl windows" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'generate-cpanfile.sh failed' }
 Push-Location (Join-Path $RepoRoot 'build')
 try {
     $cpan = @('--notest', '--cpanfile', 'cpanfile.windows')
@@ -193,8 +198,6 @@ try {
 } finally { Pop-Location }
 
 Write-Step '[7/7] Verification'
-$bash = Join-Path $GitRoot 'bin\bash.exe'
-$repoPosix = $RepoRoot -replace '\\', '/'
 $rows = @(
     @('git', (git --version)),
     @('gh', ((gh --version) | Select-Object -First 1)),
