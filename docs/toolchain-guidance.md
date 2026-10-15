@@ -55,7 +55,11 @@ The harnesses share one scratch directory, the `logs/` corpus and the `CI=1` cac
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build\windows-setup.ps1   # -DevDeps adds the profiler, -Package adds PAR::Packer
 ```
 
-It installs Git, GitHub CLI, jq, Python 3.13 (with NumPy and SciPy) and Strawberry Perl through WinGet, installs `build/cpanfile.windows`, and configures Git and Git Bash as below. It asks Windows for administrator approval once, for the two steps that write under Program Files. Afterwards run `gh auth login`. Harnesses and `ltl` run from Git Bash; the traps it removes:
+It installs Git, GitHub CLI, jq, Python 3.13 (with NumPy and SciPy) and Strawberry Perl through WinGet, installs `build/cpanfile.windows`, and configures Git and Git Bash as below. It asks Windows for administrator approval once, for the two steps that write under Program Files. Afterwards run `gh auth login`. `ltl` runs from Git Bash.
+
+**The test harnesses do not run on Windows.** They are written for macOS and Linux, and Windows breaks them at several layers: Perl writes CR LF, Git Bash rewrites any argument starting with `/` into a Windows path, the system code page alters non-ASCII text on every command line, and `ltl` draws its bars with a different character. The completion gate and every harness run happen on macOS or Linux; a Windows host is for running and developing `ltl` itself.
+
+The traps the script removes:
 
 **1. Git for Windows checks files out with CR LF.** Its system config sets `core.autocrlf=true`, so `ltl`, the harnesses and the hook scripts arrive with CR LF endings and fail as `bad interpreter` or as syntax errors on a stray `\r`. The script sets `core.autocrlf=false` in the repository and re-checks the tracked files out. A fresh clone should be made with `git clone -c core.autocrlf=false`, then the script run.
 
