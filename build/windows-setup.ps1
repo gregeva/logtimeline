@@ -202,7 +202,7 @@ $rows = @(
     @('git', (git --version)),
     @('gh', ((gh --version) | Select-Object -First 1)),
     @('jq', (jq --version)),
-    @('perl', ((perl -e 'use Config; print "$^V $Config{archname}"'))),
+    @('perl', ((perl -MConfig -e 'print $^V, q{ }, $Config{archname}'))),   # no inner double quotes: PowerShell 5.1 strips them from native arguments
     @('bash', ((& $bash -lc 'echo $BASH_VERSION'))),
     @('bash perl', ((& $bash -lc 'command -v perl'))),
     @('./ltl', ((& $bash -lc "cd '$repoPosix' && ./ltl --disable-progress -v 2>&1 | grep -ao 'log timeline \[[^]]*\]'")))
