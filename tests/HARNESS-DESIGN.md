@@ -231,7 +231,7 @@ A section's name and content are a contract with the harnesses that consume it.
 **Renames and removals are breaking changes.** Renaming a section (`=== bin-counter-mode ===` → `=== histogram-bin-counters ===`) or a key (`percentile_precision` → `data_model_precision`) requires:
 
 1. Updating every consumer in the same commit. Discover them with `grep -r "=== old-name ===" tests/` **and** `grep -rn "old-name" features/`, searching for both the section name and the key. The owning feature doc's locked decision is a consumer of the name even though it runs nothing, and a `tests/`-only search cannot see it.
-2. Running each affected harness end-to-end and confirming it still **asserts**, not merely exits 0.
+2. Running each scenario that reads the changed name, named with `--scenario` (§ Running what the change needs), and confirming it still **asserts**, not merely exits 0. The whole harness runs at the completion gate, not here.
 3. Updating the owning feature doc's section contract and the locked decision that fixes it, in the same commit. This is mandatory for **any key or value change**, not only a rename: a locked decision that still names a removed key, or that omits a key the tool emits, is a contract nothing can satisfy, and it is invisible to a search of `tests/`. Then this document's reserved-names list and any per-feature reference (CLAUDE.md, docs/usage.md, README.md, print_help).
 
 This rule exists because of two classes of failure observed in this repository. A section header was renamed without updating the harness that asserted on it: the harness's assertions failed loudly, but the failure was not noticed because the harness was not re-run after the rename. The "run each affected harness and confirm it still asserts" step is what catches that. Separately, two unrelated changes each removed a key from the `histogram-bin-counters` section while complying with this checklist as it was then written, and each left the owning locked decision promising output the tool no longer produced; the drift stood until an audit found it. Step 3 is what catches that, and it is why the owning decision is named rather than left to "any per-feature reference".
@@ -796,7 +796,7 @@ When modifying any `-V` section header, sub-section header, content key name, co
 1. Consult this document's stability contract section. Renames and removals are breaking; additions are non-breaking.
 2. Identify every consumer with `grep -r "=== name ===" tests/` (or the equivalent for the changed token).
 3. Update every consumer in the same commit. Do not dribble updates across commits.
-4. Run each affected harness end-to-end and confirm it asserts (not merely that it exits 0). The "must fail on missing anchors" rule means an assertion that no longer finds its anchor will fail; if your change should preserve the assertion, update the anchor.
+4. Run each scenario that reads the changed token, named with `--scenario`, and confirm it asserts (not merely that it exits 0); the whole harness runs at the completion gate. The "must fail on missing anchors" rule means an assertion that no longer finds its anchor will fail; if your change should preserve the assertion, update the anchor.
 5. Update `docs/usage.md`, `README.md`, and `print_help()` in `ltl` for any user-visible surface change.
 6. Update this document's reserved-names list if a name was added or removed.
 
