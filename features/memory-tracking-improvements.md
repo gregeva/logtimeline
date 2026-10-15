@@ -538,6 +538,49 @@ of `get_memory_usage()` explains that it launches `ps` to avoid the
 `Proc::ProcessTable` crashes. That is the reason for the current design, and
 criterion 4 keeps the macOS branch untouched.
 
+### Drop 2: before the fix, 1 and 3 days (criterion 16)
+
+One server of the thirty-day, five-server access-log folder, the
+common-plus-duration shape, from 2026-01-02: 1 day (33 MB, 168,981 lines) and
+3 days (65 MB), `-ni -g -V benchmark-data`, Strawberry Perl 5.42 x64 on a
+Windows 11 ARM64 host, main checkout, the code of drop 1 (offset and gate as
+shipped). Three runs per variant, interleaved; medians with ranges. The ramp
+stopped at 3 days on the architect's direction once a gap between variants
+appeared; the 7-day runs were stopped before they finished.
+
+| Stage | 1 day, no `-mem` | 1 day, `-mem` | Δ | 3 days, no `-mem` | 3 days, `-mem` | Δ |
+|---|---|---|---|---|---|---|
+| `parse/read_files` | 10.31 s [10.05–11.27] | 10.95 s [10.94–11.07] | +0.64 s | 18.06 s [17.89–18.10] | 19.63 s [19.33–19.99] | +1.57 s |
+| `finalize/group_similar` | 3.55 s [3.48–3.60] | 4.14 s [3.96–4.23] | +0.59 s | 5.51 s [5.37–5.60] | 7.63 s [7.48–8.00] | +2.12 s |
+| every other stage | ~0.5 s | ~0.5 s | ≈ 0 | ~0.8 s | ~0.8 s | ≈ 0 |
+| total | 14.14 s [13.79–15.14] | 15.33 s [15.15–15.54] | +1.19 s (+8%) | 23.99 s [23.95–24.31] | 28.03 s [27.47–28.24] | +4.04 s (+17%) |
+
+With `-mem -V memory-usage` the totals were 15.26 s [15.18–16.56] and 27.36 s
+[25.34–27.87], within the `-mem` ranges: the counting costs nothing measurable.
+
+The readings themselves: 27 at 1 day (5 phase boundaries, 14 grouping
+checkpoints, 6 final-pass windows, 2 around the scan-sub compile), 26.3 to
+27.6 ms in all; 30 at 3 days (17 checkpoints), 27.7 to 28.0 ms. The first
+reading of a run costs about 22 ms, loading `Win32::API` and binding the
+kernel32 calls; every later one 0.15 to 0.25 ms.
+
+**The `-mem` gap is the structure walks, not the reading.** A scratch copy of
+`ltl` timing the `named_structure_sizes()` walk inside
+`measure_memory_structures()` per caller (`-g -mem -V benchmark-data`; tracked
+`ltl` unchanged):
+
+| Caller | 1 day (3 runs) | 3 days (1 run) |
+|---|---|---|
+| grouping checkpoints, inside `parse/read_files` | 14 walks, 0.77–0.81 s | 17 walks, 1.66 s |
+| final-pass windows, inside `finalize/group_similar` | 6 walks, 0.61–0.64 s | 6 walks, 2.05 s |
+| phase boundaries, between the stages | 5 walks, 0.49–0.52 s | 5 walks, 1.56 s |
+
+The checkpoint walks match the reading stage's gap and the final-pass walks the
+grouping stage's, at both sizes. Each walk grows with the stores it measures:
+about 56 ms a checkpoint walk at 1 day and 98 ms at 3 days, 103 ms and 342 ms a
+final-pass walk. The walks run under `-mem` on every platform, whatever the
+reading costs; on this host the reading is 0.5 to 2% of the `-mem` overhead.
+
 ## Memory Diagnostic Method (from the #356 investigation)
 
 Recorded for future memory investigations; the temporary #356 instrumentation is not retained beyond what S4 specifies.
