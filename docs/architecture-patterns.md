@@ -715,6 +715,7 @@ which is the cost a flag exists to bound.
 - `adapt_to_command_line_options` :: `$grouping_active = $group_similar_sensitivity ne "none" ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$numeric_filter_active    = quantity_bounds_given('filter')    ? 1 : 0;`
 - `adapt_to_command_line_options` :: `$message_cut_marked = $position eq 'right' ? 0 : 1;`: `-mt left` or `center`, where a cut key carries the ellipsis; read by the grouping passes, which keep it literal in the derived pattern (`keep_ellipsis_in_mask`) and group only keys carrying the same number of them (`cut_markers_match`) (`features/564-message-truncation-position.md`).
+- `adapt_to_command_line_options` :: `$memory_readings_active = section_requested('memory-usage') ? 1 : 0;`: each memory reading is counted and timed only while `-V memory-usage` is armed (`-mem debug` requests it); `get_memory_usage` tests the flag and nothing else (`features/memory-tracking-improvements.md` § -V memory-usage section contract).
 - `adapt_to_command_line_options` :: `if ($dark_background_given) {`: the background the output is drawn for, a global style setting settled outside any feature's block, `-dbg` over `-lbg` (`features/665-background-setting-global.md`).
 
 **Owning record.** This entry.
@@ -750,6 +751,7 @@ contract).
 - `(file scope, GLOBALS)` :: `my %verbose_section_registry = (`
 - `emit_statistics_demand_verbose` :: `return unless section_requested('statistics-demand');`
 - `emit_format_registry_verbose` :: `push @verbose_output, "scan_sub_cache_hits: $format_scan_sub_cache_hits";`
+- `emit_memory_usage_verbose` :: `return unless section_requested('memory-usage');`: printed at its own site, the end of `pipeline_render`, after the run's last memory reading, as `aggregate-export` is at its writer; its totals are repeated in `benchmark-data` (`features/memory-tracking-improvements.md` § -V memory-usage section contract).
 
 **Owning record.** `tests/HARNESS-DESIGN.md` (§ Content shape for the line
 forms; `features/605-input-units.md` D25 to D29). Checked by

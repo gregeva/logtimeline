@@ -41,8 +41,7 @@ use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 use Term::ANSIColor;
 use Time::HiRes qw(gettimeofday tv_interval);
 use Devel::Size qw(total_size);
-# Proc::ProcessTable is loaded conditionally in get_memory_usage() based on platform
-# On Windows, Win32::API calls K32GetProcessMemoryInfo directly (kernel32.dll)
+# get_memory_usage() loads Win32::API at runtime on Windows only
 use List::Util qw(min max);
 use Scalar::Util qw(looks_like_number);
 use File::Glob qw(bsd_glob);
@@ -245,6 +244,9 @@ my %verbose_section_registry = (
     'aggregate-export' => {
         description => 'The YAML aggregate export -o writes beside the STATS CSV: file path and size, the blocks written, buckets written, percentiles withheld under the sample-size rule, and the per-bucket heatmap ladder retained for the file (Issue #503).',
     },
+    'memory-usage' => {
+        description => 'Every reading of the process memory: how many, and the time spent in them, per caller and in total; under -mem debug, the per-phase and in-loop diagnostic readings. Printed after the run\'s last reading (Issue #146).',
+    },
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
@@ -272,6 +274,7 @@ my @verbose_section_order = qw(
     udm-counting
     udm-specs
     aggregate-export
+    memory-usage
     section-layout
     benchmark-data
 );
@@ -420,6 +423,12 @@ my %column_color_lookup = map { $_->{name} => $_ } @column_colors;
 my ( $durations_observed, $show_memory, $disable_progress, $show_help ) = ( 0, 0, 0, undef );
 my $bytes_observed = 0;
 my ( $show_memory_debug, $memory_usage_operand ) = ( 0, undef );   # -mem debug diagnostic mode (Issue #356)
+# -V memory-usage (requested by -mem debug too): each memory reading counted and
+# timed under its caller, and the -mem debug readings kept for its debug
+# sub-section. The flag is settled with the options; while it is off, nothing is kept.
+my $memory_readings_active = 0;
+my %memory_readings;               # caller => { readings, seconds }
+my @memory_debug_records;          # [ kind, elapsed_s, tag, rss, named_sum, unattributed ]
 # -mem release (hidden): each message row's durations array is released after
 # its last use, the displayed rows' after their statistics and the others' at
 # the selection, at the cost of the time to free them. Off by default: the rows
@@ -5519,7 +5528,7 @@ sub compile_format_scan_sub {
     # (F12): each is a `ps` subprocess on macOS, several times the cost of
     # the compile it measures. Nothing but the compile allocates between
     # them, so the delta is the generated sub's real footprint.
-    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage('format_scan_compile') : undef;
     my $compile_start = [gettimeofday];
     my (@blocks, @tab_blocks, %aux_seen, @aux_all);
     for my $si (0 .. $#format_scan_order) {
@@ -5568,7 +5577,7 @@ sub compile_format_scan_sub {
     # with the compile count so the total reads against the per-sub
     # constant. Armed only when a memory surface was requested.
     if (defined $rss_before) {
-        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        my $delta = ( get_memory_usage('format_scan_compile') // 0 ) - $rss_before;
         $format_scan_subs_rss += $delta if $delta > 0;
     }
     return $sub;
@@ -5710,7 +5719,7 @@ substr($timestamp_str, 16, 0) = ':00' unless defined $1;} );
 sub compile_csv_block {
     my ($shape, $rows) = @_;
     csv_block_evict();
-    my $rss_before = $format_scan_measure_rss ? get_memory_usage() : undef;
+    my $rss_before = $format_scan_measure_rss ? get_memory_usage('csv_block_compile') : undef;
     my $compile_start = [gettimeofday];
     my $src = csv_block_src($shape);
     my $block = eval $src;
@@ -5720,7 +5729,7 @@ sub compile_csv_block {
     my @verdict = csv_validate_block($block, $rows);
     $elapsed_detect_scan_sub_compile += tv_interval($compile_start);
     if (defined $rss_before) {
-        my $delta = ( get_memory_usage() // 0 ) - $rss_before;
+        my $delta = ( get_memory_usage('csv_block_compile') // 0 ) - $rss_before;
         $format_scan_subs_rss += $delta if $delta > 0;
     }
     $shape->{block} = $format_scan_sub_cache{ $shape->{sig} } = $block;
@@ -11518,7 +11527,7 @@ sub print_help {
     $out .= help_opt("-v,   --version",       "Print the version number and exit");
     $out .= help_opt("-?,   --help [<topic>]","Show this help screen and exit. Naming a topic shows that topic's index: " . join_with_or( map { "'$_->{name}' ($_->{description})" } @help_topics ) . ".");
     $out .= help_opt("-ex,  --explain [<topic>]", "Show long-form documentation for a statistic, a visualization, a method (e.g. 'classification') or an analysis technique (e.g. 'resolution-zoom'); with no topic, lists available topics.");
-    $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' additionally emits per-phase memory diagnostics on stderr");
+    $out .= help_opt("-mem, --memory-usage [debug]",  "Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; 'debug' adds the per-phase memory diagnostics, printed with every memory reading in the -V memory-usage section at the end of the run");
     $out .= help_opt("-t,   --timing",          "Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary");
     $out .= help_opt("-D,   --debug",           "Read every file with the standard path, slower on large files: for reproducing a problem, or profiling the run");
 
@@ -12293,8 +12302,12 @@ sub detect_light_terminal_background {
     return $is_light;
 }
 
+# The process's resident memory, in bytes. $site names the caller for the
+# -V memory-usage reading counts, kept only while that section is armed.
 sub get_memory_usage {
+    my ($site) = @_;
     my $memory_usage;
+    my $reading_start = $memory_readings_active ? [gettimeofday] : undef;
 
     if ($^O eq 'darwin') {                                      # macOS
         # Use ps command - reliable and avoids Proc::ProcessTable SIGTRAP crashes
@@ -12315,10 +12328,7 @@ sub get_memory_usage {
             }
         }
     } elsif ($^O eq 'MSWin32') {                                # Windows
-        # Memory tracking disabled by default on Windows — use -mem to opt in.
-        # Direct kernel32.dll syscall via Win32::API — replaces Win32::Process::Info
-        # which used WMI (extremely slow, ~15-20s per call). See #143.
-        return 0 unless $show_memory;
+        # Working set read through kernel32's K32GetProcessMemoryInfo (Win32::API)
         eval {
             require Win32::API;
             my $get_current = Win32::API->new('kernel32', 'GetCurrentProcess', [], 'N');
@@ -12331,7 +12341,7 @@ sub get_memory_usage {
             my $get_mem_info = Win32::API->new('kernel32', 'K32GetProcessMemoryInfo', ['N', 'P', 'N'], 'I');
             if ($get_mem_info->Call($handle, $buf, $struct_size)) {
                 # WorkingSetSize: after cb(4) + PageFaultCount(4) + PeakWorkingSetSize(SIZE_T)
-                my $offset = $is_64bit ? 24 : 16;
+                my $offset = $is_64bit ? 16 : 12;
                 $memory_usage = $is_64bit ? unpack('Q', substr($buf, $offset, 8))
                                           : unpack('V', substr($buf, $offset, 4));
             }
@@ -12339,6 +12349,14 @@ sub get_memory_usage {
         if ($@) {
             warn "Failed to get memory usage on Windows: $@";
         }
+    } else {
+        return 0;                                               # no reading on this platform
+    }
+
+    if ($reading_start) {
+        my $tally = $memory_readings{$site} //= { readings => 0, seconds => 0 };
+        $tally->{readings}++;
+        $tally->{seconds} += tv_interval($reading_start);
     }
 
     return $memory_usage // 0;
@@ -13951,7 +13969,7 @@ sub process_final_pass_window {
     }
 
     # Capture transient structure HWMs before they're freed (#171)
-    measure_memory_structures();
+    measure_memory_structures('grouping_final_pass');
 
     # Cleanup: free window working structures
     for my $log_key (@key_list) {
@@ -14183,7 +14201,7 @@ sub run_consolidation_checkpoint {
         run_consolidation_pass($cat_gk, \@unmatched, $cp_num);
 
     # Capture transient structure HWMs before they're freed (#171)
-    measure_memory_structures();
+    measure_memory_structures('grouping_checkpoint');
 
     my $post_count = scalar @unmatched;
 
@@ -14313,10 +14331,12 @@ sub named_structure_sizes {
 }
 
 # Issue #45: Measure all data structures and update high-water marks
-# Called after each major subroutine to capture peak memory usage
+# Called after each major subroutine to capture peak memory usage; $site names
+# the caller for the -V memory-usage reading counts.
 sub measure_memory_structures {
+    my ($site) = @_;
     # Always capture RSS high-water mark
-    $current_memory_usage = get_memory_usage();
+    $current_memory_usage = get_memory_usage($site);
     if ($current_memory_usage > $max_memory_usage) {
         $max_memory_usage = $current_memory_usage;
     }
@@ -14343,40 +14363,80 @@ sub measure_memory_structures {
     }
 }
 
-# -mem debug (Issue #356): per-phase memory diagnostics emitted on STDERR as
-# TSV MEMDIAG lines. memory_debug_sample() is the cheap RSS-only probe safe
-# to call from hot loops at a coarse cadence (each call is a syscall/exec on
-# some platforms); memory_debug_decomposition() additionally walks the
-# named-structure map (Devel::Size) and reports the unattributed remainder
-# (RSS minus the sum of live named structures), so it runs only at phase
-# boundaries. Diagnostic lines never carry the " at <file> line <N>" suffix
-# reserved for interpreter warnings (tests/HARNESS-DESIGN.md § Runtime-warning
-# cleanliness).
+# -mem debug (Issue #356): per-phase memory diagnostics, kept as records for
+# the -V memory-usage / debug sub-section. memory_debug_sample() is the cheap
+# RSS-only probe safe to call from hot loops at a coarse cadence (each call is
+# a syscall/exec on some platforms); memory_debug_decomposition() additionally
+# walks the named-structure map (Devel::Size) and records the unattributed
+# remainder (RSS minus the sum of live named structures) and each structure of
+# 1 MiB or more, so it runs only at phase boundaries.
 my $memory_debug_epoch;
 my $memory_debug_key_samples = 0;   # shared cadence counter across per-key loops
 sub memory_debug_sample {
     return unless $show_memory_debug;
     my ($tag) = @_;
     $memory_debug_epoch //= Time::HiRes::time();
-    printf STDERR "MEMDIAG\t%.3f\t%s\trss=%d\n",
-        Time::HiRes::time() - $memory_debug_epoch, $tag, get_memory_usage() // 0;
+    my $rss = get_memory_usage('debug_sample') // 0;
+    push @memory_debug_records, [ 'sample', Time::HiRes::time() - $memory_debug_epoch, $tag, $rss ];
 }
 sub memory_debug_decomposition {
     return unless $show_memory_debug;
     my ($tag) = @_;
     $memory_debug_epoch //= Time::HiRes::time();
-    my $rss = get_memory_usage() // 0;
+    my $rss = get_memory_usage('debug_decomposition') // 0;
     my %sizes = named_structure_sizes();
     my $named_sum = 0;
     $named_sum += $_ for values %sizes;
     my $unattributed = $rss - $named_sum;
     $unattributed = 0 if $unattributed < 0;
-    printf STDERR "MEMDIAG-FULL\t%.3f\t%s\trss=%d\tnamed_sum=%d\tunattributed=%d\n",
-        Time::HiRes::time() - $memory_debug_epoch, $tag, $rss, $named_sum, $unattributed;
+    my $elapsed = Time::HiRes::time() - $memory_debug_epoch;
+    push @memory_debug_records, [ 'decomposition', $elapsed, $tag, $rss, $named_sum, $unattributed ];
     for my $struct (sort { $sizes{$b} <=> $sizes{$a} || $a cmp $b } keys %sizes) {
         last if $sizes{$struct} < 1_048_576;
-        printf STDERR "MEMDIAG-STRUCT\t%s\t%s\t%d\n", $tag, $struct, $sizes{$struct};
+        push @memory_debug_records, [ 'structure', $elapsed, $tag, undef, undef, undef, $struct, $sizes{$struct} ];
     }
+}
+
+# -V memory-usage: every reading of the process memory per caller, and under
+# -mem debug the diagnostic readings, printed at the end of pipeline_render(),
+# after the run's last reading. Contract: features/memory-tracking-improvements.md
+# § -V memory-usage section contract.
+my @memory_reading_sites = qw( phase_boundary grouping_checkpoint grouping_final_pass
+                               format_scan_compile csv_block_compile
+                               debug_decomposition debug_sample );
+sub emit_memory_usage_verbose {
+    return unless section_requested('memory-usage');
+    my @sites = grep { $memory_readings{$_} } @memory_reading_sites;
+    my %site_us = map { $_ => int( $memory_readings{$_}{seconds} * 1e6 + 0.5 ) } @sites;
+    my ( $readings, $readings_us ) = ( 0, 0 );
+    $readings    += $memory_readings{$_}{readings} for @sites;
+    $readings_us += $site_us{$_} for @sites;
+    print "=== memory-usage ===\n";
+    print "readings: $readings\n";
+    print "readings_us: $readings_us\n";
+    printf "site: %s readings=%d elapsed_us=%d\n", $_, $memory_readings{$_}{readings}, $site_us{$_} for @sites;
+    if ($show_memory_debug) {
+        print "=== memory-usage / debug ===\n";
+        print join( "\t", qw( kind elapsed_s tag rss named_sum unattributed structure bytes ) ) . "\n";
+        for my $record (@memory_debug_records) {
+            my ( $kind, $elapsed, @values ) = @$record;
+            $#values = 5;
+            print join( "\t", $kind, sprintf( '%.3f', $elapsed ), map { $_ // '-' } @values ) . "\n";
+        }
+        print "=== END memory-usage / debug ===\n";
+    }
+    print "=== END memory-usage ===\n";
+    return;
+}
+
+# The reading count and the seconds spent reading, over every caller so far.
+sub memory_reading_totals {
+    my ( $readings, $seconds ) = ( 0, 0 );
+    for my $tally ( values %memory_readings ) {
+        $readings += $tally->{readings};
+        $seconds  += $tally->{seconds};
+    }
+    return ( $readings, $seconds );
 }
 
 # A JVM heap size as written in a GC log (2433M), in bytes: the letter is
@@ -16397,6 +16457,11 @@ sub adapt_to_command_line_options {
         $show_memory_debug        = 1 if ( $literal // '' ) eq 'debug';
         $memory_release_after_use = 1 if ( $literal // '' ) eq 'release';
     }
+
+    # -mem debug prints its readings in -V memory-usage, so it requests that
+    # section whether or not -V was given.
+    $verbose_sections_requested{'memory-usage'} = 1 if $show_memory_debug;
+    $memory_readings_active = section_requested('memory-usage') ? 1 : 0;
 
     # D62: arm the compile-boundary RSS measurement whenever a surface that
     # reports memory was requested — -mem, or a -V section that emits
@@ -22166,6 +22231,10 @@ sub print_verbose_output {
     printf "TIMING\tfinalize/histogram_statistics\t%.3f\n", $elapsed_finalize_histogram_statistics;
     printf "TIMING\trender/normalize_data\t%.3f\n", $elapsed_render_normalize_data;
     printf "TIMING\ttotal\t%.3f\n", $elapsed_total;
+    # The -V memory-usage totals so far: time spent reading memory inside the
+    # stages above, an accumulator like detect/scan_sub_compile.
+    my ( $memory_readings, $memory_reading_seconds ) = memory_reading_totals();
+    printf "TIMING\tmemory/readings\t%.3f\n", $memory_reading_seconds if $memory_readings_active;
 
     # Memory rows (raw bytes)
     printf "MEMORY\trss_peak\t%d\n", $max_memory_usage;
@@ -22212,6 +22281,7 @@ sub print_verbose_output {
     printf "COUNTS\tlog_messages_entries\t%d\n", $log_messages_entries;
     printf "COUNTS\tlog_occurrences_entries\t%d\n", scalar keys %log_occurrences;
     printf "COUNTS\tlog_stats_entries\t%d\n", scalar keys %log_stats;
+    printf "COUNTS\tmemory_readings\t%d\n", $memory_readings if $memory_readings_active;
     # #417: sub-stage element-count denominators — re-emitted from the block
     # boundaries in calculate_all_statistics, never recomputed here (one
     # source, two surfaces; see tests/HARNESS-DESIGN.md). log_messages_population
@@ -24173,7 +24243,7 @@ sub pipeline_parse {
     resolve_byte_notation();
     resolve_timestamp_precision();
     note_finer_duration_bounds();
-    measure_memory_structures();
+    measure_memory_structures('phase_boundary');
     memory_debug_decomposition("after_read");
 }
 
@@ -24187,7 +24257,7 @@ sub pipeline_accumulate {
     initialize_empty_time_windows();
     $end_time = [gettimeofday];
     $elapsed_accumulate_initialize_buckets = tv_interval($start_time, $end_time);
-    measure_memory_structures();
+    measure_memory_structures('phase_boundary');
     memory_debug_decomposition("after_bucket_init");
 }
 
@@ -24416,7 +24486,7 @@ sub pipeline_finalize {
     emit_classification_percentage_notices();
     $end_time = [gettimeofday];
     $elapsed_finalize_calculate_statistics = tv_interval($start_time, $end_time);
-    measure_memory_structures();
+    measure_memory_structures('phase_boundary');
     memory_debug_decomposition("after_stats");
 
     # Issue #287: snapshot per-message-key bin-counter telemetry before any
@@ -24435,7 +24505,7 @@ sub pipeline_finalize {
         calculate_heatmap_buckets();
         $end_time = [gettimeofday];
         $elapsed_finalize_heatmap_statistics = tv_interval($start_time, $end_time);
-        measure_memory_structures();
+        measure_memory_structures('phase_boundary');
         memory_debug_decomposition("after_heatmap");
     }
 
@@ -24445,7 +24515,7 @@ sub pipeline_finalize {
         calculate_histogram_buckets();
         $end_time = [gettimeofday];
         $elapsed_finalize_histogram_statistics = tv_interval($start_time, $end_time);
-        measure_memory_structures();
+        measure_memory_structures('phase_boundary');
         memory_debug_decomposition("after_histogram");
     }
 }
@@ -24542,7 +24612,7 @@ sub pipeline_render {
     # the MAXIMUM MEMORY USED the summary reports accounts for all of them. The
     # summary render's own residual is covered by the post-output measurement
     # below and visible under -mem debug.
-    measure_memory_structures();
+    measure_memory_structures('phase_boundary');
     $reported_max_memory_usage = $max_memory_usage;
 
     # The summary reports on the run itself -- the span analysed, the files read,
@@ -24553,7 +24623,7 @@ sub pipeline_render {
 
     # Issue #356 (S1): post-output measurement keeps the recorded peak honest for
     # the full process lifetime; surfaced by the -mem debug "end" line below.
-    measure_memory_structures();
+    measure_memory_structures('phase_boundary');
     memory_debug_decomposition("end");
 
     # The aggregate export reads the run's peak memory as the summary reported
@@ -24561,6 +24631,8 @@ sub pipeline_render {
     write_aggregate_export();
 
     write_index_file() if $index_enabled;  # Write persistent index file with per-file metadata (Issue #46)
+
+    emit_memory_usage_verbose();           # after the run's last memory reading
 }
 
 # What the usage error says about one file argument that selected no file:

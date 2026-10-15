@@ -15,6 +15,9 @@ Machine-parseable TSV block delimited by `=== benchmark-data ===` / `=== END ben
 ### DD-03: Per-structure memory requires `-mem`
 Timing + RSS peak are always included in the benchmark block when `-V` is active. Per-structure HWMs require both `-V` and `-mem`. With `-mem`, the per-structure rows are followed by a `MEMORY	unattributed	<bytes>` row (Issue #356): `rss_peak` minus the sum of all structure high-water marks, floored at zero because the HWMs are captured at different instants. `unattributed` is a reserved metric name in the MEMORY row namespace — never a structure name. It aggregates interpreter baseline, allocator-retained transients, and allocation slack; consumers that join MEMORY rows by metric name treat it like any other additive row.
 
+### DD-03a: Memory-reading totals while `-V memory-usage` is armed
+When the `memory-usage` section is armed (selected with `-V`, or requested by `-mem debug`), the block carries `TIMING	memory/readings	<seconds>`, after `TIMING	total`, and `COUNTS	memory_readings	<N>`, after the structure counts: the time spent reading the process memory and the number of readings, over every caller, read from the section's counters when the block prints (Issue #146). The section prints after the run's last reading, so its totals can exceed these by the readings taken after the block. `memory/readings` is time within the stages: `compare-results.sh` reports it within parent and leaves it out of the stage sum. Without the section neither row is present. Contract: `features/memory-tracking-improvements.md` § -V memory-usage section contract.
+
 ### DD-04: Test runner output format
 TSV with composite key (test_name + metric_name). Results stored in `tests/baseline/results/` and committed to git as reference baselines.
 

@@ -25,19 +25,26 @@ TARGET_PLATFORM=${2:-all}
 cd "$REPO_ROOT"
 
 # Platform-specific modules that should be excluded from cross-platform builds
-UNIX_ONLY_MODULES="Proc::ProcessTable"
-WINDOWS_ONLY_MODULES="Win32::Process::Info\|Win32::API"
+UNIX_ONLY_MODULES=""
+WINDOWS_ONLY_MODULES="Win32::API"
+
+# Drop the lines naming any module in the given grep pattern; an empty pattern
+# drops nothing (grep -v with an empty pattern would drop every line).
+exclude_modules() {
+    if [[ -n "$1" ]]; then grep -v "$1"; else cat; fi
+}
 
 generate_cpanfile() {
     local exclude_pattern="$1"
     perl -ne '
+        BEGIN { binmode STDOUT }    # LF line endings under Windows Perl too
         if (/^\s*(?:use|require)\s+([A-Za-z0-9_:]+)(?:\s+([\d\._]+))?/) {
             my ($m,$ver) = ($1,$2);
-            next if $m =~ /^(?:strict|warnings|feature|utf8|open|mro|base|parent|lib|constant|vars|attributes?|diagnostics|subs)$/;
+            next if $m =~ /^(?:strict|warnings|feature|utf8|open|mro|base|parent|lib|constant|vars|attributes?|diagnostics|subs|integer)$/;
             next if $m eq "perl";
             print "requires \x27$m\x27", ($ver ? ", \x27>= $ver\x27" : ""), ";\n";
         }
-    ' ${SCRIPT_NAME} | sort -u
+    ' ${SCRIPT_NAME} | LC_ALL=C sort -u    # byte order, whatever the caller's locale
 }
 
 # Development-only dependencies, appended verbatim after the scanned runtime
@@ -57,14 +64,14 @@ append_develop_block() {
 
 # Write the Unix cpanfile: the scanned runtime list, then the develop block.
 generate_unix_cpanfile() {
-    generate_cpanfile | grep -v "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
+    generate_cpanfile | exclude_modules "$WINDOWS_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile"
     append_develop_block "$SCRIPT_DIR/cpanfile"
 }
 
 # Write the Windows cpanfile: runtime modules only. There is no profiling on
 # the Windows path, so the develop block is deliberately absent.
 generate_windows_cpanfile() {
-    generate_cpanfile | grep -v "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
+    generate_cpanfile | exclude_modules "$UNIX_ONLY_MODULES" | tee "$SCRIPT_DIR/cpanfile.windows"
 }
 
 case "$TARGET_PLATFORM" in

@@ -578,7 +578,7 @@ Version, help, and diagnostic options.
 | `-v, --version` | Print the version number and exit |
 | `-?, --help [<topic>]` | Show the help screen and exit; naming a topic shows that topic's index: `statistics` (every statistic ltl computes), `formats` (the log formats it recognises and how each classifies successes and failures), `profile` (every -pr mode: the days it keeps, its window and axis, and what its -alt variant changes) or `units` (the units an option taking a count, a byte size or a duration accepts) |
 | `-ex, --explain [<topic>]` | Show long-form documentation for a statistic, a visualization, a method (e.g. `classification`) or an analysis technique (e.g. `resolution-zoom`); with no topic, lists available topics |
-| `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` additionally emits per-phase memory diagnostics on stderr |
+| `-mem, --memory-usage [debug]` | Display memory consumption statistics after processing completes, including memory that cannot be attributed to any tracked structure; `debug` adds the per-phase memory diagnostics, printed with every memory reading in the `-V memory-usage` section at the end of the run |
 | `-t, --timing` | Show the per-stage timing breakdown (detect, parse, accumulate, finalize, render) in the summary |
 | `-D, --debug` | Read every file with the standard path, slower on large files: for reproducing a problem, or profiling the run |
 

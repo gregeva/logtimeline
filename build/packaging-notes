@@ -48,7 +48,7 @@ cpanm --uninstall Module::Name
 sudo /usr/bin/perl -MCPAN -e 'remove App::cpanminus'
 
 cpanm PAR::Packer
-sudo cpanm DateTime.pm Term::ReadKey.pm Proc::ProcessTable.pm Text::CSV
+sudo cpanm DateTime.pm Term::ReadKey.pm Text::CSV
 sudo cpanm --sudo PDL::Lite PDL::LiteF PDL::Core PDL::Stats
 sudo cpanm PDL Algorithm::KMeans
 sudo /usr/bin/perl -MCPAN -e 'install PDL'
@@ -130,9 +130,7 @@ cpanm --self-upgrade
 cpan Win32::Process
 cpan Win32::API
 cpan App::cpanminus
-cpanm Win32::Process::Info
 cpanm Text::CSV
-cpanm --look Win32::Process::Info
 
 
 
@@ -143,7 +141,6 @@ install Quantum::Entanglement
 perl -MCPAN -e "install PAR::Packer"
 perl -MCPAN -e "install DateTime"
 cpan install DateTime.pm
-cpan Win32::Process::Info
 cpanm Text::CSV
 
 pp -o ltl_static-binary_windows-amd64.exe ltl

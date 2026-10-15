@@ -155,6 +155,11 @@ if ($LASTEXITCODE -ne 0) { throw 'pip install numpy scipy failed (no wheel for t
 & $pyExe -c "import platform,numpy,scipy;print('[info] python',platform.python_version(),platform.machine(),'numpy',numpy.__version__,'scipy',scipy.__version__)"
 
 Write-Step '[4/7] Perl packages from build/cpanfile.windows'
+$bash = Join-Path $GitRoot 'bin\bash.exe'
+$repoPosix = $RepoRoot -replace '\\', '/'
+# The cpanfile is generated from the modules ltl loads; generate it before reading it.
+& $bash -lc "cd '$repoPosix' && ./build/generate-cpanfile.sh ltl windows" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'generate-cpanfile.sh failed' }
 Push-Location (Join-Path $RepoRoot 'build')
 try {
     $cpan = @('--notest', '--cpanfile', 'cpanfile.windows')
@@ -171,6 +176,15 @@ Write-Step '[5/7] Git Bash: Strawberry Perl ahead of Git''s own Perl'
 Set-ManagedBlock "$HOME\.bashrc" 'perl' 'export PATH="/c/Strawberry/perl/site/bin:/c/Strawberry/perl/bin:$PATH"'
 Set-ManagedBlock "$HOME\.bash_profile" 'bashrc' '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"'
 Write-Info 'wrote managed blocks to ~/.bashrc and ~/.bash_profile'
+# The harnesses call python3. The WinGet install has only python.exe, so in Git
+# Bash python3 falls through to the Microsoft Store stub. A one-line wrapper in
+# ~/bin, which Git Bash puts ahead of the Windows PATH, runs the installed Python.
+$binDir = Join-Path $HOME 'bin'
+New-Item -ItemType Directory -Force $binDir | Out-Null
+$pyPosix = '/' + ($pyExe -replace '^([A-Za-z]):', '$1' -replace '\\', '/')
+$pyPosix = $pyPosix.Substring(0, 2).ToLower() + $pyPosix.Substring(2)
+[IO.File]::WriteAllText((Join-Path $binDir 'python3'), "#!/bin/sh`nexec `"$pyPosix`" `"`$@`"`n", (New-Object Text.UTF8Encoding $false))
+Write-Info "python3 wrapper written to ~/bin/python3 -> $pyPosix"
 
 Write-Step '[6/7] Git: line endings'
 # Git for Windows defaults to core.autocrlf=true. Every script then has CR LF
@@ -193,18 +207,17 @@ try {
 } finally { Pop-Location }
 
 Write-Step '[7/7] Verification'
-$bash = Join-Path $GitRoot 'bin\bash.exe'
-$repoPosix = $RepoRoot -replace '\\', '/'
 $rows = @(
     @('git', (git --version)),
     @('gh', ((gh --version) | Select-Object -First 1)),
     @('jq', (jq --version)),
-    @('perl', ((perl -e 'use Config; print "$^V $Config{archname}"'))),
+    @('perl', ((perl -MConfig -e 'print $^V, q{ }, $Config{archname}'))),   # no inner double quotes: PowerShell 5.1 strips them from native arguments
     @('bash', ((& $bash -lc 'echo $BASH_VERSION'))),
     @('bash perl', ((& $bash -lc 'command -v perl'))),
+    @('bash python3', ((& $bash -lc "python3 -c 'import platform, numpy, scipy; print(platform.python_version(), platform.machine(), numpy.__version__, scipy.__version__)' 2>&1"))),   # as the harnesses call it
     @('./ltl', ((& $bash -lc "cd '$repoPosix' && ./ltl --disable-progress -v 2>&1 | grep -ao 'log timeline \[[^]]*\]'")))
 )
-foreach ($r in $rows) { '{0,-10} {1}' -f $r[0], $r[1] }
+foreach ($r in $rows) { '{0,-12} {1}' -f $r[0], $r[1] }
 cmd /c 'gh auth status >nul 2>&1'
 if ($LASTEXITCODE -ne 0) { Write-Warn2 'GitHub CLI is not signed in: run  gh auth login' }
 Write-Host "`nDone. Open a new terminal so the updated PATH applies." -ForegroundColor Green

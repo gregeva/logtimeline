@@ -514,8 +514,9 @@ user surface `-D`, `-V read-path`.
 spacing, visibility and colours; dynamic columns via `add_dynamic_column()`;
 auto-hides at narrow widths. `@column_colors` holds per-column ANSI definitions.
 
-**Platform:** `Proc::ProcessTable` on Unix, `Win32::Process::Info` on Windows,
-detected via `$^O eq 'MSWin32'`.
+**Platform:** `get_memory_usage()` reads process memory through `ps` on macOS,
+`/proc/self/statm` on Linux and `Win32::API` (`K32GetProcessMemoryInfo`) on
+Windows, branching on `$^O`.
 
 **Heatmap** (`-hm duration|bytes|count`, `-hmw <width>`, `-lbg`): logarithmic
 bucket boundaries, gradients yellow/green/cyan by metric.
