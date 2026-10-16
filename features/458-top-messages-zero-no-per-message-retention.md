@@ -51,6 +51,11 @@ rule satisfied structurally.
 previously accepted and produced an empty table over a fully populated store; it now
 takes the same path as `0`. No new error path was added for negative values.
 
+*Amended by the architect 2026-10-16 (#726, -n and -gc accept a negative value):*
+a count of zero retains nothing; a negative count no longer reaches this decision,
+because it is refused at settlement as a usage error (`features/605-input-units.md`
+§ 4 D2).
+
 ### D3 — Options that only configure the per-message store are ignored, not rejected
 
 Message grouping (`-g`), the message statistics data model (`-mdm`) and the message

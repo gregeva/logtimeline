@@ -270,6 +270,12 @@ separate issue". Its parts:
 - **D2 — A negative bound is a usage error**, checked at settlement beside the
   inverted-range check, from the same declaration. *Locked by the architect
   2026-09-27, stage 11 (#342).*
+  A negative value on a `size` row (`-n`, `-gc`, `--consolidation-trigger`,
+  `--consolidation-ceiling`, `--consolidation-max-patterns`,
+  `--generated-loop-threshold`) is a usage error too, with wording of its own,
+  since a size is not a bound: `Invalid -n '-1': cannot be negative`.
+  *Amended by the architect 2026-10-16 (#726, -n and -gc accept a negative
+  value).*
 - **D3 — The numeric exclusion count is reported by every consumer whenever
   the filter surface exists**, zero when nothing was excluded: the aggregate
   export's `excluded:` mapping carries `numeric` always, as the `-V` filter
@@ -304,7 +310,7 @@ separate issue". Its parts:
   `features/524-bucket-size-unit.md` D3: `<number>[<unit>]`, a decimal, no
   whitespace between number and unit, validated once at settlement, an
   unreadable value rejected with a usage message and a non-zero exit. D2 adds a
-  rejection a bare number can meet on a bound: a negative value. *Locked by the
+  rejection a bare number can meet on a bound or a size: a negative value. *Locked by the
   architect: the issue body; #524 D3.*
 - **D8 — Help rows interpolate the ladder.** "A help row that names a unit
   vocabulary interpolates the ladder's list, never a literal, for time units and
@@ -552,7 +558,7 @@ What each site becomes:
 | `_resolve_short_to_long` | `"$long\|$short"` per row |
 | `emit_runtime_config_verbose` | `$long => ${$target}`, the runtime value (D15) |
 | inverted-range check | rows with `bound` grouped by metric and role, min beside max; the message chosen by role |
-| negative-bound check (D2) | every row with `bound`, beside the inverted-range check |
+| negative-value check (D2) | every row with `bound` or `size`, beside the inverted-range check |
 | `has_active_filters` | any defined target among `role => 'filter'` rows |
 | `serialize_filters` | rows with `signature => 1`, in today's order (alphabetical by short name), each as its runtime value (D16) |
 | `$numeric_highlight_active` | any defined target among `role => 'highlight'` rows |
@@ -589,9 +595,9 @@ resolve_quantity_option($row, $text) -> ($value, $problem)
    unit, or one of another kind (`-bmin 5s`), or a bare multiplier on a byte
    option (`-bmin 1M`, D19).
 4. **Value rule** (D2, D20). A `bound` row refuses a negative value and keeps a
-   fraction; a `size` row refuses a value that is not whole. A bare number on a
-   size row keeps every value Getopt's integer check accepts today (D7),
-   negatives included.
+   fraction; a `size` row refuses a negative value and a value that is not
+   whole. A bare number on a size row keeps every value Getopt's integer check
+   accepted (D7) except a negative one.
 5. **Record.** The text as entered is kept beside the value, keyed by the
    option's long name, for `-V option-resolution` (D17) and for every message
    that quotes the value (D18).
@@ -647,6 +653,8 @@ All three read the resolved value and quote the text as entered (D18).
 - **Negative bound (D2).** A usage error and `exit 1`, from the declaration's
   `bound` rows, before the inverted-range check:
   `Invalid -dmin '-5ms': a bound cannot be negative`.
+- **Negative size (D2).** A usage error and `exit 1`, from the declaration's
+  `size` rows: `Invalid -n '-1': cannot be negative`.
 - **Inverted range.** Unchanged in behaviour: a warning, the run continues. It
   compares the resolved values and quotes the entered ones:
   `Warning: -dmin 2s is greater than -dmax 500ms - the range is unsatisfiable,
@@ -877,7 +885,9 @@ surface named is where the outcome is observed.
   (`quantity-units-declared`).
 - [ ] **AC2.** `-dmin -5` (and a negative value on each of the twelve) stops the
   run with a non-zero exit and `Invalid -dmin '-5': a bound cannot be
-  negative`; `-n -1` behaves as before. *Assertable:* exit code and stderr.
+  negative`; `-n -1` and `-gc -1` each stop the run with a non-zero exit and an
+  error naming the option (`Invalid -n '-1': cannot be negative`).
+  *Assertable:* exit code and stderr.
 - [ ] **AC3.** An `-o` run with no bound writes `numeric: 0` in the export's
   `excluded:` mapping. *Assertable:* `-V aggregate-export` and the YAML file.
 - [ ] **AC4.** The twelve help rows use the one phrasing of § 5.8 and state the
