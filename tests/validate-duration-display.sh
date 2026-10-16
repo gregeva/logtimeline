@@ -117,19 +117,31 @@ capture_render() {
 # required: the precision block is gated on csv_active. The emitted CSVs are
 # transient and cleaned with TMP_DIR. The display precision rule is a function
 # of displayed-unit vs this resolved unit, so only the unit is needed.
-# Usage: read_resolved_unit <fixture> <ltl-args...>  — echoes "<unit>".
+# Usage: read_resolved_unit <fixture> <ltl-args...>  — sets $resolved_unit.
+# Called directly, never inside $( ), so a failure it counts is kept: a run
+# that exits non-zero, a runtime warning, or a missing anchor fails the
+# scenario (HARNESS-DESIGN.md Trap 12).
+resolved_unit=""
 read_resolved_unit() {
     local fixture="$1"; shift
     local vfile="$TMP_DIR/csv-output.v"
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || true
+    resolved_unit=""
+    local rc=0
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -V csv-output "$@" -o "$fixture" ) > "$vfile" 2>"$vfile.stderr" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        echo "  FAIL  $current_scenario :: ltl exited $rc while reading -V csv-output" >&2
+        sed 's/^/        /' "$vfile.stderr" >&2
+        fail=$((fail + 1)); failures+=("$current_scenario :: resolved-unit probe failed"); return 1
+    fi
+    if ! assert_no_runtime_warnings "$vfile.stderr" "$current_scenario :: resolved-unit probe"; then
+        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr (resolved-unit probe)")
+    fi
 
-    local unit
-    unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')
-    if [[ -z "$unit" ]]; then
+    resolved_unit=$(grep -aE '^duration_unit_resolved:' "$vfile" | awk '{print $2}')
+    if [[ -z "$resolved_unit" ]]; then
         echo "  FAIL  $current_scenario :: missing 'duration_unit_resolved' anchor in -V csv-output" >&2
         fail=$((fail + 1)); failures+=("$current_scenario :: missing duration_unit_resolved"); return 1
     fi
-    echo "$unit"
 }
 
 # Self-documenting assertion (assert_command shape, HARNESS-DESIGN.md § 382):
@@ -184,16 +196,8 @@ run_scenario() {
     current_scenario="$tag"
     echo "[$current_scenario]"
 
-    local unit
-    unit=$(read_resolved_unit "$fixture" "${model_args[@]}") || return 0
-    # Runtime-warning cleanliness for the resolved-unit probe. The check runs
-    # here in the main shell because read_resolved_unit executes in a
-    # command-substitution subshell where counter updates would be lost; it
-    # writes its stderr capture to the deterministic path checked below
-    # (HARNESS-DESIGN.md section Runtime-warning cleanliness).
-    if ! assert_no_runtime_warnings "$TMP_DIR/csv-output.v.stderr" "$current_scenario :: resolved-unit probe"; then
-        fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr (resolved-unit probe)")
-    fi
+    read_resolved_unit "$fixture" "${model_args[@]}" || return 0
+    local unit="$resolved_unit"
 
     local render="$TMP_DIR/render-$tag.txt"
     capture_render "$render" "$fixture" "${model_args[@]}" --terminal-width "$width" || return 0

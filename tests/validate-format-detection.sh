@@ -238,10 +238,14 @@ assert_command() {
 # Stage a committed fixture (tests/fixtures/format-detection/<fixture>)
 # under a producer-true name in a per-scenario directory (D51): the
 # committed name is never fed to ltl, and two scenarios may stage the same
-# staged name without colliding. Echoes the staged path.
+# staged name without colliding. Names the staged path in $staged_path.
+# Called directly, never inside $( ), so a missing fixture is counted
+# (HARNESS-DESIGN.md Trap 12).
 FIXTURE_DIR="$REPO_DIR/tests/fixtures/format-detection"
+staged_path=""
 stage_fixture() {
     local fixture="$1" staged_as="$2"
+    staged_path=""
     local dir="$TMP_DIR/$current_scenario"
     mkdir -p "$dir"
     if [[ ! -f "$FIXTURE_DIR/$fixture" ]]; then
@@ -249,7 +253,7 @@ stage_fixture() {
         fail=$((fail + 1)); failures+=("$current_scenario :: fixture missing"); return 1
     fi
     cp "$FIXTURE_DIR/$fixture" "$dir/$staged_as"
-    echo "$dir/$staged_as"
+    staged_path="$dir/$staged_as"
 }
 
 # One variant-selection assertion block: format, selected member, basis.
@@ -475,7 +479,7 @@ scenario_family_shapes() {
                "access-users-only.txt|access.log|access_common_duration|D3 as revised: an httpd-named common-plus-duration file binds the one common-plus-duration format" \
                "access-bracketed-us.txt|codebeamer_access_log.2025-10-29.txt|access_common_duration_bracketed|D7: the bracketed shape binds whatever unit the line writes"; do
         IFS='|' read -r fixture staged format why <<< "$row"
-        log=$(stage_fixture "$fixture" "$staged") || continue
+        stage_fixture "$fixture" "$staged" || continue; log="$staged_path"
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
         assert_line "$out" pattern "^  format: $format\$" \
             asserts "$why" \
@@ -487,13 +491,13 @@ scenario_family_shapes() {
     done
     # The combined line carries no session: the thread-session shape's
     # all-optional tail no longer exists to swallow a quoted "-" (R13).
-    log=$(stage_fixture access-combined.txt access.log) || return
+    stage_fixture access-combined.txt access.log || return 0; log="$staged_path"
     out=$(run_format_detection "$log" -V udm-counting); check_capture_warnings "$out"
     assert_absent "$out" pattern '^bucket: [0-9]+ sessions=' \
         asserts 'a combined line yields no session: the quoted "-" of the user-agent position is never captured as one (R13)' \
         produced_by 'the access_combined entry in format_registry_specs() (no session field) in ltl' contract "$FAMILY_CONTRACT D4/D14"
     # A bare - session is absent, not a session, on the thread-session shape (R14).
-    log=$(stage_fixture access-thread-session.txt localhost_access_log.2025-05-05.txt) || return
+    stage_fixture access-thread-session.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
     # A counting metric makes the section walk the buckets, where the sessions
     # oracle line is printed.
     out=$(run_format_detection "$log" -V udm-counting -udm 'st::count:/" ([0-9]{3}) /'); check_capture_warnings "$out"
@@ -524,7 +528,7 @@ scenario_family_fields_evidence() {
     current_scenario="family-fields-evidence"
     echo "[$current_scenario]"
     local log out log_dash out_dash
-    log=$(stage_fixture access-users-only.txt access.log) || return
+    stage_fixture access-users-only.txt access.log || return 0; log="$staged_path"
     out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  fields: user=9/12 session=- thread=-$' \
         asserts 'the evidence block reports the populated identity fields of the selected member over the sampled lines it matched: 9 of 12 users populated; session and thread are not fields of this shape' \
@@ -536,7 +540,7 @@ scenario_family_fields_evidence() {
     assert_line "$out_dash" pattern '^  fields: user=0/12 session=- thread=-$' \
         asserts 'with a bare - in every user column no line populates the field' \
         produced_by 'select_format_variants() in ltl' contract "$FAMILY_CONTRACT D8"
-    log=$(stage_fixture access-users-sessions.txt localhost_access_log.2025-05-05.txt) || return
+    stage_fixture access-users-sessions.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
     out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  fields: user=9/12 session=12/12 thread=12/12$' \
         asserts 'all three identity fields are reported for the thread-session shape' \
@@ -547,7 +551,7 @@ scenario_family_pin_names() {
     current_scenario="family-pin-names"
     echo "[$current_scenario]"
     local log out err name
-    log=$(stage_fixture access-combined.txt access.log) || return
+    stage_fixture access-combined.txt access.log || return 0; log="$staged_path"
     for name in access_common access_combined access_combined_duration access_common_duration \
                 access_common_duration_thread_session access_common_duration_bracketed; do
         out=$(run_format_detection "$log" -lf "$name"); check_capture_warnings "$out"
@@ -944,7 +948,7 @@ gc_fixture_counts() {
 scenario_gc_tagless_start_lines() {
     current_scenario="gc-tagless-start-lines"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local log; stage_fixture gc-time-jdk17.txt gc.log || return 0; log="$staged_path"
     local counts records markers starts total
     counts=$(gc_fixture_counts "$log")
     read -r records markers starts total <<< "$counts"
@@ -1087,7 +1091,7 @@ scenario_gc_tagless_utc() {
 scenario_gc_tagless_level_padded() {
     current_scenario="gc-tagless-level-padded"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture gc-time-level-padded-jdk17.txt gc.log) || return
+    local log; stage_fixture gc-time-level-padded-jdk17.txt gc.log || return 0; log="$staged_path"
     local counts records markers starts total
     counts=$(gc_fixture_counts "$log")
     read -r records markers starts total <<< "$counts"
@@ -1113,7 +1117,7 @@ scenario_gc_tagless_level_padded() {
 scenario_gc_tagged_padded_level() {
     current_scenario="gc-tagged-padded-level"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture gc-tagged-padded-jdk17.txt gc.log) || return
+    local log; stage_fixture gc-tagged-padded-jdk17.txt gc.log || return 0; log="$staged_path"
     local counts records markers starts total
     counts=$(gc_fixture_counts "$log")
     read -r records markers starts total <<< "$counts"
@@ -1142,8 +1146,8 @@ scenario_gc_tagged_padded_level() {
 scenario_gc_tagless_legend() {
     current_scenario="gc-tagless-legend"
     echo "[$current_scenario]"
-    local tagged; tagged=$(stage_fixture gc-tagged-jdk21.txt gc-tagged.log) || return
-    local timeonly; timeonly=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local tagged; stage_fixture gc-tagged-jdk21.txt gc-tagged.log || return 0; tagged="$staged_path"
+    local timeonly; stage_fixture gc-time-jdk17.txt gc.log || return 0; timeonly="$staged_path"
     # run_format_detection places extra arguments before its log argument,
     # so the tagged file is read first.
     local out; out=$(run_format_detection "$timeonly" "$tagged"); check_capture_warnings "$out"
@@ -1850,7 +1854,7 @@ scenario_variant_ambiguity_note() {
 
     # Contracted absence 3: the same content under the producer-true name is
     # decided by evidence (stem), so no assumption is in effect.
-    local staged; staged=$(stage_fixture connection-server.txt cxserver.1.log) || return
+    local staged; stage_fixture connection-server.txt cxserver.1.log || return 0; staged="$staged_path"
     local out_named
     out_named=$(run_format_detection "$staged")
     check_capture_warnings "$out_named"
@@ -2036,7 +2040,7 @@ scenario_classification_summary_rows() {
 scenario_variant_connection_server() {
     current_scenario="variant-connection-server"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture connection-server.txt cxserver.1.log) || return
+    local log; stage_fixture connection-server.txt cxserver.1.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" connection_server_standard mt10 evidence '0\.93'
     assert_line "$out" pattern '^  filename_evidence: stem=mt10 ext=match date=- index=present$' \
@@ -2060,7 +2064,7 @@ scenario_milliseconds_not_read() {
         else
             slug=connection_server_standard; fixture=milliseconds-connection-server.txt; staged=milliseconds-cs.txt; confidence='0\.75'
         fi
-        log=$(stage_fixture "$fixture" "$staged") || return
+        stage_fixture "$fixture" "$staged" || return 0; log="$staged_path"
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
         assert_variant_selection "$out" "$slug" "$member" evidence "$confidence"
         assert_line "$out" pattern '^  matched_lines: 8$' \
@@ -2077,7 +2081,7 @@ scenario_milliseconds_not_read() {
 scenario_variant_integration_runtime_named() {
     current_scenario="variant-integration-runtime-named"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local log; stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.82'
     assert_member_outscores "$out" mt10ir mt10
@@ -2098,7 +2102,7 @@ scenario_variant_integration_runtime_named() {
 scenario_variant_integration_runtime_unnamed() {
     current_scenario="variant-integration-runtime-unnamed"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture integration-runtime.txt app.log) || return
+    local log; stage_fixture integration-runtime.txt app.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_variant_selection "$out" integration_runtime_standard mt10ir evidence '0\.78'
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
@@ -2169,7 +2173,7 @@ scenario_date_order_moves_back() {
 scenario_unit_tomcat_named() {
     current_scenario="unit-tomcat-named"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt) || return
+    local log; stage_fixture tomcat-access.txt localhost_access_log.2025-05-05.txt || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  format: access_common_duration$' \
         asserts 'The common-plus-duration shape is one format whatever unit the producer writes: a Tomcat-named file binds it (#444 D3 as revised)' \
@@ -2188,7 +2192,7 @@ scenario_unit_tomcat_named() {
 scenario_unit_httpd_named() {
     current_scenario="unit-httpd-named"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture httpd-access.txt access.log-20260609) || return
+    local log; stage_fixture httpd-access.txt access.log-20260609 || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  format: access_common_duration$' \
         asserts 'An httpd-named file binds the same format: nothing on the line or in the registry distinguishes the microsecond producer' \
@@ -2214,7 +2218,7 @@ scenario_unit_httpd_named() {
 scenario_variant_thingworx_rolled() {
     current_scenario="variant-thingworx-rolled"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log) || return
+    local log; stage_fixture thingworx-application-log.txt ApplicationLog.2025-05-06.0.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt1std ext=match date=match index=present$' \
         asserts 'A logback-rolled ThingWorx name decomposes to stem, date, index and extension, and the filename date agrees with the first content timestamp (D52 probe c)' \
@@ -2253,7 +2257,7 @@ assert_windchill_fixture_detection() {
 scenario_windchill_method_server_named() {
     current_scenario="windchill-method-server-named"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture windchill-method-server.txt BackgroundMethodServerESI-2507180624-9559-log4j.log) || return
+    local log; stage_fixture windchill-method-server.txt BackgroundMethodServerESI-2507180624-9559-log4j.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
@@ -2269,7 +2273,7 @@ scenario_windchill_method_server_named() {
 scenario_windchill_method_server_rolled() {
     current_scenario="windchill-method-server-rolled"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture windchill-method-server.txt MethodServer-2507180627-9144-log4j.log.2025-07-18_3) || return
+    local log; stage_fixture windchill-method-server.txt MethodServer-2507180627-9144-log4j.log.2025-07-18_3 || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=match index=present$' \
@@ -2281,7 +2285,7 @@ scenario_windchill_method_server_rolled() {
 scenario_windchill_method_server_bare() {
     current_scenario="windchill-method-server-bare"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture windchill-method-server.txt MethodServer.log) || return
+    local log; stage_fixture windchill-method-server.txt MethodServer.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=mt17 ext=match date=- index=-$' \
@@ -2293,7 +2297,7 @@ scenario_windchill_method_server_bare() {
 scenario_windchill_method_server_renamed() {
     current_scenario="windchill-method-server-renamed"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture windchill-method-server.txt app.txt) || return
+    local log; stage_fixture windchill-method-server.txt app.txt || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_windchill_fixture_detection "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
@@ -2305,7 +2309,7 @@ scenario_windchill_method_server_renamed() {
 scenario_variant_mixed_legend() {
     current_scenario="variant-mixed-legend"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture mixed.txt mixed.log) || return
+    local log; stage_fixture mixed.txt mixed.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  formats: connection_server_standard,access_common_duration$' \
         asserts 'Every format found in the file is listed, first-bound first' \
@@ -2344,7 +2348,7 @@ scenario_variant_mixed_legend() {
 scenario_windchill_workgroup_manager() {
     current_scenario="wgm-client"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture wgm-client.txt uwgm_client.log.1) || return
+    local log; stage_fixture wgm-client.txt uwgm_client.log.1 || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
     assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
         asserts 'A WGM client log binds the windchill_workgroup_manager format' \
@@ -2393,7 +2397,7 @@ scenario_windchill_workgroup_manager() {
 scenario_wgm_client_localtime() {
     current_scenario="wgm-client-localtime"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture wgm-client-localtime.txt uwgm.log.1) || return
+    local log; stage_fixture wgm-client-localtime.txt uwgm.log.1 || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log" -V benchmark-data); check_capture_warnings "$out"
     assert_line "$out" pattern '^  format: windchill_workgroup_manager$' \
         asserts 'A WGM client log whose timestamps carry a numeric zone offset binds windchill_workgroup_manager, not the bracketed-token format that would otherwise accept a minority of its lines' \
@@ -2429,7 +2433,7 @@ scenario_wgm_filename_family() {
     echo "[$current_scenario]"
     local name log out
     for name in genlwsc.log.1 uwgm.log.1; do
-        log=$(stage_fixture wgm-client.txt "$name") || return
+        stage_fixture wgm-client.txt "$name" || return 0; log="$staged_path"
         out=$(run_format_detection "$log"); check_capture_warnings "$out"
         assert_line "$out" pattern '^  filename_evidence: stem=mt16 ext=match date=- index=present$' \
             asserts "$name decomposes to the windchill_workgroup_manager entry's stem, extension and rotation index" \
@@ -2440,7 +2444,7 @@ scenario_wgm_filename_family() {
             produced_by 'read_and_process_logs() in ltl (first-match block)' \
             contract 'features/log-format-registry.md section -V format-detection section-contract'
     done
-    log=$(stage_fixture wgm-client.txt renamed.txt) || return
+    stage_fixture wgm-client.txt renamed.txt || return 0; log="$staged_path"
     out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  filename_evidence: stem=- ext=- date=- index=-$' \
         asserts 'A renamed WGM file matches no declared stem: the name signal is withheld, never contradicting (D45)' \
@@ -2470,7 +2474,7 @@ scenario_impossible_date() {
 scenario_format_pin() {
     current_scenario="format-pin"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log) || return
+    local log; stage_fixture integration-runtime.txt IntegrationRuntime-46b44bb3-cd86-44a6-a268-012144ff23af.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log" -lf connection_server_standard); check_capture_warnings "$out"
     assert_line "$out" pattern '^format_pin: connection_server_standard$' \
         asserts 'The run-level pin is reported' \
@@ -2524,7 +2528,7 @@ scenario_format_pin() {
     fi
 
     # A connector shape is pinned by its name like any scanned entry.
-    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local jk; stage_fixture apache-mod-jk.txt mod_jk.log || return 0; jk="$staged_path"
     local out3; out3=$(run_format_detection "$jk" -lf apache_mod_jk); check_capture_warnings "$out3"
     assert_line "$out3" pattern '^format_pin: apache_mod_jk$' \
         asserts 'The run-level pin names the connector entry' \
@@ -2545,7 +2549,7 @@ scenario_format_pin() {
 
     # The tag-less G1 entries are pinnable by their own names, and the tagged
     # name does not read a time-only file.
-    local gc; gc=$(stage_fixture gc-time-jdk17.txt gc.log) || return
+    local gc; stage_fixture gc-time-jdk17.txt gc.log || return 0; gc="$staged_path"
     local out4; out4=$(run_format_detection "$gc" -lf java_gc_g1_time); check_capture_warnings "$out4"
     assert_line "$out4" pattern '^  format: java_gc_g1_time$' \
         asserts 'Pinning the time-only G1 entry by its own name reads the file as that format' \
@@ -2632,7 +2636,7 @@ CONNECTOR_CONTRACT='features/655-apache-mod-jk-connector-format.md'
 # binds its own entry with every line matched and nothing dropped.
 assert_connector_shape() {
     local fixture="$1" format="$2" entry="$3" lines="$4"
-    local log; log=$(stage_fixture "$fixture" mod_jk.log) || return
+    local log; stage_fixture "$fixture" mod_jk.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern "^  format: $format\$" \
         asserts "A connector log written in the $format shape binds the entry of that name by its content" \
@@ -2699,7 +2703,7 @@ scenario_apache_mod_jk_seconds_no_request_id() {
 scenario_apache_mod_jk_unnamed() {
     current_scenario="apache-mod-jk-unnamed"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture apache-mod-jk.txt app.txt) || return
+    local log; stage_fixture apache-mod-jk.txt app.txt || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_line "$out" pattern '^  format: apache_mod_jk$' \
         asserts 'A connector log binds its entry from any file name: the shape on the line is the whole evidence' \
@@ -2723,7 +2727,7 @@ scenario_apache_mod_jk_unnamed() {
 scenario_apache_mod_jk_stamp() {
     current_scenario="apache-mod-jk-stamp"
     echo "[$current_scenario]"
-    local log; log=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local log; stage_fixture apache-mod-jk.txt mod_jk.log || return 0; log="$staged_path"
     local out; out=$(run_format_detection "$log" -V filter-summary -st '2026-08-30 01:18:10.579'); check_capture_warnings "$out"
     assert_line "$out" pattern '^excluded_time_window: 27$' \
         asserts 'A start one millisecond after the 27th line stamp (01:18:10.578) excludes exactly the 27 lines at or before it' \
@@ -2743,8 +2747,8 @@ scenario_apache_mod_jk_stamp() {
 scenario_apache_mod_jk_beside_access() {
     current_scenario="apache-mod-jk-beside-access"
     echo "[$current_scenario]"
-    local access; access=$(stage_fixture apache-mod-jk-access.txt access.log) || return
-    local jk; jk=$(stage_fixture apache-mod-jk.txt mod_jk.log) || return
+    local access; stage_fixture apache-mod-jk-access.txt access.log || return 0; access="$staged_path"
+    local jk; stage_fixture apache-mod-jk.txt mod_jk.log || return 0; jk="$staged_path"
     local window start end out
     for window in '2026-08-19 11:25:58|2026-08-19 11:25:59|413' \
                   '2026-08-21 11:50:51|2026-08-21 11:50:52|503' \

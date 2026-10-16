@@ -96,6 +96,23 @@ check_capture_warnings() {
     check_stderr_warnings "${1%.txt}.stderr"
 }
 
+# A capture that a comparison or an absence check reads must be a rendered
+# topic: ltl exited 0 and printed it. Without this, two runs that failed the
+# same way compare identical, and an error message carries no internals.
+# Takes the "<exit>:<path>" run_ltl echoes. Silent when the topic rendered.
+check_capture_rendered() {
+    local ec="${1%%:*}" out="${1#*:}"
+    if [[ "$ec" -ne 0 || ! -s "$out" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it"
+        echo "        produced_by: print_explain_topic() in ltl"
+        echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors (a comparison or an absence check reads a rendered topic)"
+        echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: topic not rendered (exit $ec)")
+    fi
+}
+
 # Self-documenting assertion: a line matching `pattern` must be present.
 assert_line() {
     local outfile="$1"
@@ -420,6 +437,8 @@ scenario_aliases() {
     r2=$(run_ltl "alias-avg"  --explain avg)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
+    check_capture_rendered "$r1"
+    check_capture_rendered "$r2"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain avg produces output identical to ltl --explain mean" \
         produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
@@ -431,6 +450,8 @@ scenario_aliases() {
     r2=$(run_ltl "alias-stddev"  --explain stddev)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
+    check_capture_rendered "$r1"
+    check_capture_rendered "$r2"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain stddev produces output identical to ltl --explain std_dev" \
         produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
@@ -442,6 +463,8 @@ scenario_aliases() {
     r2=$(run_ltl "alias-p95"          --explain p95)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
+    check_capture_rendered "$r1"
+    check_capture_rendered "$r2"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain p95 produces output identical to ltl --explain percentiles" \
         produced_by 'resolve_explain_topic() in ltl (every percentile slug routes to the shared topic)' \
@@ -453,6 +476,8 @@ scenario_aliases() {
     r2=$(run_ltl "alias-p99999"      --explain p99999)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
+    check_capture_rendered "$r1"
+    check_capture_rendered "$r2"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl --explain p99999 produces output identical to ltl --explain percentiles" \
         produced_by 'resolve_explain_topic() in ltl' \
@@ -471,6 +496,8 @@ scenario_so_names_explain() {
         r2=$(run_ltl "so-name-$so_name" --explain "$so_name")
         check_capture_warnings "${r1#*:}"
         check_capture_warnings "${r2#*:}"
+        check_capture_rendered "$r1"
+        check_capture_rendered "$r2"
         assert_outputs_equal "${r1#*:}" "${r2#*:}" \
             asserts     "ltl --explain $so_name produces the $topic topic, the statistic -so $so_name ranks by" \
             produced_by 'resolve_explain_topic() in ltl (through %so_spelling and %statistic_by_spelling)' \
@@ -483,6 +510,12 @@ scenario_so_names_explain() {
         assert_exit "${result%%:*}" 1 \
             asserts     "ltl --explain $so_name stays an unknown topic: neither a sum nor a metric's occurrences has a topic" \
             produced_by 'resolve_explain_topic() in ltl' \
+            contract    "$contract"
+        local refused="${result#*:}"
+        assert_line "${refused%.txt}.stderr" \
+            pattern     "unknown --explain topic '$so_name'" \
+            asserts     "The refusal is the unknown-topic error naming $so_name, not some other failure" \
+            produced_by 'print_usage("unknown --explain topic ...") in ltl' \
             contract    "$contract"
     done
 }
@@ -889,6 +922,8 @@ scenario_short_alias() {
     r2=$(run_ltl "short-ex"      -ex mean)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
+    check_capture_rendered "$r1"
+    check_capture_rendered "$r2"
     assert_outputs_equal "${r1#*:}" "${r2#*:}" \
         asserts     "ltl -ex mean produces output identical to ltl --explain mean" \
         produced_by 'GetOptions wiring in ltl (--explain|ex:s)' \
@@ -1696,6 +1731,7 @@ scenario_technique_no_internals() {
         result=$(run_ltl "internals-$topic" --explain "$topic")
         local out="${result#*:}"
         check_capture_warnings "$out"
+        check_capture_rendered "$result"
 
         # Issue references (#NNN) and decision labels (D5, F12, AC3, R7)
         # standing as their own token.

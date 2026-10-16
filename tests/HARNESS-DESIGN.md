@@ -642,6 +642,18 @@ fi
 
 A helper that can count a failure is called directly, never inside `$( )`; it hands back a path through a variable, or the caller derives the path. A capture helper that runs inside `$( )` records the exit code beside the capture (`<capture>.rc`), and the caller checks it in the main shell before reading the capture, as it checks `<capture>.stderr` (§ Runtime-warning cleanliness).
 
+#### Trap 13: a check that holds when the run did not happen
+
+Three assertion shapes are true of a run that failed, and so pass against it:
+
+- **A comparison of two captures.** Two runs that fail the same way print the same thing, usually nothing, and compare identical.
+- **An absence check.** An error message, or an empty capture, contains none of the forbidden text.
+- **A presence check that the seed already satisfies.** A pattern that matches rows the fixture carried in passes whether or not the run wrote anything.
+
+Each one is preceded by a check that the run produced what it reads: exit 0 and a non-empty capture before a comparison or an absence check, and a lookup of the specific row or key the run writes (its date, its value) rather than any line of the right shape. A refusal is asserted by its exit code **and** its message, never the exit code alone, since any failure exits non-zero.
+
+The way to find them is to run each scenario alone against an `ltl` that always exits 1 (`LTL=<stub> ./tests/validate-<name>.sh --scenario <s>`): a scenario that exits 0 after invoking the stub passes on a run that did not happen. The suite was swept this way under Issue #726 and the cases found were closed: alias and short-option comparisons and the no-internals absence checks in `validate-explain.sh`, and the expired-selection check in `validate-index-read-back.sh`.
+
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 
 A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.

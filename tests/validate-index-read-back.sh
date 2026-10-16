@@ -1093,13 +1093,17 @@ scenario_expired_selection_entry() {
     # The expired selection row is purged at end-of-run write per #46 logic;
     # at read-back time it may still match Tier 1 (read-back doesn't expire).
     # The acceptance criterion is that after the run, the prior expired row
-    # is replaced by a fresh selection row (entry_date is now current).
-    local current_year
-    current_year=$(date +%Y)
+    # is replaced by a fresh selection row (entry_date is now current). The
+    # check reads the row the run rewrites, the -dmin=50 selection of the log
+    # it read, so a run that never wrote the index cannot satisfy it through
+    # the seed's other rows.
+    local refreshed age
+    refreshed=$(read_index_column entry_date "entry_type=selection AND filters=-dmin=50 AND file_path=$ACCESS_LOG")
+    age=$(perl -MTime::Local=timegm -e 'my ($y,$mo,$d,$h,$mi,$s) = ($ARGV[0] // "") =~ /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)$/ or do { print -1; exit }; print time() - timegm($s,$mi,$h,$d,$mo-1,$y)' "$refreshed")
 
     assert_command \
-        command     "grep -q '^selection,${current_year}' ltl-index.csv" \
-        label       "selection row refreshed with current entry_date (${current_year})" \
+        command     "[ '$age' -ge 0 ] && [ '$age' -lt 86400 ]" \
+        label       "the -dmin=50 selection row is rewritten with a current entry_date (was 91 days old; now ${refreshed:-absent}, age ${age}s)" \
         asserts     'A selection row with entry_date older than the retention horizon (91 days here) is replaced by a fresh selection row at end-of-run write - read-back itself does not expire rows, but the write side does, so expiration is self-healing on the next run' \
         produced_by 'write_index_file() in ltl (end-of-run #46 write side; purges expired rows then writes fresh ones with current entry_date)' \
         contract    'features/179-index-read-back.md section Interactions with existing features section "With write side (#46)" - expiration semantics delegated to #46; section Behavior - read-back does not expire'

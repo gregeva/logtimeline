@@ -153,40 +153,45 @@ assert_equal() {
     fi
 }
 
-# Read `key: N` from a captured section. A key that is absent is a hard
-# failure here (a lookup that matches nothing is never a pass), reported
-# through the same accounting so the run continues to the summary.
+# Read `key: N` from a captured section into the variable named by the third
+# argument. A key that is absent is a hard failure here (a lookup that matches
+# nothing is never a pass), reported through the same accounting so the run
+# continues to the summary. Called directly, never inside $( ), so the
+# failure is counted (HARNESS-DESIGN.md Trap 12).
 section_value() {
-    local outfile="$1" key="$2"
+    local outfile="$1" key="$2" var="$3"
     local v
-    v=$(grep -E "^${key}: [0-9]+$" "$outfile" | head -1 | sed -E 's/^[^:]+: //')
+    printf -v "$var" '%s' ""
+    v=$(grep -E "^${key}: [0-9]+$" "$outfile" | head -1 | sed -E 's/^[^:]+: //') || v=""
     if [[ -z "$v" ]]; then
         echo "  FAIL  $current_scenario :: key '$key' absent from $outfile" >&2
         fail=$((fail + 1))
         failures+=("$current_scenario :: key $key absent")
-        echo ""
         return
     fi
-    echo "$v"
+    printf -v "$var" '%s' "$v"
 }
 
 # Read a benchmark-data TSV row (`key<TAB>N`).
 benchmark_value() {
-    local outfile="$1" key="$2"
+    local outfile="$1" key="$2" var="$3"
     local v
-    v=$(grep -E "^${key}	[0-9]+$" "$outfile" | head -1 | cut -f2)
+    printf -v "$var" '%s' ""
+    v=$(grep -E "^${key}	[0-9]+$" "$outfile" | head -1 | cut -f2) || v=""
     if [[ -z "$v" ]]; then
         echo "  FAIL  $current_scenario :: benchmark-data row '$key' absent from $outfile" >&2
         fail=$((fail + 1))
         failures+=("$current_scenario :: benchmark-data row $key absent")
-        echo ""
         return
     fi
-    echo "$v"
+    printf -v "$var" '%s' "$v"
 }
 
 # Run ltl with the four sections the scenarios read. Extra args precede the
-# log. Echoes the capture path; stderr sits beside it as <capture>.stderr.
+# log. Names the capture path in $sections_out; stderr sits beside it as
+# <capture>.stderr. Called directly, never inside $( ), so the runtime-warning
+# failure it counts is kept (HARNESS-DESIGN.md Trap 12).
+sections_out=""
 run_sections() {
     local log="$1"
     shift
@@ -210,7 +215,7 @@ run_sections() {
         fail=$((fail + 1))
         failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
-    echo "$outfile"
+    sections_out="$outfile"
 }
 
 # The identities every scenario must satisfy, plus the two cross-surface
@@ -220,15 +225,15 @@ run_sections() {
 assert_funnel_identities() {
     local out="$1"
     local read unmatched excluded included tw pr fi nu ot
-    read=$(section_value "$out" lines_read)
-    unmatched=$(section_value "$out" lines_unmatched)
-    excluded=$(section_value "$out" lines_excluded)
-    included=$(section_value "$out" lines_included)
-    tw=$(section_value "$out" excluded_time_window)
-    pr=$(section_value "$out" excluded_profile)
-    fi=$(section_value "$out" excluded_filter)
-    nu=$(section_value "$out" excluded_numeric)
-    ot=$(section_value "$out" excluded_other)
+    section_value "$out" lines_read read
+    section_value "$out" lines_unmatched unmatched
+    section_value "$out" lines_excluded excluded
+    section_value "$out" lines_included included
+    section_value "$out" excluded_time_window tw
+    section_value "$out" excluded_profile pr
+    section_value "$out" excluded_filter fi
+    section_value "$out" excluded_numeric nu
+    section_value "$out" excluded_other ot
     [[ -z "$read$unmatched$excluded$included$tw$pr$fi$nu$ot" ]] && return
     assert_equal "read = unmatched + excluded + included" "$read" $((unmatched + excluded + included)) \
         asserts 'Every line read is exactly one of unmatched, excluded or included; the three stages partition lines_read' \
@@ -239,14 +244,14 @@ assert_funnel_identities() {
         produced_by 'lines_excluded_total() in ltl' \
         contract "$CONTRACT - lines_excluded definition"
     local fd_unmatched bd_read bd_excluded bd_included
-    fd_unmatched=$(section_value "$out" unmatched_lines)
+    section_value "$out" unmatched_lines fd_unmatched
     assert_equal "format-detection unmatched_lines" "$fd_unmatched" "$unmatched" \
         asserts 'The classification sub-section of -V format-detection prints the run unmatched total from the same counter' \
         produced_by 'emit_format_detection_verbose() in ltl (classification sub-section, unmatched_lines)' \
         contract "$CONTRACT - lines_unmatched is the value format-detection / classification prints as unmatched_lines"
-    bd_read=$(benchmark_value "$out" lines_read)
-    bd_excluded=$(benchmark_value "$out" lines_excluded)
-    bd_included=$(benchmark_value "$out" lines_included)
+    benchmark_value "$out" lines_read bd_read
+    benchmark_value "$out" lines_excluded bd_excluded
+    benchmark_value "$out" lines_included bd_included
     assert_equal "benchmark-data lines_read" "$bd_read" "$read" \
         asserts 'benchmark-data re-emits lines_read from the same variable' \
         produced_by 'print_verbose_output() in ltl (benchmark-data lines_read row)' \
@@ -269,7 +274,8 @@ cause_scenario() {
     scenario_wanted "$name" || return 0
     current_scenario="$name"
     local out
-    out=$(run_sections "$fixture" "$@")
+    run_sections "$fixture" "$@"
+    out="$sections_out"
     assert_line "$out" pattern "^${key}: ${expected}\$" \
         asserts "$asserts" \
         produced_by "$PRODUCER" \
@@ -369,7 +375,8 @@ cause_scenario vocabulary-rejection "$FIXTURES/log-level-outside-vocabulary.txt"
 if scenario_wanted csv-unparseable-row; then
     current_scenario="csv-unparseable-row"
     printf 'timestamp,latency\n2026-06-01 10:00:05,12\nnot-a-timestamp,34\n2026-06-01 10:02:05,56\n' > "$TMP_DIR/bad-row.csv"
-    out=$(run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean)
+    run_sections "$TMP_DIR/bad-row.csv" -udm latency:ms:mean
+    out="$sections_out"
     assert_line "$out" pattern '^excluded_other: 0$' \
         asserts 'A CSV row whose timestamp is neither epoch nor ISO is never matched, so no exclusion cause counts it' \
         produced_by 'the shape test of the CSV block csv_block_src() generates, before the csv row counts as a match in read_and_process_logs() in ltl' \
@@ -412,7 +419,8 @@ cause_scenario combined-causes "$FIXTURES/http-status-families.txt" \
 if scenario_wanted impossible-date; then
     current_scenario="impossible-date"
     IMPOSSIBLE_CONTRACT='features/611-timestamp-acceptance.md C3, C4, C5 (a line whose date cannot exist is not matched, counted, and noted once per run per format); AC1, AC2, AC4'
-    out=$(run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt")
+    run_sections "$FIXTURES/impossible-date-application.txt" "$FIXTURES/impossible-date-access.txt" "$FIXTURES/impossible-date-connector.txt"
+    out="$sections_out"
     assert_line "$out" pattern '^lines_unmatched_impossible_date: 4$' \
         asserts 'Month 13 and 30 February on the scanned ISO arm, 31 June on the Apache date and 30 February on the asctime date: four lines not matched because their date cannot exist, and the run continues' \
         produced_by 'the impossible-date branch format_timestamp_src() emits into each scan block; timestamp_impossible_total() in ltl' \
@@ -441,7 +449,8 @@ if scenario_wanted impossible-date; then
         asserts 'No note per line or per file, and no line is kept at the previous line time' \
         produced_by 'format_probe_signal() in ltl' \
         contract 'features/log-format-registry.md D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C5'
-    csv_out=$(current_scenario=impossible-date-csv run_sections "$FIXTURES/impossible-date-csv.txt" -udm value::max)
+    current_scenario=impossible-date-csv run_sections "$FIXTURES/impossible-date-csv.txt" -udm value::max
+    csv_out="$sections_out"
     assert_line "$csv_out" pattern '^lines_unmatched_impossible_date: 1$' \
         asserts 'A CSV row dated 30 February under the order its file is read in is not matched, and the run continues' \
         produced_by 'the impossible-date branch format_timestamp_src() emits into the CSV block csv_block_src() generates' \
@@ -464,7 +473,8 @@ if scenario_wanted time-window-forms; then
     current_scenario="time-window-forms"
     FORMS_CONTRACT='features/611-timestamp-acceptance.md C6, C7 (one parser for -st and -et, either separator, a usage error naming the forms); AC6, AC7'
     for bound in "2025-05-07T12:00:00" "2025-05-07T12:00" "2025-05-07T11:59:59.999"; do
-        out=$(current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound")
+        current_scenario="time-window-forms-$bound" run_sections "$FIXTURES/tomcat-access-duration-spread.txt" -st "$bound"
+        out="$sections_out"
         assert_line "$out" pattern '^excluded_time_window: 360$' \
             asserts "-st $bound drops the same 360 lines as the space form: the T separator, a bound without seconds and a fraction are read whole" \
             produced_by 'iso_timestamp_parts() through the -st/-et settlement in adapt_to_command_line_options() in ltl' \
