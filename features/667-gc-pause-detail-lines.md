@@ -41,7 +41,7 @@ against wall clock, how the regions moved, and which phase took the time.
 | Decoration brackets | Matched and not kept | `features/656-gc-log-tagless-decorations.md` D9 |
 | The tagged entry's pattern | Not widened beyond the padded level bracket (scoped to #656) | `features/656-gc-log-tagless-decorations.md` D1 |
 | Time attribution | A line's contribution lands in the bucket of its own timestamp | `features/log-format-registry.md` D22 |
-| State carried across lines | Correlating lines into one record is #372's capability (on hold), an extension of the metric model with no separate state store; the merged result is a standard parse-stage record in the completion bucket; nested groups and one-to-many are non-goals | `features/log-format-registry.md` D23 (c), D58 (a); #372 § Out of scope |
+| State carried across lines | Merging lines that share a correlation key into one logical event is #372's capability (on hold, blocked by #61 and #59). It is declared per format as an optional sub-determination, so a format without declarations pays nothing; its state is #61's inter-line store, with a one-shot consume-at-end lifecycle, not a store of its own; the merged event is a standard parse-stage record in the completion bucket. #372 leaves nested pairing and one-start-to-many-ends fan-out to a future specification when a consumer demands it | `features/log-format-registry.md` D23 (a) (c), D58 (a); #372 § Out of scope |
 | Metrics a format declares | `message_metrics` probes fill the canonical fields (duration, bytes) from the matched line's message | `format_registry_specs()`, entry `mt1std` |
 | User-defined metrics | Read from lines a format matched, never from unmatched lines | F10 below |
 
