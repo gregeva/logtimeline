@@ -41,6 +41,16 @@ format) as D1 of `features/483-gc-g1-classification-criteria.md`: failure comes 
 the JVM's failure statements, success from the standard GC operation messages, and
 every other line a G1 entry matches, the CPU load line among them, is unclassified.
 
+### D3 — the CPU load lines are read by sibling entries, as counted records (architect, 2026-10-16)
+
+- The CPU load lines are read by registry entries of their own beside the G1
+  entries, scanned line by line with them, so the lines take the normal path. Each
+  is named after the G1 entry it sits beside, with a suffix naming what it captures.
+- A CPU load line is a counted record under a hard-coded category. It is
+  unclassified: the entry produces no successes and no failures.
+- The cost of the scan alternating between the pause entry and the CPU entry, one
+  failed attempt on most matched lines of a `gc*` log, is accepted.
+
 ## Surfaces and the records that govern them
 
 | Surface | Contract today | Record line |
