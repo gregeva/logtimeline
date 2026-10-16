@@ -124,9 +124,10 @@ contributor included, can see it is taken. `set ... "in progress"` assigns the
 issue to whoever runs it; when a contributor takes an issue up, the maintainer
 names them with `--assignee <login>`. `in review` and `on hold` keep the
 assignee, and so does closing. `backlog` removes every assignee: nobody is
-working on it. GitHub accepts as assignee only someone with access to the
-repository or who has commented on the issue; an assignment that does not take
-is reported, and the status change stands.
+working on it. The assignment is one call and is not checked: GitHub accepts as
+assignee only someone with access to the repository or who has commented on the
+issue, and drops anyone else without an error, so the issue stays unassigned
+and the status change stands.
 
 Status is a deliberate decision, never a computed value. A recorded status
 stands until another decision changes it; `sweep` leaves `on hold` and
