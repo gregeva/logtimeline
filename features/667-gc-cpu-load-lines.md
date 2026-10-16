@@ -34,6 +34,13 @@ Reading the whole segment, every variant, is #742, blocked by #741 (read log for
 whose entry is a known multi-line structure). This issue does not depend on either:
 it makes the CPU load lines matched lines, and the values are read by `-udm`.
 
+### D2 — a matched CPU load line is unclassified (architect, 2026-10-16)
+
+Recorded on #483 (success/failure classification criteria for the G1 GC log
+format) as D1 of `features/483-gc-g1-classification-criteria.md`: failure comes from
+the JVM's failure statements, success from the standard GC operation messages, and
+every other line a G1 entry matches, the CPU load line among them, is unclassified.
+
 ## Surfaces and the records that govern them
 
 | Surface | Contract today | Record line |
