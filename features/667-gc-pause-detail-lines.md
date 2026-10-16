@@ -97,9 +97,25 @@ and `Using G1` write nothing further.
 One CPU line per pause record on every set. Region and metaspace lines follow young
 and full pauses, never Remark or Cleanup.
 
-### F3 — association needs the `GC(n)` number, not adjacency
+### F3 — a pause is a multi-line batch, bounded and almost always consecutive
 
-Phase, region and metaspace lines precede the record; the CPU line follows it. On
+A pause is not a pair of lines dispersed across the log: the JVM writes it as one
+batch of consecutive lines, opened by the start line and closed by the CPU line. Per
+pause, from the start line to the CPU line (scratch script over every file of each
+set):
+
+| | A | B | C |
+|---|---:|---:|---:|
+| Pauses | 155,636 | 79,370 | 94,014 |
+| Longest batch, start line to CPU line | 18 lines | 20 lines | 17 lines |
+| Batches with another number's line before the record | 1 | 10 | 1,755 |
+| Batches with another number's lines between the record and the CPU line | 0 | 21,036 (at most 6 lines) | 0 |
+| Batches still open at the end of the file | 0 | 0 | 2 |
+
+Every line of another number found inside a batch is a concurrent-cycle line (D41
+of the G1 record), its `Using N workers of N for marking` line included; none is
+another pause's line, and none lacks a number. Phase, region and metaspace
+lines precede the record; the CPU line follows it. On
 deployment B, 21,036 of 79,370 CPU lines are not the line after their record: when a
 young pause starts a concurrent cycle, the next `GC(n)`'s concurrent-cycle lines are
 written between the record and its CPU line:
