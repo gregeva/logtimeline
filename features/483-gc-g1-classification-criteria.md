@@ -41,7 +41,10 @@ a full collection (`Pause Full`) is not a failure.
   picked up when the line is classified. A string, not a Boolean.
 - The pause line of the same `GC(n)`, which would have been classified a success, is
   classified a failure. The pattern captures the `GC(n)` on both lines for this; a
-  pause of another number is not touched. The reason is reset once applied.
+  pause of another number is not touched. The reason is appended to that pause's
+  message in brackets, `(Prepare Mixed) (G1 Preventive Collection) (To-space
+  exhausted)`, so the message carries what happened, and the per-message
+  success/failure indicator shows it failed. The reason is reset once applied.
 - Only the failure direction exists: success is read from the pause line itself,
   and with the binding to `GC(n)` no later pause needs a success carried to it.
 - The statement line does not appear as a category of its own.

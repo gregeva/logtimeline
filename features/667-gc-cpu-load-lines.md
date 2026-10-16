@@ -86,3 +86,30 @@ undefined. On the same log, with `-bs 1440 -oe -V`:
 2,652 matched `Pause Remark` lines, while `-udm 'young_heap::sum:/Pause Young .*?(\d+)M->/'`
 produces `occurrences=17646`, one per matched `Pause Young` line. A CPU load line
 matched without a message would be read by no metric.
+
+Inside the block `$message` serves only the masks (`$message =~ s/\Q$matched_value\E/?/`);
+the patterns run against the raw line (`if (/$pattern/)`). `docs/usage.md` states
+`-udm` as "Extract a custom metric from each log line", "Patterns match against
+the whole raw line, not only the message".
+
+## What a matched line passes through after the metric capture
+
+Read from `read_and_process_logs()` on release/0.20.0, in order:
+
+1. Format detection counts it (`matched_lines`).
+2. The category must be a declared level, or the line is dropped
+   (`unless (exists $log_level_set{$category_bucket})`).
+3. Time window, then `-e` / `-i` on the raw line (`match_filter($_, ...)`), then the
+   outcome filters on `$line_outcome`, then the numeric filters, which drop a line
+   carrying no value for the filtered metric (`-dmin` drops every line without a
+   duration).
+4. `$log_occurrences{$bucket}{$category_bucket}{occurrences}++`,
+   `$total_lines_included++`, the outcome counters.
+5. The messages store, per-message metric columns included.
+6. The bucket statistics entry `$log_analysis{$bucket}`: `occurrences++`, the
+   duration, bytes and count statistics, and the per-bucket metric sums
+   (`udm_${name}_sum`, `_occurrences`, `_min`, `_max`), all on the same entry.
+7. Heatmap and histogram raw values, a user-defined metric among them.
+
+R5 of the classification record defines lines included as "matched lines that
+survived filtering".
