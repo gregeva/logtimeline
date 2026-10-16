@@ -9,7 +9,7 @@ under #732 (GC log analysis). Reading the whole of each pause's segment of lines
 whose record `features/742-gc-multiline-pause-segments.md` holds the measurement of
 every line kind the segments carry.
 
-Status: specification, 2026-10-16.
+Status: parked by the architect, 2026-10-16, back to backlog; the attempts and the walls they met are summarised on #732 (GC log analysis).
 
 ## What this is for
 

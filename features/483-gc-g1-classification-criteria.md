@@ -8,7 +8,7 @@ is a failure, D4; a line matching neither is unclassified). Owning area:
 `features/656-gc-log-tagless-decorations.md` (the four tag-less entries). Grouped
 under #732 (GC log analysis).
 
-Status: specification, 2026-10-16.
+Status: parked by the architect, 2026-10-16, back to backlog; the attempts and the walls they met are summarised on #732 (GC log analysis).
 
 ## What this is for
 
