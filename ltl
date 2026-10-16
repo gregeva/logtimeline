@@ -12163,8 +12163,8 @@ sub number_unit_canonical {
 # typed in (undef for a bare number, which is taken as it stands), and the
 # problem that stops the run, if any. A unit is read in the row's kind only. A
 # value within rounding of a whole number is that whole number, so 1.1k is
-# 1100. A bound refuses a negative; a size refuses a fraction; a row carrying
-# a min refuses a value below it.
+# 1100. A bound or a size refuses a negative; a size refuses a fraction; a row
+# carrying a min refuses a value below it.
 sub resolve_quantity_option {
     my ($row, $text) = @_;
     my $kind = $quantity_kind{ $row->{kind} };
@@ -12184,6 +12184,7 @@ sub resolve_quantity_option {
         $value = $whole + 0 if abs($value - $whole) <= 1e-9 * abs($value);
     }
     return (undef, $unit, 'a bound cannot be negative')  if $row->{value} eq 'bound' && $value < 0;
+    return (undef, $unit, 'cannot be negative')          if $row->{value} eq 'size'  && $value < 0;
     return (undef, $unit, "not a whole number $units")    if $row->{value} eq 'size'  && $value != int($value);
     return (undef, $unit, "cannot be below $row->{min}")  if defined $row->{min} && $value < $row->{min};
     return ($value, $unit, undef);

@@ -201,8 +201,8 @@ PL
 
 # ---------------------------------------------------------------------------
 # A negative bound stops the run with a usage error naming the option and
-# quoting the value; a negative top-message count is not a bound and runs as
-# before.
+# quoting the value; a negative count-as-size option (top-messages, group-ceiling)
+# is refused the same way (#726).
 # Invocation shape: -ni -bs 1440 -oe -n 1 on the boundary fixture. The
 # assertions read the exit code and stderr only.
 # ---------------------------------------------------------------------------
@@ -231,23 +231,28 @@ scenario_negative_bound() {
         fi
     done
 
-    err="$TMP_DIR/neg-n.stderr"
-    set +e
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n -1 "$BOUNDARY_FIXTURE" ) > "$TMP_DIR/neg-n.stdout" 2> "$err"
-    rc=$?
-    set -e
-    if ! assert_no_runtime_warnings "$err" "$current_scenario/-n"; then
-        fail=$((fail + 1)); failures+=("$current_scenario :: -n perl-runtime-warnings-on-stderr")
-    fi
-    if [[ "$rc" -eq 0 ]] && ! grep -q 'cannot be negative' "$err"; then
-        pass_with "-n -1 runs as before (exit 0)"
-    else
-        fail_with "-n -1 runs as before" \
-            'The top-message count is not a bound: a negative value keeps the behaviour it had before the bound declaration (exit 0, no negative-bound error)' \
-            'adapt_to_command_line_options() in ltl (the negative-bound check reads bound rows only)' \
-            'features/605-input-units.md § 6 AC2 and § 4 D7 (a bare number keeps its meaning)' \
-            "exit: $rc" "stderr: $(tr '\n' '|' < "$err")"
-    fi
+    # #726: an option that takes a count as a size is refused a negative the
+    # same way a bound is (top-messages -n, group-ceiling -gc).
+    for short in n gc; do
+        err="$TMP_DIR/neg-$short.stderr"
+        set +e
+        ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe "-$short" -1 "$BOUNDARY_FIXTURE" ) > "$TMP_DIR/neg-$short.stdout" 2> "$err"
+        rc=$?
+        set -e
+        if ! assert_no_runtime_warnings "$err" "$current_scenario/-$short"; then
+            fail=$((fail + 1)); failures+=("$current_scenario :: -$short perl-runtime-warnings-on-stderr")
+        fi
+        expected="Error: Invalid -$short '-1': cannot be negative"
+        if [[ "$rc" -ne 0 ]] && grep -qxF -- "$expected" "$err"; then
+            pass_with "-$short -1 is refused (exit $rc)"
+        else
+            fail_with "-$short -1 is refused" \
+                'A count-as-size option refuses a negative value as a usage error: a non-zero exit and an error line naming the option and quoting the value as typed (#726)' \
+                'resolve_quantity_option() in ltl (the negative-value check reads bound and size rows, raised at settlement beside the inverted-range check)' \
+                "$CONTRACT_NEG" \
+                "exit: $rc" "expected stderr line: $expected" "stderr: $(tr '\n' '|' < "$err")"
+        fi
+    done
 }
 
 # ---------------------------------------------------------------------------
