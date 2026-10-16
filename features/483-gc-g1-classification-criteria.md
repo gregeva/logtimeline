@@ -71,7 +71,11 @@ GC(521)   Pre Evacuate Collection Set: 0.1ms
 ```
 
 The record before the marker is therefore the previous cycle's last pause, not
-the pause it belongs to.
+the pause it belongs to. The record after it is its own pause, on every marker held:
+the next line a G1 entry reads after `To-space exhausted` is a `Pause Young` of the
+same `GC(n)` for all 48 markers of the time-only sets, all 5 of the tagged corpus and
+all 4 of the JDK 17 fixtures; no marker is followed by another marker or by the end
+of its file first.
 
 ### F3 — `Concurrent Mark Abort` follows a full collection
 
