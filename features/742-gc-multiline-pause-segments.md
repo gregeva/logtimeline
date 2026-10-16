@@ -1,14 +1,16 @@
-# #667 — Read the per-pause detail lines of the G1 GC formats
+# #742 — Read the multi-line pause segments of the G1 GC log formats
 
-Issue #667 (read the per-pause CPU time, heap and region detail, and phase timing
-lines of the GC formats). Owning area: `features/382-gc-log-g1-format-coverage.md`
+Issue #742 (read the multi-line pause segments of the G1 GC log formats, in their
+variants), labelled not planned. Owning area: `features/382-gc-log-g1-format-coverage.md`
 (the tagged G1 entry, `java_gc_g1`) and `features/656-gc-log-tagless-decorations.md`
 (the four tag-less G1 entries); registry mechanics in `features/log-format-registry.md`.
-Grouped under #732 (GC log analysis) with #483 (success/failure classification
-criteria for the G1 GC format).
+Grouped under #732 (GC log analysis). Blocked by #741 (read log formats whose entry is
+a known multi-line structure).
 
-Status: specification. Findings measured on release/0.20.0 (`891fe91`), 2026-10-16;
-the architect's interview follows and its decisions are recorded here as they are made.
+Status: findings recorded, not planned. Measured on release/0.20.0 (`891fe91`),
+2026-10-16, while specifying #667 (match the CPU load lines of the G1 GC formats, so
+user-defined metrics can read them), whose scope was reduced to the CPU load lines
+the same day.
 
 ## What this is for
 
@@ -18,18 +20,16 @@ bucket, the pause count by kind, the summed pause time and the heap reclaimed. I
 does not tell them why a pause took the time it did: whether the collector's threads
 had the CPU they needed (CPU against wall clock), how the heap's regions moved
 (eden reclaimed, survivors, promotion into old, humongous growth), and which phase
-of the pause took the time. The JVM writes all three, on lines `ltl` counts as
-unmatched.
+of the pause took the time. The JVM writes all three, in the segment of lines it
+writes about each pause, and `ltl` reads only the pause line of it.
 
 ## Requirement
 
-From the issue, in its terms: read the detail lines a unified GC log writes about
-each pause, for every GC format the tool covers (the tagged G1 entry and the four
-tag-less entries): the CPU time per pause, the heap and region detail, and the phase
-timing. The lines belong to the pause they describe (the same `GC(n)` number), so
-they are read as attributes of that pause, not as events of their own that would
-inflate the pause count. The analyst sees, per bucket, besides the pause time: CPU
-against wall clock, how the regions moved, and which phase took the time.
+From the architect, in his terms: support the multi-line GC log segments, so that the
+entirety of the GC log format is read in its diverse variants, including but not
+limited to the CPU load lines. Each pause is a segment of lines sharing its `GC(n)`
+number; the lines belong to the pause they describe, and are read as part of that
+pause, not as events of their own that would inflate the pause count.
 
 ## Surfaces and the records that govern them
 
@@ -47,14 +47,14 @@ against wall clock, how the regions moved, and which phase took the time.
 
 ## Decisions
 
-### D1 — the multi-line read format is the foundation this issue depends on (architect, 2026-10-16)
+### D1 — the multi-line read format is the foundation this depends on (architect, 2026-10-16)
 
-A pause is written as a bounded batch of lines sharing its `GC(n)` number (F3), and
-the registry reads one line as one record (`features/637-udm-continuation-lines.md`
+A pause is written as a bounded segment of lines sharing its `GC(n)` number (F3),
+and the registry reads one line as one record (`features/637-udm-continuation-lines.md`
 D1 leaves a multi-line record model unbuilt). Supporting a format whose entry is a
-known multi-line structure, each line timestamped, is filed as #741 (read log formats
-whose entry is a known multi-line structure, labelled not planned) and requires the
-format registry mechanism to be updated. #667 is blocked by #741.
+known multi-line structure, each line timestamped, is #741 and requires the format
+registry mechanism to be updated. This issue is blocked by #741. Reading the CPU load
+lines alone, without the segment, is #667's reduced scope.
 
 ## Findings
 
@@ -202,14 +202,3 @@ only lines a format matched, and these lines match none.
 The same file, `-ni -bs 1440 -oe -V`, three runs: `parse/read_files` 2.003, 3.833
 and 2.081 s, about 6.2 µs a line on the two consistent runs. 302,963 of its 325,914
 lines are unmatched and pay the full scan.
-
-## Citation corrections
-
-- The issue says the tagged collection carries these lines; it does not (F9). Only
-  the JVM-generated tagged fixtures do.
-- The issue's metaspace example (`Metaspace: 120M->120M(1100M)`) is not the shape on
-  any held log; JDK 17 and 21 write used and committed, then `NonClass:` and `Class:`
-  (F6).
-- "The lines belong to the pause they describe" holds by `GC(n)` number, not by
-  position: the CPU line follows the record, sometimes after another pause number's
-  lines (F3).
