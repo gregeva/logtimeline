@@ -34,30 +34,32 @@ Applied the same day by the architect to conditions raised from the corpus: a
 missed pause-time goal (`MMU target violated`) is a target not met, not a failure;
 a full collection (`Pause Full`) is not a failure.
 
-### D2 — a failure statement written on its own line pre-classifies the next pause (architect, 2026-10-16)
+### D2 — a failure statement written on its own line pre-classifies its pause (architect, 2026-10-16)
 
 - A failure statement on its own line (JDK 17's `To-space exhausted`) sets a per-file
-  failure reason: the string the statement carries, picked up when the line is
-  classified. A string, not a Boolean; the same holds for the other direction.
-- The next pause line, which would have been classified a success, is classified a
-  failure, carrying the reason (D3). The reason is reset once applied.
+  failure reason: the string the statement carries and the `GC(n)` it carries,
+  picked up when the line is classified. A string, not a Boolean.
+- The pause line of the same `GC(n)`, which would have been classified a success, is
+  classified a failure. The pattern captures the `GC(n)` on both lines for this; a
+  pause of another number is not touched. The reason is reset once applied.
+- Only the failure direction exists: success is read from the pause line itself,
+  and with the binding to `GC(n)` no later pause needs a success carried to it.
 - The statement line does not appear as a category of its own.
-- Binding the reason to the same `GC(n)` would be ideal and is judged too complex;
-  the reset on use is required.
 - Declared per format, through the classification criteria the registry already
   compiles.
 - The failure statement lines must be matched for the classification to see them,
   so the lines the G1 entries match are widened; this issue ensures success and
   failure rules exist for every scenario.
 
-### D3 — a failed pause's category says it failed (architect, 2026-10-16)
+### D3 — category names are not touched (architect, 2026-10-16)
 
-In an access log the category carries the outcome (`4xx`, `5xx`), so the category
-totals count the failures. Here the failure is read from the message, so the
-`Pause Young` total would not say how many young pauses failed: only the failure
-rate per bucket and the total failures in the summary table would. Something is
-added after the pause kind in the category indicating that the pause failed. The
-goal is this issue's requirement, not the JDK 21 form.
+A failed pause keeps its pause kind as its category (`Pause Young`, `Pause Full`,
+`Pause Remark`, `Pause Cleanup`). A classified failure surfaces through the failure
+classification (the failure rate per bucket, the failure totals) and through the
+message, which carries the detail identifying what happened. Encoding the outcome in
+the category was considered and rejected: it splits the pause totals by kind, adds a
+category per kind and reason, and renaming categories has broken the error rate
+before (the highlight suffix, `features/453-success-failure-classification-event-ledger.md` D12).
 
 ## Findings
 
