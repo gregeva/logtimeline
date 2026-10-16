@@ -119,6 +119,15 @@ labels atomically.
 ./process/issue-status.sh sweep      # strips status from closed issues; proposes, never applies, elsewhere
 ```
 
+The assignee shows who holds an issue, so that anyone reading it, a community
+contributor included, can see it is taken. `set ... "in progress"` assigns the
+issue to whoever runs it; when a contributor takes an issue up, the maintainer
+names them with `--assignee <login>`. `in review` and `on hold` keep the
+assignee, and so does closing. `backlog` removes every assignee: nobody is
+working on it. GitHub accepts as assignee only someone with access to the
+repository or who has commented on the issue; an assignment that does not take
+is reported, and the status change stands.
+
 Status is a deliberate decision, never a computed value. A recorded status
 stands until another decision changes it; `sweep` leaves `on hold` and
 `in progress` alone because both record a judgement no signal can second-guess.

@@ -9,8 +9,14 @@
 # Blocking is a separate axis, tracked through GitHub's native blocked_by
 # dependencies. This script neither reads nor reports it.
 #
+# The assignee shows who holds an issue. Setting "in progress" assigns whoever
+# picked it up; "backlog" removes every assignee; the other statuses leave the
+# assignee as it is. An assignment GitHub refuses is reported and never stops
+# the status change.
+#
 # Usage:
-#   ./process/issue-status.sh set <issue> <status>   set status (swaps in one call)
+#   ./process/issue-status.sh set <issue> <status> [--assignee <login>]
+#                                                    set status (swaps in one call)
 #   ./process/issue-status.sh show <issue>           print one issue's status
 #   ./process/issue-status.sh list                   list open issues with status
 #   ./process/issue-status.sh sweep                  integrity check + advisory proposals
@@ -28,9 +34,12 @@ usage() {
     cat >&2 <<USAGE
 Usage: ./process/issue-status.sh <command> [args]
 
-  set <issue> <status>   Set an open issue's status. Valid: ${STATUSES[*]/#/}
+  set <issue> <status> [--assignee <login>]
+                         Set an open issue's status. Valid: ${STATUSES[*]/#/}
                          Accepts the bare name ("in review") or the full label
-                         ("status: in review").
+                         ("status: in review"). "in progress" assigns the issue
+                         to you, or to <login> when given (a contributor taking
+                         it up); "backlog" removes every assignee.
   show <issue>           Print one issue's current status.
   list                   List open issues with their status.
   sweep                  Integrity + advisory pass. Strips status from closed issues,
@@ -68,12 +77,52 @@ issue_status_labels() {
         --jq "[.labels[].name | select(startswith(\"$LABEL_PREFIX\"))] | .[]"
 }
 
+issue_assignees() {
+    gh issue view "$1" --json assignees --jq '[.assignees[].login] | join(",")'
+}
+
+# The assignee follows the status: "in progress" adds whoever picked the issue
+# up, "backlog" removes every assignee. GitHub drops, without an error, an
+# assignee without access to the repository who has not commented on the
+# issue, so the assignment is read back; one that did not take is reported and
+# the status change stands.
+sync_assignee() {
+    local issue="$1" label="$2" assignee="$3" holders
+    case "$label" in
+        "${LABEL_PREFIX}in progress")
+            [ "$assignee" = "@me" ] && assignee="$(gh api user --jq .login 2>/dev/null || echo "@me")"
+            gh issue edit "$issue" --add-assignee "$assignee" >/dev/null 2>&1 || true
+            holders="$(issue_assignees "$issue" 2>/dev/null || true)"
+            if [[ ",$holders," == *",$assignee,"* ]]; then
+                echo "[ok] #$issue assigned to $assignee"
+            else
+                echo "[note] #$issue could not be assigned to $assignee; the status is set, the assignee is unchanged"
+            fi
+            ;;
+        "${LABEL_PREFIX}backlog")
+            holders="$(issue_assignees "$issue" 2>/dev/null)" || holders=""
+            [ -n "$holders" ] || return 0
+            if gh issue edit "$issue" --remove-assignee "$holders" >/dev/null 2>&1; then
+                echo "[ok] #$issue unassigned (was: $holders)"
+            else
+                echo "[note] #$issue could not be unassigned from $holders; the status is set"
+            fi
+            ;;
+    esac
+}
+
 cmd_set() {
-    [ $# -eq 2 ] || usage
-    local issue="$1" label state current existing
+    [ $# -eq 2 ] || [ $# -eq 4 ] || usage
+    local issue="$1" label state current existing assignee="@me"
     local -a remove_args=()
 
     label="$(resolve_status_label "$2")"
+    if [ $# -eq 4 ]; then
+        [ "$3" = "--assignee" ] || usage
+        [ "$label" = "${LABEL_PREFIX}in progress" ] \
+            || die "--assignee applies to \"in progress\" only"
+        assignee="$4"
+    fi
 
     state="$(gh issue view "$issue" --json state --jq '.state')" \
         || die "issue #$issue not found"
@@ -84,6 +133,7 @@ cmd_set() {
     current="$(issue_status_labels "$issue")"
     if [ "$current" = "$label" ]; then
         echo "[ok] #$issue already '$label'"
+        sync_assignee "$issue" "$label" "$assignee"
         return 0
     fi
 
@@ -97,6 +147,7 @@ cmd_set() {
 
     gh issue edit "$issue" --add-label "$label" ${remove_args[@]+"${remove_args[@]}"} >/dev/null
     echo "[ok] #$issue -> '$label'${current:+ (was: $(printf '%s' "$current" | paste -sd, -))}"
+    sync_assignee "$issue" "$label" "$assignee"
 }
 
 cmd_show() {

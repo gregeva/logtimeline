@@ -57,7 +57,7 @@ so the gate runs on exactly the code being merged. Nothing hardcodes a version:
 
 ```bash
 git branch --show-current                          # issue number + short description
-./process/issue-status.sh set {number} "in progress"
+./process/issue-status.sh set {number} "in progress"      # also assigns you; --assignee <login> for a contributor
 # set $version_number = "X.Y.Z-{issue}" in ltl
 ```
 
