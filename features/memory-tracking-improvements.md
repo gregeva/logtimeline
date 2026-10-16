@@ -653,6 +653,15 @@ Medians with ranges.
   (`docs/toolchain-guidance.md` § Windows development host), and the gate was
   not re-run on macOS. The commit after the run (23cd2e2) changes only
   `docs/toolchain-guidance.md`.
+- **Full harness suite, run after the merge on macOS** (2026-10-16, on
+  `release/0.20.0` at 891fe91, the merge and its release-notes commits): 50 of
+  52 harnesses passed. `tests/validate-memory-usage.sh`, created on the Windows
+  host, had been committed as mode 100644, so it and
+  `tests/validate-scenario-selector.sh`, which runs every harness, exited 126
+  ("Permission denied"). The bit was set by PR #743 (dbc5bcc, merged as
+  f4f1e8d), which also records the trap in `docs/toolchain-guidance.md`
+  § Windows development host. On that commit both pass: 23 and 39 assertions,
+  none failed.
 
 ## Memory Diagnostic Method (from the #356 investigation)
 
