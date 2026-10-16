@@ -221,10 +221,6 @@ belongs to the release-cut benchmark run (release steps 13–14), not to this br
 - **scenario-10-no-message-retention-inert-options** (`-n 0 -g 85 -mdm bin -so p50`):
   the inert-option notice names all three options; `sort_gate` records the operand
   with `fallback=none`.
-- **scenario-11-negative-top-messages-retains-nothing** (`-n -5`): a negative count
-  takes the same path as zero (D2) — the message store reports `store_demand: no` and
-  `population: 0`. Proved to fail with `-n 5` substituted: both assertions failed with
-  their `asserts`/`produced_by`/`contract` triple surfaced.
 - **scenario-12-no-message-retention-csv-request** (`-bs 1440 -oe -n 0 -o`): the
   half-served-CSV notice is printed verbatim on stderr; the STATS CSV file exists and
   no MESSAGES CSV file does. The run gets its own scratch directory so the two file

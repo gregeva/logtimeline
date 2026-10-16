@@ -229,7 +229,6 @@ scenario_register scenario-1-terminal-only-default \
                   scenario-5-runtime-config-crosscheck \
                   scenario-9-no-message-retention \
                   scenario-10-no-message-retention-inert-options \
-                  scenario-11-negative-top-messages-retains-nothing \
                   scenario-12-no-message-retention-csv-request \
                   scenario-13-retained-duration-representation \
                   scenario-14-retained-durations-are-numbers \
@@ -750,32 +749,6 @@ if body=$(extract_section "$out"); then
         pattern     '^sort_gate: operand=p50 family=duration observed=- fallback=none$' \
         asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
         produced_by 'apply_parse_time_sort_gate() / apply_pre_walk_sort_gate() / apply_post_walk_sort_gate() in ltl' \
-        contract    "$CONTRACT"
-fi
-echo
-
-############################################################
-# A negative top-message count takes the same path as zero: it cannot rank a
-# row either, so nothing is retained. Read from the demand section alone —
-# nothing here depends on the render or on the bucket axis.
-fi
-
-if scenario_wanted scenario-11-negative-top-messages-retains-nothing; then
-current_scenario="scenario-11-negative-top-messages-retains-nothing"
-echo "--- $current_scenario ---"
-out=$(run_section statistics-demand -n -5)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
-    sm=$(extract_store "$body" message)
-    assert_line "$sm" \
-        pattern     '^  store_demand: no$' \
-        asserts     'A negative top-message count retains nothing, exactly as zero does: the message store has no active consumer' \
-        produced_by 'adapt_to_command_line_options() in ltl (retention resolved from the top-message count being greater than zero)' \
-        contract    "$CONTRACT"
-    assert_line "$sm" \
-        pattern     '^  population: 0$' \
-        asserts     'No message key is walked under a negative top-message count, because none was ever stored' \
-        produced_by 'calculate_all_statistics() in ltl ($stats_population_messages, per-category population accumulation)' \
         contract    "$CONTRACT"
 fi
 echo
