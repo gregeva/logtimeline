@@ -40,8 +40,7 @@ a full collection (`Pause Full`) is not a failure.
   failure reason: the string the statement carries, picked up when the line is
   classified. A string, not a Boolean; the same holds for the other direction.
 - The next pause line, which would have been classified a success, is classified a
-  failure, and the reason is added in brackets, as JDK 21 writes
-  ` (Evacuation Failure)` on the pause line itself. The reason is reset once applied.
+  failure, carrying the reason (D3). The reason is reset once applied.
 - The statement line does not appear as a category of its own.
 - Binding the reason to the same `GC(n)` would be ideal and is judged too complex;
   the reset on use is required.
@@ -50,6 +49,15 @@ a full collection (`Pause Full`) is not a failure.
 - The failure statement lines must be matched for the classification to see them,
   so the lines the G1 entries match are widened; this issue ensures success and
   failure rules exist for every scenario.
+
+### D3 — a failed pause's category says it failed (architect, 2026-10-16)
+
+In an access log the category carries the outcome (`4xx`, `5xx`), so the category
+totals count the failures. Here the failure is read from the message, so the
+`Pause Young` total would not say how many young pauses failed: only the failure
+rate per bucket and the total failures in the summary table would. Something is
+added after the pause kind in the category indicating that the pause failed. The
+goal is this issue's requirement, not the JDK 21 form.
 
 ## Findings
 
