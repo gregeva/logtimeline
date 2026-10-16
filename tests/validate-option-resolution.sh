@@ -242,7 +242,7 @@ scenario_negative_bound() {
         if ! assert_no_runtime_warnings "$err" "$current_scenario/-$short"; then
             fail=$((fail + 1)); failures+=("$current_scenario :: -$short perl-runtime-warnings-on-stderr")
         fi
-        expected="Error: Invalid -$short '-1': a bound cannot be negative"
+        expected="Error: Invalid -$short '-1': cannot be negative"
         if [[ "$rc" -ne 0 ]] && grep -qxF -- "$expected" "$err"; then
             pass_with "-$short -1 is refused (exit $rc)"
         else
