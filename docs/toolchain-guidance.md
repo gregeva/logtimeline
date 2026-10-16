@@ -77,6 +77,12 @@ The traps the script removes:
 
 **8. A Windows checkout has no `logs/` corpus** unless one is copied in; the symlink the macOS checkouts carry needs Developer Mode or administrator rights to create. Point harnesses at a corpus with `LTL_LOGS_DIR`.
 
+One trap the script cannot remove: **a script created on Windows is committed without its executable bit.** Windows has no such bit, so Git records a new file as mode 100644, and on macOS and Linux the harness suite then refuses to run it ("Permission denied", exit 126). Before committing a new script, mark it executable in the index:
+
+```bash
+git update-index --add --chmod=+x tests/validate-<name>.sh
+```
+
 ## grep and non-ASCII output
 
 `grep` switches to binary mode when a stream contains non-ASCII bytes, printing `Binary file matches` (or nothing) instead of matching lines. The symptom is a grep returning **nothing** for a line plainly visible in `head`, which reads as "the feature is broken" rather than "the encoding broke the match". This cost hours during #289, grepping captured harness output whose `contract:` / `produced_by:` strings carried `§` and `—`.
