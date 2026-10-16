@@ -68,3 +68,14 @@ B, JDK 21, 10 files; C, version not written, 18 files):
 - **Today.** On deployment A's method-server log (325,914 lines, 22,951 records),
   `-udm 'gc_user:s:sum:/User=([\d.]+)s/'` reports `no metrics produced from matching
   lines`.
+
+## A matched line with no message is not read by `-udm`
+
+The user-defined metric capture block in `read_and_process_logs()` is gated on
+`@udm_configs && $is_line_match && defined $message`. A G1 entry captures the
+message from the cause clause, so a matched line without one leaves `$message`
+undefined. On the same log, with `-bs 1440 -oe -V`:
+`-udm 'remark_heap::sum:/Pause Remark (\d+)M->/'` produces `occurrences=0` over the
+2,652 matched `Pause Remark` lines, while `-udm 'young_heap::sum:/Pause Young .*?(\d+)M->/'`
+produces `occurrences=17646`, one per matched `Pause Young` line. A CPU load line
+matched without a message would be read by no metric.
