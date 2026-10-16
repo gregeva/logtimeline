@@ -4,7 +4,7 @@ Issue #742 (read the multi-line pause segments of the G1 GC log formats, in thei
 variants), labelled not planned. Owning area: `features/382-gc-log-g1-format-coverage.md`
 (the tagged G1 entry, `java_gc_g1`) and `features/656-gc-log-tagless-decorations.md`
 (the four tag-less G1 entries); registry mechanics in `features/log-format-registry.md`.
-Grouped under #732 (GC log analysis). Blocked by #741 (read log formats whose entry is
+Related to #732 (GC log analysis, the next-up group of GC work), outside it as not planned. Blocked by #741 (read log formats whose entry is
 a known multi-line structure).
 
 Status: findings recorded, not planned. Measured on release/0.20.0 (`891fe91`),
