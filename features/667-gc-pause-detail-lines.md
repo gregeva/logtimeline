@@ -45,6 +45,17 @@ against wall clock, how the regions moved, and which phase took the time.
 | Metrics a format declares | `message_metrics` probes fill the canonical fields (duration, bytes) from the matched line's message | `format_registry_specs()`, entry `mt1std` |
 | User-defined metrics | Tried only on lines that matched a format; a line belonging to an entry is ignored by every metric, and attributing its value to the entry is named a multi-line record feature, left out of that fix | `features/637-udm-continuation-lines.md` D1; F10 below |
 
+## Decisions
+
+### D1 — the multi-line read format is the foundation this issue depends on (architect, 2026-10-16)
+
+A pause is written as a bounded batch of lines sharing its `GC(n)` number (F3), and
+the registry reads one line as one record (`features/637-udm-continuation-lines.md`
+D1 leaves a multi-line record model unbuilt). Supporting a format whose entry is a
+known multi-line structure, each line timestamped, is filed as #741 (read log formats
+whose entry is a known multi-line structure, labelled not planned) and requires the
+format registry mechanism to be updated. #667 is blocked by #741.
+
 ## Findings
 
 Measured over the three sets of time-only G1 logs held in the corpus, named as in
