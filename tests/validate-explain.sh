@@ -99,18 +99,26 @@ check_capture_warnings() {
 # A capture that a comparison or an absence check reads must be a rendered
 # topic: ltl exited 0 and printed it. Without this, two runs that failed the
 # same way compare identical, and an error message carries no internals.
-# Takes the "<exit>:<path>" run_ltl echoes. Silent when the topic rendered.
+# Takes one or more "<exit>:<path>" captures run_ltl echoes. Silent when
+# every topic rendered; otherwise counts a failure for each one that did not
+# and returns 1, so the caller skips the checks that would read it and the
+# pass count holds only checks made against a rendered topic.
 check_capture_rendered() {
-    local ec="${1%%:*}" out="${1#*:}"
-    if [[ "$ec" -ne 0 || ! -s "$out" ]]; then
-        echo "  FAIL  $current_scenario"
-        echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it"
-        echo "        produced_by: print_explain_topic() in ltl"
-        echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors (a comparison or an absence check reads a rendered topic)"
-        echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
-        fail=$((fail + 1))
-        failures+=("$current_scenario :: topic not rendered (exit $ec)")
-    fi
+    local capture ec out rendered=0
+    for capture in "$@"; do
+        ec="${capture%%:*}" out="${capture#*:}"
+        if [[ "$ec" -ne 0 || ! -s "$out" ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        asserts:     the run renders the topic the assertions read: ltl exits 0 and prints it"
+            echo "        produced_by: print_explain_topic() in ltl"
+            echo "        contract:    tests/HARNESS-DESIGN.md section Harnesses must fail on missing anchors (a comparison or an absence check reads a rendered topic)"
+            echo "        exit: $ec; stdout lines: $(wc -l < "$out" | tr -d ' '); stderr: $(head -2 "${out%.txt}.stderr" | tr '\n' '|')"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: topic not rendered (exit $ec)")
+            rendered=1
+        fi
+    done
+    return "$rendered"
 }
 
 # Self-documenting assertion: a line matching `pattern` must be present.
@@ -167,7 +175,16 @@ assert_no_line() {
     : "${produced_by:?assert_no_line requires produced_by}"
     : "${contract:?assert_no_line requires contract}"
 
-    if grep -qE "$pattern" "$outfile"; then
+    # An empty capture holds no forbidden line because nothing was rendered.
+    if [[ ! -s "$outfile" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        pattern:     !$pattern (capture is empty: nothing to check)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: !$pattern (capture is empty)")
+    elif grep -qE "$pattern" "$outfile"; then
         echo "  FAIL  $current_scenario"
         echo "        pattern:     !$pattern (unexpectedly present)"
         echo "        asserts:     $asserts"
@@ -305,6 +322,18 @@ assert_max_line_width() {
     : "${produced_by:?assert_max_line_width requires produced_by}"
     : "${contract:?assert_max_line_width requires contract}"
 
+    # An empty capture has no overlong line because nothing was rendered.
+    if [[ ! -s "$outfile" ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        width:       <= $max (capture is empty: nothing to check)"
+        echo "        asserts:     $asserts"
+        echo "        produced_by: $produced_by"
+        echo "        contract:    $contract"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: max width $max (capture is empty)")
+        return 0
+    fi
+
     # Use Perl with UTF-8 IO so length() counts display characters, not bytes.
     # Skip the title banner (printed by print_title before help/explain output);
     # it has its own width contract independent of --explain content.
@@ -437,51 +466,48 @@ scenario_aliases() {
     r2=$(run_ltl "alias-avg"  --explain avg)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
-    check_capture_rendered "$r1"
-    check_capture_rendered "$r2"
-    assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-        asserts     "ltl --explain avg produces output identical to ltl --explain mean" \
-        produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
-        contract    'Issue #261: avg is an alias to mean per %explain_aliases'
-
+    if check_capture_rendered "$r1" "$r2"; then
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain avg produces output identical to ltl --explain mean" \
+            produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
+            contract    'Issue #261: avg is an alias to mean per %explain_aliases'
+    fi
     current_scenario="alias:stddev-equals-std_dev"
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-std_dev" --explain std_dev)
     r2=$(run_ltl "alias-stddev"  --explain stddev)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
-    check_capture_rendered "$r1"
-    check_capture_rendered "$r2"
-    assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-        asserts     "ltl --explain stddev produces output identical to ltl --explain std_dev" \
-        produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
-        contract    'Issue #261: stddev is an alias to std_dev per %explain_aliases'
-
+    if check_capture_rendered "$r1" "$r2"; then
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain stddev produces output identical to ltl --explain std_dev" \
+            produced_by 'resolve_explain_topic() in ltl (consults %explain_aliases hash)' \
+            contract    'Issue #261: stddev is an alias to std_dev per %explain_aliases'
+    fi
     current_scenario="alias:p95-equals-percentiles"
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-percentiles" --explain percentiles)
     r2=$(run_ltl "alias-p95"          --explain p95)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
-    check_capture_rendered "$r1"
-    check_capture_rendered "$r2"
-    assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-        asserts     "ltl --explain p95 produces output identical to ltl --explain percentiles" \
-        produced_by 'resolve_explain_topic() in ltl (every percentile slug routes to the shared topic)' \
-        contract    'Issue #261: every percentile slug (p1..p99999) resolves to percentiles via %explain_aliases'
-
+    if check_capture_rendered "$r1" "$r2"; then
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain p95 produces output identical to ltl --explain percentiles" \
+            produced_by 'resolve_explain_topic() in ltl (every percentile slug routes to the shared topic)' \
+            contract    'Issue #261: every percentile slug (p1..p99999) resolves to percentiles via %explain_aliases'
+    fi
     current_scenario="alias:p99999-equals-percentiles"
     echo "[$current_scenario]"
     r1=$(run_ltl "alias-percentiles" --explain percentiles)
     r2=$(run_ltl "alias-p99999"      --explain p99999)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
-    check_capture_rendered "$r1"
-    check_capture_rendered "$r2"
-    assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-        asserts     "ltl --explain p99999 produces output identical to ltl --explain percentiles" \
-        produced_by 'resolve_explain_topic() in ltl' \
-        contract    'Issue #261: p99999 is routed to the shared percentiles topic'
+    if check_capture_rendered "$r1" "$r2"; then
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl --explain p99999 produces output identical to ltl --explain percentiles" \
+            produced_by 'resolve_explain_topic() in ltl' \
+            contract    'Issue #261: p99999 is routed to the shared percentiles topic'
+    fi
 }
 
 # --- Scenario: a -so name that names a statistic explains it (#614 D4). ---
@@ -496,12 +522,12 @@ scenario_so_names_explain() {
         r2=$(run_ltl "so-name-$so_name" --explain "$so_name")
         check_capture_warnings "${r1#*:}"
         check_capture_warnings "${r2#*:}"
-        check_capture_rendered "$r1"
-        check_capture_rendered "$r2"
-        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-            asserts     "ltl --explain $so_name produces the $topic topic, the statistic -so $so_name ranks by" \
-            produced_by 'resolve_explain_topic() in ltl (through %so_spelling and %statistic_by_spelling)' \
-            contract    "$contract"
+        if check_capture_rendered "$r1" "$r2"; then
+            assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+                asserts     "ltl --explain $so_name produces the $topic topic, the statistic -so $so_name ranks by" \
+                produced_by 'resolve_explain_topic() in ltl (through %so_spelling and %statistic_by_spelling)' \
+                contract    "$contract"
+        fi
     done
     local result
     for so_name in bytes_sum bytes_occurrences; do
@@ -922,12 +948,12 @@ scenario_short_alias() {
     r2=$(run_ltl "short-ex"      -ex mean)
     check_capture_warnings "${r1#*:}"
     check_capture_warnings "${r2#*:}"
-    check_capture_rendered "$r1"
-    check_capture_rendered "$r2"
-    assert_outputs_equal "${r1#*:}" "${r2#*:}" \
-        asserts     "ltl -ex mean produces output identical to ltl --explain mean" \
-        produced_by 'GetOptions wiring in ltl (--explain|ex:s)' \
-        contract    'Issue #261: -ex is the short-form alias for --explain'
+    if check_capture_rendered "$r1" "$r2"; then
+        assert_outputs_equal "${r1#*:}" "${r2#*:}" \
+            asserts     "ltl -ex mean produces output identical to ltl --explain mean" \
+            produced_by 'GetOptions wiring in ltl (--explain|ex:s)' \
+            contract    'Issue #261: -ex is the short-form alias for --explain'
+    fi
 }
 
 # --- Scenario: bold/underline render correctly in ASCII and ANSI modes. ---
@@ -943,15 +969,19 @@ scenario_ascii_and_ansi_modes() {
     current_scenario="mode:ascii (NO_COLOR=1)"
     echo "[$current_scenario]"
     local out_ascii="$TMP_DIR/mode-ascii.raw"
+    local ec_ascii
     set +e
     with_ascii_colour "$LTL" --explain mean > "$out_ascii" 2>"$out_ascii.stderr"
+    ec_ascii=$?
     set -e
     check_stderr_warnings "$out_ascii.stderr"
 
     # No ANSI bold/underline SGR codes should appear anywhere.
     # SGR 1 (bold), SGR 22 (no-bold), SGR 4 (underline), SGR 24 (no-underline).
     # Title banner uses 38;5; foreground codes which are out of scope here.
-    if perl -e '
+    if ! check_capture_rendered "$ec_ascii:$out_ascii"; then
+        :
+    elif perl -e '
         my $f = shift;
         open my $fh, "<", $f or die $!;
         local $/;
@@ -1338,7 +1368,7 @@ scenario_technique_page_anatomy() {
         # order; a page that carries them all in the wrong order reads as
         # a different page.
         local order
-        order=$(grep -nE '^  (The signal|How to read it|Command|See also)$' "$out" | sed 's/.*:  //' | tr '\n' '|')
+        order=$(grep -nE '^  (The signal|How to read it|Command|See also)$' "$out" | sed 's/.*:  //' | tr '\n' '|') || order=""
         if [[ "$order" == "The signal|How to read it|Command|See also|" ]]; then
             echo "  PASS  $current_scenario :: anatomy order"
             pass=$((pass + 1))
@@ -1392,7 +1422,7 @@ scenario_technique_group_anatomy() {
         local group_label
         group_label="$(tr '[:lower:]' '[:upper:]' <<< "${group:0:1}")${group:1}"
         local expected
-        expected=$(technique_count_for_group "$group_label")
+        expected=$(technique_count_for_group "$group_label") || expected=""
         if [[ -z "$expected" || "$expected" -eq 0 ]]; then
             echo "  FAIL  $current_scenario"
             echo "        the registry lists no techniques under the '$group_label' group"
@@ -1731,7 +1761,7 @@ scenario_technique_no_internals() {
         result=$(run_ltl "internals-$topic" --explain "$topic")
         local out="${result#*:}"
         check_capture_warnings "$out"
-        check_capture_rendered "$result"
+        check_capture_rendered "$result" || continue
 
         # Issue references (#NNN) and decision labels (D5, F12, AC3, R7)
         # standing as their own token.
@@ -2011,11 +2041,25 @@ scenario_group_see_also_names_a_neighbour() {
     # roster order and nothing else.
     current_scenario="group-see-also:not-a-pipeline"
     echo "[$current_scenario]"
+    # Judged only over pages that each carry a See also: a missing section
+    # is not evidence that the pages are not a pipeline.
+    local g
+    for g in "${TECHNIQUE_GROUPS[@]}"; do
+        if [[ ! -s "$TMP_DIR/see-also-$g.section" ]]; then
+            echo "  FAIL  $current_scenario"
+            echo "        the See also of '$g' was not read, so the order of the pages cannot be judged"
+            echo "        asserts:     The six groups are presented as neighbours an analyst moves between, not as a sequence to be followed in order."
+            echo "        produced_by: %explain_topics in ltl (the group page See also blocks)"
+            echo "        contract:    Issue #504 AC15, R11: a lookup that matches nothing is a failure, never a pass"
+            fail=$((fail + 1))
+            failures+=("$current_scenario :: no See also section read for $g")
+            return
+        fi
+    done
     local i pipeline=1 n=${#TECHNIQUE_GROUPS[@]}
     for (( i = 0; i < n - 1; i++ )); do
         local this="${TECHNIQUE_GROUPS[$i]}" next="${TECHNIQUE_GROUPS[$((i + 1))]}"
         local sec="$TMP_DIR/see-also-$this.section"
-        [[ -f "$sec" ]] || { pipeline=0; break; }
         local others=0 o
         for o in "${TECHNIQUE_GROUPS[@]}"; do
             [[ "$o" == "$this" ]] && continue

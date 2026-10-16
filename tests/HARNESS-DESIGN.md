@@ -650,9 +650,11 @@ Three assertion shapes are true of a run that failed, and so pass against it:
 - **An absence check.** An error message, or an empty capture, contains none of the forbidden text.
 - **A presence check that the seed already satisfies.** A pattern that matches rows the fixture carried in passes whether or not the run wrote anything.
 
-Each one is preceded by a check that the run produced what it reads: exit 0 and a non-empty capture before a comparison or an absence check, and a lookup of the specific row or key the run writes (its date, its value) rather than any line of the right shape. A refusal is asserted by its exit code **and** its message, never the exit code alone, since any failure exits non-zero.
+Each one is preceded by a check that the run produced what it reads: exit 0 and a non-empty capture before a comparison or an absence check, and a lookup of the specific row or key the run writes (its date, its value) rather than any line of the right shape. When that check fails, the checks that read the capture are skipped, so the pass count holds only checks made against a real output; an absence or width check on an empty capture is itself a failure. A refusal is asserted by its exit code **and** its message, never the exit code alone, since any failure exits non-zero.
 
-The way to find them is to run each scenario alone against an `ltl` that always exits 1 (`LTL=<stub> ./tests/validate-<name>.sh --scenario <s>`): a scenario that exits 0 after invoking the stub passes on a run that did not happen. The suite was swept this way under Issue #726 and the cases found were closed: alias and short-option comparisons and the no-internals absence checks in `validate-explain.sh`, and the expired-selection check in `validate-index-read-back.sh`.
+A lookup inside `$( )` that finds nothing (`grep` with no match, a pipeline fed by a failed `ltl` under `pipefail`) stops a `set -e` harness mid-run, so every later scenario goes unreported. Such an assignment carries `|| var=""` and the empty value is then asserted on.
+
+These shapes are found by reading the harness: every comparison, absence check, width check and lookup assignment is traced back to the run it reads.
 
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 
