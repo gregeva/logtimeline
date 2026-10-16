@@ -12162,7 +12162,7 @@ sub resolve_quantity_option {
         my $whole = sprintf('%.0f', $value);
         $value = $whole + 0 if abs($value - $whole) <= 1e-9 * abs($value);
     }
-    return (undef, $unit, 'a bound cannot be negative')  if $row->{value} eq 'bound' && $value < 0;
+    return (undef, $unit, 'a bound cannot be negative')  if ($row->{value} eq 'bound' || $row->{value} eq 'size') && $value < 0;
     return (undef, $unit, "not a whole number $units")    if $row->{value} eq 'size'  && $value != int($value);
     return (undef, $unit, "cannot be below $row->{min}")  if defined $row->{min} && $value < $row->{min};
     return ($value, $unit, undef);
