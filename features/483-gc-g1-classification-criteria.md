@@ -34,6 +34,23 @@ Applied the same day by the architect to conditions raised from the corpus: a
 missed pause-time goal (`MMU target violated`) is a target not met, not a failure;
 a full collection (`Pause Full`) is not a failure.
 
+### D2 — a failure statement written on its own line pre-classifies the next pause (architect, 2026-10-16)
+
+- A failure statement on its own line (JDK 17's `To-space exhausted`) sets a per-file
+  failure reason: the string the statement carries, picked up when the line is
+  classified. A string, not a Boolean; the same holds for the other direction.
+- The next pause line, which would have been classified a success, is classified a
+  failure, and the reason is added in brackets, as JDK 21 writes
+  ` (Evacuation Failure)` on the pause line itself. The reason is reset once applied.
+- The statement line does not appear as a category of its own.
+- Binding the reason to the same `GC(n)` would be ideal and is judged too complex;
+  the reset on use is required.
+- Declared per format, through the classification criteria the registry already
+  compiles.
+- The failure statement lines must be matched for the classification to see them,
+  so the lines the G1 entries match are widened; this issue ensures success and
+  failure rules exist for every scenario.
+
 ## Findings
 
 ### F1 — the failure statements on record
