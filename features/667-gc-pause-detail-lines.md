@@ -43,7 +43,7 @@ against wall clock, how the regions moved, and which phase took the time.
 | Time attribution | A line's contribution lands in the bucket of its own timestamp | `features/log-format-registry.md` D22 |
 | State carried across lines | Merging lines that share a correlation key into one logical event is #372's capability (on hold, blocked by #61 and #59). It is declared per format as an optional sub-determination, so a format without declarations pays nothing; its state is #61's inter-line store, with a one-shot consume-at-end lifecycle, not a store of its own; the merged event is a standard parse-stage record in the completion bucket. #372 leaves nested pairing and one-start-to-many-ends fan-out to a future specification when a consumer demands it | `features/log-format-registry.md` D23 (a) (c), D58 (a); #372 § Out of scope |
 | Metrics a format declares | `message_metrics` probes fill the canonical fields (duration, bytes) from the matched line's message | `format_registry_specs()`, entry `mt1std` |
-| User-defined metrics | Read from lines a format matched, never from unmatched lines | F10 below |
+| User-defined metrics | Tried only on lines that matched a format; a line belonging to an entry is ignored by every metric, and attributing its value to the entry is named a multi-line record feature, left out of that fix | `features/637-udm-continuation-lines.md` D1; F10 below |
 
 ## Findings
 
