@@ -4,7 +4,7 @@
 # per-store moment source, and the per-store statistics-calculation counters
 # (stats_calls invocations plus per-group computed/skipped_demand/ineligible)
 # (Issues #305, #303), and the resolution when the run retains no message at
-# all (-n 0, or any non-positive count, Issue #458).
+# all (-n 0, Issue #458).
 #
 # Also asserts the representation of what the per-time-bucket store retains,
 # read from the `MEMORY log_analysis` row of `-V benchmark-data` (Issue #528):
@@ -79,7 +79,9 @@ run_section() {
     local sections="$1"; shift
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -ni --terminal-width 200 -V "$sections" "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || true
+    local rc=0
+    "$LTL" --disable-progress -ni --terminal-width 200 -V "$sections" "$@" "$ACCESS_LOG" > "$outfile" 2>"$outfile.stderr" || rc=$?
+    echo "$rc" > "$outfile.rc"
     echo "$outfile"
 }
 
@@ -91,15 +93,30 @@ run_section_on() {
     local sections="$1" input="$2"; shift 2
     local outfile
     outfile=$(mktemp)
-    "$LTL" --disable-progress -ni --terminal-width 200 -bs 1440 -oe -V "$sections" "$@" "$input" > "$outfile" 2>"$outfile.stderr" || true
+    local rc=0
+    "$LTL" --disable-progress -ni --terminal-width 200 -bs 1440 -oe -V "$sections" "$@" "$input" > "$outfile" 2>"$outfile.stderr" || rc=$?
+    echo "$rc" > "$outfile.rc"
     echo "$outfile"
 }
 
-# Runtime-warning cleanliness for a run_section capture (stderr lives beside
-# the captured stdout as <capture>.stderr). Runs in the main shell so the
-# fail counters persist. HARNESS-DESIGN.md § Runtime-warning cleanliness.
-check_capture_warnings() {
-    local capture="$1"
+# A capture is read only if its run completed: ltl's exit code (in
+# <capture>.rc) must be 0, so a run that stopped early cannot pass on
+# assertions that find nothing to read; and its stderr (<capture>.stderr)
+# must carry no runtime warning (HARNESS-DESIGN.md § Runtime-warning
+# cleanliness). Called directly, never inside $( ), so the fail counters
+# persist.
+check_capture() {
+    local capture="$1" rc
+    rc=$(cat "$capture.rc")
+    if [[ "$rc" != 0 ]]; then
+        echo "  FAIL  $current_scenario"
+        echo "        asserts:     The run this scenario reads completes: ltl exits 0"
+        echo "        produced_by: the run as a whole in ltl (exit $rc; stderr names where it stopped)"
+        echo "        contract:    $CONTRACT"
+        echo "        stderr:      $(head -3 "$capture.stderr" | tr '\n' '|')"
+        fail=$((fail + 1))
+        failures+=("$current_scenario :: ltl-exit-$rc")
+    fi
     if ! assert_no_runtime_warnings "$capture.stderr" "$current_scenario"; then
         fail=$((fail + 1))
         failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
@@ -175,8 +192,11 @@ assert_command() {
     fi
 }
 
-# Extract the statistics-demand section body; hard-fail (per HARNESS-DESIGN
-# "must fail on missing anchors") if the start or end marker is absent.
+# Extract the statistics-demand section body into <capture>.section and name
+# that file in $section_body; hard-fail (per HARNESS-DESIGN "must fail on
+# missing anchors") if the start or end marker is absent. Called directly,
+# never inside $( ), so the failure is counted.
+section_body=""
 extract_section() {
     local outfile="$1"
     local body="$outfile.section"
@@ -193,7 +213,7 @@ extract_section() {
         return 1
     fi
     sed -n '/^=== statistics-demand ===$/,/^=== END statistics-demand ===$/p' "$outfile" > "$body"
-    echo "$body"
+    section_body="$body"
 }
 
 # Extract the per-store sub-block (lines from `store: <name>` up to the next
@@ -242,8 +262,9 @@ if scenario_wanted scenario-1-terminal-only-default; then
 current_scenario="scenario-1-terminal-only-default"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     for store in bucket message; do
         sb=$(extract_store "$body" "$store")
         assert_line "$sb" \
@@ -306,8 +327,9 @@ if scenario_wanted scenario-2-csv-full-demand; then
 current_scenario="scenario-2-csv-full-demand"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -o)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
         pattern     '^  group: shape_moments demanded=yes consumers=.*stats-csv' \
@@ -351,8 +373,9 @@ if scenario_wanted scenario-3-sort-on-skewness; then
 current_scenario="scenario-3-sort-on-skewness"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -so skewness)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
         pattern     '^  group: shape_moments demanded=yes consumers=sort-on:skewness$' \
@@ -433,8 +456,9 @@ current_scenario="scenario-3b-sort-on-p99"
 # demand-line shapes are the long-established scenario-1/2/3 patterns.
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -so p99)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
         pattern     '^  group: terminal_core demanded=yes consumers=messages-table,sort-on:p99$' \
@@ -493,8 +517,9 @@ echo "--- $current_scenario ---"
 for combo in "p99:-od:duration:-od/--omit-durations" "bytes_mean:-ob:bytes:-ob/--omit-bytes" "count_mean:-oc:count:-oc/--omit-count"; do
     IFS=: read -r operand flag family flagname <<< "$combo"
     out=$(run_section_on statistics-demand "$ACCESS_LOG" -so "$operand" "$flag")
-    check_capture_warnings "$out"
-    if body=$(extract_section "$out"); then
+    check_capture "$out"
+    if extract_section "$out"; then
+        body="$section_body"
         assert_line "$body" \
             pattern     "^sort_gate: operand=$operand family=$family observed=no fallback=parse\$" \
             asserts     "-so $operand with $flag is a contradiction knowable at option parsing: the gate resolves the $family family, records the metric as never collected, and falls back at parse time" \
@@ -527,8 +552,9 @@ echo "--- $current_scenario ---"
 for combo in "p99:duration" "bytes_mean:bytes" "count_mean:count"; do
     IFS=: read -r operand family <<< "$combo"
     out=$(run_section_on statistics-demand "$NO_METRICS_FIXTURE" -so "$operand")
-    check_capture_warnings "$out"
-    if body=$(extract_section "$out"); then
+    check_capture "$out"
+    if extract_section "$out"; then
+        body="$section_body"
         assert_line "$body" \
             pattern     "^sort_gate: operand=$operand family=$family observed=no fallback=pre-walk\$" \
             asserts     "-so $operand on a log with no $family values: the gate reads the family's observation state after the read loop, finds nothing observed, and falls back before the population walk" \
@@ -562,8 +588,9 @@ echo "--- $current_scenario ---"
 for combo in "skewness:12" "cv:12"; do
     IFS=: read -r operand keys <<< "$combo"
     out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -so "$operand")
-    check_capture_warnings "$out"
-    if body=$(extract_section "$out"); then
+    check_capture "$out"
+    if extract_section "$out"; then
+        body="$section_body"
         sm=$(extract_store "$body" message)
         assert_line "$sm" \
             pattern     "^  sort_selection: statistic=$operand defined=0 fill=$keys demoted=0\$" \
@@ -586,8 +613,9 @@ done
 # The available-value branch has no floor above one observation: a bytes
 # operand on a log that carries bytes must NOT trip the post-walk gate.
 out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -so bytes_mean)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     assert_line "$body" \
         pattern     '^sort_gate: operand=bytes_mean family=bytes observed=yes fallback=none$' \
         asserts     'A bytes operand on a log carrying bytes ranks on the available-value branch, which the post-walk gate never judges — the gate is scoped to calculated statistics with an eligibility floor' \
@@ -603,8 +631,9 @@ if scenario_wanted scenario-4-heatmap-no-bucket-demand; then
 current_scenario="scenario-4-heatmap-no-bucket-demand"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -hm duration)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
         pattern     '^  store_demand: no$' \
@@ -634,8 +663,9 @@ if scenario_wanted scenario-5-runtime-config-crosscheck; then
 current_scenario="scenario-5-runtime-config-crosscheck"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand,runtime-config)
-check_capture_warnings "$out"
-if body=$(extract_section "$out"); then
+check_capture "$out"
+if extract_section "$out"; then
+    body="$section_body"
     assert_command \
         command     "bd=\$(grep -oE 'bucket_duration_stats_demand: (yes|no)' '$out' | grep -oE '(yes|no)\$'); sd=\$(awk '/^store: bucket\$/{f=1;next} f&&/store_demand:/{print \$2; exit}' '$body'); [[ -n \"\$bd\" && \"\$bd\" == \"\$sd\" ]]" \
         label       'bucket store_demand agrees with runtime-config bucket_duration_stats_demand' \
@@ -667,9 +697,10 @@ if scenario_wanted scenario-9-no-message-retention; then
 current_scenario="scenario-9-no-message-retention"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand,benchmark-data -n 0)
-check_capture_warnings "$out"
+check_capture "$out"
 sed -E 's/\x1b\[[0-9;]*m//g' "$out" > "$out.plain"
-if body=$(extract_section "$out"); then
+if extract_section "$out"; then
+    body="$section_body"
     sm=$(extract_store "$body" message)
     assert_line "$sm" \
         pattern     '^  store_demand: no$' \
@@ -738,13 +769,14 @@ if scenario_wanted scenario-10-no-message-retention-inert-options; then
 current_scenario="scenario-10-no-message-retention-inert-options"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -n 0 -g 85 -mdm bin -so p50)
-check_capture_warnings "$out"
+check_capture "$out"
 assert_line "$out.stderr" \
     pattern     'Note: -n/--top-messages 0 retains no message, so .*-g/--group-similar.*-mdm/--message-stats-data-model.*-so/--sort-on have no effect' \
     asserts     'Message grouping, the message statistics data model and the message ranking are reported inert (not rejected) when no message is retained, naming each option the user passed' \
     produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
-if body=$(extract_section "$out"); then
+if extract_section "$out"; then
+    body="$section_body"
     assert_line "$body" \
         pattern     '^sort_gate: operand=p50 family=duration observed=- fallback=none$' \
         asserts     'A ranking request is recorded as given but never falls back, because with no message retained there is nothing to rank and no fallback to report' \
@@ -769,7 +801,7 @@ mkdir -p "$CSV_ONLY_DIR"
 cd "$CSV_ONLY_DIR"
 out=$(run_section statistics-demand -bs 1440 -oe -n 0 -o)
 cd "$WORKDIR"
-check_capture_warnings "$out"
+check_capture "$out"
 assert_line "$out.stderr" \
     pattern     'Note: -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written' \
     asserts     'A CSV request is reported as half-served when no message is retained: the user is told at run time which of the two files is not written and why' \
@@ -839,9 +871,11 @@ if [[ ! -f "$DURATION_SPREAD_FIXTURE" ]]; then
 fi
 
 rep_out=$(mktemp)
+rc=0
 "$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
-    "$DURATION_SPREAD_FIXTURE" > "$rep_out" 2>"$rep_out.stderr" || true
-check_capture_warnings "$rep_out"
+    "$DURATION_SPREAD_FIXTURE" > "$rep_out" 2>"$rep_out.stderr" || rc=$?
+echo "$rc" > "$rep_out.rc"
+check_capture "$rep_out"
 
 # The fixture's retained population is part of the threshold's derivation, so a
 # regeneration that changed the line count invalidates the ceiling rather than
@@ -915,9 +949,11 @@ NUMERIC_RETENTION_PRODUCED_BY='named_structure_sizes() in ltl, reached through m
 NUMERIC_RETENTION_CONTRACT='features/561-retained-durations-as-numbers.md section The decisions carried over from the prototype section measured result, D1: the numeric normalisation happens at the copy, at each of the five retention sites'
 
 num_out=$(mktemp)
+rc=0
 "$LTL" --disable-progress -mem -bs 1440 -oe -V benchmark-data -n 1 \
-    "$DURATION_SPREAD_FIXTURE" > "$num_out" 2>"$num_out.stderr" || true
-check_capture_warnings "$num_out"
+    "$DURATION_SPREAD_FIXTURE" > "$num_out" 2>"$num_out.stderr" || rc=$?
+echo "$rc" > "$num_out.rc"
+check_capture "$num_out"
 
 # A missing row is a hard failure: an absent row must never read as a value
 # under the ceiling.
@@ -988,9 +1024,11 @@ if [[ -n "$stranger" ]]; then
 fi
 
 spell_out=$(mktemp)
+rc=0
 ( cd "$SPELLING_DIR" && "$LTL" --disable-progress -bs 1440 -oe -n 1 -o -cp full \
-    "$FRACTIONAL_FIXTURE" > "$spell_out" 2>"$spell_out.stderr" ) || true
-check_capture_warnings "$spell_out"
+    "$FRACTIONAL_FIXTURE" > "$spell_out" 2>"$spell_out.stderr" ) || rc=$?
+echo "$rc" > "$spell_out.rc"
+check_capture "$spell_out"
 
 SPELLING_STATS_CSV="$(ls "$SPELLING_DIR"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)"
 if [[ -z "$SPELLING_STATS_CSV" ]]; then
@@ -1058,9 +1096,9 @@ ALIAS_CONTRACT='features/613-one-name-vocabulary.md D8 (one table of statistic n
 for pair in mean:avg:mean std_dev:stddev:std_dev; do
     IFS=: read -r first second key <<< "$pair"
     one=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -n 5 --hide title,timeline,options,summary -so "$first")
-    check_capture_warnings "$one"
+    check_capture "$one"
     two=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -n 5 --hide title,timeline,options,summary -so "$second")
-    check_capture_warnings "$two"
+    check_capture "$two"
     for capture in "$one" "$two"; do
         assert_line "$capture" \
             pattern     "^  sort_selection: statistic=$key defined=" \
@@ -1089,10 +1127,11 @@ current_scenario="scenario-17-heatmap-show-stats-demand"
 echo "--- $current_scenario ---"
 HEATMAP_CONTRACT='features/597-section-visibility.md § D27 (-hm hides the statistics column by default; per-bucket statistics are computed under -hm only when it is shown or the STATS CSV asks)'
 shown=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -hi title,options,messages,summary -hm duration --show stats)
-check_capture_warnings "$shown"
+check_capture "$shown"
 csv=$(run_section_on statistics-demand "$DURATION_SPREAD_FIXTURE" -hi title,options,messages,summary -hm duration -o)
-check_capture_warnings "$csv"
-if body=$(extract_section "$shown"); then
+check_capture "$csv"
+if extract_section "$shown"; then
+    body="$section_body"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
         pattern     '^  store_demand: yes$' \
@@ -1105,7 +1144,8 @@ if body=$(extract_section "$shown"); then
         produced_by 'resolve_statistics_group_demand() in ltl (@STAT_CONSUMERS timeline-latency-column active on !$hide_stats)' \
         contract    "$HEATMAP_CONTRACT"
 fi
-if body=$(extract_section "$csv"); then
+if extract_section "$csv"; then
+    body="$section_body"
     sb=$(extract_store "$body" bucket)
     assert_line "$sb" \
         pattern     '^  store_demand: yes$' \
@@ -1145,8 +1185,9 @@ for metric in duration bytes count; do
     for statistic in ${carried[$metric]}; do
         operand="${metric}_${statistic}"
         out=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -n 5 -so "$operand")
-        check_capture_warnings "$out"
-        if body=$(extract_section "$out"); then
+        check_capture "$out"
+        if extract_section "$out"; then
+            body="$section_body"
             assert_line "$body" \
                 pattern     "^sort_gate: operand=$operand family=$metric " \
                 asserts     "-so $operand is accepted and ranks on the $metric family" \
@@ -1158,15 +1199,13 @@ done
 
 # Shorthands rank as their full names: the rendered messages are identical.
 ranked() {
-    local capture
-    capture=$(run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -n 20 --hide title,timeline,options,summary -so "$1")
-    check_capture_warnings "$capture"
-    echo "$capture"
+    run_section_on statistics-demand "$SINGLE_SAMPLE_FIXTURE" -n 20 --hide title,timeline,options,summary -so "$1"
 }
 for pair in bytes:bytes_sum count:count_sum duration:duration_sum min:duration_min p95:duration_p95 impact:duration_impact \
             avg:mean mean:duration_mean duration_avg:duration_mean bytes_avg:bytes_mean count_avg:count_mean; do
     IFS=: read -r first second <<< "$pair"
     one=$(ranked "$first"); two=$(ranked "$second")
+    check_capture "$one"; check_capture "$two"
     assert_command \
         command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ -n \"\$(sed '1,/^=== END statistics-demand ===\$/d' '$one')\" ] && ! grep -q '^Warning:' '$one.stderr' '$two.stderr'" \
         label       "-so $first and -so $second render the same ranked messages, with no deprecation notice" \
@@ -1179,6 +1218,7 @@ done
 for pair in total:occurrences count_total:count_occurrences std_dev:stddev duration_std_dev:stddev time:duration size:bytes; do
     IFS=: read -r old new <<< "$pair"
     one=$(ranked "$old"); two=$(ranked "$new")
+    check_capture "$one"; check_capture "$two"
     assert_command \
         command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ \"\$(grep -c '^Warning: $old is deprecated.*(given to -so/--sort-on): use $new\$' '$one.stderr')\" = 1 ] && ! grep -q '^Warning:' '$two.stderr'" \
         label       "-so $old ranks as -so $new and prints one deprecation notice naming $new" \

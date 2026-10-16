@@ -621,6 +621,27 @@ assert_line "$out" \
 
 Review gate: `grep -n '`' tests/validate-*.sh` — every backtick on a non-comment line is either escaped or inside single quotes. A harness that needs a variable *and* a backtick in one string escapes the backtick.
 
+#### Trap 12: a failure counted inside `$( )` is lost
+
+```bash
+# WRONG — extract_section prints FAIL and increments fail, both inside a subshell
+if body=$(extract_section "$out"); then
+    assert_line "$body" ...
+fi
+```
+
+A command substitution runs its function in a subshell. When the helper finds the anchor missing, its `fail=$((fail + 1))` and `failures+=(...)` change the subshell's copies, and its FAIL lines are captured into the variable rather than printed. The parent sees only the non-zero return, skips the assertions, and the summary reads `0 failed`. A capture helper that swallows `ltl`'s exit code (`|| true`) compounds it: a run refused with a usage error emits no section, and nothing records that the run failed. In `validate-statistics-demand.sh` a scenario whose run was refused reported `0 passed, 0 failed` and exited 0 (Issue #726).
+
+```bash
+# RIGHT — call the helper directly; it names its result in a variable
+if extract_section "$out"; then
+    body="$section_body"
+    assert_line "$body" ...
+fi
+```
+
+A helper that can count a failure is called directly, never inside `$( )`; it hands back a path through a variable, or the caller derives the path. A capture helper that runs inside `$( )` records the exit code beside the capture (`<capture>.rc`), and the caller checks it in the main shell before reading the capture, as it checks `<capture>.stderr` (§ Runtime-warning cleanliness).
+
 ## Invocation coherence: every `ltl` run is shaped to the test that invokes it
 
 A harness does not run `ltl` "the default way" and read off the part it cares about. Every invocation — in a scenario, a capture helper, a probe, a sabotage proof — is tuned so that the tool does exactly the work the assertion needs and nothing else: the fastest runtime, the minimum memory, and an output whose shape is the one being asserted. Anything the run computes that the assertion never reads is waste at best and, on the wrong input, a resource problem at worst.
