@@ -209,15 +209,52 @@ configured" notice (row 30) for GC logs; #697 and #681 change when a shipped
 `-udm` notice fires (rows 18, 28); #469 replaces the mechanism behind row 27
 without saying whether the notice still applies.
 
+## Prototype scope
+
+The prototype explores the design options for the surface and its input;
+nothing about what is built into `ltl` is scoped until the prototypes are
+delivered and validated (architect, 2026-10-17). It is required on two counts
+of `prototype/README.md`: a new capability whose shape has to be found, and
+(d) a verification method not yet known, since asserting a rendered terminal
+surface is an open question in this repository
+(`docs/test-driven-development.md` § Visual surfaces).
+
+### Questions from the framing
+
+| # | question | design options to compare |
+|---|---|---|
+| Q1 | Which forms the surface takes, and which case selects each | an inline section in the terminal output; a modal or pop-up surface over the output; a compact form of a line or two (a single deprecation); a large form taking much of the terminal (a long guidance list) |
+| Q2 | Where it appears | before the timeline and its column titles, after all data work; or after the output is rendered, as a modal |
+| Q3 | How each D1 category is presented | category headings with colour, ANSI characters and extended glyphs (for example a magnifying glass or a settings glyph); the layout of a notice's statement, evidence and remedy |
+| Q4 | How the analyst is asked, and answers | the input display at the pane ("this was detected; shall I do this before drawing the output?"), for what can still be rendered differently from the captured data (more messages, a different sort); its form chosen by the same cases as Q1 |
+| Q5 | One input form at every decision point | the pane's input design applied to a point before the read (#44's confirmation of a run estimated above 1 GB), to show the separate pattern can use it unchanged |
+| Q6 | Relevance and restraint | what keeps the surface to a few well-chosen notices when many are raised |
+| Q7 | The producer contract | what a producer supplies (the inventory suggests statement, evidence and remedy), proven by expressing notices from the inventory through it |
+| Q8 | Verification | how a harness asserts which notices were produced, gated and shown (the `-V` section), and how the rendered surface is checked |
+
+### Questions Claude raises, for the architect to accept or drop
+
+- Where the output is not a terminal (redirected, captured, piped), what each
+  form and the input become.
+- How the forms behave at narrow widths, short terminal heights and on a light
+  background.
+- Rows 1 to 11 of the inventory print before the read today; whether the
+  prototype shows them earlier than the pane, or only in it.
+
+### Input the prototype runs on
+
+Notice sets drawn from the inventory and the planned producers, one per case
+Q1 must distinguish: a single notice (a deprecation); a handful across several
+categories; a long list dominated by guidance; and a set that asks the analyst
+a question.
+
 ## Open items
 
 - Each notice's placement under D1's five categories.
-- The forms the pane takes, and which case selects each.
-- The decision points at which the run could ask the analyst, and the one
-  input form they share with #44's pre-read confirmation.
-- Pane placement: before the timeline, or a modal presentation.
-- The producer contract: what a producer supplies.
-- The asking-the-analyst capability: what the first version must leave room for.
+- The prototype's questions, Q1 to Q8 under *Prototype scope*, and whether
+  Claude's raised questions are taken into it.
+- What is built into `ltl`: scoped only after the prototypes are delivered and
+  validated.
 
 ## Acceptance criteria
 
