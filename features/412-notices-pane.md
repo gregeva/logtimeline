@@ -50,6 +50,18 @@ a `-V` section, and the contract defined as an official pattern in
   pane is the place to say "this was detected; shall I do this before drawing
   the output?" for what can still be rendered differently from the captured
   data (for example more messages, or a different sort).
+- **Asking the analyst is a pattern of its own, with more than one decision
+  point.** #44's confirmation of a run estimated above 1 GB is asked before the
+  read, far earlier than the pane, so it is not a deferred notice. It and the
+  pane's question share one form for a dialogue or input display; the
+  difference is the point in time. The design keeps the decision points in
+  view: wherever the run could go back to the analyst with a question, it uses
+  that same form.
+- **The pane's form follows what was deferred.** A long list of guidance
+  needs much of the terminal to show it; a single deprecation notice is a
+  couple of lines and calls for no large surface. The design and the
+  prototype look at several forms to choose from, and decide which applies to
+  which case. The same holds for the input display.
 - **The existing behavioural-notices pattern is one kind of notice** within
   this surface, not the surface.
 
@@ -187,8 +199,9 @@ without saying whether the notice still applies.
   something narrower than they look: a filtered subset, derived values,
   approximate percentiles, coverage limited to what the log records) is its
   own category.
-- A notice that must be answered before the read (#44's memory confirmation)
-  cannot wait for a pane drawn after processing.
+- The forms the pane takes, and which case selects each.
+- The decision points at which the run could ask the analyst, and the one
+  input form they share with #44's pre-read confirmation.
 - Pane placement: before the timeline, or a modal presentation.
 - The producer contract: what a producer supplies.
 - The asking-the-analyst capability: what the first version must leave room for.
