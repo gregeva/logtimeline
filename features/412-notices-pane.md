@@ -17,10 +17,10 @@ interface and one renderer.
 
 https://github.com/gregeva/logtimeline/issues/412
 
-Requirements are the issue body's seven: the producer/consumer mechanism,
+Requirements are the issue body's eight: the producer/consumer mechanism,
 categories, one standardised interface, relevance and restraint, visual design,
-a `-V` section, and the contract defined as an official pattern in
-`docs/architecture-patterns.md`.
+a `-V` section, the contract defined as an official pattern in
+`docs/architecture-patterns.md`, and user input.
 
 ## Framing (architect, 2026-10-17)
 
@@ -45,18 +45,19 @@ a `-V` section, and the contract defined as an official pattern in
   notice is known before rendering starts. The pane is shown at that point,
   before the timeline, or afterwards in some form of modal presentation; which
   is a design question.
-- **Planned for, not in the first version: asking the analyst.** At the moment
+- **Asking the analyst at the pane.** At the moment
   the pane is shown, the read is done and the rendering has not started. The
   pane is the place to say "this was detected; shall I do this before drawing
   the output?" for what can still be rendered differently from the captured
   data (for example more messages, or a different sort).
-- **Asking the analyst is a pattern of its own, with more than one decision
-  point.** #44's confirmation of a run estimated above 1 GB is asked before the
-  read, far earlier than the pane, so it is not a deferred notice. It and the
-  pane's question share one form for a dialogue or input display; the
-  difference is the point in time. The design keeps the decision points in
-  view: wherever the run could go back to the analyst with a question, it uses
-  that same form.
+- **User input is part of this surface's design.** The surface designed and
+  prototyped here includes the analyst's input, not only the deferred
+  notices. Using that input design elsewhere is a separate pattern: #44's
+  confirmation of a run estimated above 1 GB is asked before the read, far
+  earlier than the pane, so it is not a deferred notice, but it takes the same
+  form for a dialogue or input display at a different point in time. The
+  design keeps the decision points in view: wherever the run could go back to
+  the analyst with a question, it uses that form.
 - **The pane's form follows what was deferred.** A long list of guidance
   needs much of the terminal to show it; a single deprecation notice is a
   couple of lines and calls for no large surface. The design and the
@@ -64,6 +65,23 @@ a `-V` section, and the contract defined as an official pattern in
   which case. The same holds for the input display.
 - **The existing behavioural-notices pattern is one kind of notice** within
   this surface, not the surface.
+
+## Locked decisions
+
+### D1 — Categories split by what the analyst does with the notice (architect, 2026-10-17)
+
+| category | what the analyst does |
+|---|---|
+| data anomaly | checks the source data or the options before trusting the figures |
+| your options | corrects the command |
+| decision taken for you | knows what the run did instead of what was asked |
+| figure caveat | reads the figures as covering less than they appear to |
+| guidance | applies the suggested sort or filter next |
+
+The test for a notice's category is the analyst's action, so the category
+heading tells them how to read every notice under it. The inventory's
+*informational* placements divide between *your options* and *decision taken
+for you*; the placement of each notice under D1 is made in the inventory.
 
 ## Inventory of current notices
 
@@ -193,12 +211,7 @@ without saying whether the notice still applies.
 
 ## Open items
 
-- The category set, beyond the three framed so far: whether informational is
-  one category or splits into the analyst's own options and the decisions
-  taken for them; and whether *figure caveat* (the figures are right but mean
-  something narrower than they look: a filtered subset, derived values,
-  approximate percentiles, coverage limited to what the log records) is its
-  own category.
+- Each notice's placement under D1's five categories.
 - The forms the pane takes, and which case selects each.
 - The decision points at which the run could ask the analyst, and the one
   input form they share with #44's pre-read confirmation.
