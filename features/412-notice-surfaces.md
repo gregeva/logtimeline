@@ -65,6 +65,11 @@ a `-V` section, the contract defined as an official pattern in
   collected within them. Deferring notices is one pattern; capturing a choice
   at a given point of the run builds on the same surfaces and is a separate
   pattern, designed and prototyped here.
+- **Presentation of information and choices is separate from the charts.**
+  As what `ltl` can detect and present grows more complex, the rendering of
+  the charts, the statistical information and the metadata describing them is
+  separated from the notices and choice patterns. The issue was first framed
+  as a structured area before the chart; that framing is too constrained.
 - **Not part of this stage:** which questions are asked, and identifying every
   place they could be asked. There are a couple of key places where it is
   possible.
@@ -254,6 +259,13 @@ each case is decided and implemented is likely to differ (architect,
 prototyping stage, and is what the final requirements and specification are
 settled from before anything is built into `ltl`; nothing about what is built
 is scoped until the prototypes are delivered and validated.
+
+The prototypes cover every example surface and choice point: the decorated
+deprecation of a couple of lines, the yes or no while processing, the choice
+offered once a pattern is detected, and the long list of guidance. During
+prototyping it is chosen which is relevant where, and how each applies; once
+validated they become patterns to draw on for future enhancements, even where
+they are not implemented in `ltl` at first.
 
 Prototyping is required on two counts of `prototype/README.md`: a new
 capability whose shape has to be found, and (d) a verification method not yet
