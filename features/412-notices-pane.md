@@ -63,6 +63,21 @@ a `-V` section, the contract defined as an official pattern in
   couple of lines and calls for no large surface. The design and the
   prototypes look at several forms to choose from, and decide which applies to
   which case. The same holds for the input display.
+- **Where the output is read.** An analyst always reads `ltl` in a terminal;
+  that is its intended and principal use. Piping is not a design goal: `ltl`
+  accepts no piped input and does not intend its output to be piped. Data for
+  other consumers goes through `-o` (two CSV files and one YAML file), and
+  pictures for documents through the screenshot capability (an SVG and a PNG
+  of a targeted section, `docs/process/screenshots.md`). The other readers of
+  the terminal surface are the test harnesses, and Claude during development,
+  which redirects the output to see how it rendered, stripping ANSI sequences
+  where needed.
+- **The surface works within the screenshot capability**, so the documentation
+  can target it.
+- **A modal or pop-up must be introspectable by Claude's development tools**;
+  for the analyst it raises no problem. `ltl` has no library for one today:
+  what is relevant and possible is found in prototyping, and what is
+  integrated into `ltl`, and how, is decided after it.
 - **The existing behavioural-notices pattern is one kind of notice** within
   this surface, not the surface.
 
