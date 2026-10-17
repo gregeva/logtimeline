@@ -72,8 +72,18 @@ a `-V` section, the contract defined as an official pattern in
   the terminal surface are the test harnesses, and Claude during development,
   which redirects the output to see how it rendered, stripping ANSI sequences
   where needed.
+- **Standard error is temporary; the designed surface is on standard output.**
+  The notices print to standard error today so that they stay out of standard
+  output and the harnesses can capture and check them. Any designed terminal
+  interface is on standard output, so this issue's `-V` section exposes the
+  deferred notices, giving the harnesses a way to read them other than
+  capturing standard error.
 - **The surface works within the screenshot capability**, so the documentation
-  can target it.
+  can target it. What the screenshot tool handles today (standard output only,
+  rows chosen by section through `-V section-layout`, no escape sequence other
+  than a colour code) is a constraint of the tool as it is, not a boundary of
+  the design: the design determined here feeds back into the screenshot tool,
+  which adapts to it, with the balance between them found as part of the work.
 - **A modal or pop-up must be introspectable by Claude's development tools**;
   for the analyst it raises no problem. `ltl` has no library for one today:
   what is relevant and possible is found in prototyping, and what is
