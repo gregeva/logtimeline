@@ -65,11 +65,21 @@ a `-V` section, the contract defined as an official pattern in
   collected within them. Deferring notices is one pattern; capturing a choice
   at a given point of the run builds on the same surfaces and is a separate
   pattern, designed and prototyped here.
+- **Restraint is choosing the surface, not merging notices.** The surface
+  chosen is the one best adapted to the situation and the actual conditions;
+  what happens in moving from one surface to another is determined once the
+  surfaces themselves are understood. One such surface is a navigable list,
+  scrolled up and down, in which a notice is selected to see more detail about
+  it: more complicated, and powerful for many notices, where it is overkill
+  for a simple informational message.
 - **Presentation of information and choices is separate from the charts.**
   As what `ltl` can detect and present grows more complex, the rendering of
   the charts, the statistical information and the metadata describing them is
   separated from the notices and choice patterns. The issue was first framed
   as a structured area before the chart; that framing is too constrained.
+  This concerns only the surfaces for the user, how the rendering and the
+  user input occur; it has nothing to do with how the data is structured or
+  processed.
 - **The progress indicator is in scope.** A choice raised while the progress
   indication is displayed is one of the scenarios prototyped. If a modal
   dialogue proves the best way, that is the more straightforward to handle;
@@ -77,6 +87,39 @@ a `-V` section, the contract defined as an official pattern in
   is displayed followed by an input point (perhaps accepting a single
   character rather than waiting for enter), and the progress printing resumes
   cleanly.
+- **A choice point with nobody at the keyboard follows industry practice.**
+  The harnesses, Claude during development and the screenshot tool run `ltl`
+  unattended, and a run must neither hang nor vary. Ways to handle it include
+  taking the choices on standard input, so that they can be redirected, and a
+  hidden option, along the lines of an always-yes, that tells `ltl` before a
+  choice point comes up how to answer it. Every choice point has a default:
+  the analyst is given a certain amount of time to intervene, and if they do
+  not, the run goes on with the default. `ltl` has none of these today; how
+  user input is supplied and handled is #748 (take the analyst's input at
+  choice points, with a default and answers given ahead of time), and the
+  surfaces are designed with it in mind.
+- **A timed default shows a visible countdown.** The message and its
+  question are printed with the yes/no block, followed in brackets by the
+  seconds remaining until the default is taken; the line is redrawn every
+  second as it counts down, while a single-character read (`Term::ReadKey`)
+  accepts Y or N.
+- **Glyphs and emoji are covered in a prototype.** Agreed in principle; how
+  they render across terminals and fonts is tested before anything is decided.
+- **A choice can be multi-stage.** A more complex choice is raised in stages:
+  first the analyst is told there are options worth looking at that might
+  change the output, and asked whether to look at them or continue as
+  planned, a yes or no that defaults after a few seconds to continuing; only a
+  yes leads on to the options themselves.
+- **Notices found before the read are an example of the framing.** The
+  notices raised at option parsing (inventory rows 1 to 11) are known before
+  processing starts and before the progress line appears. A small slice could
+  expose them at that point with an input asking whether the analyst wants to
+  continue, or stop and correct them. Not a decision taken now; a use case
+  for the surfaces and choice points the prototypes explore.
+- **Out of scope: a notice surface displayed while the read and processing
+  occur.** It could be interesting, but it would change how the current
+  progress indication works and make the scope too large to manage. (A choice
+  raised during the progress line, above, stays a prototyped scenario.)
 - **Not part of this stage:** which questions are asked, and identifying every
   place they could be asked. There are a couple of key places where it is
   possible.
@@ -115,7 +158,7 @@ a `-V` section, the contract defined as an official pattern in
 
 ## Locked decisions
 
-### D1 — Categories split by what the analyst does with the notice (architect, 2026-10-17)
+### D1 — Categories split by what the analyst does with the notice (architect, 2026-10-17; runtime condition added the same day)
 
 | category | what the analyst does |
 |---|---|
@@ -124,18 +167,19 @@ a `-V` section, the contract defined as an official pattern in
 | decision taken for you | knows what the run did instead of what was asked |
 | figure caveat | reads the figures as covering less than they appear to |
 | guidance | applies the suggested sort or filter next |
+| runtime condition | is informed of a condition of the run's environment; what, if anything, they do depends on the message |
 
 The test for a notice's category is the analyst's action, so the category
 heading tells them how to read every notice under it. The inventory's
 *informational* placements divide between *your options* and *decision taken
-for you*; the placement of each notice under D1 is made in the inventory.
+for you*; each notice is placed under D1 in the inventory below.
 
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
 `printf STDERR`, `warn`, `die` and `defer_notice`), on `release/0.20.0` at
-`48278bf`. The proposed category is Claude's first placement, for the
-architect to confirm.
+`48278bf`. The categories are Claude's placements, not confirmed by the architect; they
+are settled in the planning that precedes implementation, not now.
 
 Phases: **options** = option settlement in `adapt_to_command_line_options()`
 and its callees, printed before the read starts; **read** = inside
@@ -145,39 +189,43 @@ and its callees, printed before the read starts; **read** = inside
 
 ### Notice candidates
 
-| # | producer | phase | prefix today | says | proposed category | remedy it carries |
+| # | producer | phase | prefix today | says | category (D1) | remedy it carries |
 |---|---|---|---|---|---|---|
-| 1 | `parse_udm_configs` (9 sites) | options | `Warning:` | a `-udm` spec is malformed (bad regex, no name, key and pattern both given, function in the unit slot, counting with a transform, unknown function, fixed-string pattern under a counting aggregation) and is skipped, or a unit is ignored or unknown | informational | the corrected spelling, where one is evident |
-| 2 | `parse_udm_configs` (2 sites) | options | `Note:` / `Warning:` | a repeated `-udm` is dropped; two specs resolve to one metric name and the later is skipped | informational | give them different names |
-| 3 | `read_pattern_file`, `build_merged_regex` (8 sites) | options | `Warning:` | a pattern file is missing, unreadable, binary, empty, over 10 KB or over the pattern count; the merged regex is over its length limit | informational | none |
-| 4 | `adapt_to_command_line_options` (4 sites) | options | none (bare `warn`) | a histogram or precision value is invalid and the default is used | informational | none |
-| 5 | `adapt_to_command_line_options` | options | `Warning:` | a minimum bound exceeds its maximum: no entries can match, or be highlighted | informational | none |
-| 6 | `adapt_to_command_line_options` (2 sites) | options | `Warning:` | the heatmap is disabled, or a histogram metric skipped, because the metric uses a counting aggregation | informational | none |
-| 7 | `adapt_to_command_line_options` (2 sites) | options | `Note:` | `-n 0` leaves the listed options without effect; `-o` writes the stats CSV only | informational | none |
-| 8 | `apply_parse_time_sort_gate` | options | `Note:` | `-so` cannot apply because an `--omit-*` option discards its metric; ordered by occurrences | informational | none |
-| 9 | `resolve_discard_names` (2 sites) | options | `Note:` | `-d` removes a key a metric reads; the metric is switched off | informational | none |
-| 10 | `apply_discard_precedence` (2 sites) | options | `Note:` | a key given to both `-x`/`-m` and `-d` is discarded | informational | none |
-| 11 | `print_deprecation_notices` | options | `Warning:` | a deprecated option or spelling was used | informational | the replacement |
-| 12 | `read_path_fall_back` | read (deferred) | `Note:` | the faster read path could not be prepared; large files read with the slower standard path | informational | none |
+| 1 | `parse_udm_configs` (9 sites) | options | `Warning:` | a `-udm` spec is malformed (bad regex, no name, key and pattern both given, function in the unit slot, counting with a transform, unknown function, fixed-string pattern under a counting aggregation) and is skipped, or a unit is ignored or unknown | your options | the corrected spelling, where one is evident |
+| 2 | `parse_udm_configs` (2 sites) | options | `Note:` / `Warning:` | a repeated `-udm` is dropped; two specs resolve to one metric name and the later is skipped | your options | give them different names |
+| 3 | `read_pattern_file`, `build_merged_regex` (8 sites) | options | `Warning:` | a pattern file is missing, unreadable, binary, empty, over 10 KB or over the pattern count; the merged regex is over its length limit | your options | none |
+| 4 | `adapt_to_command_line_options` (4 sites) | options | none (bare `warn`) | a histogram or precision value is invalid and the default is used | your options | none |
+| 5 | `adapt_to_command_line_options` | options | `Warning:` | a minimum bound exceeds its maximum: no entries can match, or be highlighted | your options | none |
+| 6 | `adapt_to_command_line_options` (2 sites) | options | `Warning:` | the heatmap is disabled, or a histogram metric skipped, because the metric uses a counting aggregation | your options | none |
+| 7 | `adapt_to_command_line_options` (2 sites) | options | `Note:` | `-n 0` leaves the listed options without effect; `-o` writes the stats CSV only | your options | none |
+| 8 | `apply_parse_time_sort_gate` | options | `Note:` | `-so` cannot apply because an `--omit-*` option discards its metric; ordered by occurrences | your options | none |
+| 9 | `resolve_discard_names` (2 sites) | options | `Note:` | `-d` removes a key a metric reads; the metric is switched off | your options | none |
+| 10 | `apply_discard_precedence` (2 sites) | options | `Note:` | a key given to both `-x`/`-m` and `-d` is discarded | your options | none |
+| 11 | `print_deprecation_notices` | options | `Warning:` | a deprecated option or spelling was used | your options | the replacement |
+| 12 | `read_path_fall_back` | read (deferred) | `Note:` | the faster read path could not be prepared; large files read with the slower standard path | decision taken for you | none |
 | 13 | `format_classification_rule_change` | read (deferred) | `Note:` | a file's classification rules changed at line N because the detected format changed | data anomaly | none |
 | 14 | `defer_timestamp_impossible_notes` | read (deferred) | `Note:` | N of M lines of a format were not matched because their date cannot exist | data anomaly | `-lf <other variant>` if day and month are swapped |
 | 15 | `defer_format_unit_notes` | read (deferred) | `Note:` | a detected format is written by more than one producer, which differ in date layout or duration unit, and nothing decided which | data anomaly | `-lf <variant>` or `-du <unit>` |
-| 16 | `defer_format_unit_notes` | read (deferred) | `Note:` | `-du` is not applied to files whose format names the unit on each line | informational | none |
-| 17 | `detect_and_parse_csv_header` | read (printed, not deferred) | `Warning:` | the CSV message column is not in the header | data anomaly or informational: to settle | none |
-| 18 | `emit_udm_csv_unbound_notices` | read (printed, not deferred) and finalize | `Note:` | a `-udm` names a column absent from N CSV headers | informational | none |
+| 16 | `defer_format_unit_notes` | read (deferred) | `Note:` | `-du` is not applied to files whose format names the unit on each line | decision taken for you | none |
+| 17 | `detect_and_parse_csv_header` | read (printed, not deferred) | `Warning:` | the CSV message column is not in the header | data anomaly | none |
+| 18 | `emit_udm_csv_unbound_notices` | read (printed, not deferred) and finalize | `Note:` | a `-udm` names a column absent from N CSV headers | your options | none |
 | 19 | `read_and_process_logs` | after read | `Note:` | a format's lines carried levels `ltl` does not recognise; those lines were not counted | data anomaly | none |
-| 20 | `read_and_process_logs` | after read | `Note:` | N lines carried no value for a numerically filtered metric and were excluded | informational | none |
+| 20 | `read_and_process_logs` | after read | `Note:` | N lines carried no value for a numerically filtered metric and were excluded | figure caveat | none |
 | 21 | `read_and_process_logs` | after read | `Note:` | directories could not be read and were skipped in recursive selection | data anomaly | none |
-| 22 | `resolve_byte_notation` | after read | `Note:` | the run's formats declare different byte notations; SI is used | informational | `-bn si` or `-bn iec` |
-| 23 | `resolve_timestamp_precision` | after read | `Note:` | timestamps are shown to a coarser precision than asked, because the logs carry no finer | informational | none |
-| 24 | `note_finer_duration_bounds` | after read | `Note:` | a duration bound is finer than the log's recorded unit | informational | none |
-| 25 | `report_skipped_final_pass` | finalize | `Note:` | the final consolidation pass was skipped over N messages; the similarity at which the data clusters | informational, with guidance | a reference point for `--group-similar`; `--mask` for identifiers |
-| 26 | `sort_fallback_to_occurrences` (2 texts) | finalize | `Note:` | the `-so` ranking could not be produced (no values observed, or none eligible); ordered by occurrences | informational | none |
-| 27 | `bin_consolidation_notice` | finalize | `Note:` | consolidated rows' percentiles are approximate under the bin data model | informational | `-mdm raw` |
-| 28 | `emit_udm_zero_match_notices` | finalize | `Note:` plus indented `read as:`, `pattern:`, `hint:` lines | a `-udm` produced no metrics, with the interpretation acted on | informational | wrap a regex token key in slashes |
+| 22 | `resolve_byte_notation` | after read | `Note:` | the run's formats declare different byte notations; SI is used | decision taken for you | `-bn si` or `-bn iec` |
+| 23 | `resolve_timestamp_precision` | after read | `Note:` | timestamps are shown to a coarser precision than asked, because the logs carry no finer | decision taken for you | none |
+| 24 | `note_finer_duration_bounds` | after read | `Note:` | a duration bound is finer than the log's recorded unit | your options | none |
+| 25 | `report_skipped_final_pass` | finalize | `Note:` | the final consolidation pass was skipped over N messages; the similarity at which the data clusters | decision taken for you, with guidance | a reference point for `--group-similar`; `--mask` for identifiers |
+| 26 | `sort_fallback_to_occurrences` (2 texts) | finalize | `Note:` | the `-so` ranking could not be produced (no values observed, or none eligible); ordered by occurrences | decision taken for you | none |
+| 27 | `bin_consolidation_notice` | finalize | `Note:` | consolidated rows' percentiles are approximate under the bin data model | figure caveat | `-mdm raw` |
+| 28 | `emit_udm_zero_match_notices` | finalize | `Note:` plus indented `read as:`, `pattern:`, `hint:` lines | a `-udm` produced no metrics, with the interpretation acted on | your options | wrap a regex token key in slashes |
 | 29 | `emit_udm_skipped_capture_notices` | finalize | `Note:` | N captured values were not numbers and were skipped | data anomaly | none |
-| 30 | `emit_classification_percentage_notices` (3 texts) | finalize | `Note:` | the percentage columns are not shown; the shares are omitted; the percentages cover only operations the log records | informational | `--help formats` |
+| 30 | `emit_classification_percentage_notices` (3 texts) | finalize | `Note:` | the percentage columns are not shown; the shares are omitted; the percentages cover only operations the log records | figure caveat (all three texts; architect, 2026-10-17) | `--help formats` |
 | 31 | `emit_classification_percentage_notices` | finalize | `Warning:` | N included lines matched neither classification | data anomaly | none |
+| 32 | `read_index_file` | detect (`pipeline_detect()`) | none (bare `warn`) | the run index file exists but cannot be read; read-back skipped | runtime condition | none |
+| 33 | `read_index_file` | detect (`pipeline_detect()`) | none (bare `warn`) | the run index file is malformed; read-back skipped | runtime condition | none |
+| 34 | `write_index_file` | render (`pipeline_render()`) | none (bare `warn`) | the run index file could not be renamed into place after writing | runtime condition | none |
+| 35 | `get_memory_usage` | read and after (registry and CSV compilation, memory measurement) | none (bare `warn`) | on Windows, process memory usage could not be read | runtime condition | none |
 
 ### Not notices
 
@@ -189,12 +237,11 @@ and its callees, printed before the read starts; **read** = inside
 | `value_text`, `value_column`, `stat_consumer_active`, `index_row` | 4 | internal invariant failures |
 | `--debug-layout`, `--validate-layout`, `merge_consolidation_overlapping_patterns` debug print | 9 | developer diagnostics behind hidden options |
 | the filters note in `--help` | 1 | help text on standard output, not a notice |
-| run index read and write (`read_index_file`, `write_index_file`) | 3 warnings | side-file housekeeping: category to settle |
-| `get_memory_usage` (Windows), `detect_light_terminal_background` | 2 | environment probes: category to settle |
+| `detect_light_terminal_background` | 1 | its `stty` failure is raised inside an `eval` and never printed |
 
 ### Observations from the inventory
 
-- **A notice has parts.** Eight of the 31 carry a remedy beside the statement
+- **A notice has parts.** Eight of the 35 carry a remedy beside the statement
   (rows 1, 11, 14, 15, 22, 25, 27, 28), and several carry evidence: counts,
   files, lines, the interpretation acted on (row 28's indented lines). A
   producer contract that takes the statement, the evidence and the remedy
@@ -219,36 +266,34 @@ and its callees, printed before the read starts; **read** = inside
 Notices specified in open issues and not yet built: a sweep of the 90 open
 issues on 2026-10-17 (body, every comment, and the feature docs they own).
 Every producer already registered on this issue's thread is shipped and sits in
-the inventory above. Proposed category is Claude's first placement; *figure
-caveat* and *pre-run confirmation* are kinds the three framed categories do not
-hold, raised for the architect.
+the inventory above. The categories are Claude's placements, not confirmed by the architect; they
+are settled in the planning that precedes implementation, not now.
 
-| issue | fires when | knowable | proposed category |
+| issue | fires when | knowable | category (D1) |
 |---|---|---|---|
 | #454 statistics describe a filtered subset | any line-discarding filter is active (`-i`/`-e`, `-if`/`-ef`, the numeric `min`/`max` filters; not highlights, not `-st`/`-et`) | options; after read for discard counts | figure caveat |
 | #401 implied durations, warning A | implied durations are in use; states the maximum-gap ceiling in force | options; after read | figure caveat |
 | #401 implied durations, warning B | logged and implied durations are mixed in one run | after read | figure caveat |
 | #401 implied durations, suppressed gaps | gaps over the ceiling were suppressed (counted, never silently dropped) | after read | data anomaly, with a remedy (adjust the ceiling) |
 | #61 derived metrics, disclosure | a canonical field (`duration`, `bytes`, `count`) carries derived values; derived and real mixed | after read | figure caveat |
-| #61 derived metrics, gap in force | an inter-line function runs under a maximum-gap value the analyst did not give | options | informational |
+| #61 derived metrics, gap in force | an inter-line function runs under a maximum-gap value the analyst did not give | options | decision taken for you |
 | #372 paired start/end events | starts with no end, ends with no start, starts evicted (specified for `-V` only so far) | read; after read | data anomaly |
-| #2 memory ceiling, engagement | memory pressure engages the adaptive path, with its fidelity trade-off | read | informational |
-| #2 memory ceiling, insufficient | the budget cannot hold the request even after adapting; reduce scope or use `-g` | read; after read | informational, with a remedy |
-| #44 source file heuristics, confirmation | the run's estimated memory exceeds 1 GB; asks for acceptance before continuing | before the read | pre-run confirmation |
-| #44 source file heuristics, auto-applied | the heuristics change a setting (empty buckets omitted, bucket size, two passes) | before the read | informational |
+| #2 memory ceiling, engagement | memory pressure engages the adaptive path, with its fidelity trade-off | read | decision taken for you |
+| #2 memory ceiling, insufficient | the budget cannot hold the request even after adapting; reduce scope or use `-g` | read; after read | decision taken for you, with a remedy |
+| #44 source file heuristics, auto-applied | the heuristics change a setting (empty buckets omitted, bucket size, two passes) | before the read | decision taken for you |
 | #17 duration unit auto-detection | the values contradict the detected or assumed unit; suggests `-du` | read, or the detection sample | data anomaly, with a remedy |
-| #658 request start or end timestamp | start-or-end stamping is ambiguous, so the format's default is used | detection; after read | informational |
+| #658 request start or end timestamp | start-or-end stamping is ambiguous, so the format's default is used | detection; after read | decision taken for you |
 | #664 stall detection | held requests grow across buckets and release together; also marked in the timeline | after statistics | guidance |
 | #193 timeout clusters | error entries cluster near a round timeout boundary | after statistics | guidance |
 | #258 scenario knowledge set | the kind of input (GC log, access log) suggests related techniques | after detection | guidance, driven by the input's kind rather than a statistic |
 | #535 rates at fine bucket widths | a bucket too narrow for its rates to carry meaning (open: notice, figure change or documentation) | options; after read | figure caveat, with a remedy (widen the bucket) |
-| #582 regex specs for message options, misplaced pattern | a slash-delimited pattern given in the replacement slot is read as the pattern (its D9: "an informational message states the mistake and the run continues") | options | informational |
-| #582 regex specs for message options, zero match | an `-x`/`-d`/`-m` spec matched nothing (its D10, D12) | after read | informational, with a remedy (wrap a regex in slashes) |
+| #582 regex specs for message options, misplaced pattern | a slash-delimited pattern given in the replacement slot is read as the pattern (its D9: "an informational message states the mistake and the run continues") | options | your options |
+| #582 regex specs for message options, zero match | an `-x`/`-d`/`-m` spec matched nothing (its D10, D12) | after read | your options, with a remedy (wrap a regex in slashes) |
 | #642 `-udm` default extraction | a value such as `1,000`, `0x10`, `Inf` (open: skip and report, or leave unmatched) | after read | data anomaly |
 | #685 unreadable durations | a line's duration cannot be read; the lines skipped are reported | after read | data anomaly |
 | #682 lines no format matched | lines read but matched by no format are reported | after read | data anomaly |
-| #686 long forms of `-st`/`-et` | `--start` or `--end` is used: deprecated | options | informational |
-| #581, #601 duplicated options | a deprecated duplicate option is used (open: whether a notice is the way) | options | informational |
+| #686 long forms of `-st`/`-et` | `--start` or `--end` is used: deprecated | options | your options |
+| #581, #601 duplicated options | a deprecated duplicate option is used (open: whether a notice is the way) | options | your options |
 
 Open issues that change a shipped notice: #630 removes the deprecated options
 and with them their deprecation notices; #483 would end the "no classification
@@ -274,10 +319,55 @@ prototyping it is chosen which is relevant where, and how each applies; once
 validated they become patterns to draw on for future enhancements, even where
 they are not implemented in `ltl` at first.
 
+Prototypes are reviewed live. The architect works with Claude in one session
+while running the prototypes in another, and gives feedback as he goes; Claude
+takes it in, updates the findings and changes the prototypes accordingly, in a
+collaborative development loop.
+
+The surfaces are prototyped first: what the analyst sees and how they answer.
+The producer interface (how code anywhere in the run registers a notice or a
+choice, with a choice's options, default, timeout and what happens when it is
+accepted), on which the requirement 7 pattern rests, is designed once the
+surfaces are chosen.
+
+The prototypes explore two visual languages: one matching `ltl`'s existing
+look (the title banner, the box-drawing rules of the timeline and tables, the
+colour table per column and background), and a new style, which the rest of
+the output might later adopt.
+
+Prototyping runs in stages, simplest first, each stage directing the next.
+The early stages render from fixed sets of example notices, enough to choose a
+direction; later stages are fed what real `ltl` runs produce, so that the
+chosen surfaces become credible and relevant to `ltl`.
+
+Prototyping runs in stages across platforms. macOS is the primary
+development platform, so the prototypes start there; a round of decisions
+selects the patterns to take forward, and only those are ported to Linux and
+Windows, so that the work and validation fall on the selected patterns alone.
+Final decisions are not made before it is known what is possible on the other
+platforms: a pattern found infeasible or overly complicated on Windows is found
+before implementation in `ltl`, not during it. The packaged binaries carry
+every library the chosen patterns need.
+
+The research the prototypes start from (what `ltl` has today, the kinds of
+terminal surface, prompt practice, Perl libraries, unattended capture) is
+`features/412-notice-surfaces-research.md`.
+
 Prototyping is required on two counts of `prototype/README.md`: a new
 capability whose shape has to be found, and (d) a verification method not yet
 known, since asserting a rendered terminal surface is an open question in this
 repository (`docs/test-driven-development.md` § Visual surfaces).
+
+### Closing out prototyping (architect, 2026-10-17)
+
+Individual prototypes need not meet these; the selected options must, before
+the prototyping stage is closed:
+
+- [ ] Each selected surface is judged by the architect in the terminal.
+- [ ] Each selected surface has a demonstrated way to be captured and checked
+      unattended, for the harnesses and for the screenshot tool.
+- [ ] The prototype findings record what was chosen, what was learned along
+      the way, and why each decision was made.
 
 ## Open items
 

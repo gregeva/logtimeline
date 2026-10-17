@@ -113,4 +113,4 @@ Run 2026-08-29 on the merged commit: 30 harnesses, 1,354 assertions passed, 3 fa
 - #532 (progress line shows the file's path, shortened in the middle) — changes what fills D5's filename slot: the path as given, rendered as the "Processed files" table renders it. Record: `features/532-progress-line-file-path.md`.
 - #420 (`-r`/`--recursive`) and #445 (unquoted glob consumed by the shell) — produce the long lists; the denominator is the *selected* set, never the tree.
 - #181 (buffered read pipeline, on hold) — would change what "bytes consumed" means; D2 states the numerator as bytes processed, which survives it.
-- #412 (notices surface) — progress lines are transient and self-clearing; notices are persistent. No overlap.
+- #412 (notice surfaces) — the progress indicator is in its scope: a choice raised while the progress line is on screen is one of the scenarios it prototypes, the line erased for the choice and resumed cleanly after it. Record: `features/412-notice-surfaces.md`.
