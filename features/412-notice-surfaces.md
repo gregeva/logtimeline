@@ -70,6 +70,13 @@ a `-V` section, the contract defined as an official pattern in
   the charts, the statistical information and the metadata describing them is
   separated from the notices and choice patterns. The issue was first framed
   as a structured area before the chart; that framing is too constrained.
+- **The progress indicator is in scope.** A choice raised while the progress
+  indication is displayed is one of the scenarios prototyped. If a modal
+  dialogue proves the best way, that is the more straightforward to handle;
+  if not, the part of the progress indication on screen is erased, a message
+  is displayed followed by an input point (perhaps accepting a single
+  character rather than waiting for enter), and the progress printing resumes
+  cleanly.
 - **Not part of this stage:** which questions are asked, and identifying every
   place they could be asked. There are a couple of key places where it is
   possible.
