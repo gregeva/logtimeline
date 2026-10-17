@@ -1,17 +1,18 @@
-# Notices pane: one place where the run tells the analyst what to know (#412)
+# Notice surfaces: how the run tells the analyst what to know, and asks (#412)
 
 ## Overview
 
-The analyst reads the notices pane before the timeline, the tables and the
-charts, so that nothing they take from the rendered figures rests on a
-condition they were not told about. Every notice the run raises is deferred to
-it and presented by category, and the category tells the analyst how to read
-the notice: something to check, something the tool decided, or somewhere to
-look next.
+The analyst is told what they need to know about their run before they draw
+conclusions from its figures, and is asked for a choice where the run can act
+on one. This issue designs the notice surfaces that do this: interfaces that
+present information and may capture the analyst's input or choice, adapted to
+different situations and to different moments of the run. The deferred notices
+shown before the timeline, the tables and the charts are one of them, presented
+by category, the category telling the analyst how to read each notice.
 
 Today each producer prints its own finished text to standard error at the
-moment its condition is detected. The pane replaces that with one producer
-interface and one renderer.
+moment its condition is detected. The surfaces replace that with one producer
+interface and a coherent presentation.
 
 ## GitHub Issue
 
@@ -26,7 +27,7 @@ a `-V` section, the contract defined as an official pattern in
 
 - **The category is how the analyst is told to read the notice.** Every notice
   the tool can produce, now and in planned work, is placed in a category
-  grouping, and the pane presents them by category.
+  grouping, and the surfaces present them by category.
 - **A data anomaly** is something unexpected in how the data was encountered.
   The analyst judges whether it is expected: if so it is ignored; if not, they
   check the source data or the options given. It comes before the figures so
@@ -41,24 +42,33 @@ a `-V` section, the contract defined as an official pattern in
 - **The categories are not fixed at these.** Claude determines the full set
   from the inventory of current and planned notices, and the best way to
   display and communicate each.
-- **Placement.** All data work finishes before any section is drawn, so every
-  notice is known before rendering starts. The pane is shown at that point,
-  before the timeline, or afterwards in some form of modal presentation; which
-  is a design question.
-- **Asking the analyst at the pane.** At the moment
-  the pane is shown, the read is done and the rendering has not started. The
-  pane is the place to say "this was detected; shall I do this before drawing
-  the output?" for what can still be rendered differently from the captured
-  data (for example more messages, or a different sort).
-- **User input is part of this surface's design.** The surface designed and
-  prototyped here includes the analyst's input, not only the deferred
-  notices. Using that input design elsewhere is a separate pattern: #44's
-  confirmation of a run estimated above 1 GB is asked before the read, far
-  earlier than the pane, so it is not a deferred notice, but it takes the same
-  form for a dialogue or input display at a different point in time. The
-  design keeps the decision points in view: wherever the run could go back to
-  the analyst with a question, it uses that form.
-- **The pane's form follows what was deferred.** A long list of guidance
+- **Placement of the deferred notices.** All data work finishes before any
+  section is drawn, so every deferred notice is known before rendering starts.
+  They are shown at that point, before the timeline, or afterwards in some form
+  of modal presentation; which is a design question.
+- **Notice surfaces, adapted to the situation and the moment.** What is
+  designed is not one pane at one point of the run but notice surfaces, partly
+  presenting information and potentially capturing the analyst's input or
+  choice, which are adapted into different situations. Prototyping explores
+  them to arrive at patterns to standardise on, and determines how, and if,
+  each is implemented in `ltl`. Examples:
+  - a single-line deprecation: a couple of lines on standard output, decorated
+    a little;
+  - early in processing, memory use is growing high: a yes or no on whether to
+    continue (#44);
+  - later, once statistical analysis has detected a pattern: a choice such as
+    changing the sort order, which needs much more of the run to have happened
+    before it can even be asked.
+- **Input is captured coherently with the notice surfaces.** The choice points
+  differ in moment and in what precedes them; how each is presented is
+  coherent with the notice surfaces, so the analyst's input is captured and
+  collected within them. Deferring notices is one pattern; capturing a choice
+  at a given point of the run builds on the same surfaces and is a separate
+  pattern, designed and prototyped here.
+- **Not part of this stage:** which questions are asked, and identifying every
+  place they could be asked. There are a couple of key places where it is
+  possible.
+- **A surface's form follows what it carries.** A long list of guidance
   needs much of the terminal to show it; a single deprecation notice is a
   couple of lines and calls for no large surface. The design and the
   prototypes look at several forms to choose from, and decide which applies to
@@ -121,7 +131,7 @@ and its callees, printed before the read starts; **read** = inside
 `read_and_process_logs()` and the tail of `pipeline_parse()`; **finalize** =
 `pipeline_finalize()`.
 
-### Pane candidates
+### Notice candidates
 
 | # | producer | phase | prefix today | says | proposed category | remedy it carries |
 |---|---|---|---|---|---|---|
@@ -157,11 +167,11 @@ and its callees, printed before the read starts; **read** = inside
 | 30 | `emit_classification_percentage_notices` (3 texts) | finalize | `Note:` | the percentage columns are not shown; the shares are omitted; the percentages cover only operations the log records | informational | `--help formats` |
 | 31 | `emit_classification_percentage_notices` | finalize | `Warning:` | N included lines matched neither classification | data anomaly | none |
 
-### Not pane material
+### Not notices
 
 | emission | sites | reason |
 |---|---|---|
-| `print_usage` and the run-stopping errors (`_validate_dm`, `_validate_profile`, a file that cannot be opened, the CSV output that cannot be written, no file to read, with the `-r` quoting hint) | ~15 | the run stops before anything renders, so there is no pane |
+| `print_usage` and the run-stopping errors (`_validate_dm`, `_validate_profile`, a file that cannot be opened, the CSV output that cannot be written, no file to read, with the `-r` quoting hint) | ~15 | the run stops at the error, before any notice is deferred |
 | format-registry self-validation (`build_format_registry`, `compile_format_*`, `format_*_src`, `format_classification_resolve`, `derive_format_constraints`, `csv_block_for_file`) | ~50 | internal invariant failures: a defect in `ltl`, never a condition of the run |
 | generated read loop (`generated_loop_*`, `read_path_text`) | ~12 | internal invariant failures, caught and turned into row 12 |
 | `value_text`, `value_column`, `stat_consumer_active`, `index_row` | 4 | internal invariant failures |
@@ -176,7 +186,7 @@ and its callees, printed before the read starts; **read** = inside
   (rows 1, 11, 14, 15, 22, 25, 27, 28), and several carry evidence: counts,
   files, lines, the interpretation acted on (row 28's indented lines). A
   producer contract that takes the statement, the evidence and the remedy
-  separately would let the pane present each the same way.
+  separately would let a surface present each the same way.
 - **No guidance producer exists today.** Guidance appears only as remedies
   inside other notices, and row 25 is the one notice whose remedy points at an
   analysis choice rather than a correction.
@@ -185,7 +195,7 @@ and its callees, printed before the read starts; **read** = inside
   analyst's own malformed input (row 1) and for a data anomaly (row 31).
 - **Timing moves.** Rows 1 to 11 print today before the read starts, so an
   analyst who mistyped a pattern file or a `-udm` sees it at once and can stop
-  a long run. Deferred to the pane, they appear only after the read.
+  a long run. Deferred to the end of the data work, they appear only after the read.
 - **Two producers print during the read without deferral** (rows 17 and 18,
   via `detect_and_parse_csv_header`), while the read pass may own the terminal.
 - **Granularity differs.** Some notices aggregate one line per run across
