@@ -159,3 +159,34 @@ key, the box and modal growing to hold the views, declining erasing all of
 it, the browser's tabs, views and closing. A width lookup per character
 through Unicode::UCD made the browser take seconds per frame; each code
 point is now looked up once.
+
+### Architect's feedback on round 2 (2026-10-18)
+
+All 16 options reviewed, verbatim in `feedback/stage1-round2.jsonl`.
+
+- **Questions during a run lead with the modal** on the alternate screen; the
+  modal below the cursor is the second choice. The row form is rejected: the
+  three parts of a notice and a question jammed into one row cannot be read.
+  A one-row form would have to be very concise, which these notices are not.
+- **One pattern, different inputs.** The memory question and the pattern
+  question are the same surface called with different content; a prototype
+  that shows them as different surfaces misreads the work.
+- **Nothing is reprinted after the answer.** A surface that asks shows the
+  notice mid-run, takes the choice, and leaves no trace. Carrying the notice
+  and the answer to the end panel is rejected as the default; whether a
+  surface leaves a record is a boolean the caller passes.
+- **Style by kind:** boxes and pop-ups in the new style (rounded corners, the
+  frame in the category colour); inline text close to the ltl look. Category
+  names set as coloured blocks are rejected except to mark the selected tab;
+  elsewhere a category is in its foreground colour.
+- **Panel:** categories divided by a blank row, not a rule; `NOTICES` in the
+  same dim colour as its count, not bright; the box drawn even for a single
+  notice; 25 notices belong in the browser, not printed as a panel. The
+  compaction, glyphs and colours are kept.
+- **Box:** the small box in the category colour is right directionally. Its
+  heading carries the category, the count, and how to read the category.
+- **Views (the second stage):** each view has a third part, the why, in a
+  column on the right beside the what and the how; it comes from the
+  producer as part of the notice.
+- **Browser:** good in both modes, in the new style with rounded corners;
+  every tab always shows its category name.
