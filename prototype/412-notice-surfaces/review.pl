@@ -8,10 +8,10 @@
 #   perl review.pl --from box-read  start at an option and go on from there
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
-#   perl review.pl --round 1      the first round's options (default: 2)
+#   perl review.pl --round 1      the first round's options (default: 3)
 #
 # Feedback is appended to feedback/stage1.jsonl (round 1) or
-# feedback/stage1-round2.jsonl (round 2), one JSON object per entry: the
+# feedback/stage1-roundN.jsonl (round N), one JSON object per entry: the
 # option's id, title, the command run, the time, and the text. An option
 # reviewed again gets a second entry; nothing is overwritten.
 
@@ -28,7 +28,7 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-$opt{round} = 2;
+$opt{round} = 3;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
@@ -70,24 +70,23 @@ $rounds{1} = [
     [ 'P6-d', 'p6-modal-choice.pl',     '--moment after --screen alt --style new',    'Modal once a pattern is found, alternate screen, new style', 'as P6-c, centred on a clear screen' ],
 
 ];
-# Round 2: the standard patterns, each at the moments it serves.
-$rounds{2} = [
-    [ 'panel-rule',   'round2/panel.pl', '--divide rule',               'Panel: one box round all the notices, categories divided by a rule', 'each category headed once (glyph, name, count, how to read it); one row per notice, wrapping only past the width; · before the evidence, → before the remedy' ],
-    [ 'panel-new',    'round2/panel.pl', '--divide rule --style new',   'Panel, new style',                                 'rounded corners; each category heading set as a coloured block' ],
-    [ 'panel-blank',  'round2/panel.pl', '--divide blank',              'Panel, categories divided by a blank row',        'a blank row instead of the rule between categories' ],
-    [ 'panel-one',    'round2/panel.pl', '--set minimal',               'Panel with a single notice',                       'one notice: one row, no box (it wraps only if the terminal is narrower than the notice)' ],
-    [ 'panel-heavy',  'round2/panel.pl', '--set heavy',                 'Panel with 25 notices over all six categories',    'the same box at its largest, at your terminal width' ],
-    [ 'row-read',     'round2/ask.pl',   '--moment read --surface row', 'Row: the question in the progress row',            'the notice cut to fit beside the question, all on one row; y/n/Enter, or any other key pauses the countdown; erased once answered, the answer carried to the panel at the end' ],
-    [ 'row-preread',  'round2/ask.pl',   '--moment preread --surface row', 'Row, before the read, with four option notices', 'more than one notice: a row each above the question row; all erased once answered' ],
-    [ 'row-pattern',  'round2/ask.pl',   '--moment pattern --surface row', 'Row, a pattern found: the views by digit',      'press y: the views on one row, a digit chooses (the fallback for a terminal without arrow keys)' ],
-    [ 'box-read',     'round2/ask.pl',   '--moment read --surface box --style new', 'Box: the question inside the box, during the read', 'the frame in the category colour, the question on its last row, the bottom edge drawn; press a key other than y/n to pause; erased once answered' ],
-    [ 'box-preread',  'round2/ask.pl',   '--moment preread --surface box --style new', 'Box, before the read, with four option notices', 'the same box holding several notices' ],
-    [ 'box-pattern',  'round2/ask.pl',   '--moment pattern --surface box', 'Box, a pattern found, ltl look',                'press y: the box grows to hold the views; ↑↓ or j k, Enter; or press n / wait: everything is erased, only the notice goes to the panel' ],
-    [ 'modal-read',   'round2/ask.pl',   '--moment read --surface modal --screen alt --style new', 'Modal on the alternate screen, during the read', 'the dialog centred over a dimmed copy of the run; ←→ Tab, Enter, y/n; any other key pauses; the run comes back once answered' ],
-    [ 'modal-pattern', 'round2/ask.pl',  '--moment pattern --surface modal --screen alt', 'Modal on the alternate screen, a pattern found, ltl look', 'focus Look at the views and Enter: the dialog grows to hold the views' ],
-    [ 'modal-inline', 'round2/ask.pl',   '--moment read --surface modal --screen inline --style new', 'Modal below the cursor (the fallback)', 'the same dialog drawn in the rows below the cursor, erased once answered' ],
-    [ 'browser-alt',  'round2/browser.pl', '--screen alt',              'Notice browser in a box over the dimmed run',      'tabs: ←→ h l Tab or 1-7 (the shown tab named); ↑↓ j k; the ➤ notice marked ◇ offers views: Enter, choose, back to the list; q closes and the view chosen goes to the panel' ],
-    [ 'browser-inline', 'round2/browser.pl', '--screen inline --style new', 'Notice browser below the cursor, new style (the fallback)', 'the same box drawn below the cursor, erased on closing' ],
+# Round 2 was reviewed from the scripts as they stood at commit 4d1218c; its
+# commands are recorded with its feedback in feedback/stage1-round2.jsonl.
+# Round 3: one surface for asking during the run (the modal, its compact box
+# form), the panel and the browser, from round 2's feedback.
+$rounds{3} = [
+    [ 'panel',          'surfaces/panel.pl', '',                                  'Panel: one box round all the notices',             'categories divided by a blank row; NOTICES in the dim of its count; each category headed once with how to read it' ],
+    [ 'panel-one',      'surfaces/panel.pl', '--set minimal',                     'Panel with a single notice',                       'the box drawn for one notice too' ],
+    [ 'modal-read',     'surfaces/ask.pl',   '--moment read',                     'Modal over the run, during the read (memory)',     'the lead surface: the dialog centred over the dimmed run; the top edge carries the category and how to read it; once answered it leaves no trace' ],
+    [ 'modal-preread',  'surfaces/ask.pl',   '--moment preread',                  'The same modal before the read (four option notices)', 'the same call with other notices and buttons' ],
+    [ 'modal-pattern',  'surfaces/ask.pl',   '--moment pattern',                  'The same modal once a pattern is found (views)',   'focus Look at the views (← or Tab) and Enter: the dialog grows to the views in three columns, what, options and why' ],
+    [ 'modal-inline',   'surfaces/ask.pl',   '--moment read --screen inline',     'The modal below the cursor (the fallback)',        'the same dialog in the rows below the cursor, erased once answered' ],
+    [ 'modal-record',   'surfaces/ask.pl',   '--moment read --record',            'The modal, the caller asking for a record',        'with record set, the notice and the answer stay as inline text in the ltl look where the dialog was' ],
+    [ 'box-read',       'surfaces/ask.pl',   '--moment read --surface box',       'The compact form: a box below the cursor, during the read', 'the question on the last row inside the frame; the top edge with how to read the category' ],
+    [ 'box-preread',    'surfaces/ask.pl',   '--moment preread --surface box',    'The compact form before the read (four notices)',  'the top edge: category, count, how to read it' ],
+    [ 'box-pattern',    'surfaces/ask.pl',   '--moment pattern --surface box',    'The compact form once a pattern is found',         'press y: the box grows to the views, what, options and why; the why wraps in its column when the terminal is narrow' ],
+    [ 'browser-alt',    'surfaces/browser.pl', '',                                'Notice browser over the dimmed run',               'rounded corners; every tab named (a second row when they do not fit); the detail heading in its colour, no block; 7 then Enter on the ◇ notice opens the views; q closes, leaving no trace' ],
+    [ 'browser-inline', 'surfaces/browser.pl', '--screen inline',                 'Notice browser below the cursor (the fallback)',   'the same box drawn below the cursor' ],
 ];
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
 my %index = map { $options[$_][0] => $_ } 0 .. $#options;

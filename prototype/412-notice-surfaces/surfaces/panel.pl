@@ -1,11 +1,11 @@
 #!/usr/bin/env perl
-# Round 2, the panel: the notices of the run presented together, before the
-# charts. One notice is one row; more are one box round them all, each
-# category headed once, its notices one row each.
+# The panel: the notices of the run presented together, before the charts.
+# One box round them all, however many, each category headed once, its
+# notices one row each, the categories divided by a blank row.
 # Terminal layout only, from a fixed notice set.
 #
-#   perl round2/panel.pl [--set minimal|typical|heavy] [--divide rule|blank]
-#        [--style ltl|new] [--bg dark|light] [--width N]
+#   perl surfaces/panel.pl [--set minimal|typical|heavy] [--divide blank|rule]
+#        [--style new|ltl] [--bg dark|light] [--width N]
 
 use strict;
 use warnings;
@@ -16,7 +16,7 @@ use Getopt::Long;
 use NoticeProto qw(terminal_size style_for);
 use NoticeSurfaces qw(panel);
 
-my %opt = ( set => 'typical', divide => 'rule', style => 'ltl', bg => 'dark' );
+my %opt = ( set => 'typical', divide => 'blank', style => 'new', bg => 'dark' );
 GetOptions( \%opt, 'set=s', 'divide=s', 'style=s', 'bg=s', 'width=i' ) or die "bad options\n";
 my ($W) = terminal_size( width => $opt{width} );
 my $sets = do "$FindBin::Bin/../notices/round2.pl" or die "notices/round2.pl: $@ $!\n";

@@ -1,6 +1,7 @@
-# The round 2 notices: the stage 1 sets, with the parts a notice is told
+# The notices of rounds 2 and 3: the stage 1 sets, with the parts a notice is told
 # apart by (focus, statement, evidence, remedy) set where the first round ran
-# them together, and the views a guidance notice offers.
+# them together, and the views a guidance notice offers, each with the what,
+# the how (its options) and the why, as its producer would give them.
 
 use utf8;
 
@@ -9,11 +10,14 @@ my %n = %{ $sets->{notice} };
 
 my @views = (
     { label => 'Sort the messages by bimodality', args => '-so bimodality_coef',
-      effect => 'this API comes first in the messages table, with any other whose durations split the same way' },
+      effect => 'this API comes first in the messages table, with any other whose durations split the same way',
+      why    => 'other APIs whose durations split the same way show up beside it' },
     { label => 'Isolate this API, with its histogram', args => '-i QueryStreamEntries -hg',
-      effect => "only this API's lines are kept, and its two populations are drawn as a histogram of durations" },
+      effect => "only this API's lines are kept, and its two populations are drawn as a histogram of durations",
+      why    => 'its percentiles blend the two populations and describe neither' },
     { label => 'Continue as planned', args => '',
-      effect => 'the charts are drawn with the options given' },
+      effect => 'the charts are drawn with the options given',
+      why    => 'the run as it was asked for' },
 );
 
 $n{bimodal} = {

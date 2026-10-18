@@ -13,6 +13,32 @@ Run from this directory with Homebrew Perl. Every prototype takes
 `--width N`; every choice point takes `--answer` (answers given ahead, comma
 separated, one per choice point) and `--seconds N`.
 
+## Resuming (2026-10-18)
+
+Where stage 1 stands, for picking the review up in a later session:
+
+- **Round 3 is built and not yet reviewed.** It is the next step: the
+  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
+  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one
+  option at a time, feedback saved to `feedback/stage1-round3.jsonl`.
+  `perl review.pl --list` shows which options have feedback; a run resumes at
+  the first without.
+- **Then:** Claude reads `feedback/stage1-round3.jsonl`, records it here
+  under round 3, commits and pushes it, and proposes the next round (or the
+  stage's decision round) from it, waiting for the architect's go-ahead
+  before building.
+- **What each round holds:** round 1 (the six first prototypes, `p1-` to
+  `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (the first standard
+  patterns, reviewed at commit 4d1218c, feedback
+  `feedback/stage1-round2.jsonl`); round 3 (`surfaces/`, the current
+  patterns). Each round's feedback is summarised below.
+- **Not started:** the decision round on which surfaces go forward, the
+  light background (no option on it has been evaluated), porting to Linux and
+  Windows, the unattended-capture method for the selected surfaces, the
+  producer interface.
+- `ltl` carries `$version_number = "0.20.0-412"`; it is restored before any
+  completion gate.
+
 ## Shared pieces
 
 - `lib/NoticeProto.pm`: the two visual languages, built on ltl's box glyphs
@@ -190,3 +216,38 @@ All 16 options reviewed, verbatim in `feedback/stage1-round2.jsonl`.
   producer as part of the notice.
 - **Browser:** good in both modes, in the new style with rounded corners;
   every tab always shows its category name.
+
+## Round 3 (2026-10-18)
+
+Built from round 2's feedback; the scripts moved from `round2/` to
+`surfaces/`, where the patterns now evolve, and both styles default to the
+new one for boxes and dialogs.
+
+- **Asking during the run is one surface**, `ask()` in
+  `lib/NoticeSurfaces.pm`, called at each moment with that moment's notices
+  and choices: the modal on the alternate screen over the dimmed run leads,
+  the modal below the cursor is its fallback (`--screen inline`), and the box
+  below the cursor is the compact form (`--surface box`). The row form is
+  removed.
+- **No trace by default.** Once answered the surface is erased and nothing is
+  printed in its place. `record`, a boolean the caller passes (`--record`),
+  leaves the notice and the answer as inline text in the ltl look where the
+  surface was. The carry to the end panel is removed.
+- **The top edge** of the modal and the box carries the category, the count
+  when there is more than one notice, and how to read the category.
+- **Views** in three columns: what, options, why; the why is part of each
+  view as its producer would give it (`notices/round2.pl`), wrapping within
+  its column when the terminal is narrow.
+- **Panel:** blank rows between categories, `NOTICES` in the dim of its
+  count, the box drawn for a single notice too.
+- **Browser:** rounded corners; every tab named, on a second row when they do
+  not fit on one; a coloured block only on the selected tab, the detail
+  heading in its foreground colour; closing leaves no trace.
+
+Claude's own runs: every script unattended in both styles at 80 and 140
+columns, on both screens, with and without a record and with answers given
+ahead (exit 0, nothing on stderr); under a pty with keys, replayed through
+Term::VT102: the views' columns at 100 and 160 columns, the modal growing to
+them inline and on the alternate screen (one enter, one leave), the record
+left in place of the dialog, nothing left without it, the browser's views and
+closing.
