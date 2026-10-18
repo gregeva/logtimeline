@@ -3,14 +3,16 @@
 # introduced, run in this terminal, and followed by a prompt for feedback,
 # which is saved with the option's id and the exact command that drew it.
 #
-#   perl review.pl              resume at the first option with no feedback
-#   perl review.pl --list       the options and whether each has feedback
-#   perl review.pl --from P3-b  start at an option and go on from there
-#   perl review.pl --only P3-b  one option alone
-#   perl review.pl --all        every option, from the first
+#   perl review.pl                resume at the first option with no feedback
+#   perl review.pl --list         the options and whether each has feedback
+#   perl review.pl --from box-read  start at an option and go on from there
+#   perl review.pl --only box-read  one option alone
+#   perl review.pl --all          every option, from the first
+#   perl review.pl --round 1      the first round's options (default: 2)
 #
-# Feedback is appended to feedback/stage1.jsonl, one JSON object per entry:
-# the option's id, title, the command run, the time, and the text. An option
+# Feedback is appended to feedback/stage1.jsonl (round 1) or
+# feedback/stage1-round2.jsonl (round 2), one JSON object per entry: the
+# option's id, title, the command run, the time, and the text. An option
 # reviewed again gets a second entry; nothing is overwritten.
 
 use strict;
@@ -26,14 +28,16 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all' ) or die "bad options\n";
+$opt{round} = 2;
+GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
-my $file = "$dir/feedback/stage1.jsonl";
+my $file = "$dir/feedback/stage1" . ( $opt{round} == 1 ? '' : "-round$opt{round}" ) . '.jsonl';
 my $json = JSON::PP->new->canonical->utf8;
 
 # id, prototype, arguments, what the option is, what to look at, what to do.
-my @options = (
+my %rounds;
+$rounds{1} = [
     [ 'P1-a', 'p1-deferred-notices.pl', '--form lines --style ltl',     'Deferred notices as prefixed lines, ltl look',      'one notice to a line, led by glyph and category name; continuation aligned under the text' ],
     [ 'P1-b', 'p1-deferred-notices.pl', '--form lines --style new',     'Deferred notices as prefixed lines, new style',     'a coloured bar down the left of every row; bold category label' ],
     [ 'P1-c', 'p1-deferred-notices.pl', '--form boxes --style ltl',     'One box per category, ltl look',                    "grey light-rule frames from ltl's box set; category and how to read it set in the top edge" ],
@@ -64,7 +68,28 @@ my @options = (
     [ 'P6-b', 'p6-modal-choice.pl',     '--moment read --screen alt',   'Modal during the read, on the alternate screen',    'the dialog centred on a clear screen; the run reappears once answered' ],
     [ 'P6-c', 'p6-modal-choice.pl',     '--moment after --screen inline --style new', 'Modal once a pattern is found, below the cursor, new style', 'the pattern choice as a dialog rather than a question row' ],
     [ 'P6-d', 'p6-modal-choice.pl',     '--moment after --screen alt --style new',    'Modal once a pattern is found, alternate screen, new style', 'as P6-c, centred on a clear screen' ],
-);
+
+];
+# Round 2: the standard patterns, each at the moments it serves.
+$rounds{2} = [
+    [ 'panel-rule',   'round2/panel.pl', '--divide rule',               'Panel: one box round all the notices, categories divided by a rule', 'each category headed once (glyph, name, count, how to read it); one row per notice, wrapping only past the width; · before the evidence, → before the remedy' ],
+    [ 'panel-new',    'round2/panel.pl', '--divide rule --style new',   'Panel, new style',                                 'rounded corners; each category heading set as a coloured block' ],
+    [ 'panel-blank',  'round2/panel.pl', '--divide blank',              'Panel, categories divided by a blank row',        'a blank row instead of the rule between categories' ],
+    [ 'panel-one',    'round2/panel.pl', '--set minimal',               'Panel with a single notice',                       'one notice: one row, no box (it wraps only if the terminal is narrower than the notice)' ],
+    [ 'panel-heavy',  'round2/panel.pl', '--set heavy',                 'Panel with 25 notices over all six categories',    'the same box at its largest, at your terminal width' ],
+    [ 'row-read',     'round2/ask.pl',   '--moment read --surface row', 'Row: the question in the progress row',            'the notice cut to fit beside the question, all on one row; y/n/Enter, or any other key pauses the countdown; erased once answered, the answer carried to the panel at the end' ],
+    [ 'row-preread',  'round2/ask.pl',   '--moment preread --surface row', 'Row, before the read, with four option notices', 'more than one notice: a row each above the question row; all erased once answered' ],
+    [ 'row-pattern',  'round2/ask.pl',   '--moment pattern --surface row', 'Row, a pattern found: the views by digit',      'press y: the views on one row, a digit chooses (the fallback for a terminal without arrow keys)' ],
+    [ 'box-read',     'round2/ask.pl',   '--moment read --surface box --style new', 'Box: the question inside the box, during the read', 'the frame in the category colour, the question on its last row, the bottom edge drawn; press a key other than y/n to pause; erased once answered' ],
+    [ 'box-preread',  'round2/ask.pl',   '--moment preread --surface box --style new', 'Box, before the read, with four option notices', 'the same box holding several notices' ],
+    [ 'box-pattern',  'round2/ask.pl',   '--moment pattern --surface box', 'Box, a pattern found, ltl look',                'press y: the box grows to hold the views; ↑↓ or j k, Enter; or press n / wait: everything is erased, only the notice goes to the panel' ],
+    [ 'modal-read',   'round2/ask.pl',   '--moment read --surface modal --screen alt --style new', 'Modal on the alternate screen, during the read', 'the dialog centred over a dimmed copy of the run; ←→ Tab, Enter, y/n; any other key pauses; the run comes back once answered' ],
+    [ 'modal-pattern', 'round2/ask.pl',  '--moment pattern --surface modal --screen alt', 'Modal on the alternate screen, a pattern found, ltl look', 'focus Look at the views and Enter: the dialog grows to hold the views' ],
+    [ 'modal-inline', 'round2/ask.pl',   '--moment read --surface modal --screen inline --style new', 'Modal below the cursor (the fallback)', 'the same dialog drawn in the rows below the cursor, erased once answered' ],
+    [ 'browser-alt',  'round2/browser.pl', '--screen alt',              'Notice browser in a box over the dimmed run',      'tabs: ←→ h l Tab or 1-7 (the shown tab named); ↑↓ j k; the ➤ notice marked ◇ offers views: Enter, choose, back to the list; q closes and the view chosen goes to the panel' ],
+    [ 'browser-inline', 'round2/browser.pl', '--screen inline --style new', 'Notice browser below the cursor, new style (the fallback)', 'the same box drawn below the cursor, erased on closing' ],
+];
+my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
 my %index = map { $options[$_][0] => $_ } 0 .. $#options;
 
 my %reviewed;
@@ -76,7 +101,7 @@ if ( open my $fh, '<', $file ) {
 }
 
 if ( $opt{list} ) {
-    printf "%-5s %-9s %s\n", $_->[0], $reviewed{ $_->[0] } ? "reviewed" : '', $_->[3] for @options;
+    printf "%-15s %-9s %s\n", $_->[0], $reviewed{ $_->[0] } ? "reviewed" : '', $_->[3] for @options;
     exit 0;
 }
 

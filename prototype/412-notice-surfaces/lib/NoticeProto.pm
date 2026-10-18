@@ -138,6 +138,9 @@ sub query_cursor_column {
 # presentation properties gives a string: two for a wide or full-width
 # character, or an emoji presented as emoji (by default, or by U+FE0F);
 # nothing for a variation selector or zero-width joiner; one otherwise.
+# Unicode::UCD answers slowly; each code point is looked up once.
+my ( %eaw_of, %emoji_of );
+
 sub expected_width {
     my ($s) = @_;
     my @cp = map { ord } split //, $s;
@@ -147,8 +150,8 @@ sub expected_width {
         next if $cp == 0xFE0E || $cp == 0xFE0F || $cp == 0x200D;
         my $vs16 = $i < $#cp && $cp[ $i + 1 ] == 0xFE0F;
         my $vs15 = $i < $#cp && $cp[ $i + 1 ] == 0xFE0E;
-        my $eaw  = charprop( $cp, 'East_Asian_Width' );
-        my $emoji = charprop( $cp, 'Emoji_Presentation' ) eq 'Yes';
+        my $eaw   = $eaw_of{$cp}   //= charprop( $cp, 'East_Asian_Width' );
+        my $emoji = $emoji_of{$cp} //= charprop( $cp, 'Emoji_Presentation' ) eq 'Yes' ? 1 : 0;
         $w += ( $eaw eq 'Wide' || $eaw eq 'Fullwidth' || ( $emoji && !$vs15 ) || $vs16 ) ? 2 : 1;
     }
     return $w;
@@ -192,6 +195,8 @@ sub style_for {
     }
     my $frame = $bg eq 'light' ? "\e[38;5;244m" : "\e[90m";
     my $text  = $bg eq 'light' ? "\e[30m"       : "\e[37m";
+    # What the analyst picks (a choice, a key) stands out from the text.
+    my $pick  = $bg eq 'light' ? "\e[1;30m"     : "\e[1;97m";
     if ( $name eq 'ltl' ) {
         return {
             name  => 'ltl',
@@ -200,6 +205,8 @@ sub style_for {
             fg    => \%fg,
             frame => $frame,
             text  => $text,
+            pick  => $pick,
+            bg    => $bg,
             bold  => '',
             dim   => $frame,
             reset => "\e[0m",
@@ -216,6 +223,8 @@ sub style_for {
         fg    => \%fg,
         frame => $frame,
         text  => $text,
+        pick  => $pick,
+        bg    => $bg,
         bold  => "\e[1m",
         dim   => "\e[2m",
         reset => "\e[0m",

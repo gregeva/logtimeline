@@ -127,3 +127,35 @@ By surface:
 | pattern choice in two stages (P4) | the vertical list with its explanation of the highlighted view | the guidance notice lacks the separated parts the others have (the focus, e.g. the API, then the analysis); stage two sits outside stage one's box: the box should grow to hold the list; declining should erase it all; the one-row digit selector is a fallback only (small terminal, no boxes, no arrow keys) |
 | notice browser (P5) | the list with a detail pane, for many dense notices; category tabs filtered with left and right | should be a box drawn over the output and erased on closing, reachable again after a two-stage choice; full screen is overkill; the new style shows no difference from the ltl look here |
 | modal (P6) | the modal erasing itself after the choice; the alternate screen as primary, drawn below the cursor as fallback, the caller passing which | a different presentation per moment |
+
+## Round 2: the standard patterns (2026-10-18)
+
+Built from the feedback above, in `lib/NoticeSurfaces.pm` and called by three
+scripts under `round2/`: the same patterns at every moment, none of its own.
+Reviewed with `perl review.pl` (round 2 is the default; feedback to
+`feedback/stage1-round2.jsonl`).
+
+| pattern | what it is | called at |
+|---|---|---|
+| panel | one notice: one row, no box; more: one box round them all, each category headed once (upper case, count, how to read it), one row per notice, categories divided by a rule or a blank row | end of the run (`round2/panel.pl`), and to carry what each question showed and its answer |
+| row | the question on one row in place of what was there, the notice cut to fit beside it; several notices: a row each above it; the views chosen by digit | before the read, during it, once a pattern is found (`round2/ask.pl --surface row`) |
+| box | a box below the cursor, frame in the category colour in the new style, the question on its last row inside the frame; grows to hold the views | the same three moments (`--surface box`) |
+| modal | a dialog with two buttons, on the alternate screen over a dimmed copy of what the run printed, or below the cursor as the fallback, the caller choosing; grows to hold the views | the same three moments (`--surface modal --screen alt\|inline`) |
+| browser | the notices in a box of fixed height: tabs by category (the shown one named), the list, the selected notice's detail; a notice offering views opens them in the detail's place and returns to the list | end of the run (`round2/browser.pl --screen alt\|inline`) |
+
+Every surface that asks erases itself once answered; any key that is not a
+choice stops its countdown (10 s); `j`/`k` move wherever the arrows do; a
+notice's parts are told apart by colour, `·` before the evidence and `→`
+before the remedy. Claude's proposals in this round, all open: carrying the
+question's notice and its answer to the end panel as a `↳` row; the
+alternate screen drawn over a dimmed copy of the run's own rows (ltl knows
+what it printed), so the dialog reads as a window over the run; naming only
+the shown tab.
+
+Claude's own runs: every script unattended in both styles at 80 and 140
+columns, exit 0, nothing on stderr; under a pty with keys (expect driving
+`script -F`), replayed through Term::VT102: the countdown paused by another
+key, the box and modal growing to hold the views, declining erasing all of
+it, the browser's tabs, views and closing. A width lookup per character
+through Unicode::UCD made the browser take seconds per frame; each code
+point is now looked up once.
