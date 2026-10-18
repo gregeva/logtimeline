@@ -17,6 +17,7 @@ use Unicode::UCD qw(charprop);
 our @EXPORT_OK = qw(
     ltl_constants interactive terminal_size raw_mode restore_mode
     query_cursor_column expected_width style_for strip_sgr
+    display_width wrap_text categories ltl_backdrop ltl_path
 );
 
 binmode STDOUT, ':encoding(UTF-8)';
@@ -216,6 +217,90 @@ sub style_for {
         bold  => "\e[1m",
         dim   => "\e[2m",
         reset => "\e[0m",
+    };
+}
+
+# --- text --------------------------------------------------------------------
+
+# Display width of a string with its SGR codes removed; ASCII is one cell
+# each without consulting Unicode's tables.
+sub display_width {
+    my $s = strip_sgr( $_[0] );
+    return length $s if $s !~ /[^\x00-\x7f]/;
+    return expected_width($s);
+}
+
+# Words wrapped to lines of at most $width display cells.
+sub wrap_text {
+    my ( $text, $width ) = @_;
+    $width = 10 if $width < 10;
+    my @lines;
+    my $line = '';
+    for my $word ( split / +/, $text ) {
+        if ( $line eq '' ) { $line = $word; next }
+        if ( display_width("$line $word") <= $width ) { $line .= " $word"; next }
+        push @lines, $line;
+        $line = $word;
+    }
+    push @lines, $line if $line ne '';
+    return @lines;
+}
+
+# --- the categories ---------------------------------------------------------
+#
+# D1's six categories in the order a surface presents them, each with how
+# the analyst reads it (D1's "what the analyst does") and the glyph that heads
+# it. The order puts what bears on trusting the figures first and the next
+# step last; the glyphs are single-width text symbols. Both are Claude's
+# proposal for the prototypes.
+
+my @categories = (
+    { name => 'data anomaly',           glyph => '⚠', emoji => "\x{26A0}\x{FE0F}", ascii => '!', reads => 'check the source data or the options before trusting the figures' },
+    { name => 'figure caveat',          glyph => '≈', emoji => '📉', ascii => '~', reads => 'the figures cover less than they appear to' },
+    { name => 'your options',           glyph => '⚙', emoji => "\x{2699}\x{FE0F}", ascii => '>', reads => 'correct the command' },
+    { name => 'decision taken for you', glyph => '↻', emoji => '🔁', ascii => '*', reads => 'what the run did instead of what was asked' },
+    { name => 'runtime condition',      glyph => '⏱', emoji => '⏳', ascii => '#', reads => "a condition of the run's environment" },
+    { name => 'guidance',               glyph => '➤', emoji => '💡', ascii => '?', reads => 'a next step worth trying' },
+);
+
+sub categories { return @categories }
+
+# --- a real ltl run as the backdrop -----------------------------------------
+#
+# The surfaces are shown where they would appear in a real run: ltl is run on
+# a log (with --disable-progress and -V section-layout), its section layout
+# read and removed, and its rows handed back by section so a prototype can
+# splice a surface between them.
+
+sub ltl_path { return $ltl_path }
+
+sub ltl_backdrop {
+    my (%opt) = @_;
+    my @cmd = ( $^X, $ltl_path, '--disable-progress', '-V', 'section-layout',
+        '--terminal-width', $opt{width}, '--terminal-height', $opt{height},
+        ( $opt{bg} eq 'light' ? '-lbg' : '-dbg' ), @{ $opt{args} // [] }, $opt{log} );
+    open my $fh, '-|:encoding(UTF-8)', @cmd or die "cannot run ltl: $!\n";
+    my @rows = <$fh>;
+    close $fh or die "ltl exited " . ( $? >> 8 ) . ": @cmd\n";
+    my ( @out, %layout, $in );
+    for (@rows) {
+        my $plain = strip_sgr($_);
+        if ( $plain =~ /^=== section-layout ===/ )     { $in = 1; next }
+        if ( $plain =~ /^=== END section-layout ===/ ) { $in = 0; next }
+        if ($in) {
+            my ( $name, $state, $start, $n ) = split /\t/, $plain;
+            chomp $n if defined $n;
+            $layout{$name} = { start => $start, rows => $n } if $state eq 'rendered';
+            next;
+        }
+        push @out, $_;
+    }
+    my $title_end = $layout{title} ? $layout{title}{start} + $layout{title}{rows} - 1 : 0;
+    my $body_start = ( sort { $a <=> $b } map { $_->{start} } grep { $_->{start} > $title_end } values %layout )[0]
+        // $title_end + 1;
+    return {
+        title => [ @out[ 0 .. $title_end - 1 ] ],
+        body  => [ @out[ $body_start - 1 .. $#out ] ],
     };
 }
 
