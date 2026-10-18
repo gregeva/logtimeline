@@ -12,12 +12,14 @@ use Exporter 'import';
 use File::Basename qw(dirname);
 use File::Spec;
 use Term::ReadKey qw(ReadMode ReadKey GetTerminalSize);
+use Time::HiRes qw(time);
 use Unicode::UCD qw(charprop);
 
 our @EXPORT_OK = qw(
     ltl_constants interactive terminal_size raw_mode restore_mode
     query_cursor_column expected_width style_for strip_sgr
-    display_width wrap_text categories ltl_backdrop ltl_path
+    display_width wrap_text categories
+    set_answers_ahead answer_ahead read_key timed_yes_no
 );
 
 binmode STDOUT, ':encoding(UTF-8)';
@@ -265,43 +267,82 @@ my @categories = (
 
 sub categories { return @categories }
 
-# --- a real ltl run as the backdrop -----------------------------------------
+# --- input ------------------------------------------------------------------
 #
-# The surfaces are shown where they would appear in a real run: ltl is run on
-# a log (with --disable-progress and -V section-layout), its section layout
-# read and removed, and its rows handed back by section so a prototype can
-# splice a surface between them.
+# Answers given ahead of time (--answer y,n,2,...) are taken one per choice
+# point, in order, before any key is waited for; with no terminal and no
+# answer left, every choice point takes its default at once.
 
-sub ltl_path { return $ltl_path }
+my @answers_ahead;
 
-sub ltl_backdrop {
-    my (%opt) = @_;
-    my @cmd = ( $^X, $ltl_path, '--disable-progress', '-V', 'section-layout',
-        '--terminal-width', $opt{width}, '--terminal-height', $opt{height},
-        ( $opt{bg} eq 'light' ? '-lbg' : '-dbg' ), @{ $opt{args} // [] }, $opt{log} );
-    open my $fh, '-|:encoding(UTF-8)', @cmd or die "cannot run ltl: $!\n";
-    my @rows = <$fh>;
-    close $fh or die "ltl exited " . ( $? >> 8 ) . ": @cmd\n";
-    my ( @out, %layout, $in );
-    for (@rows) {
-        my $plain = strip_sgr($_);
-        if ( $plain =~ /^=== section-layout ===/ )     { $in = 1; next }
-        if ( $plain =~ /^=== END section-layout ===/ ) { $in = 0; next }
-        if ($in) {
-            my ( $name, $state, $start, $n ) = split /\t/, $plain;
-            chomp $n if defined $n;
-            $layout{$name} = { start => $start, rows => $n } if $state eq 'rendered';
-            next;
-        }
-        push @out, $_;
+sub set_answers_ahead { @answers_ahead = map { split /,/ } grep { defined } @_; return }
+
+sub answer_ahead { return @answers_ahead ? shift @answers_ahead : undef }
+
+# One key, decoded: 'up', 'down', 'left', 'right', 'enter', 'esc', 'tab',
+# 'pgup', 'pgdn', or the character itself; undef when the timeout passes.
+# The terminal must be in cbreak or raw mode.
+sub read_key {
+    my ($timeout) = @_;
+    my $c = ReadKey( defined $timeout ? $timeout : 0 );
+    return undef unless defined $c;
+    return 'enter' if $c eq "\n" || $c eq "\r";
+    return 'tab'   if $c eq "\t";
+    return $c unless $c eq "\e";
+    my $n = ReadKey(0.05);
+    return 'esc' unless defined $n && ( $n eq '[' || $n eq 'O' );
+    my $seq = '';
+    while ( defined( my $d = ReadKey(0.05) ) ) {
+        $seq .= $d;
+        last if $d =~ /[A-Za-z~]/;
     }
-    my $title_end = $layout{title} ? $layout{title}{start} + $layout{title}{rows} - 1 : 0;
-    my $body_start = ( sort { $a <=> $b } map { $_->{start} } grep { $_->{start} > $title_end } values %layout )[0]
-        // $title_end + 1;
-    return {
-        title => [ @out[ 0 .. $title_end - 1 ] ],
-        body  => [ @out[ $body_start - 1 .. $#out ] ],
+    return { A => 'up', B => 'down', C => 'right', D => 'left', '5~' => 'pgup', '6~' => 'pgdn' }->{$seq} // 'esc';
+}
+
+# A yes or no with a timed default and a visible countdown: the question,
+# its [Y/n] block, and in brackets the seconds left, redrawn every second on
+# one row while a single key is awaited. Enter takes the default. When the
+# answer is in, the row is rewritten to the answer taken and how it was taken.
+# Returns (answer, how): answer 'y' or 'n'; how 'key', 'default after Ns',
+# 'given ahead' or 'default, no terminal'.
+sub timed_yes_no {
+    my (%a) = @_;
+    my $s       = $a{style};
+    my $default = $a{default} // 'y';
+    my $secs    = $a{seconds} // 10;
+    my $lead    = $a{lead} // '';
+    my $block   = $default eq 'y' ? '[Y/n]' : '[y/N]';
+    my $q       = $a{question};
+    # A row drawn inside a frame gets its right edge back at a fixed column.
+    my $close   = defined $a{close} ? "\e[$a{close_col}G$a{close}" : q{};
+    my $word    = sub { $_[0] eq 'y' ? ( $a{yes} // 'yes' ) : ( $a{no} // 'no' ) };
+    my $final   = sub {
+        my ( $ans, $how ) = @_;
+        print "\r\e[2K$lead$s->{text}$q$s->{reset} $s->{bold}" . $word->($ans) . "$s->{reset} $s->{dim}($how)$s->{reset}$close\n";
+        return ( $ans, $how );
     };
+    if ( defined( my $given = answer_ahead() ) ) {
+        my $ans = $given eq 'default' ? $default : lc substr( $given, 0, 1 ) eq 'n' ? 'n' : 'y';
+        return $final->( $ans, 'given ahead' );
+    }
+    return $final->( $default, 'default, no terminal' ) unless interactive();
+    raw_mode('cbreak');
+    print "\e[?25l";
+    my $end = time + $secs;
+    my $ans;
+    while (1) {
+        my $left = int( $end - time + 0.999 );
+        last if $left <= 0;
+        print "\r\e[2K$lead$s->{text}$q$s->{reset} $s->{bold}$block$s->{reset} $s->{dim}(${left}s)$s->{reset}$close";
+        my $wait = $end - time - ( $left - 1 );
+        my $k = read_key( $wait > 0 ? $wait : 0.01 );
+        next unless defined $k;
+        if ( $k eq 'enter' ) { $ans = $default; last }
+        if ( lc $k eq 'y' || lc $k eq 'n' ) { $ans = lc $k; last }
+    }
+    restore_mode();
+    return $final->( $ans, 'key' ) if defined $ans;
+    return $final->( $default, "default after ${secs}s" );
 }
 
 1;
