@@ -88,6 +88,42 @@ perl p6-modal-choice.pl --moment after --screen alt --style new
   were checked from the frame's own bytes and the `?1049h` / `?1049l` pair.
   This bears on the unattended-capture criterion for selected surfaces.
 
-## Architect's feedback
+## Architect's feedback (2026-10-18)
 
-Pending.
+Given through `review.pl`, one entry per option, verbatim in
+`feedback/stage1.jsonl`. 29 of 30 options reviewed; the light-background
+option (one box per category with `--bg light`) was not, so no light
+background has been evaluated.
+
+Across the surfaces:
+
+- **One standard set of patterns.** Each moment does not get its own way of
+  presenting and asking; a small set of surface patterns is chosen, committed
+  to, and called through shared code wherever it applies.
+- **Vertical space is the cost.** No row break inside a notice: the colours
+  and the `→` already separate its statement, evidence and remedy. A single
+  notice is one row. Mostly empty rows and a right side left blank are waste.
+- **Group by category, name it once.** A category's name is not repeated on
+  each notice. Upper-case headings, and the "how to read it" text on the
+  heading row, are liked.
+- **Colours and text glyphs are liked.** Emoji are rejected (inconsistent
+  spacing after them in this terminal, and not apt to the categories); ASCII
+  marks add nothing beyond the category name.
+- **A surface that asks erases itself once answered**, so it costs no screen
+  space afterwards; nothing redundant is left (a declined choice leaves no
+  row repeating "continue as planned").
+- **Countdowns.** Any key other than a choice stops the countdown, leaving
+  time to read; the pattern choice's countdown is too short.
+- **Navigation.** `j`/`k` alongside the arrows for less capable terminals;
+  number keys select a tab.
+
+By surface:
+
+| surface | liked | to change |
+|---|---|---|
+| deferred notices (P1) | a box marking the notice surface; headed sections, upper case, the how-to-read text | a box per category is busy beyond one or two categories: one box round all the notices, categories divided inside by rows or blank lines; denser rows |
+| option notices with a timed continue (P2) | the choice row; bold or bright white choices | the layout of the block; the shared frame left open while asking: draw the bottom edge and come back up for the choice |
+| yes or no over the progress line (P3) | in the progress row itself, for the most minimal (with the category colours and parts brought into that one row); the box that collapses once answered, for more detail, with the frame in the category colour | the notice above the progress line wastes width and rows |
+| pattern choice in two stages (P4) | the vertical list with its explanation of the highlighted view | the guidance notice lacks the separated parts the others have (the focus, e.g. the API, then the analysis); stage two sits outside stage one's box: the box should grow to hold the list; declining should erase it all; the one-row digit selector is a fallback only (small terminal, no boxes, no arrow keys) |
+| notice browser (P5) | the list with a detail pane, for many dense notices; category tabs filtered with left and right | should be a box drawn over the output and erased on closing, reachable again after a two-stage choice; full screen is overkill; the new style shows no difference from the ltl look here |
+| modal (P6) | the modal erasing itself after the choice; the alternate screen as primary, drawn below the cursor as fallback, the caller passing which | a different presentation per moment |
