@@ -1,0 +1,168 @@
+#!/usr/bin/env perl
+# Review the stage 1 prototypes one option at a time: each option is
+# introduced, run in this terminal, and followed by a prompt for feedback,
+# which is saved with the option's id and the exact command that drew it.
+#
+#   perl review.pl              resume at the first option with no feedback
+#   perl review.pl --list       the options and whether each has feedback
+#   perl review.pl --from P3-b  start at an option and go on from there
+#   perl review.pl --only P3-b  one option alone
+#   perl review.pl --all        every option, from the first
+#
+# Feedback is appended to feedback/stage1.jsonl, one JSON object per entry:
+# the option's id, title, the command run, the time, and the text. An option
+# reviewed again gets a second entry; nothing is overwritten.
+
+use strict;
+use warnings;
+use utf8;
+use FindBin;
+use Getopt::Long;
+use JSON::PP;
+use POSIX qw(strftime);
+
+binmode STDOUT, ':encoding(UTF-8)';
+binmode STDIN,  ':encoding(UTF-8)';
+$| = 1;
+
+my %opt;
+GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all' ) or die "bad options\n";
+
+my $dir  = $FindBin::Bin;
+my $file = "$dir/feedback/stage1.jsonl";
+my $json = JSON::PP->new->canonical->utf8;
+
+# id, prototype, arguments, what the option is, what to look at, what to do.
+my @options = (
+    [ 'P1-a', 'p1-deferred-notices.pl', '--form lines --style ltl',     'Deferred notices as prefixed lines, ltl look',      'one notice to a line, led by glyph and category name; continuation aligned under the text' ],
+    [ 'P1-b', 'p1-deferred-notices.pl', '--form lines --style new',     'Deferred notices as prefixed lines, new style',     'a coloured bar down the left of every row; bold category label' ],
+    [ 'P1-c', 'p1-deferred-notices.pl', '--form boxes --style ltl',     'One box per category, ltl look',                    "grey light-rule frames from ltl's box set; category and how to read it set in the top edge" ],
+    [ 'P1-d', 'p1-deferred-notices.pl', '--form boxes --style new',     'One box per category, new style',                   'rounded corners, frame in the category colour, bold heading' ],
+    [ 'P1-e', 'p1-deferred-notices.pl', '--form sections --style ltl',  'Headed sections, ltl look',                         "upper-case heading and rule per category, bullets, as ltl's messages tables are headed" ],
+    [ 'P1-f', 'p1-deferred-notices.pl', '--form sections --style new',  'Headed sections, new style',                        'coloured bar on the heading, a rail down the notices' ],
+    [ 'P1-g', 'p1-deferred-notices.pl', '--form lines --set minimal',   'A single deprecation, the smallest surface',        'what one notice on its own looks like: two rows' ],
+    [ 'P1-h', 'p1-deferred-notices.pl', '--form sections --glyphs emoji', 'Headed sections with emoji glyphs',               'emoji in place of the text symbols: recognition, and whether they sit in line in this terminal' ],
+    [ 'P1-i', 'p1-deferred-notices.pl', '--form sections --glyphs ascii', 'Headed sections with ASCII marks',                'no symbols beyond ASCII' ],
+    [ 'P1-j', 'p1-deferred-notices.pl', '--form boxes --bg light',      'One box per category on a light background',        'the colours chosen for a light background (best seen in a light terminal profile)' ],
+    [ 'P2-a', 'p2-preread-choice.pl',   '--form boxes --style ltl',     'Option notices, then a timed question below them',  'the countdown row under the block: [Y/n] and the seconds left, redrawn each second; press y, n, Enter, or wait' ],
+    [ 'P2-b', 'p2-preread-choice.pl',   '--form sections --style new',  'Option notices as a section, question below, new style', 'the same question under a lighter block' ],
+    [ 'P2-c', 'p2-preread-choice.pl',   '--frame shared --style ltl',   'Notices and question in one frame, ltl look',       'the question inside the frame, under a divider; the frame closes once answered' ],
+    [ 'P2-d', 'p2-preread-choice.pl',   '--frame shared --style new',   'Notices and question in one frame, new style',      'as P2-c in the new style' ],
+    [ 'P3-a', 'p3-progress-choice.pl',  '--place above',                'Question over the progress line: notice above, stays', 'the progress row gives way to the notice and question; once answered they stay and progress resumes below' ],
+    [ 'P3-b', 'p3-progress-choice.pl',  '--place inplace',              'Question in the progress row itself',               'one row replaces the progress line; once answered it is erased and the answer is recorded under the completion row' ],
+    [ 'P3-c', 'p3-progress-choice.pl',  '--place box --style ltl',      'Boxed notice over the progress line, ltl look',     'a box and the question; once answered both collapse to one row' ],
+    [ 'P3-d', 'p3-progress-choice.pl',  '--place box --style new',      'Boxed notice over the progress line, new style',    'as P3-c in the new style' ],
+    [ 'P4-a', 'p4-pattern-choice.pl',   '--selector list --style ltl',  'Two-stage choice, vertical list, ltl look',         'press y within 5 s to reach stage two; arrows move the highlight, its effect shows beneath; Enter or Esc' ],
+    [ 'P4-b', 'p4-pattern-choice.pl',   '--selector list --style new',  'Two-stage choice, vertical list, new style',        'as P4-a in the new style (press y within 5 s)' ],
+    [ 'P4-c', 'p4-pattern-choice.pl',   '--selector keys --form lines', 'Two-stage choice, one row chosen by a digit',       'press y within 5 s; the views on one row, a single digit chooses' ],
+    [ 'P4-d', 'p4-pattern-choice.pl',   '--selector list',              'Two-stage choice, declined at stage one',           'let the 5 s run out, or press n: what stays on screen when the analyst does not engage' ],
+    [ 'P5-a', 'p5-notice-browser.pl',   '--mode inline --style ltl',    'Inline list of 25 notices with a detail pane, ltl look', 'a window below the cursor; arrows, PgUp/PgDn, 1-6 jump to a category; q leaves and it collapses to one row' ],
+    [ 'P5-b', 'p5-notice-browser.pl',   '--mode inline --style new',    'Inline list with a detail pane, new style',         'as P5-a in the new style' ],
+    [ 'P5-c', 'p5-notice-browser.pl',   '--mode fullscreen --style ltl', 'Full-screen list with category tabs, ltl look',    'the alternate screen: tabs (Tab, arrows), list and detail side by side from 120 columns; q gives the screen back' ],
+    [ 'P5-d', 'p5-notice-browser.pl',   '--mode fullscreen --style new', 'Full-screen list with category tabs, new style',   'as P5-c in the new style' ],
+    [ 'P6-a', 'p6-modal-choice.pl',     '--moment read --screen inline', 'Modal during the read, drawn below the cursor',    'a dialog with two buttons and a countdown over the progress moment; arrows or Tab, Enter, y/n' ],
+    [ 'P6-b', 'p6-modal-choice.pl',     '--moment read --screen alt',   'Modal during the read, on the alternate screen',    'the dialog centred on a clear screen; the run reappears once answered' ],
+    [ 'P6-c', 'p6-modal-choice.pl',     '--moment after --screen inline --style new', 'Modal once a pattern is found, below the cursor, new style', 'the pattern choice as a dialog rather than a question row' ],
+    [ 'P6-d', 'p6-modal-choice.pl',     '--moment after --screen alt --style new',    'Modal once a pattern is found, alternate screen, new style', 'as P6-c, centred on a clear screen' ],
+);
+my %index = map { $options[$_][0] => $_ } 0 .. $#options;
+
+my %reviewed;
+if ( open my $fh, '<', $file ) {
+    while (<$fh>) {
+        my $e = eval { $json->decode($_) } or next;
+        $reviewed{ $e->{option} }++;
+    }
+}
+
+if ( $opt{list} ) {
+    printf "%-5s %-9s %s\n", $_->[0], $reviewed{ $_->[0] } ? "reviewed" : '', $_->[3] for @options;
+    exit 0;
+}
+
+my @queue;
+if ( $opt{only} ) {
+    defined $index{ $opt{only} } or die "no option '$opt{only}' (see --list)\n";
+    @queue = ( $index{ $opt{only} } );
+}
+elsif ( $opt{from} ) {
+    defined $index{ $opt{from} } or die "no option '$opt{from}' (see --list)\n";
+    @queue = ( $index{ $opt{from} } .. $#options );
+}
+elsif ( $opt{all} ) {
+    @queue = ( 0 .. $#options );
+}
+else {
+    @queue = grep { !$reviewed{ $options[$_][0] } } 0 .. $#options;
+    print "Every option has feedback. Use --all, --from or --only to review again.\n" and exit 0 unless @queue;
+}
+
+-t STDIN && -t STDOUT or die "review.pl runs in a terminal: it shows each option and waits for feedback\n";
+
+my $pos = 0;
+while ( $pos < @queue ) {
+    my ( $id, $script, $args, $title, $look ) = @{ $options[ $queue[$pos] ] };
+    my $cmd = "perl $script $args";
+    print "\e[H\e[2J";
+    print "\e[1m$id  $title\e[0m   \e[2m(" . ( $queue[$pos] + 1 ) . ' of ' . scalar(@options) . ")\e[0m\n";
+    print "\e[2m$cmd\e[0m\n";
+    print "Look at: $look\n\n";
+    print "\e[2mEnter runs it · s skips · b goes back · q quits\e[0m ";
+    my $go = <STDIN> // exit 0;
+    chomp $go;
+    if ( $go eq 'q' ) { last }
+    if ( $go eq 's' ) { $pos++; next }
+    if ( $go eq 'b' ) { $pos-- if $pos > 0; next }
+
+    print "\e[H\e[2J";
+    system( $^X, "$dir/$script", split( ' ', $args ) );
+    system( 'stty', 'sane' );    # in case the prototype was stopped mid-prompt
+
+    while (1) {
+        print "\n\e[1m── feedback for $id ($title) ──\e[0m\n";
+        print "\e[2mtype your feedback; an empty line ends it.  r alone reruns · s alone skips without saving · q alone quits\e[0m\n";
+        my @lines;
+        while ( defined( my $l = <STDIN> ) ) {
+            chomp $l;
+            last if $l eq '';
+            push @lines, $l;
+        }
+        if ( @lines == 1 && $lines[0] eq 'r' ) {
+            print "\e[H\e[2J";
+            system( $^X, "$dir/$script", split( ' ', $args ) );
+            system( 'stty', 'sane' );
+            next;
+        }
+        last if @lines == 1 && $lines[0] eq 's';
+        if ( @lines == 1 && $lines[0] eq 'q' ) { $pos = @queue; last }
+        if (@lines) {
+            save( $id, $title, $cmd, join( "\n", @lines ) );
+            print "\e[32msaved for $id\e[0m\n";
+        }
+        else {
+            print "\e[2mnothing typed; nothing saved for $id\e[0m\n";
+        }
+        last;
+    }
+    $pos++;
+    if ( $pos < @queue ) {
+        print "\e[2mEnter goes on to the next option\e[0m ";
+        my $x = <STDIN>;
+    }
+}
+print "\nFeedback is in $file\n";
+
+sub save {
+    my ( $id, $title, $cmd, $text ) = @_;
+    mkdir "$dir/feedback" unless -d "$dir/feedback";
+    open my $fh, '>>', $file or die "cannot write $file: $!\n";
+    print $fh $json->encode( {
+        option   => $id,
+        title    => $title,
+        command  => $cmd,
+        time     => strftime( '%Y-%m-%dT%H:%M:%S%z', localtime ),
+        feedback => $text,
+    } ), "\n";
+    close $fh;
+    $reviewed{$id}++;
+}
