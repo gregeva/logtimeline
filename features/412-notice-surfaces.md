@@ -358,6 +358,15 @@ capability whose shape has to be found, and (d) a verification method not yet
 known, since asserting a rendered terminal surface is an open question in this
 repository (`docs/test-driven-development.md` § Visual surfaces).
 
+### Where prototyping stands
+
+Stage 1 (macOS, fixed example notices) is under way on branch
+`412-notice-surfaces`, reviewed by the architect in rounds through
+`prototype/412-notice-surfaces/review.pl`. Each round's feedback, what was
+built from it, and how to resume the review are in
+`prototype/412-notice-surfaces/findings.md` (§ Resuming); the stage's
+findings report comes here once its decision round is held.
+
 ### Closing out prototyping (architect, 2026-10-17)
 
 Individual prototypes need not meet these; the selected options must, before
