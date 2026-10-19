@@ -751,3 +751,15 @@ The screenshot question follows the same rule: the panel is a section the
 tool already draws; how a pop-up is pictured is decided when a pop-up is
 delivered.
 
+## The contract becomes the project's (architect, 2026-10-19)
+
+What the rounds settled goes beyond this issue: how input is taken, how
+navigation works, which keys do what, and the design language, are patterns of
+the application that every future surface reads from. The architect had them
+moved out of the feature doc into `docs/design-language.md` (the looks, with
+the existing ltl look written up from the code for the first time, since other
+surfaces will reapply it even where the new style does not) and
+`docs/terminal-interaction.md` (the behaviour), one section per pattern; the
+feature doc keeps the locked decisions and points at them. The references to
+"the contract" in the rounds above describe the document as it was while the
+rounds ran.

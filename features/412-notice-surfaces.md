@@ -385,8 +385,9 @@ carried the same correction):
 2. Claude sends a read-back before building anything: what was heard, what
    changes, what is not changing and why. Building waits for the architect's
    confirmation of that reading.
-3. The round's settled lines are proposed for lock and moved into this
-   document, each as a locked decision or a line of the contract, in the same
+3. The round's settled lines are proposed for lock and moved into the record,
+   each as a locked decision here or a line of the contract (now
+   `docs/design-language.md` and `docs/terminal-interaction.md`), in the same
    step; only what still needs iteration stays open in the findings.
 4. The next round is built against the contract, and Claude's own check before
    review observes what the architect will observe (a terminal pane captured
@@ -461,244 +462,33 @@ the prototyping stage is closed:
 - [x] Each selected surface has a demonstrated way to be captured and checked
       unattended, for the harnesses and for the screenshot tool
       (`prototype/412-notice-surfaces/findings.md` § Unattended capture, 2026-10-19;
-      the method follows the surface, § Unattended runs of the contract).
+      the method follows the surface, `docs/terminal-interaction.md` § Unattended runs).
 - [ ] The prototype findings record what was chosen, what was learned along
       the way, and why each decision was made.
 
 ## Surface framework contract
 
-The framework the prototypes converge on, as one document: what each component
-is, what its caller passes, and the conventions every component keeps. Each
-line is either **settled** by a locked decision, named in brackets, or
-**proposed** by Claude for the architect's review of this document (step B of
-the round procedure, 2026-10-19). A proposed line that the architect confirms
-becomes settled here; one he corrects is rewritten; one that needs to be seen
-first goes to round 4 as its question. Nothing proposed here is a decision.
+The framework the prototypes converged on was written here as one document,
+each line settled by a locked decision or confirmed by the architect round by
+round, and reviewed before code. Once settled it was moved out of this issue's
+record into two project documents, so that every surface of `ltl` is drawn and
+built from them and nothing drifts between two copies (architect, 2026-10-19:
+the contract's patterns are first-class patterns of the project, each with its
+own section):
 
-### Components
+- `docs/design-language.md`: the two looks and the rule which applies where
+  (D6), the ltl look as the tool draws it today, the new style, the category
+  sheet, the notice's anatomy, wording and the light background.
+- `docs/terminal-interaction.md`: the three components and the notice record,
+  the key map and key bars, taking input (default, countdown, answers given
+  ahead, two stages, quitting), buttons, the options list, the defaults by use,
+  layered surfaces, pop-up size, placement, padding, erasing and the record,
+  unattended runs and the test method per surface.
 
-Three, and only three. Every moment of the run calls one of them with its own
-content; no moment has a presentation of its own (D5).
-
-| component | for | what the caller passes |
-|---|---|---|
-| **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
-| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); any parameter of the defaults table it wants otherwise |
-| **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection). A detail that carries ltl's histograms carries them at ltl's own size, side by side as the tool renders two metrics, which needs 160 to 180 columns (round 5) |
-
-A notice is the same record everywhere (proposed): its category (D1); a focus
-(what it is about: an API, a time range, a count); a statement; evidence, zero
-or more; a remedy; the producer that raised it; and, when it offers options, the
-list of them. An option carries its parts under the consumer's headings (D8),
-the command options that apply it and its effect in one line.
-
-### Keys (settled, architect 2026-10-19; one key map on every component, following common terminal practice)
-
-Moving and choosing, wherever the action exists:
-
-| key | in a list (options, notices) | between buttons or tabs |
-|---|---|---|
-| ↑ ↓ | move the highlight one row | |
-| j k | the same, for terminals without arrow keys | |
-| PgUp PgDn | move a page | |
-| ← → | | move the highlight one button, or one tab |
-| Tab | | next button or tab, wrapping round |
-| Shift-Tab | | previous button or tab, always Tab's reverse |
-| 1 to 9 | choose the n-th row directly | choose the n-th tab directly |
-| Enter | activate the highlighted row | activate the highlighted button |
-| a choice letter | | the caller passes the key character of each option; that letter is underlined in the option's printed label, marking it as the choice code; accepted in either case, so Shift or Caps Lock does not matter |
-
-Leaving:
-
-| key | does |
-|---|---|
-| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing. Esc alone: no letter closes, since a letter would collide with a caller's choice letter (locked, architect 2026-10-19) |
-| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; a parameter, on by default, with its default per use in the table below (architect, 2026-10-19) |
-| any other key | stops the countdown and nothing else |
-
-The key bar each component shows, from the rows above that apply to it.
-Every entry is written `keys: action`, the same shape throughout, so a pair
-of keys never reads as a key and an action (locked, architect 2026-10-19):
-
-| component | key bar |
-|---|---|
-| ask, first stage | `←→ Tab: move · Enter: choose · Esc: continue reading · q/x: quit` where quitting is on; the choice letters underlined in the buttons |
-| ask, compact box | `s/c: choose`, the letters; `· q/x: quit` where quitting is on |
-| ask, options list | `↑↓ j k: move · 1-N Enter: choose · Esc: continue as planned · q/x: quit` |
-| browser, list | `↑↓ j k: move · ←→ Tab: tabs · 1-N: tab · Enter: options · Esc: close · q/x: quit` |
-| layered options list over the browser | as the options list, with `Esc: back` |
-
-### Parameters and their defaults by use (settled, architect 2026-10-19, with the two cells he marked open)
-
-Every parameter has a default per use, so that a caller passes only what it
-wants otherwise, and a compact surface is not cluttered with what a full one
-shows. The uses are the three components, the ask component in its two forms.
-
-**Layered surfaces** (architect, 2026-10-19): a selection on an item in the
-browser may open an ask modal on top of the browser, with its own selection and
-options; the modal's keys and choice letters take effect while it is up, and
-the browser is back as it was when it closes. Modals layered over a surface
-have not been prototyped or discussed before this; the case is factored into
-the framework and goes into round 4.
-
-| parameter | ask, modal | ask, compact box | browser | panel |
-|---|---|---|---|---|
-| placement | alternate screen; below the cursor as fallback | below the cursor | alternate screen; below the cursor as fallback | inline, in the run's output |
-| size | smallest fitting tier | to its content, full width | smallest fitting tier; height from the tallest detail | to its content |
-| quit with q/x | on | off | on | not applicable |
-| key bar | full | the choice letters only | full | none |
-| countdown to the default | 10 s | 10 s | 15 s | none |
-| choice letters | from the caller, underlined | from the caller, underlined | none in the list itself; a selection on an item may open an ask modal on top of the browser, whose own choice letters then take effect | not applicable |
-| headings of the options list | open: depends on the notice producers' data model, investigated later | open: as the modal | What? How? Why? | not applicable |
-| record left after answering | off | off | not applicable | not applicable |
-| top edge | category, count, how to read it | category, count, how to read it | `notices` and the count | `notices` and the count |
-
-### Buttons (settled, architect 2026-10-19)
-
-The default button is the rightmost and is highlighted when the surface
-appears; the countdown sits beside it. The other buttons stand to its left in a
-fixed order: the action that stops or leaves (Stop, Cancel) leftmost, the action
-that goes further (Look at the options) between. Labels are the caller's;
-positions are not. Enter activates the highlighted button; the choice letter
-the caller passes is underlined in the label and is a shortcut to it. The
-buttons are centred on their labels alone; the countdown stands beside the
-default button outside the centred width, so nothing moves when it stops
-(architect, 2026-10-19, round 4).
-
-### Padding (settled, architect 2026-10-19, round 4)
-
-A pop-up that will be erased (the modal, the compact box, the browser, a
-layered modal) has two characters of padding inside its left and right edges
-and one empty row above and below the content of each of its panes; the
-padding is counted as rendered, two cells, not two added to a space already
-there. A box that stays on screen (the panel) has one character inside each
-side and no empty rows (architect, 2026-10-19, round 5). A modal's question
-has an empty row above and below it. The browser's tabs belong to its list
-pane: an empty row above and below the tabs, then the list, no rule between.
-In a detail pane an empty row separates a notice from a histogram under it,
-and the chosen or on-offer row from what is above it. A notice's continuation
-rows carry no hanging indent inside a modal or box. A box drawn below the
-cursor that will be erased is preceded by one empty row.
-
-### Pop-up size (proposed; to be seen in round 4; round 3 asked for three predefined sizes as ratios of the terminal)
-
-| tier | width | height |
-|---|---|---|
-| small | 50% of the columns, at least 44 | to its content, at most 30% of the rows |
-| medium | 70% | to its content, at most 50% |
-| large | 90% | to its content, at most 80% |
-
-The surface measures what it has to show and takes the smallest tier in which
-its longest unbreakable unit fits and its wrapped content does not exceed the
-height; for an options list the unit is the width at which its last column
-wraps to no more than two rows, so dense content takes a wider tier
-(architect, 2026-10-19, round 4: a dense list at two thirds of the terminal
-was too tight). A caller may name a tier. A surface never changes size while it is
-shown: the browser's height is computed from its tallest detail before it is
-drawn (round 3), and the second stage of a choice is measured with the first.
-
-### The options list (D8; the gap settled, architect 2026-10-19, round 4)
-
-The gap between the list's columns grows with the width available: one space
-at the tightest, up to five when there is room; the columns are never equally
-spaced. The columns before the last take their widest part; the last wraps.
-
-### Countdown (D7)
-
-The seconds left are shown dim in brackets beside the default button and redrawn
-each second. Any key that is not a choice stops it; the bracket disappears and
-nothing is said. It never resumes.
-
-### Erasing and the record (D4)
-
-A component that asks erases itself once answered, leaving the cursor where it
-was; on the alternate screen, the screen is given back as it was. With the
-record flag, the notice and the answer are left as inline text in the ltl look
-in the rows the surface occupied, nothing else.
-
-### Where a component is drawn (D5)
-
-Alternate screen: centred, over a dimmed copy of the rows the run has printed,
-every row kept at the position it had, the live row included (a round 3
-finding: the progress row must not move). Below the cursor: drawn into rows
-reserved under the cursor, the fallback when the alternate screen is not wanted
-or not available. The compact form of ask is a box below the cursor whose top
-edge carries the category, the count when there is more than one notice, and
-how to read the category, with the question on its last inside row.
-
-### Style (D6, D2, D3)
-
-Boxes and pop-ups: rounded corners, frame in the category colour. Inline text:
-the ltl look. Categories by text glyph and colour; the category named once in
-upper case with its how-to-read text, categories divided by a blank row, a
-notice one row with no row break inside it, its parts told apart by colour and
-a marker before the evidence and before the remedy. A coloured block marks only
-the selected tab.
-
-### Wording (settled, architect 2026-10-19, rounds 3 and 5)
-
-A count is written in parentheses everywhere, `(N)`: after a category name,
-in a tab, in a title; never a bare number (round 5: the browser's bare
-counts broke the design language). The panel's title is the word `notices`
-and its count, in the dim of the count; `notices` is lower case beside an
-upper-case category name. A panel with one category takes the edge form: the
-category's glyph, name, count and how-to-read text in the top edge, in the
-category colour, the notices alone inside, so the row that said `notices`
-goes (round 5: "this is the one"). The how-to-read text of *your options*
-says the tool is warning, not that the analyst erred: "command usage
-warnings" or words to that effect.
-
-### Category sheet (settled, architect 2026-10-19: order, glyphs, colours, how-to-read text and the bullet)
-
-| order | category | glyph | colour (dark background) | how to read it |
-|---|---|---|---|---|
-| 1 | data anomaly | ⚠ | orange | check the source data or the options before trusting the figures |
-| 2 | figure caveat | ≈ | magenta | the figures cover less than they appear to |
-| 3 | your options | ⚙ | cyan | command usage warnings |
-| 4 | decision taken for you | ↻ | blue | what the run did instead of what was asked |
-| 5 | runtime condition | ⏱ | teal | a condition of the run's environment |
-| 6 | guidance | ➤ | green | a next step worth trying |
-
-The order puts what bears on trusting the figures first and the next step
-last. On a light background each category takes the darkest step of its
-colour's light gradient, the frame grey 244, the text black, the highlight
-black bold in reverse video (settled, architect 2026-10-19: every component
-reviewed once per form on a light terminal and accepted). The bullet
-before a notice in a list is `╶` (U+2576, box drawings light right), in the
-category's colour, so the one character carries the classification; chosen
-from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).
-
-### Unattended runs (settled, architect 2026-10-19)
-
-**One rendering, with or without a terminal.** A surface draws the same
-rows whether standard output is a terminal or a file; the only difference is
-what every command-line tool has: no alternate screen, no cursor control and
-no waiting for a key when there is none, so the surface appears once and the
-run goes on with the default or the answer given ahead (architect, 2026-10-19:
-no second code path that changes the tool's standard output).
-
-**The test method follows the surface it targets.** A harness or the
-screenshot tool uses the cheapest capture that sees what the surface
-produces; no method runs for a surface that does not need it, and nothing runs
-on a platform that lacks the method's tooling.
-
-| surface | what a run with no terminal holds | capture and check | screenshot |
-|---|---|---|---|
-| panel (notices inline, the first delivery and the normal use) | the same rows as in a terminal | redirected run, read through the cell decoder, as every harness today; outcomes from `-V` | the panel's rows as a section through `-V section-layout`, as the tool works today |
-| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes, since without a terminal there is no alternate screen, no cursor control and no key to wait for | the frame's cells and the `-V` choice section of #748 (take the analyst's input at choice points, with a default and answers given ahead) by redirected run; its behaviour (keys, erasing, the run unmoved under it, layering) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the frame from a redirected run as a section, or a pane capture for the pop-up over the dimmed run |
-| browser (navigation, layered pop-ups) | its first frame drawn once, as it appears | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
-
-The pane-capture method is demonstrated, with predicates that told this
-stage's known-good and known-bad builds apart, in
-`prototype/412-notice-surfaces/findings.md` § Unattended capture; its
-predicates enter `tests/lib/` when the first harness needs them, not before.
-
-**Platforms.** The harnesses run on macOS and Linux (`docs/toolchain-guidance.md`:
-they do not run on Windows). A harness that needs tmux is skipped where tmux
-is absent and runs elsewhere; the better remedy, equipping the Windows
-development host with WSL or Cygwin so interactive surfaces are tested there
-too, is an enhancement to the Windows setup, to be filed when the first
-interactive surface is scheduled.
+The locked decisions above remain the authority behind every line; the
+documents carry the settled form and cite the round that settled it. A line
+still open there (the headings of the options list in the modal and box,
+pending the producers' data model) is marked open in the document.
 
 ## Open items
 

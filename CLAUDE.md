@@ -381,6 +381,8 @@ about anything else, these still hold.
 | Creating, renaming or editing any `tests/validate-*.sh`, or any `-V` section or key | `tests/HARNESS-DESIGN.md` (mandatory before acting) |
 | Deriving acceptance criteria | `docs/test-driven-development.md` |
 | Deciding whether and how to prototype | `prototype/README.md` |
+| How a surface looks: glyphs, colours, the two looks and where each applies, the category sheet, wording | `docs/design-language.md` |
+| How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
