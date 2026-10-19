@@ -174,6 +174,50 @@ heading tells them how to read every notice under it. The inventory's
 *informational* placements divide between *your options* and *decision taken
 for you*; each notice is placed under D1 in the inventory below.
 
+### D2 — Categories are marked by a text glyph and a colour (architect, 2026-10-19, from round 1)
+
+Emoji are rejected (inconsistent spacing after them, not apt to the
+categories); ASCII marks are rejected (they add nothing beyond the category
+name).
+
+### D3 — Notices are grouped by category and compact (architect, 2026-10-19, from rounds 1 and 2)
+
+The category is named once, in upper case, with its how-to-read text on the
+heading row; categories are divided by a blank row. A single notice is one row
+with no row break inside it: colour and the part markers separate its
+statement, evidence and remedy.
+
+### D4 — A surface that asks erases itself; a record is the caller's boolean (architect, 2026-10-19, from round 2)
+
+Once answered the surface is erased and nothing is printed in its place.
+Whether it leaves a record of the notice and the answer is a boolean the
+caller passes, off by default.
+
+### D5 — Asking during a run is one surface; the modal leads (architect, 2026-10-19, from rounds 1 and 2)
+
+One surface is called at every moment with that moment's notices and choices.
+The modal on the alternate screen leads; the box below the cursor is the
+compact form; the modal below the cursor is the fallback; the caller passes the
+preference. The one-row form (the question and the notice's parts on one line)
+is rejected: it cannot be read.
+
+### D6 — Boxes and pop-ups take the new style; inline text keeps the ltl look (architect, 2026-10-19, from round 2)
+
+Rounded corners, the frame in the category colour. A category name set as a
+coloured block marks only the selected tab; elsewhere a category is in its
+foreground colour.
+
+### D7 — Any key stops a countdown, and nothing says so (architect, 2026-10-19, from rounds 1 and 3)
+
+A key that is not a choice stops the countdown, leaving time to read. No
+surface reports the countdown's state: its disappearance is the whole signal,
+and it never resumes.
+
+### D9 — Many notices go to the browser, never to a panel (architect, 2026-10-19, from round 2)
+
+A large number of notices is for the interactive browser; printing them all to
+the terminal as a panel is rejected.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
