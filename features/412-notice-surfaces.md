@@ -548,8 +548,21 @@ The default button is the rightmost and is highlighted when the surface
 appears; the countdown sits beside it. The other buttons stand to its left in a
 fixed order: the action that stops or leaves (Stop, Cancel) leftmost, the action
 that goes further (Look at the options) between. Labels are the caller's;
-positions are not. Enter activates the highlighted button; a letter key named
-in a label (`y`, `n`) is a shortcut to it.
+positions are not. Enter activates the highlighted button; the choice letter
+the caller passes is underlined in the label and is a shortcut to it. The
+buttons are centred on their labels alone; the countdown stands beside the
+default button outside the centred width, so nothing moves when it stops
+(architect, 2026-10-19, round 4).
+
+### Padding (settled, architect 2026-10-19, round 4)
+
+Every box has two characters of padding inside its left and right edges, in
+each pane, whether or not it will be erased. A pop-up that will be erased (the
+modal, the compact box, the browser, a layered modal) also has one empty row
+above and below the content of each pane. A modal's question has an empty row
+above and below it. In a detail pane an empty row separates a notice from a
+histogram under it. A notice's continuation rows carry no hanging indent
+inside a modal or box.
 
 ### Pop-up size (proposed; to be seen in round 4; round 3 asked for three predefined sizes as ratios of the terminal)
 
@@ -561,9 +574,18 @@ in a label (`y`, `n`) is a shortcut to it.
 
 The surface measures what it has to show and takes the smallest tier in which
 its longest unbreakable unit fits and its wrapped content does not exceed the
-height. A caller may name a tier. A surface never changes size while it is
+height; for an options list the unit is the width at which its last column
+wraps to no more than two rows, so dense content takes a wider tier
+(architect, 2026-10-19, round 4: a dense list at two thirds of the terminal
+was too tight). A caller may name a tier. A surface never changes size while it is
 shown: the browser's height is computed from its tallest detail before it is
 drawn (round 3), and the second stage of a choice is measured with the first.
+
+### The options list (D8; the gap settled, architect 2026-10-19, round 4)
+
+The gap between the list's columns grows with the width available: one space
+at the tightest, up to five when there is room; the columns are never equally
+spaced. The columns before the last take their widest part; the last wraps.
 
 ### Countdown (D7)
 
@@ -604,7 +626,7 @@ count; `notices` is lower case beside an upper-case category name. The
 how-to-read text of *your options* says the tool is warning, not that the
 analyst erred: "command usage warnings" or words to that effect.
 
-### Category sheet (settled, architect 2026-10-19: order, glyphs, colours and how-to-read text; the bullet glyph is open)
+### Category sheet (settled, architect 2026-10-19: order, glyphs, colours, how-to-read text and the bullet)
 
 | order | category | glyph | colour (dark background) | how to read it |
 |---|---|---|---|---|
@@ -618,8 +640,9 @@ analyst erred: "command usage warnings" or words to that effect.
 The order puts what bears on trusting the figures first and the next step
 last. On a light background each category takes the darkest step of its
 gradient; no light-background rendering has been reviewed yet. The bullet
-before a notice in a list is open: a light glyph from the dash family, chosen
-from a glyph sheet in round 4 (round 3).
+before a notice in a list is `╶` (U+2576, box drawings light right), in the
+category's colour, so the one character carries the classification; chosen
+from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).
 
 ### Unattended runs (the default rule settled, architect 2026-10-19; the capture method open, the stage's second deliverable)
 
