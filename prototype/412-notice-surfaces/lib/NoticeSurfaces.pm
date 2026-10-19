@@ -1,33 +1,93 @@
 package NoticeSurfaces;
 
-# The standard surface patterns of stage 1. One way to present a block of
-# notices (the panel); one way to ask during the run (a modal, with a compact
-# box form), with a view selector inside it; and a navigable list of notices
-# in a box. Every moment of the run calls these with its own notices and
-# choices; no moment has a presentation of its own.
+# The three components of the surface framework (features/412-notice-surfaces.md
+# § Surface framework contract): the panel, which presents the notices known
+# once the data work is done; ask, the one surface for a question during the
+# run, as a modal or in its compact box form, with the options list as its
+# second stage; and the browser, many notices in a navigable list with a
+# detail pane. Every moment of the run calls one of them with its own content;
+# no moment has a presentation of its own (D5).
 #
-# Rules every pattern keeps, from the architect's feedback:
-#   - a notice is one row; its parts are told apart by colour and by the
-#     separators (· before the evidence, → before the remedy), never by a
-#     row break; it wraps only past the width;
-#   - a category's name is shown once, upper case, with how to read it;
-#   - a surface that asks erases itself once answered and leaves no trace,
-#     unless its caller asks for a record;
-#   - boxes and dialogs in the new style, inline text in the ltl look; a
-#     coloured block marks only the selected tab;
-#   - any key that is not a choice stops a countdown;
-#   - j and k move wherever the arrow keys do.
+# What every component keeps, from the contract:
+#   - the defaults table: a caller passes only what it wants otherwise;
+#   - one key map (action()): arrows and j/k move, Tab and Shift-Tab step
+#     between buttons or tabs, digits choose directly, Enter activates, Esc
+#     closes taking the default, q/x quit the application where that is on,
+#     any other key stops a countdown and nothing says so (D7);
+#   - buttons in fixed places: the default rightmost and highlighted, the
+#     countdown beside it, stop leftmost, go-further between; the caller's
+#     choice letter underlined in each label, accepted in either case;
+#   - a pop-up takes the smallest of three size tiers that fits its content,
+#     measured with its second stage, and never changes size while shown;
+#   - a surface that asks erases itself (D4); a record is the caller's boolean;
+#   - a notice is one row, its parts told apart by colour and a marker (D3);
+#   - boxes and pop-ups in the new style, inline text in the ltl look (D6).
 
 use strict;
 use warnings;
 use utf8;
 use Exporter 'import';
-use List::Util qw(max);
+use List::Util qw(max min sum);
 use Time::HiRes qw(time);
-use NoticeProto qw(interactive display_width wrap_text strip_sgr categories read_key raw_mode restore_mode answer_ahead);
+use NoticeProto qw(interactive display_width wrap_text strip_sgr categories read_key raw_mode restore_mode answer_ahead query_cursor_position);
 
-our @EXPORT_OK = qw(cat_named grouped fit pad_to notice_line heading frame panel
-                    out live_row ask browser);
+our @EXPORT_OK = qw(defaults panel bullet_candidates bullet_sheet ask browser out live_row);
+
+# --- the defaults table ------------------------------------------------------
+#
+# contract § Parameters and their defaults by use (settled 2026-10-19).
+
+my %DEFAULTS = (
+    'ask-modal' => { placement => 'alt',    size => 'auto',    quit => 1, keybar => 'full',    seconds => 10, record => 0 },
+    'ask-box'   => { placement => 'inline', size => 'full',    quit => 0, keybar => 'letters', seconds => 10, record => 0 },
+    browser     => { placement => 'alt',    size => 'auto',    quit => 1, keybar => 'full',    seconds => 15 },
+    panel       => { placement => 'inline', size => 'content' },
+);
+
+sub defaults {
+    my ($use) = @_;
+    my $d = $DEFAULTS{$use} or die "no use '$use' in the defaults table\n";
+    return %$d;
+}
+
+# The defaults of a use, overlaid with what the caller passed.
+sub with_defaults {
+    my ( $use, %a ) = @_;
+    my %d = defaults($use);
+    $d{$_} = $a{$_} for grep { defined $a{$_} } keys %a;
+    return %d;
+}
+
+# --- the key map -------------------------------------------------------------
+#
+# contract § Keys. A decoded key becomes one action, the same on every
+# component: 'up' 'down' 'pgup' 'pgdn' 'left' 'right' 'next' 'prev' 'enter'
+# 'esc' 'quit' 'digit:N' 'letter:x' or 'other'.
+
+sub action {
+    my ( $k, %o ) = @_;
+    return 'up'   if $k eq 'up'   || $k eq 'k';
+    return 'down' if $k eq 'down' || $k eq 'j';
+    return $k     if $k =~ /^(?:pgup|pgdn|left|right|enter|esc)$/;
+    return 'next' if $k eq 'tab';
+    return 'prev' if $k eq 'shift-tab';
+    return "digit:$k" if $k =~ /^[1-9]$/;
+    return 'other' if length $k != 1;
+    my $l = lc $k;
+    return 'quit' if $o{quit} && ( $l eq 'q' || $l eq 'x' );
+    return "letter:$l";
+}
+
+# The key bar's text for what is on: the moving keys of the component, Enter,
+# Esc with what it takes, and quitting where it is on.
+sub key_bar {
+    my (%k) = @_;
+    my @p = ( $k{move} // () );
+    push @p, 'Enter ' . ( $k{enter} // 'choose' );
+    push @p, 'Esc ' . $k{esc} if $k{esc};
+    push @p, 'q/x quit/exit' if $k{quit};
+    return join ' · ', @p;
+}
 
 # --- pieces -----------------------------------------------------------------
 
@@ -70,11 +130,17 @@ sub pad_to {
     return $row . ( ' ' x ( $w - display_width($row) ) );
 }
 
-# A notice as one row where it fits: its focus in bold (what it is about), the
-# statement, the evidence dim after a dot, the remedy after an arrow in the
-# category's colour. Past $width it wraps by words, the rows after the first
-# indented by $indent cells. A record (the answer given at a choice) is one
-# dim row after a hooked arrow.
+# The longest word of a text, in cells: what cannot be wrapped.
+sub longest_word {
+    my (@texts) = @_;
+    return max( 0, map { display_width($_) } map { split / +/, strip_sgr( $_ // '' ) } @texts );
+}
+
+# A notice as one row where it fits (D3): its focus in bold, the statement,
+# the evidence dim after a dot, the remedy after an arrow in the category's
+# colour. Past $width it wraps by words, the rows after the first indented by
+# $indent cells. A record (the answer given at a choice) is one dim row after
+# a hooked arrow.
 sub notice_line {
     my ( $n, $s, $fg, $width, $indent ) = @_;
     $indent //= 2;
@@ -103,8 +169,7 @@ sub notice_line {
     } 0 .. $#lines;
 }
 
-# A category's label: its glyph and upper-case name, in its colour (bold in
-# the new style). A coloured block marks only the selected tab.
+# A category's label: its glyph and upper-case name, in its colour, bold.
 sub label {
     my ( $cat, $s ) = @_;
     my $fg = $s->{fg}{ $cat->{name} };
@@ -134,6 +199,7 @@ sub frame {
     my $edge = sub {
         my ( $l, $text, $r ) = @_;
         $text //= '';
+        $text = fit( $text, $w - 4 );
         my $fill = $w - 3 - display_width($text);
         return $e . $l . $b->{h_line} . $s->{reset} . $text . $e . ( $b->{h_line} x ( $fill > 0 ? $fill : 0 ) ) . $r . $s->{reset};
     };
@@ -149,44 +215,90 @@ sub frame {
     return @out;
 }
 
-# A notice's rows inside a list: a bullet in the category's colour, or the
-# hooked arrow alone for a record.
+# The bullet before a notice in a list: light, from the dash family, open
+# until the glyph sheet is reviewed (round 4). The candidates, each with its
+# code point and name, and the one used by default.
+my @BULLETS = (
+    [ '‐', 'U+2010 HYPHEN' ],
+    [ '‒', 'U+2012 FIGURE DASH' ],
+    [ '–', 'U+2013 EN DASH' ],
+    [ '—', 'U+2014 EM DASH' ],
+    [ '⁃', 'U+2043 HYPHEN BULLET' ],
+    [ '─', 'U+2500 BOX DRAWINGS LIGHT HORIZONTAL' ],
+    [ '╶', 'U+2576 BOX DRAWINGS LIGHT RIGHT' ],
+    [ '⎯', 'U+23AF HORIZONTAL LINE EXTENSION' ],
+    [ '·', 'U+00B7 MIDDLE DOT (not a dash, for contrast)' ],
+    [ '◦', 'U+25E6 WHITE BULLET (not a dash, for contrast)' ],
+);
+my $DEFAULT_BULLET = '–';
+
+sub bullet_candidates { return @BULLETS }
+
+# A notice's rows inside a list: the bullet in the dim colour, or the hooked
+# arrow alone for a record.
 sub bulleted {
-    my ( $n, $s, $fg, $width ) = @_;
+    my ( $n, $s, $fg, $width, $bullet ) = @_;
+    $bullet //= $DEFAULT_BULLET;
     my @r = notice_line( $n, $s, $fg, $width - 2, 0 );
     my $first = shift @r;
-    return ( ( $n->{record} ? '  ' : "$fg•$s->{reset} " ) . $first, map { "  $_" } @r );
+    return ( ( $n->{record} ? '  ' : "$s->{dim}$bullet$s->{reset} " ) . $first, map { "  $_" } @r );
 }
 
-# --- the panel: the notices of the run, presented together ------------------
+# --- the panel ---------------------------------------------------------------
 #
-# One box round all the notices, however many: each category headed once,
-# its notices one row each, the categories divided by a blank row
-# ($o{divide} 'blank') or a rule ('rule'). Records do not count as notices.
+#   panel( s, W, notices => [...], bullet => glyph )
+#
+# One box round all the notices, however many (D9 sends many to the browser):
+# each category headed once, its notices one row each, the categories divided
+# by a blank row (D3). The title is `notices` and the bare count, dim.
 
 sub panel {
-    my ( $list, $s, $W, %o ) = @_;
-    my $divide = $o{divide} // 'blank';
-    my @notices = grep { !$_->{record} } @$list;
-    my @groups = grouped($list);
+    my (%a) = @_;
+    my $s = $a{s};
+    my $W = $a{W};
+    my @notices = grep { !$_->{record} } @{ $a{notices} };
+    my @groups = grouped( $a{notices} );
     my $iw = $W - 5;
     my @rows;
     for my $gi ( 0 .. $#groups ) {
         my ( $cat, $in ) = @{ $groups[$gi] };
         my $fg = $s->{fg}{ $cat->{name} };
-        push @rows, $divide eq 'blank' ? '' : 'RULE' if $gi;
+        push @rows, '' if $gi;
         push @rows, heading( $cat, $s, scalar( grep { !$_->{record} } @$in ), $iw );
-        push @rows, bulleted( $_, $s, $fg, $iw ) for @$in;
+        push @rows, bulleted( $_, $s, $fg, $iw, $a{bullet} ) for @$in;
     }
-    my $title = " $s->{dim}NOTICES · " . scalar(@notices) . " about this run$s->{reset} ";
+    my $title = " $s->{dim}notices · " . scalar(@notices) . "$s->{reset} ";
     return frame( s => $s, width => $W - 1, title => $title, rows => \@rows );
 }
 
-# --- what the run has printed --------------------------------------------------
+# The glyph sheet: every bullet candidate in the panel's own context, a
+# category heading and two notices under it, so the bullet is judged beside
+# the category glyph (round 3: the filled circle overshadowed it).
+sub bullet_sheet {
+    my (%a) = @_;
+    my $s = $a{s};
+    my $W = $a{W};
+    my $iw = $W - 5;
+    my @groups = grouped( $a{notices} );
+    my @rows;
+    for my $i ( 0 .. $#BULLETS ) {
+        my ( $glyph, $name ) = @{ $BULLETS[$i] };
+        my ( $cat, $in ) = @{ $groups[ $i % @groups ] };
+        my $fg = $s->{fg}{ $cat->{name} };
+        push @rows, '' if $i;
+        push @rows, "$s->{pick}" . ( $i + 1 ) . "$s->{reset}  $s->{dim}$name$s->{reset}";
+        push @rows, heading( $cat, $s, scalar @$in, $iw );
+        push @rows, bulleted( $_, $s, $fg, $iw, $glyph ) for @$in[ 0 .. min( 1, $#$in ) ];
+    }
+    my $title = " $s->{dim}bullet glyphs · " . scalar(@BULLETS) . " candidates$s->{reset} ";
+    return frame( s => $s, width => $W - 1, title => $title, rows => \@rows );
+}
+
+# --- what the run has printed ------------------------------------------------
 #
 # The rows a prototype prints, kept so that a surface on the alternate screen
-# can draw itself over a dimmed copy of them: the analyst sees the run behind
-# the question, as a window over it.
+# can draw itself over a dimmed copy of them, each row at the position it has
+# on the terminal: the analyst sees the run behind the question, unmoved.
 
 my @printed;
 my $live = '';
@@ -205,21 +317,59 @@ sub live_row {
     return;
 }
 
-# --- where a surface that asks is drawn ----------------------------------------
+# The backdrop: H rows as the terminal holds them. The cursor's row, from the
+# terminal's own report, is the live row; the printed rows end on the row
+# above it; what is above them is unknown and left blank.
+sub backdrop_layer {
+    my ( $W, $H ) = @_;
+    raw_mode('cbreak');
+    my ($row) = query_cursor_position();
+    $row //= $H;
+    $row = $H if $row > $H;
+    my @bd = ('') x $H;
+    $bd[ $row - 1 ] = $live;
+    my $r = $row - 2;
+    for my $p ( reverse @printed ) {
+        last if $r < 0;
+        $bd[ $r-- ] = $p;
+    }
+    return { rows => \@bd, top => 1, col => 1 };
+}
+
+# --- where a component is drawn ----------------------------------------------
 #
+# alt:    centred on the alternate screen over the dimmed layers under it: the
+#         backdrop, and any surface it is layered over; on leaving the screen
+#         is given back as it was.
 # inline: from the cursor's row down, redrawn in place, erased on leaving with
 #         the cursor back on the row it started on.
-# alt:    centred on the alternate screen over the dimmed rows the run had
-#         printed; on leaving the screen is given back as it was.
+# over:   centred within the rows of an inline parent, for a modal layered
+#         over a surface drawn below the cursor; the parent repaints itself.
 # plain:  not in a terminal; drawn once, as it would first appear.
 
 sub drawer {
-    my ( $mode, $W, $H ) = @_;
-    return { mode => interactive() ? $mode : 'plain', W => $W, H => $H, h => 0 };
+    my (%a) = @_;
+    my $mode = interactive() ? $a{placement} : 'plain';
+    my $d = { mode => $mode, W => $a{W}, H => $a{H}, h => 0, under => $a{under} // [], parent => $a{parent} };
+    if ( $mode eq 'alt' && !@{ $d->{under} } ) {
+        push @{ $d->{under} }, backdrop_layer( $a{W}, $a{H} );
+    }
+    return $d;
+}
+
+sub paint_layer {
+    my ( $l, $dimmed ) = @_;
+    for my $i ( 0 .. $#{ $l->{rows} } ) {
+        my $r = $l->{rows}[$i];
+        print "\e[" . ( $l->{top} + $i ) . ";$l->{col}H";
+        print $dimmed ? "\e[2m" . strip_sgr($r) . "\e[0m" : $r;
+    }
+    return;
 }
 
 sub draw_rows {
     my ( $d, @rows ) = @_;
+    my ( $W, $H ) = @$d{qw(W H)};
     if ( $d->{mode} eq 'plain' ) {
         return if $d->{h}++;
         print "\r\e[2K";
@@ -228,15 +378,26 @@ sub draw_rows {
     }
     if ( $d->{mode} eq 'alt' ) {
         print "\e[?1049h" unless $d->{on}++;
-        my ( $W, $H ) = @$d{qw(W H)};
-        my @bd = ( @printed, $live );
-        @bd = @bd[ -$H .. -1 ] if @bd > $H;
-        unshift @bd, ('') x ( $H - @bd );
-        print "\e[" . ( $_ + 1 ) . ";1H\e[2K\e[2m" . strip_sgr( $bd[$_] ) . "\e[0m" for 0 .. $H - 1;
+        print "\e[H\e[2J";
+        paint_layer( $_, 1 ) for @{ $d->{under} };
         my $bw  = max map { display_width($_) } @rows;
-        my $top = int( ( $H - @rows ) / 2 ) + 1;
-        my $col = int( ( $W - $bw ) / 2 ) + 1;
-        print "\e[" . ( $top + $_ ) . ";${col}H$rows[$_]" for 0 .. $#rows;
+        my $top = max( 1, int( ( $H - @rows ) / 2 ) + 1 );
+        my $col = max( 1, int( ( $W - $bw ) / 2 ) + 1 );
+        $d->{last} = { rows => [@rows], top => $top, col => $col };
+        paint_layer( $d->{last}, 0 );
+        return;
+    }
+    if ( $d->{mode} eq 'over' ) {
+        my $p   = $d->{parent};
+        my $bw  = max map { display_width($_) } @rows;
+        my $top = max( 0, int( ( $p->{h} - @rows ) / 2 ) );
+        my $col = max( 1, int( ( $W - $bw ) / 2 ) + 1 );
+        my $up  = $p->{h} - 1 - $top;
+        print "\e[${up}A" if $up > 0;
+        print "\r\e[${col}G$rows[$_]" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
+        my $down = $p->{h} - 1 - ( $top + $#rows );
+        print "\e[${down}B" if $down > 0;
+        print "\r";
         return;
     }
     print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1;
@@ -260,206 +421,381 @@ sub close_drawer {
     return;
 }
 
+# The layers a surface layered over this one draws under itself.
+sub layers_of {
+    my ($d) = @_;
+    return [ @{ $d->{under} }, ( $d->{last} ? $d->{last} : () ) ];
+}
+
 # --- waiting for the analyst -------------------------------------------------
 
 # A choice with a countdown to its default. $draw->($left) paints the surface
-# with the seconds left, undef once paused; $key->($k) returns the choice for
-# a key that chooses and undef for any other, which stops the countdown so the
-# analyst has the time to read.
+# with the seconds left, undef once the countdown is stopped; $act->($action)
+# returns the choice for an action that chooses and undef for any other,
+# which stops the countdown (D7) so the analyst has the time to read.
 sub wait_choice {
     my (%a) = @_;
     my $end = time + $a{seconds};
-    my $paused = 0;
+    my $stopped = $a{seconds} <= 0;
     raw_mode('cbreak');
     print "\e[?25l";
     my ( $v, $how );
     while (1) {
-        my $left = $paused ? undef : int( $end - time + 0.999 );
+        my $left = $stopped ? undef : int( $end - time + 0.999 );
         if ( defined $left && $left <= 0 ) { ( $v, $how ) = ( $a{default}, "default after $a{seconds}s" ); last }
         $a{draw}->($left);
-        my $wait = $paused ? undef : $end - time - ( $left - 1 );
-        my $k = read_key( $paused ? undef : $wait > 0 ? $wait : 0.01 );
+        my $wait = $stopped ? undef : $end - time - ( $left - 1 );
+        my $k = read_key( $stopped ? undef : $wait > 0 ? $wait : 0.01 );
         next unless defined $k;
-        my $c = $a{key}->($k);
+        my $c = $a{act}->( action( $k, quit => $a{quit} ) );
         if ( defined $c ) { ( $v, $how ) = ( $c, 'key' ); last }
-        $paused = 1;
+        $stopped = 1;
     }
     restore_mode();
     return ( $v, $how );
 }
 
-# A selection among $n with no countdown: the analyst chose to look.
-sub wait_select {
-    my ( $draw, $n, $default, $start ) = @_;
-    my $sel = $start // 0;
-    raw_mode('cbreak');
-    print "\e[?25l";
-    my @r;
-    while (1) {
-        $draw->($sel);
-        my $k = read_key();
-        next unless defined $k;
-        if    ( $k eq 'up' || $k eq 'k' )   { $sel = ( $sel - 1 ) % $n }
-        elsif ( $k eq 'down' || $k eq 'j' ) { $sel = ( $sel + 1 ) % $n }
-        elsif ( $k =~ /^[1-9]$/ && $k <= $n ) { $sel = $k - 1 }
-        elsif ( $k eq 'enter' ) { @r = ( $sel, 'key' ); last }
-        elsif ( $k eq 'esc' || $k eq 'q' ) { @r = ( $default, 'Esc' ); last }
-    }
-    restore_mode();
-    return @r;
-}
-
+# The seconds left, dim in brackets, or the same width of nothing once the
+# countdown is stopped, so what stands beside it does not move.
 sub countdown {
-    my ( $s, $left ) = @_;
-    return $s->{dim} . ( defined $left ? "(${left}s)" : '(paused)' ) . $s->{reset};
+    my ( $s, $left, $seconds ) = @_;
+    my $slot = length("(${seconds}s)");
+    return ' ' x $slot unless defined $left;
+    my $t = "(${left}s)";
+    return "$s->{dim}$t$s->{reset}" . ( ' ' x ( $slot - length $t ) );
 }
 
-# The views on offer as a vertical list in three columns: what the view is,
-# the options that give it, and why it is worth looking at, the why wrapping
-# within its column; the highlighted one in reverse video, its effect on the
-# row beneath.
-sub selector_rows {
-    my ( $views, $sel, $s, $fg, $iw ) = @_;
-    my $lw = max map { display_width( $_->{label} ) } @$views;
-    my $aw = max map { display_width( $_->{args} ) } @$views;
-    my $why_at = 11 + $lw + $aw;    # where the why column starts
-    my $room = $iw - $why_at;
-    my @rows = ( "$s->{pick}Choose a view$s->{reset}" . ' ' x ( $lw - 5 ) . "$s->{dim}options" . ' ' x ( $aw - 4 ) . "why$s->{reset}" );
-    for my $i ( 0 .. $#$views ) {
-        my $v = $views->[$i];
-        my $what = ( $i + 1 ) . '  ' . pad_to( $v->{label}, $lw ) . '  ' . pad_to( $v->{args}, $aw );
-        my @why = $room >= 16 ? wrap_text( $v->{why} // '', $room ) : ( fit( $v->{why} // '', $room > 1 ? $room : 1 ) );
-        my $c = $i == $sel ? $fg : $s->{dim};
-        push @rows, ( $i == $sel ? "$fg▶$s->{reset} $s->{pick}\e[7m $what \e[0m" : "   $s->{text}$what$s->{reset} " )
-            . "  $c" . shift(@why) . $s->{reset};
-        push @rows, ( ' ' x $why_at ) . "$c$_$s->{reset}" for @why;
+# --- buttons -------------------------------------------------------------------
+#
+# contract § Buttons: fixed places by role, the caller's labels, the choice
+# letter underlined.
+
+my %ORDER = ( stop => 0, more => 1, default => 2 );
+
+sub ordered_buttons {
+    my ($list) = @_;
+    return sort { $ORDER{ $a->{role} } <=> $ORDER{ $b->{role} } } @$list;
+}
+
+# A label with its choice letter underlined, at the letter's first occurrence
+# in either case.
+sub lettered {
+    my ( $b, $under, $over ) = @_;
+    my $l = $b->{label};
+    my $i = index( lc $l, lc $b->{key} );
+    return $l if $i < 0 || !defined $b->{key};
+    return substr( $l, 0, $i ) . "\e[4m" . substr( $l, $i, 1 ) . "\e[24m" . substr( $l, $i + 1 );
+}
+
+# The buttons on one row: the highlighted one in reverse video in the
+# category's colour, the others framed in brackets; the countdown's slot
+# beside the default, always the same width.
+sub button_row {
+    my ( $s, $fg, $btns, $focus, $left, $seconds ) = @_;
+    my @b;
+    for my $i ( 0 .. $#$btns ) {
+        my $b = $btns->[$i];
+        my $text = lettered($b);
+        my $cd = $b->{role} eq 'default' ? ' ' . countdown( $s, $left, $seconds ) : '';
+        push @b, $i == $focus
+            ? "$fg\e[7m\e[1m  $text  \e[0m$cd"
+            : $s->{text} . "[ $text ]" . "$s->{reset}$cd";
     }
-    push @rows, "    $s->{dim}" . fit( $views->[$sel]{effect}, $iw - 4 ) . $s->{reset};
+    return join '    ', @b;
+}
+
+# --- the options list (the second stage of a choice, D8) ---------------------
+#
+# Each option on one row in columns under the consumer's headings; the
+# columns before the last take their widest part, the last wraps within its
+# column; the highlighted option in reverse video, its effect on the row
+# beneath. Fewer parts than headings: fewer columns.
+
+sub option_columns {
+    my ( $options, $headings, $iw ) = @_;
+    my $P = min( scalar @$headings, max map { scalar @{ $_->{parts} } } @$options );
+    my @w;
+    for my $c ( 0 .. $P - 2 ) {
+        $w[$c] = max( display_width( $headings->[$c] ), map { display_width( $_->{parts}[$c] // '' ) } @$options );
+        $w[$c] = int( $iw * 0.4 ) if $w[$c] > int( $iw * 0.4 );
+    }
+    my $lead = 5;    # marker, digit, spaces
+    my $last_at = $lead + sum( 0, map { $_ + 2 } @w );
+    return ( $P, \@w, $last_at );
+}
+
+sub options_rows {
+    my ( $options, $headings, $sel, $s, $fg, $iw ) = @_;
+    my ( $P, $w, $last_at ) = option_columns( $options, $headings, $iw );
+    my $room = max( 8, $iw - $last_at );
+    my $head = ' ' x $last_at;
+    $head = ( ' ' x 5 ) . join( '', map { pad_to( $headings->[$_], $w->[$_] ) . '  ' } 0 .. $P - 2 ) if $P > 1;
+    my @rows = ( "$s->{pick}" . $head . $headings->[ $P - 1 ] . "$s->{reset}" );
+    for my $i ( 0 .. $#$options ) {
+        my $o = $options->[$i];
+        my $fixed = join '', map { pad_to( $o->{parts}[$_] // '', $w->[$_] ) . '  ' } 0 .. $P - 2;
+        my @last = wrap_text( $o->{parts}[ $P - 1 ] // '', $room );
+        @last = ('') unless @last;
+        my $c = $i == $sel ? $fg : $s->{dim};
+        my $mark = $i == $sel ? "$fg▶$s->{reset} " : '  ';
+        my $cells = ( $i + 1 ) . '  ' . $fixed;
+        push @rows, $mark . ( $i == $sel ? "$s->{pick}\e[7m" . strip_sgr($cells) . "\e[0m" : "$s->{text}$cells$s->{reset}" ) . "$c" . shift(@last) . $s->{reset};
+        push @rows, ( ' ' x $last_at ) . "$c$_$s->{reset}" for @last;
+    }
+    push @rows, "   $s->{dim}" . fit( $options->[$sel]{effect} // '', $iw - 3 ) . $s->{reset};
     return @rows;
 }
 
-sub keys_foot {
-    my ( $s, $text ) = @_;
-    return " $s->{dim}$text$s->{reset} ";
+# The widest unit of the list that cannot wrap: the fixed columns and a
+# readable last column.
+sub options_unit {
+    my ( $options, $headings ) = @_;
+    my ( $P, $w, $last_at ) = option_columns( $options, $headings, 10_000 );
+    return $last_at + max( 16, longest_word( map { $_->{parts}[ $P - 1 ] } @$options ) );
 }
 
-# --- asking ----------------------------------------------------------------
+# --- size tiers ---------------------------------------------------------------
 #
-#   ask( s, W, H, surface => modal|box, screen => alt|inline, category,
-#        notices => [...], question, buttons => [yes, no], default => 0|1,
-#        seconds, views => [...], view_default, record => 0|1 )
+# contract § Pop-up size (proposed, to be seen in round 4): three tiers as
+# ratios of the terminal; the smallest in which the content's longest
+# unbreakable unit fits and its wrapped rows do not exceed the height.
+
+my %TIER = ( small => [ 0.5, 0.3 ], medium => [ 0.7, 0.5 ], large => [ 0.9, 0.8 ] );
+
+sub tier_dims {
+    my ( $tier, $W, $H ) = @_;
+    my ( $fw, $fh ) = @{ $TIER{$tier} or die "no size tier '$tier'\n" };
+    my $bw = int( $W * $fw );
+    $bw = 44 if $bw < 44;
+    $bw = $W - 2 if $bw > $W - 2;
+    my $mh = int( $H * $fh );
+    $mh = 6 if $mh < 6;
+    return ( $bw, $mh );
+}
+
+# ($box width, $max rows, $tier): the named tier, or the smallest that fits
+# what $measure->($box width) reports as (unit, rows).
+sub choose_tier {
+    my ( $W, $H, $measure, $named ) = @_;
+    return ( tier_dims( $named, $W, $H ), $named ) if $named && $named ne 'auto';
+    for my $t (qw(small medium large)) {
+        my ( $bw, $mh ) = tier_dims( $t, $W, $H );
+        my ( $unit, $rows ) = $measure->($bw);
+        return ( $bw, $mh, $t ) if $unit <= $bw - 4 && $rows <= $mh;
+    }
+    return ( tier_dims( 'large', $W, $H ), 'large' );
+}
+
+# --- asking -------------------------------------------------------------------
 #
-# The one surface for a question raised during the run: the caller passes
-# what it is about and what is on offer, nothing more. modal is a dialog with
-# two buttons, on the alternate screen over the dimmed run or below the
-# cursor; box is the compact form below the cursor, the question on its last
-# row. The first button is the yes; when views are given it leads to them, in
-# the same surface, which grows to hold the list. Once answered the surface is
-# erased and leaves no trace; with record set, the notice and the answer stay
-# where the surface was, as inline text. Returns (button, how, view, view
-# how), the view undefined when none was looked at.
+#   ask( s, W, H, form => modal|box, category, notices => [...], question,
+#        buttons => [ { label, key, role } ... ], options => [...], headings,
+#        option_default, placement, size, quit, keybar, seconds, record,
+#        fixed_height, under => layers, parent => inline drawer, stage => 1|2 )
+#
+# The one surface for a question raised during the run (D5): a modal, on the
+# alternate screen over the dimmed run or below the cursor, or the compact
+# box below the cursor with the choices on its question row. A button whose
+# role is 'more' leads to the options list in the same surface, its second
+# stage; stage => 2 opens on the list (a modal layered over the browser). The
+# surface's width is chosen once for both stages; its height is each stage's
+# own, growing when the list opens, or the taller stage's for both with
+# fixed_height (the contract's size line, proposed, is to be seen: both are
+# offered). It is erased once answered (D4).
+# Returns (role, how, option index, option how): the role of the button taken
+# ('quit' when the analyst quit), the option undefined when none was chosen.
 
 sub ask {
     my (%a) = @_;
-    my $s   = $a{s};
-    my $cat = cat_named( $a{category} );
-    my $fg  = $s->{fg}{ $a{category} };
-    my $W   = $a{W};
-    my $surface = $a{surface};
+    my $s    = $a{s};
+    my $form = $a{form} // 'modal';
+    my %p    = with_defaults( "ask-$form", map { $_ => $a{$_} } qw(placement size quit keybar seconds record) );
+    my $cat  = cat_named( $a{category} );
+    my $fg   = $s->{fg}{ $a{category} };
+    my ( $W, $H ) = @a{qw(W H)};
+    my @btn  = ordered_buttons( $a{buttons} // [] );
+    my ($def_i) = grep { $btn[$_]{role} eq 'default' } 0 .. $#btn;
+    $def_i //= $#btn;
+    my %letter = map { lc( $btn[$_]{key} // '' ) => $_ } grep { defined $btn[$_]{key} } 0 .. $#btn;
+    my $headings = $a{headings} // [ 'What?', 'How?', 'Why?' ];
+    my $opt_def  = $a{option_default} // 0;
+    my $stage    = $a{stage} // 1;
+    my $count    = @{ $a{notices} };
 
-    my ( $b, $how, $v, $vhow );
+    my ( $role, $how, $oi, $ohow );
     if ( defined( my $given = answer_ahead() ) ) {
-        $b = $given eq 'default' ? $a{default} : $given =~ /^n/i ? 1 : 0;
-        $how = $vhow = 'given ahead';
-        if ( $b == 0 && $a{views} ) {
+        my $i = $given eq 'default' ? $def_i : $letter{ lc substr( $given, 0, 1 ) } // $def_i;
+        ( $role, $how ) = ( $btn[$i]{role}, 'given ahead' );
+        if ( ( $role eq 'more' || $stage == 2 ) && $a{options} ) {
             my $g = answer_ahead();
-            $v = defined $g && $g =~ /^\d+$/ && $g >= 1 && $g <= @{ $a{views} } ? $g - 1 : $a{view_default};
+            $oi = defined $g && $g =~ /^\d+$/ && $g >= 1 && $g <= @{ $a{options} } ? $g - 1 : $opt_def;
+            $ohow = 'given ahead';
         }
-        leave_record( \%a, $b, $how, $v ) if $a{record};
-        return ( $b, $how, $v, $vhow );
+        leave_record( \%a, \@btn, $role, $how, $oi ) if $p{record};
+        return ( $role, $how, $oi, $ohow );
     }
 
-    my $d = drawer( $surface eq 'modal' ? $a{screen} : 'inline', $W, $a{H} );
-    my $yn = $a{default} == 0 ? '[Y/n]' : '[y/N]';
-    my $focus = $a{default};
-    my $count = @{ $a{notices} };
-    my $edge  = $s->{name} eq 'new' ? $fg : $s->{frame};
-    my $bw    = $surface eq 'modal' ? ( $W - 4 < 100 ? $W - 4 : 100 ) : $W - 1;
-    my $iw    = $bw - 4;
-    my $mcol  = ' ' x ( $surface eq 'modal' && $d->{mode} eq 'inline' ? int( ( $W - $bw ) / 2 ) : 0 );
-    # The top edge: the category, the count, and how to read the category.
+    my $edge  = $fg;
     my $title = ' ' . label( $cat, $s ) . ( $count > 1 ? " $s->{dim}($count)$s->{reset}" : '' ) . ' ';
-    my $reads = $bw - 6 - display_width($title);
-    $title .= "$s->{dim}" . fit( $cat->{reads}, $reads ) . "$s->{reset} " if $reads > 12;
+    my $treads = sub { my ($bw) = @_; my $room = $bw - 6 - display_width($title); return $room > 12 ? "$title$s->{dim}" . fit( $cat->{reads}, $room ) . "$s->{reset} " : $title };
+    my $q = "$s->{text}$a{question}$s->{reset}";
+    my $esc_takes = lc( $btn[$def_i]{label} // 'close' );
 
-    # The surface's rows: stage 1 with the seconds left; stage 2 with the
-    # view highlighted.
-    my $rows = sub {
-        my ( $stage, $x ) = @_;
-        my $q = "$s->{text}$a{question}$s->{reset}";
-        my @body = map { $count > 1 ? bulleted( $_, $s, $fg, $iw ) : notice_line( $_, $s, $fg, $iw, 2 ) } @{ $a{notices} };
-        my ( @tail, $foot );
-        if ( $stage == 2 ) {
-            @tail = ( 'RULE', selector_rows( $a{views}, $x, $s, $fg, $iw ) );
-            $foot = keys_foot( $s, '↑↓ j k move · 1-' . scalar( @{ $a{views} } ) . ' · Enter choose · Esc continue as planned' );
-        }
-        elsif ( $surface eq 'box' ) {
-            @tail = ( "$q $s->{pick}$yn$s->{reset} " . countdown( $s, $x ) );
-            $foot = keys_foot( $s, 'y/n · Enter: ' . lc( $a{buttons}[ $a{default} ] ) . ' · any other key pauses' );
-        }
-        else {
-            my @btn;
-            for my $i ( 0, 1 ) {
-                my $l = $a{buttons}[$i] . ( $i == $a{default} ? ' ' . countdown( $s, $x ) : '' );
-                push @btn, $i == $focus ? "$fg\e[7m\e[1m  " . strip_sgr($l) . "  \e[0m" : $s->{text} . "[ $l" . $s->{text} . " ]" . $s->{reset};
+    # The body rows at an inside width: the notices (bulleted when several).
+    my $body = sub {
+        my ($iw) = @_;
+        return map { $count > 1 ? bulleted( $_, $s, $fg, $iw ) : notice_line( $_, $s, $fg, $iw, 2 ) } @{ $a{notices} };
+    };
+    # Stage 1's tail: the question and the buttons (modal), or the question
+    # row with the choices inline (box).
+    my $tail1 = sub {
+        my ( $iw, $focus, $left ) = @_;
+        if ( $form eq 'box' ) {
+            my @ch;
+            for my $i ( 0 .. $#btn ) {
+                my $t = lettered( $btn[$i] );
+                push @ch, ( $i == $def_i ? "$s->{pick}$t$s->{reset} " . countdown( $s, $left, $p{seconds} ) : "$s->{text}$t$s->{reset}" );
             }
-            my $brow = join '    ', @btn;
-            # Centred on the row's widest form, so the buttons stay put while
-            # the countdown changes.
-            my $widest = display_width($brow) + ( defined $x ? length( $a{seconds} ) - length($x) : length( $a{seconds} ) + 1 - length('paused') );
-            @tail = ( '', ( ' ' x int( ( $iw - display_width($q) ) / 2 ) ) . $q, ( ' ' x int( ( $iw - $widest ) / 2 ) ) . $brow );
-            $foot = keys_foot( $s, '←→ Tab move · Enter choose · y/n · any other key pauses' );
+            return ( $q . '  ' . join( '   ', @ch ) );
         }
-        my @pad = $surface eq 'modal' ? ('') : ();
-        return map { $mcol . $_ } frame( s => $s, edge => $edge, width => $bw, title => $title, foot => $foot,
-            rows => [ @pad, @body, @tail, @pad ] );
+        my $brow = button_row( $s, $fg, \@btn, $focus, $left, $p{seconds} );
+        return ( ( ' ' x max( 0, int( ( $iw - display_width($q) ) / 2 ) ) ) . $q,
+                 ( ' ' x max( 0, int( ( $iw - display_width($brow) ) / 2 ) ) ) . $brow );
+    };
+    my $tail2 = sub {
+        my ( $iw, $sel ) = @_;
+        return ( 'RULE', options_rows( $a{options}, $headings, $sel, $s, $fg, $iw ) );
+    };
+    my $foot = sub {
+        my ($st) = @_;
+        return undef if $p{keybar} eq 'none';
+        if ( $p{keybar} eq 'letters' ) {
+            my $t = $st == 2
+                ? '1-' . scalar( @{ $a{options} } ) . ' · Enter · Esc'
+                : join( ' ', grep { defined } map { $_->{key} } @btn );
+            return " $s->{dim}$t" . ( $p{quit} ? ' · q/x quit/exit' : '' ) . "$s->{reset} ";
+        }
+        my $t = $st == 2
+            ? key_bar( move => '↑↓ j k move · 1-' . scalar( @{ $a{options} } ), enter => 'choose', esc => $esc_takes, quit => $p{quit} )
+            : key_bar( move => '←→ Tab move', enter => 'choose', esc => $esc_takes, quit => $p{quit} );
+        return " $s->{dim}$t$s->{reset} ";
     };
 
+    # Size: the width from the tier (modal) or the terminal (box); the
+    # height, in rows inside the frame, is the taller stage's.
+    my $pad = $form eq 'modal' ? 1 : 0;
+    my $stage_rows = sub {
+        my ( $iw, $st ) = @_;
+        my @b = $body->($iw);
+        return @b + ( $form eq 'box' ? 2 : 3 ) + 2 * $pad if $st == 1;    # body, blank, question (+ buttons)
+        return @b + 1 + scalar( $tail2->( $iw, 0 ) ) + 2 * $pad;
+    };
+    # The rows inside the frame: the taller stage's when the height is fixed
+    # for both (fixed_height), else each stage's own; the width is one for
+    # both stages either way.
+    my $rows_in = sub {
+        my ( $iw, $st ) = @_;
+        return max( $stage_rows->( $iw, 1 ), $a{options} ? $stage_rows->( $iw, 2 ) : 0 ) if $a{fixed_height} || !defined $st;
+        return $stage_rows->( $iw, $st );
+    };
+    my $measure = sub {
+        my ($bw) = @_;
+        my $iw = $bw - 4;
+        my $unit = max( display_width($title) + 6 + min( 24, display_width( $cat->{reads} ) ),
+                        display_width( $foot->(1) // '' ) + 4,
+                        ( $a{options} ? display_width( $foot->(2) // '' ) + 4 : 0 ),
+                        display_width( strip_sgr( button_row( $s, $fg, \@btn, 0, $p{seconds}, $p{seconds} ) ) ) + 2,
+                        ( $a{options} ? options_unit( $a{options}, $headings ) : 0 ),
+                        longest_word( $a{question}, map { ( $_->{focus}, $_->{statement}, $_->{remedy}, @{ $_->{evidence} // [] } ) } @{ $a{notices} } ) + 4 );
+        return ( $unit, $rows_in->($iw) + 2 );
+    };
+    my ( $bw, $mh, $tier );
+    if ( $form eq 'box' ) { ( $bw, $mh, $tier ) = ( $W - 1, $H - 2, 'full' ) }
+    else                  { ( $bw, $mh, $tier ) = choose_tier( $W, $H, $measure, $p{size} ) }
+    my $iw       = $bw - 4;
+    my $top_edge = $treads->($bw);
+
+    # The frame's rows for a stage, the body at the top and the tail at the
+    # bottom, filled to the fixed height.
+    my $frame_rows = sub {
+        my ( $st, $x, $left ) = @_;
+        my $height = min( $rows_in->( $iw, $st ), $mh - 2 );
+        my @b = $body->($iw);
+        my @t = $st == 2 ? $tail2->( $iw, $x ) : ( '', $tail1->( $iw, $x, $left ) );
+        my $fill = $height - 2 * $pad - @b - @t;
+        my @in = ( ('') x $pad, @b, ( ('') x max( 0, $fill ) ), @t, ('') x $pad );
+        @in = @in[ 0 .. $height - 1 ] if @in > $height;
+        return frame( s => $s, edge => $edge, width => $bw, title => $top_edge, foot => $foot->($st), rows => \@in );
+    };
+
+    my $placement = $form eq 'modal' ? $p{placement} : 'inline';
+    $placement = 'over' if $a{parent};
+    my $d = drawer( placement => $placement, W => $W, H => $H, under => $a{under}, parent => $a{parent} );
+    my $indent = $d->{mode} eq 'inline' && $form eq 'modal' ? ' ' x int( ( $W - $bw ) / 2 ) : '';
+    my $draw = sub { draw_rows( $d, map { "$indent$_" } @_ ) };
+
     if ( $d->{mode} eq 'plain' ) {
-        draw_rows( $d, $rows->( 1, $a{seconds} ) );
-        ( $b, $how ) = ( $a{default}, 'default, no terminal' );
+        $draw->( $frame_rows->( $stage, $stage == 2 ? $opt_def : $def_i, $p{seconds} ) );
+        ( $role, $how ) = ( $btn[$def_i]{role} // 'default', 'default, no terminal' );
+        $a{tier} = $tier;
+        return ( $role, $how, undef, undef );
     }
-    else {
-        ( $b, $how ) = wait_choice(
-            seconds => $a{seconds},
-            default => $a{default},
-            draw    => sub { draw_rows( $d, $rows->( 1, $_[0] ) ) },
-            key     => sub {
-                my ($k) = @_;
-                return 0 if lc $k eq 'y';
-                return 1 if lc $k eq 'n';
-                if ( $surface eq 'modal' ) {
-                    return $focus if $k eq 'enter';
-                    $focus = 1 - $focus if $k =~ /^(left|right|tab|h|l)$/;
+
+    my $focus = $def_i;
+    if ( $stage == 1 ) {
+        my ( $i, $h ) = wait_choice(
+            seconds => $p{seconds},
+            default => $def_i,
+            quit    => $p{quit},
+            draw    => sub { $draw->( $frame_rows->( 1, $focus, $_[0] ) ) },
+            act     => sub {
+                my ($act) = @_;
+                return 'quit' if $act eq 'quit';
+                return $letter{$1} if $act =~ /^letter:(.)$/ && defined $letter{$1};
+                return $def_i if $act eq 'esc';
+                if ( $form eq 'modal' ) {
+                    return $focus if $act eq 'enter';
+                    $focus = ( $focus + 1 ) % @btn if $act eq 'right' || $act eq 'next';
+                    $focus = ( $focus - 1 ) % @btn if $act eq 'left'  || $act eq 'prev';
                     return undef;
                 }
-                return $a{default} if $k eq 'enter';
+                return $def_i if $act eq 'enter';
                 return undef;
             },
         );
-        if ( $b == 0 && $a{views} ) {
-            ( $v, $vhow ) = wait_select( sub { draw_rows( $d, $rows->( 2, $_[0] ) ) }, scalar @{ $a{views} }, $a{view_default} );
-        }
-        close_drawer($d);
+        if ( $i eq 'quit' ) { close_drawer($d); return ( 'quit', 'key', undef, undef ) }
+        ( $role, $how ) = ( $btn[$i]{role}, $h );
     }
-    leave_record( \%a, $b, $how, $v ) if $a{record};
-    return ( $b, $how, $v, $vhow );
+    if ( ( $stage == 2 || $role eq 'more' ) && $a{options} ) {
+        my $sel = $opt_def;
+        my $n   = @{ $a{options} };
+        raw_mode('cbreak');
+        print "\e[?25l";
+        while (1) {
+            $draw->( $frame_rows->( 2, $sel ) );
+            my $k = read_key();
+            next unless defined $k;
+            my $act = action( $k, quit => $p{quit} );
+            if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % $n }
+            elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % $n }
+            elsif ( $act =~ /^digit:(\d)$/ && $1 <= $n ) { $sel = $1 - 1 }
+            elsif ( $act eq 'enter' ) { ( $oi, $ohow ) = ( $sel, 'key' ); last }
+            elsif ( $act eq 'esc' )   { ( $oi, $ohow ) = $stage == 2 ? ( undef, 'Esc' ) : ( $opt_def, 'Esc' ); last }
+            elsif ( $act eq 'quit' )  { restore_mode(); close_drawer($d); return ( 'quit', 'key', undef, undef ) }
+        }
+        restore_mode();
+        $role //= 'more';
+        $how  //= $ohow;
+    }
+    close_drawer($d);
+    leave_record( \%a, \@btn, $role, $how, $oi ) if $p{record};
+    return ( $role, $how, $oi, $ohow );
 }
 
 # What a surface leaves when the caller asks for a record: the notices as
 # inline text, in the ltl look, and the answer on the row after them.
 sub leave_record {
-    my ( $a, $b, $how, $v ) = @_;
+    my ( $a, $btn, $role, $how, $oi ) = @_;
     my $s   = $a->{s};
     my $cat = cat_named( $a->{category} );
     my $fg  = $s->{fg}{ $a->{category} };
@@ -474,48 +810,57 @@ sub leave_record {
     else {
         push @rows, heading( $cat, $s, scalar @{ $a->{notices} }, $W - 1 ), map { bulleted( $_, $s, $fg, $W - 1 ) } @{ $a->{notices} };
     }
-    my $answer = lcfirst $a->{buttons}[$b];
-    $answer .= ': ' . lcfirst( $a->{views}[$v]{label} ) . ( $a->{views}[$v]{args} ? " $a->{views}[$v]{args}" : '' ) if defined $v;
+    my ($b) = grep { $_->{role} eq $role } @$btn;
+    my $answer = lcfirst( $b ? $b->{label} : $role );
+    if ( defined $oi ) {
+        my $o = $a->{options}[$oi];
+        $answer .= ': ' . lcfirst( $o->{parts}[0] ) . ( $o->{args} ? " $o->{args}" : '' );
+    }
     push @rows, map { "  $_" } notice_line( { record => 1, statement => "$a->{question} $answer ($how)" }, $s, $fg, $W - 3, 2 );
     out(@rows);
     return;
 }
 
-# --- the notice browser: many notices, navigable, in a box ---------------------
+# --- the browser ---------------------------------------------------------------
 #
-#   browser( s, W, H, screen => alt|inline, notices => [...], rows => N )
+#   browser( s, W, H, notices => [...], placement, size, quit, seconds, rows )
 #
-# Tabs across the top filter by category (All first); the list below, one row
-# per notice; the selected notice's detail beneath. A notice offering views
-# opens the selector in the detail's place, and the list comes back once one
-# is chosen. Closing erases the box. Returns the views chosen, as
-# [notice, view index, how].
+# Tabs across the top filter by category (All first), every tab named; the
+# list below, one row per notice; the selected notice's detail beneath, in a
+# pane of fixed height, sized before drawing for the tallest detail any notice
+# has (a histogram, options), so the window never changes size or moves while
+# the analyst navigates. Enter on a notice with options opens the options list
+# as an ask modal layered over the browser; the browser is back as it was when
+# it closes. A countdown to closing runs until any key. Closing erases the
+# box. Returns the options chosen, as [notice, option index, how], or 'quit'.
 
 sub browser {
     my (%a) = @_;
     my $s = $a{s};
+    my %p = with_defaults( 'browser', map { $_ => $a{$_} } qw(placement size quit keybar seconds) );
     my ( $W, $H ) = @a{qw(W H)};
-    my $d = drawer( $a{screen}, $W, $H );
-    my $bw = $d->{mode} eq 'alt' ? $W - 4 : $W - 1;
-    my $iw = $bw - 4;
+    my $d = drawer( placement => $p{placement}, W => $W, H => $H );
     my @items = map { @{ $_->[1] } } grouped( $a{notices} );
-    my @cats = map { $_->[0] } grouped( \@items );
-    my $D = 4;
-    # The same height in both modes, and whichever tab is shown: a window over
-    # the run, never the whole screen.
-    my $L = $a{rows} // 10;
-    $L = $H - 14 if $L > $H - 14;
-    my ( $tab, $sel, $top, $choosing, $vsel ) = ( 0, 0, 0, 0, 0 );
-    my %chosen;
+    my @cats  = map { $_->[0] } grouped( \@items );
+    my $headings = $a{headings} // [ 'What?', 'How?', 'Why?' ];
 
-    my $shown = sub { $tab ? grep { $_->{category} eq $cats[ $tab - 1 ]{name} } @items : @items };
-    my $rows = sub {
-        my @shown = $shown->();
-        $sel = $#shown if $sel > $#shown;
-        $top = $sel if $sel < $top;
-        $top = $sel - $L + 1 if $sel >= $top + $L;
-        # Every tab by its glyph, name and count, the selected one set as a
-        # coloured block; a second row when they do not fit on one.
+    # The detail pane's rows for a notice at an inside width.
+    my $detail_rows = sub {
+        my ( $n, $iw, $chosen ) = @_;
+        my $fg = $s->{fg}{ $n->{category} };
+        my $c  = cat_named( $n->{category} );
+        my @r = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 2 ) );
+        push @r, map { "$s->{text}$_$s->{reset}" } @{ $n->{detail} } if $n->{detail};
+        if ( $n->{options} ) {
+            push @r, defined $chosen
+                ? "$s->{dim}chosen:$s->{reset} $s->{pick}" . $n->{options}[$chosen]{parts}[0] . "$s->{reset} $fg$n->{options}[$chosen]{args}$s->{reset}"
+                : "$fg◇$s->{reset} $s->{dim}" . scalar( @{ $n->{options} } ) . " options on offer: Enter to choose$s->{reset}";
+        }
+        return @r;
+    };
+    # Tabs: every tab named, the selected one a coloured block (D6).
+    my $tab_rows = sub {
+        my ( $tab, $iw ) = @_;
         my @tabs = ( $tab == 0 ? "$s->{pick}\e[7m All " . @items . " \e[0m" : "$s->{text} All " . @items . " $s->{reset}" );
         for my $i ( 0 .. $#cats ) {
             my $c  = $cats[$i];
@@ -524,79 +869,111 @@ sub browser {
             my $l  = " $c->{glyph} " . uc( $c->{name} ) . " $n ";
             push @tabs, $tab == $i + 1 ? "$fg\e[7m\e[1m$l\e[0m" : "$fg$l$s->{reset}";
         }
-        my @tabrows = ('');
+        my @rows = ('');
         for my $t (@tabs) {
-            push @tabrows, '' if $tabrows[-1] ne '' && display_width("$tabrows[-1] $t") > $iw;
-            $tabrows[-1] .= ( $tabrows[-1] ne '' ? ' ' : '' ) . $t;
+            push @rows, '' if $rows[-1] ne '' && display_width("$rows[-1] $t") > $iw;
+            $rows[-1] .= ( $rows[-1] ne '' ? ' ' : '' ) . $t;
         }
-        my @r = ( @tabrows, 'RULE' );
+        return @rows;
+    };
+
+    # Size: the tier's width; the height from the tallest detail, the tabs
+    # and as many list rows as fit (at most $a{rows}, default 10), measured
+    # before anything is drawn.
+    my $want_L = $a{rows} // 10;
+    my ( $D, $T, $L );
+    my $measure = sub {
+        my ($bw) = @_;
+        my $iw = $bw - 4;
+        $D = max map { scalar( $detail_rows->( $_, $iw, 0 ) ) } @items;
+        $T = scalar( $tab_rows->( 0, $iw ) );
+        # The widest row no detail can wrap (a histogram), or a readable list.
+        my $unit = max( 40, map { display_width($_) } map { @{ $_->{detail} // [] } } @items );
+        return ( $unit, $T + 1 + $want_L + 1 + $D + 2 );
+    };
+    my ( $bw, $mh, $tier ) = $d->{mode} eq 'inline' ? ( $W - 1, $H - 2, 'full' ) : choose_tier( $W, $H, $measure, $p{size} );
+    $measure->($bw);
+    $L = min( $want_L, $mh - 2 - $T - 2 - $D );
+    $L = 3 if $L < 3;
+    my $iw = $bw - 4;
+
+    my ( $tab, $sel, $top ) = ( 0, 0, 0 );
+    my %chosen;
+    my $shown = sub { $tab ? grep { $_->{category} eq $cats[ $tab - 1 ]{name} } @items : @items };
+    my $rows = sub {
+        my ($left) = @_;
+        my @shown = $shown->();
+        $sel = $#shown if $sel > $#shown;
+        $top = $sel if $sel < $top;
+        $top = $sel - $L + 1 if $sel >= $top + $L;
+        my @r = ( $tab_rows->( $tab, $iw ), 'RULE' );
         for my $i ( $top .. $top + $L - 1 ) {
             if ( $i > $#shown ) { push @r, ''; next }
             my $n  = $shown[$i];
             my $fg = $s->{fg}{ $n->{category} };
             my $c  = cat_named( $n->{category} );
-            my $mark = $n->{views} ? ( defined $chosen{$n} ? "$fg◆$s->{reset}" : "$fg◇$s->{reset}" ) : ' ';
+            my $mark = $n->{options} ? ( defined $chosen{$n} ? "$fg◆$s->{reset}" : "$fg◇$s->{reset}" ) : ' ';
             my $text = fit( join( ' ', notice_line( $n, $s, $fg, 10_000 ) ), $iw - 6 );
             push @r, $i == $sel
                 ? "$fg▶$s->{reset} $fg$c->{glyph}$s->{reset} \e[7m" . pad_to( strip_sgr($text), $iw - 6 ) . "\e[0m $mark"
                 : "  $fg$c->{glyph}$s->{reset} " . pad_to( $text, $iw - 6 ) . " $mark";
         }
         push @r, 'RULE';
-        my $n  = $shown[$sel];
-        my $fg = $s->{fg}{ $n->{category} };
-        my $c  = cat_named( $n->{category} );
-        my @detail;
-        if ($choosing) {
-            @detail = selector_rows( $n->{views}, $vsel, $s, $fg, $iw );
-        }
-        else {
-            @detail = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 2 ) );
-            push @detail, $n->{views}
-                ? ( defined $chosen{$n}
-                    ? "$s->{dim}view chosen:$s->{reset} $s->{pick}" . $n->{views}[ $chosen{$n} ]{label} . "$s->{reset} $fg$n->{views}[ $chosen{$n} ]{args}$s->{reset}"
-                    : "$fg◇$s->{reset} $s->{dim}" . scalar( @{ $n->{views} } ) . " views on offer: Enter to choose$s->{reset}" )
-                : ();
-        }
-        my $DD = $choosing ? @{ $n->{views} } + 2 : $D;
-        push @r, map { $detail[$_] // '' } 0 .. ( $DD > @detail ? $DD : scalar @detail ) - 1;
-        my $foot = $choosing
-            ? keys_foot( $s, '↑↓ j k move · Enter choose · Esc back to the list' )
-            : keys_foot( $s, '↑↓ j k move · ←→ h l Tab category · 1-' . ( @cats + 1 ) . ' tab · Enter views · q close' );
-        my $more = ' ' . ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown . ' ';
+        my @detail = $detail_rows->( $shown[$sel], $iw, $chosen{ $shown[$sel] } );
+        push @r, map { $detail[$_] // '' } 0 .. $D - 1;
+        my $cd = defined $left ? ' ' . countdown( $s, $left, $p{seconds} ) : '';
+        my $foot = ' ' . $s->{dim} . key_bar( move => '↑↓ j k move · ←→ Tab tabs · 1-' . ( @cats + 1 ) . ' tab', enter => 'options', esc => 'close', quit => $p{quit} ) . $s->{reset} . $cd . ' ';
+        my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
         return frame( s => $s, width => $bw, rows => \@r, foot => $foot,
-            title => " $s->{pick}NOTICES$s->{reset} $s->{dim}· " . @items . " about this run ·$more$s->{reset}" );
+            title => " $s->{dim}notices · " . @items . " · $range$s->{reset} " );
     };
 
     if ( $d->{mode} eq 'plain' ) {
-        draw_rows( $d, $rows->() );
+        draw_rows( $d, $rows->( $p{seconds} ) );
         return [];
     }
     raw_mode('cbreak');
     print "\e[?25l";
+    my $end = time + $p{seconds};
+    my $stopped = $p{seconds} <= 0;
     while (1) {
-        draw_rows( $d, $rows->() );
-        my $k = read_key();
+        my $left = $stopped ? undef : int( $end - time + 0.999 );
+        last if defined $left && $left <= 0;
+        draw_rows( $d, $rows->($left) );
+        my $wait = $stopped ? undef : $end - time - ( $left - 1 );
+        my $k = read_key( $stopped ? undef : $wait > 0 ? $wait : 0.01 );
         next unless defined $k;
+        $stopped = 1;
+        my $act = action( $k, quit => $p{quit} );
         my @shown = $shown->();
-        if ($choosing) {
+        if ( $act eq 'quit' ) { restore_mode(); close_drawer($d); return 'quit' }
+        last if $act eq 'esc';
+        if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % @shown }
+        elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % @shown }
+        elsif ( $act eq 'pgup' ) { $sel = $sel - $L < 0 ? 0 : $sel - $L }
+        elsif ( $act eq 'pgdn' ) { $sel = $sel + $L > $#shown ? $#shown : $sel + $L }
+        elsif ( $act eq 'right' || $act eq 'next' ) { $tab = ( $tab + 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'left'  || $act eq 'prev' ) { $tab = ( $tab - 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act =~ /^digit:(\d)$/ && $1 <= @cats + 1 ) { $tab = $1 - 1; ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'enter' && $shown[$sel]{options} ) {
             my $n = $shown[$sel];
-            my $nv = @{ $n->{views} };
-            if    ( $k eq 'up' || $k eq 'k' )   { $vsel = ( $vsel - 1 ) % $nv }
-            elsif ( $k eq 'down' || $k eq 'j' ) { $vsel = ( $vsel + 1 ) % $nv }
-            elsif ( $k =~ /^[1-9]$/ && $k <= $nv ) { $vsel = $k - 1 }
-            elsif ( $k eq 'enter' ) { $chosen{$n} = $vsel; $choosing = 0 }
-            elsif ( $k eq 'esc' || $k eq 'q' ) { $choosing = 0 }
-            next;
+            restore_mode();
+            # The options list as a modal layered over the browser (contract
+            # § Layered surfaces): on the alternate screen over the dimmed
+            # browser, or centred within the browser's rows below the cursor.
+            my ( $role, $how, $oi ) = ask(
+                s => $s, W => $W, H => $H, form => 'modal', stage => 2,
+                category => $n->{category}, notices => [$n], question => $n->{question} // '',
+                buttons  => [ { label => 'Continue as planned', key => 'c', role => 'default' } ],
+                options  => $n->{options}, headings => $headings, option_default => $chosen{$n} // 0,
+                quit     => $p{quit}, seconds => 0,
+                ( $d->{mode} eq 'alt' ? ( under => layers_of($d) ) : ( parent => $d ) ),
+            );
+            if ( $role eq 'quit' ) { close_drawer($d); return 'quit' }
+            $chosen{$n} = $oi if defined $oi;
+            raw_mode('cbreak');
+            print "\e[?25l";
         }
-        last if $k eq 'q' || $k eq 'esc';
-        if    ( $k eq 'up' || $k eq 'k' )   { $sel = ( $sel - 1 ) % @shown }
-        elsif ( $k eq 'down' || $k eq 'j' ) { $sel = ( $sel + 1 ) % @shown }
-        elsif ( $k eq 'pgup' ) { $sel = $sel - $L < 0 ? 0 : $sel - $L }
-        elsif ( $k eq 'pgdn' ) { $sel = $sel + $L > $#shown ? $#shown : $sel + $L }
-        elsif ( $k eq 'right' || $k eq 'l' || $k eq 'tab' ) { $tab = ( $tab + 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
-        elsif ( $k eq 'left' || $k eq 'h' ) { $tab = ( $tab - 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
-        elsif ( $k =~ /^[1-9]$/ && $k <= @cats + 1 ) { $tab = $k - 1; ( $sel, $top ) = ( 0, 0 ) }
-        elsif ( $k eq 'enter' && $shown[$sel]{views} ) { $choosing = 1; $vsel = $chosen{ $shown[$sel] } // 0 }
     }
     restore_mode();
     close_drawer($d);

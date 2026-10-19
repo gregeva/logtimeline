@@ -17,26 +17,27 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 3 is reviewed** (12 of 12 options, `feedback/stage1-round3.jsonl`,
-  summarised under round 3 below). Building a round 4 from it is on hold.
-- **Next: a pause on the process.** The architect called a pause after round
-  3 to reflect on what is not working in the prototyping process, redesign
-  its goals and capture lessons learned, to be worked into
-  `prototype/README.md` once the prototypes are done. The reflection and its
-  outcome are recorded here when agreed; nothing is built until then.
+- **Round 4 is built and not yet reviewed.** It is the next step: the
+  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
+  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one view
+  at a time, feedback saved to `feedback/stage1-round4.jsonl`; the last entry,
+  `contract`, runs nothing and takes remarks against the contract. `perl
+  review.pl --list` shows which views have feedback; a run resumes at the
+  first without.
+- **Then, by the round procedure** (`features/412-notice-surfaces.md`
+  § Prototyping): Claude records the feedback here under round 4, sends the
+  read-back (heard, changes, not changing and why), builds only after the
+  architect confirms it, and moves the round's settled lines into the
+  contract.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
-  `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (the first standard
-  patterns, reviewed at commit 4d1218c, feedback
-  `feedback/stage1-round2.jsonl`); round 3 (`surfaces/`, the current
-  patterns, feedback `feedback/stage1-round3.jsonl`). The review runner is
-  `perl review.pl` (Homebrew Perl: `export PATH="$(brew --prefix)/bin:$(brew
-  --prefix)/opt/perl/bin:$PATH"`); `--list` shows which options have feedback.
-- **Asked for and not yet built:** a bullet glyph selection prototype; a
-  browser example whose detail is tall (a guidance notice with a selection and
-  a histogram); the light background (no option on it has been evaluated).
-- **Not started:** the decision round on which surfaces go forward, porting
-  to Linux and Windows, the unattended-capture method for the selected
-  surfaces, the producer interface.
+  `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
+  4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
+  commit 4bef110, feedback `feedback/stage1-round3.jsonl`); round 4 (`show.pl`
+  with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`, the current framework).
+- **Not started:** the decision round on which surfaces go forward, the
+  light background (no option on it has been evaluated), porting to Linux and
+  Windows, the unattended-capture method for the selected surfaces, the
+  producer interface.
 - `ltl` carries `$version_number = "0.20.0-412"`; it is restored before any
   completion gate.
 
@@ -321,3 +322,112 @@ By option:
 | box once a pattern is found | good; full width keeps the Why from wrapping | the three-column remarks above |
 | browser over the dimmed run | I love it, well done | fixed height from the tallest detail; the guidance-with-histogram example |
 | browser below the cursor | fine, a variation on the last; erases on closing as it should | |
+
+## The pause after round 3 (2026-10-19)
+
+The architect paused the stage to redesign its process. What was diagnosed,
+what was agreed and the round procedure that came of it are recorded in
+`features/412-notice-surfaces.md` § Prototyping; the decisions the three
+rounds had settled are locked there as D2 to D9, and the framework's
+specification is its § Surface framework contract, reviewed by the architect
+as a document before round 4 was built. The lessons go into
+`prototype/README.md` when the stage closes, as the rules of a design
+prototype.
+
+## Round 4: the framework against the contract (2026-10-19)
+
+Built from the contract after the architect confirmed the read-back (one
+addition at confirmation: more text on the screen before a modal, so the
+dimmed run has something to dim). The round 3 scripts are gone; the use cases
+are named inputs (`notices/inputs.pl`) any component takes, and one driver
+runs them:
+
+```
+perl show.pl panel [--input typical|deprecation|heavy] [--bullet N|glyph]
+perl show.pl bullets
+perl show.pl ask --input memory|preread|pattern [--form modal|box] [--placement alt|inline]
+                 [--size small|medium|large] [--quit on|off] [--keybar full|letters|none]
+                 [--record] [--seconds N] [--answer letter|default[,option]] [--fixed-height]
+perl show.pl browser [--input heavy] [--placement alt|inline] [--size ...] [--rows N] [--seconds N]
+```
+
+What it holds, by the contract's sections:
+
+- **Components:** `panel()`, `ask()` and `browser()` in `lib/NoticeSurfaces.pm`,
+  each taking the parameters of the defaults table and only what a caller
+  wants otherwise (`with_defaults()`); the table itself is `%DEFAULTS`.
+- **Keys:** one map, `action()`, on every component: arrows and j/k, PgUp and
+  PgDn, ←→ and Tab with Shift-Tab as its reverse (`\e[Z` decoded in
+  `NoticeProto::read_key`), digits, Enter, Esc taking the default, q and x
+  quitting where quitting is on (the surface cleared, the run stopped with one
+  dim row), any other key stopping the countdown; the key bar text comes from
+  `key_bar()` and reads the same everywhere. Choice letters are passed by the
+  caller with each button, underlined in the label (`lettered()`), accepted in
+  either case.
+- **Buttons:** by role, `stop` leftmost, `more` between, `default` rightmost
+  and highlighted, the countdown's slot beside it kept at a fixed width so the
+  row does not move when the countdown stops.
+- **Size tiers:** small, medium, large as 50, 70 and 90 per cent of the
+  columns (at least 44) and 30, 50 and 80 per cent of the rows; `choose_tier()`
+  takes the smallest in which the content's longest unbreakable unit (the top
+  edge, the key bar, the button row, the options list's fixed columns, the
+  longest word) fits and the rows do not exceed the height; `--size` names
+  one. At 120 by 40 the memory modal takes medium and the pattern modal large.
+- **Height across the two stages:** Claude's interpretation of the contract's
+  proposed line, to be seen. The width is chosen once for both stages; the
+  height is each stage's own, growing when the options list opens, since the
+  transition is a decision, not navigation. The literal reading (one height
+  for both, the taller's, so stage one carries blank rows between the notice
+  and the question) is `--fixed-height`, kept for comparison and not a review
+  view. The browser follows the architect's rule literally: its height comes
+  from its tallest detail before it is drawn.
+- **The dimmed run does not move:** the backdrop is built from the terminal's
+  own cursor position report (`query_cursor_position`): the live row at the
+  cursor's row, the printed rows ending on the row above it, nothing padded.
+  `notices/backdrop.pl` gives the run more to dim: a previous run's summary,
+  the prompt, ltl's banner, two scanning rows, the progress line.
+- **Compact box:** quitting off and the key bar the choice letters only
+  (the defaults table); the choices on the question row with their letters
+  underlined, the default bright with the countdown; a blank row before the
+  question.
+- **Wording:** `notices · N` dim as the panel's title; `command usage
+  warnings` for *your options*.
+- **Bullet:** an en dash in the dim colour by default; `perl show.pl bullets`
+  is the glyph sheet, ten candidates each under a category heading with two
+  notices, numbered so the architect can name one; `panel --bullet N` shows it
+  in full.
+- **Browser:** sized before drawing for its tallest detail: the guidance
+  notice on one API carries ltl's own duration histogram with its percentile
+  legend (`notices/histogram.pl`, 14 rows captured from a real `-hg duration
+  -hgh 8` run at 80 columns, colour codes kept; the architect's correction
+  mid-build: an actual ltl histogram, not generic bins). Enter on it opens the
+  options list as an ask modal layered over the browser (`stage => 2`): on the
+  alternate screen over the dimmed browser, or centred within the browser's
+  rows when the browser is below the cursor (`drawer` mode `over`); Esc
+  returns to the browser as it was, a choice marks the notice ◆ and shows in
+  its detail. A 15 s countdown to closing runs until the first key.
+- **Open, carried as placeholders:** the headings What? How? Why? in the modal
+  and box (the producers' data model decides later); the light background.
+
+Claude's own runs, before review:
+
+- **Unattended**, every view at 120 by 40 to a file (15 runs: the panel with
+  each input and a bullet candidate, the glyph sheet, every ask input in each
+  form and placement, with answers given ahead and with a record, the browser
+  on both screens): exit 0, nothing on stderr.
+- **In a tmux pane** (`check-tmux.sh`, 120 by 40, keys sent, the pane captured
+  as seen, alternate screen included), replacing the replay through an
+  emulator that had no alternate screen: the backdrop rows at their positions
+  under the memory modal with the progress row where it was; Shift-Tab moving
+  the focus back; a space stopping the countdown with the slot left blank;
+  Esc leaving no trace and the run going on; x stopping the run; the pattern
+  modal growing from the question to the three-column list, 1 to 3 and ↓
+  moving the highlight; the same with `--fixed-height`; the preread modal's
+  `s` stopping before the read; the inline modal; the box with q ignored
+  (quitting off) and stopping the countdown, Esc taking the default; the box
+  pattern list at full width, `2` and Enter choosing; the browser on tab 7
+  showing the histogram detail, Enter opening the layered list over the
+  dimmed browser (`\e[2m` on the browser's rows in the capture), a choice
+  marked ◆, Esc back to the browser; the inline browser's layered list drawn
+  within its rows and the browser repainted after it; the browser closing on
+  its own after its countdown.

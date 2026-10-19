@@ -2,7 +2,8 @@ package NoticeProto;
 
 # Shared pieces of the #412 notice-surface prototypes: the terminal state
 # guard, the terminal size, the constants sliced out of ltl, and the two
-# visual languages. Each prototype adapts these to its own surface; nothing
+# visual languages (D6: boxes and pop-ups in the new style, inline text in the
+# ltl look). Each prototype adapts these to its own surface; nothing
 # here is a candidate for ltl.
 
 use strict;
@@ -17,7 +18,7 @@ use Unicode::UCD qw(charprop);
 
 our @EXPORT_OK = qw(
     ltl_constants interactive terminal_size raw_mode restore_mode
-    query_cursor_column expected_width style_for strip_sgr
+    query_cursor_column query_cursor_position expected_width style_for strip_sgr
     display_width wrap_text categories
     set_answers_ahead answer_ahead read_key timed_yes_no
 );
@@ -120,9 +121,10 @@ $SIG{TERM} = sub { restore_mode(); exit 143 };
 $SIG{__DIE__} = sub { restore_mode() unless $^S };
 END { restore_mode() }
 
-# The column the cursor stands on, from the terminal's own answer to a cursor
-# position report (CSI 6n), or undef when nothing answers within the timeout.
-sub query_cursor_column {
+# The row and column the cursor stands on, from the terminal's own answer to
+# a cursor position report (CSI 6n), or an empty list when nothing answers
+# within the timeout.
+sub query_cursor_position {
     my ($timeout) = @_;
     $timeout //= 0.3;
     print "\e[6n";
@@ -131,8 +133,10 @@ sub query_cursor_column {
         $reply .= $c;
         last if $c eq 'R';
     }
-    return $reply =~ /\e\[\d+;(\d+)R/ ? $1 : undef;
+    return $reply =~ /\e\[(\d+);(\d+)R/ ? ( $1, $2 ) : ();
 }
+
+sub query_cursor_column { my @p = query_cursor_position(@_); return @p ? $p[1] : undef }
 
 # The width a terminal following Unicode's East Asian Width and emoji
 # presentation properties gives a string: two for a wide or full-width
@@ -259,19 +263,20 @@ sub wrap_text {
 
 # --- the categories ---------------------------------------------------------
 #
-# D1's six categories in the order a surface presents them, each with how
-# the analyst reads it (D1's "what the analyst does") and the glyph that heads
-# it. The order puts what bears on trusting the figures first and the next
-# step last; the glyphs are single-width text symbols. Both are Claude's
-# proposal for the prototypes.
+# D1's six categories in the order a surface presents them, each with how the
+# analyst reads it and the glyph that heads it (D2: a text glyph and a colour;
+# the order, glyphs, colours and how-to-read text are the contract's category
+# sheet, settled 2026-10-19). The order puts what bears on trusting the
+# figures first and the next step last; the glyphs are single-width text
+# symbols.
 
 my @categories = (
-    { name => 'data anomaly',           glyph => '⚠', emoji => "\x{26A0}\x{FE0F}", ascii => '!', reads => 'check the source data or the options before trusting the figures' },
-    { name => 'figure caveat',          glyph => '≈', emoji => '📉', ascii => '~', reads => 'the figures cover less than they appear to' },
-    { name => 'your options',           glyph => '⚙', emoji => "\x{2699}\x{FE0F}", ascii => '>', reads => 'correct the command' },
-    { name => 'decision taken for you', glyph => '↻', emoji => '🔁', ascii => '*', reads => 'what the run did instead of what was asked' },
-    { name => 'runtime condition',      glyph => '⏱', emoji => '⏳', ascii => '#', reads => "a condition of the run's environment" },
-    { name => 'guidance',               glyph => '➤', emoji => '💡', ascii => '?', reads => 'a next step worth trying' },
+    { name => 'data anomaly',           glyph => '⚠', reads => 'check the source data or the options before trusting the figures' },
+    { name => 'figure caveat',          glyph => '≈', reads => 'the figures cover less than they appear to' },
+    { name => 'your options',           glyph => '⚙', reads => 'command usage warnings' },
+    { name => 'decision taken for you', glyph => '↻', reads => 'what the run did instead of what was asked' },
+    { name => 'runtime condition',      glyph => '⏱', reads => "a condition of the run's environment" },
+    { name => 'guidance',               glyph => '➤', reads => 'a next step worth trying' },
 );
 
 sub categories { return @categories }
@@ -289,7 +294,8 @@ sub set_answers_ahead { @answers_ahead = map { split /,/ } grep { defined } @_; 
 sub answer_ahead { return @answers_ahead ? shift @answers_ahead : undef }
 
 # One key, decoded: 'up', 'down', 'left', 'right', 'enter', 'esc', 'tab',
-# 'pgup', 'pgdn', or the character itself; undef when the timeout passes.
+# 'shift-tab', 'pgup', 'pgdn', or the character itself; undef when the
+# timeout passes.
 # The terminal must be in cbreak or raw mode.
 sub read_key {
     my ($timeout) = @_;
@@ -305,7 +311,7 @@ sub read_key {
         $seq .= $d;
         last if $d =~ /[A-Za-z~]/;
     }
-    return { A => 'up', B => 'down', C => 'right', D => 'left', '5~' => 'pgup', '6~' => 'pgdn' }->{$seq} // 'esc';
+    return { A => 'up', B => 'down', C => 'right', D => 'left', Z => 'shift-tab', '5~' => 'pgup', '6~' => 'pgdn' }->{$seq} // 'esc';
 }
 
 # A yes or no with a timed default and a visible countdown: the question,

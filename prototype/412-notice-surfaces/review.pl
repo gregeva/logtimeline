@@ -8,7 +8,10 @@
 #   perl review.pl --from box-read  start at an option and go on from there
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
-#   perl review.pl --round 1      the first round's options (default: 3)
+#   perl review.pl --round 3      an earlier round's options (default: 4)
+#
+# An option whose script is '-' runs nothing: it takes remarks alone (round
+# 4's closing entry, for remarks against the contract).
 #
 # Feedback is appended to feedback/stage1.jsonl (round 1) or
 # feedback/stage1-roundN.jsonl (round N), one JSON object per entry: the
@@ -28,7 +31,7 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-$opt{round} = 3;
+$opt{round} = 4;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
@@ -73,7 +76,9 @@ $rounds{1} = [
 # Round 2 was reviewed from the scripts as they stood at commit 4d1218c; its
 # commands are recorded with its feedback in feedback/stage1-round2.jsonl.
 # Round 3: one surface for asking during the run (the modal, its compact box
-# form), the panel and the browser, from round 2's feedback.
+# form), the panel and the browser, from round 2's feedback. Its scripts
+# (surfaces/*.pl, notices/round2.pl) are at commit 4bef110; round 4 replaced
+# them with show.pl and notices/inputs.pl.
 $rounds{3} = [
     [ 'panel',          'surfaces/panel.pl', '',                                  'Panel: one box round all the notices',             'categories divided by a blank row; NOTICES in the dim of its count; each category headed once with how to read it' ],
     [ 'panel-one',      'surfaces/panel.pl', '--set minimal',                     'Panel with a single notice',                       'the box drawn for one notice too' ],
@@ -88,6 +93,24 @@ $rounds{3} = [
     [ 'browser-alt',    'surfaces/browser.pl', '',                                'Notice browser over the dimmed run',               'rounded corners; every tab named (a second row when they do not fit); the detail heading in its colour, no block; 7 then Enter on the ◇ notice opens the views; q closes, leaving no trace' ],
     [ 'browser-inline', 'surfaces/browser.pl', '--screen inline',                 'Notice browser below the cursor (the fallback)',   'the same box drawn below the cursor' ],
 ];
+# Round 4: the three components against the contract (features/412-notice-
+# surfaces.md § Surface framework contract), each with named inputs; the size
+# tiers, the bullet glyph, the tall detail and the layered modal to be seen.
+$rounds{4} = [
+    [ 'panel',          'show.pl', 'panel',                                    'Panel with the typical set (7 notices)',            'title `notices · 7` dim; a light dash bullet in dim; blank rows between categories; `command usage warnings` on your options' ],
+    [ 'panel-one',      'show.pl', 'panel --input deprecation',                'Panel with a single notice',                        'the box drawn for one notice; lower-case `notices` beside the upper-case category' ],
+    [ 'bullets',        'show.pl', 'bullets',                                  'The bullet glyph sheet',                            'ten candidates, each in the panel\'s own context under a category heading; name the number to take forward (panel --bullet N shows it in full)' ],
+    [ 'modal-read',     'show.pl', 'ask --input memory',                       'Modal over the run, during the read (memory)',      'the dimmed run keeps every row where it was, the progress row included; the size tier chosen from the content; Tab and Shift-Tab, ←→; underlined choice letters s/c; Esc continues; q/x quits; any other key stops the countdown and nothing says so' ],
+    [ 'modal-preread',  'show.pl', 'ask --input preread',                      'The same modal before the read (four option notices)', 'the same call with other notices and buttons; the key bar reads the same' ],
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'The same modal once a pattern is found, with its options list', 'press l (or Tab to Look at the options, Enter): the list in three columns headed What? How? Why?; the dialog was sized for both stages up front and does not change size; 1-3, ↑↓, Enter; Esc continues as planned' ],
+    [ 'box-read',       'show.pl', 'ask --input memory --form box',            'The compact form: a box below the cursor, during the read', 'the choices on the question row with their letters underlined, the default bright with the countdown; the key bar is the letters only; quitting is off here by default' ],
+    [ 'box-pattern',    'show.pl', 'ask --input pattern --form box',           'The compact form once a pattern is found',          'a blank row before the question; press l: the options list at full width' ],
+    [ 'modal-inline',   'show.pl', 'ask --input memory --placement inline',    'The modal below the cursor (the fallback)',         'the same dialog drawn into rows below the cursor; erased once answered' ],
+    [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'sized before drawing for its tallest detail: move to the GUIDANCE notice on GetDateAndTime, its detail holds ltl\'s histogram with the percentile legend; Enter opens the options as a modal layered over the browser; Esc closes it and the browser is back as it was; a 15 s countdown to closing stops at the first key' ],
+    [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Notice browser below the cursor (the fallback)',     'the same browser below the cursor; the layered modal is drawn within its rows; closing erases it' ],
+    [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
+];
+
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
 my %index = map { $options[$_][0] => $_ } 0 .. $#options;
 
@@ -126,7 +149,7 @@ else {
 my $pos = 0;
 while ( $pos < @queue ) {
     my ( $id, $script, $args, $title, $look ) = @{ $options[ $queue[$pos] ] };
-    my $cmd = "perl $script $args";
+    my $cmd = $script eq '-' ? '(no command: remarks only)' : "perl $script $args";
     print "\e[H\e[2J";
     print "\e[1m$id  $title\e[0m   \e[2m(" . ( $queue[$pos] + 1 ) . ' of ' . scalar(@options) . ")\e[0m\n";
     print "\e[2m$cmd\e[0m\n";
@@ -138,9 +161,11 @@ while ( $pos < @queue ) {
     if ( $go eq 's' ) { $pos++; next }
     if ( $go eq 'b' ) { $pos-- if $pos > 0; next }
 
-    print "\e[H\e[2J";
-    system( $^X, "$dir/$script", split( ' ', $args ) );
-    system( 'stty', 'sane' );    # in case the prototype was stopped mid-prompt
+    if ( $script ne '-' ) {
+        print "\e[H\e[2J";
+        system( $^X, "$dir/$script", split( ' ', $args ) );
+        system( 'stty', 'sane' );    # in case the prototype was stopped mid-prompt
+    }
 
     while (1) {
         print "\n\e[1m── feedback for $id ($title) ──\e[0m\n";
@@ -151,7 +176,7 @@ while ( $pos < @queue ) {
             last if $l eq '';
             push @lines, $l;
         }
-        if ( @lines == 1 && $lines[0] eq 'r' ) {
+        if ( @lines == 1 && $lines[0] eq 'r' && $script ne '-' ) {
             print "\e[H\e[2J";
             system( $^X, "$dir/$script", split( ' ', $args ) );
             system( 'stty', 'sane' );
