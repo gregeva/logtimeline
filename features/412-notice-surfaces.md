@@ -303,26 +303,46 @@ without saying whether the notice still applies.
 
 ## Prototyping
 
-Prototyping is many prototype scripts, built to be compared against each other
-and adapted to different scenarios. They share elements, but the selection
-criteria and the adaptation are worked on each prototype individually, and how
-each case is decided and implemented is likely to differ (architect,
-2026-10-17). Prototype feedback is captured throughout and at the end of the
-prototyping stage, and is what the final requirements and specification are
-settled from before anything is built into `ltl`; nothing about what is built
-is scoped until the prototypes are delivered and validated.
+Prototyping here is iterative design (architect, 2026-10-17, restated
+2026-10-19). It began as many separate prototype scripts, one per example
+surface and choice point, built to be compared against each other: enough to
+establish something quickly, look at the options, pick one, and tighten the
+direction. Each review round narrows them, and what they converge on is one
+framework for notices, user input, choices and navigation: a few components
+with parameters, a conventions contract (keys, buttons, sizing, countdown,
+erase or record, headings, glyphs and colours) and the decisions behind them,
+fitting the cases known today and cases not yet known. The deliverable of the
+stage is that framework's specification and its locked decisions, not a set of
+validated renderings; nothing about what is built into `ltl` is scoped until
+the prototypes are delivered and validated.
 
 The prototypes cover every example surface and choice point: the decorated
 deprecation of a couple of lines, the yes or no while processing, the choice
-offered once a pattern is detected, and the long list of guidance. During
-prototyping it is chosen which is relevant where, and how each applies; once
-validated they become patterns to draw on for future enhancements, even where
-they are not implemented in `ltl` at first.
+offered once a pattern is detected, and the long list of guidance. The
+examples are the inputs the components are exercised with, never scripts of
+their own; once validated the components become patterns to draw on for future
+enhancements, even where they are not implemented in `ltl` at first.
 
 Prototypes are reviewed live. The architect works with Claude in one session
-while running the prototypes in another, and gives feedback as he goes; Claude
-takes it in, updates the findings and changes the prototypes accordingly, in a
-collaborative development loop.
+while running the prototypes in another, through a review runner that shows
+one view at a time and saves the feedback with the exact command that drew it.
+Each round then runs the same way (agreed 2026-10-19, after three rounds had
+carried the same correction):
+
+1. Claude records the round's feedback in the prototype findings.
+2. Claude sends a read-back before building anything: what was heard, what
+   changes, what is not changing and why. Building waits for the architect's
+   confirmation of that reading.
+3. The round's settled lines are proposed for lock and moved into this
+   document, each as a locked decision or a line of the contract, in the same
+   step; only what still needs iteration stays open in the findings.
+4. The next round is built against the contract, and Claude's own check before
+   review observes what the architect will observe (a terminal pane captured
+   as it is seen, alternate screen included), or says that it cannot.
+
+The review unit is the contract once, as a document, then each component with
+a few inputs; cross-cutting feedback is given against the contract's lines,
+not against renderings.
 
 The surfaces are prototyped first: what the analyst sees and how they answer.
 The producer interface (how code anywhere in the run registers a notice or a
@@ -356,16 +376,23 @@ terminal surface, prompt practice, Perl libraries, unattended capture) is
 Prototyping is required on two counts of `prototype/README.md`: a new
 capability whose shape has to be found, and (d) a verification method not yet
 known, since asserting a rendered terminal surface is an open question in this
-repository (`docs/test-driven-development.md` § Visual surfaces).
+repository (`docs/test-driven-development.md` § Visual surfaces). The lessons
+of this stage's process are worked into `prototype/README.md` when the
+prototypes are done, as the rules of a design prototype, a kind that document
+does not yet describe.
 
 ### Where prototyping stands
 
 Stage 1 (macOS, fixed example notices) is under way on branch
-`412-notice-surfaces`, reviewed by the architect in rounds through
-`prototype/412-notice-surfaces/review.pl`. Each round's feedback, what was
-built from it, and how to resume the review are in
-`prototype/412-notice-surfaces/findings.md` (§ Resuming); the stage's
-findings report comes here once its decision round is held.
+`412-notice-surfaces`. Three rounds have been built and reviewed through
+`prototype/412-notice-surfaces/review.pl`; each round's feedback, what was
+built from it, and how to resume are in
+`prototype/412-notice-surfaces/findings.md` (§ Resuming). After round 3 the
+architect paused the stage to redesign its process (the steps above). The
+catch-up that follows the pause: the decisions the three rounds settled,
+locked below; the conventions contract, written here as a document and
+reviewed before code; then round 4 built against it. The stage's findings
+report comes here once its decision round is held.
 
 ### Closing out prototyping (architect, 2026-10-17)
 
