@@ -657,7 +657,7 @@ the framework is left unvalidated on macOS.
 | a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | demonstrated against known-good and known-bad input (§ Unattended capture below); the options and their costs are before the architect |
 | the findings record what was chosen, what was learned and why | this file; the lessons are `prototype/README.md` § (e), the design prototype (2026-10-19) |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
-| porting the selected components to Linux and Windows | not started |
+| validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | not started |
 | the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |
 | the modal's and box's list headings | open until the producers' data model is investigated |
 

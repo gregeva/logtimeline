@@ -420,12 +420,20 @@ chosen surfaces become credible and relevant to `ltl`.
 
 Prototyping runs in stages across platforms. macOS is the primary
 development platform, so the prototypes start there; a round of decisions
-selects the patterns to take forward, and only those are ported to Linux and
-Windows, so that the work and validation fall on the selected patterns alone.
-Final decisions are not made before it is known what is possible on the other
-platforms: a pattern found infeasible or overly complicated on Windows is found
-before implementation in `ltl`, not during it. The packaged binaries carry
-every library the chosen patterns need.
+selects the patterns to take forward, and only those are validated on Linux
+and Windows, so that the work falls on the selected patterns alone. The
+components rely on standard terminal behaviour (raw key reading through
+Term::ReadKey, escape sequences for keys, the alternate screen, the cursor
+position report and colour), so the validation is the architect judging each
+component once per form in a Linux terminal and in Windows Terminal, as on
+macOS, and noting any key that does not decode, any sequence that does not
+take, and any glyph missing or two cells wide. Its outcome is acceptance or a
+short list of adaptations, each a branch of the kind `ltl` already carries
+for Windows (the code page, the bar character); it is not a port (architect,
+2026-10-19). Final decisions are not made before it is known what is possible
+on the other platforms: a pattern found infeasible or overly complicated on
+Windows is found before implementation in `ltl`, not during it. The packaged
+binaries carry every library the chosen patterns need.
 
 The research the prototypes start from (what `ltl` has today, the kinds of
 terminal surface, prompt practice, Perl libraries, unattended capture) is
