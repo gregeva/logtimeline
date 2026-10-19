@@ -21,6 +21,18 @@ in the run registers a notice or a choice, is not yet designed.
 
 ---
 
+## Independent of look
+
+These patterns are a layer over whichever look a surface takes
+(`docs/design-language.md` § Two looks, one choice per surface). They were
+validated on the notice surfaces in the new style, and they apply as they
+stand to a surface in the ltl look: scrolling the summary table's message list
+with the same keys is the model case, interactivity added on top of the
+existing table rather than a new surface for the same data. Each pattern is
+implemented once and called by every surface that uses it, so a change to a
+key, a countdown or a selection behaviour reaches every consumer and every
+future consumer (architect, 2026-10-19).
+
 ## Components
 
 Three, and only three. Every moment of the run calls one of them with its own

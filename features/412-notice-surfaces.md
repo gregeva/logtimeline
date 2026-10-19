@@ -476,9 +476,11 @@ built from them and nothing drifts between two copies (architect, 2026-10-19:
 the contract's patterns are first-class patterns of the project, each with its
 own section):
 
-- `docs/design-language.md`: the two looks and the rule which applies where
-  (D6), the ltl look as the tool draws it today, the new style, the category
-  sheet, the notice's anatomy, wording and the light background.
+- `docs/design-language.md`: the two looks, coexisting, with one deliberate
+  choice per surface and one implementation per look so change cascades
+  (architect, 2026-10-19); the ltl look as the tool draws it today, the new
+  style as settled for these surfaces (D6), the category sheet, the notice's
+  anatomy, wording and the light background.
 - `docs/terminal-interaction.md`: the three components and the notice record,
   the key map and key bars, taking input (default, countdown, answers given
   ahead, two stages, quitting), buttons, the options list, the defaults by use,

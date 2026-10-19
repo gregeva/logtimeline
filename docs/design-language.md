@@ -17,18 +17,37 @@ authority; this document carries the settled form.
 
 ---
 
-## Which look applies where
+## Two looks, one choice per surface
 
-| drawn as | look | examples |
+The two looks coexist, and neither replaces the other. The ltl look is the
+tool's output as it stands; the new style was validated for the notice
+surfaces of #412 (notice surfaces: presenting notices and capturing the
+analyst's choices) and is settled for them (D6). Whether a future surface
+takes one or the other is a deliberate choice made when that surface is
+designed, never a default drawn from the kind of thing it is.
+
+Three rules (architect, 2026-10-19):
+
+1. **Choose one, on purpose.** A new surface, or a change to one, names the
+   look it takes and the reason, in its feature doc and in the table below, so
+   the project's surfaces stay few in look and the choice is readable later.
+2. **Interactivity is independent of look.** The interaction patterns of
+   `docs/terminal-interaction.md` (keys, navigation, selection, the countdown)
+   lay over either look. Scrolling the summary table's message list is the
+   model case: the interactivity validated for the notice surfaces is added on
+   top of the existing ltl-look table, not by proposing another surface that
+   presents the same data in the new style.
+3. **One implementation per look, so change cascades.** Each look is drawn by
+   one set of routines that every surface in that look calls; a change or an
+   evolution of the look is made there once and reaches every consumer and
+   every future consumer, never re-styled per surface.
+
+| surface | look | chosen where |
 |---|---|---|
-| the run's output: timeline, summary table, heatmap, histograms, the title, help and explain text | **ltl look** | everything `ltl` prints today |
-| inline text that joins the run's output, such as the record a question leaves behind once answered | **ltl look** | the notice and the answer taken, left in the rows a pop-up occupied (D4) |
-| a box or pop-up: the notices panel, a modal, the compact box below the cursor, the notice browser, a modal layered over the browser | **new style** | the notice surfaces of #412 (D6) |
-
-The rule is by kind of thing drawn, not by feature: a box anywhere takes the
-new style; text in the flow of the output takes the ltl look.
-
----
+| the run's output: title, timeline, summary table, heatmap, histograms, help and explain text | ltl look | the tool as it stands |
+| the notices panel, the ask modal, the compact box, the notice browser, a modal layered over the browser | new style | `features/412-notice-surfaces.md` D6, 2026-10-19 |
+| the record a question leaves behind once answered, inline in the output | ltl look | the same, D4 |
+| interactivity added to an existing surface, such as scrolling the message list | the surface's own look, the interaction patterns laid over it | rule 2, architect 2026-10-19; no such surface is scheduled yet |
 
 ## The ltl look
 
@@ -117,8 +136,9 @@ percentage.
 
 ## The new style
 
-Settled for boxes and pop-ups (D6). It differs from the ltl look in four
-things and shares everything else.
+Settled for the notice surfaces' boxes and pop-ups (D6), available to a
+future surface that chooses it. It differs from the ltl look in the elements
+below and shares everything else.
 
 | element | the new style |
 |---|---|
