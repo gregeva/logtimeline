@@ -213,6 +213,14 @@ A key that is not a choice stops the countdown, leaving time to read. No
 surface reports the countdown's state: its disappearance is the whole signal,
 and it never resumes.
 
+### D8 — The list view of a choice's second stage shows each option in three parts (architect, 2026-10-19, from rounds 2 and 3)
+
+When a choice leads on to its options, they are shown as a selectable list, one
+row per option, with the highlighted option's parts beside it in columns headed
+What? How? Why? by default. The headings are parameters of the consumer, and a
+consumer whose options have fewer parts gets two columns or one. The why comes
+from the producer as part of the notice, not from the surface.
+
 ### D9 — Many notices go to the browser, never to a panel (architect, 2026-10-19, from round 2)
 
 A large number of notices is for the interactive browser; printing them all to
@@ -448,6 +456,138 @@ the prototyping stage is closed:
       unattended, for the harnesses and for the screenshot tool.
 - [ ] The prototype findings record what was chosen, what was learned along
       the way, and why each decision was made.
+
+## Surface framework contract
+
+The framework the prototypes converge on, as one document: what each component
+is, what its caller passes, and the conventions every component keeps. Each
+line is either **settled** by a locked decision, named in brackets, or
+**proposed** by Claude for the architect's review of this document (step B of
+the round procedure, 2026-10-19). A proposed line that the architect confirms
+becomes settled here; one he corrects is rewritten; one that needs to be seen
+first goes to round 4 as its question. Nothing proposed here is a decision.
+
+### Components
+
+Three, and only three. Every moment of the run calls one of them with its own
+content; no moment has a presentation of its own (D5).
+
+| component | for | what the caller passes |
+|---|---|---|
+| **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
+| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); the quit-the-application key, when offered |
+| **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection) |
+
+A notice is the same record everywhere (proposed): its category (D1); a focus
+(what it is about: an API, a time range, a count); a statement; evidence, zero
+or more; a remedy; the producer that raised it; and, when it offers options, the
+list of them. An option carries its parts under the consumer's headings (D8),
+the command options that apply it and its effect in one line.
+
+### Keys (proposed, following common terminal practice; round 3 asked for one key map on every surface)
+
+| key | does |
+|---|---|
+| ↑ ↓, j k | move in a list |
+| PgUp PgDn | page in a list |
+| ← →, Tab, Shift-Tab | move between buttons, or between tabs; Shift-Tab is always Tab's reverse |
+| 1 to 9 | choose the n-th option or tab directly |
+| Enter | activate what is highlighted |
+| Esc | close, taking the default; back to the list from a detail |
+| q | quit the application, only when the caller offers it, and named in the key bar when it is |
+| any other key | stops the countdown (D7); nothing else |
+
+Open on this table: round 1 accepted `q` as a second way to close the browser,
+and round 3 asked for `q` or `x` as the quit-the-application key. One key
+cannot do both; the table gives `q` to quitting the application and leaves
+closing to Esc. The architect decides.
+
+### Buttons (proposed)
+
+The default button is the rightmost and is highlighted when the surface
+appears; the countdown sits beside it. The other buttons stand to its left in a
+fixed order: the action that stops or leaves (Stop, Cancel) leftmost, the action
+that goes further (Look at the options) between. Labels are the caller's;
+positions are not. Enter activates the highlighted button; a letter key named
+in a label (`y`, `n`) is a shortcut to it.
+
+### Pop-up size (proposed; round 3 asked for three predefined sizes as ratios of the terminal)
+
+| tier | width | height |
+|---|---|---|
+| small | 50% of the columns, at least 44 | to its content, at most 30% of the rows |
+| medium | 70% | to its content, at most 50% |
+| large | 90% | to its content, at most 80% |
+
+The surface measures what it has to show and takes the smallest tier in which
+its longest unbreakable unit fits and its wrapped content does not exceed the
+height. A caller may name a tier. A surface never changes size while it is
+shown: the browser's height is computed from its tallest detail before it is
+drawn (round 3), and the second stage of a choice is measured with the first.
+
+### Countdown (D7)
+
+The seconds left are shown dim in brackets beside the default button and redrawn
+each second. Any key that is not a choice stops it; the bracket disappears and
+nothing is said. It never resumes.
+
+### Erasing and the record (D4)
+
+A component that asks erases itself once answered, leaving the cursor where it
+was; on the alternate screen, the screen is given back as it was. With the
+record flag, the notice and the answer are left as inline text in the ltl look
+in the rows the surface occupied, nothing else.
+
+### Where a component is drawn (D5)
+
+Alternate screen: centred, over a dimmed copy of the rows the run has printed,
+every row kept at the position it had, the live row included (a round 3
+finding: the progress row must not move). Below the cursor: drawn into rows
+reserved under the cursor, the fallback when the alternate screen is not wanted
+or not available. The compact form of ask is a box below the cursor whose top
+edge carries the category, the count when there is more than one notice, and
+how to read the category, with the question on its last inside row.
+
+### Style (D6, D2, D3)
+
+Boxes and pop-ups: rounded corners, frame in the category colour. Inline text:
+the ltl look. Categories by text glyph and colour; the category named once in
+upper case with its how-to-read text, categories divided by a blank row, a
+notice one row with no row break inside it, its parts told apart by colour and
+a marker before the evidence and before the remedy. A coloured block marks only
+the selected tab.
+
+### Wording (proposed, from round 3)
+
+The panel's title is the word `notices` and the bare count, in the dim of the
+count; `notices` is lower case beside an upper-case category name. The
+how-to-read text of *your options* says the tool is warning, not that the
+analyst erred: "command usage warnings" or words to that effect.
+
+### Category sheet (proposed, Claude's, carried since round 1; D1 fixes the categories, not their order, glyphs or colours)
+
+| order | category | glyph | colour (dark background) | how to read it |
+|---|---|---|---|---|
+| 1 | data anomaly | ⚠ | orange | check the source data or the options before trusting the figures |
+| 2 | figure caveat | ≈ | magenta | the figures cover less than they appear to |
+| 3 | your options | ⚙ | cyan | command usage warnings |
+| 4 | decision taken for you | ↻ | blue | what the run did instead of what was asked |
+| 5 | runtime condition | ⏱ | teal | a condition of the run's environment |
+| 6 | guidance | ➤ | green | a next step worth trying |
+
+The order puts what bears on trusting the figures first and the next step
+last. On a light background each category takes the darkest step of its
+gradient; no light-background rendering has been reviewed yet. The bullet
+before a notice in a list is open: a light glyph from the dash family, chosen
+from a glyph sheet in round 4 (round 3).
+
+### Unattended runs (open; the stage's second deliverable)
+
+With no terminal every component takes its default and goes on, and a run
+never waits. How a chosen surface is captured and checked by the harnesses and
+the screenshot tool is not yet demonstrated; answers given ahead of time are
+#748 (take the analyst's input at choice points, with a default and answers
+given ahead).
 
 ## Open items
 
