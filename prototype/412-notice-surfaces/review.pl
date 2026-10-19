@@ -35,7 +35,42 @@ $| = 1;
 
 my %opt;
 $opt{round} = 7;
-GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=s' ) or die "bad options\n";
+GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=s', 'help|h|?' ) or usage(1);
+usage(0) if $opt{help};
+
+sub usage {
+    my ($status) = @_;
+    my $fh = $status ? *STDERR : *STDOUT;
+    print $fh <<'USAGE';
+Usage: perl review.pl [--round ROUND] [--list | --from ID | --only ID | --all]
+
+Reviews the stage 1 prototypes one option at a time: each option is introduced,
+run in this terminal, and followed by a prompt for feedback, saved with the
+option's id and the exact command that drew it. Runs in a terminal only.
+
+Options:
+  --round ROUND   which review list to run (default: 7)
+                    1 .. 7    the numbered rounds, as they were reviewed
+                    light     the light-background evaluation (light-review.pl)
+                    linux     the platform validation on Linux
+                    windows   the platform validation in Windows Terminal
+  --list          the round's options, marked when they already have feedback
+  --from ID       start at that option and go on from there
+  --only ID       review one option alone
+  --all           every option of the round, from the first
+  (none of these) resume at the first option of the round with no feedback
+  --help, -h, -?  this text
+
+Feedback files, under feedback/, one JSON object per line, appended never
+overwritten: stage1.jsonl (round 1), stage1-roundN.jsonl (rounds 2 to 7),
+stage1-light.jsonl, stage1-linux.jsonl, stage1-windows.jsonl.
+
+At the feedback prompt: type the remarks and end with an empty line. On a line
+of its own, r reruns the view, s skips it without saving, q quits. An option
+whose script is '-' runs nothing and takes remarks alone.
+USAGE
+    exit $status;
+}
 
 my $dir  = $FindBin::Bin;
 my $file = "$dir/feedback/stage1" . ( $opt{round} eq '1' ? '' : $opt{round} =~ /^\d+$/ ? "-round$opt{round}" : "-$opt{round}" ) . '.jsonl';
