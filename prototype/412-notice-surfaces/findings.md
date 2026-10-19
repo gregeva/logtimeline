@@ -17,13 +17,13 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 7 is built and not yet reviewed:** one view, the pattern modal's
-  options list, and the contract entry. `perl review.pl` from this directory
-  (Homebrew Perl: `export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`),
-  feedback to `feedback/stage1-round7.jsonl`.
-- **Then, by the round procedure:** Claude records the feedback here, sends
-  the read-back where a reading is open, builds on confirmation, shows only
-  what changed, and moves the settled lines into the contract.
+- **Round 7 is reviewed and accepted** ("yes, you finally got it",
+  `feedback/stage1-round7.jsonl`). Every view of the framework on macOS is now
+  validated by the architect: the panel in both forms, the modal at the three
+  moments with its options list, the compact box, the inline fallbacks, the
+  browser on both screens with the layered list. What remains of stage 1 is
+  listed under § Where stage 1 stands below; the next step is the architect's
+  to direct.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
@@ -31,8 +31,8 @@ Where stage 1 stands, for picking the review up in a later session:
   build of `show.pl` with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`,
   feedback `feedback/stage1-round4.jsonl`); round 5 (the same scripts,
   feedback `feedback/stage1-round5.jsonl`); round 6 (feedback
-  `feedback/stage1-round6.jsonl`); round 7 (the same scripts, the current
-  framework).
+  `feedback/stage1-round6.jsonl`); round 7 (feedback
+  `feedback/stage1-round7.jsonl`; the same scripts, the current framework).
 - **Not started:** the decision round on which surfaces go forward, the
   light background (no option on it has been evaluated), porting to Linux and
   Windows, the unattended-capture method for the selected surfaces, the
@@ -628,3 +628,20 @@ headings, options, empty row, the effect, empty row; the body's pane closes
 with an empty row before the rule. Checked in a tmux pane at 180 by 50 in
 both forms, each pane's rows counted in the capture; every other view ran
 unattended unchanged.
+
+### Architect's feedback on round 7 (2026-10-19)
+
+One entry: the pattern modal's list, "yes, you finally got it". No view of
+the framework is left unvalidated on macOS.
+
+## Where stage 1 stands (2026-10-19, after round 7)
+
+| closing criterion or item (feature doc § Closing out prototyping, § Prototyping) | state |
+|---|---|
+| each selected surface judged by the architect in the terminal | done on macOS: the three components, every form and placement |
+| a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | not started; `check-tmux.sh` (a tmux pane captured as seen) is the candidate method, used for Claude's own checks since round 4 |
+| the findings record what was chosen, what was learned and why | this file and the contract; the lessons go into `prototype/README.md` at the close |
+| the light background | no view evaluated |
+| porting the selected components to Linux and Windows | not started |
+| the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |
+| the modal's and box's list headings | open until the producers' data model is investigated |
