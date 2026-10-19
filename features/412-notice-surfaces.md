@@ -484,23 +484,38 @@ or more; a remedy; the producer that raised it; and, when it offers options, the
 list of them. An option carries its parts under the consumer's headings (D8),
 the command options that apply it and its effect in one line.
 
-### Keys (proposed, following common terminal practice; round 3 asked for one key map on every surface)
+### Keys (proposed; one key map on every component, following common terminal practice; corrected by the architect 2026-10-19)
+
+Moving and choosing, wherever the action exists:
+
+| key | in a list (options, notices) | between buttons or tabs |
+|---|---|---|
+| ↑ ↓ | move the highlight one row | |
+| j k | the same, for terminals without arrow keys | |
+| PgUp PgDn | move a page | |
+| ← → | | move the highlight one button, or one tab |
+| Tab | | next button or tab, wrapping round |
+| Shift-Tab | | previous button or tab, always Tab's reverse |
+| 1 to 9 | choose the n-th row directly | choose the n-th tab directly |
+| Enter | activate the highlighted row | activate the highlighted button |
+| a choice letter | | the caller passes the key character of each option; that letter is underlined in the option's printed label, marking it as the choice code; accepted in either case, so Shift or Caps Lock does not matter |
+
+Leaving:
 
 | key | does |
 |---|---|
-| ↑ ↓, j k | move in a list |
-| PgUp PgDn | page in a list |
-| ← →, Tab, Shift-Tab | move between buttons, or between tabs; Shift-Tab is always Tab's reverse |
-| 1 to 9 | choose the n-th option or tab directly |
-| Enter | activate what is highlighted |
-| Esc | close, taking the default; back to the list from a detail |
-| q | quit the application, only when the caller offers it, and named in the key bar when it is |
-| any other key | stops the countdown (D7); nothing else |
+| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing |
+| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; offered when the caller enables it (round 3: "a parameterized option") |
+| any other key | stops the countdown and nothing else |
 
-Open on this table: round 1 accepted `q` as a second way to close the browser,
-and round 3 asked for `q` or `x` as the quit-the-application key. One key
-cannot do both; the table gives `q` to quitting the application and leaves
-closing to Esc. The architect decides.
+The key bar each component shows, from the rows above that apply to it:
+
+| component | key bar |
+|---|---|
+| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` when enabled |
+| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned` |
+| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` when enabled |
+| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list` |
 
 ### Buttons (settled, architect 2026-10-19)
 
