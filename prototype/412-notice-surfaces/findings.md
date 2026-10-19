@@ -17,17 +17,12 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 5 is built and not yet reviewed.** It is the next step: the
-  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
-  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one view
-  at a time, feedback saved to `feedback/stage1-round5.jsonl`; the last entry
-  takes remarks against the contract. The modal before the read, missed in
-  round 4, is in the list again.
-- **Then, by the round procedure** (`features/412-notice-surfaces.md`
-  § Prototyping): Claude records the feedback here under round 5, sends the
-  read-back (heard, changes, not changing and why), builds only after the
-  architect confirms it, and moves the round's settled lines into the
-  contract.
+- **Round 5 is reviewed** (12 of 12 entries, `feedback/stage1-round5.jsonl`,
+  summarised under round 5 below), with the architect's rebuke on the
+  process: the review list must shrink round by round (see § Lessons learned).
+- **Next, by the round procedure:** the read-back of round 5's feedback goes
+  to the architect; round 6 is built only after he confirms it, shows only the
+  views a change touched, and moves the settled lines into the contract.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
@@ -524,3 +519,56 @@ in the large tier with the gap at five spaces, 1 to 3 and ↓; the box pattern
 list at full width; the browser on tab 7 with both histograms in the detail
 after an empty row, the layered list padded the same, a choice marked and
 shown, Esc back; the inline browser's layered list and repaint.
+
+### Architect's feedback on round 5 (2026-10-19)
+
+All 12 entries, verbatim in `feedback/stage1-round5.jsonl`. Settled: the
+memory modal ("perfect, they've nailed it"), the single notice with the
+category in the top edge ("this is the one, way cleaner": the same visual
+language as the pop-ups, one row fewer), the preread modal ("also great"), the
+inline fallback. What changes:
+
+- **Padding, corrected and counted.** Two characters inside the sides of a
+  pop-up that will be erased; one character for the inline panel that stays
+  on screen (the architect withdrew the two for it: with no empty rows above
+  and below, the sides follow suit). Round 5 rendered three where two were
+  asked: Claude added two to the one that was there. The padding asked for is
+  the padding rendered, counted.
+- **Each pane, one empty row above and below its content**, in a pop-up that
+  will be erased: the options list pane got none above it in round 5. The
+  browser's tabs are part of the list pane, not a pane of their own: the rule
+  under them goes, and the tabs have an empty row above and below, then the
+  list.
+- **The histograms at ltl's own size**, side by side as the tool renders two
+  metrics at 160 to 180 columns, not crushed into 85 cells: "you had the
+  correct size before, I just asked you to add the bytes next to it". An empty
+  row before the `chosen:` row, which bumped into the legend.
+- **Counts in parentheses everywhere.** The browser's title and tabs carried
+  bare numbers where every other surface writes `(N)`: a locked form is
+  carried across every surface when it is locked.
+- **One empty row before a box drawn below the cursor that will be erased**,
+  as the inline modal did; the compact box and the inline browser drew on the
+  next row directly. Standardised on the empty row.
+- **The process.** Twelve scenarios again, many already validated (the
+  fallback shown for every surface), "an inappropriate waste of my time": the
+  list must get shorter every round, towards sign-off.
+
+## Lessons learned (accumulating, for `prototype/README.md` at the stage's close)
+
+1. **The review list shrinks every round.** A round shows only the views a
+   change touched or something new; a view the architect has validated is not
+   shown again, and a mechanism validated on one surface (the fallback
+   placement, a key, the padding) is not re-shown on every surface that
+   shares it. The list is the measure of convergence: twelve, then twelve
+   again, is a round that did not converge (architect, round 5).
+2. **A locked form is swept across every surface when it is locked**, in the
+   same change, and the sweep is checked against each surface by reading the
+   rendering (counts in parentheses, round 5).
+3. **What was asked is what is rendered, counted.** A padding of two is two
+   cells, measured in the capture before review, not two added to what was
+   there.
+4. The lessons recorded at the pause (feature doc § Prototyping): the review
+   object is the framework and its contract, not instances; the contract is
+   written before instances; every round is read back before building; every
+   round ends with its settled lines in the record; Claude's own check
+   observes what the architect observes.

@@ -391,6 +391,11 @@ carried the same correction):
 4. The next round is built against the contract, and Claude's own check before
    review observes what the architect will observe (a terminal pane captured
    as it is seen, alternate screen included), or says that it cannot.
+5. The round shows only the views a change touched or something new. A view
+   the architect validated is not shown again; a mechanism validated on one
+   surface is not re-shown on every surface that shares it. The list gets
+   shorter every round, towards sign-off; a list that does not shrink is a
+   round that did not converge (architect, 2026-10-19, after round 5).
 
 The review unit is the contract once, as a document, then each component with
 a few inputs; cross-cutting feedback is given against the contract's lines,
@@ -476,7 +481,7 @@ content; no moment has a presentation of its own (D5).
 |---|---|---|
 | **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
 | **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); any parameter of the defaults table it wants otherwise |
-| **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection) |
+| **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection). A detail that carries ltl's histograms carries them at ltl's own size, side by side as the tool renders two metrics, which needs 160 to 180 columns (round 5) |
 
 A notice is the same record everywhere (proposed): its category (D1); a focus
 (what it is about: an API, a time range, a count); a statement; evidence, zero
@@ -556,13 +561,18 @@ default button outside the centred width, so nothing moves when it stops
 
 ### Padding (settled, architect 2026-10-19, round 4)
 
-Every box has two characters of padding inside its left and right edges, in
-each pane, whether or not it will be erased. A pop-up that will be erased (the
-modal, the compact box, the browser, a layered modal) also has one empty row
-above and below the content of each pane. A modal's question has an empty row
-above and below it. In a detail pane an empty row separates a notice from a
-histogram under it. A notice's continuation rows carry no hanging indent
-inside a modal or box.
+A pop-up that will be erased (the modal, the compact box, the browser, a
+layered modal) has two characters of padding inside its left and right edges
+and one empty row above and below the content of each of its panes; the
+padding is counted as rendered, two cells, not two added to a space already
+there. A box that stays on screen (the panel) has one character inside each
+side and no empty rows (architect, 2026-10-19, round 5). A modal's question
+has an empty row above and below it. The browser's tabs belong to its list
+pane: an empty row above and below the tabs, then the list, no rule between.
+In a detail pane an empty row separates a notice from a histogram under it,
+and the chosen or on-offer row from what is above it. A notice's continuation
+rows carry no hanging indent inside a modal or box. A box drawn below the
+cursor that will be erased is preceded by one empty row.
 
 ### Pop-up size (proposed; to be seen in round 4; round 3 asked for three predefined sizes as ratios of the terminal)
 
@@ -619,12 +629,18 @@ notice one row with no row break inside it, its parts told apart by colour and
 a marker before the evidence and before the remedy. A coloured block marks only
 the selected tab.
 
-### Wording (settled, architect 2026-10-19, from round 3)
+### Wording (settled, architect 2026-10-19, rounds 3 and 5)
 
-The panel's title is the word `notices` and the bare count, in the dim of the
-count; `notices` is lower case beside an upper-case category name. The
-how-to-read text of *your options* says the tool is warning, not that the
-analyst erred: "command usage warnings" or words to that effect.
+A count is written in parentheses everywhere, `(N)`: after a category name,
+in a tab, in a title; never a bare number (round 5: the browser's bare
+counts broke the design language). The panel's title is the word `notices`
+and its count, in the dim of the count; `notices` is lower case beside an
+upper-case category name. A panel with one category takes the edge form: the
+category's glyph, name, count and how-to-read text in the top edge, in the
+category colour, the notices alone inside, so the row that said `notices`
+goes (round 5: "this is the one"). The how-to-read text of *your options*
+says the tool is warning, not that the analyst erred: "command usage
+warnings" or words to that effect.
 
 ### Category sheet (settled, architect 2026-10-19: order, glyphs, colours, how-to-read text and the bullet)
 
