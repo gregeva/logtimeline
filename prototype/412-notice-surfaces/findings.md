@@ -17,18 +17,15 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 4 is built and not yet reviewed.** It is the next step: the
-  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
-  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one view
-  at a time, feedback saved to `feedback/stage1-round4.jsonl`; the last entry,
-  `contract`, runs nothing and takes remarks against the contract. `perl
-  review.pl --list` shows which views have feedback; a run resumes at the
-  first without.
-- **Then, by the round procedure** (`features/412-notice-surfaces.md`
-  § Prototyping): Claude records the feedback here under round 4, sends the
-  read-back (heard, changes, not changing and why), builds only after the
-  architect confirms it, and moves the round's settled lines into the
-  contract.
+- **Round 4 is reviewed** (12 of 12 entries, `feedback/stage1-round4.jsonl`,
+  summarised under round 4 below). The modal before the read was missed (the
+  countdown ran out) and is reviewed again next round.
+- **Next, by the round procedure** (`features/412-notice-surfaces.md`
+  § Prototyping): the read-back of round 4's feedback (heard, changes, not
+  changing and why) goes to the architect; round 5 is built only after he
+  confirms it, and the round's settled lines move into the contract. The
+  review runner is `perl review.pl` in this directory (Homebrew Perl: `export
+  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`).
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
@@ -431,3 +428,52 @@ Claude's own runs, before review:
   marked ◆, Esc back to the browser; the inline browser's layered list drawn
   within its rows and the browser repainted after it; the browser closing on
   its own after its countdown.
+
+### Architect's feedback on round 4 (2026-10-19)
+
+All 12 entries, verbatim in `feedback/stage1-round4.jsonl`. The framework
+reads as right: the panel "looks good", the single-notice panel "amazing",
+the memory modal "looks great", the compact box "beautiful, I love it", the
+inline modal "unnoticeably different, so perfect for a fallback", the browser
+"really great, and the power is starting to come through". The closing entry
+carried no separate remarks against the contract; what follows is what
+changes.
+
+Across the surfaces:
+
+- **Padding inside every pop-up that will be erased.** One empty row above
+  and below the content and two characters of padding left and right, in each
+  pane (the modal, the browser's list and detail, the layered modal), so the
+  content is easier to read and separate. The question in a modal has an
+  empty row above and below it. Between a notice and its histogram in the
+  browser's detail, an empty row.
+- **The bullet carries the category colour.** Claude changed the bullet to
+  the dim colour without asking; the category colour on the bullet carried
+  the classification in a single character and is put back.
+- **Buttons are centred on text that does not change.** The countdown's
+  removal moved the buttons off centre; the width used for centring must not
+  change through the run.
+- **The column gap in the options list grows with the width.** One space at
+  the tightest, up to about five when there is room; columns are not equally
+  spaced, the gap expands with the available width.
+- **A dense list gets a wider pop-up.** The pattern modal's list, at about
+  two thirds of the terminal, was too dense for its content; dense content
+  takes the wider tier.
+- **No hanging indent** on a notice's continuation rows inside a modal: never
+  requested, removed.
+
+By view:
+
+| view | verdict | to change |
+|---|---|---|
+| panel, 7 notices | looks good; the dash is liked | the bullet back in the category colour |
+| panel, one notice | amazing | add, for comparison, the form where the glyph, category, count and how-to-read sit in the top edge, saving a row on a tight terminal |
+| bullet glyph sheet | | first choice candidate 7 (U+2576, box drawings light right: a slight indentation under the category glyph, the dash right-aligned); second choice candidate 2 (U+2012, figure dash) |
+| modal during the read | looks great | two characters of inside padding left and right; buttons centred; the hanging indent removed; an empty row below the question |
+| modal before the read | missed (the countdown ran out) | reviewed again next round |
+| modal once a pattern is found | pretty good; the list all good | the buttons' centring; a wider pop-up for the dense list |
+| box during the read | beautiful | |
+| box once a pattern is found | looks and works good | the column gap growing with the width |
+| modal below the cursor | good, perfect as a fallback | |
+| browser over the dimmed run | really great | the padding rule above in the list, the detail and the layered modal; an empty row between the notice and the histogram; the bytes histogram added to the detail where the messages data has bytes |
+| browser below the cursor | good, as expected | |
