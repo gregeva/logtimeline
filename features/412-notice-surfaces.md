@@ -484,7 +484,7 @@ or more; a remedy; the producer that raised it; and, when it offers options, the
 list of them. An option carries its parts under the consumer's headings (D8),
 the command options that apply it and its effect in one line.
 
-### Keys (settled, architect 2026-10-19; one key map on every surface, following common terminal practice)
+### Keys (proposed, following common terminal practice; round 3 asked for one key map on every surface)
 
 | key | does |
 |---|---|
@@ -497,9 +497,10 @@ the command options that apply it and its effect in one line.
 | q | quit the application, only when the caller offers it, and named in the key bar when it is |
 | any other key | stops the countdown (D7); nothing else |
 
-Round 1 had accepted `q` as a second way to close the browser and round 3
-asked for `q` or `x` to quit the application; one key cannot do both, so `q`
-quits the application and closing is Esc alone (architect, 2026-10-19).
+Open on this table: round 1 accepted `q` as a second way to close the browser,
+and round 3 asked for `q` or `x` as the quit-the-application key. One key
+cannot do both; the table gives `q` to quitting the application and leaves
+closing to Esc. The architect decides.
 
 ### Buttons (settled, architect 2026-10-19)
 
