@@ -9,6 +9,7 @@
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
 #   perl review.pl --round 6      an earlier round's options (default: 7)
+#   perl review.pl --round light  the light-background evaluation (light-review.pl runs this)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -32,10 +33,10 @@ $| = 1;
 
 my %opt;
 $opt{round} = 7;
-GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
+GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=s' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
-my $file = "$dir/feedback/stage1" . ( $opt{round} == 1 ? '' : "-round$opt{round}" ) . '.jsonl';
+my $file = "$dir/feedback/stage1" . ( $opt{round} eq '1' ? '' : $opt{round} eq 'light' ? '-light' : "-round$opt{round}" ) . '.jsonl';
 my $json = JSON::PP->new->canonical->utf8;
 
 # id, prototype, arguments, what the option is, what to look at, what to do.
@@ -143,6 +144,21 @@ $rounds{6} = [
 $rounds{7} = [
     [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'Modal once a pattern is found, with its options list', 'press l: the list pane with an empty row above and below its content, an empty row between the list and the highlighted option\'s effect, the body pane closed by an empty row before the rule' ],
     [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views' ],
+];
+
+# The light background: the validated framework once more, from a terminal
+# with a light profile, every component in each of its forms once; the
+# colours are the darkest step of each category colour's light gradient, the
+# frame grey 244, the text black (NoticeProto::style_for). Feedback to
+# feedback/stage1-light.jsonl.
+$rounds{light} = [
+    [ 'panel',          'show.pl', 'panel --bg light',                         'Panel with the typical set, light background',      'the category colours on light: are the six told apart, and readable, with the bullets in the same colours' ],
+    [ 'panel-one',      'show.pl', 'panel --input deprecation --bg light',     'Panel with a single notice, light background',      'the edge form with the frame in the category colour' ],
+    [ 'modal-read',     'show.pl', 'ask --input memory --bg light',            'Modal during the read, light background',           'the dimmed run under the dialog; the frame colour; the highlighted button in reverse video; the countdown dim' ],
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern --bg light',           'Modal with its options list, light background',     'press l: the headings, the highlighted option in reverse video, the dim why column against the selected one in colour' ],
+    [ 'box-read',       'show.pl', 'ask --input memory --form box --bg light', 'The compact box, light background',                 'the question row with the default bright: on light that is bold black' ],
+    [ 'browser',        'show.pl', 'browser --bg light',                       'Notice browser, light background',                  'tabs with the selected one as a coloured block; the list highlight; press 7 for the histograms, which keep ltl\'s own colours' ],
+    [ 'contract',       '-',       '',                                         'Remarks against the light background',              'anything that applies across views: the category sheet\'s light colours are the contract\'s proposed line for it' ],
 ];
 
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
