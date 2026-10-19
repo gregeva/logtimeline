@@ -461,7 +461,7 @@ the prototyping stage is closed:
 - [x] Each selected surface has a demonstrated way to be captured and checked
       unattended, for the harnesses and for the screenshot tool
       (`prototype/412-notice-surfaces/findings.md` § Unattended capture, 2026-10-19;
-      which options are taken is the architect's decision, pending).
+      the method follows the surface, § Unattended runs of the contract).
 - [ ] The prototype findings record what was chosen, what was learned along
       the way, and why each decision was made.
 
@@ -668,22 +668,30 @@ before a notice in a list is `╶` (U+2576, box drawings light right), in the
 category's colour, so the one character carries the classification; chosen
 from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).
 
-### Unattended runs (proposed from the demonstration of 2026-10-19; the architect decides the options)
+### Unattended runs (settled, architect 2026-10-19)
 
-With no terminal, a component draws itself once, as it would appear, in the
-state an answer given ahead reaches (the options list with its choice
-highlighted), takes that answer or else the default, emits nothing but rows
-and colour codes, and the run goes on. That is what the harnesses and the
-screenshot tool read. Answers given ahead of time are #748 (take the analyst's
-input at choice points, with a default and answers given ahead).
+**The test method follows the surface it targets.** A harness or the
+screenshot tool uses the cheapest capture that sees what the surface
+produces; no method runs for a surface that does not need it, and nothing runs
+on a platform that lacks the method's tooling.
 
-The capture and check method is demonstrated against this stage's own escaped
-defects in `prototype/412-notice-surfaces/findings.md` § Unattended capture:
-a redirected run and a tmux pane capture, both read through the repository's
-cell decoder, with predicates for pane padding, the run's rows unmoved under a
-pop-up, no trace after it, and a plain redirected run. The options and costs
-(H1, H2 for the harnesses; S1 to S3 for the screenshot tool) are listed there
-for the architect's decision.
+| surface | what a run with no terminal holds | capture and check | screenshot |
+|---|---|---|---|
+| panel (notices inline, the first delivery and the normal use) | the same rows as in a terminal | redirected run, read through the cell decoder, as every harness today; outcomes from `-V` | the panel's rows as a section through `-V section-layout`, as the tool works today |
+| a surface that asks (modal, box, options list) | the notice in the record form, the category named, and the answer taken on the row after it; nothing but rows and colour codes (the architect's option B, pending lock) | the record form and the `-V` choice section of #748 (take the analyst's input at choice points, with a default and answers given ahead) by redirected run; the pop-up's rendering and behaviour (padding, size, keys, erasing, the run unmoved under it) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the record form from a redirected run, or a pane capture for the pop-up over the run |
+| browser (navigation, layered pop-ups) | the panel form of its notices | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
+
+The pane-capture method is demonstrated, with predicates that told this
+stage's known-good and known-bad builds apart, in
+`prototype/412-notice-surfaces/findings.md` § Unattended capture; its
+predicates enter `tests/lib/` when the first harness needs them, not before.
+
+**Platforms.** The harnesses run on macOS and Linux (`docs/toolchain-guidance.md`:
+they do not run on Windows). A harness that needs tmux is skipped where tmux
+is absent and runs elsewhere; the better remedy, equipping the Windows
+development host with WSL or Cygwin so interactive surfaces are tested there
+too, is an enhancement to the Windows setup, to be filed when the first
+interactive surface is scheduled.
 
 ## Open items
 

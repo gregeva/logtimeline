@@ -579,6 +579,15 @@ inline fallback. What changes:
    written before instances; every round is read back before building; every
    round ends with its settled lines in the record; Claude's own check
    observes what the architect observes.
+5. **A verification method is chosen per surface, against what the first
+   delivery uses.** Asked which capture method the harnesses should adopt, I
+   offered a choice of tools for every surface at once, with tmux weighed
+   against a redirected run as if one had to win. The architect's rule: the
+   method follows the surface it targets, the cheapest capture that sees what
+   the surface produces, and nothing runs on a platform without its tooling.
+   The first delivery prints notices inline, so the first harness is a
+   redirected run; the terminal-driving method waits for the surface that
+   needs it (2026-10-19).
 
 ## Round 6: round 5's corrections, three views (2026-10-19)
 
@@ -702,18 +711,26 @@ and with an answer given ahead and no terminal the surface is still drawn
 once, in the state the answer reaches, so a harness or the screenshot tool can
 look at it.
 
-### Costs, for the architect to decide
+### The decision: the method follows the surface (architect, 2026-10-19)
 
-| consumer | option | what it gives | cost |
-|---|---|---|---|
-| harnesses | **H1** redirected run + cell decoder (the method they use today) | every component's rendering and the answer taken, on macOS, Linux and Windows | none new: the surfaces already honour it; the four predicates move into `tests/lib/rendered-output.pl` |
-| harnesses | **H2** pane capture through tmux, keys sent | the interactive behaviour: erasing, the dimmed run unmoved, focus, layering | tmux as a development dependency (Homebrew, apt; not on Windows, so these assertions are skipped there); a `pane_capture` helper in `tests/lib/` after `check-tmux.sh`; a harness scenario runs seconds, not milliseconds |
-| screenshot tool | **S1** the plain frame as a section | an image of any surface as it first appears, or in the state an answer given ahead reaches | `ltl` reports the surface's rows in `-V section-layout` (a section name per surface), and the tool accepts an answers-ahead option where it refuses `-p` today: a small change to `features/598-screenshot-capture.md` |
-| screenshot tool | **S2** the pane capture as the image source | a modal over the dimmed run, the browser with its layered list, as the analyst sees them | the tool gains a tmux capture stage beside its redirected one (macOS and Linux only) and a way to name the moment to capture: a medium change to the tool's specification |
-| screenshot tool | **S3** no image of a pop-up over the run | | none; documentation shows the plain frame (S1) |
+I put this up as a choice among tools (redirected run, a hidden frame option,
+tmux) for all surfaces at once. The architect reframed it: the harnesses adapt
+to the surface they target, and the surfaces are being designed now so the
+language can grow; the first delivery and the normal use is notices printed
+inline, with no interactivity. For that, the redirected run and the cell
+decoder are the whole method, and tmux would be cost without return. tmux
+becomes essential when a surface needs the interface driven: navigation,
+layered pop-ups, keys. Settled in `features/412-notice-surfaces.md`
+§ Unattended runs as a table of surface against method.
 
-Recommendation: H1 and H2 for the harnesses, H1 carrying every rendering
-assertion and H2 the few interactive ones; S1 for the screenshot tool now, S2
-deferred until a document needs a pop-up over the run. The redirected-run
-behaviour (draw once, in the state the answer reaches, nothing but colour
-codes) is proposed as the contract's line for unattended runs.
+Two corrections to what I wrote above. The "skipped on Windows" cost was moot:
+the harnesses do not run on Windows at all, for any surface. And the choice is
+not fixed per platform: a tmux harness is skipped where tmux is absent, and
+the Windows host can be equipped (WSL, Cygwin) so interactive surfaces are
+tested there too, an enhancement to the Windows setup when the first such
+surface is scheduled.
+
+The screenshot question follows the same rule: the panel is a section the
+tool already draws; how a pop-up is pictured is decided when a pop-up is
+delivered.
+
