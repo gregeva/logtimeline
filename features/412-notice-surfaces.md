@@ -484,7 +484,7 @@ or more; a remedy; the producer that raised it; and, when it offers options, the
 list of them. An option carries its parts under the consumer's headings (D8),
 the command options that apply it and its effect in one line.
 
-### Keys (proposed; one key map on every component, following common terminal practice; corrected by the architect 2026-10-19)
+### Keys (settled, architect 2026-10-19; one key map on every component, following common terminal practice)
 
 Moving and choosing, wherever the action exists:
 
@@ -551,7 +551,7 @@ that goes further (Look at the options) between. Labels are the caller's;
 positions are not. Enter activates the highlighted button; a letter key named
 in a label (`y`, `n`) is a shortcut to it.
 
-### Pop-up size (proposed; round 3 asked for three predefined sizes as ratios of the terminal)
+### Pop-up size (proposed; to be seen in round 4; round 3 asked for three predefined sizes as ratios of the terminal)
 
 | tier | width | height |
 |---|---|---|
@@ -597,14 +597,14 @@ notice one row with no row break inside it, its parts told apart by colour and
 a marker before the evidence and before the remedy. A coloured block marks only
 the selected tab.
 
-### Wording (proposed, from round 3)
+### Wording (settled, architect 2026-10-19, from round 3)
 
 The panel's title is the word `notices` and the bare count, in the dim of the
 count; `notices` is lower case beside an upper-case category name. The
 how-to-read text of *your options* says the tool is warning, not that the
 analyst erred: "command usage warnings" or words to that effect.
 
-### Category sheet (proposed, Claude's, carried since round 1; D1 fixes the categories, not their order, glyphs or colours)
+### Category sheet (settled, architect 2026-10-19: order, glyphs, colours and how-to-read text; the bullet glyph is open)
 
 | order | category | glyph | colour (dark background) | how to read it |
 |---|---|---|---|---|
@@ -621,7 +621,7 @@ gradient; no light-background rendering has been reviewed yet. The bullet
 before a notice in a list is open: a light glyph from the dash family, chosen
 from a glyph sheet in round 4 (round 3).
 
-### Unattended runs (open; the stage's second deliverable)
+### Unattended runs (the default rule settled, architect 2026-10-19; the capture method open, the stage's second deliverable)
 
 With no terminal every component takes its default and goes on, and a run
 never waits. How a chosen surface is captured and checked by the harnesses and
