@@ -509,18 +509,21 @@ Leaving:
 
 | key | does |
 |---|---|
-| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing |
+| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing. Esc alone: no letter closes, since a letter would collide with a caller's choice letter (locked, architect 2026-10-19) |
 | q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; a parameter, on by default, with its default per use in the table below (architect, 2026-10-19) |
 | any other key | stops the countdown and nothing else |
 
-The key bar each component shows, from the rows above that apply to it:
+The key bar each component shows, from the rows above that apply to it.
+Every entry is written `keys: action`, the same shape throughout, so a pair
+of keys never reads as a key and an action (locked, architect 2026-10-19):
 
 | component | key bar |
 |---|---|
-| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` where it is on |
-| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned`, `q/x quit` where it is on |
-| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` where it is on |
-| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list`, `q/x quit` where it is on |
+| ask, first stage | `←→ Tab: move · Enter: choose · Esc: continue reading · q/x: quit` where quitting is on; the choice letters underlined in the buttons |
+| ask, compact box | `s/c: choose`, the letters; `· q/x: quit` where quitting is on |
+| ask, options list | `↑↓ j k: move · 1-N Enter: choose · Esc: continue as planned · q/x: quit` |
+| browser, list | `↑↓ j k: move · ←→ Tab: tabs · 1-N: tab · Enter: options · Esc: close · q/x: quit` |
+| layered options list over the browser | as the options list, with `Esc: back` |
 
 ### Parameters and their defaults by use (settled, architect 2026-10-19, with the two cells he marked open)
 

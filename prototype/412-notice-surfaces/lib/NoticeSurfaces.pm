@@ -82,14 +82,14 @@ sub action {
     return "letter:$l";
 }
 
-# The key bar's text for what is on: the moving keys of the component, Enter,
-# Esc with what it takes, and quitting where it is on.
+# The key bar's text: every entry is `keys: action`, the same shape on every
+# surface (architect, 2026-10-19: "q/x: quit" throughout), so a pair of keys
+# never reads as a key and an action. Takes [keys, action] pairs; quitting is
+# appended where it is on.
 sub key_bar {
-    my (%k) = @_;
-    my @p = ( $k{move} // () );
-    push @p, 'Enter ' . ( $k{enter} // 'choose' );
-    push @p, 'Esc ' . $k{esc} if $k{esc};
-    push @p, 'q/x quit/exit' if $k{quit};
+    my ( $pairs, %k ) = @_;
+    my @p = map { "$_->[0]: $_->[1]" } @$pairs;
+    push @p, 'q/x: quit' if $k{quit};
     return join ' · ', @p;
 }
 
@@ -713,15 +713,16 @@ sub ask {
     my $foot = sub {
         my ($st) = @_;
         return undef if $p{keybar} eq 'none';
+        my $esc = $stage == 2 ? 'back' : $esc_takes;
         if ( $p{keybar} eq 'letters' ) {
             my $t = $st == 2
-                ? '1-' . scalar( @{ $a{options} } ) . ' · Enter · Esc'
-                : join( ' ', grep { defined } map { $_->{key} } @btn );
-            return " $s->{dim}$t" . ( $p{quit} ? ' · q/x quit/exit' : '' ) . "$s->{reset} ";
+                ? key_bar( [ [ '1-' . scalar( @{ $a{options} } ), 'choose' ], [ 'Esc', $esc ] ], quit => $p{quit} )
+                : key_bar( [ [ join( '/', grep { defined } map { $_->{key} } @btn ), 'choose' ] ], quit => $p{quit} );
+            return " $s->{dim}$t$s->{reset} ";
         }
         my $t = $st == 2
-            ? key_bar( move => '↑↓ j k move · 1-' . scalar( @{ $a{options} } ), enter => 'choose', esc => $esc_takes, quit => $p{quit} )
-            : key_bar( move => '←→ Tab move', enter => 'choose', esc => $esc_takes, quit => $p{quit} );
+            ? key_bar( [ [ '↑↓ j k', 'move' ], [ '1-' . scalar( @{ $a{options} } ) . ' Enter', 'choose' ], [ 'Esc', $esc ] ], quit => $p{quit} )
+            : key_bar( [ [ '←→ Tab', 'move' ], [ 'Enter', 'choose' ], [ 'Esc', $esc ] ], quit => $p{quit} );
         return " $s->{dim}$t$s->{reset} ";
     };
 
@@ -980,7 +981,7 @@ sub browser {
         my @detail = $detail_rows->( $shown[$sel], $iw, $chosen{ $shown[$sel] } );
         push @r, ( map { $detail[$_] // '' } 0 .. $D - 1 ), '';
         my $cd = defined $left ? ' ' . countdown( $s, $left, $p{seconds} ) : '';
-        my $foot = ' ' . $s->{dim} . key_bar( move => '↑↓ j k move · ←→ Tab tabs · 1-' . ( @cats + 1 ) . ' tab', enter => 'options', esc => 'close', quit => $p{quit} ) . $s->{reset} . $cd . ' ';
+        my $foot = ' ' . $s->{dim} . key_bar( [ [ '↑↓ j k', 'move' ], [ '←→ Tab', 'tabs' ], [ '1-' . ( @cats + 1 ), 'tab' ], [ 'Enter', 'options' ], [ 'Esc', 'close' ] ], quit => $p{quit} ) . $s->{reset} . $cd . ' ';
         my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
         return frame( s => $s, width => $bw, rows => \@r, foot => $foot,
             title => " $s->{dim}notices (" . @items . ") · $range$s->{reset} " );
