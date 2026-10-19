@@ -517,11 +517,18 @@ The key bar each component shows, from the rows above that apply to it:
 | browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` where it is on |
 | browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list`, `q/x quit` where it is on |
 
-### Parameters and their defaults by use (proposed; the architect asked for this table 2026-10-19)
+### Parameters and their defaults by use (settled, architect 2026-10-19, with the two cells he marked open)
 
 Every parameter has a default per use, so that a caller passes only what it
 wants otherwise, and a compact surface is not cluttered with what a full one
 shows. The uses are the three components, the ask component in its two forms.
+
+**Layered surfaces** (architect, 2026-10-19): a selection on an item in the
+browser may open an ask modal on top of the browser, with its own selection and
+options; the modal's keys and choice letters take effect while it is up, and
+the browser is back as it was when it closes. Modals layered over a surface
+have not been prototyped or discussed before this; the case is factored into
+the framework and goes into round 4.
 
 | parameter | ask, modal | ask, compact box | browser | panel |
 |---|---|---|---|---|
@@ -529,9 +536,9 @@ shows. The uses are the three components, the ask component in its two forms.
 | size | smallest fitting tier | to its content, full width | smallest fitting tier; height from the tallest detail | to its content |
 | quit with q/x | on | off | on | not applicable |
 | key bar | full | the choice letters only | full | none |
-| countdown to the default | 10 s | 10 s | none | none |
-| choice letters | from the caller, underlined | from the caller, underlined | not applicable | not applicable |
-| headings of the options list | What? How? Why? | What? How? Why? | What? How? Why? in a detail that offers options | not applicable |
+| countdown to the default | 10 s | 10 s | 15 s | none |
+| choice letters | from the caller, underlined | from the caller, underlined | none in the list itself; a selection on an item may open an ask modal on top of the browser, whose own choice letters then take effect | not applicable |
+| headings of the options list | open: depends on the notice producers' data model, investigated later | open: as the modal | What? How? Why? | not applicable |
 | record left after answering | off | off | not applicable | not applicable |
 | top edge | category, count, how to read it | category, count, how to read it | `notices` and the count | `notices` and the count |
 
