@@ -456,9 +456,12 @@ report comes here once its decision round is held.
 Individual prototypes need not meet these; the selected options must, before
 the prototyping stage is closed:
 
-- [ ] Each selected surface is judged by the architect in the terminal.
-- [ ] Each selected surface has a demonstrated way to be captured and checked
-      unattended, for the harnesses and for the screenshot tool.
+- [x] Each selected surface is judged by the architect in the terminal (macOS,
+      dark and light, rounds 4 to 7 and the light evaluation, 2026-10-19).
+- [x] Each selected surface has a demonstrated way to be captured and checked
+      unattended, for the harnesses and for the screenshot tool
+      (`prototype/412-notice-surfaces/findings.md` § Unattended capture, 2026-10-19;
+      which options are taken is the architect's decision, pending).
 - [ ] The prototype findings record what was chosen, what was learned along
       the way, and why each decision was made.
 
@@ -665,13 +668,22 @@ before a notice in a list is `╶` (U+2576, box drawings light right), in the
 category's colour, so the one character carries the classification; chosen
 from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).
 
-### Unattended runs (the default rule settled, architect 2026-10-19; the capture method open, the stage's second deliverable)
+### Unattended runs (proposed from the demonstration of 2026-10-19; the architect decides the options)
 
-With no terminal every component takes its default and goes on, and a run
-never waits. How a chosen surface is captured and checked by the harnesses and
-the screenshot tool is not yet demonstrated; answers given ahead of time are
-#748 (take the analyst's input at choice points, with a default and answers
-given ahead).
+With no terminal, a component draws itself once, as it would appear, in the
+state an answer given ahead reaches (the options list with its choice
+highlighted), takes that answer or else the default, emits nothing but rows
+and colour codes, and the run goes on. That is what the harnesses and the
+screenshot tool read. Answers given ahead of time are #748 (take the analyst's
+input at choice points, with a default and answers given ahead).
+
+The capture and check method is demonstrated against this stage's own escaped
+defects in `prototype/412-notice-surfaces/findings.md` § Unattended capture:
+a redirected run and a tmux pane capture, both read through the repository's
+cell decoder, with predicates for pane padding, the run's rows unmoved under a
+pop-up, no trace after it, and a plain redirected run. The options and costs
+(H1, H2 for the harnesses; S1 to S3 for the screenshot tool) are listed there
+for the architect's decision.
 
 ## Open items
 

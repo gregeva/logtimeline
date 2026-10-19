@@ -53,14 +53,19 @@ sub backdrop {
     out( @{ $bd->{before_prompt} }, $bd->{prompt}->('ltl access_log.2025-05-05.txt'), split( /\n/, ltl_constants()->{title} ), '', @{ $bd->{scanning} } );
 }
 
+# The progress line is painted only in a terminal, as ltl's is (a redirected
+# run, the harnesses' and the screenshot tool's, carries no progress and no
+# cursor control, only the rows and their colours).
 sub progress {
     my ( $from, $to ) = @_;
-    for my $pct ( $from .. $to ) {
-        live_row( $bd->{progress}->($pct), $W );
-        sleep 0.02 if $live;
+    if ($live) {
+        for my $pct ( $from .. $to ) {
+            live_row( $bd->{progress}->($pct), $W );
+            sleep 0.02;
+        }
     }
     return unless $to == 100;
-    print "\r\e[2K";
+    print "\r\e[2K" if $live;
     out( @{ $bd->{completed} } );
 }
 
@@ -103,7 +108,7 @@ elsif ( $component eq 'ask' ) {
         my ( $role, $how ) = ask(%ask);
         quit_run() if $role eq 'quit';
         if ( $role eq 'stop' ) {
-            print "\r\e[2K";
+            print "\r\e[2K" if $live;
             out("\e[93mProcessing stopped at 40%.\e[0m");
             finish('the figures would cover the lines read so far');
             exit 0;

@@ -639,7 +639,7 @@ the framework is left unvalidated on macOS.
 | closing criterion or item (feature doc § Closing out prototyping, § Prototyping) | state |
 |---|---|
 | each selected surface judged by the architect in the terminal | done on macOS: the three components, every form and placement |
-| a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | not started; `check-tmux.sh` (a tmux pane captured as seen) is the candidate method, used for Claude's own checks since round 4 |
+| a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | demonstrated against known-good and known-bad input (§ Unattended capture below); the options and their costs are before the architect |
 | the findings record what was chosen, what was learned and why | this file and the contract; the lessons go into `prototype/README.md` at the close |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
 | porting the selected components to Linux and Windows | not started |
@@ -654,3 +654,66 @@ bold"). The category sheet's light colours (the darkest step of each colour's
 light gradient) stand. One remark on the browser: Esc and close should be
 synonyms as q and x are; its reading is checked with the architect before
 anything changes.
+
+## Unattended capture: the method, demonstrated (2026-10-19)
+
+The stage's second closing criterion, a verification-method prototype under
+`prototype/README.md` § (d): how a surface is captured and checked by the
+harnesses and by the screenshot tool with nobody at the keyboard. The
+consumers and their constraints come from the records: a harness reads a
+redirected standard output and asserts on cells through
+`tests/lib/rendered-output.pl`, never on escape sequences
+(`tests/HARNESS-DESIGN.md` § Asserting rendered output); the screenshot tool
+draws standard output, chooses rows by `-V section-layout`, refuses any escape
+other than a colour code, and runs `ltl` with `--disable-progress`
+(`docs/process/screenshots.md`, `features/598-screenshot-capture.md`).
+
+### Two captures, one decoder
+
+| capture | what it is | sees | does not see |
+|---|---|---|---|
+| **redirected run** | standard output to a file, no terminal: every component draws itself once, as it would appear, in the state an answer given ahead reaches (the options list with its choice highlighted), takes that answer or the default, and emits nothing but rows and colour codes | the surface's content, colours, padding, size; the answer taken | keys, erasing, layering, the dimmed run |
+| **pane capture** | the run in a tmux pane of a set size, keys sent as the analyst would, the pane captured with its attributes (`capture-pane -e -p`), alternate screen included | everything the analyst sees at any moment: the dimmed run under a modal, a focus moved by Shift-Tab, the surface erased, a list layered over the browser | nothing of the surfaces; it needs tmux |
+
+Both are read through the repository's own cell decoder;
+`capture/assert-surface.pl` adds four predicates over it: `panes` (each pane's
+side padding in cells and its empty rows above and below), `unmoved` (the run's
+rows outside a pop-up's rectangle at the same rows as before it opened),
+`no-trace` (nothing where the pop-up was once it closed, the run's own rows
+continuing), `plain` (a redirected run holds no escape but colour, draws the
+surface once, and goes on).
+
+### Validated against this stage's own escaped defects
+
+`capture/specimens.sh` runs each predicate on the current build and on the
+build that carried the defect it is for, checked out from its commit, and
+reports whether the two are told apart. All eight cases came out as expected:
+
+| predicate | known good | known bad | told apart |
+|---|---|---|---|
+| panes (2 cells at the sides, an empty row above and below) | round 7, the options list | round 6 (commit e6230dd): the list pane lacked its row below, said three times before it was caught | yes: `no empty row below its content` on both panes of the round 6 capture |
+| unmoved | round 7, the memory modal | round 3 (commit 4bef110): the dimmed run drawn at the bottom of the screen | yes: `row 2 moved: before '$ ltl ...' / with the pop-up ''` |
+| no-trace | round 7, Esc on the memory modal | the same with `--record`, which leaves the notice and the answer on purpose | yes: `3 rows left where the pop-up was` |
+| plain | the redirected run | the raw byte stream a terminal receives (tmux `pipe-pane`) | yes: `74 escape sequences other than colour codes` |
+
+Two things the demonstration changed in the prototypes: a redirected run paints
+no progress line and no cursor control (as `ltl` under `--disable-progress`);
+and with an answer given ahead and no terminal the surface is still drawn
+once, in the state the answer reaches, so a harness or the screenshot tool can
+look at it.
+
+### Costs, for the architect to decide
+
+| consumer | option | what it gives | cost |
+|---|---|---|---|
+| harnesses | **H1** redirected run + cell decoder (the method they use today) | every component's rendering and the answer taken, on macOS, Linux and Windows | none new: the surfaces already honour it; the four predicates move into `tests/lib/rendered-output.pl` |
+| harnesses | **H2** pane capture through tmux, keys sent | the interactive behaviour: erasing, the dimmed run unmoved, focus, layering | tmux as a development dependency (Homebrew, apt; not on Windows, so these assertions are skipped there); a `pane_capture` helper in `tests/lib/` after `check-tmux.sh`; a harness scenario runs seconds, not milliseconds |
+| screenshot tool | **S1** the plain frame as a section | an image of any surface as it first appears, or in the state an answer given ahead reaches | `ltl` reports the surface's rows in `-V section-layout` (a section name per surface), and the tool accepts an answers-ahead option where it refuses `-p` today: a small change to `features/598-screenshot-capture.md` |
+| screenshot tool | **S2** the pane capture as the image source | a modal over the dimmed run, the browser with its layered list, as the analyst sees them | the tool gains a tmux capture stage beside its redirected one (macOS and Linux only) and a way to name the moment to capture: a medium change to the tool's specification |
+| screenshot tool | **S3** no image of a pop-up over the run | | none; documentation shows the plain frame (S1) |
+
+Recommendation: H1 and H2 for the harnesses, H1 carrying every rendering
+assertion and H2 the few interactive ones; S1 for the screenshot tool now, S2
+deferred until a document needs a pop-up over the run. The redirected-run
+behaviour (draw once, in the state the answer reaches, nothing but colour
+codes) is proposed as the contract's line for unattended runs.

@@ -396,8 +396,9 @@ sub draw_rows {
     my ( $d, @rows ) = @_;
     my ( $W, $H ) = @$d{qw(W H)};
     if ( $d->{mode} eq 'plain' ) {
+        # Not a terminal: the rows once, with their colours and nothing else,
+        # which is what a harness or the screenshot tool reads.
         return if $d->{h}++;
-        print "\r\e[2K";
         print "$_\n" for @rows;
         return;
     }
@@ -676,8 +677,9 @@ sub ask {
             $oi = defined $g && $g =~ /^\d+$/ && $g >= 1 && $g <= @{ $a{options} } ? $g - 1 : $opt_def;
             $ohow = 'given ahead';
         }
-        leave_record( \%a, \@btn, $role, $how, $oi ) if $p{record};
-        return ( $role, $how, $oi, $ohow );
+        $a{_given} = [ $i, $oi ];    # drawn once below when there is no terminal
+        leave_record( \%a, \@btn, $role, $how, $oi ) if $p{record} && interactive();
+        return ( $role, $how, $oi, $ohow ) if interactive();
     }
 
     my $edge  = $fg;
@@ -789,9 +791,19 @@ sub ask {
     my $draw = sub { draw_rows( $d, map { "$indent$_" } @_ ) };
 
     if ( $d->{mode} eq 'plain' ) {
+        # No terminal: the surface is drawn once as it would appear, in the
+        # state an answer given ahead reaches (the list with its choice
+        # highlighted), so a harness or the screenshot tool sees it; the
+        # answer taken is the one given ahead, else the default.
+        if ( my $g = $a{_given} ) {
+            my ( $i, $oi ) = @$g;
+            my $on_list = defined $oi && $a{options};
+            $draw->( $frame_rows->( $on_list ? 2 : 1, $on_list ? $oi : $i, $p{seconds} ) );
+            leave_record( \%a, \@btn, $role, $how, $oi ) if $p{record};
+            return ( $role, $how, $oi, $ohow );
+        }
         $draw->( $frame_rows->( $stage, $stage == 2 ? $opt_def : $def_i, $p{seconds} ) );
         ( $role, $how ) = ( $btn[$def_i]{role} // 'default', 'default, no terminal' );
-        $a{tier} = $tier;
         return ( $role, $how, undef, undef );
     }
 
