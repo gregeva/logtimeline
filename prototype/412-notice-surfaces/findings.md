@@ -17,23 +17,22 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 6 is built and not yet reviewed:** three views and the contract
-  entry, only what round 5's corrections touched. The architect runs `perl
-  review.pl` from this directory (Homebrew Perl: `export PATH="$(brew
-  --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), feedback to
-  `feedback/stage1-round6.jsonl`; the browser view wants a terminal of 160 to
-  180 columns for the histograms.
+- **Round 7 is built and not yet reviewed:** one view, the pattern modal's
+  options list, and the contract entry. `perl review.pl` from this directory
+  (Homebrew Perl: `export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`),
+  feedback to `feedback/stage1-round7.jsonl`.
 - **Then, by the round procedure:** Claude records the feedback here, sends
-  the read-back, builds only on confirmation, shows only what changed, and
-  moves the settled lines into the contract.
+  the read-back where a reading is open, builds on confirmation, shows only
+  what changed, and moves the settled lines into the contract.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
   commit 4bef110, feedback `feedback/stage1-round3.jsonl`); round 4 (the first
   build of `show.pl` with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`,
   feedback `feedback/stage1-round4.jsonl`); round 5 (the same scripts,
-  feedback `feedback/stage1-round5.jsonl`); round 6 (the same scripts, the
-  current framework).
+  feedback `feedback/stage1-round5.jsonl`); round 6 (feedback
+  `feedback/stage1-round6.jsonl`); round 7 (the same scripts, the current
+  framework).
 - **Not started:** the decision round on which surfaces go forward, the
   light background (no option on it has been evaluated), porting to Linux and
   Windows, the unattended-capture method for the selected surfaces, the
@@ -570,7 +569,11 @@ inline fallback. What changes:
    rendering (counts in parentheses, round 5).
 3. **What was asked is what is rendered, counted.** A padding of two is two
    cells, measured in the capture before review, not two added to what was
-   there.
+   there; a pane's empty rows are counted in the capture, each pane, each
+   edge, not inferred from the code that was meant to produce them (round 6:
+   a row count derived from a Perl expression in scalar context dropped the
+   list pane's bottom row while the capture that would have shown it was in
+   hand and not counted).
 4. The lessons recorded at the pause (feature doc § Prototyping): the review
    object is the framework and its contract, not instances; the contract is
    written before instances; every round is read back before building; every
@@ -607,3 +610,21 @@ pane padded above and below with two cells at the sides, the compact box
 below an empty row, the browser full width with both histograms at their own
 size, counts in parentheses, the empty row before `chosen:` after a choice,
 the inline browser repainted after its layered list.
+
+### Architect's feedback on round 6 (2026-10-19)
+
+Three entries, verbatim in `feedback/stage1-round6.jsonl`. The panel:
+"perfect". The browser: "you've nailed it". The pattern modal: the list pane
+still lacked its empty row at the bottom, said for the third time, and an
+empty row is wanted between the list and the highlighted option's effect row.
+
+## Round 7: the options list's pane rows (2026-10-19)
+
+One view. The cause of the missing row: the stage's row count took a list
+in scalar context (the last element's count, not the list's), one short once
+round 6 had added the row above the list, so the frame cut its last row. The
+count now comes from the rows themselves. The list pane reads: empty row,
+headings, options, empty row, the effect, empty row; the body's pane closes
+with an empty row before the rule. Checked in a tmux pane at 180 by 50 in
+both forms, each pane's rows counted in the capture; every other view ran
+unattended unchanged.

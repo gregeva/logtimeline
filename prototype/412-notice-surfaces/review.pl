@@ -8,7 +8,7 @@
 #   perl review.pl --from box-read  start at an option and go on from there
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
-#   perl review.pl --round 5      an earlier round's options (default: 6)
+#   perl review.pl --round 6      an earlier round's options (default: 7)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -31,7 +31,7 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-$opt{round} = 6;
+$opt{round} = 7;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
@@ -137,6 +137,12 @@ $rounds{6} = [
     [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'Modal once a pattern is found, with its options list', 'two cells inside each side, counted; press l: the list pane with an empty row above and below its content' ],
     [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'the tabs inside the list pane with an empty row above and below, no rule under them; counts in parentheses; press 7: ltl\'s histograms at their own size side by side (a terminal of 160 to 180 columns), an empty row before the options row; Enter and a choice: the empty row before `chosen:`' ],
     [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
+];
+
+# Round 7: one view, the options list's pane rows (round 6's correction).
+$rounds{7} = [
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'Modal once a pattern is found, with its options list', 'press l: the list pane with an empty row above and below its content, an empty row between the list and the highlighted option\'s effect, the body pane closed by an empty row before the rule' ],
+    [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views' ],
 ];
 
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };

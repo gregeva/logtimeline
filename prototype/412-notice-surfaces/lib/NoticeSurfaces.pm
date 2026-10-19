@@ -542,8 +542,8 @@ sub centred_buttons {
 #
 # Each option on one row in columns under the consumer's headings; the
 # columns before the last take their widest part, the last wraps within its
-# column; the highlighted option in reverse video, its effect on the row
-# beneath. Fewer parts than headings: fewer columns.
+# column; the highlighted option in reverse video, its effect after an empty
+# row beneath the list. Fewer parts than headings: fewer columns.
 
 # The columns: how many parts, the fixed widths, the gap between columns
 # (one space at the tightest, up to five with room: the spare width shared
@@ -585,7 +585,7 @@ sub options_rows {
         push @rows, $mark . ( $i == $sel ? "$s->{pick}\e[7m" . strip_sgr($cells) . "\e[0m" : "$s->{text}$cells$s->{reset}" ) . "$c" . shift(@last) . $s->{reset};
         push @rows, ( ' ' x $last_at ) . "$c$_$s->{reset}" for @last;
     }
-    push @rows, "   $s->{dim}" . fit( $options->[$sel]{effect} // '', $iw - 3 ) . $s->{reset};
+    push @rows, '', "   $s->{dim}" . fit( $options->[$sel]{effect} // '', $iw - 3 ) . $s->{reset};
     return @rows;
 }
 
@@ -728,11 +728,19 @@ sub ask {
     # Size: the width from the tier (modal) or the terminal (box); an empty
     # row above and below the content in both forms (both are erased).
     my $pad = 1;
+    # A stage's tail: a blank row closes the body's pane, then the question
+    # and buttons, or the rule and the list pane (blank, list, blank, effect).
+    my $tail = sub {
+        my ( $st, $iw, $x, $left ) = @_;
+        return ( '', $tail2->( $iw, $x ) ) if $st == 2;
+        return ( '', $tail1->( $iw, $x, $left ) );
+    };
+    # The rows a stage needs, counted from the rows themselves.
     my $stage_rows = sub {
         my ( $iw, $st ) = @_;
         my @b = $body->($iw);
-        return @b + ( $form eq 'box' ? 2 : 4 ) + 2 * $pad if $st == 1;    # body, blank, question (, blank, buttons)
-        return @b + 1 + scalar( $tail2->( $iw, 0 ) ) + 2 * $pad;    # body, blank, rule, blank, list
+        my @t = $tail->( $st, $iw, 0, $p{seconds} );
+        return @b + @t + 2 * $pad;
     };
     # The rows inside the frame: the taller stage's when the height is fixed
     # for both (fixed_height), else each stage's own; the width is one for
@@ -766,7 +774,7 @@ sub ask {
         my ( $st, $x, $left ) = @_;
         my $height = min( $rows_in->( $iw, $st ), $mh - 2 );
         my @b = $body->($iw);
-        my @t = $st == 2 ? $tail2->( $iw, $x ) : ( '', $tail1->( $iw, $x, $left ) );
+        my @t = $tail->( $st, $iw, $x, $left );
         my $fill = $height - 2 * $pad - @b - @t;
         my @in = ( ('') x $pad, @b, ( ('') x max( 0, $fill ) ), @t, ('') x $pad );
         @in = @in[ 0 .. $height - 1 ] if @in > $height;
