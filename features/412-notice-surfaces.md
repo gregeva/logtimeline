@@ -655,7 +655,9 @@ warnings" or words to that effect.
 
 The order puts what bears on trusting the figures first and the next step
 last. On a light background each category takes the darkest step of its
-gradient; no light-background rendering has been reviewed yet. The bullet
+colour's light gradient, the frame grey 244, the text black, the highlight
+black bold in reverse video (settled, architect 2026-10-19: every component
+reviewed once per form on a light terminal and accepted). The bullet
 before a notice in a list is `╶` (U+2576, box drawings light right), in the
 category's colour, so the one character carries the classification; chosen
 from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).

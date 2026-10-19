@@ -641,7 +641,16 @@ the framework is left unvalidated on macOS.
 | each selected surface judged by the architect in the terminal | done on macOS: the three components, every form and placement |
 | a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | not started; `check-tmux.sh` (a tmux pane captured as seen) is the candidate method, used for Claude's own checks since round 4 |
 | the findings record what was chosen, what was learned and why | this file and the contract; the lessons go into `prototype/README.md` at the close |
-| the light background | no view evaluated |
+| the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
 | porting the selected components to Linux and Windows | not started |
 | the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |
 | the modal's and box's list headings | open until the producers' data model is investigated |
+
+### Architect's feedback on the light background (2026-10-19)
+
+Six entries, verbatim in `feedback/stage1-light.jsonl`: every view accepted
+("yes, it works", "all good", the compact box's default "nice, that is black
+bold"). The category sheet's light colours (the darkest step of each colour's
+light gradient) stand. One remark on the browser: Esc and close should be
+synonyms as q and x are; its reading is checked with the architect before
+anything changes.
