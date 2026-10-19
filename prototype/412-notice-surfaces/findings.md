@@ -17,18 +17,22 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 5 is reviewed** (12 of 12 entries, `feedback/stage1-round5.jsonl`,
-  summarised under round 5 below), with the architect's rebuke on the
-  process: the review list must shrink round by round (see § Lessons learned).
-- **Next, by the round procedure:** the read-back of round 5's feedback goes
-  to the architect; round 6 is built only after he confirms it, shows only the
-  views a change touched, and moves the settled lines into the contract.
+- **Round 6 is built and not yet reviewed:** three views and the contract
+  entry, only what round 5's corrections touched. The architect runs `perl
+  review.pl` from this directory (Homebrew Perl: `export PATH="$(brew
+  --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), feedback to
+  `feedback/stage1-round6.jsonl`; the browser view wants a terminal of 160 to
+  180 columns for the histograms.
+- **Then, by the round procedure:** Claude records the feedback here, sends
+  the read-back, builds only on confirmation, shows only what changed, and
+  moves the settled lines into the contract.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
   commit 4bef110, feedback `feedback/stage1-round3.jsonl`); round 4 (the first
   build of `show.pl` with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`,
-  feedback `feedback/stage1-round4.jsonl`); round 5 (the same scripts, the
+  feedback `feedback/stage1-round4.jsonl`); round 5 (the same scripts,
+  feedback `feedback/stage1-round5.jsonl`); round 6 (the same scripts, the
   current framework).
 - **Not started:** the decision round on which surfaces go forward, the
   light background (no option on it has been evaluated), porting to Linux and
@@ -572,3 +576,34 @@ inline fallback. What changes:
    written before instances; every round is read back before building; every
    round ends with its settled lines in the record; Claude's own check
    observes what the architect observes.
+
+## Round 6: round 5's corrections, three views (2026-10-19)
+
+Built after the architect confirmed the read-back; the settled lines went into
+the contract first (§ Padding, § Wording, the browser's detail in
+§ Components). Shown for review: the panel, the pattern modal with its list,
+the browser; nothing already validated.
+
+- **Padding counted as rendered:** `frame()` takes `side`, two cells for a
+  pop-up that is erased, one for the panel that stays; the captures count
+  one cell after the panel's edge and two after the modal's.
+- **Each pane an empty row above and below:** the modal's list pane now has
+  its row above (`RULE`, blank, list); the browser's tabs are in the list pane
+  (blank, tabs, blank, list, blank), the rule under the tabs is gone.
+- **Histograms at ltl's size:** `notices/histogram.pl` regenerated from the
+  same run at 170 columns (14 rows, 161 cells); a detail wider than the
+  largest tier takes the whole width rather than being cut. An empty row
+  before the options or `chosen:` row.
+- **Counts in parentheses** on the browser's title and tabs, and the panel's
+  title, `notices (7)`.
+- **One empty row before an erased box drawn below the cursor:** the inline
+  drawer prints it on its first draw and erases it with the box.
+- **The single-category panel takes the edge form** by default; `--headed`
+  asks for the headed form.
+
+Claude's own runs: every view unattended at 180 by 50 (12 runs, exit 0,
+nothing on stderr); in a tmux pane at 180 by 50: the pattern modal's list
+pane padded above and below with two cells at the sides, the compact box
+below an empty row, the browser full width with both histograms at their own
+size, counts in parentheses, the empty row before `chosen:` after a choice,
+the inline browser repainted after its layered list.

@@ -5,7 +5,7 @@
 # are asked before the read, memory during it, the pattern once the
 # statistics are done; the panel and the browser come after the run.
 #
-#   perl show.pl panel   [--input typical|deprecation|heavy] [--bullet N|glyph] [--edge]
+#   perl show.pl panel   [--input typical|deprecation|heavy] [--bullet N|glyph] [--headed]
 #   perl show.pl bullets                                 the bullet glyph sheet
 #   perl show.pl ask     --input memory|preread|pattern [--form modal|box]
 #                        [--placement alt|inline] [--size small|medium|large]
@@ -31,7 +31,7 @@ use NoticeSurfaces qw(panel bullet_candidates bullet_sheet ask browser out live_
 my $component = shift(@ARGV) // '';
 $component =~ /^(panel|bullets|ask|browser)$/ or die "usage: show.pl panel|bullets|ask|browser [options]\n";
 my %opt = ( bg => 'dark' );
-GetOptions( \%opt, 'input=s', 'bullet=s', 'edge', 'form=s', 'placement=s', 'size=s', 'quit=s', 'keybar=s', 'record', 'seconds=i',
+GetOptions( \%opt, 'input=s', 'bullet=s', 'headed', 'form=s', 'placement=s', 'size=s', 'quit=s', 'keybar=s', 'record', 'seconds=i',
     'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i' ) or die "bad options\n";
 my ( $W, $H ) = terminal_size( width => $opt{width}, height => $opt{height} );
 set_answers_ahead( $opt{answer} );
@@ -82,7 +82,7 @@ if ( $component eq 'panel' ) {
     progress( 1, 100 );
     my $bullet = $opt{bullet};
     $bullet = ( bullet_candidates() )[ $bullet - 1 ][0] if defined $bullet && $bullet =~ /^\d+$/;
-    out( '', panel( s => $s, W => $W, notices => $in->{notices}, bullet => $bullet, form => $opt{edge} ? 'edge' : 'headed' ) );
+    out( '', panel( s => $s, W => $W, notices => $in->{notices}, bullet => $bullet, form => $opt{headed} ? 'headed' : 'edge' ) );
     finish();
 }
 elsif ( $component eq 'bullets' ) {

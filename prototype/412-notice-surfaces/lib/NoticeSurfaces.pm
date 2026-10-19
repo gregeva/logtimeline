@@ -22,8 +22,10 @@ package NoticeSurfaces;
 #   - a surface that asks erases itself (D4); a record is the caller's boolean;
 #   - a notice is one row, its parts told apart by colour and a marker (D3);
 #   - boxes and pop-ups in the new style, inline text in the ltl look (D6);
-#   - every box has two characters of padding inside its sides; a pop-up that
-#     will be erased also has an empty row above and below each pane's content.
+#   - a pop-up that will be erased has two cells of padding inside its sides
+#     and an empty row above and below each pane's content, and one empty row
+#     before it when drawn below the cursor; the panel, which stays, has one
+#     cell inside its sides and no empty rows.
 
 use strict;
 use warnings;
@@ -191,12 +193,14 @@ sub heading {
 
 # Rows framed in a box $a{width} cells wide: $a{title} set in the top edge,
 # $a{foot} in the bottom edge, each row padded to the inside width, which
-# leaves SIDE cells of padding inside each edge (the contract's two characters
-# and the one that was there), a row 'RULE' drawn as a divider across the box.
-# inside_width() is what a component lays its rows out to.
-my $SIDE = 3;
+# leaves $a{side} cells of padding inside each edge (two for a pop-up that is
+# erased, one for the panel that stays; counted as rendered), a row 'RULE'
+# drawn as a divider across the box. inside_width() is what a component lays
+# its rows out to.
+my $POPUP_SIDE = 2;
+my $PANEL_SIDE = 1;
 
-sub inside_width { my ($box_width) = @_; return $box_width - 2 - 2 * $SIDE }
+sub inside_width { my ( $box_width, $side ) = @_; return $box_width - 2 - 2 * ( $side // $POPUP_SIDE ) }
 
 sub frame {
     my (%a) = @_;
@@ -204,7 +208,8 @@ sub frame {
     my $b = $s->{box};
     my $e = $a{edge} // $s->{frame};
     my $w = $a{width};
-    my $sp = ' ' x $SIDE;
+    my $side = $a{side} // $POPUP_SIDE;
+    my $sp = ' ' x $side;
     my $edge = sub {
         my ( $l, $text, $r ) = @_;
         $text //= '';
@@ -218,7 +223,7 @@ sub frame {
             push @out, $e . $b->{t_right} . ( $b->{h_line} x ( $w - 2 ) ) . $b->{t_left} . $s->{reset};
             next;
         }
-        push @out, $e . $b->{v_line} . $s->{reset} . $sp . pad_to( $r, inside_width($w) ) . $sp . $e . $b->{v_line} . $s->{reset};
+        push @out, $e . $b->{v_line} . $s->{reset} . $sp . pad_to( $r, inside_width( $w, $side ) ) . $sp . $e . $b->{v_line} . $s->{reset};
     }
     push @out, $edge->( $b->{corner_bl}, $a{foot}, $b->{corner_br} );
     return @out;
@@ -259,10 +264,10 @@ sub bulleted {
 #
 # One box round all the notices, however many (D9 sends many to the browser):
 # each category headed once, its notices one row each, the categories divided
-# by a blank row (D3). The title is `notices` and the bare count, dim. The
-# edge form, for a single category (round 4, for comparison): the category's
+# by a blank row (D3). The title is `notices` and its count, dim. A single
+# category takes the edge form (round 5: "this is the one"): the category's
 # glyph, name, count and how-to-read text in the top edge, the notices alone
-# inside, one row shorter.
+# inside, one row shorter; form => headed asks for the headed form anyway.
 
 sub panel {
     my (%a) = @_;
@@ -270,14 +275,14 @@ sub panel {
     my $W = $a{W};
     my @notices = grep { !$_->{record} } @{ $a{notices} };
     my @groups = grouped( $a{notices} );
-    my $iw = inside_width( $W - 1 );
+    my $iw = inside_width( $W - 1, $PANEL_SIDE );
     my @rows;
-    if ( ( $a{form} // 'headed' ) eq 'edge' && @groups == 1 ) {
+    if ( ( $a{form} // 'edge' ) eq 'edge' && @groups == 1 ) {
         my ( $cat, $in ) = @{ $groups[0] };
         my $fg = $s->{fg}{ $cat->{name} };
         push @rows, bulleted( $_, $s, $fg, $iw, $a{bullet} ) for @$in;
         my $title = ' ' . heading( $cat, $s, scalar(@notices), $W - 7 ) . ' ';
-        return frame( s => $s, edge => $fg, width => $W - 1, title => $title, rows => \@rows );
+        return frame( s => $s, edge => $fg, width => $W - 1, side => $PANEL_SIDE, title => $title, rows => \@rows );
     }
     for my $gi ( 0 .. $#groups ) {
         my ( $cat, $in ) = @{ $groups[$gi] };
@@ -286,8 +291,8 @@ sub panel {
         push @rows, heading( $cat, $s, scalar( grep { !$_->{record} } @$in ), $iw );
         push @rows, bulleted( $_, $s, $fg, $iw, $a{bullet} ) for @$in;
     }
-    my $title = " $s->{dim}notices · " . scalar(@notices) . "$s->{reset} ";
-    return frame( s => $s, width => $W - 1, title => $title, rows => \@rows );
+    my $title = " $s->{dim}notices (" . scalar(@notices) . ")$s->{reset} ";
+    return frame( s => $s, width => $W - 1, side => $PANEL_SIDE, title => $title, rows => \@rows );
 }
 
 # The glyph sheet: every bullet candidate in the panel's own context, a
@@ -297,7 +302,7 @@ sub bullet_sheet {
     my (%a) = @_;
     my $s = $a{s};
     my $W = $a{W};
-    my $iw = inside_width( $W - 1 );
+    my $iw = inside_width( $W - 1, $PANEL_SIDE );
     my @groups = grouped( $a{notices} );
     my @rows;
     for my $i ( 0 .. $#BULLETS ) {
@@ -309,8 +314,8 @@ sub bullet_sheet {
         push @rows, heading( $cat, $s, scalar @$in, $iw );
         push @rows, bulleted( $_, $s, $fg, $iw, $glyph ) for @$in[ 0 .. min( 1, $#$in ) ];
     }
-    my $title = " $s->{dim}bullet glyphs · " . scalar(@BULLETS) . " candidates$s->{reset} ";
-    return frame( s => $s, width => $W - 1, title => $title, rows => \@rows );
+    my $title = " $s->{dim}bullet glyphs (" . scalar(@BULLETS) . ")$s->{reset} ";
+    return frame( s => $s, width => $W - 1, side => $PANEL_SIDE, title => $title, rows => \@rows );
 }
 
 # --- what the run has printed ------------------------------------------------
@@ -360,8 +365,9 @@ sub backdrop_layer {
 # alt:    centred on the alternate screen over the dimmed layers under it: the
 #         backdrop, and any surface it is layered over; on leaving the screen
 #         is given back as it was.
-# inline: from the cursor's row down, redrawn in place, erased on leaving with
-#         the cursor back on the row it started on.
+# inline: one empty row, then the box from the next row down, redrawn in
+#         place, erased on leaving (the empty row too) with the cursor back on
+#         the row it started on.
 # over:   centred within the rows of an inline parent, for a modal layered
 #         over a surface drawn below the cursor; the parent repaints itself.
 # plain:  not in a terminal; drawn once, as it would first appear.
@@ -419,7 +425,8 @@ sub draw_rows {
         print "\r";
         return;
     }
-    print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1;
+    if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" }
+    else            { print "\r\e[2K\n"; $d->{lead} = 1 }
     print "\r";
     print "\e[J" if @rows < $d->{h};
     print "\e[2K$rows[$_]" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
@@ -433,7 +440,7 @@ sub close_drawer {
         print "\e[?1049l" if $d->{on};
     }
     elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
-        print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1;
+        print "\e[" . ( $d->{h} - 1 + ( $d->{lead} // 0 ) ) . "A";
         print "\r\e[J";
     }
     $d->{h} = 0;
@@ -701,7 +708,7 @@ sub ask {
     };
     my $tail2 = sub {
         my ( $iw, $sel ) = @_;
-        return ( 'RULE', options_rows( $a{options}, $headings, $sel, $s, $fg, $iw ) );
+        return ( 'RULE', '', options_rows( $a{options}, $headings, $sel, $s, $fg, $iw ) );
     };
     my $foot = sub {
         my ($st) = @_;
@@ -725,7 +732,7 @@ sub ask {
         my ( $iw, $st ) = @_;
         my @b = $body->($iw);
         return @b + ( $form eq 'box' ? 2 : 4 ) + 2 * $pad if $st == 1;    # body, blank, question (, blank, buttons)
-        return @b + 1 + scalar( $tail2->( $iw, 0 ) ) + 2 * $pad;
+        return @b + 1 + scalar( $tail2->( $iw, 0 ) ) + 2 * $pad;    # body, blank, rule, blank, list
     };
     # The rows inside the frame: the taller stage's when the height is fixed
     # for both (fixed_height), else each stage's own; the width is one for
@@ -890,7 +897,7 @@ sub browser {
         my @r = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 0 ) );
         push @r, '', map { "$s->{text}$_$s->{reset}" } @{ $n->{detail} } if $n->{detail};
         if ( $n->{options} ) {
-            push @r, defined $chosen
+            push @r, '', defined $chosen
                 ? "$s->{dim}chosen:$s->{reset} $s->{pick}" . $n->{options}[$chosen]{parts}[0] . "$s->{reset} $fg$n->{options}[$chosen]{args}$s->{reset}"
                 : "$fg◇$s->{reset} $s->{dim}" . scalar( @{ $n->{options} } ) . " options on offer: Enter to choose$s->{reset}";
         }
@@ -899,12 +906,12 @@ sub browser {
     # Tabs: every tab named, the selected one a coloured block (D6).
     my $tab_rows = sub {
         my ( $tab, $iw ) = @_;
-        my @tabs = ( $tab == 0 ? "$s->{pick}\e[7m All " . @items . " \e[0m" : "$s->{text} All " . @items . " $s->{reset}" );
+        my @tabs = ( $tab == 0 ? "$s->{pick}\e[7m All (" . @items . ") \e[0m" : "$s->{text} All (" . @items . ") $s->{reset}" );
         for my $i ( 0 .. $#cats ) {
             my $c  = $cats[$i];
             my $n  = grep { $_->{category} eq $c->{name} } @items;
             my $fg = $s->{fg}{ $c->{name} };
-            my $l  = " $c->{glyph} " . uc( $c->{name} ) . " $n ";
+            my $l  = " $c->{glyph} " . uc( $c->{name} ) . " ($n) ";
             push @tabs, $tab == $i + 1 ? "$fg\e[7m\e[1m$l\e[0m" : "$fg$l$s->{reset}";
         }
         my @rows = ('');
@@ -926,13 +933,17 @@ sub browser {
         $D = max map { scalar( $detail_rows->( $_, $iw, 0 ) ) } @items;
         $T = scalar( $tab_rows->( 0, $iw ) );
         # The widest row no detail can wrap (a histogram), or a readable list;
-        # the rows: three panes, each with an empty row above and below.
-        my $unit = max( 40, map { display_width($_) } map { @{ $_->{detail} // [] } } @items ) + 8;
-        return ( $unit, $T + 1 + $want_L + 1 + $D + 2 + 6 );
+        # the rows: the list pane (tabs, a blank, the list) and the detail
+        # pane, each with an empty row above and below, a rule between.
+        my $unit = max( 40, map { display_width($_) } map { @{ $_->{detail} // [] } } @items ) + 2 + 2 * $POPUP_SIDE;
+        return ( $unit, 1 + $T + 1 + $want_L + 1 + 1 + 1 + $D + 1 + 2 );
     };
     my ( $bw, $mh, $tier ) = $d->{mode} eq 'inline' ? ( $W - 1, $H - 2, 'full' ) : choose_tier( $W, $H, $measure, $p{size} );
+    # A detail wider than the largest tier (ltl's histograms side by side)
+    # takes the whole width rather than being cut.
+    ( $bw, $tier ) = ( $W - 1, 'full' ) if $d->{mode} ne 'inline' && ( $measure->($bw) )[0] > $bw - 2 - 2 * $POPUP_SIDE;
     $measure->($bw);
-    $L = min( $want_L, $mh - 2 - 6 - $T - 2 - $D );
+    $L = min( $want_L, $mh - 2 - 5 - $T - 1 - $D );
     $L = 3 if $L < 3;
     my $iw = inside_width($bw);
 
@@ -945,7 +956,7 @@ sub browser {
         $sel = $#shown if $sel > $#shown;
         $top = $sel if $sel < $top;
         $top = $sel - $L + 1 if $sel >= $top + $L;
-        my @r = ( '', $tab_rows->( $tab, $iw ), '', 'RULE', '' );
+        my @r = ( '', $tab_rows->( $tab, $iw ), '' );
         for my $i ( $top .. $top + $L - 1 ) {
             if ( $i > $#shown ) { push @r, ''; next }
             my $n  = $shown[$i];
@@ -964,7 +975,7 @@ sub browser {
         my $foot = ' ' . $s->{dim} . key_bar( move => '↑↓ j k move · ←→ Tab tabs · 1-' . ( @cats + 1 ) . ' tab', enter => 'options', esc => 'close', quit => $p{quit} ) . $s->{reset} . $cd . ' ';
         my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
         return frame( s => $s, width => $bw, rows => \@r, foot => $foot,
-            title => " $s->{dim}notices · " . @items . " · $range$s->{reset} " );
+            title => " $s->{dim}notices (" . @items . ") · $range$s->{reset} " );
     };
 
     if ( $d->{mode} eq 'plain' ) {

@@ -10,7 +10,7 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 export PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"
-W=120; H=40
+W=${CHECK_W:-120}; H=${CHECK_H:-40}
 
 # name | command | key steps: "sleep:S" waits, "cap:NAME" captures, anything else is sent as keys
 scenarios() {

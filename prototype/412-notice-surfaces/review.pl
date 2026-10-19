@@ -8,7 +8,7 @@
 #   perl review.pl --from box-read  start at an option and go on from there
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
-#   perl review.pl --round 4      an earlier round's options (default: 5)
+#   perl review.pl --round 5      an earlier round's options (default: 6)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -31,7 +31,7 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-$opt{round} = 5;
+$opt{round} = 6;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
@@ -126,6 +126,16 @@ $rounds{5} = [
     [ 'modal-inline',   'show.pl', 'ask --input memory --placement inline',    'The modal below the cursor (the fallback)',         'the same dialog drawn below the cursor' ],
     [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'each pane padded: an empty row above and below, two characters at the sides; press 7 for GUIDANCE: the detail holds ltl\'s duration and bytes histograms side by side after an empty row; Enter opens the options list layered over the browser, padded the same' ],
     [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Notice browser below the cursor (the fallback)',     'the same browser below the cursor' ],
+    [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
+];
+
+# Round 6: round 5's corrections, shown only where a change touched a view
+# (the round procedure's fifth step). Validated views and mechanisms are not
+# shown again.
+$rounds{6} = [
+    [ 'panel',          'show.pl', 'panel',                                    'Panel with the typical set (7 notices)',            'one cell of padding inside each side, no empty rows: the box that stays on screen' ],
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'Modal once a pattern is found, with its options list', 'two cells inside each side, counted; press l: the list pane with an empty row above and below its content' ],
+    [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'the tabs inside the list pane with an empty row above and below, no rule under them; counts in parentheses; press 7: ltl\'s histograms at their own size side by side (a terminal of 160 to 180 columns), an empty row before the options row; Enter and a choice: the empty row before `chosen:`' ],
     [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
 ];
 
