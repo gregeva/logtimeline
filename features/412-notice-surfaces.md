@@ -475,7 +475,7 @@ content; no moment has a presentation of its own (D5).
 | component | for | what the caller passes |
 |---|---|---|
 | **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
-| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); the quit-the-application key, when offered |
+| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4) |
 | **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection) |
 
 A notice is the same record everywhere (proposed): its category (D1); a focus
@@ -505,17 +505,17 @@ Leaving:
 | key | does |
 |---|---|
 | Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing |
-| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; offered when the caller enables it (round 3: "a parameterized option") |
+| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; available on every surface, always (architect, 2026-10-19) |
 | any other key | stops the countdown and nothing else |
 
 The key bar each component shows, from the rows above that apply to it:
 
 | component | key bar |
 |---|---|
-| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` when enabled |
-| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned` |
-| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` when enabled |
-| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list` |
+| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` |
+| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned`, `q/x quit` |
+| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` |
+| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list`, `q/x quit` |
 
 ### Buttons (settled, architect 2026-10-19)
 
