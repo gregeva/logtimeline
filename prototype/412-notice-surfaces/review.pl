@@ -10,6 +10,8 @@
 #   perl review.pl --all          every option, from the first
 #   perl review.pl --round 6      an earlier round's options (default: 7)
 #   perl review.pl --round light  the light-background evaluation (light-review.pl runs this)
+#   perl review.pl --round linux  the platform validation on Linux (feedback/stage1-linux.jsonl)
+#   perl review.pl --round windows  the same in Windows Terminal (feedback/stage1-windows.jsonl)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -36,7 +38,7 @@ $opt{round} = 7;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=s' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
-my $file = "$dir/feedback/stage1" . ( $opt{round} eq '1' ? '' : $opt{round} eq 'light' ? '-light' : "-round$opt{round}" ) . '.jsonl';
+my $file = "$dir/feedback/stage1" . ( $opt{round} eq '1' ? '' : $opt{round} =~ /^\d+$/ ? "-round$opt{round}" : "-$opt{round}" ) . '.jsonl';
 my $json = JSON::PP->new->canonical->utf8;
 
 # id, prototype, arguments, what the option is, what to look at, what to do.
@@ -160,6 +162,26 @@ $rounds{light} = [
     [ 'browser',        'show.pl', 'browser --bg light',                       'Notice browser, light background',                  'tabs with the selected one as a coloured block; the list highlight; press 7 for the histograms, which keep ltl\'s own colours' ],
     [ 'contract',       '-',       '',                                         'Remarks against the light background',              'anything that applies across views: the category sheet\'s light colours are the contract\'s proposed line for it' ],
 ];
+
+# The platform validation (feature doc § Prototyping): the validated framework
+# once more in a Linux terminal and in Windows Terminal, every component in
+# each of its forms once, with the keys and sequences that could differ by
+# platform exercised in each view. The outcome is acceptance or a short list
+# of adaptations, not a port. One list, two feedback files.
+$rounds{platform} = [
+    [ 'panel',          'show.pl', 'panel',                                    'Panel with the typical set',                        'the six category glyphs and the bullet: present, one cell wide, the colours as on macOS; rounded corners' ],
+    [ 'panel-one',      'show.pl', 'panel --input deprecation',                'Panel with a single notice (edge form)',            'the glyph and text in the top edge; the frame in the category colour' ],
+    [ 'modal-read',     'show.pl', 'ask --input memory',                       'Modal during the read',                             'the alternate screen: the dimmed run under the dialog, rows unmoved; try ← → Tab and Shift-Tab, then any key to stop the countdown, then Esc: the run is back as it was' ],
+    [ 'modal-quit',     'show.pl', 'ask --input memory',                       'Modal, quitting',                                   'press x: the run stops cleanly with the terminal restored (no raw mode left behind, the cursor visible, typing echoes)' ],
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'Modal with its options list',                       'press l, then ↓ j k and a digit; Enter chooses; the two-stage height change' ],
+    [ 'modal-inline',   'show.pl', 'ask --input memory --placement inline',    'Modal below the cursor (the fallback)',             'drawn under the cursor and erased on Esc, the rows above untouched' ],
+    [ 'box-read',       'show.pl', 'ask --input memory --form box',            'The compact box',                                   'the choice letters, in either case; Esc takes the default' ],
+    [ 'browser',        'show.pl', 'browser',                                  'Notice browser',                                    'tabs with ← → and digits; press 7 for the histograms at ltl\'s size (needs 160 columns or more); Enter on an item for the layered list, Esc back, Esc close' ],
+    [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Notice browser below the cursor',                   'the same, drawn under the cursor and erased on close' ],
+    [ 'light',          'show.pl', 'panel --bg light',                         'Panel, light colours (switch to a light profile if you have one)', 'the light sheet on this platform; skip with a remark if no light profile is at hand' ],
+    [ 'contract',       '-',       '',                                         'Remarks for this platform',                         'anything that applies across views: a key that did not decode, a sequence that did not take, a glyph missing or two cells wide, the terminal and font used' ],
+];
+$rounds{$_} = $rounds{platform} for qw(linux windows);
 
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
 my %index = map { $options[$_][0] => $_ } 0 .. $#options;
