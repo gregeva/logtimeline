@@ -670,6 +670,13 @@ from the glyph sheet, the figure dash second (architect, 2026-10-19, round 4).
 
 ### Unattended runs (settled, architect 2026-10-19)
 
+**One rendering, with or without a terminal.** A surface draws the same
+rows whether standard output is a terminal or a file; the only difference is
+what every command-line tool has: no alternate screen, no cursor control and
+no waiting for a key when there is none, so the surface appears once and the
+run goes on with the default or the answer given ahead (architect, 2026-10-19:
+no second code path that changes the tool's standard output).
+
 **The test method follows the surface it targets.** A harness or the
 screenshot tool uses the cheapest capture that sees what the surface
 produces; no method runs for a surface that does not need it, and nothing runs
@@ -678,8 +685,8 @@ on a platform that lacks the method's tooling.
 | surface | what a run with no terminal holds | capture and check | screenshot |
 |---|---|---|---|
 | panel (notices inline, the first delivery and the normal use) | the same rows as in a terminal | redirected run, read through the cell decoder, as every harness today; outcomes from `-V` | the panel's rows as a section through `-V section-layout`, as the tool works today |
-| a surface that asks (modal, box, options list) | the notice in the record form, the category named, and the answer taken on the row after it; nothing but rows and colour codes (the architect's option B, pending lock) | the record form and the `-V` choice section of #748 (take the analyst's input at choice points, with a default and answers given ahead) by redirected run; the pop-up's rendering and behaviour (padding, size, keys, erasing, the run unmoved under it) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the record form from a redirected run, or a pane capture for the pop-up over the run |
-| browser (navigation, layered pop-ups) | the panel form of its notices | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
+| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes, since without a terminal there is no alternate screen, no cursor control and no key to wait for | the record form and the `-V` choice section of #748 (take the analyst's input at choice points, with a default and answers given ahead) by redirected run; the pop-up's rendering and behaviour (padding, size, keys, erasing, the run unmoved under it) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the record form from a redirected run, or a pane capture for the pop-up over the run |
+| browser (navigation, layered pop-ups) | its first frame drawn once, as it appears | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
 
 The pane-capture method is demonstrated, with predicates that told this
 stage's known-good and known-bad builds apart, in

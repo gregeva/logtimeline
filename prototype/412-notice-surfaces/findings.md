@@ -588,6 +588,12 @@ inline fallback. What changes:
    The first delivery prints notices inline, so the first harness is a
    redirected run; the terminal-driving method waits for the surface that
    needs it (2026-10-19).
+6. **Tension is found, not manufactured.** Told that a recommendation hid the
+   tension behind a decision, I answered by inventing alternatives (a record
+   form for redirected runs) that the records had already ruled out. A
+   decision goes to the architect when two options are viable or a tension is
+   unsettled; when the records settle it, the step is recorded and taken, and
+   saying so is the answer (2026-10-19).
 
 ## Round 6: round 5's corrections, three views (2026-10-19)
 
@@ -729,6 +735,17 @@ not fixed per platform: a tmux harness is skipped where tmux is absent, and
 the Windows host can be equipped (WSL, Cygwin) so interactive surfaces are
 tested there too, an enhancement to the Windows setup when the first such
 surface is scheduled.
+
+I had also put up, as "question 1", whether a redirected run should hold the
+dialog's frame once (what the prototypes do), the notice in the record form
+instead, or nothing. The architect refused the record form: there is no
+purpose in a second code path that changes the tool's standard output
+depending on where it goes. The redirected run holds the surface as it
+appears, drawn once, with the default or the given answer taken; the only
+terminal dependence is the one every command-line tool has (no alternate
+screen, no cursor control, no key to wait for). That is what the contract's
+proposed line already said; the alternatives were mine, made up to show
+tension where the records had settled the matter.
 
 The screenshot question follows the same rule: the panel is a section the
 tool already draws; how a pop-up is pictured is decided when a pop-up is
