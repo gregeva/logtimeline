@@ -475,7 +475,7 @@ content; no moment has a presentation of its own (D5).
 | component | for | what the caller passes |
 |---|---|---|
 | **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
-| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4) |
+| **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); any parameter of the defaults table it wants otherwise |
 | **browser** | many notices (D9), or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection) |
 
 A notice is the same record everywhere (proposed): its category (D1); a focus
@@ -505,17 +505,35 @@ Leaving:
 | key | does |
 |---|---|
 | Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing |
-| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; available on every surface, always (architect, 2026-10-19) |
+| q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; a parameter, on by default, with its default per use in the table below (architect, 2026-10-19) |
 | any other key | stops the countdown and nothing else |
 
 The key bar each component shows, from the rows above that apply to it:
 
 | component | key bar |
 |---|---|
-| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` |
-| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned`, `q/x quit` |
-| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` |
-| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list`, `q/x quit` |
+| ask, first stage | the underlined choice letters, `← → Tab` between buttons, `Enter`, `Esc continue as planned`, `q/x quit` where it is on |
+| ask, options list | `↑↓ j k move`, `1-N`, `Enter choose`, `Esc continue as planned`, `q/x quit` where it is on |
+| browser, list | `↑↓ j k move`, `← → Tab tabs`, `1-N tab`, `Enter open`, `Esc close`, `q/x quit` where it is on |
+| browser, detail | `↑↓ j k move`, `Enter choose` where the detail offers options, `Esc back to the list`, `q/x quit` where it is on |
+
+### Parameters and their defaults by use (proposed; the architect asked for this table 2026-10-19)
+
+Every parameter has a default per use, so that a caller passes only what it
+wants otherwise, and a compact surface is not cluttered with what a full one
+shows. The uses are the three components, the ask component in its two forms.
+
+| parameter | ask, modal | ask, compact box | browser | panel |
+|---|---|---|---|---|
+| placement | alternate screen; below the cursor as fallback | below the cursor | alternate screen; below the cursor as fallback | inline, in the run's output |
+| size | smallest fitting tier | to its content, full width | smallest fitting tier; height from the tallest detail | to its content |
+| quit with q/x | on | off | on | not applicable |
+| key bar | full | the choice letters only | full | none |
+| countdown to the default | 10 s | 10 s | none | none |
+| choice letters | from the caller, underlined | from the caller, underlined | not applicable | not applicable |
+| headings of the options list | What? How? Why? | What? How? Why? | What? How? Why? in a detail that offers options | not applicable |
+| record left after answering | off | off | not applicable | not applicable |
+| top edge | category, count, how to read it | category, count, how to read it | `notices` and the count | `notices` and the count |
 
 ### Buttons (settled, architect 2026-10-19)
 
