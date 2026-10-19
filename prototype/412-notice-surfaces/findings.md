@@ -13,29 +13,30 @@ Run from this directory with Homebrew Perl. Every prototype takes
 `--width N`; every choice point takes `--answer` (answers given ahead, comma
 separated, one per choice point) and `--seconds N`.
 
-## Resuming (2026-10-18)
+## Resuming (2026-10-19)
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 3 is built and not yet reviewed.** It is the next step: the
-  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
-  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one
-  option at a time, feedback saved to `feedback/stage1-round3.jsonl`.
-  `perl review.pl --list` shows which options have feedback; a run resumes at
-  the first without.
-- **Then:** Claude reads `feedback/stage1-round3.jsonl`, records it here
-  under round 3, commits and pushes it, and proposes the next round (or the
-  stage's decision round) from it, waiting for the architect's go-ahead
-  before building.
+- **Round 3 is reviewed** (12 of 12 options, `feedback/stage1-round3.jsonl`,
+  summarised under round 3 below). Building a round 4 from it is on hold.
+- **Next: a pause on the process.** The architect called a pause after round
+  3 to reflect on what is not working in the prototyping process, redesign
+  its goals and capture lessons learned, to be worked into
+  `prototype/README.md` once the prototypes are done. The reflection and its
+  outcome are recorded here when agreed; nothing is built until then.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (the first standard
   patterns, reviewed at commit 4d1218c, feedback
   `feedback/stage1-round2.jsonl`); round 3 (`surfaces/`, the current
-  patterns). Each round's feedback is summarised below.
-- **Not started:** the decision round on which surfaces go forward, the
-  light background (no option on it has been evaluated), porting to Linux and
-  Windows, the unattended-capture method for the selected surfaces, the
-  producer interface.
+  patterns, feedback `feedback/stage1-round3.jsonl`). The review runner is
+  `perl review.pl` (Homebrew Perl: `export PATH="$(brew --prefix)/bin:$(brew
+  --prefix)/opt/perl/bin:$PATH"`); `--list` shows which options have feedback.
+- **Asked for and not yet built:** a bullet glyph selection prototype; a
+  browser example whose detail is tall (a guidance notice with a selection and
+  a histogram); the light background (no option on it has been evaluated).
+- **Not started:** the decision round on which surfaces go forward, porting
+  to Linux and Windows, the unattended-capture method for the selected
+  surfaces, the producer interface.
 - `ltl` carries `$version_number = "0.20.0-412"`; it is restored before any
   completion gate.
 
@@ -251,3 +252,72 @@ Term::VT102: the views' columns at 100 and 160 columns, the modal growing to
 them inline and on the alternate screen (one enter, one leave), the record
 left in place of the dialog, nothing left without it, the browser's views and
 closing.
+
+### Architect's feedback on round 3 (2026-10-19)
+
+All 12 options reviewed, verbatim in `feedback/stage1-round3.jsonl`. The
+patterns are accepted in direction: the panel "looks good", the box during the
+read is "perfect", the browser over the dimmed run "I love it", the modal below
+the cursor and the browser below the cursor are fine. What follows is what
+changes.
+
+**The framework, not the instances.** Said on the compact form before the
+read, and bearing on the whole stage: the use cases (the deprecation, the
+memory question, the pattern choice, the long list) were given as examples in
+order to establish standardised terminal interface scenarios, usage patterns,
+layouts and designs; the prototypes still iterate through the same per-use-case
+scripts, and the architect fears that after all the prototype work what is to
+be built (a standard framework) will still not have been structured. This is
+the third round carrying the correction (round 1: one standard set of
+patterns; round 2: one pattern, different inputs).
+
+Across the surfaces:
+
+- **Keys follow industry practice and are the same on every surface.** Where
+  Tab moves forward, Shift-Tab moves back. A quit key (Esc, and `q`) is
+  always available and takes the default; one surface accepted Esc and
+  another only Enter, which is the inconsistency to remove. A parameter lets
+  a consumer add a key (`q` or `x`) that quits the application outright, so
+  the analyst can simply say quit.
+- **Nothing ever says "paused".** Any key stops the countdown; stopping is an
+  internal state that the countdown's disappearance already shows. A "paused"
+  word implies it might resume, which it never does. No surface shows status
+  on the countdown.
+- **Pop-up size follows the text.** A dialog measures what it has to show and
+  takes one of three predefined sizes, ratios of the terminal: small, medium,
+  large. The views' third column widened the text without widening the
+  modal. Generic to every pop-up.
+- **Buttons sit in fixed places.** Continue and Select changed position
+  between prototypes; cancel, continue or OK have one consistent placement
+  across uses. Custom labels depend on the use, their positions do not.
+- **The dimmed run does not move.** The progress line printed at the top right
+  of the terminal is drawn at the bottom right of the dimmed copy under the
+  modal, and returns to the top when the modal closes. Seen on the modal
+  during the read and on the record variant; a bug in the prototypes, since
+  dimming must not move the run's rows.
+- **Views are headed What? How? Why?** by default, and the headings are
+  parameters set by each consumer. A consumer may have fewer than three parts:
+  the surface adapts down to two columns or one. (Claude had named the columns
+  what, options and why.)
+- **The browser is sized for its tallest detail up front.** A selection whose
+  detail grows from three or four rows to ten (a guidance notice with a
+  selection and a histogram of the API concerned) must not resize or move the
+  window while the analyst navigates: the height is computed from the largest
+  entry before drawing. Such an entry is added to the examples.
+
+By option:
+
+| option | verdict | to change |
+|---|---|---|
+| panel, 7 notices | looks good | title is the bare count, not "about this run"; the filled circle bullets are too intense and overshadow the category glyph: something lighter from the dash family (not the plain dash), chosen in a bullet glyph selection prototype next round |
+| panel, one notice | | `notices` in lower case beside the upper-case category name; "correct the command" reads as blame: words that say the tool is warning, such as "command usage warnings" |
+| modal during the read | otherwise good | the dimmed run moving; Shift-Tab; a quit key; no "paused" |
+| modal before the read | as the previous | no "paused" anywhere |
+| modal once a pattern is found | the third column is good | What? How? Why? parameterised, adapting down; the modal sized to its text; button placement |
+| modal below the cursor | good | |
+| modal with a record | validated, works; the architect sees no use case for it | the dimmed run moving |
+| box during the read | perfect | keys consistent with the modal (Esc accepted there, only Enter here); the parameterised quit-the-application key |
+| box before the read | fine | an empty row between the notices and the question; the framework remark above |
+| box once a pattern is found | good; full width keeps the Why from wrapping | the three-column remarks above |
+| browser over the dimmed run | I love it, well done | fixed height from the tallest detail; the guidance-with-histogram example |
+| browser below the cursor | fine, a variation on the last; erases on closing as it should | |
