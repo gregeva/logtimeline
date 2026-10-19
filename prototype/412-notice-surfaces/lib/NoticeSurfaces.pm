@@ -21,7 +21,9 @@ package NoticeSurfaces;
 #     measured with its second stage, and never changes size while shown;
 #   - a surface that asks erases itself (D4); a record is the caller's boolean;
 #   - a notice is one row, its parts told apart by colour and a marker (D3);
-#   - boxes and pop-ups in the new style, inline text in the ltl look (D6).
+#   - boxes and pop-ups in the new style, inline text in the ltl look (D6);
+#   - every box has two characters of padding inside its sides; a pop-up that
+#     will be erased also has an empty row above and below each pane's content.
 
 use strict;
 use warnings;
@@ -188,14 +190,21 @@ sub heading {
 }
 
 # Rows framed in a box $a{width} cells wide: $a{title} set in the top edge,
-# $a{foot} in the bottom edge, each row padded to the inside width, a row
-# 'RULE' drawn as a divider across the box.
+# $a{foot} in the bottom edge, each row padded to the inside width, which
+# leaves SIDE cells of padding inside each edge (the contract's two characters
+# and the one that was there), a row 'RULE' drawn as a divider across the box.
+# inside_width() is what a component lays its rows out to.
+my $SIDE = 3;
+
+sub inside_width { my ($box_width) = @_; return $box_width - 2 - 2 * $SIDE }
+
 sub frame {
     my (%a) = @_;
     my $s = $a{s};
     my $b = $s->{box};
     my $e = $a{edge} // $s->{frame};
     my $w = $a{width};
+    my $sp = ' ' x $SIDE;
     my $edge = sub {
         my ( $l, $text, $r ) = @_;
         $text //= '';
@@ -209,15 +218,15 @@ sub frame {
             push @out, $e . $b->{t_right} . ( $b->{h_line} x ( $w - 2 ) ) . $b->{t_left} . $s->{reset};
             next;
         }
-        push @out, $e . $b->{v_line} . $s->{reset} . ' ' . pad_to( $r, $w - 4 ) . ' ' . $e . $b->{v_line} . $s->{reset};
+        push @out, $e . $b->{v_line} . $s->{reset} . $sp . pad_to( $r, inside_width($w) ) . $sp . $e . $b->{v_line} . $s->{reset};
     }
     push @out, $edge->( $b->{corner_bl}, $a{foot}, $b->{corner_br} );
     return @out;
 }
 
-# The bullet before a notice in a list: light, from the dash family, open
-# until the glyph sheet is reviewed (round 4). The candidates, each with its
-# code point and name, and the one used by default.
+# The bullet before a notice in a list: a light right stroke in the category's
+# colour, so the one character carries the classification (chosen from the
+# glyph sheet, round 4). The candidates stay for the sheet.
 my @BULLETS = (
     [ '‐', 'U+2010 HYPHEN' ],
     [ '‒', 'U+2012 FIGURE DASH' ],
@@ -230,27 +239,30 @@ my @BULLETS = (
     [ '·', 'U+00B7 MIDDLE DOT (not a dash, for contrast)' ],
     [ '◦', 'U+25E6 WHITE BULLET (not a dash, for contrast)' ],
 );
-my $DEFAULT_BULLET = '–';
+my $DEFAULT_BULLET = '╶';
 
 sub bullet_candidates { return @BULLETS }
 
-# A notice's rows inside a list: the bullet in the dim colour, or the hooked
-# arrow alone for a record.
+# A notice's rows inside a list: the bullet in the category's colour, or the
+# hooked arrow alone for a record.
 sub bulleted {
     my ( $n, $s, $fg, $width, $bullet ) = @_;
     $bullet //= $DEFAULT_BULLET;
     my @r = notice_line( $n, $s, $fg, $width - 2, 0 );
     my $first = shift @r;
-    return ( ( $n->{record} ? '  ' : "$s->{dim}$bullet$s->{reset} " ) . $first, map { "  $_" } @r );
+    return ( ( $n->{record} ? '  ' : "$fg$bullet$s->{reset} " ) . $first, map { "  $_" } @r );
 }
 
 # --- the panel ---------------------------------------------------------------
 #
-#   panel( s, W, notices => [...], bullet => glyph )
+#   panel( s, W, notices => [...], bullet => glyph, form => headed|edge )
 #
 # One box round all the notices, however many (D9 sends many to the browser):
 # each category headed once, its notices one row each, the categories divided
-# by a blank row (D3). The title is `notices` and the bare count, dim.
+# by a blank row (D3). The title is `notices` and the bare count, dim. The
+# edge form, for a single category (round 4, for comparison): the category's
+# glyph, name, count and how-to-read text in the top edge, the notices alone
+# inside, one row shorter.
 
 sub panel {
     my (%a) = @_;
@@ -258,8 +270,15 @@ sub panel {
     my $W = $a{W};
     my @notices = grep { !$_->{record} } @{ $a{notices} };
     my @groups = grouped( $a{notices} );
-    my $iw = $W - 5;
+    my $iw = inside_width( $W - 1 );
     my @rows;
+    if ( ( $a{form} // 'headed' ) eq 'edge' && @groups == 1 ) {
+        my ( $cat, $in ) = @{ $groups[0] };
+        my $fg = $s->{fg}{ $cat->{name} };
+        push @rows, bulleted( $_, $s, $fg, $iw, $a{bullet} ) for @$in;
+        my $title = ' ' . heading( $cat, $s, scalar(@notices), $W - 7 ) . ' ';
+        return frame( s => $s, edge => $fg, width => $W - 1, title => $title, rows => \@rows );
+    }
     for my $gi ( 0 .. $#groups ) {
         my ( $cat, $in ) = @{ $groups[$gi] };
         my $fg = $s->{fg}{ $cat->{name} };
@@ -278,7 +297,7 @@ sub bullet_sheet {
     my (%a) = @_;
     my $s = $a{s};
     my $W = $a{W};
-    my $iw = $W - 5;
+    my $iw = inside_width( $W - 1 );
     my @groups = grouped( $a{notices} );
     my @rows;
     for my $i ( 0 .. $#BULLETS ) {
@@ -488,20 +507,28 @@ sub lettered {
 }
 
 # The buttons on one row: the highlighted one in reverse video in the
-# category's colour, the others framed in brackets; the countdown's slot
-# beside the default, always the same width.
+# category's colour, the others framed in brackets. Returns the row of labels
+# and, apart, the countdown's slot (always the same width), which the caller
+# sets beside the default button outside the centred width, so the buttons
+# do not move when the countdown stops.
 sub button_row {
     my ( $s, $fg, $btns, $focus, $left, $seconds ) = @_;
     my @b;
     for my $i ( 0 .. $#$btns ) {
         my $b = $btns->[$i];
         my $text = lettered($b);
-        my $cd = $b->{role} eq 'default' ? ' ' . countdown( $s, $left, $seconds ) : '';
         push @b, $i == $focus
-            ? "$fg\e[7m\e[1m  $text  \e[0m$cd"
-            : $s->{text} . "[ $text ]" . "$s->{reset}$cd";
+            ? "$fg\e[7m\e[1m  $text  \e[0m"
+            : $s->{text} . "[ $text ]" . $s->{reset};
     }
-    return join '    ', @b;
+    return ( join( '    ', @b ), countdown( $s, $left, $seconds ) );
+}
+
+# The button row centred in $iw on its labels alone, the countdown after it.
+sub centred_buttons {
+    my ( $s, $fg, $btns, $focus, $left, $seconds, $iw ) = @_;
+    my ( $brow, $cd ) = button_row( $s, $fg, $btns, $focus, $left, $seconds );
+    return ( ' ' x max( 0, int( ( $iw - display_width($brow) ) / 2 ) ) ) . "$brow $cd";
 }
 
 # --- the options list (the second stage of a choice, D8) ---------------------
@@ -511,6 +538,9 @@ sub button_row {
 # column; the highlighted option in reverse video, its effect on the row
 # beneath. Fewer parts than headings: fewer columns.
 
+# The columns: how many parts, the fixed widths, the gap between columns
+# (one space at the tightest, up to five with room: the spare width shared
+# between the gaps and the last column) and where the last column starts.
 sub option_columns {
     my ( $options, $headings, $iw ) = @_;
     my $P = min( scalar @$headings, max map { scalar @{ $_->{parts} } } @$options );
@@ -519,21 +549,27 @@ sub option_columns {
         $w[$c] = max( display_width( $headings->[$c] ), map { display_width( $_->{parts}[$c] // '' ) } @$options );
         $w[$c] = int( $iw * 0.4 ) if $w[$c] > int( $iw * 0.4 );
     }
-    my $lead = 5;    # marker, digit, spaces
-    my $last_at = $lead + sum( 0, map { $_ + 2 } @w );
-    return ( $P, \@w, $last_at );
+    my $lead  = 5;    # marker, digit, spaces
+    my $gaps  = $P - 1;
+    my $fixed = sum( 0, @w );
+    my $last_min = min( 24, max( display_width( $headings->[ $P - 1 ] ), longest_word( map { $_->{parts}[ $P - 1 ] } @$options ) ) );
+    my $spare = $iw - $lead - $fixed - $last_min;
+    my $gap = $gaps ? min( 5, max( 1, int( $spare / ( 2 * $gaps ) ) ) ) : 0;
+    my $last_at = $lead + $fixed + $gap * $gaps;
+    return ( $P, \@w, $last_at, $gap );
 }
 
 sub options_rows {
     my ( $options, $headings, $sel, $s, $fg, $iw ) = @_;
-    my ( $P, $w, $last_at ) = option_columns( $options, $headings, $iw );
+    my ( $P, $w, $last_at, $gap ) = option_columns( $options, $headings, $iw );
     my $room = max( 8, $iw - $last_at );
+    my $g = ' ' x $gap;
     my $head = ' ' x $last_at;
-    $head = ( ' ' x 5 ) . join( '', map { pad_to( $headings->[$_], $w->[$_] ) . '  ' } 0 .. $P - 2 ) if $P > 1;
+    $head = ( ' ' x 5 ) . join( '', map { pad_to( $headings->[$_], $w->[$_] ) . $g } 0 .. $P - 2 ) if $P > 1;
     my @rows = ( "$s->{pick}" . $head . $headings->[ $P - 1 ] . "$s->{reset}" );
     for my $i ( 0 .. $#$options ) {
         my $o = $options->[$i];
-        my $fixed = join '', map { pad_to( $o->{parts}[$_] // '', $w->[$_] ) . '  ' } 0 .. $P - 2;
+        my $fixed = join '', map { pad_to( $o->{parts}[$_] // '', $w->[$_] ) . $g } 0 .. $P - 2;
         my @last = wrap_text( $o->{parts}[ $P - 1 ] // '', $room );
         @last = ('') unless @last;
         my $c = $i == $sel ? $fg : $s->{dim};
@@ -546,12 +582,14 @@ sub options_rows {
     return @rows;
 }
 
-# The widest unit of the list that cannot wrap: the fixed columns and a
-# readable last column.
+# The width the list needs for its last column to wrap to no more than two
+# rows: the fixed columns at the tightest gap, and half the longest last part.
+# Dense content takes a wider tier through it (round 4).
 sub options_unit {
     my ( $options, $headings ) = @_;
-    my ( $P, $w, $last_at ) = option_columns( $options, $headings, 10_000 );
-    return $last_at + max( 16, longest_word( map { $_->{parts}[ $P - 1 ] } @$options ) );
+    my ( $P, $w, $last_at ) = option_columns( $options, $headings, 0 );
+    my $last = max( 16, map { display_width( $_->{parts}[ $P - 1 ] // '' ) } @$options );
+    return $last_at + max( longest_word( map { $_->{parts}[ $P - 1 ] } @$options ), int( ( $last + 1 ) / 2 ) );
 }
 
 # --- size tiers ---------------------------------------------------------------
@@ -644,7 +682,7 @@ sub ask {
     # The body rows at an inside width: the notices (bulleted when several).
     my $body = sub {
         my ($iw) = @_;
-        return map { $count > 1 ? bulleted( $_, $s, $fg, $iw ) : notice_line( $_, $s, $fg, $iw, 2 ) } @{ $a{notices} };
+        return map { $count > 1 ? bulleted( $_, $s, $fg, $iw ) : notice_line( $_, $s, $fg, $iw, 0 ) } @{ $a{notices} };
     };
     # Stage 1's tail: the question and the buttons (modal), or the question
     # row with the choices inline (box).
@@ -658,9 +696,8 @@ sub ask {
             }
             return ( $q . '  ' . join( '   ', @ch ) );
         }
-        my $brow = button_row( $s, $fg, \@btn, $focus, $left, $p{seconds} );
-        return ( ( ' ' x max( 0, int( ( $iw - display_width($q) ) / 2 ) ) ) . $q,
-                 ( ' ' x max( 0, int( ( $iw - display_width($brow) ) / 2 ) ) ) . $brow );
+        return ( ( ' ' x max( 0, int( ( $iw - display_width($q) ) / 2 ) ) ) . $q, '',
+                 centred_buttons( $s, $fg, \@btn, $focus, $left, $p{seconds}, $iw ) );
     };
     my $tail2 = sub {
         my ( $iw, $sel ) = @_;
@@ -681,13 +718,13 @@ sub ask {
         return " $s->{dim}$t$s->{reset} ";
     };
 
-    # Size: the width from the tier (modal) or the terminal (box); the
-    # height, in rows inside the frame, is the taller stage's.
-    my $pad = $form eq 'modal' ? 1 : 0;
+    # Size: the width from the tier (modal) or the terminal (box); an empty
+    # row above and below the content in both forms (both are erased).
+    my $pad = 1;
     my $stage_rows = sub {
         my ( $iw, $st ) = @_;
         my @b = $body->($iw);
-        return @b + ( $form eq 'box' ? 2 : 3 ) + 2 * $pad if $st == 1;    # body, blank, question (+ buttons)
+        return @b + ( $form eq 'box' ? 2 : 4 ) + 2 * $pad if $st == 1;    # body, blank, question (, blank, buttons)
         return @b + 1 + scalar( $tail2->( $iw, 0 ) ) + 2 * $pad;
     };
     # The rows inside the frame: the taller stage's when the height is fixed
@@ -700,19 +737,20 @@ sub ask {
     };
     my $measure = sub {
         my ($bw) = @_;
-        my $iw = $bw - 4;
+        my $iw = inside_width($bw);
+        my ($brow) = button_row( $s, $fg, \@btn, 0, $p{seconds}, $p{seconds} );
         my $unit = max( display_width($title) + 6 + min( 24, display_width( $cat->{reads} ) ),
                         display_width( $foot->(1) // '' ) + 4,
                         ( $a{options} ? display_width( $foot->(2) // '' ) + 4 : 0 ),
-                        display_width( strip_sgr( button_row( $s, $fg, \@btn, 0, $p{seconds}, $p{seconds} ) ) ) + 2,
-                        ( $a{options} ? options_unit( $a{options}, $headings ) : 0 ),
-                        longest_word( $a{question}, map { ( $_->{focus}, $_->{statement}, $_->{remedy}, @{ $_->{evidence} // [] } ) } @{ $a{notices} } ) + 4 );
+                        display_width($brow) + 2 + length("(${\ $p{seconds}}s)") + 8,
+                        ( $a{options} ? options_unit( $a{options}, $headings ) + 8 : 0 ),
+                        longest_word( $a{question}, map { ( $_->{focus}, $_->{statement}, $_->{remedy}, @{ $_->{evidence} // [] } ) } @{ $a{notices} } ) + 8 );
         return ( $unit, $rows_in->($iw) + 2 );
     };
     my ( $bw, $mh, $tier );
     if ( $form eq 'box' ) { ( $bw, $mh, $tier ) = ( $W - 1, $H - 2, 'full' ) }
     else                  { ( $bw, $mh, $tier ) = choose_tier( $W, $H, $measure, $p{size} ) }
-    my $iw       = $bw - 4;
+    my $iw       = inside_width($bw);
     my $top_edge = $treads->($bw);
 
     # The frame's rows for a stage, the body at the top and the tail at the
@@ -849,8 +887,8 @@ sub browser {
         my ( $n, $iw, $chosen ) = @_;
         my $fg = $s->{fg}{ $n->{category} };
         my $c  = cat_named( $n->{category} );
-        my @r = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 2 ) );
-        push @r, map { "$s->{text}$_$s->{reset}" } @{ $n->{detail} } if $n->{detail};
+        my @r = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 0 ) );
+        push @r, '', map { "$s->{text}$_$s->{reset}" } @{ $n->{detail} } if $n->{detail};
         if ( $n->{options} ) {
             push @r, defined $chosen
                 ? "$s->{dim}chosen:$s->{reset} $s->{pick}" . $n->{options}[$chosen]{parts}[0] . "$s->{reset} $fg$n->{options}[$chosen]{args}$s->{reset}"
@@ -884,18 +922,19 @@ sub browser {
     my ( $D, $T, $L );
     my $measure = sub {
         my ($bw) = @_;
-        my $iw = $bw - 4;
+        my $iw = inside_width($bw);
         $D = max map { scalar( $detail_rows->( $_, $iw, 0 ) ) } @items;
         $T = scalar( $tab_rows->( 0, $iw ) );
-        # The widest row no detail can wrap (a histogram), or a readable list.
-        my $unit = max( 40, map { display_width($_) } map { @{ $_->{detail} // [] } } @items );
-        return ( $unit, $T + 1 + $want_L + 1 + $D + 2 );
+        # The widest row no detail can wrap (a histogram), or a readable list;
+        # the rows: three panes, each with an empty row above and below.
+        my $unit = max( 40, map { display_width($_) } map { @{ $_->{detail} // [] } } @items ) + 8;
+        return ( $unit, $T + 1 + $want_L + 1 + $D + 2 + 6 );
     };
     my ( $bw, $mh, $tier ) = $d->{mode} eq 'inline' ? ( $W - 1, $H - 2, 'full' ) : choose_tier( $W, $H, $measure, $p{size} );
     $measure->($bw);
-    $L = min( $want_L, $mh - 2 - $T - 2 - $D );
+    $L = min( $want_L, $mh - 2 - 6 - $T - 2 - $D );
     $L = 3 if $L < 3;
-    my $iw = $bw - 4;
+    my $iw = inside_width($bw);
 
     my ( $tab, $sel, $top ) = ( 0, 0, 0 );
     my %chosen;
@@ -906,7 +945,7 @@ sub browser {
         $sel = $#shown if $sel > $#shown;
         $top = $sel if $sel < $top;
         $top = $sel - $L + 1 if $sel >= $top + $L;
-        my @r = ( $tab_rows->( $tab, $iw ), 'RULE' );
+        my @r = ( '', $tab_rows->( $tab, $iw ), '', 'RULE', '' );
         for my $i ( $top .. $top + $L - 1 ) {
             if ( $i > $#shown ) { push @r, ''; next }
             my $n  = $shown[$i];
@@ -918,9 +957,9 @@ sub browser {
                 ? "$fg▶$s->{reset} $fg$c->{glyph}$s->{reset} \e[7m" . pad_to( strip_sgr($text), $iw - 6 ) . "\e[0m $mark"
                 : "  $fg$c->{glyph}$s->{reset} " . pad_to( $text, $iw - 6 ) . " $mark";
         }
-        push @r, 'RULE';
+        push @r, '', 'RULE', '';
         my @detail = $detail_rows->( $shown[$sel], $iw, $chosen{ $shown[$sel] } );
-        push @r, map { $detail[$_] // '' } 0 .. $D - 1;
+        push @r, ( map { $detail[$_] // '' } 0 .. $D - 1 ), '';
         my $cd = defined $left ? ' ' . countdown( $s, $left, $p{seconds} ) : '';
         my $foot = ' ' . $s->{dim} . key_bar( move => '↑↓ j k move · ←→ Tab tabs · 1-' . ( @cats + 1 ) . ' tab', enter => 'options', esc => 'close', quit => $p{quit} ) . $s->{reset} . $cd . ' ';
         my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;

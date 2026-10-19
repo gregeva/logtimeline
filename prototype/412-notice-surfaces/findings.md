@@ -17,20 +17,24 @@ separated, one per choice point) and `--seconds N`.
 
 Where stage 1 stands, for picking the review up in a later session:
 
-- **Round 4 is reviewed** (12 of 12 entries, `feedback/stage1-round4.jsonl`,
-  summarised under round 4 below). The modal before the read was missed (the
-  countdown ran out) and is reviewed again next round.
-- **Next, by the round procedure** (`features/412-notice-surfaces.md`
-  § Prototyping): the read-back of round 4's feedback (heard, changes, not
-  changing and why) goes to the architect; round 5 is built only after he
-  confirms it, and the round's settled lines move into the contract. The
-  review runner is `perl review.pl` in this directory (Homebrew Perl: `export
-  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`).
+- **Round 5 is built and not yet reviewed.** It is the next step: the
+  architect runs `perl review.pl` from this directory (Homebrew Perl: `export
+  PATH="$(brew --prefix)/bin:$(brew --prefix)/opt/perl/bin:$PATH"`), one view
+  at a time, feedback saved to `feedback/stage1-round5.jsonl`; the last entry
+  takes remarks against the contract. The modal before the read, missed in
+  round 4, is in the list again.
+- **Then, by the round procedure** (`features/412-notice-surfaces.md`
+  § Prototyping): Claude records the feedback here under round 5, sends the
+  read-back (heard, changes, not changing and why), builds only after the
+  architect confirms it, and moves the round's settled lines into the
+  contract.
 - **What each round holds:** round 1 (the six first prototypes, `p1-` to
   `p6-*.pl`, feedback `feedback/stage1.jsonl`); round 2 (reviewed at commit
   4d1218c, feedback `feedback/stage1-round2.jsonl`); round 3 (its scripts at
-  commit 4bef110, feedback `feedback/stage1-round3.jsonl`); round 4 (`show.pl`
-  with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`, the current framework).
+  commit 4bef110, feedback `feedback/stage1-round3.jsonl`); round 4 (the first
+  build of `show.pl` with `lib/NoticeSurfaces.pm` and `notices/inputs.pl`,
+  feedback `feedback/stage1-round4.jsonl`); round 5 (the same scripts, the
+  current framework).
 - **Not started:** the decision round on which surfaces go forward, the
   light background (no option on it has been evaluated), porting to Linux and
   Windows, the unattended-capture method for the selected surfaces, the
@@ -477,3 +481,46 @@ By view:
 | modal below the cursor | good, perfect as a fallback | |
 | browser over the dimmed run | really great | the padding rule above in the list, the detail and the layered modal; an empty row between the notice and the histogram; the bytes histogram added to the detail where the messages data has bytes |
 | browser below the cursor | good, as expected | |
+
+## Round 5: round 4's corrections (2026-10-19)
+
+Built after the architect confirmed the read-back, with one amendment at
+confirmation: the two characters of side padding apply to every box, erased
+or not; the empty rows above and below apply to the pop-ups that are erased.
+The settled lines went into the contract first (§ Padding, § Buttons, § The
+options list, § Pop-up size, the bullet in § Category sheet).
+
+- **Padding:** `frame()` leaves three cells inside each side edge (the one
+  it had and the two asked for) and every component lays its rows out to
+  `inside_width()`. The modal and the compact box have an empty row above and
+  below their content; the browser's three panes (tabs, list, detail) each
+  have one; the layered modal has the modal's. The modal's question has an
+  empty row above and below. An empty row separates a notice from its
+  histogram in the detail. A single notice inside a modal or box has no
+  hanging indent on its continuation rows; under a bullet the continuation
+  stays aligned with the text.
+- **Bullet:** `╶` (U+2576) in the category's colour, the sheet's first choice;
+  the sheet stays in `show.pl bullets` but is no longer a review view.
+- **Buttons:** centred on their labels alone (`centred_buttons()`); the
+  countdown's slot follows the default button outside the centred width.
+- **Options list:** the gap between columns is one space at the tightest and
+  up to five, the spare width shared between the gaps and the last column
+  (`option_columns()`); the tier is chosen so the last column wraps to no more
+  than two rows (`options_unit()`), which takes the pattern modal from medium
+  to large at 120 columns.
+- **Single notice:** `panel --edge` is the comparison the architect asked for:
+  the category's glyph, name, count and how-to-read text in the top edge in
+  the category colour, the notice alone inside, one row shorter than the
+  headed form. Both are review views.
+- **Browser detail:** ltl's duration and bytes histograms side by side, as ltl
+  renders two metrics (`-hg duration,bytes -hgh 8` at 90 columns, 14 rows, 85
+  cells wide, `notices/histogram.pl` regenerated from a real run), so the
+  detail is no taller than before.
+
+Claude's own runs, before review: every view unattended at 120 by 40 (15
+runs, exit 0, nothing on stderr); in a tmux pane (`check-tmux.sh`): the
+memory modal with Shift-Tab and a stopped countdown; the pattern modal's list
+in the large tier with the gap at five spaces, 1 to 3 and ↓; the box pattern
+list at full width; the browser on tab 7 with both histograms in the detail
+after an empty row, the layered list padded the same, a choice marked and
+shown, Esc back; the inline browser's layered list and repaint.

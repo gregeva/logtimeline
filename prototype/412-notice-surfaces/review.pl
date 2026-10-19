@@ -8,7 +8,7 @@
 #   perl review.pl --from box-read  start at an option and go on from there
 #   perl review.pl --only box-read  one option alone
 #   perl review.pl --all          every option, from the first
-#   perl review.pl --round 3      an earlier round's options (default: 4)
+#   perl review.pl --round 4      an earlier round's options (default: 5)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -31,7 +31,7 @@ binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
 
 my %opt;
-$opt{round} = 4;
+$opt{round} = 5;
 GetOptions( \%opt, 'list', 'from=s', 'only=s', 'all', 'round=i' ) or die "bad options\n";
 
 my $dir  = $FindBin::Bin;
@@ -108,6 +108,24 @@ $rounds{4} = [
     [ 'modal-inline',   'show.pl', 'ask --input memory --placement inline',    'The modal below the cursor (the fallback)',         'the same dialog drawn into rows below the cursor; erased once answered' ],
     [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'sized before drawing for its tallest detail: move to the GUIDANCE notice on GetDateAndTime, its detail holds ltl\'s histogram with the percentile legend; Enter opens the options as a modal layered over the browser; Esc closes it and the browser is back as it was; a 15 s countdown to closing stops at the first key' ],
     [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Notice browser below the cursor (the fallback)',     'the same browser below the cursor; the layered modal is drawn within its rows; closing erases it' ],
+    [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
+];
+
+# Round 5: round 4's corrections (padding, the bullet in the category colour,
+# centred buttons, the growing column gap, the dense list in a wider tier, the
+# bytes histogram) and the single-notice comparison.
+$rounds{5} = [
+    [ 'panel',          'show.pl', 'panel',                                    'Panel with the typical set (7 notices)',            'the chosen bullet in the category colour; two characters of padding inside the sides' ],
+    [ 'panel-one',      'show.pl', 'panel --input deprecation',                'Panel with a single notice, headed inside',         'the standard form: the category heading on its own row inside the box' ],
+    [ 'panel-one-edge', 'show.pl', 'panel --input deprecation --edge',         'Panel with a single notice, the category in the top edge', 'for comparison: glyph, category, count and how-to-read in the top edge, the notice alone inside, one row shorter' ],
+    [ 'modal-read',     'show.pl', 'ask --input memory',                       'Modal over the run, during the read (memory)',      'padding inside the sides; no hanging indent; an empty row above and below the question; the buttons centred on their labels, the countdown beside the default outside the centring' ],
+    [ 'modal-preread',  'show.pl', 'ask --input preread',                      'The same modal before the read (four option notices)', 'missed last round: press any key to stop the countdown first; the same call with other notices and buttons' ],
+    [ 'modal-pattern',  'show.pl', 'ask --input pattern',                      'The same modal once a pattern is found, with its options list', 'press l: the list takes the wider tier for its dense content; the column gap grows with the width' ],
+    [ 'box-read',       'show.pl', 'ask --input memory --form box',            'The compact form: a box below the cursor, during the read', 'padding inside the sides and an empty row above and below' ],
+    [ 'box-pattern',    'show.pl', 'ask --input pattern --form box',           'The compact form once a pattern is found',          'press l: the list at full width with the column gap grown to the room' ],
+    [ 'modal-inline',   'show.pl', 'ask --input memory --placement inline',    'The modal below the cursor (the fallback)',         'the same dialog drawn below the cursor' ],
+    [ 'browser',        'show.pl', 'browser',                                  'Notice browser over the dimmed run (25 notices)',   'each pane padded: an empty row above and below, two characters at the sides; press 7 for GUIDANCE: the detail holds ltl\'s duration and bytes histograms side by side after an empty row; Enter opens the options list layered over the browser, padded the same' ],
+    [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Notice browser below the cursor (the fallback)',     'the same browser below the cursor' ],
     [ 'contract',       '-',       '',                                         'Remarks against the contract',                      'anything that applies across views, against a line of features/412-notice-surfaces.md § Surface framework contract rather than a rendering' ],
 ];
 
