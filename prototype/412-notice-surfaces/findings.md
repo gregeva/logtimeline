@@ -556,7 +556,7 @@ inline fallback. What changes:
   fallback shown for every surface), "an inappropriate waste of my time": the
   list must get shorter every round, towards sign-off.
 
-## Lessons learned (accumulating, for `prototype/README.md` at the stage's close)
+## Lessons learned (worked into `prototype/README.md` § (e) on 2026-10-19)
 
 1. **The review list shrinks every round.** A round shows only the views a
    change touched or something new; a view the architect has validated is not
@@ -655,7 +655,7 @@ the framework is left unvalidated on macOS.
 |---|---|
 | each selected surface judged by the architect in the terminal | done on macOS: the three components, every form and placement |
 | a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | demonstrated against known-good and known-bad input (§ Unattended capture below); the options and their costs are before the architect |
-| the findings record what was chosen, what was learned and why | this file and the contract; the lessons go into `prototype/README.md` at the close |
+| the findings record what was chosen, what was learned and why | this file; the lessons are `prototype/README.md` § (e), the design prototype (2026-10-19) |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
 | porting the selected components to Linux and Windows | not started |
 | the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |

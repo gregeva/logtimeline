@@ -463,8 +463,10 @@ the prototyping stage is closed:
       unattended, for the harnesses and for the screenshot tool
       (`prototype/412-notice-surfaces/findings.md` § Unattended capture, 2026-10-19;
       the method follows the surface, `docs/terminal-interaction.md` § Unattended runs).
-- [ ] The prototype findings record what was chosen, what was learned along
-      the way, and why each decision was made.
+- [x] The prototype findings record what was chosen, what was learned along
+      the way, and why each decision was made (the findings' round sections
+      and § Lessons learned; the lessons are the rules of the design prototype
+      in `prototype/README.md` § (e), 2026-10-19).
 
 ## Surface framework contract
 
