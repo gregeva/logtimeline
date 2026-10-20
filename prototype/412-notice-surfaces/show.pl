@@ -127,7 +127,6 @@ elsif ( $component eq 'ask' ) {
 else {
     backdrop();
     progress( 1, 100 );
-    print "\n";
     my $chosen = browser( s => $s, W => $W, H => $H, %param, notices => $in->{notices} );
     quit_run() if !ref $chosen && $chosen eq 'quit';
     my @args = grep { $_ ne '' } map { $_->[0]{options}[ $_->[1] ]{args} } @$chosen;

@@ -959,3 +959,24 @@ gave the screen back.
 - **The bullet on Windows** is `—` (U+2014), the architect's choice from the
   bullet sheet drawn in panels in Windows Terminal, after `‒` (U+2012) was
   rejected in context; elsewhere it stays `╶`.
+
+### Architect's re-check on Windows (2026-10-20)
+
+modal-read, modal-quit, modal-pattern: no flicker. browser: "yes, perfect".
+modal-inline: "there wasn't previous flicker here - not sure why you are
+asking me to redo this test" (the re-check was started with `--from` and so
+ran views that had not changed; a re-check names the changed views alone).
+box-read: "There are 2 empty lines above the compact box, that is not a part
+of what we've agreed to in the requirements." browser-inline: "it too like
+compact box has way too many empty lines before it which does not meet
+requirements."
+
+Cause: a surface below the cursor always cleared the cursor's row and moved
+down, adding an empty row even where the row above was already empty (the
+run's blank row before the progress line), and `show.pl` printed a newline of
+its own before the browser. Now the surface starts on the cursor's row when
+the row above is empty and adds the empty row only otherwise, and the extra
+newline is gone; rows are overwritten in place with the line's tail cleared
+after them. Measured on screen rows: one empty row above the compact box, the
+modal below the cursor and the browser below the cursor; after Esc the
+progress row resumes on its own row.

@@ -582,11 +582,20 @@ sub draw_rows {
         print "\r";
         return;
     }
-    if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" }
-    else            { print "\r\e[2K\n"; $d->{lead} = 1 }
+    if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1 }
+    elsif ( @printed && strip_sgr( $printed[-1] ) eq '' ) {
+        # The row above is already empty: that is the one empty row before
+        # the box, which starts on the cursor's own row (contract § Where a
+        # component is drawn).
+        print "\r\e[2K";
+        $d->{lead} = 0;
+    }
+    else { print "\r\e[2K\n"; $d->{lead} = 1 }
     print "\r";
+    # Each row overwritten in place, then the rest of the line cleared after
+    # it; a box that shrank clears the rows it no longer uses.
+    print "$rows[$_]\e[K" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
     print "\e[J" if @rows < $d->{h};
-    print "\e[2K$rows[$_]" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
     $d->{h} = @rows;
     return;
 }
@@ -598,7 +607,8 @@ sub close_drawer {
         $d->{on} = 0;
     }
     elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
-        print "\e[" . ( $d->{h} - 1 + ( $d->{lead} // 0 ) ) . "A";
+        my $up = $d->{h} - 1 + ( $d->{lead} // 0 );
+        print "\e[${up}A" if $up > 0;
         print "\r\e[J";
     }
     $d->{h} = 0;
