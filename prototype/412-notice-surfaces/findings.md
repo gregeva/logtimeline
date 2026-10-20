@@ -1148,3 +1148,9 @@ dark by default there, follows from it.
 The bullet is the em dash `—` on every terminal (the architect, 2026-10-20,
 after finding `╶` a bit small in the Linux round): `docs/design-language.md`
 § the notice's anatomy. The panel's seven bulleted rows change, nothing else.
+
+Checked by the architect in Windows Terminal (2026-10-20), "they work":
+`perl show.pl terminal`; `perl show.pl panel` from a light profile with no
+`--bg`, drawn in the light colours; the compact box's key bar giving each
+choice letter its action and Esc. Terminal detection stands validated on
+macOS, over SSH to Linux, and on Windows.
