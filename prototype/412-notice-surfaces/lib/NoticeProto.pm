@@ -307,7 +307,7 @@ sub wrap_text {
 # its colour there (docs/terminal-output.md § Glyphs and width).
 
 my @categories = (
-    { name => 'data anomaly',           glyph => '⚠', windows => '▲', reads => 'check the source data or the options before trusting the figures' },
+    { name => 'data anomaly',           glyph => '⚠', windows => '△', reads => 'check the source data or the options before trusting the figures' },
     { name => 'figure caveat',          glyph => '≈', reads => 'the figures cover less than they appear to' },
     { name => 'your options',           glyph => '⚙', windows => '⛭', reads => 'command usage warnings' },
     { name => 'decision taken for you', glyph => '↻', reads => 'what the run did instead of what was asked' },

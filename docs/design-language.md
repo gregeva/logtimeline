@@ -164,7 +164,7 @@ light one.
 
 | order | category | glyph | on Windows | colour | how to read it |
 |---|---|---|---|---|---|
-| 1 | data anomaly | ⚠ | ▲ | orange | check the source data or the options before trusting the figures |
+| 1 | data anomaly | ⚠ | △ | orange | check the source data or the options before trusting the figures |
 | 2 | figure caveat | ≈ | ≈ | magenta | the figures cover less than they appear to |
 | 3 | your options | ⚙ | ⛭ | cyan | command usage warnings |
 | 4 | decision taken for you | ↻ | ↻ | blue | what the run did instead of what was asked |

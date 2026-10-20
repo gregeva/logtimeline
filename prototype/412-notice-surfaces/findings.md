@@ -822,6 +822,10 @@ right-pointing candidates printed in both terminals, `►` (U+25BA), `▸` and
 `›` were one cell in both; the architect chose `►`, and the category sheet
 takes it on Windows.
 
+`▲` for data anomaly and `⧖` for runtime condition were Claude's picks, never
+the architect's. In his own Windows round the architect chose `△` (U+25B3),
+one cell in its colour in both terminals, for data anomaly.
+
 Every non-ASCII character the prototypes and `ltl` draw, 74, was then printed
 in both terminals (the table in `docs/terminal-output.md` § Glyphs and width).
 In Windows Terminal only the three emoji glyphs fail. In the classic console
