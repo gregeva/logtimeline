@@ -829,6 +829,38 @@ An earlier line of `docs/terminal-output.md` said `ltl`'s colours reach a
 classic console as text; that was inferred from a script that starts no
 subprocess, never from running `ltl`, and it was wrong.
 
-The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
-arrows, Shift-Tab, the cursor position report) are not yet validated on
-Windows.
+The rules drawn from these are `docs/terminal-output.md`.
+
+### Keys, a first pass by script (2026-10-20)
+
+Each view was started with `perl show.pl` in its own Windows Terminal window
+and driven with keystrokes sent to that window only, the screen captured
+after each key; the architect's own judgement of the views is still to come.
+
+| view | keys sent | seen |
+|---|---|---|
+| modal, during the read | → ← Tab Shift-Tab, `z`, Esc, Enter | ← and Tab move to Stop here, → and Shift-Tab back; Tab stops the countdown and its bracket goes; `z` changes nothing; Esc erases the modal and the run carries on; Enter on Continue reading continues |
+| modal, countdown left to run out (`--seconds 4`) | none | the default taken, the run completes |
+| modal, quitting | `x`, then a typed command | the run stops with `Stopped: the analyst quit (q/x).`; the command typed afterwards echoes and runs |
+| modal with its options list | `l`, ↓ j k, `2`, Enter | `l` opens the list on Continue as planned; ↓ wraps to 1, j k move; `2` then Enter chooses Isolate this API (`-i GetDateAndTime -hg`) |
+| compact box | `C`; separately Esc | the upper-case letter chooses Continue reading; Esc takes the default; the box is erased either way |
+| notice browser | `3`, ↓, `7`, Enter, Esc, Esc | the digits pick the tabs; ↓ moves the highlight; Enter on a guidance item opens the layered options list over the browser; Esc goes back to the browser as it was, then closes it |
+| modal and browser below the cursor | Esc; Tab, Esc | drawn below the run and erased on Esc |
+
+Every key decoded. Two things to look at:
+
+- **The dimmed copy of the run under an alternate-screen modal stands 3 to 4
+  rows lower than the run itself** (the `Processing 40%` row and the summary
+  table above it, in all three modal captures), where
+  `docs/terminal-interaction.md` § Where a component is drawn has "every row
+  kept at the position it had, the live row included". The cause is not
+  isolated; whether macOS shows the same at the window size used here is not
+  known.
+- After the browser below the cursor closes, the window shows only the rows
+  after it: the run's rows above have scrolled out of view, the browser being
+  taller than the space below the cursor. Whether macOS does the same is not
+  known.
+
+Not covered: the light background (no light profile was used), and the
+browser's histograms at `ltl`'s size, which need 160 columns or more against
+the 120 or so of the window used.
