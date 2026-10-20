@@ -872,6 +872,18 @@ Every key decoded. Two things to look at:
   taller than the space below the cursor. Whether macOS does the same is not
   known.
 
-Not covered: the light background (no light profile was used), and the
-browser's histograms at `ltl`'s size, which need 160 columns or more against
-the 120 or so of the window used.
+### Light background, by script (2026-10-20)
+
+Maximized Windows Terminal windows on its built-in "One Half Light" scheme
+(`wt --colorScheme`, the architect's settings untouched), each view with
+`--bg light`: the panel, the modal (Tab, Esc), the options list (`l`, ↓, Esc)
+and the browser with the layered options list (`7`, Enter, Esc, Esc). Every
+glyph is one cell in its light colour, the keys decode, and the browser's
+histograms show at `ltl`'s size side by side in the maximized window.
+
+One thing does not hold: **the dimmed copy of the run under a modal is not
+dimmed.** Its text measures RGB 28,29,33 against the scheme's foreground
+#383A42 (56,58,66), about half its brightness: Windows Terminal renders faint
+(SGR 2) by darkening the colour, which on a light scheme takes text towards
+black instead of towards the background. On the dark scheme the same
+sequence greys the copy as designed.
