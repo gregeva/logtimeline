@@ -906,3 +906,29 @@ change, in maximized windows: on light, the focus and statement black
 browser's text under the layered list from black to 127 on light and from 204
 to 102 on dark, its histograms in their own colours, dimmed, on both; the
 colours back in full when the list closes.
+
+### Architect's feedback on the Windows round (2026-10-20)
+
+From `feedback/stage1-windows.jsonl`, `perl review.pl --round windows` in
+Windows Terminal:
+
+| option | feedback |
+|---|---|
+| panel | "excellent - finally got to compatibility with macOS" |
+| panel-one | "not convinced about the bullet glyph in Windows. I don't recall the color being this on on macOS - make sure that they are the same colors across environments. Otherwise all good." |
+| modal-read | "whole screen is flickering when the countdown remaining time is updated. Make sure that any refreshes are differential - you cannot update the entire screen just for a single character!" |
+| modal-quit | "at the redraw ... you are first drawing the dimmed background, then re-drawing the modal dialogue over top of it, which is causing the modal dialogue to be cleared and redrawn, and we can see what is behind it ... this is not allowed for a TUI" |
+| modal-pattern | "Functionally it works as expected, but same issue on the redraw, while navigating the list, I can see the text from the background coming through as the modal window is erased and fully redrawn." |
+| modal-inline | "Yes, perfect" |
+| box-read | "Perfect" |
+| browser | "Escape to close does not erase the dialogue!!!! ... Same issues as seen throughout with the redrawing." |
+| browser-inline | "Good. However in the detail pane, there should be an additional vertical space below the category heading and the notices themselves in the dialogue versions which are erased. This is obviously uniform across platforms and virtual screen-based or fallback method." |
+| light | "It's not possible to switch to a light profile browser during the same orchestrated run, however I already watched your light background terminal tests, and the current state is excellent." |
+| contract | "No comment" |
+
+What the code shows for the redraw: every alternate-screen draw in
+`draw_rows()` clears the screen (`\e[H\e[2J`), repaints every dimmed layer
+under the surface, then the surface, so a countdown tick or a key in a list
+repaints the whole screen. The browser's Esc did not reproduce in a run of
+`perl show.pl browser` started on its own: one Esc in the list closed it and
+gave the screen back.
