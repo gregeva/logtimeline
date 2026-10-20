@@ -1130,6 +1130,21 @@ identity reply `1;95;0`, background dark from the colour reply (luminance
 0.00), the category glyphs ⚠ ≈ ⚙ ↻ ⏱ ➤. The Windows branch awaits a check on
 Windows.
 
+On Windows 11 (Claude's runs, 2026-10-20), `terminal()` called in a new
+window of each kind, its result written to a file:
+
+| window | terminal (from) | background (from) | glyphs | time to find |
+|---|---|---|---|---|
+| Windows Terminal, its default dark scheme | `windows-terminal` (`WT_SESSION`) | dark (colour reply, luminance 0.05) | △ ≈ ⛭ ↻ ⧖ ► | 49 ms |
+| Windows Terminal, scheme One Half Light | `windows-terminal` (`WT_SESSION`) | light (colour reply, luminance 0.98) | △ ≈ ⛭ ↻ ⧖ ► | 35 ms |
+| classic console, `WT_SESSION` cleared | `conhost` (Windows without `WT_SESSION`) | dark (default, no colour reply) | △ ≈ ⛭ ↻ ⧖ ► | 36 ms |
+
+Windows Terminal answers the colour query; the classic console does not, and
+the device attributes request sent after it ends the wait at once. A classic
+console started from inside Windows Terminal inherits `WT_SESSION` and reads
+as Windows Terminal; both take the same glyphs, so only its background,
+dark by default there, follows from it.
+
 The bullet is the em dash `—` on every terminal (the architect, 2026-10-20,
 after finding `╶` a bit small in the Linux round): `docs/design-language.md`
 § the notice's anatomy. The panel's seven bulleted rows change, nothing else.
