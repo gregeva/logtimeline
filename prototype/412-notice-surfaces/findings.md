@@ -1104,3 +1104,9 @@ everything but its time and is not kept.
 - **The background is read from the terminal** (the colour query answered in
   every macOS Terminal run), so a dark or light background can be known
   without the analyst saying so.
+
+The fonts (the architect): Clear Dark uses SF Mono Terminal Regular 12, Pro
+uses Monaco 10. With the Pro profile switched to SF Mono Terminal the frame's
+lines join: the cause is the font, confirmed. SF Mono Terminal needs
+anti-aliasing on to read well. Recorded in `docs/terminal-output.md`
+§ Glyphs and width.

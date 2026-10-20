@@ -173,6 +173,17 @@ font has no shape for a character) in others. Which setting decides it is not
 isolated: neither the code page nor VT processing alone explains every
 window measured.
 
+**Measured on macOS.** Whether the frame's lines join is decided by the
+font of the terminal's profile, which no query reaches. In macOS Terminal,
+with the same characters, each one cell wide: in SF Mono Terminal (profile
+Clear Dark) the vertical bars join from row to row and the rounded corners
+sit on the lines; in Monaco (profile Pro) the vertical bars break between rows
+and the rounded corners sit about one pixel low, the shapes of a fallback
+font. Switching the Pro profile to SF Mono Terminal joins them (the architect,
+2026-10-20); that font needs anti-aliasing on to read well. A program cannot
+detect or correct this; the frame is drawn for a font that carries the
+box-drawing set.
+
 Replacements tried for the three emoji glyphs, printed in the category's
 colour and bold:
 
