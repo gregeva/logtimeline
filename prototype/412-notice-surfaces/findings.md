@@ -956,5 +956,6 @@ gave the screen back.
   candidates shown in both Windows terminals the architect chose 170 for
   figure caveat, 44 for your options, 33 for decision taken for you and 40
   for guidance, on every platform.
-- **The bullet on Windows** is `‒` (U+2012), the architect's choice from the
-  bullet candidates shown in both terminals; elsewhere it stays `╶`.
+- **The bullet on Windows** is `—` (U+2014), the architect's choice from the
+  bullet sheet drawn in panels in Windows Terminal, after `‒` (U+2012) was
+  rejected in context; elsewhere it stays `╶`.

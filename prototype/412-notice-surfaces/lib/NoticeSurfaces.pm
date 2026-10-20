@@ -243,10 +243,13 @@ my @BULLETS = (
     [ '⎯', 'U+23AF HORIZONTAL LINE EXTENSION' ],
     [ '·', 'U+00B7 MIDDLE DOT (not a dash, for contrast)' ],
     [ '◦', 'U+25E6 WHITE BULLET (not a dash, for contrast)' ],
+    [ '•', 'U+2022 BULLET' ],
+    [ '▸', 'U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE' ],
+    [ '›', 'U+203A SINGLE RIGHT-POINTING ANGLE QUOTATION MARK' ],
 );
-# Windows Terminal draws ╶ as a short dash; Windows takes ‒, the architect's
+# Windows Terminal draws ╶ as a short dash; Windows takes —, the architect's
 # choice in the Windows round.
-my $DEFAULT_BULLET = $^O eq 'MSWin32' ? '‒' : '╶';
+my $DEFAULT_BULLET = $^O eq 'MSWin32' ? '—' : '╶';
 
 sub bullet_candidates { return @BULLETS }
 
