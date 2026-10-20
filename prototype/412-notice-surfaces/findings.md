@@ -1123,3 +1123,9 @@ and, with it unset, from the name reply; the measured colour replies (black,
 dark blue-grey) read dark, white and cream light; the redirected runs of every
 view and the tmux captures of every scenario are unchanged but for the
 compact box's key bar. The rule is `docs/terminal-output.md` § The terminals.
+
+In macOS Terminal, profile Pro, over SSH to the Linux host (the architect,
+2026-10-20), `perl show.pl terminal`: terminal `Apple_Terminal` from the
+identity reply `1;95;0`, background dark from the colour reply (luminance
+0.00), the category glyphs ⚠ ≈ ⚙ ↻ ⏱ ➤. The Windows branch awaits a check on
+Windows.
