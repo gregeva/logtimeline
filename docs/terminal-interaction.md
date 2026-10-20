@@ -219,8 +219,19 @@ counted as rendered, two cells, not two added to a space already there. A box
 that stays on screen (the panel) has one cell inside each side and no empty
 rows. A modal's question has an empty row above and below it. The browser's
 tabs belong to its list pane: an empty row above and below the tabs, then the
-list, no rule between. In a detail pane an empty row separates a notice from a
-histogram under it, and the chosen or on-offer row from what is above it.
+list, no rule between. In a detail pane an empty row separates the category
+heading from the notice under it (architect, 2026-10-20, from the Windows
+round), a notice from a histogram under it, and the chosen or on-offer row
+from what is above it.
+
+### Redrawing
+
+A surface that changes while it is shown (a countdown tick, a move in a list,
+a stage change) rewrites only the cells that changed, overwriting them in
+place; nothing is cleared first and nothing is repainted that did not change,
+so what lies behind a pop-up never shows through it (architect, 2026-10-20,
+from the Windows round). A surface layered over another draws on the same
+alternate screen and leaves entering and leaving it to the outermost surface.
 
 ### Erasing and the record (D4)
 

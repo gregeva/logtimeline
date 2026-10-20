@@ -376,19 +376,108 @@ sub drawer {
     my (%a) = @_;
     my $mode = interactive() ? $a{placement} : 'plain';
     my $d = { mode => $mode, W => $a{W}, H => $a{H}, h => 0, under => $a{under} // [], parent => $a{parent}, bg => $a{bg} // 'dark' };
+    $d->{nested} = $mode eq 'alt' && @{ $d->{under} } ? 1 : 0;
     if ( $mode eq 'alt' && !@{ $d->{under} } ) {
         push @{ $d->{under} }, backdrop_layer( $a{W}, $a{H} );
     }
     return $d;
 }
 
-sub paint_layer {
-    my ( $l, $dimmed, $bg ) = @_;
-    for my $i ( 0 .. $#{ $l->{rows} } ) {
-        my $r = $l->{rows}[$i];
-        print "\e[" . ( $l->{top} + $i ) . ";$l->{col}H";
-        print $dimmed ? dim_row( $r, $bg ) : $r;
+# --- the alternate screen, drawn by difference ---------------------------------
+#
+# The screen is held as one composed row per terminal row: the dimmed layers
+# under the surface, then the surface over them. A draw composes the new
+# screen and rewrites only the rows that differ from what the terminal shows,
+# each overwritten in place, never cleared first, so a countdown tick or a
+# move in a list rewrites one or two rows and nothing behind the surface shows
+# through.
+
+my %cell_width;
+
+sub cells { my ($c) = @_; return $cell_width{$c} //= display_width($c) }
+
+# The cells $from (0-based) to $from + $len - 1 of a row with its colours,
+# starting in the colour state it had at $from; $len undef runs to the end.
+sub cut_cells {
+    my ( $s, $from, $len ) = @_;
+    my ( $col, $state, $out ) = ( 0, '', '' );
+    while ( $s =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e\[/ ) {
+            if   ( $col < $from ) { $state .= $t }
+            else                  { $out .= $t }
+            next;
+        }
+        last if defined $len && $col >= $from + $len;
+        $out .= $t if $col >= $from;
+        $col += cells($t);
     }
+    my $got = display_width($out);
+    $out .= ' ' x ( $len - $got ) if defined $len && $got < $len;
+    return $state . $out . "\e[0m";
+}
+
+# The dimmed layers under a surface, composed once per drawer.
+sub base_rows {
+    my ($d) = @_;
+    return $d->{base} if $d->{base};
+    my ( $W, $H ) = @$d{qw(W H)};
+    my @base = (' ' x $W) x $H;
+    for my $l ( @{ $d->{under} } ) {
+        my @dimmed = map { dim_row( $_, $d->{bg} ) } @{ $l->{rows} };
+        my $layer = { rows => \@dimmed, top => $l->{top}, col => $l->{col} };
+        @base = @{ compose( $W, $H, \@base, $layer ) };
+    }
+    return $d->{base} = \@base;
+}
+
+# Each row of $base with the layer's rows laid over it at its place.
+sub compose {
+    my ( $W, $H, $base, $l ) = @_;
+    my @out = @$base;
+    for my $i ( 0 .. $#{ $l->{rows} } ) {
+        my $r = $l->{top} - 1 + $i;
+        next if $r < 0 || $r >= $H;
+        my $row = $l->{rows}[$i];
+        my $w   = display_width($row);
+        my $c   = $l->{col} - 1;
+        $out[$r] = cut_cells( $out[$r], 0, $c ) . $row . "\e[0m" . cut_cells( $out[$r], $c + $w, max( 0, $W - $c - $w ) );
+    }
+    return \@out;
+}
+
+# A row as its cells, each the character with the colour state it is drawn in.
+sub cell_list {
+    my ($s) = @_;
+    my ( $state, @c ) = ('');
+    while ( $s =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e\[/ ) { $state = $t =~ /^\e\[0?m$/ ? '' : $state . $t; next }
+        push @c, "$state\0$t";
+        push @c, "$state\0" for 2 .. cells($t);
+    }
+    return \@c;
+}
+
+# Rewrite, on each row that changed, only the run of cells from its first
+# changed cell to its last.
+sub paint_differences {
+    my ( $d, $rows ) = @_;
+    my $was = $d->{screen};
+    for my $r ( 0 .. $#$rows ) {
+        my $new = $rows->[$r];
+        next if $was && defined $was->[$r] && $was->[$r] eq $new;
+        if ( !$was || !defined $was->[$r] ) { print "\e[" . ( $r + 1 ) . ";1H$new"; next }
+        my ( $a, $b ) = ( cell_list( $was->[$r] ), cell_list($new) );
+        my $n = max( scalar @$a, scalar @$b );
+        my $first = 0;
+        $first++ while $first < $n && ( $a->[$first] // '' ) eq ( $b->[$first] // '' );
+        next if $first == $n;
+        my $last = $n - 1;
+        $last-- while $last > $first && ( $a->[$last] // '' ) eq ( $b->[$last] // '' );
+        print "\e[" . ( $r + 1 ) . ';' . ( $first + 1 ) . 'H' . cut_cells( $new, $first, $last - $first + 1 );
+    }
+    $d->{screen} = $rows;
     return;
 }
 
@@ -462,14 +551,17 @@ sub draw_rows {
         return;
     }
     if ( $d->{mode} eq 'alt' ) {
-        print "\e[?1049h" unless $d->{on}++;
-        print "\e[H\e[2J";
-        paint_layer( $_, 1, $d->{bg} ) for @{ $d->{under} };
+        unless ( $d->{on}++ ) {
+            # The outermost surface opens the alternate screen; one layered
+            # over it draws on the same screen and leaves it to its parent.
+            if ( $d->{nested} ) { $d->{screen} = undef }
+            else                { print "\e[?1049h\e[H\e[2J"; $d->{screen} = [ (' ' x $W) x $H ] }
+        }
         my $bw  = max map { display_width($_) } @rows;
         my $top = max( 1, int( ( $H - @rows ) / 2 ) + 1 );
         my $col = max( 1, int( ( $W - $bw ) / 2 ) + 1 );
         $d->{last} = { rows => [@rows], top => $top, col => $col };
-        paint_layer( $d->{last}, 0 );
+        paint_differences( $d, compose( $W, $H, base_rows($d), $d->{last} ) );
         return;
     }
     if ( $d->{mode} eq 'over' ) {
@@ -497,7 +589,8 @@ sub draw_rows {
 sub close_drawer {
     my ($d) = @_;
     if ( $d->{mode} eq 'alt' ) {
-        print "\e[?1049l" if $d->{on};
+        print "\e[?1049l" if $d->{on} && !$d->{nested};
+        $d->{on} = 0;
     }
     elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
         print "\e[" . ( $d->{h} - 1 + ( $d->{lead} // 0 ) ) . "A";
@@ -974,7 +1067,9 @@ sub browser {
         my ( $n, $iw, $chosen ) = @_;
         my $fg = $s->{fg}{ $n->{category} };
         my $c  = cat_named( $n->{category} );
-        my @r = ( heading( $c, $s, undef, $iw ), notice_line( $n, $s, $fg, $iw, 0 ) );
+        # An empty row between the category heading and the notice, as in
+        # every surface that erases itself (contract § Padding).
+        my @r = ( heading( $c, $s, undef, $iw ), '', notice_line( $n, $s, $fg, $iw, 0 ) );
         push @r, '', map { "$s->{text}$_$s->{reset}" } @{ $n->{detail} } if $n->{detail};
         if ( $n->{options} ) {
             push @r, '', defined $chosen
@@ -1103,6 +1198,9 @@ sub browser {
             $chosen{$n} = $oi if defined $oi;
             raw_mode('cbreak');
             print "\e[?25l";
+            # The layered modal dimmed the browser on the shared screen: the
+            # next draw repaints every row of it, in place.
+            $d->{screen} = undef if $d->{mode} eq 'alt';
         }
     }
     restore_mode();

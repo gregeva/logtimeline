@@ -932,3 +932,21 @@ under the surface, then the surface, so a countdown tick or a key in a list
 repaints the whole screen. The browser's Esc did not reproduce in a run of
 `perl show.pl browser` started on its own: one Esc in the list closed it and
 gave the screen back.
+
+### Built from the Windows round's feedback (2026-10-20)
+
+- **Redraw by difference.** The alternate screen is now held as one composed
+  row per terminal row (the dimmed layers, the surface over them); a draw
+  rewrites only the run of cells from the first to the last changed cell of
+  each changed row, in place, with no clear. Measured on two draws a second
+  apart, 120 by 30: the first writes 28 rows (the screen opening), a
+  countdown tick writes one span of two characters (` 9`), a Tab writes the
+  button span alone.
+- **Esc in the browser after the layered options list.** The layered list
+  opened its own alternate screen and left it on closing, so the browser
+  went on drawing on the normal screen and its close had nothing to undo.
+  A surface layered over another now shares its parent's alternate screen;
+  the parent repaints itself in place when the layer closes. The architect's
+  sequence (7, Enter, ↓, ↑, Esc, Esc) now ends with the run's screen back.
+- **The detail pane** has an empty row between the category heading and the
+  notice.
