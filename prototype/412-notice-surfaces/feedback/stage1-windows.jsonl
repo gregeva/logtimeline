@@ -16,3 +16,5 @@
 {"command":"perl show.pl ask --input memory --form box","feedback":"There are 2 empty lines above the compact box, that is not a part of what we've agreed to in the requirements.","option":"box-read","time":"2026-10-20T13:25:18+0200","title":"The compact box"}
 {"command":"perl show.pl browser","feedback":"yes, perfect","option":"browser","time":"2026-10-20T13:26:14+0200","title":"Notice browser"}
 {"command":"perl show.pl browser --placement inline","feedback":"This was also already working, however it too like compact box has way too many empty lines before it which does not meet requirements.","option":"browser-inline","time":"2026-10-20T13:27:04+0200","title":"Notice browser below the cursor"}
+{"command":"perl show.pl ask --input memory --form box","feedback":"Yes, that's correct now","option":"box-read","time":"2026-10-20T13:33:10+0200","title":"The compact box"}
+{"command":"perl show.pl browser --placement inline","feedback":"yes, good","option":"browser-inline","time":"2026-10-20T13:34:30+0200","title":"Notice browser below the cursor"}
