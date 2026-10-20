@@ -1078,3 +1078,29 @@ attributes, name-and-version and colour queries, and the cells it advances
 for every glyph the surfaces draw; then it draws the frame and the bullets to
 be looked at. Checked in a tmux pane on this host: tmux answers the name query
 (`tmux 3.6`), not the colour queries, and every glyph is one cell.
+
+Run by the architect (2026-10-20), files under `terminals/`:
+
+| run | terminal's identity answer | background | `TERM_PROGRAM` | glyphs not one cell | frame lines, as seen |
+|---|---|---|---|---|---|
+| `mac-pro-ssh`: macOS Terminal, profile Pro, SSH to this Linux host | `1;95;0` | black | absent | none | vertical bars broken between rows; rounded corners about one pixel low |
+| `mac-clear-dark-local`: macOS Terminal, profile Clear Dark, on another Mac | `1;95;0` | dark blue-grey | `Apple_Terminal` 470.2 | none | joined, rounded corners in line |
+| profile Pro, on the Mac without SSH | | | | | broken, as over SSH (the architect) |
+
+A second run in the Pro window over SSH was the same as the first in
+everything but its time and is not kept.
+
+- **The broken lines come from the profile, not from the program or SSH.**
+  The same terminal, the same characters and the same widths join in Clear
+  Dark and break in Pro, locally and over SSH alike. Breaks between rows of
+  vertical bars are a line height taller than the font's `│`; corners off the
+  line are drawn from a fallback font. No query reaches a profile's font or
+  spacing, so detection cannot see this, and no handling in the program
+  corrects it.
+- **The terminal is identified by its answer, over SSH too:** macOS Terminal
+  answers the secondary device attributes with `1;95;0` and ignores the name
+  query; tmux answers both (`84;0;0`, `tmux 3.6`). The environment names the
+  terminal only on the machine it runs on.
+- **The background is read from the terminal** (the colour query answered in
+  every macOS Terminal run), so a dark or light background can be known
+  without the analyst saying so.
