@@ -23,6 +23,7 @@ our @EXPORT_OK = qw(
     set_answers_ahead answer_ahead read_key timed_yes_no
 );
 
+system("chcp 65001 > nul") if $^O eq 'MSWin32';    # the console's code page to UTF-8, as ltl does (docs/terminal-output.md § Encoding)
 binmode STDOUT, ':encoding(UTF-8)';
 $| = 1;
 

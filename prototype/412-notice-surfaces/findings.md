@@ -782,6 +782,12 @@ its first screen, for two faults of these scripts, not of the platform.
   Windows prints `'stty' is not recognized as an internal or external command`
   into the review.
 
+Both fixed the same day: `lib/NoticeProto.pm`, which every prototype and
+`show.pl` load, `review.pl` and `replay.pl` set the code page as `ltl` does,
+and `review.pl` resets the terminal with Term::ReadKey's `ReadMode('normal')`.
+From a new window on code page 437, the review's first screen and
+`perl show.pl panel` then rendered as on macOS.
+
 Seen once the code page was set:
 
 - `⚠`, `⚙` and `⏱` of the category sheet are drawn by Windows Terminal as

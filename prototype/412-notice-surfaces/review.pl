@@ -28,7 +28,9 @@ use FindBin;
 use Getopt::Long;
 use JSON::PP;
 use POSIX qw(strftime);
+use Term::ReadKey qw(ReadMode);
 
+system("chcp 65001 > nul") if $^O eq 'MSWin32';    # the console's code page to UTF-8, as ltl does (docs/terminal-output.md § Encoding)
 binmode STDOUT, ':encoding(UTF-8)';
 binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
@@ -271,7 +273,7 @@ while ( $pos < @queue ) {
     if ( $script ne '-' ) {
         print "\e[H\e[2J";
         system( $^X, "$dir/$script", split( ' ', $args ) );
-        system( 'stty', 'sane' );    # in case the prototype was stopped mid-prompt
+        ReadMode('normal');    # in case the prototype was stopped mid-prompt
     }
 
     while (1) {
@@ -286,7 +288,7 @@ while ( $pos < @queue ) {
         if ( @lines == 1 && $lines[0] eq 'r' && $script ne '-' ) {
             print "\e[H\e[2J";
             system( $^X, "$dir/$script", split( ' ', $args ) );
-            system( 'stty', 'sane' );
+            ReadMode('normal');
             next;
         }
         last if @lines == 1 && $lines[0] eq 's';

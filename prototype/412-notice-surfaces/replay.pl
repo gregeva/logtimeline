@@ -16,6 +16,7 @@ my %opt = ( cols => 120, rows => 60 );
 GetOptions( \%opt, 'cols=i', 'rows=i' ) or die "bad options\n";
 my $file = shift or die "usage: replay.pl CAPTURE [--cols N] [--rows N]\n";
 
+system("chcp 65001 > nul") if $^O eq 'MSWin32';    # the console's code page to UTF-8, as ltl does (docs/terminal-output.md § Encoding)
 binmode STDOUT, ':encoding(UTF-8)';
 open my $fh, '<:encoding(UTF-8)', $file or die "$file: $!\n";
 my $data = do { local $/; <$fh> };
