@@ -313,7 +313,9 @@ about anything else, these still hold.
 - [ ] Any script whose output a person reads in a terminal, prototypes and
       tools included, follows `docs/terminal-output.md`: the UTF-8 code page
       set on Windows, no `stty` or `tput`, every glyph one cell wide in Windows
-      Terminal. Windows output is checked in a new window, not the agent's shell.
+      Terminal, a colour that must hold its value (and anything bold) a
+      256-colour or 24-bit code, never a basic one. Windows output is checked
+      in a new window, not the agent's shell.
 
 ### After each change, before committing it
 

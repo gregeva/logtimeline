@@ -890,7 +890,7 @@ sequence greys the copy as designed.
 
 The architect also saw emphasised text in the notices lose its emphasis, and
 the histograms under the layered options list lose their colour. Both are
-measured in `docs/terminal-output.md` § Emphasis: Windows Terminal draws bold
+measured in `docs/terminal-output.md` § Colour and emphasis: Windows Terminal draws bold
 in a basic colour as its lighter bright variant in the normal weight, and the
 prototypes' dimmed layer stripped every colour (`strip_sgr`) before applying
 faint. The architect locked D10 (on a light background secondary text is an

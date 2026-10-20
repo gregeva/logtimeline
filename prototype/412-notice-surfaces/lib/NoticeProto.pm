@@ -229,7 +229,7 @@ sub style_for {
     # On a light background text and emphasis are 256-colour black: Windows
     # Terminal draws bold in one of the eight basic colours as its lighter
     # bright colour in the normal weight, and faint darker, so secondary text
-    # is an explicit grey there (docs/terminal-output.md § Emphasis).
+    # is an explicit grey there (docs/terminal-output.md § Colour and emphasis).
     my $frame = $bg eq 'light' ? "\e[38;5;244m"   : "\e[90m";
     my $text  = $bg eq 'light' ? "\e[38;5;16m"    : "\e[37m";
     # What the analyst picks (a choice, a key) stands out from the text.

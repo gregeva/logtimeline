@@ -94,14 +94,18 @@ Nothing measured here tells the two apart, so a Windows choice holds in both.
 
 ---
 
-## Emphasis
+## Colour and emphasis
 
-**Rule.** On a light background, text and emphasis are 256-colour codes
-(black `38;5;16`), never one of the eight basic colours, and secondary text
-is an explicit grey (`38;5;244`), never faint (SGR 2) (D10 of
-`features/412-notice-surfaces.md`). A layer dimmed under a pop-up keeps its
-colours: faint over them on a dark background, each blended half way to white
-on a light one.
+**Rule.** A colour that has to hold its value is written as a 256-colour code
+(`38;5;N`, `48;5;N`) or a 24-bit one (`38;2;R;G;B`), never as one of the
+sixteen basic colours (`30` to `37`, `90` to `97`, and their backgrounds): the
+basic colours are the terminal scheme's to repaint, and Windows Terminal
+changes them again under bold. Bold is applied only over a 256-colour or
+24-bit foreground. Faint (SGR 2) is used only where the background is known
+to be dark; on a light background secondary text is an explicit grey
+(`38;5;244`, D10 of `features/412-notice-surfaces.md`). A layer dimmed under
+a pop-up keeps its colours: faint over them on a dark background, each
+blended half way to white on a light one.
 
 **Measured** in Windows Terminal on its "One Half Light" scheme (foreground
 #383A42), the darkest pixel of a run of text:
@@ -116,11 +120,26 @@ on a light one.
 | `38;5;244` | 128,128,128 | normal |
 | `38;5;184`, then with faint `2;38;5;184` | 215,215,0, then 107,107,0: darker | normal |
 
-Windows Terminal draws bold in one of the eight basic colours as that colour's
-bright variant in the normal weight, so on a light scheme emphasis came out
-lighter than the text around it, and draws faint by darkening the colour, so
-dim text came out darker. On a dark scheme both read as designed, which is
-why the macOS rounds did not show it.
+What the table shows:
+
+- **The scheme repaints the basic colours.** `30`, "black", is the scheme's
+  56,58,66; `38;5;16` is 0,0,0 whatever the scheme.
+- **Bold on a basic colour, or on the default, becomes the bright variant in
+  the normal weight:** lighter on a light scheme, and never heavier. Bold
+  over a 256-colour code is drawn bold, in its colour.
+- **Faint darkens the colour.** On a dark scheme that reads as dim; on a
+  light one it pushes text towards black.
+
+On a dark scheme the last two read as designed, which is why the macOS rounds
+did not show them.
+
+**Beyond the notice surfaces.** `ltl`'s `@column_colors` writes the
+foreground of its first six colours (yellow, green, cyan, blue, magenta, red)
+as basic codes (`93`, `32`, `36`, `34`, `35`, `31`), and `%colors` writes
+basic codes throughout, while the other column colours and every background
+are 256-colour codes. How those basic foregrounds render across schemes, and
+under `bs_bold()` in help text, is not yet measured: an observation for
+`ltl`, not yet an issue.
 
 ---
 

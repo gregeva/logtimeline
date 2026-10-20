@@ -212,7 +212,7 @@ gradient, frames and secondary text are 256-colour grey 244, text is
 Every component was reviewed once per form on a light terminal and accepted
 (architect, 2026-10-19); the black and the grey are 256-colour codes since the
 Windows round, where the basic black lost its emphasis and faint darkened
-(D10, `docs/terminal-output.md` § Emphasis).
+(D10, `docs/terminal-output.md` § Colour and emphasis).
 
 ---
 

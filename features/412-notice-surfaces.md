@@ -235,7 +235,7 @@ draws faint darker, so on a light scheme secondary text stood out from the
 text it is secondary to. A layer under a pop-up keeps its colours, dimmed,
 on either background (architect, the same day: the histograms under a
 layered modal must not lose their colour). Measurements:
-`docs/terminal-output.md` § Emphasis.
+`docs/terminal-output.md` § Colour and emphasis.
 
 ## Inventory of current notices
 

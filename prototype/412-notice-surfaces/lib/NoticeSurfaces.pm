@@ -396,7 +396,7 @@ sub paint_layer {
 # background, faint over the row's own colours, bold dropped so it cannot
 # cancel the faint. On a light one, where Windows Terminal draws faint darker,
 # every colour is blended half way to white and uncoloured text takes the
-# secondary grey (docs/terminal-output.md § Emphasis).
+# secondary grey (docs/terminal-output.md § Colour and emphasis).
 sub dim_row {
     my ( $r, $bg ) = @_;
     if ( ( $bg // 'dark' ) ne 'light' ) {
