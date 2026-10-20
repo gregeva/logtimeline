@@ -657,7 +657,7 @@ the framework is left unvalidated on macOS.
 | a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | demonstrated against known-good and known-bad input (§ Unattended capture below); the options and their costs are before the architect |
 | the findings record what was chosen, what was learned and why | this file; the lessons are `prototype/README.md` § (e), the design prototype (2026-10-19) |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
-| validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | Windows: accepted by the architect 2026-10-20 after his round and re-check, with the adaptations listed under § Windows validation round below; macOS: a re-check of what those adaptations changed is due; Linux: not started |
+| validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | Windows: accepted by the architect 2026-10-20 after his round and re-check, with the adaptations listed under § Windows validation round below; macOS: the re-check of the dark views accepted 2026-10-20, the two light views without an entry yet; Linux: not started |
 | the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |
 | the modal's and box's list headings | open until the producers' data model is investigated |
 
@@ -988,3 +988,14 @@ black and secondary text as grey 244 (D10); dimmed layers keeping their
 colours; the dark category colours 170, 44, 33, 40; redraw by difference;
 the detail pane's empty row under the heading; one empty row above a surface
 below the cursor.
+
+### Architect's re-check on macOS (2026-10-20)
+
+The views the Windows round's changes reach, shown alone (`review.pl --round
+mac`, feedback in `feedback/stage1-mac.jsonl`): the panel with the dark
+category colours 170, 44, 33 and 40, "yes, good"; the modal redrawn by
+difference, "good"; the compact box with one empty row above it, "good"; the
+browser's detail pane row and the layered list's close, "good"; the browser
+below the cursor, "Good". The dark-background changes are accepted on macOS.
+The two light-background views (text as 256-colour black and secondary text
+as grey 244, D10; the dimmed run keeping its colours) have no entry yet.
