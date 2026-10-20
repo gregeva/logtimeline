@@ -886,7 +886,7 @@ sub ask {
         if ( $p{keybar} eq 'letters' ) {
             my $t = $st == 2
                 ? key_bar( [ [ '1-' . scalar( @{ $a{options} } ), 'choose' ], [ 'Esc', $esc ] ], quit => $p{quit} )
-                : key_bar( [ [ join( '/', grep { defined } map { $_->{key} } @btn ), 'choose' ] ], quit => $p{quit} );
+                : key_bar( [ ( map { [ $_->{key}, lc $_->{label} ] } grep { defined $_->{key} } @btn ), [ 'Esc', $esc ] ], quit => $p{quit} );
             return " $s->{dim}$t$s->{reset} ";
         }
         my $t = $st == 2

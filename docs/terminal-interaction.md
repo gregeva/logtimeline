@@ -88,7 +88,7 @@ key and an action.
 | component | key bar |
 |---|---|
 | ask, first stage | `←→ Tab: move · Enter: choose · Esc: continue reading · q/x: quit` where quitting is on; the choice letters underlined in the buttons |
-| ask, compact box | `s/c: choose`, the letters; `· q/x: quit` where quitting is on |
+| ask, compact box | each choice letter with its action, then Esc: `s: stop here · c: continue reading · Esc: continue reading`; `· q/x: quit` where quitting is on |
 | ask, options list | `↑↓ j k: move · 1-N Enter: choose · Esc: continue as planned · q/x: quit` |
 | browser, list | `↑↓ j k: move · ←→ Tab: tabs · 1-N: tab · Enter: options · Esc: close · q/x: quit` |
 | layered options list over the browser | as the options list, with `Esc: back` |
@@ -156,7 +156,7 @@ shows. The uses are the three components, the ask component in its two forms.
 | placement | alternate screen; below the cursor as fallback | below the cursor | alternate screen; below the cursor as fallback | inline, in the run's output |
 | size | smallest fitting tier | to its content, full width | smallest fitting tier; height from the tallest detail | to its content |
 | quit with q/x | on | off | on | not applicable |
-| key bar | full | the choice letters only | full | none |
+| key bar | full | the choice letters, each with its action, and Esc | full | none |
 | countdown to the default | 10 s | 10 s | 15 s | none |
 | choice letters | from the caller, underlined | from the caller, underlined | none in the list itself; a selection on an item may open an ask modal on top of the browser, whose own choice letters then take effect | not applicable |
 | headings of the options list | open: depends on the notice producers' data model | open: as the modal | What? How? Why? | not applicable |
