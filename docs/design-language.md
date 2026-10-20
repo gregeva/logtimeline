@@ -13,7 +13,7 @@ glyphs are one cell wide on Windows.
 named in each section. The new style and the shared conventions were settled
 by the architect in the prototyping of #412 (notice surfaces: presenting
 notices and capturing the analyst's choices), 2026-10-19; nothing in `ltl`
-draws them yet. The locked decisions behind them (D2 to D9) are in
+draws them yet. The locked decisions behind them (D2 to D10) are in
 `features/412-notice-surfaces.md` § Locked decisions, which remains their
 authority; this document carries the settled form.
 
@@ -147,7 +147,7 @@ below and shares everything else.
 | corners | rounded: `╭ ╮ ╰ ╯` on light lines `─ │` |
 | frame colour | the colour of the category the box carries; grey (SGR 90 dark, 256-colour 244 light) for a box with no category, such as the browser's outer frame |
 | headings | bold (SGR 1) |
-| secondary text | dim (SGR 2): evidence inside a notice, the countdown's bracket |
+| secondary text | dim (SGR 2) on a dark background, 256-colour grey 244 on a light one (D10): evidence inside a notice, the countdown's bracket |
 | highlight | reverse video for the selected row, button or tab; a coloured block marks only the selected tab, elsewhere a category is in its foreground colour |
 | the chosen thing | what the analyst picks (a choice, a key) stands out from the text: bold bright white on dark, bold black on light |
 
@@ -207,15 +207,18 @@ notice carry no hanging indent inside a box.
 ### Light background
 
 On a light background: each category's colour is the darkest step of its light
-gradient, frames are 256-colour grey 244, text is black, the highlight is
-black bold in reverse video. Every component was reviewed once per form on a
-light terminal and accepted (architect, 2026-10-19).
+gradient, frames and secondary text are 256-colour grey 244, text is
+256-colour black (16), the highlight is that black, bold, in reverse video.
+Every component was reviewed once per form on a light terminal and accepted
+(architect, 2026-10-19); the black and the grey are 256-colour codes since the
+Windows round, where the basic black lost its emphasis and faint darkened
+(D10, `docs/terminal-output.md` § Emphasis).
 
 ---
 
 ## Owning records
 
-- `features/412-notice-surfaces.md`: the locked decisions D1 to D9 and the
+- `features/412-notice-surfaces.md`: the locked decisions D1 to D10 and the
   prototyping record; `prototype/412-notice-surfaces/findings.md` the rounds
   that settled the new style and the shared conventions.
 - `features/column-layout-refactor.md`: colour identity as a column property.

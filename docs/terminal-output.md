@@ -94,6 +94,36 @@ Nothing measured here tells the two apart, so a Windows choice holds in both.
 
 ---
 
+## Emphasis
+
+**Rule.** On a light background, text and emphasis are 256-colour codes
+(black `38;5;16`), never one of the eight basic colours, and secondary text
+is an explicit grey (`38;5;244`), never faint (SGR 2) (D10 of
+`features/412-notice-surfaces.md`). A layer dimmed under a pop-up keeps its
+colours: faint over them on a dark background, each blended half way to white
+on a light one.
+
+**Measured** in Windows Terminal on its "One Half Light" scheme (foreground
+#383A42), the darkest pixel of a run of text:
+
+| sequence | darkest pixel | weight |
+|---|---|---|
+| none, or `30` | 56,58,66 | normal |
+| bold `1`, or `1;30` | 79,82,93: lighter | normal |
+| faint `2` | 28,29,33: darker | normal |
+| `38;5;16` | 0,0,0 | normal |
+| `1;38;5;16` | 0,0,0 | bold |
+| `38;5;244` | 128,128,128 | normal |
+| `38;5;184`, then with faint `2;38;5;184` | 215,215,0, then 107,107,0: darker | normal |
+
+Windows Terminal draws bold in one of the eight basic colours as that colour's
+bright variant in the normal weight, so on a light scheme emphasis came out
+lighter than the text around it, and draws faint by darkening the colour, so
+dim text came out darker. On a dark scheme both read as designed, which is
+why the macOS rounds did not show it.
+
+---
+
 ## Glyphs and width
 
 **Rule.** Every glyph a surface draws occupies exactly one cell on every

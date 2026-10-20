@@ -226,10 +226,15 @@ sub style_for {
         my $col = $c->{colours}{ $category_colour{$cat} };
         $fg{$cat} = $bg eq 'light' ? "\e[38;5;$col->{gradient_light}[-1]m" : $col->{fg};
     }
-    my $frame = $bg eq 'light' ? "\e[38;5;244m" : "\e[90m";
-    my $text  = $bg eq 'light' ? "\e[30m"       : "\e[37m";
+    # On a light background text and emphasis are 256-colour black: Windows
+    # Terminal draws bold in one of the eight basic colours as its lighter
+    # bright colour in the normal weight, and faint darker, so secondary text
+    # is an explicit grey there (docs/terminal-output.md § Emphasis).
+    my $frame = $bg eq 'light' ? "\e[38;5;244m"   : "\e[90m";
+    my $text  = $bg eq 'light' ? "\e[38;5;16m"    : "\e[37m";
     # What the analyst picks (a choice, a key) stands out from the text.
-    my $pick  = $bg eq 'light' ? "\e[1;30m"     : "\e[1;97m";
+    my $pick  = $bg eq 'light' ? "\e[1;38;5;16m"  : "\e[1;97m";
+    my $dim   = $bg eq 'light' ? "\e[38;5;244m"   : "\e[2m";
     if ( $name eq 'ltl' ) {
         return {
             name  => 'ltl',
@@ -259,7 +264,7 @@ sub style_for {
         pick  => $pick,
         bg    => $bg,
         bold  => "\e[1m",
-        dim   => "\e[2m",
+        dim   => $dim,
         reset => "\e[0m",
     };
 }

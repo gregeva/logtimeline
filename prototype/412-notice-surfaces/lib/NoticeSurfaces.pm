@@ -375,7 +375,7 @@ sub backdrop_layer {
 sub drawer {
     my (%a) = @_;
     my $mode = interactive() ? $a{placement} : 'plain';
-    my $d = { mode => $mode, W => $a{W}, H => $a{H}, h => 0, under => $a{under} // [], parent => $a{parent} };
+    my $d = { mode => $mode, W => $a{W}, H => $a{H}, h => 0, under => $a{under} // [], parent => $a{parent}, bg => $a{bg} // 'dark' };
     if ( $mode eq 'alt' && !@{ $d->{under} } ) {
         push @{ $d->{under} }, backdrop_layer( $a{W}, $a{H} );
     }
@@ -383,13 +383,72 @@ sub drawer {
 }
 
 sub paint_layer {
-    my ( $l, $dimmed ) = @_;
+    my ( $l, $dimmed, $bg ) = @_;
     for my $i ( 0 .. $#{ $l->{rows} } ) {
         my $r = $l->{rows}[$i];
         print "\e[" . ( $l->{top} + $i ) . ";$l->{col}H";
-        print $dimmed ? "\e[2m" . strip_sgr($r) . "\e[0m" : $r;
+        print $dimmed ? dim_row( $r, $bg ) : $r;
     }
     return;
+}
+
+# A row of a layer under a surface, dimmed with its colours kept. On a dark
+# background, faint over the row's own colours, bold dropped so it cannot
+# cancel the faint. On a light one, where Windows Terminal draws faint darker,
+# every colour is blended half way to white and uncoloured text takes the
+# secondary grey (docs/terminal-output.md § Emphasis).
+sub dim_row {
+    my ( $r, $bg ) = @_;
+    if ( ( $bg // 'dark' ) ne 'light' ) {
+        $r =~ s/\e\[([0-9;]*)m/sgr_without_weight($1) . "\e[2m"/ge;
+        return "\e[2m$r\e[0m";
+    }
+    $r =~ s/\e\[([0-9;]*)m/light_dimmed_sgr($1)/ge;
+    return "\e[38;5;244m$r\e[0m";
+}
+
+sub sgr_without_weight {
+    my @p = grep { $_ ne '1' && $_ ne '2' && $_ ne '22' } split /;/, $_[0], -1;
+    return @p ? "\e[" . join( ';', @p ) . 'm' : '';
+}
+
+# The xterm values of the 256 colours, for blending a colour towards white.
+my @XTERM16 = ( [ 0, 0, 0 ], [ 205, 0, 0 ], [ 0, 205, 0 ], [ 205, 205, 0 ], [ 0, 0, 238 ], [ 205, 0, 205 ], [ 0, 205, 205 ], [ 229, 229, 229 ],
+    [ 127, 127, 127 ], [ 255, 0, 0 ], [ 0, 255, 0 ], [ 255, 255, 0 ], [ 92, 92, 255 ], [ 255, 0, 255 ], [ 0, 255, 255 ], [ 255, 255, 255 ] );
+
+sub rgb_of_index {
+    my ($n) = @_;
+    return @{ $XTERM16[$n] } if $n < 16;
+    if ( $n < 232 ) {
+        my @lv = ( 0, 95, 135, 175, 215, 255 );
+        $n -= 16;
+        return ( $lv[ int( $n / 36 ) ], $lv[ int( $n / 6 ) % 6 ], $lv[ $n % 6 ] );
+    }
+    my $g = 8 + 10 * ( $n - 232 );
+    return ( $g, $g, $g );
+}
+
+sub half_to_white { return join ';', map { int( $_ + ( 255 - $_ ) / 2 ) } @_ }
+
+sub light_dimmed_sgr {
+    my @p = split /;/, $_[0], -1;
+    @p = (0) unless @p;
+    my @out;
+    while (@p) {
+        my $c = shift @p;
+        $c = 0 if $c eq '';
+        if    ( $c == 0 )                                   { push @out, 0, '38;5;244' }
+        elsif ( $c == 39 )                                  { push @out, '38;5;244' }
+        elsif ( $c == 1 || $c == 2 || $c == 22 )            { }
+        elsif ( ( $c >= 30 && $c <= 37 ) )                  { push @out, '38;2;' . half_to_white( rgb_of_index( $c - 30 ) ) }
+        elsif ( ( $c >= 90 && $c <= 97 ) )                  { push @out, '38;2;' . half_to_white( rgb_of_index( $c - 82 ) ) }
+        elsif ( ( $c >= 40 && $c <= 47 ) )                  { push @out, '48;2;' . half_to_white( rgb_of_index( $c - 40 ) ) }
+        elsif ( ( $c >= 100 && $c <= 107 ) )                { push @out, '48;2;' . half_to_white( rgb_of_index( $c - 92 ) ) }
+        elsif ( ( $c == 38 || $c == 48 ) && @p && $p[0] == 5 ) { shift @p; push @out, "$c;2;" . half_to_white( rgb_of_index( shift @p ) ) }
+        elsif ( ( $c == 38 || $c == 48 ) && @p && $p[0] == 2 ) { shift @p; push @out, "$c;2;" . half_to_white( splice @p, 0, 3 ) }
+        else                                                { push @out, $c }
+    }
+    return @out ? "\e[" . join( ';', @out ) . 'm' : '';
 }
 
 sub draw_rows {
@@ -405,7 +464,7 @@ sub draw_rows {
     if ( $d->{mode} eq 'alt' ) {
         print "\e[?1049h" unless $d->{on}++;
         print "\e[H\e[2J";
-        paint_layer( $_, 1 ) for @{ $d->{under} };
+        paint_layer( $_, 1, $d->{bg} ) for @{ $d->{under} };
         my $bw  = max map { display_width($_) } @rows;
         my $top = max( 1, int( ( $H - @rows ) / 2 ) + 1 );
         my $col = max( 1, int( ( $W - $bw ) / 2 ) + 1 );
@@ -786,7 +845,7 @@ sub ask {
 
     my $placement = $form eq 'modal' ? $p{placement} : 'inline';
     $placement = 'over' if $a{parent};
-    my $d = drawer( placement => $placement, W => $W, H => $H, under => $a{under}, parent => $a{parent} );
+    my $d = drawer( placement => $placement, W => $W, H => $H, under => $a{under}, parent => $a{parent}, bg => $s->{bg} );
     my $indent = $d->{mode} eq 'inline' && $form eq 'modal' ? ' ' x int( ( $W - $bw ) / 2 ) : '';
     my $draw = sub { draw_rows( $d, map { "$indent$_" } @_ ) };
 
@@ -905,7 +964,7 @@ sub browser {
     my $s = $a{s};
     my %p = with_defaults( 'browser', map { $_ => $a{$_} } qw(placement size quit keybar seconds) );
     my ( $W, $H ) = @a{qw(W H)};
-    my $d = drawer( placement => $p{placement}, W => $W, H => $H );
+    my $d = drawer( placement => $p{placement}, W => $W, H => $H, bg => $s->{bg} );
     my @items = map { @{ $_->[1] } } grouped( $a{notices} );
     my @cats  = map { $_->[0] } grouped( \@items );
     my $headings = $a{headings} // [ 'What?', 'How?', 'Why?' ];

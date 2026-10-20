@@ -887,3 +887,18 @@ dimmed.** Its text measures RGB 28,29,33 against the scheme's foreground
 (SGR 2) by darkening the colour, which on a light scheme takes text towards
 black instead of towards the background. On the dark scheme the same
 sequence greys the copy as designed.
+
+The architect also saw emphasised text in the notices lose its emphasis, and
+the histograms under the layered options list lose their colour. Both are
+measured in `docs/terminal-output.md` § Emphasis: Windows Terminal draws bold
+in a basic colour as its lighter bright variant in the normal weight, and the
+prototypes' dimmed layer stripped every colour (`strip_sgr`) before applying
+faint. The architect locked D10 (on a light background secondary text is an
+explicit grey; a dimmed layer keeps its colours). Since then `style_for()`
+gives light text and emphasis as 256-colour black and secondary text as grey
+244, and `dim_row()` dims a layer with its colours kept. Measured after the
+change, in maximized windows: on light, the focus and statement black
+(0,0,0) with the focus bold, evidence and the dimmed backdrop grey (128); the
+browser's text under the layered list from black to 127 on light and from 204
+to 102 on dark, its histograms in their own colours, dimmed, on both; the
+colours back in full when the list closes.

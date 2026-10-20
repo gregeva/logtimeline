@@ -14,7 +14,7 @@ surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,
 after seven review rounds on macOS, dark and light. Nothing in `ltl`
 implements it yet; the first delivery is the panel, with no interactivity, and
 the other components follow when a feature needs them. The locked decisions
-(D4, D5, D7, D8, D9) are in `features/412-notice-surfaces.md` § Locked
+(D4, D5, D7, D8, D9, D10) are in `features/412-notice-surfaces.md` § Locked
 decisions, which remains their authority; how input is supplied, including
 answers given ahead, is #748 (take the analyst's input at choice points, with
 a default and answers given ahead). The producer interface, how code anywhere
@@ -168,8 +168,9 @@ shows. The uses are the three components, the ask component in its two forms.
 A selection on an item in the browser may open an ask modal on top of the
 browser, with its own selection and options. The modal's keys and choice
 letters take effect while it is up, Esc goes back one layer, and the browser
-is back as it was when the modal closes. A layered modal is a pop-up and takes
-a pop-up's padding and size.
+is back as it was when the modal closes. While the modal is up the browser
+under it is dimmed with its colours kept, its histograms included (D10). A
+layered modal is a pop-up and takes a pop-up's padding and size.
 
 ---
 
@@ -197,7 +198,8 @@ that asks for a fixed height, which then holds blank rows in the first stage.
 ### Where a component is drawn (D5)
 
 - **Alternate screen**: centred, over a dimmed copy of the rows the run has
-  printed, every row kept at the position it had, the live row included. The
+  printed, every row kept at the position it had, the live row included, and
+  every colour kept, dimmed (D10). The
   copy is placed from the cursor position report (CSI 6n), so the progress row
   does not move.
 - **Below the cursor**: drawn into rows reserved under the cursor, the fallback

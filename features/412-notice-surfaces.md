@@ -226,6 +226,17 @@ from the producer as part of the notice, not from the surface.
 A large number of notices is for the interactive browser; printing them all to
 the terminal as a panel is rejected.
 
+### D10 — On a light background, secondary text is an explicit grey, not faint (architect, 2026-10-20, from the Windows round)
+
+On a light background the secondary text of every surface (evidence, the
+countdown, the dimmed copy of what lies under a pop-up) is drawn in an
+explicit grey on every platform, never with faint (SGR 2): Windows Terminal
+draws faint darker, so on a light scheme secondary text stood out from the
+text it is secondary to. A layer under a pop-up keeps its colours, dimmed,
+on either background (architect, the same day: the histograms under a
+layered modal must not lose their colour). Measurements:
+`docs/terminal-output.md` § Emphasis.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
