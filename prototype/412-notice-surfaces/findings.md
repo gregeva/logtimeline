@@ -1110,8 +1110,7 @@ uses Monaco 10. With the Pro profile switched to SF Mono Terminal the frame's
 lines join: the cause is the font, confirmed. SF Mono Terminal needs
 anti-aliasing on to read well. Recorded in `docs/terminal-output.md`
 § Glyphs and width.
-Monaco stays the architect's terminal font (2026-10-20): a frame drawn in a
-font without the box-drawing set is a case the surfaces have to handle, open.
+Monaco stays the architect's terminal font (2026-10-20).
 
 Built (the architect: identity and background only, glyph width settled by
 taking no glyph wider than a cell): `terminal()` in `lib/NoticeProto.pm` finds

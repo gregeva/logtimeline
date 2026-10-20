@@ -201,8 +201,7 @@ and the rounded corners sit about one pixel low, the shapes of a fallback
 font. Switching the Pro profile to SF Mono Terminal joins them (the architect,
 2026-10-20); that font needs anti-aliasing on to read well, and Monaco stays
 the architect's font. No query reaches a profile's font, so a program cannot
-detect this; how the frame is drawn in a font without the box-drawing set is
-open.
+detect this.
 
 Replacements tried for the three emoji glyphs, printed in the category's
 colour and bold:
