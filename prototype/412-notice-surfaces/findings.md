@@ -816,10 +816,16 @@ missing-glyph boxes in the bold headings.
 
 Every non-ASCII character the prototypes and `ltl` draw, 74, was then printed
 in both terminals (the table in `docs/terminal-output.md` § Glyphs and width).
-In Windows Terminal only the three emoji glyphs fail. In the classic console,
-turning VT processing on, which the prototypes now do, turns `↳ ↻ ⎯ ▶ ⧖ ▇`
-into missing-glyph boxes that it draws with VT processing off; `▁ ▂ ▃ ▅ ▆`
-are boxes either way.
+In Windows Terminal only the three emoji glyphs fail. In the classic console
+`↳ ↻ ⎯ ▶ ⧖` and the blocks `▁ ▂ ▃ ▅ ▆ ▇` were drawn in some windows and
+missing-glyph boxes in others; what decides it is not isolated.
+
+`ltl` itself renders its colours in a classic console window: its startup
+`system("chcp 65001 > nul")` runs `cmd.exe`, which leaves VT processing on
+(console mode 0x0003 before, 0x0007 after, read through `GetConsoleMode`).
+An earlier line of `docs/terminal-output.md` said `ltl`'s colours reach a
+classic console as text; that was inferred from a script that starts no
+subprocess, never from running `ltl`, and it was wrong.
 
 The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
 arrows, Shift-Tab, the cursor position report) are not yet validated on

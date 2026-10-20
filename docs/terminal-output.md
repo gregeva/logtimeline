@@ -74,20 +74,23 @@ through Win32::Console or Win32::API).
 
 **Measured.**
 
-| terminal | without `SetConsoleMode` |
+| terminal | VT processing |
 |---|---|
-| Windows Terminal | bold, dim, underline, reverse, 16-colour and 256-colour SGR all render |
-| classic console host | every sequence printed as text: `[1mbold [0m`, `[93myellow`; with the flag set, every sequence renders, at a cost in glyphs (§ Glyphs and width) |
+| Windows Terminal | on without asking: bold, dim, underline, reverse, 16-colour and 256-colour SGR all render |
+| classic console host | off for a program that never starts a subprocess (console mode 0x0003): every sequence printed as text, `[93myellow` |
+| classic console host, after the program has run `cmd.exe` | on (console mode 0x0007): `cmd.exe` sets the flag and leaves it set |
 
-`ltl` does not call `SetConsoleMode` today (research § 1.8), so its colours
-reach a classic console window as text. That is an observation for `ltl`, not
-yet an issue.
+`ltl` renders its colours in a classic console window (seen: the run of
+`ltl -n 3 -hg` on an access log fixture, every colour in place). It never calls
+`SetConsoleMode`; its startup `system("chcp 65001 > nul")` runs `cmd.exe`,
+which turns VT processing on as a side effect. `SetConsoleMode` gives the
+same state explicitly.
 
 **Detecting Windows Terminal.** `WT_SESSION` is not proof of it: a classic
 console window started from a process inside Windows Terminal inherits the
 variable (measured: set in a `conhost.exe` window opened from a shell running
-in Windows Terminal). `TERM` is unset in both. The reliable test is whether
-`SetConsoleMode` accepts the flag.
+in Windows Terminal). `TERM` is unset in both, and both accept the VT flag.
+Nothing measured here tells the two apart, so a Windows choice holds in both.
 
 ---
 
@@ -103,22 +106,20 @@ prototypes and of `ltl` (outside comments), 74 in all, each printed between
 `[` and `|]` plain and in bold colour, under code page 65001. Anything not
 named below is one cell in its colour in every column.
 
-| glyph | used by | Windows Terminal | classic console, VT processing on | classic console, VT processing off |
-|---|---|---|---|---|
-| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | colour emoji in its own colours, covering the next cell | monochrome, covering the next cell | the same |
-| `↻` U+21BB, `➤` U+27A4, `⛭` U+26ED | the category sheet | one cell, reaching its right edge | `↻` a missing-glyph box; the others one cell | one cell |
-| `↳` U+21B3, `⎯` U+23AF, `▶` U+25B6, `⧖` U+29D6 | prototypes | one cell | a missing-glyph box | one cell |
-| `▇` U+2587 | prototypes, `ltl` histograms | one cell | a missing-glyph box | one cell |
-| `▁ ▂ ▃ ▅ ▆` U+2581 to U+2586 but `▄` | prototypes, `ltl` histograms | one cell | a missing-glyph box | a missing-glyph box |
+| glyph | used by | Windows Terminal | classic console host |
+|---|---|---|---|
+| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | colour emoji in its own colours, covering the next cell | monochrome, covering the next cell |
+| `↻` U+21BB, `➤` U+27A4, `⛭` U+26ED | the category sheet | one cell, reaching its right edge | `➤` and `⛭` one cell; `↻` varies |
+| `↳` U+21B3, `⎯` U+23AF, `▶` U+25B6, `⧖` U+29D6, `▁ ▂ ▃ ▅ ▆ ▇` | prototypes; the blocks also `ltl`'s histograms | one cell | varies |
 
-VT processing changes what the classic console host can draw: with it on,
-six glyphs it draws without it become missing-glyph boxes. Colour and glyph
-coverage cannot both be had there. Five of `ltl`'s eight histogram blocks are
-boxes in the classic console host either way; that is an observation for
-`ltl`, not yet an issue.
+"Varies": the same glyph was drawn in some classic console windows and shown
+as a missing-glyph box (the placeholder rectangle a terminal draws when its
+font has no shape for a character) in others. Which setting decides it is not
+isolated: neither the code page nor VT processing alone explains every
+window measured.
 
 Replacements tried for the three emoji glyphs, printed in the category's
-colour and bold (the classic console with VT processing on):
+colour and bold:
 
 | glyph | Windows Terminal | classic console |
 |---|---|---|
