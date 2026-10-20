@@ -1031,3 +1031,33 @@ addressed across the repository); the `browser-cd` scenario captures at 7 s a br
 3.5 s and closes on its 3 s countdown, so its `up` capture shows the run
 after it. What these runs cannot show is the architect's terminal and font:
 `perl review.pl --round linux`.
+
+### Architect's feedback on the Linux round (2026-10-20)
+
+From `feedback/stage1-linux.jsonl`, `perl review.pl --round linux`; light and
+the platform remarks not given:
+
+| option | feedback |
+|---|---|
+| panel | "Mostly OK, however the box drawing is showing here as it was initially with macOS where the lines are not contiguous. During the prototyping on macOS, I am not sure what you did after having starting to look at actually what was rendered, but you changed how the boxes with the rounded corners were drawn and they got a 10X improvement. Here, what is displayed in Linux is very legacy from our prototyping efforts. Otherwise the glyphs, colors, are all good." |
+| panel-one | "same comment as last one. the bullet character is a bit small. maybe it should be widened to the em dash?" |
+| modal-read | "Fine - smae issues on box drawing" |
+| modal-quit | "Fine" |
+| modal-pattern | "fine - same comments" |
+| modal-inline | "yes, works" |
+| box-read | "works, available key list does not include the Esc like the specification mandates" |
+| browser | "works" |
+| browser-inline | "works" |
+
+What the code shows for the box drawing: the frame is written with the same
+characters and codes in round 3 (commit 4bef110) as now: `─ │ ╭ ╮ ╰ ╯`
+(U+2500, U+2502, U+256D to U+2570) in colour 90, byte for byte the same in
+the two panels' redirected runs. Between round 3 and round 4 nothing in how
+the frame is drawn changed; whether its lines join is decided by the terminal
+that renders them (its font, and whether it draws box-drawing characters
+itself).
+
+The compact box's key bar: `s/c: choose` alone comes from the defaults table's
+"the choice letters only", a line Claude wrote (commit 5b3eb47); the Esc row
+of the key map (Esc closes the surface and takes the default) applies to every
+surface, and the box takes Esc.
