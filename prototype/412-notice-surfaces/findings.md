@@ -1002,3 +1002,32 @@ black and secondary text as grey 244 (D10), "good"; the modal with the dimmed
 run keeping its colours, "good". Every change the Windows round made is
 accepted on macOS; the framework stands validated on both platforms, dark and
 light.
+
+### Claude's runs on Linux, before the architect's round (2026-10-20)
+
+Ubuntu, Perl 5.40.1, Term::ReadKey 2.38, tmux 3.6, `C.UTF-8`; no Homebrew.
+
+- **In a tmux pane** (`check-tmux.sh`, 120 by 40): all 12 scenarios exit 0.
+  The modal's rows outside the dialog unmoved; ← → Tab and Shift-Tab move the
+  focus; any key stops the countdown; Esc gives the run back; x stops the run
+  with `stty -g` identical before and after, the cursor visible, the alternate
+  screen off and typing echoed. The options list: ↓ wraps, a digit chooses,
+  Enter takes it. The compact box: one empty row above it. The browser at 180
+  by 50: tab 7 draws both histograms in full; the sequence 7, Enter, ↓, ↑, Esc,
+  Esc ends with the run's screen back.
+- **Capture method** (`capture/specimens.sh`): the eight known-good and
+  known-bad cases come out as on macOS. `panes` passes on every capture of a
+  surface drawn alone.
+- **Redirected runs**, every view at 120 by 40: exit 0, nothing on stderr, `plain`
+  passes on each.
+- **Glyphs**: the 23 non-ASCII characters the views draw, glibc `wcwidth` 1
+  for each. The dark category colours are 170, 44, 33 and 40; the basic codes
+  left are the backdrop's banner and status lines, copied from `ltl`.
+
+Not of this platform: `check-tmux.sh` and `capture/specimens.sh` call
+`brew --prefix` unconditionally and print `brew: command not found` where it
+is absent (filed as #750, a workaround of the environment setup to be
+addressed across the repository); the `browser-cd` scenario captures at 7 s a browser that opens at
+3.5 s and closes on its 3 s countdown, so its `up` capture shows the run
+after it. What these runs cannot show is the architect's terminal and font:
+`perl review.pl --round linux`.
