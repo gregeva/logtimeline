@@ -1129,3 +1129,7 @@ In macOS Terminal, profile Pro, over SSH to the Linux host (the architect,
 identity reply `1;95;0`, background dark from the colour reply (luminance
 0.00), the category glyphs ⚠ ≈ ⚙ ↻ ⏱ ➤. The Windows branch awaits a check on
 Windows.
+
+The bullet is the em dash `—` on every terminal (the architect, 2026-10-20,
+after finding `╶` a bit small in the Linux round): `docs/design-language.md`
+§ the notice's anatomy. The panel's seven bulleted rows change, nothing else.

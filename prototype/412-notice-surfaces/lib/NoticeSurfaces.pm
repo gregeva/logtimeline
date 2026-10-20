@@ -33,7 +33,7 @@ use utf8;
 use Exporter 'import';
 use List::Util qw(max min sum);
 use Time::HiRes qw(time);
-use NoticeProto qw(windows_glyphs interactive display_width wrap_text strip_sgr categories read_key raw_mode restore_mode answer_ahead query_cursor_position);
+use NoticeProto qw(interactive display_width wrap_text strip_sgr categories read_key raw_mode restore_mode answer_ahead query_cursor_position);
 
 our @EXPORT_OK = qw(defaults panel bullet_candidates bullet_sheet ask browser out live_row);
 
@@ -247,9 +247,9 @@ my @BULLETS = (
     [ '▸', 'U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE' ],
     [ '›', 'U+203A SINGLE RIGHT-POINTING ANGLE QUOTATION MARK' ],
 );
-# Windows Terminal draws ╶ as a short dash; the Windows terminals take —, the
-# architect's choice in the Windows round.
-sub default_bullet { return windows_glyphs() ? '—' : '╶' }
+# The em dash on every terminal: the architect's choice in the Windows round,
+# taken for macOS and Linux after the Linux round.
+my $DEFAULT_BULLET = '—';
 
 sub bullet_candidates { return @BULLETS }
 
@@ -257,7 +257,7 @@ sub bullet_candidates { return @BULLETS }
 # hooked arrow alone for a record.
 sub bulleted {
     my ( $n, $s, $fg, $width, $bullet ) = @_;
-    $bullet //= default_bullet();
+    $bullet //= $DEFAULT_BULLET;
     my @r = notice_line( $n, $s, $fg, $width - 2, 0 );
     my $first = shift @r;
     return ( ( $n->{record} ? '  ' : "$fg$bullet$s->{reset} " ) . $first, map { "  $_" } @r );

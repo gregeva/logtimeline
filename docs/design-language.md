@@ -191,8 +191,8 @@ upper case, with its how-to-read text on the heading row; categories are
 divided by one blank row. A notice is one row with no row break inside it: its
 statement, evidence and remedy are told apart by colour and by a marker before
 the evidence and before the remedy. In a list each notice is preceded by the
-bullet `╶` (U+2576, box drawings light right), on Windows `—` (U+2014, em
-dash, the architect's choice there, where `╶` draws as a short dash), in the
+bullet `—` (U+2014, em dash, the architect's choice on every platform after
+the Windows and Linux rounds), in the
 category's colour, so the one character carries the classification. Continuation rows of a wrapped
 notice carry no hanging indent inside a box.
 
