@@ -1061,3 +1061,20 @@ The compact box's key bar: `s/c: choose` alone comes from the defaults table's
 "the choice letters only", a line Claude wrote (commit 5b3eb47); the Esc row
 of the key map (Esc closes the surface and takes the default) applies to every
 surface, and the box takes Esc.
+
+### Terminal detection (2026-10-20)
+
+The architect, after the Linux round, from macOS Terminal over SSH: the
+prototypes need terminal detection and handling as comprehensive as Windows
+forced, done now, within this issue. The prototypes adapt by operating system
+(`$^O`), so a Linux host drawn by macOS Terminal gets the Linux choices; over
+SSH the host's environment does not carry `TERM_PROGRAM` (this host sees
+`TERM=xterm-256color`), while the terminal's answers to queries reach the
+program wherever it runs.
+
+`probe-terminal.pl --label NAME` records what the program can learn, into
+`terminals/NAME.json`: the environment, the terminal's answers to the device
+attributes, name-and-version and colour queries, and the cells it advances
+for every glyph the surfaces draw; then it draws the frame and the bullets to
+be looked at. Checked in a tmux pane on this host: tmux answers the name query
+(`tmux 3.6`), not the colour queries, and every glyph is one cell.
