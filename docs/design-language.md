@@ -5,7 +5,9 @@ drawn with, so that a new surface is drawn from this document and an existing
 one is changed against it. Two looks exist, and a rule says which applies
 where. This is a developer document: it names Perl identifiers and is not part
 of the wiki. `docs/terminal-interaction.md` is its companion for how a surface
-behaves; `docs/architecture-patterns.md` holds the mechanisms in code.
+behaves; `docs/architecture-patterns.md` holds the mechanisms in code;
+`docs/terminal-output.md` holds what output does per platform, including which
+glyphs are one cell wide on Windows.
 
 **Status.** The ltl look is what the tool draws today, read from the code
 named in each section. The new style and the shared conventions were settled

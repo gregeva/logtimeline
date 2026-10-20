@@ -5,8 +5,9 @@ components, the keys, how input is taken, how a pop-up is sized, placed, padded
 and erased, and how a surface is captured when nobody is at the keyboard. One
 section per pattern, so that a new surface is built from this document and an
 existing one is changed against it. `docs/design-language.md` is its companion
-for how a surface looks. This is a developer document and is not part of the
-wiki.
+for how a surface looks; `docs/terminal-output.md` holds what output does per
+platform (encoding, escape sequences, terminal commands). This is a developer
+document and is not part of the wiki.
 
 **Status.** Settled by the architect in the prototyping of #412 (notice
 surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,

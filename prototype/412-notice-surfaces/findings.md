@@ -657,7 +657,7 @@ the framework is left unvalidated on macOS.
 | a demonstrated way to capture and check each selected surface unattended, for the harnesses and the screenshot tool | demonstrated against known-good and known-bad input (§ Unattended capture below); the options and their costs are before the architect |
 | the findings record what was chosen, what was learned and why | this file; the lessons are `prototype/README.md` § (e), the design prototype (2026-10-19) |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
-| validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | not started |
+| validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | Windows: started 2026-10-20, stopped by two faults of the scripts (§ Windows validation round below); Linux: not started |
 | the producer interface (how code registers a notice or a choice) | not started; designed once the surfaces are chosen, which they now are |
 | the modal's and box's list headings | open until the producers' data model is investigated |
 
@@ -763,3 +763,38 @@ surfaces will reapply it even where the new style does not) and
 feature doc keeps the locked decisions and points at them. The references to
 "the contract" in the rounds above describe the document as it was while the
 rounds ran.
+
+## Windows validation round (2026-10-20)
+
+Run on Windows 11, Strawberry Perl, in a new Windows Terminal window, then a
+classic console window (`conhost.exe`); screens captured, not typed into. The
+round did not reach the architect's judgement: the review was unreadable from
+its first screen, for two faults of these scripts, not of the platform.
+
+- **The code page.** A new Windows Terminal window starts on code page 437.
+  `review.pl`, `show.pl` and the prototypes mark their output UTF-8 but never
+  set the console to 65001, as `ltl` does at startup. Every non-ASCII
+  character arrived as its UTF-8 bytes read under 437 (`│` as `Γöé`, `·` as
+  `┬╖`), two or three cells each, so the panel's rule wrapped onto three rows.
+  With `chcp 65001` first, `perl show.pl panel` rendered as on macOS: frame,
+  rounded corners, colours, dim, bold.
+- **`stty`.** `review.pl` calls `system('stty', 'sane')` after each view;
+  Windows prints `'stty' is not recognized as an internal or external command`
+  into the review.
+
+Seen once the code page was set:
+
+- `⚠`, `⚙` and `⏱` of the category sheet are drawn by Windows Terminal as
+  colour emoji two cells wide over a one-cell slot, covering the space after
+  them (`⚠DATA ANOMALY`); the text-presentation selector does not change it.
+  `≈`, `↻`, `➤`, the bullet `╶`, the arrows and every box and block glyph are
+  one cell. In the classic console host all of them are one cell.
+- Windows Terminal renders every SGR sequence the prototypes use without a
+  `SetConsoleMode` call; the classic console host prints them as text.
+  `WT_SESSION` is inherited by a classic console window started from inside
+  Windows Terminal, so it does not tell the two apart. These answer open
+  points 5 and 6 of `features/412-notice-surfaces-research.md` § 6.
+
+The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
+arrows, Shift-Tab, the cursor position report) are not yet validated on
+Windows; they follow once the two faults are fixed.

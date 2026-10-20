@@ -310,6 +310,10 @@ about anything else, these still hold.
       same commit, and run the scenarios that read the changed section or key,
       each named with `--scenario`, to see them assert. Never a whole harness.
 - [ ] A visual surface is verified by looking at rendered output on real data.
+- [ ] Any script whose output a person reads in a terminal, prototypes and
+      tools included, follows `docs/terminal-output.md`: the UTF-8 code page
+      set on Windows, no `stty` or `tput`, every glyph one cell wide in Windows
+      Terminal. Windows output is checked in a new window, not the agent's shell.
 
 ### After each change, before committing it
 
@@ -383,6 +387,7 @@ about anything else, these still hold.
 | Deciding whether and how to prototype | `prototype/README.md` |
 | How a surface looks: glyphs, colours, the two coexisting looks and the choice per surface, the category sheet, wording | `docs/design-language.md` |
 | How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
+| What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
