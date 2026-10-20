@@ -794,13 +794,21 @@ Seen once the code page was set:
   colour emoji two cells wide over a one-cell slot, covering the space after
   them (`⚠DATA ANOMALY`); the text-presentation selector does not change it.
   `≈`, `↻`, `➤`, the bullet `╶`, the arrows and every box and block glyph are
-  one cell. In the classic console host all of them are one cell.
+  one cell. In the classic console host the three are monochrome and still
+  cover the next cell, and `↻` is a missing-glyph box in the panel's bold,
+  coloured heading though it is drawn in plain text.
 - Windows Terminal renders every SGR sequence the prototypes use without a
   `SetConsoleMode` call; the classic console host prints them as text.
   `WT_SESSION` is inherited by a classic console window started from inside
   Windows Terminal, so it does not tell the two apart. These answer open
   points 5 and 6 of `features/412-notice-surfaces-research.md` § 6.
 
+`lib/NoticeProto.pm` now also turns VT processing on for standard output when
+it loads, through Win32::API, and `review.pl` loads it; `perl show.pl panel`
+then renders in colour in a classic console window too. Replacement glyphs
+for the three were tried in both terminals; the results are the glyph table
+of `docs/terminal-output.md` § Glyphs and width.
+
 The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
 arrows, Shift-Tab, the cursor position report) are not yet validated on
-Windows; they follow once the two faults are fixed.
+Windows.

@@ -103,16 +103,27 @@ page 65001):
 
 | glyph | in | Windows Terminal | classic console host |
 |---|---|---|---|
-| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | drawn as colour emoji two cells wide, covering the next cell | one cell, monochrome |
-| `≈` U+2248, `↻` U+21BB, `➤` U+27A4 | the category sheet | one cell | one cell |
+| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | drawn as colour emoji two cells wide, covering the next cell | monochrome, still covering the next cell |
+| `≈` U+2248, `➤` U+27A4 | the category sheet | one cell | one cell |
+| `↻` U+21BB | the category sheet | one cell | one cell in plain text; a missing-glyph box in the panel's bold, coloured heading |
 | `╶` U+2576, `·` U+00B7, `→ ← ↑ ↓` | the notice bullet, key bars, remedies | one cell | one cell |
 | `╭ ╮ ╰ ╯ ─ │`, `┌ ┬ ┐ ━ ┃ ┏`, `▁ … █`, `■ ▪ •` | frames, axes, bars | one cell, joined | one cell, joined |
+| `▲` U+25B2, `△` U+25B3, `✱` U+2731, `≡` U+2261 | candidates for the category sheet | one cell | one cell |
+| `◬` U+25EC, `⧋` U+29CB, `⚑` U+2691, `⊘` U+2298, `⌘` U+2318, `◷` U+25F7, `◴` U+25F4, `⧖` U+29D6, `⧗` U+29D7, `◔` U+25D4 | candidates | one cell | a missing-glyph box, one cell |
+| `⛭` U+26ED, `⌥` U+2325 | candidates | covering the next cell | `⛭` one cell; `⌥` a missing-glyph box |
 
 The text-presentation selector (U+FE0E after the glyph) does not help: Windows
 Terminal still draws the emoji, and the classic console host gives the
 selector a cell of its own. A program's width arithmetic counts these glyphs
-as one cell, so on Windows Terminal the row stays aligned while the glyph
-overdraws the space after it (seen in the notices panel: `⚠DATA ANOMALY`).
+as one cell, so the row stays aligned while the glyph overdraws the space
+after it (seen in the notices panel in both terminals: `⚠DATA ANOMALY`).
+
+**Choosing a glyph.** The three that overdraw in Windows Terminal are the
+three of the category sheet with Unicode's `Emoji` property; none of the
+glyphs drawn in one cell has it. A candidate therefore lacks `Emoji`
+(`/\p{Emoji}/` in Perl) and is not East Asian `Wide`; that is necessary, not
+sufficient (`⛭` and `⌥` lack both and still overdraw), so the candidate is then
+seen in each terminal.
 
 Bar characters differ by platform for another reason: `ltl` draws bars with
 `■` on Windows (research § 1.8; `features/windows-character-rendering.md`).

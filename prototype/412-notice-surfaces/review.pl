@@ -29,8 +29,9 @@ use Getopt::Long;
 use JSON::PP;
 use POSIX qw(strftime);
 use Term::ReadKey qw(ReadMode);
+use lib "$FindBin::Bin/lib";
+use NoticeProto ();    # prepares the Windows console when it loads
 
-system("chcp 65001 > nul") if $^O eq 'MSWin32';    # the console's code page to UTF-8, as ltl does (docs/terminal-output.md § Encoding)
 binmode STDOUT, ':encoding(UTF-8)';
 binmode STDIN,  ':encoding(UTF-8)';
 $| = 1;
