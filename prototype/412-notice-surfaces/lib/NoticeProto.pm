@@ -217,6 +217,18 @@ my %category_colour = (
     'runtime condition'      => 'teal',
 );
 
+# On a dark background the categories whose ltl colour is one of the basic
+# codes take a 256-colour value instead, chosen by the architect in the
+# Windows round, so they are the same on every terminal and scheme
+# (docs/terminal-output.md § Colour and emphasis); orange and teal are
+# 256-colour codes in ltl already.
+my %dark_256 = (
+    'figure caveat'          => 170,
+    'your options'           => 44,
+    'decision taken for you' => 33,
+    'guidance'               => 40,
+);
+
 sub style_for {
     my ( $name, $bg ) = @_;
     $bg //= 'dark';
@@ -224,7 +236,9 @@ sub style_for {
     my %fg;
     for my $cat ( keys %category_colour ) {
         my $col = $c->{colours}{ $category_colour{$cat} };
-        $fg{$cat} = $bg eq 'light' ? "\e[38;5;$col->{gradient_light}[-1]m" : $col->{fg};
+        $fg{$cat} = $bg eq 'light'          ? "\e[38;5;$col->{gradient_light}[-1]m"
+                  : exists $dark_256{$cat} ? "\e[38;5;$dark_256{$cat}m"
+                  :                          $col->{fg};
     }
     # On a light background text and emphasis are 256-colour black: Windows
     # Terminal draws bold in one of the eight basic colours as its lighter

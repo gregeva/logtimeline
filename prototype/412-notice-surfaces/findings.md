@@ -950,3 +950,11 @@ gave the screen back.
   sequence (7, Enter, ↓, ↑, Esc, Esc) now ends with the run's screen back.
 - **The detail pane** has an empty row between the category heading and the
   notice.
+- **Category colours on a dark background.** Four categories had their ltl
+  colour as a basic code (`35`, `36`, `34`, `32`), which Windows Terminal's
+  scheme repaints (its "cyan" is a blue). From a sheet of 256-colour
+  candidates shown in both Windows terminals the architect chose 170 for
+  figure caveat, 44 for your options, 33 for decision taken for you and 40
+  for guidance, on every platform.
+- **The bullet on Windows** is `‒` (U+2012), the architect's choice from the
+  bullet candidates shown in both terminals; elsewhere it stays `╶`.

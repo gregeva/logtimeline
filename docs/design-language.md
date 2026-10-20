@@ -158,18 +158,21 @@ below and shares everything else.
 ### The category sheet (D1, D2)
 
 A notice's category is marked by a text glyph and a colour (D2); emoji and
-ASCII marks are rejected. The colours are the `fg` of `@column_colors` on a
-dark background and the darkest step of the colour's `gradient_light` on a
-light one.
+ASCII marks are rejected. On a dark background each colour is a 256-colour
+code, the same on every terminal and scheme: orange and teal are the `fg` of
+`@column_colors`, the other four were chosen by the architect in the Windows
+round in place of the basic codes they had (`docs/terminal-output.md`
+§ Colour and emphasis). On a light background each is the darkest step of the
+colour's `gradient_light`.
 
-| order | category | glyph | on Windows | colour | how to read it |
-|---|---|---|---|---|---|
-| 1 | data anomaly | ⚠ | △ | orange | check the source data or the options before trusting the figures |
-| 2 | figure caveat | ≈ | ≈ | magenta | the figures cover less than they appear to |
-| 3 | your options | ⚙ | ⛭ | cyan | command usage warnings |
-| 4 | decision taken for you | ↻ | ↻ | blue | what the run did instead of what was asked |
-| 5 | runtime condition | ⏱ | ⧖ | teal | a condition of the run's environment |
-| 6 | guidance | ➤ | ► | green | a next step worth trying |
+| order | category | glyph | on Windows | colour | dark, 256-colour | how to read it |
+|---|---|---|---|---|---|---|
+| 1 | data anomaly | ⚠ | △ | orange | 208 | check the source data or the options before trusting the figures |
+| 2 | figure caveat | ≈ | ≈ | magenta | 170 | the figures cover less than they appear to |
+| 3 | your options | ⚙ | ⛭ | cyan | 44 | command usage warnings |
+| 4 | decision taken for you | ↻ | ↻ | blue | 33 | what the run did instead of what was asked |
+| 5 | runtime condition | ⏱ | ⧖ | teal | 43 | a condition of the run's environment |
+| 6 | guidance | ➤ | ► | green | 40 | a next step worth trying |
 
 Windows Terminal draws `⚠`, `⚙` and `⏱` as colour emoji, in their own colours
 and covering the next cell, and draws `➤` reaching into the next cell, so
@@ -188,8 +191,9 @@ upper case, with its how-to-read text on the heading row; categories are
 divided by one blank row. A notice is one row with no row break inside it: its
 statement, evidence and remedy are told apart by colour and by a marker before
 the evidence and before the remedy. In a list each notice is preceded by the
-bullet `╶` (U+2576, box drawings light right) in the category's colour, so the
-one character carries the classification. Continuation rows of a wrapped
+bullet `╶` (U+2576, box drawings light right), on Windows `‒` (U+2012, figure
+dash, the architect's choice there, where `╶` draws as a short dash), in the
+category's colour, so the one character carries the classification. Continuation rows of a wrapped
 notice carry no hanging indent inside a box.
 
 ### Wording
