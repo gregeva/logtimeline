@@ -180,9 +180,10 @@ Clear Dark) the vertical bars join from row to row and the rounded corners
 sit on the lines; in Monaco (profile Pro) the vertical bars break between rows
 and the rounded corners sit about one pixel low, the shapes of a fallback
 font. Switching the Pro profile to SF Mono Terminal joins them (the architect,
-2026-10-20); that font needs anti-aliasing on to read well. A program cannot
-detect or correct this; the frame is drawn for a font that carries the
-box-drawing set.
+2026-10-20); that font needs anti-aliasing on to read well, and Monaco stays
+the architect's font. No query reaches a profile's font, so a program cannot
+detect this; how the frame is drawn in a font without the box-drawing set is
+open.
 
 Replacements tried for the three emoji glyphs, printed in the category's
 colour and bold:
