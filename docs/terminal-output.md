@@ -169,8 +169,22 @@ leaves the bare text (measured: `q` CR LF read through `binmode STDIN,
 ':encoding(UTF-8)'` gives `q`). A program does not push `:raw` on standard
 input.
 
-**Keys.** Raw key reading, the arrow keys, Shift-Tab and the cursor position
-report (CSI 6n) on Windows are not yet validated.
+**The terminal's answers.** **Rule.** On Windows a program that reads an
+answer from the terminal, such as the cursor position report (CSI 6n), sets
+`ENABLE_VIRTUAL_TERMINAL_INPUT` (0x0200) on its console input handle while it
+reads keys. **Measured** in Windows Terminal through Term::ReadKey in cbreak
+mode: without the flag the report reads as one byte, `00`; with it, the whole
+answer, `1B 5B 32 3B 31 52` (ESC [ 2 ; 1 R). Without it the prototypes placed
+the dimmed copy of the run under a modal on the bottom row, 3 to 4 rows below
+the run in a window it did not fill. `ReadMode('restore')` puts the input
+mode back.
+
+**Keys.** In Windows Terminal, with and without that flag, Term::ReadKey
+delivers the arrow keys, Tab, Shift-Tab, Esc, Enter, digits and letters as
+the prototypes' key reader expects (`read_key()` in
+`prototype/412-notice-surfaces/lib/NoticeProto.pm`), every view of the
+Windows round driven by script (`prototype/412-notice-surfaces/findings.md`
+§ Keys, a first pass by script).
 
 ---
 

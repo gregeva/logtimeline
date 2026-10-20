@@ -849,13 +849,18 @@ after each key; the architect's own judgement of the views is still to come.
 
 Every key decoded. Two things to look at:
 
-- **The dimmed copy of the run under an alternate-screen modal stands 3 to 4
+- **The dimmed copy of the run under an alternate-screen modal stood 3 to 4
   rows lower than the run itself** (the `Processing 40%` row and the summary
   table above it, in all three modal captures), where
   `docs/terminal-interaction.md` § Where a component is drawn has "every row
-  kept at the position it had, the live row included". The cause is not
-  isolated; whether macOS shows the same at the window size used here is not
-  known.
+  kept at the position it had, the live row included". Cause: the cursor
+  position report never arrived. Term::ReadKey read one `00` byte in its
+  place, because the console's input handle lacked
+  `ENABLE_VIRTUAL_TERMINAL_INPUT`, so `backdrop_layer()` fell back to the
+  bottom row. `raw_mode()` now sets the flag on Windows; with it the report
+  reads `ESC [ 2 ; 1 R`, and the copy's rows stand where the run's were, in a
+  window of 120 by 29 and in a maximized one, with ← Tab Shift-Tab Esc still
+  decoding.
 - After the browser below the cursor closes, the window shows only the rows
   after it: the run's rows above have scrolled out of view, the browser being
   taller than the space below the cursor. Whether macOS does the same is not

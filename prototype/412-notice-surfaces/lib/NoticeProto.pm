@@ -109,7 +109,31 @@ my $mode_changed = 0;
 sub raw_mode {
     my ($mode) = @_;
     ReadMode( $mode // 'cbreak' );
+    windows_vt_input();
     $mode_changed = 1;
+    return;
+}
+
+# On Windows the console hands the terminal's answers to the program only
+# with ENABLE_VIRTUAL_TERMINAL_INPUT (0x0200) on its input handle: without it
+# a cursor position report reads as one NUL byte instead of ESC [ row ; col R
+# (docs/terminal-output.md § Input). ReadMode('restore') puts the input mode
+# back as it was before the first ReadMode.
+my %win_in;
+
+sub windows_vt_input {
+    return unless $^O eq 'MSWin32';
+    unless (%win_in) {
+        require Win32::API;
+        %win_in = (
+            get => Win32::API->new( 'kernel32', 'GetConsoleMode', [ 'N', 'P' ], 'I' ),
+            set => Win32::API->new( 'kernel32', 'SetConsoleMode', [ 'N', 'N' ], 'I' ),
+        );
+        $win_in{handle} = Win32::API->new( 'kernel32', 'GetStdHandle', ['N'], 'N' )->Call(-10);    # STD_INPUT_HANDLE
+    }
+    my $mode = pack 'L', 0;
+    $win_in{get}->Call( $win_in{handle}, $mode ) or return;
+    $win_in{set}->Call( $win_in{handle}, unpack( 'L', $mode ) | 0x0200 );
     return;
 }
 
