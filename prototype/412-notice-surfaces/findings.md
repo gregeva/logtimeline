@@ -807,7 +807,12 @@ Seen once the code page was set:
 it loads, through Win32::API, and `review.pl` loads it; `perl show.pl panel`
 then renders in colour in a classic console window too. Replacement glyphs
 for the three were tried in both terminals; the results are the glyph table
-of `docs/terminal-output.md` § Glyphs and width.
+of `docs/terminal-output.md` § Glyphs and width. On Windows the category
+sheet now takes `▲` for data anomaly, `⛭` for your options (the architect's
+pick, from the classic console capture) and `⧖` for runtime condition. In
+`perl show.pl panel` in Windows Terminal each is one cell in its category's
+colour; in the classic console `▲` and `⛭` are, while `⧖` and `↻` are
+missing-glyph boxes in the bold headings.
 
 The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
 arrows, Shift-Tab, the cursor position report) are not yet validated on

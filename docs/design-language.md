@@ -162,14 +162,19 @@ ASCII marks are rejected. The colours are the `fg` of `@column_colors` on a
 dark background and the darkest step of the colour's `gradient_light` on a
 light one.
 
-| order | category | glyph | colour | how to read it |
-|---|---|---|---|---|
-| 1 | data anomaly | ⚠ | orange | check the source data or the options before trusting the figures |
-| 2 | figure caveat | ≈ | magenta | the figures cover less than they appear to |
-| 3 | your options | ⚙ | cyan | command usage warnings |
-| 4 | decision taken for you | ↻ | blue | what the run did instead of what was asked |
-| 5 | runtime condition | ⏱ | teal | a condition of the run's environment |
-| 6 | guidance | ➤ | green | a next step worth trying |
+| order | category | glyph | on Windows | colour | how to read it |
+|---|---|---|---|---|---|
+| 1 | data anomaly | ⚠ | ▲ | orange | check the source data or the options before trusting the figures |
+| 2 | figure caveat | ≈ | ≈ | magenta | the figures cover less than they appear to |
+| 3 | your options | ⚙ | ⛭ | cyan | command usage warnings |
+| 4 | decision taken for you | ↻ | ↻ | blue | what the run did instead of what was asked |
+| 5 | runtime condition | ⏱ | ⧖ | teal | a condition of the run's environment |
+| 6 | guidance | ➤ | ➤ | green | a next step worth trying |
+
+Windows Terminal draws `⚠`, `⚙` and `⏱` as colour emoji, in their own colours
+and covering the next cell, so Windows takes the glyph of the fourth column,
+seen one cell wide and in the category's colour there
+(`docs/terminal-output.md` § Glyphs and width).
 
 The order puts what bears on trusting the figures first and the next step
 last. The how-to-read text of *your options* says the tool is warning, never

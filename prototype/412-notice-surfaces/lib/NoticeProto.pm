@@ -290,16 +290,19 @@ sub wrap_text {
 # the order, glyphs, colours and how-to-read text are the contract's category
 # sheet, settled 2026-10-19). The order puts what bears on trusting the
 # figures first and the next step last; the glyphs are single-width text
-# symbols.
+# symbols. On Windows three of them are drawn as colour emoji covering the
+# next cell, so each has a Windows glyph seen one cell wide and in its colour
+# there (docs/terminal-output.md § Glyphs and width).
 
 my @categories = (
-    { name => 'data anomaly',           glyph => '⚠', reads => 'check the source data or the options before trusting the figures' },
+    { name => 'data anomaly',           glyph => '⚠', windows => '▲', reads => 'check the source data or the options before trusting the figures' },
     { name => 'figure caveat',          glyph => '≈', reads => 'the figures cover less than they appear to' },
-    { name => 'your options',           glyph => '⚙', reads => 'command usage warnings' },
+    { name => 'your options',           glyph => '⚙', windows => '⛭', reads => 'command usage warnings' },
     { name => 'decision taken for you', glyph => '↻', reads => 'what the run did instead of what was asked' },
-    { name => 'runtime condition',      glyph => '⏱', reads => "a condition of the run's environment" },
+    { name => 'runtime condition',      glyph => '⏱', windows => '⧖', reads => "a condition of the run's environment" },
     { name => 'guidance',               glyph => '➤', reads => 'a next step worth trying' },
 );
+if ( $^O eq 'MSWin32' ) { $_->{glyph} = $_->{windows} // $_->{glyph} for @categories }
 
 sub categories { return @categories }
 

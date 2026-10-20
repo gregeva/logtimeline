@@ -110,7 +110,8 @@ page 65001):
 | `╭ ╮ ╰ ╯ ─ │`, `┌ ┬ ┐ ━ ┃ ┏`, `▁ … █`, `■ ▪ •` | frames, axes, bars | one cell, joined | one cell, joined |
 | `▲` U+25B2, `△` U+25B3, `✱` U+2731, `≡` U+2261 | candidates for the category sheet | one cell | one cell |
 | `◬` U+25EC, `⧋` U+29CB, `⚑` U+2691, `⊘` U+2298, `⌘` U+2318, `◷` U+25F7, `◴` U+25F4, `⧖` U+29D6, `⧗` U+29D7, `◔` U+25D4 | candidates | one cell | a missing-glyph box, one cell |
-| `⛭` U+26ED, `⌥` U+2325 | candidates | covering the next cell | `⛭` one cell; `⌥` a missing-glyph box |
+| `⛭` U+26ED | candidate | one cell, filling it edge to edge, in the category's colour | one cell, in the category's colour |
+| `⌥` U+2325 | candidate | covering the next cell | a missing-glyph box |
 
 The text-presentation selector (U+FE0E after the glyph) does not help: Windows
 Terminal still draws the emoji, and the classic console host gives the
@@ -122,8 +123,11 @@ after it (seen in the notices panel in both terminals: `⚠DATA ANOMALY`).
 three of the category sheet with Unicode's `Emoji` property; none of the
 glyphs drawn in one cell has it. A candidate therefore lacks `Emoji`
 (`/\p{Emoji}/` in Perl) and is not East Asian `Wide`; that is necessary, not
-sufficient (`⛭` and `⌥` lack both and still overdraw), so the candidate is then
-seen in each terminal.
+sufficient (`⌥` lacks both and still overdraws), so the candidate is then seen
+in each terminal, in the category's colour and in bold, as a heading draws it.
+The emoji glyphs also ignore the colour codes in Windows Terminal: `⚙` is drawn
+grey beside a cyan heading. The Windows column of the category sheet in
+`docs/design-language.md` is the outcome.
 
 Bar characters differ by platform for another reason: `ltl` draws bars with
 `■` on Windows (research § 1.8; `features/windows-character-rendering.md`).
