@@ -814,6 +814,13 @@ pick, from the classic console capture) and `⧖` for runtime condition. In
 colour; in the classic console `▲` and `⛭` are, while `⧖` and `↻` are
 missing-glyph boxes in the bold headings.
 
+Every non-ASCII character the prototypes and `ltl` draw, 74, was then printed
+in both terminals (the table in `docs/terminal-output.md` § Glyphs and width).
+In Windows Terminal only the three emoji glyphs fail. In the classic console,
+turning VT processing on, which the prototypes now do, turns `↳ ↻ ⎯ ▶ ⧖ ▇`
+into missing-glyph boxes that it draws with VT processing off; `▁ ▂ ▃ ▅ ▆`
+are boxes either way.
+
 The rules drawn from these are `docs/terminal-output.md`. The keys (raw read,
 arrows, Shift-Tab, the cursor position report) are not yet validated on
 Windows.

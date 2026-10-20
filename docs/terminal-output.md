@@ -77,7 +77,7 @@ through Win32::Console or Win32::API).
 | terminal | without `SetConsoleMode` |
 |---|---|
 | Windows Terminal | bold, dim, underline, reverse, 16-colour and 256-colour SGR all render |
-| classic console host | every sequence printed as text: `[1mbold [0m`, `[93myellow` |
+| classic console host | every sequence printed as text: `[1mbold [0m`, `[93myellow`; with the flag set, every sequence renders, at a cost in glyphs (§ Glyphs and width) |
 
 `ltl` does not call `SetConsoleMode` today (research § 1.8), so its colours
 reach a classic console window as text. That is an observation for `ltl`, not
@@ -98,20 +98,33 @@ target terminal. A glyph enters `docs/design-language.md` only after it has
 been seen one cell wide in a terminal of each platform, and the table below
 holds the result.
 
-**Measured on Windows** (each glyph printed between `[` and `|]`, under code
-page 65001):
+**Measured on Windows.** Every non-ASCII character in the source of the #412
+prototypes and of `ltl` (outside comments), 74 in all, each printed between
+`[` and `|]` plain and in bold colour, under code page 65001. Anything not
+named below is one cell in its colour in every column.
 
-| glyph | in | Windows Terminal | classic console host |
-|---|---|---|---|
-| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | drawn as colour emoji two cells wide, covering the next cell | monochrome, still covering the next cell |
-| `≈` U+2248, `➤` U+27A4 | the category sheet | one cell | one cell |
-| `↻` U+21BB | the category sheet | one cell | one cell in plain text; a missing-glyph box in the panel's bold, coloured heading |
-| `╶` U+2576, `·` U+00B7, `→ ← ↑ ↓` | the notice bullet, key bars, remedies | one cell | one cell |
-| `╭ ╮ ╰ ╯ ─ │`, `┌ ┬ ┐ ━ ┃ ┏`, `▁ … █`, `■ ▪ •` | frames, axes, bars | one cell, joined | one cell, joined |
-| `▲` U+25B2, `△` U+25B3, `✱` U+2731, `≡` U+2261 | candidates for the category sheet | one cell | one cell |
-| `◬` U+25EC, `⧋` U+29CB, `⚑` U+2691, `⊘` U+2298, `⌘` U+2318, `◷` U+25F7, `◴` U+25F4, `⧖` U+29D6, `⧗` U+29D7, `◔` U+25D4 | candidates | one cell | a missing-glyph box, one cell |
-| `⛭` U+26ED | candidate | one cell, filling it edge to edge, in the category's colour | one cell, in the category's colour |
-| `⌥` U+2325 | candidate | covering the next cell | a missing-glyph box |
+| glyph | used by | Windows Terminal | classic console, VT processing on | classic console, VT processing off |
+|---|---|---|---|---|
+| `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | colour emoji in its own colours, covering the next cell | monochrome, covering the next cell | the same |
+| `↻` U+21BB, `➤` U+27A4, `⛭` U+26ED | the category sheet | one cell, reaching its right edge | `↻` a missing-glyph box; the others one cell | one cell |
+| `↳` U+21B3, `⎯` U+23AF, `▶` U+25B6, `⧖` U+29D6 | prototypes | one cell | a missing-glyph box | one cell |
+| `▇` U+2587 | prototypes, `ltl` histograms | one cell | a missing-glyph box | one cell |
+| `▁ ▂ ▃ ▅ ▆` U+2581 to U+2586 but `▄` | prototypes, `ltl` histograms | one cell | a missing-glyph box | a missing-glyph box |
+
+VT processing changes what the classic console host can draw: with it on,
+six glyphs it draws without it become missing-glyph boxes. Colour and glyph
+coverage cannot both be had there. Five of `ltl`'s eight histogram blocks are
+boxes in the classic console host either way; that is an observation for
+`ltl`, not yet an issue.
+
+Replacements tried for the three emoji glyphs, printed in the category's
+colour and bold (the classic console with VT processing on):
+
+| glyph | Windows Terminal | classic console |
+|---|---|---|
+| `▲` U+25B2, `△` U+25B3, `✱` U+2731, `≡` U+2261 | one cell | one cell |
+| `◬` U+25EC, `⧋` U+29CB, `⚑` U+2691, `⊘` U+2298, `⌘` U+2318, `◷` U+25F7, `◴` U+25F4, `⧗` U+29D7, `◔` U+25D4 | one cell | a missing-glyph box |
+| `⌥` U+2325 | covering the next cell | a missing-glyph box |
 
 The text-presentation selector (U+FE0E after the glyph) does not help: Windows
 Terminal still draws the emoji, and the classic console host gives the
