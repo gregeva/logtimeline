@@ -65,12 +65,12 @@ window (§ Checking output on Windows).
 ## Escape sequences
 
 **Rule.** Colour, emphasis and cursor control are written as VT escape
-sequences, the one form every target terminal reads. On Windows a program
-that writes them enables virtual terminal processing on its output handle
-first (`SetConsoleMode` with `ENABLE_VIRTUAL_TERMINAL_PROCESSING`, 0x0004),
-and writes no escape sequence when the console refuses the flag
-(`features/412-notice-surfaces-research.md` § 4.2 gives the call from Perl
-through Win32::Console or Win32::API).
+sequences, the one form every target terminal reads. On Windows, VT
+processing is on before the first sequence is written. `ltl` gets it from its
+startup `system("chcp 65001 > nul")`, and every other program does it the
+same way, so there is one mechanism to reason about; `SetConsoleMode` with
+`ENABLE_VIRTUAL_TERMINAL_PROCESSING` (0x0004) is the explicit form, should it
+ever be needed (`features/412-notice-surfaces-research.md` § 4.2).
 
 **Measured.**
 

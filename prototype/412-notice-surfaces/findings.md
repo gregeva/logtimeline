@@ -803,9 +803,11 @@ Seen once the code page was set:
   Windows Terminal, so it does not tell the two apart. These answer open
   points 5 and 6 of `features/412-notice-surfaces-research.md` § 6.
 
-`lib/NoticeProto.pm` now also turns VT processing on for standard output when
-it loads, through Win32::API, and `review.pl` loads it; `perl show.pl panel`
-then renders in colour in a classic console window too. Replacement glyphs
+`review.pl` now loads `lib/NoticeProto.pm`, which prepares the console as
+`ltl` does (`system("chcp 65001 > nul")`, whose `cmd.exe` leaves VT
+processing on); `perl show.pl panel` renders in colour in a classic console
+window too. An explicit `SetConsoleMode` call through Win32::API was tried
+first and removed, since it duplicated what the `chcp` call already does. Replacement glyphs
 for the three were tried in both terminals; the results are the glyph table
 of `docs/terminal-output.md` § Glyphs and width. On Windows the category
 sheet now takes `▲` for data anomaly, `⛭` for your options (the architect's

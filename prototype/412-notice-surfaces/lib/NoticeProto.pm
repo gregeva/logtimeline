@@ -23,28 +23,11 @@ our @EXPORT_OK = qw(
     set_answers_ahead answer_ahead read_key timed_yes_no
 );
 
-# The Windows console, prepared once when this module loads, so no prototype
-# can forget it (docs/terminal-output.md § Encoding, § Escape sequences): the
-# code page to UTF-8, as ltl does, and VT processing on standard output, which
-# Windows Terminal has without asking and the classic console host does not.
-# Win32::API rather than Win32::Console, whose DESTROY closes the handle.
-sub prepare_windows_console {
-    return unless $^O eq 'MSWin32';
-    system("chcp 65001 > nul");
-    return unless -t STDOUT;
-    require Win32::API;
-    my $get_handle = Win32::API->new( 'kernel32', 'GetStdHandle',   ['N'],        'N' );
-    my $get_mode   = Win32::API->new( 'kernel32', 'GetConsoleMode', [ 'N', 'P' ], 'I' );
-    my $set_mode   = Win32::API->new( 'kernel32', 'SetConsoleMode', [ 'N', 'N' ], 'I' );
-    my $handle     = $get_handle->Call(-11);    # STD_OUTPUT_HANDLE
-    my $mode       = pack 'L', 0;
-    $get_mode->Call( $handle, $mode ) or return;
-    $set_mode->Call( $handle, unpack( 'L', $mode ) | 0x0004 )    # ENABLE_VIRTUAL_TERMINAL_PROCESSING
-        or die "this console does not accept VT escape sequences; run the prototypes in Windows Terminal\n";
-    return;
-}
-
-prepare_windows_console();
+# The Windows console, prepared when this module loads, so no prototype can
+# forget it, exactly as ltl does at startup: the code page to UTF-8, and the
+# cmd.exe this runs leaves VT processing on (docs/terminal-output.md
+# § Encoding, § Escape sequences).
+system("chcp 65001 > nul") if $^O eq 'MSWin32';
 binmode STDOUT, ':encoding(UTF-8)';
 $| = 1;
 
