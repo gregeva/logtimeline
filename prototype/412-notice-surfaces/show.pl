@@ -7,6 +7,7 @@
 #
 #   perl show.pl panel   [--input typical|deprecation|heavy] [--bullet N|glyph] [--headed]
 #   perl show.pl bullets                                 the bullet glyph sheet
+#   perl show.pl terminal                                the terminal and background found, and how
 #   perl show.pl ask     --input memory|preread|pattern [--form modal|box]
 #                        [--placement alt|inline] [--size small|medium|large]
 #                        [--quit on|off] [--keybar full|letters|none] [--record]
@@ -14,6 +15,7 @@
 #   perl show.pl browser [--input heavy] [--placement alt|inline] [--size ...]
 #                        [--rows N] [--seconds N]
 #   every component:     [--bg dark|light] [--width N] [--height N]
+#                        (the background found from the terminal when --bg is not given)
 #
 # A parameter not given takes the defaults table's value for the use.
 # Terminal layout only, from fixed content; nothing here runs ltl.
@@ -25,12 +27,12 @@ use FindBin;
 use lib "$FindBin::Bin/lib";
 use Getopt::Long;
 use Time::HiRes qw(sleep);
-use NoticeProto qw(interactive terminal_size style_for set_answers_ahead ltl_constants);
+use NoticeProto qw(interactive terminal_size style_for set_answers_ahead ltl_constants terminal categories);
 use NoticeSurfaces qw(panel bullet_candidates bullet_sheet ask browser out live_row);
 
 my $component = shift(@ARGV) // '';
-$component =~ /^(panel|bullets|ask|browser)$/ or die "usage: show.pl panel|bullets|ask|browser [options]\n";
-my %opt = ( bg => 'dark' );
+$component =~ /^(panel|bullets|ask|browser|terminal)$/ or die "usage: show.pl panel|bullets|ask|browser|terminal [options]\n";
+my %opt;
 GetOptions( \%opt, 'input=s', 'bullet=s', 'headed', 'form=s', 'placement=s', 'size=s', 'quit=s', 'keybar=s', 'record', 'seconds=i',
     'answer=s', 'rows=i', 'fixed-height', 'bg=s', 'width=i', 'height=i' ) or die "bad options\n";
 my ( $W, $H ) = terminal_size( width => $opt{width}, height => $opt{height} );
@@ -43,6 +45,14 @@ my %param  = map { $_ => $opt{$_} } grep { defined $opt{$_} } qw(form placement 
 $param{quit}   = $opt{quit} eq 'on' ? 1 : 0 if defined $opt{quit};
 $param{record} = 1 if $opt{record};
 $param{fixed_height} = 1 if $opt{'fixed-height'};
+
+if ( $component eq 'terminal' ) {
+    my $t = terminal();
+    printf "  %-12s %s (%s)\n", 'terminal', $t->{name}, $t->{name_from};
+    printf "  %-12s %s (%s)\n", 'background', $t->{background}, $t->{background_from};
+    printf "  %-12s %s\n", 'glyphs', join( ' ', map { $_->{glyph} } categories() );
+    exit 0;
+}
 
 my $input_name = $opt{input} // { panel => 'typical', bullets => 'typical', ask => 'memory', browser => 'heavy' }->{$component};
 my $in = $inputs->{$input_name} or die "no input '$input_name'\n";

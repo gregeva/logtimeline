@@ -30,6 +30,25 @@ validated; macOS is the platform every surface was designed on.
 The harnesses run on macOS and Linux only (`docs/toolchain-guidance.md`
 § Windows development host).
 
+**Which terminal, on what background.** **Rule.** What is drawn follows the
+terminal that draws it, found once at start; the platform decides only what
+the operating system owns (the code page, the console's input mode). Over SSH
+the program runs on one platform and is drawn by a terminal on another, so
+the platform says nothing about the drawing. Two things are found, and only
+these (the architect, 2026-10-20):
+
+| what | read from, in order | measured |
+|---|---|---|
+| the terminal | `WT_SESSION` (Windows Terminal); Windows without it (the classic console host); `TERM_PROGRAM`; the terminal's name-and-version reply (CSI > 0 q); its identity reply (CSI > c), where the reply has been measured to name it | macOS Terminal: `TERM_PROGRAM=Apple_Terminal` locally, absent over SSH; no name reply; identity `1;95;0` in both. tmux: name reply `tmux 3.6`, identity `84;0;0` |
+| the background | the terminal's colour reply (OSC 11): light when its luminance is above one half | macOS Terminal answers locally and over SSH; tmux does not |
+
+With no terminal (a redirected run) nothing is asked: the background is dark
+and the terminal unknown. Each query is followed by the primary device
+attributes request, which every terminal answers, so a query a terminal
+ignores costs no wait. Glyph widths are not measured at run time: a glyph
+enters the design only once seen one cell wide (§ Glyphs and width). Inside
+tmux the replies describe tmux, not the terminal behind it.
+
 ---
 
 ## Encoding

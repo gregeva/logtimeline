@@ -19,7 +19,7 @@ use Unicode::UCD qw(charprop);
 our @EXPORT_OK = qw(
     ltl_constants interactive terminal_size raw_mode restore_mode
     query_cursor_column query_cursor_position expected_width style_for strip_sgr
-    display_width wrap_text categories
+    display_width wrap_text categories terminal windows_glyphs
     set_answers_ahead answer_ahead read_key timed_yes_no
 );
 
@@ -167,6 +167,74 @@ sub query_cursor_position {
 
 sub query_cursor_column { my @p = query_cursor_position(@_); return @p ? $p[1] : undef }
 
+# --- the terminal -----------------------------------------------------------
+#
+# Which terminal draws the output and on what background, found once, on the
+# first call. The platform decides only what the operating system owns (the
+# code page, the console's input mode); what is drawn follows the terminal.
+# The environment names the terminal on the machine it runs on; over SSH only
+# the terminal's own answers reach the program: its name-and-version reply,
+# its identity reply where one has been measured, its background colour
+# (prototype/412-notice-surfaces/findings.md § Terminal detection). With no
+# terminal nothing is asked and the defaults stand.
+
+# Identity replies (secondary device attributes) measured to name a terminal.
+my %identity_reply = ( '1;95;0' => 'Apple_Terminal', '84;0;0' => 'tmux' );
+
+my %terminal;
+
+sub terminal {
+    return \%terminal if %terminal;
+    %terminal = ( name => 'unknown', name_from => 'nothing answered', background => 'dark', background_from => 'default' );
+    if    ( $ENV{WT_SESSION} )     { @terminal{qw(name name_from)} = ( 'windows-terminal', 'WT_SESSION' ) }
+    elsif ( $^O eq 'MSWin32' )     { @terminal{qw(name name_from)} = ( 'conhost', 'Windows without WT_SESSION' ) }
+    elsif ( $ENV{TERM_PROGRAM} )   { @terminal{qw(name name_from)} = ( $ENV{TERM_PROGRAM}, 'TERM_PROGRAM' ) }
+    unless ( interactive() ) {
+        $terminal{background_from} = 'default, no terminal';
+        return \%terminal;
+    }
+    my $own_mode = !$mode_changed;
+    raw_mode('raw') if $own_mode;
+    if ( $terminal{name} eq 'unknown' ) {
+        if ( ask_terminal("\e[>0q") =~ /\eP>\|([^\s\e]+)/ ) {
+            @terminal{qw(name name_from)} = ( $1, 'name-and-version reply' );
+        }
+        elsif ( ask_terminal("\e[>c") =~ /\e\[>([\d;]+)c/ && $identity_reply{$1} ) {
+            @terminal{qw(name name_from)} = ( $identity_reply{$1}, "identity reply $1" );
+        }
+    }
+    if ( ask_terminal("\e]11;?\e\\") =~ m{\e\]11;rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)}i ) {
+        my @c = map { hex( substr( $_, 0, 2 ) ) / 255 } ( $1, $2, $3 );
+        my $luminance = 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2];
+        $terminal{background}      = $luminance > 0.5 ? 'light' : 'dark';
+        $terminal{background_from} = sprintf 'colour reply, luminance %.2f', $luminance;
+    }
+    else { $terminal{background_from} = 'default, no colour reply' }
+    if ($own_mode) { ReadMode('restore'); $mode_changed = 0 }
+    return \%terminal;
+}
+
+# The terminal's answer to a query, read up to its reply to the primary
+# device attributes sent after it: every terminal answers that one, so a
+# query it ignores costs no wait.
+sub ask_terminal {
+    my ($query) = @_;
+    print $query, "\e[c";
+    my ( $buf, $t0 ) = ( '', time );
+    while ( time - $t0 < 0.5 ) {
+        my $c = ReadKey(0.1);
+        next unless defined $c;
+        $buf .= $c;
+        last if $buf =~ /\e\[\?[\d;]*c\z/;
+    }
+    $buf =~ s/\e\[\?[\d;]*c\z//;
+    return $buf;
+}
+
+# The terminals measured to draw some category glyphs over the next cell
+# (docs/terminal-output.md § Glyphs and width).
+sub windows_glyphs { return terminal()->{name} =~ /^(windows-terminal|conhost)$/ }
+
 # The width a terminal following Unicode's East Asian Width and emoji
 # presentation properties gives a string: two for a wide or full-width
 # character, or an emoji presented as emoji (by default, or by U+FE0F);
@@ -231,7 +299,7 @@ my %dark_256 = (
 
 sub style_for {
     my ( $name, $bg ) = @_;
-    $bg //= 'dark';
+    $bg //= terminal()->{background};
     my $c = ltl_constants();
     my %fg;
     for my $cat ( keys %category_colour ) {
@@ -316,9 +384,10 @@ sub wrap_text {
 # the order, glyphs, colours and how-to-read text are the contract's category
 # sheet, settled 2026-10-19). The order puts what bears on trusting the
 # figures first and the next step last; the glyphs are single-width text
-# symbols. On Windows four of them reach into the next cell (three drawn as
-# colour emoji, and ➤), so each has a Windows glyph seen one cell wide and in
-# its colour there (docs/terminal-output.md § Glyphs and width).
+# symbols. In the Windows terminals four of them reach into the next cell
+# (three drawn as colour emoji, and ➤), so each has a Windows glyph seen one
+# cell wide and in its colour there (docs/terminal-output.md § Glyphs and
+# width).
 
 my @categories = (
     { name => 'data anomaly',           glyph => '⚠', windows => '△', reads => 'check the source data or the options before trusting the figures' },
@@ -328,9 +397,15 @@ my @categories = (
     { name => 'runtime condition',      glyph => '⏱', windows => '⧖', reads => "a condition of the run's environment" },
     { name => 'guidance',               glyph => '➤', windows => '►', reads => 'a next step worth trying' },
 );
-if ( $^O eq 'MSWin32' ) { $_->{glyph} = $_->{windows} // $_->{glyph} for @categories }
+my $glyphs_resolved;
 
-sub categories { return @categories }
+sub categories {
+    unless ($glyphs_resolved) {
+        $glyphs_resolved = 1;
+        if ( windows_glyphs() ) { $_->{glyph} = $_->{windows} // $_->{glyph} for @categories }
+    }
+    return @categories;
+}
 
 # --- input ------------------------------------------------------------------
 #

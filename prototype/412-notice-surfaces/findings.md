@@ -1112,3 +1112,14 @@ anti-aliasing on to read well. Recorded in `docs/terminal-output.md`
 § Glyphs and width.
 Monaco stays the architect's terminal font (2026-10-20): a frame drawn in a
 font without the box-drawing set is a case the surfaces have to handle, open.
+
+Built (the architect: identity and background only, glyph width settled by
+taking no glyph wider than a cell): `terminal()` in `lib/NoticeProto.pm` finds
+the terminal and the background once; the Windows category glyphs and the
+Windows bullet follow the Windows terminals instead of `$^O`; the background
+is the terminal's unless `--bg` is given; `perl show.pl terminal` prints what
+was found and from what. Checked: in a tmux pane, `tmux` from `TERM_PROGRAM`
+and, with it unset, from the name reply; the measured colour replies (black,
+dark blue-grey) read dark, white and cream light; the redirected runs of every
+view and the tmux captures of every scenario are unchanged but for the
+compact box's key bar. The rule is `docs/terminal-output.md` § The terminals.
