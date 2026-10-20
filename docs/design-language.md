@@ -169,10 +169,11 @@ light one.
 | 3 | your options | ⚙ | ⛭ | cyan | command usage warnings |
 | 4 | decision taken for you | ↻ | ↻ | blue | what the run did instead of what was asked |
 | 5 | runtime condition | ⏱ | ⧖ | teal | a condition of the run's environment |
-| 6 | guidance | ➤ | ➤ | green | a next step worth trying |
+| 6 | guidance | ➤ | ► | green | a next step worth trying |
 
 Windows Terminal draws `⚠`, `⚙` and `⏱` as colour emoji, in their own colours
-and covering the next cell, so Windows takes the glyph of the fourth column,
+and covering the next cell, and draws `➤` reaching into the next cell, so
+Windows takes the glyph of the fourth column,
 seen one cell wide and in the category's colour there
 (`docs/terminal-output.md` § Glyphs and width).
 

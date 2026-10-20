@@ -816,6 +816,12 @@ pick, from the classic console capture) and `⧖` for runtime condition. In
 colour; in the classic console `▲` and `⛭` are, while `⧖` and `↻` are
 missing-glyph boxes in the bold headings.
 
+The architect then saw `➤` of guidance reaching into the next cell in
+Windows Terminal, which the measurement above had passed as one cell. Of the
+right-pointing candidates printed in both terminals, `►` (U+25BA), `▸` and
+`›` were one cell in both; the architect chose `►`, and the category sheet
+takes it on Windows.
+
 Every non-ASCII character the prototypes and `ltl` draw, 74, was then printed
 in both terminals (the table in `docs/terminal-output.md` § Glyphs and width).
 In Windows Terminal only the three emoji glyphs fail. In the classic console

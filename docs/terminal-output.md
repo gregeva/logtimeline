@@ -109,7 +109,11 @@ named below is one cell in its colour in every column.
 | glyph | used by | Windows Terminal | classic console host |
 |---|---|---|---|
 | `⚠` U+26A0, `⚙` U+2699, `⏱` U+23F1 | the category sheet | colour emoji in its own colours, covering the next cell | monochrome, covering the next cell |
-| `↻` U+21BB, `➤` U+27A4, `⛭` U+26ED | the category sheet | one cell, reaching its right edge | `➤` and `⛭` one cell; `↻` varies |
+| `➤` U+27A4 | the category sheet | reaching into the next cell, over the space after it (seen by the architect in the panel) | one cell |
+| `↻` U+21BB, `⛭` U+26ED | the category sheet | one cell, reaching its right edge | `⛭` one cell; `↻` varies |
+| `►` U+25BA, `▸` U+25B8, `›` U+203A | candidates for guidance | one cell | one cell |
+| `▹` U+25B9, `▻` U+25BB, `❯` U+276F, `▷` U+25B7, `⊳` U+22B3 | candidates for guidance | one cell | a missing-glyph box |
+| `⇒` U+21D2, `⇨` U+21E8, `➜` U+279C, `➔` U+2794, `➢` U+27A2, `⮞` U+2B9E | candidates for guidance | reaching into the next cell | varies |
 | `↳` U+21B3, `⎯` U+23AF, `▶` U+25B6, `⧖` U+29D6, `▁ ▂ ▃ ▅ ▆ ▇` | prototypes; the blocks also `ltl`'s histograms | one cell | varies |
 
 "Varies": the same glyph was drawn in some classic console windows and shown
