@@ -12,6 +12,7 @@
 #   perl review.pl --round light  the light-background evaluation (light-review.pl runs this)
 #   perl review.pl --round linux  the platform validation on Linux (feedback/stage1-linux.jsonl)
 #   perl review.pl --round windows  the same in Windows Terminal (feedback/stage1-windows.jsonl)
+#   perl review.pl --round mac    the macOS re-check of the Windows round's changes (feedback/stage1-mac.jsonl)
 #
 # An option whose script is '-' runs nothing: it takes remarks alone (round
 # 4's closing entry, for remarks against the contract).
@@ -57,6 +58,7 @@ Options:
                     light     the light-background evaluation (light-review.pl)
                     linux     the platform validation on Linux
                     windows   the platform validation in Windows Terminal
+                    mac       the macOS re-check of what the Windows round changed
   --list          the round's options, marked when they already have feedback
   --from ID       start at that option and go on from there
   --only ID       review one option alone
@@ -66,7 +68,7 @@ Options:
 
 Feedback files, under feedback/, one JSON object per line, appended never
 overwritten: stage1.jsonl (round 1), stage1-roundN.jsonl (rounds 2 to 7),
-stage1-light.jsonl, stage1-linux.jsonl, stage1-windows.jsonl.
+stage1-light.jsonl, stage1-linux.jsonl, stage1-windows.jsonl, stage1-mac.jsonl.
 
 At the feedback prompt: type the remarks and end with an empty line. On a line
 of its own, r reruns the view, s skips it without saving, q quits. An option
@@ -220,6 +222,20 @@ $rounds{platform} = [
     [ 'contract',       '-',       '',                                         'Remarks for this platform',                         'anything that applies across views: a key that did not decode, a sequence that did not take, a glyph missing or two cells wide, the terminal and font used' ],
 ];
 $rounds{$_} = $rounds{platform} for qw(linux windows);
+
+# The macOS re-check after the Windows round (findings § Architect's re-check
+# on Windows): only the views the Windows changes reach on macOS. Nothing
+# already validated here is shown again.
+$rounds{mac} = [
+    [ 'panel',          'show.pl', 'panel',                                    'Panel: the dark category colours',                  'figure caveat, your options, decision taken for you and guidance now in 256-colour 170, 44, 33 and 40 on every platform: the six still told apart, and as you saw them on Windows' ],
+    [ 'modal-read',     'show.pl', 'ask --input memory',                       'Modal: redraw by difference',                       'the countdown ticks and Tab moves with no flicker; the dimmed run under the dialog keeps its colours (dimmed, not grey); Esc gives the screen back' ],
+    [ 'box-read',       'show.pl', 'ask --input memory --form box',            'Compact box: one empty row above it',               'exactly one empty row between the progress row and the box; after Esc the progress row resumes on its own row' ],
+    [ 'browser',        'show.pl', 'browser',                                  'Browser: the detail pane and the layered list',     'an empty row between the category heading and the notice in the detail pane; 7, Enter, ↓, ↑, Esc, Esc ends with the run\'s screen back' ],
+    [ 'browser-inline', 'show.pl', 'browser --placement inline',               'Browser below the cursor: one empty row above it',  'exactly one empty row above the browser; erased on close' ],
+    [ 'light-panel',    'show.pl', 'panel --bg light',                         'Panel on light: text and secondary text (D10)',    'from a light profile: text in 256-colour black, secondary text (counts, how-to-read) in grey 244 rather than dim' ],
+    [ 'light-modal',    'show.pl', 'ask --input memory --bg light',            'Modal on light: the dimmed run keeps its colours',  'from a light profile: the run under the dialog dimmed with its colours kept; the countdown in grey 244' ],
+    [ 'contract',       '-',       '',                                         'Remarks for the macOS re-check',                    'anything across views; the two light views can be skipped with a remark if no light profile is at hand' ],
+];
 
 my @options = @{ $rounds{ $opt{round} } or die "no round $opt{round}\n" };
 my %index = map { $options[$_][0] => $_ } 0 .. $#options;
