@@ -597,6 +597,9 @@ surface      ask before the read            ask during the read     panel before
   stack; the developer chooses whether it stays, as the record of the choice,
   or goes. Every record therefore has a unique identifier, returned when it is
   put on the stack, to get it back and to delete it.
+- **Delete is a flag, not a removal** (architect, 2026-10-21). A deleted
+  record stays on the stack with its deleted flag set, so the surfaces skip it
+  and the `-V` section still reads it.
 
 Confirmed by the architect from Claude's read-back (2026-10-21): one store,
 two entry points, so every notice, asked or not, is in the store with its
