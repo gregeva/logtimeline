@@ -588,6 +588,15 @@ surface      ask before the read            ask during the read     panel before
 - **Migrating the current producers is part of the issue**, planned, the cost
   of bringing on a structured pattern that can grow; never a caveat against
   the model.
+- **One store, entered by `notice` and `ask`** (architect, 2026-10-21, after
+  the trade-offs of one store against two, or none for immediate notices).
+  Order is not an issue: notices are organised by category.
+- **A choice taken at runtime is locked.** Seen later in the browser it shows
+  what was chosen and cannot be taken again. A third entry, delete, lets the
+  code that consumed a runtime-changing choice remove its notice from the
+  stack; the developer chooses whether it stays, as the record of the choice,
+  or goes. Every record therefore has a unique identifier, returned when it is
+  put on the stack, to get it back and to delete it.
 
 Confirmed by the architect from Claude's read-back (2026-10-21): one store,
 two entry points, so every notice, asked or not, is in the store with its
