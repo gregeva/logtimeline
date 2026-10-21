@@ -1058,8 +1058,8 @@ Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
 
 **Status.** Designed and locked before code (2026-10-21). Being built on #412
 in the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
-plan): the store, the record, `-V notices`, the panel, ask and every notice
-up to finalize are in `ltl`; the browser and the last four notices follow.
+plan): the store, the record, `-V notices`, the panel, ask, the browser and
+every notice up to finalize are in `ltl`; the last four notices follow.
 
 ---
 

@@ -638,6 +638,34 @@ with no terminal, and in tmux `s` stopping the run before the read) and checks
 every kind of rows 1 to 11 in `migration-categories`, now reading `ask()` calls
 too. `docs/usage.md` § Notices describes the question.
 
+### Drop 5: the browser (2026-10-21)
+
+`notice_browser()` takes the panel's place when the panel would not fit the
+terminal's height (more rows than the height less one): the tabs (All, then
+each category, every one named with its count, wrapping), the list of
+`rows` notices (10) with the selected one in reverse video, the detail pane
+sized before drawing for the tallest detail, the key bar with its 15 s
+countdown, the title `notices (N) · a-b of N`; ported from the prototype's
+`browser()`. Enter on a notice carrying a choice not yet taken layers its
+options list over the browser through `notice_ask_surface()` at its second
+stage, the drawer nested on the browser's alternate screen over it dimmed, or
+centred within its rows below the cursor; the answer is set on that record
+(D12), which the list then marks `◆` and whose detail shows `chosen:`, and an
+answered choice opens nothing again (D11, locked). Esc and c close it; q and
+x quit, writing `-V notices`. With no terminal its first frame is drawn once
+as the notices section. `ask()` now registers the record and hands the
+drawing to `notice_ask_surface()`, so the browser layers the same surface on
+a deferred record. The browser's presentation is `%notice_browser_presentation`;
+the fixture sets `browser-many`, `browser-inline` and `browser-countdown`
+change it.
+
+Proven: `validate-notices.sh` `browser-unattended` (the browser in the
+panel's place in a 40-row terminal, the panel in a 60-row one, every tab
+named, drawn once) and `tmux-browser` (moving, a tab by number, ◇, the
+layered list over the browser, ◆ and `chosen:`, the lock, c closing, the
+countdown closing it, below the cursor erased on Esc, q quitting); a copy of
+`ltl` that reopens an answered choice fails the lock assertion.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,

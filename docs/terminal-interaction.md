@@ -12,7 +12,7 @@ document and is not part of the wiki.
 **Status.** Settled by the architect in the prototyping of #412 (notice
 surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,
 after seven review rounds on macOS, dark and light, and validated on Linux
-and Windows on 2026-10-20. The panel and ask are in `ltl`; the first delivery builds
+and Windows on 2026-10-20. The panel, ask and the browser are in `ltl`; the first delivery builds
 all three components, each reached by a real producer (D16).
 The locked decisions (D4, D5, D7, D8, D10 to D16) are in
 `features/412-notice-surfaces.md` § Locked decisions, which remains their

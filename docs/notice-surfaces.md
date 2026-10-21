@@ -7,8 +7,7 @@ observed, and what a producer is responsible for. The index entry is
 `docs/architecture-patterns.md` § Notice surfaces; the locked decisions
 behind every line are in `features/412-notice-surfaces.md` (D1 to D17),
 which remains their authority. The store, the record, both entry calls,
-`-V notices`, the panel and ask are in `ltl`; the browser is prototyped in
-`prototype/412-notice-surfaces/` and built in the drops of the delivery plan.
+`-V notices`, the panel, ask and the browser are in `ltl`.
 
 ## What a notice is
 

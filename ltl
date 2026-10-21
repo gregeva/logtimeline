@@ -626,6 +626,10 @@ my @notice_category_sheet = (
       reads => 'a next step worth trying' },
 );
 my @notice_categories = map { $_->{name} } @notice_category_sheet;
+# The browser's presentation (docs/terminal-interaction.md § Parameters and
+# their defaults by use); a fixture set may change it.
+my %notice_browser_presentation = ( placement => 'alt', size => 'auto', quit => 1, seconds => 15, rows => 10 );
+
 my %notice_category = map { $_ => 1 } @notice_categories;
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
 
@@ -15009,6 +15013,9 @@ my %notice_fixture_sets = (
           statement => 'a notice whose answer is left as a record', question => 'Continue reading?',
           buttons => [ { label => 'Stop here', key => 's', role => 'stop' }, { label => 'Continue reading', key => 'c', role => 'default' } ] },
     ],
+    'browser-many'      => [ notice_fixture_browser_set() ],
+    'browser-inline'    => [ { stage => 'options', browser => { placement => 'inline' } }, notice_fixture_browser_set() ],
+    'browser-countdown' => [ { stage => 'options', browser => { seconds => 3 } }, notice_fixture_browser_set() ],
     'ask-several' => [
         { stage => 'options', kind => 'fixture-shown-first', category => 'your_options', focus => '-x', statement => 'the first notice the ask presents' },
         { stage => 'options', kind => 'fixture-shown-second', category => 'your_options', statement => 'the second notice the ask presents', remedy => '-d key' },
@@ -15017,6 +15024,24 @@ my %notice_fixture_sets = (
           buttons => [ { label => 'Stop and correct them', key => 's', role => 'stop' }, { label => 'Continue', key => 'c', role => 'default' } ] },
     ],
 );
+
+# Thirty notices across the six categories, two carrying a choice: more than
+# a terminal's height holds, so the browser takes the panel's place.
+sub notice_fixture_browser_set {
+    my @names = map { $_->{name} } @notice_category_sheet;
+    return (
+        ( map { { stage => 'finalize', kind => 'fixture-many', category => $names[ $_ % 6 ], statement => "the notice numbered $_ of the browser fixture" } } 1 .. 28 ),
+        { stage => 'finalize', kind => 'fixture-browser-choice', category => 'guidance', focus => 'the focus',
+          statement => 'a notice with options to choose in the browser', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'first', parts => [ 'the first', '-so count', 'the why of the first' ], args => '-so count', effect => 'the effect of the first' },
+                       { key => 'second', parts => [ 'the second', '-so bytes', 'the why of the second' ], args => '-so bytes', effect => 'the effect of the second' } ] },
+        { stage => 'finalize', kind => 'fixture-browser-choice', category => 'guidance',
+          statement => 'a second notice with options', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'only', parts => [ 'the only option', '-n 5' ], args => '-n 5', effect => 'the effect of the only option' } ] },
+    );
+}
 
 sub _validate_notice_fixture {
     my ($value) = @_;
@@ -15029,6 +15054,7 @@ sub raise_fixture_notices {
     for my $entry ( grep { $_->{stage} eq $notice_stage } @{ $notice_fixture_sets{$notice_fixture} } ) {
         my %n = %$entry;
         delete $n{stage};
+        if ( my $browser = delete $n{browser} ) { %notice_browser_presentation = ( %notice_browser_presentation, %$browser ); next }
         my $ask = delete $n{ask};
         unless ($ask) { notice(%n); next }
         my %presentation = %$ask;
@@ -15248,7 +15274,7 @@ sub notice_heading {
     my ( $cat, $count, $width ) = @_;
     my $s = notice_style();
     my $head = "$s->{bold}$s->{fg}{ $cat->{name} }$s->{glyph}{ $cat->{name} } $cat->{heading}$s->{reset}"
-             . " $s->{dim}($count)$s->{reset}";
+             . ( defined $count ? " $s->{dim}($count)$s->{reset}" : '' );
     my $room = $width - notice_cells($head) - 2;
     $head .= "  $s->{dim}" . notice_fit( $cat->{reads}, $room ) . $s->{reset} if $room > 12;
     return $head;
@@ -15323,9 +15349,13 @@ sub draw_notice_panel {
 }
 
 # The deferred panel, before the timeline: every deferred, visible notice no
-# surface has drawn.
+# surface has drawn; the browser in its place when the panel would not fit.
 sub draw_deferred_notices {
-    draw_notice_panel( 'notices', grep { $_->{immediacy} eq 'deferred' && $_->{visible} && $_->{shown} eq 'none' } @notice_records );
+    my @records = grep { $_->{immediacy} eq 'deferred' && $_->{visible} && $_->{shown} eq 'none' } @notice_records;
+    return unless @records;
+    # The browser when the panel would not fit the terminal's height (D16).
+    return notice_browser(@records) if notice_panel_rows(@records) > $terminal_height - 1;
+    draw_notice_panel( 'notices', @records );
     return;
 }
 
@@ -15482,6 +15512,19 @@ sub notice_drawer {
     my (%a) = @_;
     my $mode = notice_interactive() ? $a{placement} : 'plain';
     my $d = { mode => $mode, W => $terminal_width, H => $terminal_height, h => 0 };
+    if ( my $parent = $a{under} ) {
+        # Layered over a surface: on its alternate screen, over it dimmed with
+        # its colours kept, leaving the screen to it; or centred within the
+        # rows of a surface below the cursor (docs/terminal-interaction.md
+        # § Layered surfaces).
+        if ( $parent->{mode} eq 'alt' ) {
+            @$d{qw(mode nested parent)} = ( 'alt', 1, $parent );
+            $d->{base} = [ map { notice_cut_cells( notice_dim_row( $_, notice_background() ), 0, $d->{W} ) } @{ $parent->{screen} } ];
+        } else {
+            @$d{qw(mode parent)} = ( 'over', $parent );
+        }
+        return $d;
+    }
     if ( $mode eq 'alt' ) {
         my $row = notice_cursor_row() // $d->{H};
         $row = $d->{H} if $row > $d->{H};
@@ -15631,15 +15674,31 @@ sub notice_draw_rows {
     }
     if ( $d->{mode} eq 'alt' ) {
         unless ( $d->{on}++ ) {
-            print "\e[?1049h\e[H\e[2J";
-            $notice_alt_screen = 1;
-            $d->{screen} = [ (' ' x $d->{W}) x $d->{H} ];
+            if ( $d->{nested} ) { $d->{screen} = [ @{ $d->{parent}{screen} } ] }
+            else {
+                print "\e[?1049h\e[H\e[2J";
+                $notice_alt_screen = 1;
+                $d->{screen} = [ (' ' x $d->{W}) x $d->{H} ];
+            }
         }
         my @chars = map { notice_chars($_) } @rows;
         my $bw  = max map { notice_cells($_) } @rows;
         my $top = max( 1, int( ( $d->{H} - @rows ) / 2 ) + 1 );
         my $col = max( 1, int( ( $d->{W} - $bw ) / 2 ) + 1 );
         notice_paint_differences( $d, notice_compose( $d, { rows => \@chars, top => $top, col => $col } ) );
+        return;
+    }
+    if ( $d->{mode} eq 'over' ) {
+        my $p   = $d->{parent};
+        my $bw  = max map { notice_cells($_) } @rows;
+        my $top = max( 0, int( ( $p->{h} - @rows ) / 2 ) );
+        my $col = max( 1, int( ( $d->{W} - $bw ) / 2 ) + 1 );
+        my $up  = $p->{h} - 1 - $top;
+        print "\e[${up}A" if $up > 0;
+        print "\r\e[${col}G$rows[$_]" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
+        my $down = $p->{h} - 1 - ( $top + $#rows );
+        print "\e[${down}B" if $down > 0;
+        print "\r";
         return;
     }
     if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1 }
@@ -15659,7 +15718,9 @@ sub notice_draw_rows {
 
 sub notice_close_drawer {
     my ($d) = @_;
-    if ( $d->{mode} eq 'alt' && $d->{on} ) {
+    if ( $d->{mode} eq 'alt' && $d->{nested} ) {
+        $d->{parent}{screen} = undef;    # the parent repaints every row, in place
+    } elsif ( $d->{mode} eq 'alt' && $d->{on} ) {
         print "\e[?1049l";
         $notice_alt_screen = 0;
     } elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
@@ -15842,7 +15903,20 @@ sub ask {
     $record->{shown} = 'ask';
     my @shown = map { $notice_records[ $_ - 1 ] } @{ $record->{shows} };
     @{$_}{qw(shown visible)} = ( 'ask', 0 ) for @shown;
-    my @body_notices = @shown ? @shown : ($record);
+    return notice_ask_surface( $record, @shown ? \@shown : [$record], %p, form => $form );
+}
+
+# The ask surface for a record that carries a choice (D14): the one ask()
+# registers, or a deferred notice the browser layers it on (D12). stage => 2
+# opens on the options list, for an ask layered over the browser, where Esc
+# goes back without an answer; under => the drawer of the surface it is
+# layered over. Returns the answer, or undef when a layered list is left.
+sub notice_ask_surface {
+    my ( $record, $body_notices, %p ) = @_;
+    my @body_notices = @$body_notices;
+    my $form  = $p{form} // 'modal';
+    my $stage = $p{stage} // 1;
+    %p = ( %{ $notice_presentation{"ask-$form"} }, map { $_ => $p{$_} } grep { defined $p{$_} } keys %p );
 
     my $s   = notice_style();
     my ($cat) = grep { $_->{name} eq $record->{category} } @notice_category_sheet;
@@ -15854,14 +15928,16 @@ sub ask {
     my $options  = $record->{options};
     my $headings = $record->{headings};
     my $count    = @body_notices;
-    my $answer   = $record->{answer} = { button => $btn[$def_i]{key}, option => undef, how => undef };
+    my ($more) = grep { $_->{role} eq 'more' } @btn;
+    my $answer = { button => $btn[$def_i]{key}, option => undef, how => undef };
+    $record->{answer} = $answer if $stage == 1;
     my $option_default = $options ? $options->[0]{key} : undef;
     my %option_at = $options ? map { $options->[$_]{key} => $_ } 0 .. $#$options : ();
 
     # Answers given ahead: one per choice point, the option key next when the
     # button leads to the list.
     my $ahead;
-    if ( defined( my $given = notice_answer_ahead() ) ) {
+    if ( $stage == 1 && defined( my $given = notice_answer_ahead() ) ) {
         my $i = $given eq 'default' ? $def_i : $letter{ lc $given } // $def_i;
         @$answer{qw(button how)} = ( $btn[$i]{key}, 'ahead' );
         if ( $btn[$i]{role} eq 'more' && $options ) {
@@ -15952,7 +16028,7 @@ sub ask {
     local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
     local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
     notice_raw_mode() if $interactive;
-    my $d = notice_drawer( placement => $form eq 'modal' ? $p{placement} : 'inline' );
+    my $d = notice_drawer( placement => $form eq 'modal' ? $p{placement} : 'inline', under => $p{under} );
     my $indent = $d->{mode} eq 'inline' && $form eq 'modal' ? ' ' x int( ( $terminal_width - $bw ) / 2 ) : '';
     my $draw = sub { notice_draw_rows( $d, map { "$indent$_" } @_ ) };
 
@@ -15965,6 +16041,32 @@ sub ask {
         $answer->{how} //= 'no_terminal';
         notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
         return $answer;
+    }
+    if ( $stage == 2 ) {
+        # Layered over the browser: the list at once, Esc back without an
+        # answer, Enter answering the record through the button that leads
+        # to the list.
+        my $sel = 0;
+        my $n   = @$options;
+        while (1) {
+            $draw->( $frame_rows->( 2, $sel ) );
+            my $k = notice_read_key();
+            next unless defined $k;
+            my $act = notice_action( $k, $p{quit} );
+            if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % $n }
+            elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % $n }
+            elsif ( $act eq 'pgup' ) { $sel = 0 }
+            elsif ( $act eq 'pgdn' ) { $sel = $n - 1 }
+            elsif ( $act =~ /^digit:(\d)$/ && $1 <= $n ) { $sel = $1 - 1 }
+            elsif ( $act eq 'enter' ) {
+                $record->{answer} = { button => ( $more // $btn[$def_i] )->{key}, option => $options->[$sel]{key}, how => 'key' };
+                last;
+            }
+            elsif ( $act eq 'esc' )  { last }
+            elsif ( $act eq 'quit' ) { notice_close_drawer($d); notice_quit_run( $record->{answer} = { button => undef, option => undef } ) }
+        }
+        notice_close_drawer($d);
+        return $record->{answer};
     }
     my $focus = $def_i;
     my $chosen = notice_wait_choice(
@@ -16034,6 +16136,151 @@ sub ask_about_option_notices {
     return unless $answer->{button} eq 's';
     emit_notices_verbose();
     exit 0;
+}
+
+# --- the browser (#412 D5) ----------------------------------------------------
+#
+# Many notices in a navigable list: tabs across the top filter by category,
+# All first, every tab named with its count; the list beneath, one row per
+# notice; the selected notice's detail under it, in a pane sized before
+# anything is drawn for the tallest detail, so the browser never changes size
+# while navigated. Enter on a notice that carries a choice layers the options
+# list over the browser; the answer is set on the record (D12) and locks it: ◇
+# marks a choice on offer, ◆ one answered. A countdown closes it until any
+# key (15 s). Esc and c close it, q and x quit the run (docs/terminal-interaction.md
+# § Keys). With no terminal its first frame is drawn once.
+
+sub notice_browser {
+    my (@records) = @_;
+    my %p = %notice_browser_presentation;
+    my $s = notice_style();
+    my %category_at = map { $notice_category_sheet[$_]{name} => $_ } 0 .. $#notice_category_sheet;
+    my @items = sort { $category_at{ $a->{category} } <=> $category_at{ $b->{category} } || $a->{id} <=> $b->{id} } @records;
+    my @cats  = grep { my $c = $_; grep { $_->{category} eq $c->{name} } @items } @notice_category_sheet;
+    $_->{shown} = 'browser' for @items;
+
+    my $choice_line = sub {
+        my ($n) = @_;
+        my $fg = $s->{fg}{ $n->{category} };
+        my $a  = $n->{answer};
+        return "$s->{dim}chosen:$s->{reset} $s->{pick}" . ( map { $_->{parts}[0] } grep { $_->{key} eq $a->{option} } @{ $n->{options} } )[0]
+             . "$s->{reset} $fg" . ( map { $_->{args} // '' } grep { $_->{key} eq $a->{option} } @{ $n->{options} } )[0] . $s->{reset}
+            if $a && defined $a->{option};
+        return "$fg◇$s->{reset} $s->{dim}" . scalar( @{ $n->{options} } ) . " options on offer: Enter to choose$s->{reset}";
+    };
+    my $detail_rows = sub {
+        my ( $n, $iw ) = @_;
+        my ($c) = grep { $_->{name} eq $n->{category} } @notice_category_sheet;
+        my @r = ( notice_heading( $c, undef, $iw ), '', notice_rows( $n, $iw, bullet => 0 ) );
+        push @r, '', $choice_line->($n) if $n->{options};
+        return @r;
+    };
+    my $tab_rows = sub {
+        my ( $tab, $iw ) = @_;
+        my @tabs = ( $tab == 0 ? "$s->{pick}\e[7m All (" . @items . ") \e[0m" : "$s->{text} All (" . @items . ") $s->{reset}" );
+        for my $i ( 0 .. $#cats ) {
+            my $c  = $cats[$i];
+            my $n  = grep { $_->{category} eq $c->{name} } @items;
+            my $fg = $s->{fg}{ $c->{name} };
+            my $l  = " $s->{glyph}{ $c->{name} } $c->{heading} ($n) ";
+            push @tabs, $tab == $i + 1 ? "$fg\e[7m\e[1m$l\e[0m" : "$fg$l$s->{reset}";
+        }
+        my @rows = ('');
+        for my $t (@tabs) {
+            push @rows, '' if $rows[-1] ne '' && notice_cells("$rows[-1] $t") > $iw;
+            $rows[-1] .= ( $rows[-1] ne '' ? ' ' : '' ) . $t;
+        }
+        return @rows;
+    };
+
+    my ( $D, $T, $L );
+    my $measure = sub {
+        my ($bw) = @_;
+        my $iw = $bw - 6;
+        $D = max map { scalar( $detail_rows->( $_, $iw ) ) } @items;
+        $T = scalar( $tab_rows->( 0, $iw ) );
+        return ( 40 + 6, 1 + $T + 1 + $p{rows} + 1 + 1 + 1 + $D + 1 + 2 );
+    };
+    my $interactive = notice_interactive();
+    my $placement = $p{placement};
+    my ( $bw, $mh ) = $placement eq 'inline' ? ( $terminal_width - 1, $terminal_height - 2 ) : notice_choose_tier( $measure, $p{size} );
+    $measure->($bw);
+    $L = min( $p{rows}, $mh - 2 - 5 - $T - 1 - $D );
+    $L = 3 if $L < 3;
+    my $iw = $bw - 6;
+
+    my ( $tab, $sel, $top ) = ( 0, 0, 0 );
+    my $shown = sub { $tab ? grep { $_->{category} eq $cats[ $tab - 1 ]{name} } @items : @items };
+    my $rows = sub {
+        my ($left) = @_;
+        my @shown = $shown->();
+        $sel = $#shown if $sel > $#shown;
+        $top = $sel if $sel < $top;
+        $top = $sel - $L + 1 if $sel >= $top + $L;
+        my @r = ( '', $tab_rows->( $tab, $iw ), '' );
+        for my $i ( $top .. $top + $L - 1 ) {
+            if ( $i > $#shown ) { push @r, ''; next }
+            my $n  = $shown[$i];
+            my $fg = $s->{fg}{ $n->{category} };
+            my $mark = $n->{options} ? ( $n->{answer} && defined $n->{answer}{option} ? "$fg◆$s->{reset}" : "$fg◇$s->{reset}" ) : ' ';
+            my $text = notice_fit( join( ' ', notice_rows( $n, 100_000, bullet => 0 ) ), $iw - 6 );
+            ( my $plain = $text ) =~ s/\e\[[0-9;]*m//g;
+            push @r, $i == $sel
+                ? "$fg▶$s->{reset} $fg$s->{glyph}{ $n->{category} }$s->{reset} \e[7m" . notice_pad( $plain, $iw - 6 ) . "\e[0m $mark"
+                : "  $fg$s->{glyph}{ $n->{category} }$s->{reset} " . notice_pad( $text, $iw - 6 ) . " $mark";
+        }
+        push @r, '', 'RULE', '';
+        my @detail = $detail_rows->( $shown[$sel], $iw );
+        push @r, ( map { $detail[$_] // '' } 0 .. $D - 1 ), '';
+        my @pairs = ( [ '↑↓ j k', 'move' ], [ '←→ Tab', 'tabs' ], [ '1-' . ( @cats + 1 ), 'tab' ], [ 'Enter', 'options' ], [ 'Esc/c', 'close' ] );
+        push @pairs, [ 'q/x', 'quit' ] if $p{quit};
+        my $foot = " $s->{dim}" . join( ' · ', map { "$_->[0]: $_->[1]" } @pairs ) . $s->{reset} . ( defined $left ? ' ' . notice_countdown( $left, $p{seconds} ) : '' ) . ' ';
+        my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
+        return notice_frame( width => $bw, side => 2, rows => \@r, foot => $foot,
+                             title => " $s->{dim}notices (" . @items . ") · $range$s->{reset} " );
+    };
+
+    local $| = 1;
+    local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
+    local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
+    notice_raw_mode() if $interactive;
+    my $d = notice_drawer( placement => $placement );
+    my $indent = $d->{mode} eq 'inline' ? '' : '';
+    if ( $d->{mode} eq 'plain' ) {
+        open_section('notices');
+        notice_draw_rows( $d, $rows->( $p{seconds} ) );
+        return;
+    }
+    print "\e[?25l";
+    my $end = Time::HiRes::time() + $p{seconds};
+    my $stopped = $p{seconds} <= 0;
+    while (1) {
+        my $left = $stopped ? undef : int( $end - Time::HiRes::time() + 0.999 );
+        last if defined $left && $left <= 0;
+        notice_draw_rows( $d, $rows->($left) );
+        my $wait = $stopped ? undef : $end - Time::HiRes::time() - ( $left - 1 );
+        my $k = notice_read_key( $stopped ? undef : $wait > 0 ? $wait : 0.01 );
+        next unless defined $k;
+        $stopped = 1;
+        my $act = notice_action( $k, $p{quit} );
+        my @shown = $shown->();
+        if ( $act eq 'quit' ) { notice_close_drawer($d); notice_quit_run( {} ) }
+        last if $act eq 'esc' || $act eq 'letter:c';    # close is the dialogue, quit the application
+        if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % @shown }
+        elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % @shown }
+        elsif ( $act eq 'pgup' ) { $sel = $sel - $L < 0 ? 0 : $sel - $L }
+        elsif ( $act eq 'pgdn' ) { $sel = $sel + $L > $#shown ? $#shown : $sel + $L }
+        elsif ( $act eq 'right' || $act eq 'next' ) { $tab = ( $tab + 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'left'  || $act eq 'prev' ) { $tab = ( $tab - 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act =~ /^digit:(\d)$/ && $1 <= @cats + 1 ) { $tab = $1 - 1; ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'enter' && $shown[$sel]{options} && !( $shown[$sel]{answer} && defined $shown[$sel]{answer}{option} ) ) {
+            # A choice not yet taken: its options list layered over the browser.
+            notice_ask_surface( $shown[$sel], [ $shown[$sel] ], form => 'modal', stage => 2, seconds => 0, quit => $p{quit}, under => $d );
+        }
+    }
+    notice_close_drawer($d);
+    notice_restore_terminal();
+    return;
 }
 
 # Quitting from a surface: the surface is already cleared; the -V notices

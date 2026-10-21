@@ -800,6 +800,65 @@ scenario_preread() {
         'Stop and correct them ends the run before any file is read, the -V notices section written first' 'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
 }
 
+# ---------------------------------------------------------------------------
+# The browser (#412 D5, D16): the deferred notices when the panel would not
+# fit the terminal's height, with a choice layered over it.
+# ---------------------------------------------------------------------------
+C_BROWSER="$DOC § D5, D11, D12, D16; docs/terminal-interaction.md § Keys, § Layered surfaces; acceptance criteria, browser"
+
+scenario_browser_unattended() {
+    current_scenario="browser-unattended"
+    echo "[$current_scenario]"
+    run_ok bu "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --terminal-height 40 --notice-fixture browser-many -V notices,section-layout "$DURATION_FIXTURE"
+    check "the browser in the panel's place" "$(panel bu 1 title)|$(layout bu notices | awk '{ print $1 }')|$(field bu shown | sort -u | paste -sd, -)" \
+        "notices (30) · 1-10 of 30|rendered|browser" \
+        'Thirty notices do not fit a 40-row terminal: the browser takes the panel'"'"'s place, as the notices section, and records them shown by it' 'draw_deferred_notices() and notice_browser() in ltl' "$C_BROWSER"
+    check "every tab named, with its count" "$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/bu.out" | grep -oE '(All|DATA ANOMALY|FIGURE CAVEAT|YOUR OPTIONS|DECISION TAKEN FOR YOU|RUNTIME CONDITION|GUIDANCE) \([0-9]+\)' | paste -sd, -)" \
+        "All (30),DATA ANOMALY (4),FIGURE CAVEAT (5),YOUR OPTIONS (5),DECISION TAKEN FOR YOU (5),RUNTIME CONDITION (5),GUIDANCE (6)" \
+        'The tabs are All and each category, every one named with its count, continuing on a second row' 'notice_browser() in ltl' "$C_BROWSER"
+    check "drawn once, the run going on" "$(grep -c 'notices (30) · ' "$TMP_DIR/bu.out")|$(grep -c 'LINES READ' "$TMP_DIR/bu.out")" "1|1" \
+        'With no terminal the first frame is drawn once and the run continues' 'notice_browser() in ltl' "$C_BROWSER"
+    run_ok bp "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --terminal-height 60 --notice-fixture browser-many "$DURATION_FIXTURE"
+    check "the panel while they fit" "$(panel bp 1 title)" "notices (30)" \
+        'In a terminal tall enough for them the same notices take the panel' 'draw_deferred_notices() in ltl' "$C_BROWSER"
+}
+
+scenario_tmux_browser() {
+    current_scenario="tmux-browser"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    local h=$TMUX_H
+    TMUX_H=34
+    tmux_run tb "sleep:3 cap:up Down sleep:0.4 cap:down 7 sleep:0.4 cap:tab Up sleep:0.3 Up sleep:0.4 cap:onchoice Enter sleep:0.8 cap:layered Down sleep:0.3 Enter sleep:0.8 cap:chosen Enter sleep:0.5 cap:again c sleep:1.5" \
+        -bs 1440 -oe -n 1 --notice-fixture browser-many -V notices "$DURATION_FIXTURE"
+    check "the browser, the selection moving down" "$(grep -c 'notices (30) · 1-10 of 30' "$TMP_DIR/tb.up.txt")|$(grep -c '▶ ⚠ the notice numbered 12 ' "$TMP_DIR/tb.down.txt")" "1|1" \
+        'The browser opens on the alternate screen; Down moves the selection one row' 'notice_browser() in ltl' "$C_BROWSER"
+    predicate "two cells of padding in each pane of the browser" 'The browser is a pop-up: two cells inside its sides and an empty row above and below each pane' panes "$TMP_DIR/tb.up.ansi" --side 2 --rows
+    check "a number chooses the tab" "$(grep -c 'notices (30) · 1-6 of 6' "$TMP_DIR/tb.tab.txt")" "1" \
+        'The n-th tab is chosen by its number: 7 is the guidance tab, its six notices listed' 'notice_browser() in ltl' "$C_BROWSER"
+    check "a choice on offer is marked" "$(grep -c '▶ ➤ the focus a notice with options to choose in the browser .*◇' "$TMP_DIR/tb.onchoice.txt")" "1" \
+        'A notice that carries a choice not yet taken is marked ◇' 'notice_browser() in ltl' "$C_BROWSER"
+    check "Enter layers the options list over the browser" "$(grep -c 'What? *How? *Why?' "$TMP_DIR/tb.layered.txt")|$(grep -c 'notices (30) · 1-6 of 6' "$TMP_DIR/tb.layered.txt")" "1|1" \
+        'Enter on a notice with a choice opens its options list as a modal over the browser, which stays under it' 'notice_ask_surface() in ltl (stage two, under the browser)' "$C_BROWSER"
+    check "the answer marks it and shows what was chosen" "$(grep -c '▶ ➤ the focus a notice with options to choose in the browser .*◆' "$TMP_DIR/tb.chosen.txt")|$(grep -c 'chosen: the second -so bytes' "$TMP_DIR/tb.chosen.txt")" "1|1" \
+        'Once answered the notice is marked ◆ and its detail shows what was chosen; the browser is back as it was' 'notice_browser() in ltl' "$C_BROWSER"
+    check "an answered choice is locked" "$(diff -q "$TMP_DIR/tb.chosen.txt" "$TMP_DIR/tb.again.txt" > /dev/null && echo locked || echo reopened)" "locked" \
+        'Enter on a choice already taken opens nothing: the answer is locked (D11)' 'notice_browser() in ltl' "$C_BROWSER"
+    check "the answer is on the record, c closes" "$(pane_answer tb fixture-browser-choice | paste -sd'#' -)|$(cat "$TMP_DIR/tb.state")|$(grep -c 'LINES READ' "$TMP_DIR/tb.final.txt")" \
+        "button=l option=second how=key#-|0 1|1" \
+        'The browser sets the answer on the notice through the layered ask (D12); c closes it, the terminal given back and the run going on' 'notice_ask_surface() and notice_browser() in ltl' "$C_BROWSER"
+    tmux_run tc "sleep:5" -bs 1440 -oe -n 1 --notice-fixture browser-countdown "$DURATION_FIXTURE"
+    check "the countdown closes it" "$(grep -c 'notices (30) · ' "$TMP_DIR/tc.screen.txt" || true)|$(grep -c 'LINES READ' "$TMP_DIR/tc.final.txt")" "0|1" \
+        'Untouched, the browser closes when its countdown runs out and the run goes on' 'notice_browser() in ltl' "$C_BROWSER"
+    tmux_run ti "sleep:3 cap:up Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture browser-inline "$DURATION_FIXTURE"
+    check "below the cursor, erased on Esc" "$(grep -c 'notices (30) · ' "$TMP_DIR/ti.up.txt")|$(grep -c 'notices (30) · ' "$TMP_DIR/ti.final.txt" || true)|$(grep -c 'LINES READ' "$TMP_DIR/ti.final.txt")" "1|0|1" \
+        'Placed below the cursor the browser is drawn there and erased when Esc closes it' 'notice_browser() and notice_close_drawer() in ltl' "$C_BROWSER"
+    tmux_run tq "sleep:3 q sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture browser-many -V notices "$DURATION_FIXTURE"
+    check "q quits the run" "$(pane_exit tq)|$(grep -c 'LINES READ' "$TMP_DIR/tq.final.txt" || true)|$(grep -c '^=== notices ===$' "$TMP_DIR/tq.final.txt")|$(cat "$TMP_DIR/tq.state")" "0|0|1|0 1" \
+        'q in the browser quits the application: -V notices written, the run stopped, the terminal given back' 'notice_quit_run() in ltl' "$C_BROWSER"
+    TMUX_H=$h
+}
+
 scenario_register registered \
                   clean-run \
                   read-path-fallback \
@@ -826,7 +885,9 @@ scenario_register registered \
                   tmux-below-cursor \
                   tmux-box \
                   tmux-ahead \
-                  preread
+                  preread \
+                  browser-unattended \
+                  tmux-browser
 scenario_parse_args "$@"
 
 if [[ ! -f "$LTL" ]]; then
