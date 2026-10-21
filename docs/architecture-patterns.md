@@ -1004,79 +1004,43 @@ decide as early as the information exists.
 **Definition.** A notice is a message to the analyst about this run (a
 decision taken for them, a condition found in the input, a consequence of
 their options, guidance), and may carry a choice. Code anywhere in the run
-registers it through one of two entry calls over one backend; it never
-composes or prints the finished text itself.
+registers it as a record in one store through one of two entry calls,
+`notice` (deferred or immediate, returns the record's id) and `ask`
+(immediate, blocks, returns a reference to the answer), and never composes
+or prints the finished text itself. The surfaces (panel, ask, browser)
+present the store by category; `-V notices` exposes every record. The full
+pattern, the record's fields, the answer and the producer's contract:
+`docs/notice-data-model.md`.
 
-- **The store.** One array of notice records, one record per raising, never
-  merged. Every record gets a unique id, returned to the caller
-  (`features/412-notice-surfaces.md` D11).
-- **The record** (D13): `kind` (a stable name for the notice's type, the same
-  in every run), `category` (one of six, D1: data anomaly, figure caveat,
-  your options, decision taken for you, runtime condition, guidance), the
-  parts `focus`, `statement`, `evidence` (zero or more) and `remedy`, the
-  `producer` sub, `immediacy` (now or deferred), `visible` (default yes), and
-  when it carries a choice: the question, the buttons and the default one,
-  the countdown, the headings (What? How? Why? when none are given) and the
-  options, each with a key, its parts, the command options that apply it and
-  its effect. The store stamps the pipeline `stage`.
-- **`notice`** takes the producer's fields and returns the id. Deferred, it
-  draws nothing: the panel presents every deferred, visible notice once the
-  data work is done, grouped by category (D3), or the browser when the
-  feature that calls it chooses so. Immediate, it draws the panel with that
-  one notice at the call, inline (D14).
-- **`ask`** takes the same with the choice's definition, plus presentation
-  only (placement, the compact form, the seconds, whether to leave a record),
-  draws the ask surface now, blocks, and returns a reference to the answer
-  (D14). Every choice has a default taken when the countdown ends, when Esc
-  is pressed, when there is no terminal, or from an answer given ahead
-  (#748).
-- **The answer** (D12) is a structure on the record, the same one the
-  blocking call returns: the button's letter, the option's key, and how it was
-  answered (a key, the default, given ahead, or quit). A record with an answer
-  is locked: seen later in the browser it shows what was chosen and cannot be
-  taken again.
-- **`-V notices`** (D15) exposes every record as an entity block, raising
-  order, with `visible`, `shown` (the surface that drew it) and the answer, so
-  a harness asserts what was produced, gated, shown and chosen without
-  reading a rendering.
-
-**The producer's contract.** The producer decides the category, the
-immediacy, the visibility, how often it raises (once per API found is as
-valid as once per run), and whether its notice is relevant to this run. A
-producer that offers a choice applies the answer itself, in its own code,
-before execution continues, and only to the stages that follow; what it may
-change and how is its responsibility, never the surfaces'. An immediate call
-made while the progress line owns the terminal is a development mistake. A
-notice always prints: `--disable-progress` suppresses progress indicators
-only. The surfaces own how a notice looks (`docs/design-language.md`) and
-how input is taken (`docs/terminal-interaction.md`); a producer passes what
-the notice says and never a formatted line.
+**Intended uses.** Any message the analyst needs about what the run did,
+found, or was asked to do, and any choice put to them during the run. The
+producer passes what the notice says and decides its category, immediacy,
+visibility and relevance; a producer that offers a choice applies the answer
+in its own code, to the stages that follow. A notice always prints:
+`--disable-progress` suppresses progress indicators only.
 
 **Reasoning.** Each producer printing its own finished text put notices
-wherever the producing code ran, with five prefixes and no structure, and
-nothing a harness could read but standard error. One store with one record
-shape gives every notice one presentation per category, one place to answer
-a choice and record it, and one observable section; one id per raising gives
-a producer its record back. The design and its trade-offs:
-`features/412-notice-surfaces.md` § Notice data model.
+wherever the producing code ran, with five prefixes, no structure, and nothing
+a harness could read but standard error. One store with one record shape gives
+every notice one presentation per category, one place to answer a choice and
+record it, and one observable section.
 
-**Consumption sites.** None in `ltl` yet. The surfaces and the record are
-prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm` (the
-panel, ask and browser components) and exercised by its `notices/inputs.pl`.
-Today's placeholders, every one a producer to migrate (the inventory of 35 in
-`features/412-notice-surfaces.md` § Inventory of current notices):
-- `defer_notice` :: `push @deferred_notices, $text;` with `flush_deferred_notices` after the read pass: pre-formatted strings, no category, printed to standard error.
-- `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";`: a deprecation recorded with `record_deprecation` as it is met and printed once at option settlement (#613 D17).
+**Consumption sites.** None in `ltl` yet; the components and the record are
+prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`. Today's
+placeholders are producers to migrate (`features/412-notice-surfaces.md`
+§ Inventory of current notices):
+- `defer_notice` :: `push @deferred_notices, $text;` with `flush_deferred_notices` after the read pass: pre-formatted strings printed to standard error.
+- `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";` (#613 D17).
 - `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";` (#613 D4, D12).
-- `emit_classification_percentage_notices`, `bin_consolidation_notice`, `emit_udm_zero_match_notices` and the other `emit_<topic>_notices()` subs: end-of-run notices printed directly. The numbers inside them render through the one width-to-format dispatch (`notice`, `notice exact`, `notice share` budgets, #617), which the migrated producers keep.
+- the `emit_<topic>_notices()` subs and `bin_consolidation_notice`: end-of-run notices printed directly; their numbers render through the width-to-format dispatch (#617), which migrated producers keep.
 
-**Owning record.** `features/412-notice-surfaces.md` (the locked decisions
-D1 to D15, the framing, the inventory); the surface contract in
-`docs/design-language.md` and `docs/terminal-interaction.md`.
+**Owning record.** `features/412-notice-surfaces.md` (D1 to D15);
+`docs/notice-data-model.md`, `docs/design-language.md`,
+`docs/terminal-interaction.md`.
 
 **Status.** Designed and locked before code (2026-10-21); nothing in `ltl`
-implements it. The first delivery and the migration of the inventory are
-scoped on #412 once the prototyping stage closes.
+implements it. The first delivery and the migration are scoped on #412 once
+the prototyping stage closes.
 
 ---
 

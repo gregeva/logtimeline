@@ -671,10 +671,12 @@ The walkthrough is complete: D11 (one store, two entry calls), D12 (one
 answer structure, two routes), D13 (the notice record), D14 (the two entry
 calls), D15 (the `-V notices` section), and the options list's headings closed
 in the surface contract. Requirement 7 is met by the pattern entry
-`docs/architecture-patterns.md` § Notice surfaces: one store of notice
-records, two entry calls, written from the locks before any code, which
-replaces the behavioural-notices entry and names today's producers as
-placeholders to migrate. What is built into `ltl`, and the migration, are
+`docs/architecture-patterns.md` § Notice surfaces, a short index entry in
+the shape of every other (architect, 2026-10-21: the patterns file holds the
+reference and points at a complete document per pattern), which replaces the
+behavioural-notices entry and names today's producers as placeholders to
+migrate; the complete pattern is `docs/notice-data-model.md`, written from
+the locks before any code. What is built into `ltl`, and the migration, are
 scoped next, once the prototyping stage is closed.
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.
