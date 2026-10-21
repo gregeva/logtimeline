@@ -12,8 +12,9 @@ glyphs are one cell wide on Windows.
 **Status.** The ltl look is what the tool draws today, read from the code
 named in each section. The new style and the shared conventions were settled
 by the architect in the prototyping of #412 (notice surfaces: presenting
-notices and capturing the analyst's choices), 2026-10-19; nothing in `ltl`
-draws them yet. The locked decisions behind them (D2 to D10) are in
+notices and capturing the analyst's choices), 2026-10-19, and validated on
+Linux and Windows on 2026-10-20; nothing in `ltl` draws them yet. The locked
+decisions behind them (D2 to D10, and D13 for the options list's headings) are in
 `features/412-notice-surfaces.md` § Locked decisions, which remains their
 authority; this document carries the settled form.
 
@@ -198,15 +199,21 @@ notice carry no hanging indent inside a box.
 
 ### Wording
 
+- A surface presents information simply, with the least explanation and
+  detail the analyst needs to understand it and know what to do (architect,
+  2026-10-18, round 1).
 - A count is written in parentheses everywhere, `(N)`: after a category name,
   in a tab, in a title; never a bare number.
 - The notices panel is titled with the word `notices` in lower case and its
-  count; a panel with one category takes the **edge form**: the category's
+  count, the title in the secondary text's colour, as its count is, never
+  bright (rounds 2 and 3); a panel with one category takes the **edge form**: the category's
   glyph, name, count and how-to-read text in the top edge, in the category
   colour, the notices alone inside.
 - A key bar entry is `keys: action` (`q/x: quit`), the same shape throughout,
   so a pair of keys never reads as a key and an action.
 - The chosen option is reported on a row beginning `chosen:`.
+- Every tab of the browser shows its category's name and count, always; tabs
+  that do not fit on one row continue on a second (rounds 2 and 3).
 
 ### Light background
 
@@ -222,7 +229,7 @@ Windows round, where the basic black lost its emphasis and faint darkened
 
 ## Owning records
 
-- `features/412-notice-surfaces.md`: the locked decisions D1 to D10 and the
+- `features/412-notice-surfaces.md`: the locked decisions D1 to D16 and the
   prototyping record; `prototype/412-notice-surfaces/findings.md` the rounds
   that settled the new style and the shared conventions.
 - `features/column-layout-refactor.md`: colour identity as a column property.

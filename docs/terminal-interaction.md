@@ -11,14 +11,15 @@ document and is not part of the wiki.
 
 **Status.** Settled by the architect in the prototyping of #412 (notice
 surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,
-after seven review rounds on macOS, dark and light. Nothing in `ltl`
-implements it yet; the first delivery is the panel, with no interactivity, and
-the other components follow when a feature needs them. The locked decisions
-(D4, D5, D7, D8, D10) are in `features/412-notice-surfaces.md` § Locked
-decisions, which remains their authority; how input is supplied, including
-answers given ahead, is #748 (take the analyst's input at choice points, with
-a default and answers given ahead). The producer interface, how code anywhere
-in the run registers a notice or a choice, is not yet designed.
+after seven review rounds on macOS, dark and light, and validated on Linux
+and Windows on 2026-10-20. Nothing in `ltl` implements it yet; the first
+delivery builds all three components, each reached by a real producer (D16).
+The locked decisions (D4, D5, D7, D8, D10 to D16) are in
+`features/412-notice-surfaces.md` § Locked decisions, which remains their
+authority; answers given ahead are #748 (take the analyst's input at choice
+points, with a default and answers given ahead). The data model and the
+producer's contract, how code anywhere in the run registers a notice or a
+choice, are `docs/notice-surfaces.md`.
 
 ---
 
@@ -44,7 +45,7 @@ moment uses is the choice of the feature that calls it.
 |---|---|---|
 | **panel** | presenting the notices known once the data work is done, before the charts, with nothing to answer | the notices |
 | **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); any parameter of the defaults table it wants otherwise |
-| **browser** | many notices, or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection). A detail that carries ltl's histograms carries them at ltl's own size, side by side as the tool renders two metrics, which needs 160 to 180 columns |
+| **browser** | many notices, or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection). A detail that carries ltl's histograms carries them at ltl's own size, side by side as the tool renders two metrics (the bytes histogram beside the duration one where the messages carry bytes), which needs 160 to 180 columns |
 
 A notice is the same record everywhere, the notice record of
 `features/412-notice-surfaces.md` D13: its category; a focus (what it is
@@ -111,10 +112,11 @@ key and an action.
   options or continue as planned, a yes or no defaulting to continuing; only a
   yes leads to the options list. The second stage is measured with the first,
   so the surface does not change size at the transition.
-- **Observable**: a `-V` section records each choice point, whether it was
-  offered, the answer taken and how (a key, the default after the countdown, an
-  answer given ahead), so a harness asserts the outcome without reading the
-  rendering (#748).
+- **Observable**: the `-V notices` section (D15) records each choice point
+  in the block of the record that carries it, `choice: yes`, with the answer
+  taken and how (a key, the default after the countdown, given ahead, or
+  quit), so a harness asserts the outcome without reading the rendering; there
+  is no separate section for choices.
 - **Quitting** with q or x ends the run cleanly, the surface cleared first.
 
 ### Countdown (D7)
@@ -172,7 +174,8 @@ shows. The uses are the three components, the ask component in its two forms.
 A selection on an item in the browser may open an ask modal on top of the
 browser, with its own selection and options. The modal's keys and choice
 letters take effect while it is up, Esc goes back one layer, and the browser
-is back as it was when the modal closes. While the modal is up the browser
+is back as it was when the modal closes. A notice answered there is marked `◆`
+in the list, and its detail shows what was chosen (round 4). While the modal is up the browser
 under it is dimmed with its colours kept, its histograms included (D10). A
 layered modal is a pop-up and takes a pop-up's padding and size.
 
@@ -208,7 +211,10 @@ that asks for a fixed height, which then holds blank rows in the first stage.
   does not move.
 - **Below the cursor**: drawn into rows reserved under the cursor, the fallback
   when the alternate screen is not wanted or not available; one empty row
-  precedes a box that will be erased.
+  precedes a box that will be erased, and where the row above the cursor is
+  already empty the surface starts on the cursor's row and adds none, so two
+  empty rows never stand above it (architect, 2026-10-20, from the Windows
+  re-check).
 - **The compact form** of ask is a box below the cursor whose top edge carries
   the category, the count when there is more than one notice, and how to read
   the category, with the question on its last inside row.
@@ -221,8 +227,9 @@ layered modal) has two cells of padding inside its left and right edges and one
 empty row above and below the content of each of its panes; the padding is
 counted as rendered, two cells, not two added to a space already there. A box
 that stays on screen (the panel) has one cell inside each side and no empty
-rows. A modal's question has an empty row above and below it. The browser's
-tabs belong to its list pane: an empty row above and below the tabs, then the
+rows. A modal's question has an empty row above and below it; the compact
+box has an empty row between its notices and the question (rounds 3 and 4).
+The browser's tabs belong to its list pane: an empty row above and below the tabs, then the
 list, no rule between. In a detail pane an empty row separates the category
 heading from the notice under it (architect, 2026-10-20, from the Windows
 round), a notice from a histogram under it, and the chosen or on-offer row
@@ -263,7 +270,7 @@ platform that lacks the method's tooling.
 | surface | what a run with no terminal holds | capture and check | screenshot |
 |---|---|---|---|
 | panel (notices inline, the first delivery and the normal use) | the same rows as in a terminal | redirected run, read through the cell decoder (`tests/lib/rendered-output.pl`), as every harness today; outcomes from `-V` | the panel's rows as a section through `-V section-layout`, as `process/capture-screenshots.pl` works today |
-| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes | the frame's cells and the `-V` choice section by redirected run; its behaviour (keys, erasing, the run unmoved under it, layering) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the frame from a redirected run as a section, or a pane capture for the pop-up over the dimmed run |
+| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes | the frame's cells and the `-V notices` blocks with `choice: yes` by redirected run; its behaviour (keys, erasing, the run unmoved under it, layering) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the frame from a redirected run as a section, or a pane capture for the pop-up over the dimmed run |
 | browser (navigation, layered pop-ups) | its first frame drawn once, as it appears | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
 
 The pane-capture method is demonstrated, with predicates for pane padding, the
@@ -287,6 +294,7 @@ interactive surface is scheduled.
   record; `prototype/412-notice-surfaces/findings.md`: the rounds that settled
   each line, with the architect's feedback per round.
 - #748 (take the analyst's input at choice points, with a default and answers
-  given ahead): how input is supplied, and the `-V` choice section.
+  given ahead): how answers given ahead are supplied; the `-V` record of
+  each choice point is the `-V notices` section (D15).
 - `tests/HARNESS-DESIGN.md` § Asserting rendered output: cells, never escape
   sequences; `docs/process/screenshots.md`: how the screenshot tool sees output.

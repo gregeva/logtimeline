@@ -13,8 +13,9 @@ developer document and is not part of the wiki.
 **Status.** Written 2026-10-20 from the Windows validation round of #412
 (notice surfaces: presenting notices and capturing the analyst's choices), on
 Windows 11 with Windows Terminal and the classic console host, Strawberry
-Perl. Each Windows fact below says how it was measured. Linux is not yet
-validated; macOS is the platform every surface was designed on.
+Perl. Each Windows fact below says how it was measured. Linux was validated
+on 2026-10-20 (Ubuntu, Claude's runs in a tmux pane and the architect's
+round); macOS is the platform every surface was designed on.
 
 ---
 
@@ -40,12 +41,14 @@ these (the architect, 2026-10-20):
 | what | read from, in order | measured |
 |---|---|---|
 | the terminal | `WT_SESSION` (Windows Terminal); Windows without it (the classic console host); `TERM_PROGRAM`; the terminal's name-and-version reply (CSI > 0 q); its identity reply (CSI > c), where the reply has been measured to name it | macOS Terminal: `TERM_PROGRAM=Apple_Terminal` locally, absent over SSH; no name reply; identity `1;95;0` in both. tmux: name reply `tmux 3.6`, identity `84;0;0` |
-| the background | the terminal's colour reply (OSC 11): light when its luminance is above one half | macOS Terminal answers locally and over SSH; tmux does not |
+| the background | the terminal's colour reply (OSC 11): light when its luminance is above one half; dark when no reply comes | macOS Terminal answers locally and over SSH; Windows Terminal answers (luminance 0.05 on its default dark scheme, 0.98 on One Half Light); tmux and the classic console host do not, so they read dark |
 
 With no terminal (a redirected run) nothing is asked: the background is dark
 and the terminal unknown. Each query is followed by the primary device
 attributes request, which every terminal answers, so a query a terminal
-ignores costs no wait. Glyph widths are not measured at run time: a glyph
+ignores costs no wait: finding both took 49, 35 and 36 ms in a new window of
+Windows Terminal dark, Windows Terminal light and the classic console host
+(Claude's runs, 2026-10-20). Glyph widths are not measured at run time: a glyph
 enters the design only once seen one cell wide (§ Glyphs and width). Inside
 tmux the replies describe tmux, not the terminal behind it.
 
@@ -192,7 +195,18 @@ font has no shape for a character) in others. Which setting decides it is not
 isolated: neither the code page nor VT processing alone explains every
 window measured.
 
-**Measured on macOS.** Whether the frame's lines join is decided by the
+**Measured on macOS and Linux.** Every glyph the surfaces draw, 45 in the
+probe's set, advanced one cell in macOS Terminal, in profile Pro over SSH and
+in profile Clear Dark locally (`prototype/412-notice-surfaces/terminals/`,
+2026-10-20); on Linux the 23 non-ASCII characters the views draw are each one
+cell by glibc `wcwidth`, and one cell in a tmux pane. The answered-notice
+marker `◆` (U+25C6) is one cell on Windows and is not in the macOS probe's set.
+
+**A width lookup per character is too slow.** Looking each character's width
+up through Unicode::UCD made the browser take seconds per frame; each code
+point is looked up once and kept (round 2).
+
+**Measured on macOS, the font.** Whether the frame's lines join is decided by the
 font of the terminal's profile, which no query reaches. In macOS Terminal,
 with the same characters, each one cell wide: in SF Mono Terminal (profile
 Clear Dark) the vertical bars join from row to row and the rounded corners

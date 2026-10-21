@@ -626,6 +626,22 @@ specification and its locked decisions, is delivered:
 The prototype scripts stay as the reference the first delivery is built
 from; nothing in them is production code.
 
+**Findings checked against the specification (2026-10-21, at the
+architect's request, before the acceptance criteria).** Every settled line of
+`prototype/412-notice-surfaces/findings.md` and of the feedback logs was
+matched to where the specification carries it. Transcribed then, being
+settled in the rounds but absent: the browser's tabs always named, on a
+second row when they do not fit; the panel's title in the secondary colour of
+its count; the compact box's empty row before its question; the `◆` marker of
+a notice answered in the browser; the bytes histogram beside the duration one
+where the messages carry bytes; no second empty row above a surface below the
+cursor; the principle that a surface presents information simply; the
+background read on Windows and dark when no reply comes; the cost of terminal
+detection; the glyph widths measured on macOS and Linux; the width lookup done
+once per code point. Trued up: the status lines of the three contract
+documents (Linux validated, D16's first delivery, the data model designed) and
+the `-V` choice section, which D15 folds into `-V notices`.
+
 ### Closing out prototyping (architect, 2026-10-17)
 
 Individual prototypes need not meet these; the selected options must, before
@@ -779,8 +795,9 @@ migration, are D16.
 
 Confirmed by the architect from Claude's read-back (2026-10-21): one store,
 two entry points, so every notice, asked or not, is in the store with its
-answer beside it, and "immediate" always means asked, the contract having no
-surface that prints a notice at once without a question; one answer structure,
+answer beside it (the read-back's further clause, that "immediate" always
+means asked, is superseded by immediacy and choice as two parameters, above,
+and D14); one answer structure,
 set on the notice and returned by reference from the blocking call, the
 browser setting it through the layered ask.
 
