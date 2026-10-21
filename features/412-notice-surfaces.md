@@ -290,6 +290,18 @@ the record alone; the ask call carries presentation only (placement, the
 compact form, the seconds, whether to leave a record, D4). Not on the record:
 how often a producer raises, and any merging.
 
+### D14 — The two entry calls (architect, 2026-10-21, from the notice data model walkthrough)
+
+`notice` takes the record's producer fields (D13) and returns the id; it
+draws nothing when deferred, and when immediate draws the panel with that one
+notice at the call, in the inline form the prototype draws for the
+deprecation. `ask` takes the same with the choice's definition, plus
+presentation only (placement, the compact form, the seconds, whether to leave
+a record, D4), draws the ask surface now, blocks, and returns a reference to
+the answer (D12). An immediate call made while the progress line owns the
+terminal is a development mistake, not a case the backend handles; the ask
+during the read is a designed scenario of the framing.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
@@ -578,10 +590,12 @@ on the model as a whole (architect, 2026-10-21: what is designed here is a
 common and shared data model, not a new producer interface). It is designed
 once the surfaces are chosen and validated (they are, on macOS, Linux and
 Windows, 2026-10-21), as a walkthrough of seven sections, each confirmed by
-the architect before the next: the record; the two entry calls, the answer
-and what happens when an option is accepted; the moment each inventory row
-registers in; restraint; observability (the `-V` sections for notices and for
-choices, #748); the pattern entry; the options list's headings. What is
+the architect before the next: the record; the two entry calls and the
+answer; observability (the `-V` sections for notices and for choices, #748);
+the pattern entry; the options list's headings. (A section on the moment
+each inventory row registers in, and one on restraint, were Claude's and were
+dropped on 2026-10-21: when a producer registers, with what immediacy, and
+whether it is relevant, is each producer's decision at its migration.) What is
 settled is written here, then moved to the project documents as the surface
 contract was.
 
