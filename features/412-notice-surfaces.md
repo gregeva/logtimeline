@@ -247,7 +247,15 @@ registration. Two entry calls, `notice` and `ask`, over one backend. The
 caller says at call time whether the notice appears on the surfaces, visible
 by default; an invisible one stays on the stack, unseen by every surface. A
 choice taken at runtime is locked and shows what was chosen. The `-V`
-observability section exposes the data model. Trade-offs weighed before the
+observability section exposes the data model. What `visible` is for
+(architect, 2026-10-21, correcting Claude's reading of it as a producer's
+switch for a notice nobody should see): its primary use is a notice already
+put to the analyst at its moment, such as a choice asked and answered, which
+has no relevance later and so is kept off the deferred surfaces (the panel
+and the browser); a notice drawn at its call is drawn whatever its
+visibility, and `visible: no` keeps it off every surface after. Other uses
+exist; the harness scenarios exercise every path of the gate. Trade-offs
+weighed before the
 lock: two stores (a deferred queue and an ask log) make the panel's record of
 an asked choice, the browser's layered ask and `-V` each read two places; no
 store for immediate notices leaves nothing to answer on and nothing for the
@@ -280,7 +288,7 @@ What a notice is in the store, one record per raising, never merged:
 | producer | the sub that raised it | the producer |
 | stage | the pipeline stage it was raised in | the store |
 | immediacy | now or deferred | the producer |
-| visible | shown on the surfaces or not, default yes (D11) | the producer |
+| visible | whether it appears on the deferred surfaces, default yes; primarily off for a notice already put to the analyst at its moment (D11) | the producer |
 | question, buttons, default button, countdown, headings, options | the choice's definition when it has one; the headings name the options' parts, What? How? Why? when none are given (amended 2026-10-21: the producer owns the options, so it owns what their parts are called); each option carries a key, its parts (D8), its command options and its effect | the producer |
 | answer | button letter, option key, how (D12); present means locked | the surface |
 

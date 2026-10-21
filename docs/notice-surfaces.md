@@ -70,8 +70,11 @@ One array of notice records, one record per raising, never merged. Every
 record gets a unique id, returned to the caller, which gets the record back.
 Order is by raising; the surfaces group by category. Two entry calls over
 one backend, `notice` and `ask`. The caller says at call time whether the
-notice appears on the surfaces, visible by default; an invisible one stays on
-the stack, unseen by every surface, read by `-V`.
+notice appears on the deferred surfaces (the panel, the browser), visible by
+default; an invisible one stays on the stack, read by `-V`. Its primary use is
+a notice already put to the analyst at its moment, a choice asked and
+answered, which has no relevance later: drawn at its call, it is kept out of
+the deferred list.
 
 ### The record (D13)
 
@@ -84,7 +87,7 @@ the stack, unseen by every surface, read by `-V`.
 | producer | the sub that raised it | the producer |
 | stage | the pipeline stage it was raised in | the store |
 | immediacy | now or deferred | the producer |
-| visible | shown on the surfaces or not, default yes | the producer |
+| visible | whether it appears on the deferred surfaces, default yes; primarily off for a notice already put to the analyst at its moment | the producer |
 | question, buttons, default button, countdown, headings, options | the choice's definition when it has one; the headings name the options' parts, What? How? Why? when none are given; each option carries a key, its parts, the command options that apply it and its effect in one line | the producer |
 | answer | see below; present means locked | the surface |
 
