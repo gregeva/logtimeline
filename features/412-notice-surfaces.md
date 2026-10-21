@@ -626,6 +626,10 @@ surface      ask before the read            ask during the read     panel before
   2026-10-21, restated after Claude twice drew an apply step into the model).
   The model's whole part is the answer on the record (D12) and the identifier
   that gets the record back (D11).
+- **An immediate notice raised while the progress line owns the terminal is
+  a development mistake** (architect, 2026-10-21): the backend does nothing
+  for it; the developer fixes the call. The ask during the read (memory
+  growing) is a designed scenario of the framing and is not this case.
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.
 - **Two parameters shape every notice: immediacy and choice** (architect,
