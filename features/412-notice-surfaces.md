@@ -343,6 +343,36 @@ default taken when there is no terminal to wait on, the countdown and the two
 stages are built here, and the `-V` record of each choice point is D15;
 answers given ahead stay with #748.
 
+### Delivery plan (architect, 2026-10-21)
+
+The drops of D16, in order, each committed and pushed on the issue branch as
+it is proven:
+
+1. **Store and record**: every field of the record, the `notice` entry call
+   (deferred), the `-V notices` section and its harness, proven on the
+   read-path fallback (row 12); until drop 2 the deferred notices still print
+   through the stderr flush.
+2. **Shared layer and the panel**: the category sheet, the notice row, the
+   frame, glyph widths and terminal detection on `ltl`'s
+   `detect_light_terminal_background()`; terminal ownership designed for all
+   three components; the panel on standard output before the charts, deferred
+   and immediate inline.
+3. **Migration after the read and at finalize**: rows 13 to 31 to the store
+   and the panel, their harness assertions moved from standard error to
+   `-V notices`.
+4. **`ask`**: raw mode, the key map, buttons, countdown, the compact box, the
+   modal on the alternate screen and below the cursor, the options list, the
+   default when there is no terminal, the terminal restored on exit or
+   interrupt; reached by rows 1 to 11 before the read.
+5. **Browser**: the list and detail pane, the ask layered on an item; reached
+   by the deferred notices when they do not fit the terminal's height.
+6. **Close of the migration**: rows 32 to 35; `defer_notice()` and
+   `flush_deferred_notices()` removed; `docs/notice-surfaces.md` and the
+   pattern entry trued to what is built; a screenshot entry per surface.
+
+The per-line read loop is not touched, so no before/after benchmark is
+planned.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
@@ -756,8 +786,7 @@ browser setting it through the layered ask.
 
 ## Open items
 
-- The delivery plan of D16 (its drops, in order) and the acceptance
-  criteria, agreed before code. A notice's category, immediacy and visibility
+- The acceptance criteria, agreed before code. A notice's category, immediacy and visibility
   are each producer's decision at its migration.
 
 ## Acceptance criteria
