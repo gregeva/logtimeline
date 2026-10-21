@@ -411,6 +411,49 @@ Weighed: real producers alone reach only their own cells; a harness-side
 driver over subs sliced out of `ltl` never runs them in a real run, so
 terminal ownership, the part D16 exists to prove, would go untested.
 
+## Implementation progress
+
+### Drop 1: store and record (2026-10-21)
+
+Built: the store (`@notice_records`), `notice()` with every field of the
+record (D13), the stage set by `enter_notice_stage()` as each pipeline stage
+begins (`options`, `detect`, `parse`, `accumulate`, `finalize`, `render`),
+`-V notices` printed by `emit_notices_verbose()` at the end of
+`pipeline_render()`, after the run's last notice, and `tests/validate-notices.sh`.
+The first producer is the read-path fallback (row 12, `read-path-fallback`,
+*decision taken for you*); its text still prints on standard error through
+`flush_deferred_notices()` until drop 2.
+
+How the record is written, within D13 and D15:
+
+- `producer` is the sub that called `notice()`, read from the call stack, so
+  it cannot drift from the code.
+- `immediacy` is `deferred` (the default) or `now`.
+- A button carries its label, its choice letter and its role (`stop`,
+  `more`, `default`), as in the prototype; the default button is the one whose
+  role is `default`, and the role fixes its position (`docs/terminal-interaction.md`
+  § Buttons).
+- `headings` is written only when the choice has options; given none, the
+  options are headed What? How? Why?, as many as their parts.
+- A value is written on one line: tabs and line breaks become a space.
+- An unknown field, a missing kind or statement, or a category outside the
+  six stops the run: a development mistake, never a run condition.
+
+The hidden developer option of D17 that raises fixture notices is
+`--notice-fixture NAME`; its one set so far, `record-fields`, raises nine
+records across the six stages that between them carry every field and value
+of the record. An unknown set is refused as a usage error naming the sets.
+
+Proven: the fixture run and the fallback, injected into a copy of `ltl`, read
+from `-V notices`; a clean run writes `count: 0`; the run's output unchanged
+against the base on five option shapes over two inputs, bare `-V` differing
+only in timings and memory; four sabotaged copies of `ltl` (the stage never
+set, the evidence joined, headings on a choice without options, the fixture
+never raised) each fail the assertions written for them. Harnesses run:
+`validate-notices.sh` (36 passed), `validate-verbose-content-shape.sh`,
+`validate-help-content.sh`, `validate-scenario-selector.sh`, and the
+`fallback` scenario of `validate-read-path.sh`.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,

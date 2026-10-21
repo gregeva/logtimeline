@@ -220,6 +220,8 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `section-layout` — per output section and part, in print order: its state (rendered, hidden, absent), the standard-output row it started on and the rows it printed, as a tab-separated table. Rows are counted as they print, leaving out every `-V` range wherever it prints, so they are the rows of the same run without `-V`. Printed after the run's last row (Issue #597; contract in features/597-section-visibility.md § D3, D13, D14). Asserted by `tests/validate-section-layout.sh`.
 - `read-path` — the path each file was read by: the threshold in effect and its source, whether `-D` forced the standard path, whether the generated body's text was written and why a body could not be prepared, per file its size, path and reason, and one line per gate marker the generator resolved with whether the code under it stays in the generated body (Issue #721; contract in features/621-generated-read-loop-body.md § 9). Asserted by `tests/validate-read-path.sh`.
 
+- `notices` — every notice the run raised, one entity block per raising in raising order: its kind, category, stage, producer, immediacy, visibility, the surface that drew it (`shown`), its focus, statement, evidence (one line per piece), remedy, the choice it carries with its headings and option blocks, and the answer. Printed at the end of `pipeline_render()`, after the run's last notice (Issue #412; contract in features/412-notice-surfaces.md § D15). Asserted by `tests/validate-notices.sh`.
+
 **Reserved by sub-issues, not yet implemented:**
 - *(none)*
 

@@ -1031,22 +1031,28 @@ a harness could read but standard error. One store with one record shape gives
 every notice one presentation per category, one place to answer a choice and
 record it, and one observable section.
 
-**Consumption sites.** None in `ltl` yet; the components and the record are
-prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`. Today's
-placeholders are producers to migrate (`features/412-notice-surfaces.md`
+**Consumption sites.** The store, the `notice` entry call (deferred) and
+`-V notices` are in `ltl` (`notice`, `emit_notices_verbose`); the stage each
+record is raised in is set by `enter_notice_stage` as each pipeline stage
+begins. Producers on the store:
+- `read_path_fall_back` :: `notice( kind => 'read-path-fallback', category => 'decision_taken_for_you', statement => ... );`, its text still printed by `flush_deferred_notices` until the panel draws deferred notices.
+
+The surfaces are prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`.
+Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
 § Inventory of current notices):
 - `defer_notice` :: `push @deferred_notices, $text;` with `flush_deferred_notices` after the read pass: pre-formatted strings printed to standard error.
 - `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";` (#613 D17).
 - `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";` (#613 D4, D12).
 - the `emit_<topic>_notices()` subs and `bin_consolidation_notice`: end-of-run notices printed directly; their numbers render through the width-to-format dispatch (#617), which migrated producers keep.
 
-**Owning record.** `features/412-notice-surfaces.md` (D1 to D15);
+**Owning record.** `features/412-notice-surfaces.md` (D1 to D17);
 `docs/notice-surfaces.md`, `docs/design-language.md`,
 `docs/terminal-interaction.md`.
 
-**Status.** Designed and locked before code (2026-10-21); nothing in `ltl`
-implements it. The first delivery and the migration are scoped on #412 once
-the prototyping stage closes.
+**Status.** Designed and locked before code (2026-10-21). Being built on #412
+in the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
+plan): the store, the record and `-V notices` are in `ltl`; the surfaces and
+the migration follow.
 
 ---
 
