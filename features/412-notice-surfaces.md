@@ -265,9 +265,11 @@ apply step to read.
 
 The answer is a structure on the record, created when the choice is
 answered: the caller's choice letter of the button taken; the key of the
-option chosen, when the second stage was reached; how it was answered (a
-key, the default after the countdown, given ahead, or quit, so the `-V`
-section is written before the run ends). The blocking call returns a
+option chosen, when the second stage was reached; how it was answered,
+one of six values (amended 2026-10-21, from the prototype's own record of
+the answer): `key` (a choice key or Enter), `default` (the countdown ran
+out), `esc`, `no_terminal` (the default, nothing to wait on), `ahead`,
+`quit`, the last so the `-V` section is written before the run ends. The blocking call returns a
 reference to that same structure; the browser sets it through the layered
 ask. A record with an answer is locked. The option's command options stay on
 the option, reached through the record by the chosen key, one copy. Weighed:
@@ -321,7 +323,7 @@ surface that drew it: `panel`, `ask`, `browser`, or `none`), `focus`,
 record carries a choice (amended 2026-10-21) `headings` (`What? | How? |
 Why?`) and one nested block per option offered, `option: <key>` with
 `parts` (the parts separated by ` | `), `args` and `effect`; then `answer`
-(`button=<letter> option=<key> how=<key|default|ahead|quit>`, or `-`).
+(`button=<letter> option=<key> how=<key|default|esc|no_terminal|ahead|quit>`, or `-`; the six values amended 2026-10-21, D12).
 `visible` with `shown` gives requirement 6 its produced, gated and shown. No
 separate section for choices: #748's record of each choice point (offered,
 the answer, how) is the block of the record that carries the choice, selected

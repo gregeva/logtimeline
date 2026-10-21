@@ -118,8 +118,8 @@ key and an action.
   the transition is a decision, not navigation (§ Pop-up size).
 - **Observable**: the `-V notices` section (D15) records each choice point
   in the block of the record that carries it, `choice: yes`, with the answer
-  taken and how (a key, the default after the countdown, given ahead, or
-  quit), so a harness asserts the outcome without reading the rendering; there
+  taken and how (`key`, `default` after the countdown, `esc`,
+  `no_terminal`, `ahead`, `quit`, D12), so a harness asserts the outcome without reading the rendering; there
   is no separate section for choices.
 - **Quitting** with q or x ends the run cleanly, the surface cleared first.
 

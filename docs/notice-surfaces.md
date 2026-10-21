@@ -113,8 +113,9 @@ choice and the browser layers the ask on it from the record alone.
 One structure on the record, created when the choice is answered, the same
 one the blocking call returns by reference: the caller's choice letter of the
 button taken; the key of the option chosen, when the second stage was
-reached; how it was answered (a key, the default after the countdown, given
-ahead, or quit). The browser sets it through the layered ask. A record with
+reached; how it was answered, one of six: `key` (a choice key or Enter),
+`default` (the countdown ran out), `esc`, `no_terminal` (the default, with
+no terminal to wait on), `ahead`, `quit`. The browser sets it through the layered ask. A record with
 an answer is locked: seen later it shows what was chosen and cannot be taken
 again. The option's command options stay on the option, reached through the
 record by the chosen key.
