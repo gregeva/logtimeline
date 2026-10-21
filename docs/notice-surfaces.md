@@ -1,15 +1,57 @@
-# Notice data model
+# Notice surfaces
 
-The mechanism behind `ltl`'s notices: what a notice is as data, how code
-registers one or asks a question through it, what an answer is, and what a
-producer is responsible for. The surfaces that present notices are specified
-in `docs/design-language.md` (how they look) and `docs/terminal-interaction.md`
-(how input is taken); the pattern's index entry is
-`docs/architecture-patterns.md` § Notice surfaces. The locked decisions
-behind every line here are in `features/412-notice-surfaces.md` (D1 to D15),
-which remains their authority; nothing in `ltl` implements this yet.
+The pattern by which `ltl` tells the analyst about their run and takes their
+choices: what a notice is, the surfaces that present notices and ask
+questions, how input is taken, the data model every part shares, how it is
+observed, and what a producer is responsible for. The index entry is
+`docs/architecture-patterns.md` § Notice surfaces; the locked decisions
+behind every line are in `features/412-notice-surfaces.md` (D1 to D15),
+which remains their authority. Nothing in `ltl` implements this yet; the
+surfaces and the record are prototyped in `prototype/412-notice-surfaces/`.
 
-## The store (D11)
+## What a notice is
+
+A message to the analyst about this run: a decision taken on their behalf, a
+condition detected in the input, a consequence of the options they gave, or
+guidance on a next step. It may carry a choice. Every notice belongs to one
+of six categories, defined by what the analyst does with it (D1): data
+anomaly, figure caveat, your options, decision taken for you, runtime
+condition, guidance. The category is how the analyst is told to read the
+notice, and the surfaces present notices by category.
+
+## The surfaces
+
+Three components, and only three (D5): every moment of the run calls one of
+them with its own content.
+
+| component | for |
+|---|---|
+| panel | the notices known once the data work is done, before the charts, with nothing to answer; also one immediate notice drawn at the call, inline |
+| ask | a question put to the analyst during the run, with a default and a countdown, as a modal on the alternate screen, a modal below the cursor, or a compact box; it may lead on to a list of options (the second stage, D8) |
+| browser | many notices, or notices worth exploring, in a navigable list with a detail pane; an ask may be layered on an item |
+
+Which component a moment uses is the choice of the feature that calls it.
+How a surface looks (the two coexisting looks, the category sheet of glyphs
+and colours, the notice's anatomy, wording, the light background) is
+`docs/design-language.md`. How a surface behaves (keys and key bars, taking
+input, countdown, buttons, the options list, size, placement, padding,
+erasing and the record, unattended runs and the test method per surface) is
+`docs/terminal-interaction.md`.
+
+## Taking input
+
+Every choice has a default, taken when the countdown ends, when Esc is
+pressed, when there is no terminal to wait on, or from an answer given ahead
+on standard input or by a hidden option (#748). Any key that is not a choice
+stops the countdown, and nothing says so (D7). A surface that asks erases
+itself once answered; whether it leaves a record is the caller's boolean
+(D4). A complex choice is raised in two stages: first whether to look at the
+options or continue as planned, then the options themselves (D8). The full
+contract is `docs/terminal-interaction.md` § Taking input.
+
+## The data model
+
+### The store (D11)
 
 One array of notice records, one record per raising, never merged. Every
 record gets a unique id, returned to the caller, which gets the record back.
@@ -18,7 +60,7 @@ one backend, `notice` and `ask`. The caller says at call time whether the
 notice appears on the surfaces, visible by default; an invisible one stays on
 the stack, unseen by every surface, read by `-V`.
 
-## The record (D13)
+### The record (D13)
 
 | field | holds | set by |
 |---|---|---|
@@ -36,7 +78,7 @@ the stack, unseen by every surface, read by `-V`.
 The choice's definition lives on the record, so a deferred notice carries its
 choice and the browser layers the ask on it from the record alone.
 
-## The two entry calls (D14)
+### The two entry calls (D14)
 
 - **`notice`** takes the record's producer fields and returns the id.
   Deferred, it draws nothing: the panel presents every deferred, visible
@@ -50,7 +92,7 @@ choice and the browser layers the ask on it from the record alone.
   when Esc is pressed, when there is no terminal to wait on, or from an
   answer given ahead (#748).
 
-## The answer (D12)
+### The answer (D12)
 
 One structure on the record, created when the choice is answered, the same
 one the blocking call returns by reference: the caller's choice letter of the
@@ -61,7 +103,7 @@ an answer is locked: seen later it shows what was chosen and cannot be taken
 again. The option's command options stay on the option, reached through the
 record by the chosen key.
 
-## The `-V notices` section (D15)
+## Observability: the `-V notices` section (D15)
 
 One section exposes every record as an entity block, in raising order, in
 the harness content shape (`tests/HARNESS-DESIGN.md` § Content shape):

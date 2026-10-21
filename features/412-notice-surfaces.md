@@ -675,8 +675,9 @@ in the surface contract. Requirement 7 is met by the pattern entry
 the shape of every other (architect, 2026-10-21: the patterns file holds the
 reference and points at a complete document per pattern), which replaces the
 behavioural-notices entry and names today's producers as placeholders to
-migrate; the complete pattern is `docs/notice-data-model.md`, written from
-the locks before any code. What is built into `ltl`, and the migration, are
+migrate; the complete pattern is `docs/notice-surfaces.md` (the surfaces,
+taking input, the data model, observability, the producer's contract),
+written from the locks before any code. What is built into `ltl`, and the migration, are
 scoped next, once the prototyping stage is closed.
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.

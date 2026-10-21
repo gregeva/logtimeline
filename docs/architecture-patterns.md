@@ -1014,9 +1014,9 @@ registers it as a record in one store through one of two entry calls,
 `notice` (deferred or immediate, returns the record's id) and `ask`
 (immediate, blocks, returns a reference to the answer), and never composes
 or prints the finished text itself. The surfaces (panel, ask, browser)
-present the store by category; `-V notices` exposes every record. The full
-pattern, the record's fields, the answer and the producer's contract:
-`docs/notice-data-model.md`.
+present the store by category; `-V notices` exposes every record. The
+complete pattern (the surfaces, taking input, the data model, observability
+and the producer's contract): `docs/notice-surfaces.md`.
 
 **Intended uses.** Any message the analyst needs about what the run did,
 found, or was asked to do, and any choice put to them during the run. The
@@ -1041,7 +1041,7 @@ placeholders are producers to migrate (`features/412-notice-surfaces.md`
 - the `emit_<topic>_notices()` subs and `bin_consolidation_notice`: end-of-run notices printed directly; their numbers render through the width-to-format dispatch (#617), which migrated producers keep.
 
 **Owning record.** `features/412-notice-surfaces.md` (D1 to D15);
-`docs/notice-data-model.md`, `docs/design-language.md`,
+`docs/notice-surfaces.md`, `docs/design-language.md`,
 `docs/terminal-interaction.md`.
 
 **Status.** Designed and locked before code (2026-10-21); nothing in `ltl`

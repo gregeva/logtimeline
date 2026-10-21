@@ -391,7 +391,7 @@ about anything else, these still hold.
 | Deciding whether and how to prototype | `prototype/README.md` |
 | How a surface looks: glyphs, colours, the two coexisting looks and the choice per surface, the category sheet, wording | `docs/design-language.md` |
 | How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
-| What a notice is as data, how code registers one or asks a question, the answer, the `-V notices` section, the producer's contract | `docs/notice-data-model.md` |
+| Notices and choices: what a notice is, the surfaces, taking input, the data model, the `-V notices` section, the producer's contract | `docs/notice-surfaces.md` |
 | What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
