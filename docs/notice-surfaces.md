@@ -38,6 +38,19 @@ input, countdown, buttons, the options list, size, placement, padding,
 erasing and the record, unattended runs and the test method per surface) is
 `docs/terminal-interaction.md`.
 
+## The terminal
+
+Terminal detection (identity and background, found once, over SSH too),
+encoding, escape sequences, colour and emphasis, the glyphs and their width
+per platform, input, and checking output on Windows: `docs/terminal-output.md`.
+
+## Verifying a surface
+
+The test method per surface (the redirected run through the cell decoder,
+the tmux pane capture, `-V` for outcomes) and the screenshot path:
+`docs/terminal-interaction.md` § Unattended runs and how a surface is tested;
+`docs/process/screenshots.md`.
+
 ## Taking input
 
 Every choice has a default, taken when the countdown ends, when Esc is
