@@ -906,3 +906,27 @@ Driven by the real producers, not the fixture option; every run carries
 | numbers in notices | each row whose parts carry a count, a size or a share, at 1,000 or more | rendered through the width-to-format rule's notice budgets (`notice`, `notice exact`, `notice share`) |
 | the harnesses | the 19 harnesses whose 93 assertion lines read `Note:`/`Warning:` text | each reads `-V notices` by `kind`; no harness reads notice text from standard error; each moved assertion still asserts |
 | the old mechanism | `defer_notice()`, `flush_deferred_notices()`, `@deferred_notices` | gone from `ltl`; the pattern entry names no placeholders |
+
+### Panel (requirements 3 to 5; D2, D3, D6, D10; agreed 2026-10-21)
+
+Redirected runs read through the cell decoder (`tests/lib/rendered-output.pl`),
+content from the fixture option, and from real producers where one reaches
+the case.
+
+| dimension | values exercised | asserted on the rendered cells |
+|---|---|---|
+| where | deferred notices present | drawn on standard output after the progress line and before the timeline, as its own section (`notices`) in `-V section-layout`, so the screenshot tool can target it |
+| none to show | no visible deferred notice | no panel, no empty section |
+| how many | one; seven across several categories; as many as fit the terminal's height | one box round them all; beyond the height the browser takes over (the browser group) |
+| form | several categories (headed form); one category (edge form) | headed: each heading carries the glyph, the name in upper case, `(N)` and the how-to-read text, in category order, one blank row between categories; edge: glyph, name, count and how-to-read text in the top edge, the frame in the category colour, the notices alone inside |
+| the notice | focus present and absent; evidence none, one, several; remedy present and absent | one row each: the em dash bullet in the category colour, the focus bold, the evidence after `·` in secondary text, the remedy after the arrow in the category colour; a notice wider than the box wraps by words with no hanging indent |
+| all six categories | one notice each | glyph and colour of the category sheet in `docs/design-language.md` |
+| title and frame | any panel | rounded corners; the title `notices (N)` in the secondary colour, as its count; one cell of padding each side, no empty rows |
+| width | 80, 120, 160 columns | the box spans the width, nothing overflows it |
+| background | dark; light (`-lbg`, and detected from the terminal) | on light, secondary text is grey 244, never faint, and each category's colour is the darkest step of its light gradient (D10) |
+| immediate | `notice` called immediately before the read | the inline form drawn at the call with that one notice, not drawn again in the deferred panel |
+| unattended | redirected run | the same rows as in a terminal, drawn once |
+
+Unassertable by a harness: how the panel looks on real data on macOS dark and
+light, Linux and Windows Terminal, the Windows glyph column included, judged
+by the architect in the terminal before the work is called done.
