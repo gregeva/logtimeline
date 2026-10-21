@@ -281,7 +281,7 @@ What a notice is in the store, one record per raising, never merged:
 | stage | the pipeline stage it was raised in | the store |
 | immediacy | now or deferred | the producer |
 | visible | shown on the surfaces or not, default yes (D11) | the producer |
-| question, buttons, default button, countdown, options | the choice's definition when it has one; each option carries a key, its parts (D8), its command options and its effect | the producer |
+| question, buttons, default button, countdown, headings, options | the choice's definition when it has one; the headings name the options' parts, What? How? Why? when none are given (amended 2026-10-21: the producer owns the options, so it owns what their parts are called); each option carries a key, its parts (D8), its command options and its effect | the producer |
 | answer | button letter, option key, how (D12); present means locked | the surface |
 
 The choice's definition lives on the record, not on the ask call, so a
@@ -309,7 +309,10 @@ in raising order, in the harness content shape (`tests/HARNESS-DESIGN.md`
 § Content shape): `count`, then per record `notice: <id>` with `kind`,
 `category`, `stage`, `producer`, `immediacy`, `visible`, `shown` (the
 surface that drew it: `panel`, `ask`, `browser`, or `none`), `focus`,
-`statement`, `evidence`, `remedy`, `choice` (`yes`/`no`) and `answer`
+`statement`, `evidence`, `remedy`, `choice` (`yes`/`no`), and when the
+record carries a choice (amended 2026-10-21) `headings` (`What? | How? |
+Why?`) and one nested block per option offered, `option: <key>` with
+`parts` (the parts separated by ` | `), `args` and `effect`; then `answer`
 (`button=<letter> option=<key> how=<key|default|ahead|quit>`, or `-`).
 `visible` with `shown` gives requirement 6 its produced, gated and shown. No
 separate section for choices: #748's record of each choice point (offered,
@@ -590,9 +593,10 @@ own section):
   unattended runs and the test method per surface.
 
 The locked decisions above remain the authority behind every line; the
-documents carry the settled form and cite the round that settled it. A line
-still open there (the headings of the options list in the modal and box,
-pending the producers' data model) is marked open in the document.
+documents carry the settled form and cite the round that settled it. The
+one line left open there, the headings of the options list in the modal and
+box, closed on 2026-10-21 with D13: every surface takes the producer's
+headings, What? How? Why? when none are given.
 
 ## Notice data model
 

@@ -159,7 +159,7 @@ shows. The uses are the three components, the ask component in its two forms.
 | key bar | full | the choice letters, each with its action, and Esc | full | none |
 | countdown to the default | 10 s | 10 s | 15 s | none |
 | choice letters | from the caller, underlined | from the caller, underlined | none in the list itself; a selection on an item may open an ask modal on top of the browser, whose own choice letters then take effect | not applicable |
-| headings of the options list | open: depends on the notice producers' data model | open: as the modal | What? How? Why? | not applicable |
+| headings of the options list | the producer's; What? How? Why? when none are given | as the modal | as the modal | not applicable |
 | record left after answering | off | off | not applicable | not applicable |
 | top edge | category, count, how to read it | category, count, how to read it | `notices` and the count | `notices` and the count; a single category takes the edge form |
 
