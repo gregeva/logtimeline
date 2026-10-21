@@ -563,6 +563,47 @@ before them. One snapshot reference changes, by design: `tests/reference-output/
 gains the panel with the precision notice, which printed on standard error
 when it was captured; every other reference of the 74 recaptures identical.
 
+### Drop 4: ask (2026-10-21, in two steps)
+
+**The surface.** `ask()` registers the choice as a record (immediate, `shown:
+ask`) and draws the ask surface now: the modal on the alternate screen over a
+dimmed copy of the rows the run printed (kept by `notice_printed()`), the
+modal below the cursor, or the compact box; the options list as the second
+stage; the countdown, the buttons, the key bars, the size tiers, the record
+flag, drawn by difference (`notice_paint_differences()`), all ported from the
+prototype's `NoticeSurfaces.pm`. The terminal is put in cbreak mode only while
+a surface waits, with Windows' virtual terminal input on, and given back on
+the answer, quit, Ctrl-C (exit 130), TERM and the end of the program. Quitting
+writes `-V notices` and stops the run with exit 0. With no terminal the
+surface is drawn once, in the state the default or the answer given ahead
+reaches, after one blank row as between sections. An ask presenting notices
+raised before it names their ids in `shows` (D13); they become `shown: ask`,
+`visible: no`. Standard output is flushed on every write while a surface is
+up, since a surface draws without line ends. The options list's default is its
+first option, as the prototype's.
+
+The hidden option `--notice-answers a,b,...` gives answers ahead, one per
+choice point in order: a choice letter or `default`, then an option key when
+the button leads to the list (#748 requirement 3, brought in by D17).
+`--notice-fixture` gains the ask sets `ask-modal`, `ask-box`, `ask-inline`,
+`ask-options`, `ask-options-box`, `ask-fixed`, `ask-record` and `ask-several`.
+
+Proven: `validate-notices.sh` `ask-unattended` (drawn once with nothing but
+colour codes, the default, answers given ahead with an option, an unknown
+option key, the compact box, the record flag, `shows`), and seven tmux
+scenarios carried over from the prototype's (`tmux-modal-keys`,
+`tmux-countdown`, `tmux-quit` with Ctrl-C, `tmux-options` with the fixed
+height, `tmux-below-cursor`, `tmux-box`, `tmux-ahead`), through
+`tests/lib/surface-capture.pl`, the prototype's pane predicates moved into
+`tests/lib/`. The run's rows under the modal are compared with the normal
+screen tmux holds while the pop-up has the alternate one (`capture-pane -a`).
+The pane runs under bash, which goes on after a child that handled Ctrl-C
+itself. Two sabotaged copies (Esc recorded as a key, the countdown never
+stopped) fail the assertions written for them.
+
+**Step 2**, the notices raised at option parsing (rows 1 to 11) on the store
+and asked about before the read, follows.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,

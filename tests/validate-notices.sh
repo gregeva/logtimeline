@@ -31,6 +31,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -537,6 +539,210 @@ scenario_migration_raised() {
         'The notices raised after the read and at finalize reach the panel, never standard error' 'draw_deferred_notices() in ltl' "$C_MIGRATION"
 }
 
+# ---------------------------------------------------------------------------
+# ask in a terminal (#412 D4, D5, D7, D8, D12; D17's tmux scenarios): ltl runs
+# in a tmux pane, keys are sent, and the pane is captured as it is seen; the
+# assertions read the captures through tests/lib/surface-capture.pl and the
+# -V notices section the run prints at its end. macOS and Linux only; skipped
+# where tmux is absent, never run on Windows (docs/terminal-interaction.md
+# § Unattended runs and how a surface is tested).
+# ---------------------------------------------------------------------------
+C_ASK="$DOC § D4, D5, D7, D8, D12, D14; docs/terminal-interaction.md § Keys, § Taking input; acceptance criteria, ask"
+TMUX_W=120
+TMUX_H=50
+
+tmux_ready() {
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]] || ! command -v tmux > /dev/null 2>&1; then
+        echo "  SKIP  $current_scenario :: tmux is not available on this host"
+        return 1
+    fi
+}
+
+# tmux_run NAME "STEPS" LTL-ARGS...: ltl in a pane of its own, no shell around
+# it; STEPS is sleep:N, cap:LABEL (the pane, with and without its attributes,
+# to NAME.LABEL.ansi and .txt), under:LABEL (the normal screen while a pop-up
+# holds the alternate one: what the terminal showed before it) or a key name
+# for send-keys. Afterwards the
+# whole pane history, wrapped rows joined, is NAME.final.txt, and the pane's
+# terminal state NAME.state ("alternate_on cursor_flag").
+tmux_run() {
+    local name="$1" steps="$2"; shift 2
+    local sess="ltl-notices-$$-$RANDOM" step args
+    printf -v args '%q ' "$(command -v perl)" "$LTL" --disable-progress "$@"
+    # bash, not the default shell: it goes on after a child that handled an
+    # interrupt itself, so the pane outlives the Ctrl-C a scenario sends.
+    tmux new-session -d -s "$sess" -x "$TMUX_W" -y "$TMUX_H" -c "$TMP_DIR" \
+        bash --noprofile --norc -c "$args; echo EXIT=\$?; sleep 60"
+    for step in $steps; do
+        case "$step" in
+            sleep:*) sleep "${step#sleep:}" ;;
+            under:*) tmux capture-pane -a -p -t "$sess" > "$TMP_DIR/$name.${step#under:}.txt" || true ;;
+            cap:*)   tmux capture-pane -e -p -t "$sess" > "$TMP_DIR/$name.${step#cap:}.ansi" || true
+                     tmux capture-pane -p -t "$sess"    > "$TMP_DIR/$name.${step#cap:}.txt" || true ;;
+            *)       tmux send-keys -t "$sess" "$step" || true ;;
+        esac
+    done
+    sleep 0.5
+    # A capture that fails (the pane gone) leaves its file empty, which the
+    # checks that read it then fail on.
+    tmux capture-pane -p -J -S - -t "$sess" > "$TMP_DIR/$name.final.txt" || true
+    tmux capture-pane -p -t "$sess" > "$TMP_DIR/$name.screen.txt" || true
+    tmux display-message -p -t "$sess" '#{alternate_on} #{cursor_flag}' > "$TMP_DIR/$name.state" || true
+    tmux kill-session -t "$sess" 2>/dev/null || true
+}
+
+# pane_exit NAME: the exit status the pane printed; pane_answer NAME KIND: the
+# answer recorded for that kind in the run's -V notices.
+pane_exit()   { sed -n 's/^EXIT=//p' "$TMP_DIR/$1.final.txt" | tail -1; }
+pane_answer() { notice_field "$TMP_DIR/$1.final.txt" "$2" answer; }
+# pane_boxes NAME LABEL: how many box tops the capture holds.
+pane_boxes()  { grep -c '╭' "$TMP_DIR/$1.$2.txt" || true; }
+# box_size NAME LABEL: "width x height" of the capture's box.
+box_size() {
+    awk '/╭/ { top = NR; w = length($0) } /╰/ && top { print "rows=" (NR - top + 1); exit }' "$TMP_DIR/$1.$2.txt" | tr -d '\n'
+    perl -CSD -ne 'if (/(\x{256d}.*\x{256e})/) { print " cols=" . length($1); exit }' "$TMP_DIR/$1.$2.txt"
+}
+# predicate LABEL ASSERTS MODE ARGS...: one surface-capture.pl predicate as a check.
+predicate() {
+    local label="$1" asserts="$2"; shift 2
+    local out rc=0
+    out=$(perl "$SCRIPT_DIR/lib/surface-capture.pl" "$@" 2>&1) || rc=$?
+    if [[ "$rc" -eq 0 ]]; then pass_with "$label"; else
+        fail_with "$label" "$asserts" 'ask() and the drawing subs (notice_drawer, notice_draw_rows, notice_close_drawer) in ltl' "$C_ASK" "$(grep MISS <<<"$out" | head -3 | tr '\n' ' ')"
+    fi
+}
+
+scenario_tmux_modal_keys() {
+    current_scenario="tmux-modal-keys"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run mk "sleep:2.5 cap:up under:before BTab sleep:0.4 cap:btab Tab sleep:0.4 cap:tab Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-modal -V notices "$DURATION_FIXTURE"
+    check "the modal is up, counting down" "$(pane_boxes mk up)|$(grep -c 'RUNTIME CONDITION' "$TMP_DIR/mk.up.txt")|$(grep -cE '\[ Stop here \] +Continue reading +\([0-9]+s\)' "$TMP_DIR/mk.up.txt")" "1|1|1" \
+        'The modal opens on the alternate screen, the default rightmost and highlighted, its countdown beside it' 'ask() in ltl' "$C_ASK"
+    predicate "two cells of padding, an empty row above and below each pane" 'A pop-up that will be erased has two cells inside its sides and an empty row above and below its content' panes "$TMP_DIR/mk.up.ansi" --side 2 --rows
+    predicate "the run's rows unmoved under the modal" 'The rows the run printed are at their place under the pop-up, dimmed, outside its rectangle' unmoved "$TMP_DIR/mk.before.txt" "$TMP_DIR/mk.up.txt"
+    check "Shift-Tab moves left, Tab back" "$(grep -c '  Stop here  *\[ Continue reading \]' "$TMP_DIR/mk.btab.txt")|$(grep -c '\[ Stop here \]' "$TMP_DIR/mk.tab.txt")" "1|1" \
+        'Shift-Tab moves the highlight one button left, Tab one right, wrapping round' 'ask() in ltl (the stage-one key handling)' "$C_ASK"
+    check "Esc takes the default" "$(pane_answer mk fixture-ask)|$(pane_exit mk)" "button=c option=- how=esc|0" \
+        'Esc closes the surface and takes the default, recorded how=esc' 'ask() in ltl' "$C_ASK"
+    check "the screen is given back" "$(cat "$TMP_DIR/mk.state")|$(grep -c '╭' "$TMP_DIR/mk.screen.txt" || true)" "0 1|0" \
+        'Leaving, the alternate screen is closed, the cursor shown, and no box row is left' 'notice_close_drawer() and notice_restore_terminal() in ltl' "$C_ASK"
+}
+
+scenario_tmux_countdown() {
+    current_scenario="tmux-countdown"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run cd "sleep:2.5 cap:up Space sleep:2 cap:stopped Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-modal -V notices "$DURATION_FIXTURE"
+    check "any other key stops the countdown, and nothing says so" "$(grep -cE '\([0-9]+s\)' "$TMP_DIR/cd.up.txt")|$(grep -cE '\([0-9]+s\)' "$TMP_DIR/cd.stopped.txt" || true)|$(pane_boxes cd stopped)" "1|0|1" \
+        'A key that is not a choice stops the countdown: the bracket disappears, the surface stays, nothing is said (D7)' 'notice_wait_choice() in ltl' "$C_ASK"
+    tmux_run cr "sleep:4.5" -bs 1440 -oe -n 1 --notice-fixture ask-record -V notices "$DURATION_FIXTURE"
+    check "the countdown runs out to the default, and the record stays" "$(pane_answer cr fixture-ask-record)|$(grep -c '↳ Continue reading? continue reading (default)' "$TMP_DIR/cr.final.txt")" "button=c option=- how=default|1" \
+        'When the countdown ends the default is taken, how=default; with the record flag the notice and the answer stay inline (D4)' 'notice_wait_choice() and notice_leave_record() in ltl' "$C_ASK"
+}
+
+scenario_tmux_quit() {
+    current_scenario="tmux-quit"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run mq "sleep:2.5 x sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-modal -V notices "$DURATION_FIXTURE"
+    check "q or x quits the run, -V notices written first" "$(pane_answer mq fixture-ask)|$(pane_exit mq)|$(grep -c 'LINES READ' "$TMP_DIR/mq.final.txt" || true)|$(cat "$TMP_DIR/mq.state")" \
+        "button=c option=- how=quit|0|0|0 1" \
+        'Quitting clears the surface, writes the -V notices section and stops the run cleanly before the read; the terminal is given back' 'notice_quit_run() in ltl' "$C_ASK"
+    tmux_run mi "sleep:2.5 C-c sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-modal "$DURATION_FIXTURE"
+    check "Ctrl-C gives the terminal back" "$(pane_exit mi)|$(cat "$TMP_DIR/mi.state")" "130|0 1" \
+        'An interrupt during an ask leaves the alternate screen, shows the cursor, restores the input mode and exits 130' 'notice_restore_terminal() and the INT handler in ask() in ltl' "$C_ASK"
+}
+
+scenario_tmux_options() {
+    current_scenario="tmux-options"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run mo "sleep:2.5 cap:stage1 l sleep:0.6 cap:list Down sleep:0.4 cap:list2 Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-options -V notices "$DURATION_FIXTURE"
+    local s1 l1
+    s1=$(box_size mo stage1); l1=$(box_size mo list)
+    check "the list opens: the width kept, the height grown" "${s1#* }|${l1#* }|$([[ ${s1%% *} != "${l1%% *}" ]] && echo grown || echo same)" "${s1#* }|${s1#* }|grown" \
+        'A choice keeps its width at the second stage and takes the list stage its own height (docs/terminal-interaction.md § Pop-up size)' 'ask() in ltl (frame_rows per stage)' "$C_ASK"
+    check "the list in columns, the first highlighted, then the next" "$(grep -c 'What? *How? *Why?' "$TMP_DIR/mo.list.txt")|$(grep -c '▶ 1  the what' "$TMP_DIR/mo.list.txt")|$(grep -c '▶ 2  the what' "$TMP_DIR/mo.list2.txt")" "1|1|1" \
+        'The options list shows its headings and one row per option; Down moves the highlight' 'notice_options_rows() in ltl' "$C_ASK"
+    check "Esc on the list continues as planned" "$(pane_answer mo fixture-ask-options)" "button=l option=three how=esc" \
+        'Esc on the options list takes the list default and records how=esc' 'ask() in ltl (the stage-two key handling)' "$C_ASK"
+    tmux_run mf "sleep:2.5 cap:stage1 l sleep:0.6 cap:list Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-fixed -V notices "$DURATION_FIXTURE"
+    check "a fixed height is the taller stage's for both" "$(box_size mf stage1)" "$(box_size mf list)" \
+        'A caller asking for a fixed height gets the taller stage height for both stages' 'ask() in ltl (fixed_height)' "$C_ASK"
+}
+
+scenario_tmux_below_cursor() {
+    current_scenario="tmux-below-cursor"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run bi "sleep:2.5 cap:up BTab sleep:0.4 Enter sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-inline -V notices "$DURATION_FIXTURE"
+    check "below the cursor, one empty row above it" "$(awk '/╭/ { print NR; exit }' "$TMP_DIR/bi.up.txt")|$(sed -n 5p "$TMP_DIR/bi.up.txt" | tr -d ' ')" "6|" \
+        'Below the cursor the modal starts one empty row under the title, never two' 'notice_draw_rows() in ltl (inline)' "$C_ASK"
+    predicate "two cells of padding below the cursor too" 'A pop-up below the cursor keeps the pop-up padding' panes "$TMP_DIR/bi.up.ansi" --side 2 --rows
+    check "Enter takes the highlighted button" "$(pane_answer bi fixture-ask-inline)" "button=s option=- how=key" \
+        'Enter activates the highlighted button, here Stop after Shift-Tab' 'ask() in ltl' "$C_ASK"
+    check "erased, the run going on" "$(grep -c '╭' "$TMP_DIR/bi.final.txt" || true)|$(grep -c 'LINES READ' "$TMP_DIR/bi.final.txt")" "0|1" \
+        'Once answered the surface is erased with its empty row and the run continues in its place' 'notice_close_drawer() in ltl' "$C_ASK"
+}
+
+scenario_tmux_box() {
+    current_scenario="tmux-box"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run bx "sleep:2.5 cap:up q sleep:0.5 cap:q Escape sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-box -V notices "$DURATION_FIXTURE"
+    check "the compact box spans the width" "$(box_size bx up | sed 's/.* //')" "cols=$(( TMUX_W - 1 ))" \
+        'The compact box is drawn below the cursor across the terminal, one cell narrower' 'ask() in ltl (form box)' "$C_ASK"
+    check "q is ignored, quitting is off" "$(pane_boxes bx q)|$(pane_answer bx fixture-ask-box)" "1|button=c option=- how=esc" \
+        'On the compact box quitting is off by default, so q does nothing; Esc then takes the default' 'notice_action() in ltl' "$C_ASK"
+    tmux_run bo "sleep:2.5 L sleep:0.6 cap:list 2 sleep:0.4 cap:list2 Enter sleep:1.5" -bs 1440 -oe -n 1 --notice-fixture ask-options-box -V notices "$DURATION_FIXTURE"
+    check "a choice letter in upper case, a number, Enter" "$(grep -c 'Order *Option' "$TMP_DIR/bo.list.txt")|$(pane_answer bo fixture-ask-options-box)" "1|button=l option=by-bytes how=key" \
+        'A choice letter is accepted in either case; a number chooses the n-th option and Enter takes it' 'ask() in ltl' "$C_ASK"
+}
+
+scenario_tmux_ahead() {
+    current_scenario="tmux-ahead"
+    echo "[$current_scenario]"
+    tmux_ready || return 0
+    tmux_run ah "sleep:2.5 cap:up" -bs 1440 -oe -n 1 --notice-fixture ask-modal --notice-answers s -V notices "$DURATION_FIXTURE"
+    check "an answer given ahead draws nothing and is taken" "$(grep -c 'RUNTIME CONDITION' "$TMP_DIR/ah.final.txt" || true)|$(pane_answer ah fixture-ask)" "0|button=s option=- how=ahead" \
+        'With the answer given ahead in a terminal the surface is not drawn and the answer is taken, how=ahead' 'ask() in ltl (answers given ahead)' "$C_ASK"
+}
+
+# ---------------------------------------------------------------------------
+# ask with no terminal: drawn once as it appears, in the state the default or
+# the answer given ahead reaches; nothing waits, and the run goes on.
+# ---------------------------------------------------------------------------
+scenario_ask_unattended() {
+    current_scenario="ask-unattended"
+    echo "[$current_scenario]"
+    run_ok am "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-modal -V notices "$DURATION_FIXTURE"
+    predicate "drawn once, nothing but colour codes, the run going on" 'With no terminal the surface is drawn once, with no cursor control, and the run continues to its summary' plain "$TMP_DIR/am.out" --boxes 1
+    check "the default, no terminal to wait on" "$(block_field am fixture-ask answer)|$(block_field am fixture-ask shown)|$(block_field am fixture-ask immediacy)|$(block_field am fixture-ask choice)" \
+        "button=c option=- how=no_terminal|ask|now|yes" \
+        'A choice with no terminal takes its default at once, recorded how=no_terminal; the record is shown by ask, immediate, with a choice' 'ask() in ltl' "$C_ASK"
+    check "the default highlighted, the countdown shown" "$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/am.out" | grep -cE '\[ Stop here \] +Continue reading +\(10s\)')" "1" \
+        'The surface appears as it first would: the default rightmost and highlighted, the 10 s countdown beside it' 'notice_button_row() in ltl' "$C_ASK"
+    run_ok aa "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-options --notice-answers l,two -V notices "$DURATION_FIXTURE"
+    check "an answer given ahead, with its option" "$(block_field aa fixture-ask-options answer)|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/aa.out" | grep -c '▶ 2  the what')" "button=l option=two how=ahead|1" \
+        'Given ahead, the button letter and the option key are taken, how=ahead, and the surface is drawn in the state they reach: the list, the option highlighted' 'ask() in ltl (answers given ahead)' "$C_ASK"
+    run_ok au "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-options --notice-answers L,nosuch -V notices "$DURATION_FIXTURE"
+    check "an unknown option key falls to the list's default" "$(block_field au fixture-ask-options answer)" "button=l option=three how=ahead" \
+        'A choice letter in either case; an option key the list does not carry takes its default' 'ask() in ltl (answers given ahead)' "$C_ASK"
+    run_ok ab "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-box -V notices "$DURATION_FIXTURE"
+    check "the compact box" "$(panel ab 1 width)|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/ab.out" | grep -cE 'Continue reading\?  Stop here   Continue reading \(10s\)')|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/ab.out" | grep -c 's: stop here · c: continue reading · Esc: continue reading')" "119|1|1" \
+        'The compact box spans the width, the question on its last inside row with the choices, the key bar the choice letters and Esc' 'ask() in ltl (form box)' "$C_ASK"
+    run_ok ar "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-record --notice-answers s -V notices "$DURATION_FIXTURE"
+    check "the record flag leaves the answer inline" "$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/ar.out" | grep -c '↳ Continue reading? stop here (ahead)')|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/ar.out" | grep -c '(3s)')" "1|1" \
+        'With the record flag the notice and the answer are left inline; the caller sets the seconds' 'notice_leave_record() in ltl' "$C_ASK"
+    run_ok as "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 --notice-fixture ask-several -V notices "$DURATION_FIXTURE"
+    check "shows names the notices presented" "$(block_field as fixture-ask-several shows)|$(block_field as fixture-shown-first shown)|$(block_field as fixture-shown-first visible)|$(block_field as fixture-shown-second visible)|$(panels as)" \
+        "1,2|ask|no|no|1" \
+        'An ask presenting notices raised before it names their ids in shows; each is shown by ask and kept off the deferred panel' 'ask() in ltl' "$DOC § D13 (the shows row); $C_ASK"
+    check "several notices bulleted under the category" "$(panel as 1 title | sed -E 's/  .*//')|$(panel_rows as 1 notice | wc -l | tr -d ' ')" "⚙ YOUR OPTIONS (2) command usage warnings|2" \
+        'An ask over several notices heads them with the category and its count, one bulleted row each' 'ask() in ltl' "$C_ASK"
+}
+
 scenario_register registered \
                   clean-run \
                   read-path-fallback \
@@ -554,7 +760,15 @@ scenario_register registered \
                   panel-windows-glyphs \
                   panel-immediate \
                   migration-categories \
-                  migration-raised
+                  migration-raised \
+                  ask-unattended \
+                  tmux-modal-keys \
+                  tmux-countdown \
+                  tmux-quit \
+                  tmux-options \
+                  tmux-below-cursor \
+                  tmux-box \
+                  tmux-ahead
 scenario_parse_args "$@"
 
 if [[ ! -f "$LTL" ]]; then
