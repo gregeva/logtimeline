@@ -1035,7 +1035,12 @@ record it, and one observable section.
 `-V notices` are in `ltl` (`notice`, `emit_notices_verbose`); the stage each
 record is raised in is set by `enter_notice_stage` as each pipeline stage
 begins. Producers on the store:
-- `read_path_fall_back` :: `notice( kind => 'read-path-fallback', category => 'decision_taken_for_you', statement => ... );`, its text still printed by `flush_deferred_notices` until the panel draws deferred notices.
+- `read_path_fall_back` :: `notice( kind => 'read-path-fallback', category => 'decision_taken_for_you', statement => ... );`, drawn in the panel.
+
+The panel is drawn by `draw_deferred_notices` before the timeline, and by
+`notice` itself for an immediate notice, through the shared layer
+(`notice_style`, `notice_rows`, `notice_heading`, `notice_frame`); the
+terminal is found once by `detect_terminal`.
 
 The surfaces are prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`.
 Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
@@ -1051,8 +1056,8 @@ Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
 
 **Status.** Designed and locked before code (2026-10-21). Being built on #412
 in the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
-plan): the store, the record and `-V notices` are in `ltl`; the surfaces and
-the migration follow.
+plan): the store, the record, `-V notices` and the panel are in `ltl`; ask,
+the browser and the migration follow.
 
 ---
 

@@ -454,6 +454,59 @@ never raised) each fail the assertions written for them. Harnesses run:
 `validate-help-content.sh`, `validate-scenario-selector.sh`, and the
 `fallback` scenario of `validate-read-path.sh`.
 
+### Drop 2: shared layer and the panel (2026-10-21)
+
+Built: the category sheet (`@notice_category_sheet`), the new style's codes
+per background (`notice_style()`), the cell count and cut (`notice_cells()`,
+`notice_fit()`), the notice row, the heading and the frame (`notice_rows()`,
+`notice_heading()`, `notice_frame()`), and the panel (`notice_panel_rows()`),
+drawn by `draw_deferred_notices()` on standard output after the progress rows
+and before the timeline, as the `notices` section of `-V section-layout`; an
+immediate `notice()` draws the panel with its one notice at the call, in an
+unnamed section so the one blank row between sections holds. The read-path
+fallback is drawn in the panel and no longer printed on standard error.
+
+- **Terminal detection** is one sub, `detect_terminal()`, found once on first
+  use: the name from `WT_SESSION`, Windows, `TERM_PROGRAM`, then the
+  name-and-version and identity replies; the background from the colour
+  reply; each query followed by the primary device attributes request, the
+  queries written to `/dev/tty` so they never reach the row counter.
+  `detect_light_terminal_background()`, the heatmap's, now reads it.
+  Hand-forward to drop 4: on Windows `ltl` puts no console in raw mode yet,
+  so nothing is asked there and the background is dark; the Windows Terminal
+  reply (`docs/terminal-output.md` § The terminals) is read once drop 4
+  builds raw mode with the console's input mode.
+- **The panel is not a value of `--hide` or `--show`**: behavioural notices
+  always print (`CLAUDE.md` § Before writing or changing code). `-V
+  section-layout` reports it after `progress` through `@section_layout_order`.
+- **Width** is a character a cell, after UTF-8 decoding: every glyph the
+  surfaces draw is one cell (`docs/terminal-output.md` § Glyphs and width),
+  and `ltl` measures text this way elsewhere.
+- **Finding, the bold of two headings.** `@column_colors` writes the orange
+  and teal foregrounds with a leading reset (`\e[0m\e[38;5;208m`). The
+  prototype's `style_for()` used those codes as they are, so the reset
+  cancelled the bold before them: in every prototype view the *data
+  anomaly* and *runtime condition* headings drew in the normal weight while
+  the other four were bold (`prototype/412-notice-surfaces/lib/NoticeProto.pm`
+  `style_for`, `lib/NoticeSurfaces.pm` `label`). The contract says headings are
+  bold (`docs/design-language.md` § The new style); `notice_style()` takes
+  those two codes without the reset, so all six are bold. To be seen by the
+  architect in the terminal review.
+
+The cell decoder (`tests/lib/rendered-output.pl`) records bold and faint per
+cell, the attributes a panel row is told apart by; `tests/notices/panel-report.pl`
+reports each panel's frame, title and rows from it. Proven: nine panel
+scenarios in `tests/validate-notices.sh` (placement and section accounting,
+no panel, an invisible notice kept off, the headed form at 80, 120 and 160
+columns, the parts of a notice, the edge form and one notice, wrapping at 80
+columns, the light background, the Windows glyphs, an immediate notice);
+six sabotaged copies of `ltl` each fail the assertion written for them (the
+box as wide as the terminal, the bold lost, faint on light, an immediate
+notice drawn twice, the Windows glyphs never taken); the run's output
+unchanged against drop 1 on six option shapes over two inputs but for the
+new `notices absent` row; an interactive run in a tmux pane drew the panel
+with no query reply on screen, 0.22 s in all.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,

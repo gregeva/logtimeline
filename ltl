@@ -605,7 +605,27 @@ my @deferred_notices;           # notices raised mid-read, emitted once it ends
 my @notice_records;
 my $notice_stage = 'options';   # the pipeline stage running, set by enter_notice_stage()
 my $notice_fixture;             # hidden --notice-fixture NAME: the fixture set raised (D17)
-my @notice_categories = qw( data_anomaly figure_caveat your_options decision_taken_for_you runtime_condition guidance );
+# The six categories in presentation order (#412 D1, D2, D10;
+# docs/design-language.md § The category sheet): the name a producer passes,
+# the heading, the glyph, the glyph Windows terminals draw one cell wide where
+# the first is drawn wider (docs/terminal-output.md § Glyphs and width), the
+# colour by its @column_colors name with the 256-colour code a dark background
+# takes where the column colour is a basic code, and how to read the category.
+my @notice_category_sheet = (
+    { name => 'data_anomaly',           heading => 'DATA ANOMALY',           glyph => '⚠', windows => '△', colour => 'orange',
+      reads => 'check the source data or the options before trusting the figures' },
+    { name => 'figure_caveat',          heading => 'FIGURE CAVEAT',          glyph => '≈', windows => '≈', colour => 'magenta', dark => 170,
+      reads => 'the figures cover less than they appear to' },
+    { name => 'your_options',           heading => 'YOUR OPTIONS',           glyph => '⚙', windows => '⛭', colour => 'cyan',    dark => 44,
+      reads => 'command usage warnings' },
+    { name => 'decision_taken_for_you', heading => 'DECISION TAKEN FOR YOU', glyph => '↻', windows => '↻', colour => 'blue',    dark => 33,
+      reads => 'what the run did instead of what was asked' },
+    { name => 'runtime_condition',      heading => 'RUNTIME CONDITION',      glyph => '⏱', windows => '⧖', colour => 'teal',
+      reads => "a condition of the run's environment" },
+    { name => 'guidance',               heading => 'GUIDANCE',               glyph => '➤', windows => '►', colour => 'green',   dark => 40,
+      reads => 'a next step worth trying' },
+);
+my @notice_categories = map { $_->{name} } @notice_category_sheet;
 my %notice_category = map { $_ => 1 } @notice_categories;
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
 
@@ -617,6 +637,10 @@ my @output_sections = qw(
     threadpools threadpools-highlighted threadpools-overall
     summary summary-values summary-files
 );
+# The sections -V section-layout reports: those above, and the notices panel
+# after the progress rows (#412). Notices always print, so the panel is no
+# value of --hide or --show.
+my @section_layout_order = map { $_ eq 'progress' ? ( 'progress', 'notices' ) : $_ } @output_sections;
 my %section_rows;               # section or part => { start, rows } as printed, while rows are counted
 # The fixed alias of each public section (#597 D11, D17). Titles and parts have none.
 my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', msg => 'messages',
@@ -8541,7 +8565,7 @@ sub print_section_layout {
     return unless counting_rows();
     print "=== section-layout ===\n";
     print join( "\t", qw( name state start rows ) ) . "\n";
-    for my $name (@output_sections) {
+    for my $name (@section_layout_order) {
         my $state = section_state($name);
         my @position = $state eq 'rendered' ? @{ $section_rows{$name} }{qw( start rows )} : ( '', '' );
         print join( "\t", $name, $state, @position ) . "\n";
@@ -12234,84 +12258,11 @@ sub convert_duration_to_ms {
     return $step->{per_ms} ? $value / $step->{per_ms} : $value * $step->{ms};
 }
 
+# 1 when the terminal's background is light, from its answer to the
+# background colour query (detect_terminal()); 0 with no answer, with no
+# terminal and on Windows, where -lbg is given explicitly.
 sub detect_light_terminal_background {
-    # Detect if terminal has a light background using OSC 11 query
-    # Returns 1 if light background detected, 0 otherwise
-    # Uses xterm-compatible escape sequence: \e]11;?\e\\
-    # Terminal responds with: \e]11;rgb:RRRR/GGGG/BBBB\e\\
-    #
-    # References:
-    # - https://jwodder.github.io/kbits/posts/term-fgbg/
-    # - https://dystroy.org/blog/terminal-light/
-    #
-    # Note: On Windows, OSC 11 query is not reliably supported (only works in
-    # Windows Terminal 1.22+, not in legacy conhost or cmd.exe). The stty command
-    # used for terminal raw mode is also Unix-only. Users on Windows should use
-    # the -lbg flag explicitly if they have a light background terminal.
-
-    # Skip auto-detection on Windows - use -lbg flag instead
-    return 0 if $^O eq 'MSWin32';
-
-    return 0 unless -t STDIN && -t STDOUT;  # Only works on interactive terminals
-
-    my $response = '';
-    my $is_light = 0;
-
-    eval {
-        # Save terminal settings
-        my $old_settings = `stty -g 2>/dev/null`;
-        chomp $old_settings if $old_settings;
-
-        # Set terminal to raw mode with timeout
-        system('stty', '-icanon', '-echo', 'min', '0', 'time', '1') == 0 or die "stty failed";
-
-        # Send OSC 11 query (background color)
-        # Using BEL (0x07) as terminator for wider compatibility
-        print STDOUT "\e]11;?\a";
-        STDOUT->flush();
-
-        # Read response with timeout (using select)
-        my $rin = '';
-        vec($rin, fileno(STDIN), 1) = 1;
-
-        my $timeout = 0.1;  # 100ms timeout
-        my $start = time();
-
-        while ((time() - $start) < $timeout) {
-            if (select(my $rout = $rin, undef, undef, 0.01)) {
-                my $char;
-                if (sysread(STDIN, $char, 1)) {
-                    $response .= $char;
-                    # Response ends with BEL (0x07) or ST (\e\\)
-                    last if $response =~ /\a$/ || $response =~ /\e\\$/;
-                }
-            }
-        }
-
-        # Restore terminal settings
-        system('stty', $old_settings) if $old_settings;
-
-        # Parse response: expect format like \e]11;rgb:RRRR/GGGG/BBBB\a
-        if ($response =~ /rgb:([0-9a-fA-F]+)\/([0-9a-fA-F]+)\/([0-9a-fA-F]+)/) {
-            my ($r, $g, $b) = ($1, $2, $3);
-
-            # Normalize to 0-1 range (values can be 2 or 4 hex digits)
-            my $max_val = (length($r) == 4) ? 65535 : 255;
-            my $r_norm = hex($r) / $max_val;
-            my $g_norm = hex($g) / $max_val;
-            my $b_norm = hex($b) / $max_val;
-
-            # Calculate luma (perceived brightness)
-            # Using ITU-R BT.709 coefficients
-            my $luma = 0.2126 * $r_norm + 0.7152 * $g_norm + 0.0722 * $b_norm;
-
-            # Light background if luma > 0.5
-            $is_light = ($luma > 0.5) ? 1 : 0;
-        }
-    };
-
-    # If anything fails, default to dark background (0)
-    return $is_light;
+    return detect_terminal()->{background} eq 'light' ? 1 : 0;
 }
 
 # The process's resident memory, in bytes. $site names the caller for the
@@ -14879,7 +14830,8 @@ sub size_selected_files_for_progress {
 # Register one notice in the store and return its id (#412 D11, D13, D14).
 # The producer passes the notice's parts, never a formatted line; the store
 # sets the id and the stage, and records the sub that called as the producer.
-# A deferred notice draws nothing at the call. A choice's definition travels
+# A deferred notice draws nothing at the call; an immediate one draws the
+# panel with that one notice, inline, at the call. A choice's definition travels
 # on the record (question, buttons with the default among them, countdown,
 # headings, options), so a surface can put the choice from the record alone;
 # the headings default to What? How? Why?, as many as the options have parts.
@@ -14910,6 +14862,7 @@ sub notice {
         $record->{headings} //= [ ( 'What?', 'How?', 'Why?' )[ 0 .. $parts - 1 ] ];
     }
     push @notice_records, $record;
+    draw_notice_panel( undef, $record ) if $record->{immediacy} eq 'now';
     return $record->{id};
 }
 
@@ -14957,6 +14910,39 @@ my %notice_fixture_sets = (
           buttons => [ { label => 'Look at the options', key => 'l', role => 'more' },
                        { label => 'Continue as planned', key => 'c', role => 'default' } ],
           options => [ { key => 'by-duration', parts => [ 'by duration', '-so duration' ], args => '-so duration', effect => 'the slowest messages first' } ] },
+    ],
+    'panel-one' => [
+        { stage => 'finalize', kind => 'fixture-one', category => 'decision_taken_for_you',
+          statement => 'the one notice of the run' },
+    ],
+    'panel-edge' => [
+        { stage => 'parse', kind => 'fixture-edge', category => 'figure_caveat', focus => 'the focus',
+          statement => 'the first notice of one category', evidence => 'its evidence' },
+        { stage => 'finalize', kind => 'fixture-edge', category => 'figure_caveat',
+          statement => 'the second notice of one category', remedy => '-x example' },
+        { stage => 'finalize', kind => 'fixture-edge', category => 'figure_caveat',
+          statement => 'the third notice of one category' },
+    ],
+    'panel-categories' => [
+        { stage => 'render',   kind => 'fixture-guidance', category => 'guidance', statement => 'a guidance notice', remedy => '-so count' },
+        { stage => 'finalize', kind => 'fixture-runtime', category => 'runtime_condition', statement => 'a runtime condition' },
+        { stage => 'finalize', kind => 'fixture-decision', category => 'decision_taken_for_you', statement => 'a decision taken for the analyst' },
+        { stage => 'parse',    kind => 'fixture-options', category => 'your_options', focus => '-x', statement => 'a command usage warning' },
+        { stage => 'parse',    kind => 'fixture-caveat', category => 'figure_caveat', statement => 'a figure caveat', evidence => [ 'one', 'two' ] },
+        { stage => 'detect',   kind => 'fixture-anomaly', category => 'data_anomaly', focus => 'file.txt', statement => 'a data anomaly', evidence => 'its evidence' },
+        { stage => 'detect',   kind => 'fixture-anomaly', category => 'data_anomaly', statement => 'a second data anomaly' },
+    ],
+    'panel-wrap' => [
+        { stage => 'finalize', kind => 'fixture-wrap', category => 'data_anomaly', focus => 'the focus of a long notice',
+          statement => 'a notice whose statement runs on well past the width of the narrowest terminal the tool supports, so it wraps by words onto the rows below',
+          evidence => [ 'the first piece of evidence it carries', 'the second piece' ], remedy => '-x example -d another' },
+        { stage => 'finalize', kind => 'fixture-short', category => 'guidance', statement => 'a short notice beside it' },
+    ],
+    'panel-immediate' => [
+        { stage => 'options', kind => 'fixture-immediate', category => 'your_options', immediacy => 'now',
+          statement => 'a notice drawn at its call, before the read' },
+        { stage => 'finalize', kind => 'fixture-deferred', category => 'runtime_condition',
+          statement => 'a notice deferred to the panel' },
     ],
 );
 
@@ -15011,6 +14997,243 @@ sub emit_notices_verbose {
         print '  answer: ' . ( $answer ? "button=$answer->{button} option=" . ( $answer->{option} // '-' ) . " how=$answer->{how}" : '-' ) . "\n";
     }
     print "=== END notices ===\n";
+    return;
+}
+
+# The terminal that draws the output, found once, on first use: its name and
+# its background (docs/terminal-output.md § The terminals). The
+# environment names the terminal on the machine ltl runs on; over SSH only the
+# terminal's own answers reach it: its name-and-version reply, an identity
+# reply where one has been measured, its background colour. With no terminal,
+# and on Windows, where ltl does not yet put the console in raw mode, nothing
+# is asked and the background is dark.
+my %terminal_identity_reply = ( '1;95;0' => 'Apple_Terminal', '84;0;0' => 'tmux' );
+my %terminal;
+
+sub detect_terminal {
+    return \%terminal if %terminal;
+    %terminal = ( name => 'unknown', background => 'dark' );
+    if    ( $ENV{WT_SESSION} )   { $terminal{name} = 'windows-terminal' }
+    elsif ( $^O eq 'MSWin32' )   { $terminal{name} = 'conhost' }
+    elsif ( $ENV{TERM_PROGRAM} ) { $terminal{name} = $ENV{TERM_PROGRAM} }
+    return \%terminal if $^O eq 'MSWin32' || !( -t STDIN && -t STDOUT );
+    open my $tty, '>', '/dev/tty' or return \%terminal;
+    $tty->autoflush(1);
+    my $old_settings = `stty -g 2>/dev/null`;
+    chomp $old_settings;
+    eval {
+        system( 'stty', '-icanon', '-echo', 'min', '0', 'time', '1' ) == 0 or die "stty failed\n";
+        if ( $terminal{name} eq 'unknown' ) {
+            if ( terminal_reply( $tty, "\e[>0q" ) =~ /\eP>\|([^\s\e]+)/ ) {
+                $terminal{name} = $1;
+            } elsif ( terminal_reply( $tty, "\e[>c" ) =~ /\e\[>([\d;]+)c/ && $terminal_identity_reply{$1} ) {
+                $terminal{name} = $terminal_identity_reply{$1};
+            }
+        }
+        # The background's luma (ITU-R BT.709); light above one half. A
+        # component is two or four hex digits.
+        if ( terminal_reply( $tty, "\e]11;?\a" ) =~ m{rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)}i ) {
+            my @c = map { hex($_) / ( length($_) == 4 ? 65535 : 255 ) } ( $1, $2, $3 );
+            $terminal{background} = 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] > 0.5 ? 'light' : 'dark';
+        }
+    };
+    system( 'stty', $old_settings ) if $old_settings;
+    close $tty;
+    return \%terminal;
+}
+
+# The terminal's answer to a query, read up to its answer to the primary
+# device attributes request sent after it: every terminal answers that one,
+# so a query it ignores costs no wait. Half a second at most.
+sub terminal_reply {
+    my ( $tty, $query ) = @_;
+    print {$tty} $query, "\e[c";
+    my ( $reply, $start ) = ( '', Time::HiRes::time() );
+    my $rin = '';
+    vec( $rin, fileno(STDIN), 1 ) = 1;
+    while ( Time::HiRes::time() - $start < 0.5 ) {
+        next unless select( my $rout = $rin, undef, undef, 0.01 );
+        my $char;
+        last unless sysread( STDIN, $char, 1 );
+        $reply .= $char;
+        last if $reply =~ /\e\[\?[\d;]*c\z/;
+    }
+    $reply =~ s/\e\[\?[\d;]*c\z//;
+    return $reply;
+}
+
+# The background the notice surfaces draw for: as -lbg, -dbg or the heatmap's
+# detection settled it, otherwise the terminal's answer.
+sub notice_background {
+    return $light_background ? 'light' : 'dark' if $light_background_source ne 'default';
+    return detect_terminal()->{background};
+}
+
+# The new style's codes for this run's background (docs/design-language.md
+# § The new style, § Light background; #412 D6, D10), and each category's
+# colour and glyph. Built once, on first use.
+my %notice_style;
+
+sub notice_style {
+    return \%notice_style if %notice_style;
+    my $light   = notice_background() eq 'light';
+    my $windows = detect_terminal()->{name} =~ /^(?:windows-terminal|conhost)$/;
+    my %column  = map { $_->{name} => $_ } @column_colors;
+    %notice_style = (
+        frame => $light ? "\e[38;5;244m" : "\e[90m",
+        text  => $light ? "\e[38;5;16m"  : "\e[37m",
+        dim   => $light ? "\e[38;5;244m" : "\e[2m",
+        bold  => "\e[1m",
+        reset => "\e[0m",
+        box   => { %{ $histogram_box_sets{light} }, corner_tl => '╭', corner_tr => '╮', corner_bl => '╰', corner_br => '╯' },
+    );
+    for my $c (@notice_category_sheet) {
+        my $col = $column{ $c->{colour} };
+        # The column colour without the reset it opens with, so a bold before it holds.
+        ( my $column_fg = $col->{fg} ) =~ s{^\e\[0m}{};
+        $notice_style{fg}{ $c->{name} } = $light ? "\e[38;5;$col->{gradient_light}[-1]m"
+                                        : defined $c->{dark} ? "\e[38;5;$c->{dark}m"
+                                        : $column_fg;
+        $notice_style{glyph}{ $c->{name} } = $windows ? $c->{windows} : $c->{glyph};
+    }
+    return \%notice_style;
+}
+
+# The cells a string takes: its colour codes removed, a character a cell.
+# Every glyph the surfaces draw is one cell wide on every target terminal
+# (docs/terminal-output.md § Glyphs and width).
+sub notice_cells {
+    my ($s) = @_;
+    $s =~ s/\e\[[0-9;]*m//g;
+    utf8::decode($s);
+    return length $s;
+}
+
+# A string cut to $width cells, an ellipsis marking the cut, colour codes kept.
+sub notice_fit {
+    my ( $s, $width ) = @_;
+    return $s if notice_cells($s) <= $width;
+    my $text = $s;
+    utf8::decode($text);
+    my ( $out, $cells ) = ( '', 0 );
+    while ( $text =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e/ ) { $out .= $t; next }
+        last if $cells + 1 > $width - 1;
+        $out .= $t;
+        $cells++;
+    }
+    utf8::encode($out);
+    return "$out…\e[0m";
+}
+
+sub notice_pad {
+    my ( $row, $width ) = @_;
+    $row = notice_fit( $row, $width );
+    return $row . ( ' ' x ( $width - notice_cells($row) ) );
+}
+
+# A notice as rows of at most $width cells (#412 D3): the bullet in the
+# category's colour, the focus in bold, the statement, the evidence in
+# secondary text after a dot, the remedy after an arrow in the category's
+# colour. It wraps by words; the rows after the first start under the text,
+# past the bullet.
+sub notice_rows {
+    my ( $r, $width ) = @_;
+    my $s  = notice_style();
+    my $fg = $s->{fg}{ $r->{category} };
+    my @parts;
+    push @parts, [ $r->{focus}, $s->{bold} . $s->{text} ] if defined $r->{focus} && length $r->{focus};
+    push @parts, [ $r->{statement}, $s->{text} ];
+    push @parts, [ '· ' . join( '; ', @{ $r->{evidence} } ), $s->{dim} ] if @{ $r->{evidence} };
+    push @parts, [ "→ $r->{remedy}", $fg ] if defined $r->{remedy} && length $r->{remedy};
+    my @words = map { my ( $t, $c ) = @$_; map { [ $_, $c ] } split / +/, $t } @parts;
+    my @lines = ( [] );
+    my $cells = 0;
+    for my $w (@words) {
+        my $wc = notice_cells( $w->[0] );
+        if ( @{ $lines[-1] } && $cells + 1 + $wc > $width - 2 ) { push @lines, []; $cells = 0 }
+        $cells += ( @{ $lines[-1] } ? 1 : 0 ) + $wc;
+        push @{ $lines[-1] }, $w;
+    }
+    my @rows = map { join ' ', map { $_->[1] . $_->[0] . $s->{reset} } @$_ } @lines;
+    return ( "$fg—$s->{reset} " . shift(@rows), map { "  $_" } @rows );
+}
+
+# A category heading on one row: its glyph and name in its colour, bold, the
+# count, and how to read the category, cut to fit.
+sub notice_heading {
+    my ( $cat, $count, $width ) = @_;
+    my $s = notice_style();
+    my $head = "$s->{bold}$s->{fg}{ $cat->{name} }$s->{glyph}{ $cat->{name} } $cat->{heading}$s->{reset}"
+             . " $s->{dim}($count)$s->{reset}";
+    my $room = $width - notice_cells($head) - 2;
+    $head .= "  $s->{dim}" . notice_fit( $cat->{reads}, $room ) . $s->{reset} if $room > 12;
+    return $head;
+}
+
+# Rows framed in a box $width cells wide, $title set in the top edge, the
+# frame in $edge, each row padded to the inside width, $side cells of padding
+# inside each edge (one for a box that stays on screen, two for a pop-up).
+sub notice_frame {
+    my (%a) = @_;
+    my $s = notice_style();
+    my $b = $s->{box};
+    my ( $e, $w, $side ) = ( $a{edge} // $s->{frame}, $a{width}, $a{side} );
+    my $title = notice_fit( $a{title} // '', $w - 4 );
+    my $fill  = $w - 3 - notice_cells($title);
+    my @out = ( $e . $b->{corner_tl} . $b->{h_line} . $s->{reset} . $title . $e . ( $b->{h_line} x ( $fill > 0 ? $fill : 0 ) ) . $b->{corner_tr} . $s->{reset} );
+    push @out, $e . $b->{v_line} . $s->{reset} . ( ' ' x $side ) . notice_pad( $_, $w - 2 - 2 * $side ) . ( ' ' x $side ) . $e . $b->{v_line} . $s->{reset}
+        for @{ $a{rows} };
+    push @out, $e . $b->{corner_bl} . ( $b->{h_line} x ( $w - 2 ) ) . $b->{corner_br} . $s->{reset};
+    return @out;
+}
+
+# The panel (#412 D3, D5): one box round the notices, however many, each
+# category headed once in presentation order, its notices one row each, the
+# categories divided by a blank row, titled `notices` and its count in
+# secondary text. A single category takes the edge form: its glyph, name,
+# count and how-to-read text in the top edge, in its colour, the notices alone
+# inside. The box is one cell narrower than the terminal, so its last column
+# never wraps.
+sub notice_panel_rows {
+    my (@records) = @_;
+    my $s = notice_style();
+    my $box = $terminal_width - 1;
+    my $inside = $box - 4;
+    my @groups = grep { @{ $_->[1] } } map { my $c = $_; [ $c, [ grep { $_->{category} eq $c->{name} } @records ] ] } @notice_category_sheet;
+    if ( @groups == 1 ) {
+        my ( $cat, $in ) = @{ $groups[0] };
+        return notice_frame( width => $box, side => 1, edge => $s->{fg}{ $cat->{name} },
+                             title => ' ' . notice_heading( $cat, scalar @$in, $box - 7 ) . ' ',
+                             rows  => [ map { notice_rows( $_, $inside ) } @$in ] );
+    }
+    my @rows;
+    for my $i ( 0 .. $#groups ) {
+        my ( $cat, $in ) = @{ $groups[$i] };
+        push @rows, '' if $i;
+        push @rows, notice_heading( $cat, scalar @$in, $inside ), map { notice_rows( $_, $inside ) } @$in;
+    }
+    return notice_frame( width => $box, side => 1, title => " $s->{dim}notices (" . scalar(@records) . ")$s->{reset} ", rows => \@rows );
+}
+
+# Draw the panel with the records given, on standard output, and mark them
+# shown. The deferred panel is the notices section; a notice drawn at its
+# call opens a section of its own, unnamed, so one blank row still separates
+# it from what is above.
+sub draw_notice_panel {
+    my ( $section, @records ) = @_;
+    return unless @records;
+    open_section($section);
+    print "$_\n" for notice_panel_rows(@records);
+    $_->{shown} = 'panel' for @records;
+    return;
+}
+
+# The deferred panel, before the timeline: every deferred, visible notice no
+# surface has drawn.
+sub draw_deferred_notices {
+    draw_notice_panel( 'notices', grep { $_->{immediacy} eq 'deferred' && $_->{visible} && $_->{shown} eq 'none' } @notice_records );
     return;
 }
 
@@ -17493,7 +17716,6 @@ sub read_path_fall_back {
     return if $read_path_noticed++;
     notice( kind => 'read-path-fallback', category => 'decision_taken_for_you',
             statement => 'the faster read path could not be prepared, so large files are read with the standard path, which is slower' );
-    defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");
     return;
 }
 
@@ -24725,6 +24947,8 @@ sub pipeline_render {
 
     print_verbose_output();
 
+    draw_deferred_notices();
+
     if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
         my $csv_file_name = build_csv_filename('STATS');
@@ -24966,9 +25190,9 @@ my $_help_or_explain_invoked = grep {
     $info && ($info->{kind} eq 'help' || $info->{kind} eq 'explain');
 } @ARGV;
 adapt_to_command_line_options( title => !$_help_or_explain_invoked );
-enter_notice_stage('options');
 adapt_to_terminal_settings();
 start_row_counting();
+enter_notice_stage('options');
 open_section('progress') unless $disable_progress;    # the progress rows follow as their own section
 
 pipeline_detect();

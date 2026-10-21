@@ -6,8 +6,8 @@ questions, how input is taken, the data model every part shares, how it is
 observed, and what a producer is responsible for. The index entry is
 `docs/architecture-patterns.md` § Notice surfaces; the locked decisions
 behind every line are in `features/412-notice-surfaces.md` (D1 to D17),
-which remains their authority. The store, the record, the `notice` call
-(deferred) and `-V notices` are in `ltl`; the surfaces are prototyped in
+which remains their authority. The store, the record, the `notice` call,
+`-V notices` and the panel are in `ltl`; ask and the browser are prototyped in
 `prototype/412-notice-surfaces/` and built in the drops of the delivery plan.
 
 ## What a notice is

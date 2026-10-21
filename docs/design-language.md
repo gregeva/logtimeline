@@ -13,7 +13,7 @@ glyphs are one cell wide on Windows.
 named in each section. The new style and the shared conventions were settled
 by the architect in the prototyping of #412 (notice surfaces: presenting
 notices and capturing the analyst's choices), 2026-10-19, and validated on
-Linux and Windows on 2026-10-20; nothing in `ltl` draws them yet. The locked
+Linux and Windows on 2026-10-20; the notices panel draws them in `ltl`. The locked
 decisions behind them (D2 to D10, and D13 for the options list's headings) are in
 `features/412-notice-surfaces.md` § Locked decisions, which remains their
 authority; this document carries the settled form.

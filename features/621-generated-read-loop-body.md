@@ -209,7 +209,10 @@ Locked by the architect on 2026-10-13.
   marker does not match the code under it, or the generated text does not
   compile), that file is read by the inline loop; a notice prints on stderr
   once per run saying the standard path is used, slower on large files, and
-  `-V read-path` records the reason. The output stays correct; only speed is
+  `-V read-path` records the reason. Amended by #412 (2026-10-21): the notice
+  is a record of the notice store, `read-path-fallback`, drawn in the notices
+  panel on standard output, no longer on stderr
+  (`features/412-notice-surfaces.md` § Drop 2). The output stays correct; only speed is
   lost. The identity harness fails on any fallback, since with the threshold
   at 0 every file must take the generated body. Chosen over stopping the run
   with an error.

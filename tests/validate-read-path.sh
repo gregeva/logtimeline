@@ -200,7 +200,8 @@ paths() {
 
 # normalise <run dir>: every output the run wrote, with what is measured per
 # run (timings, memory, the echoed options) and the read-path section set
-# aside, so two runs of one shape compare byte for byte. Colour escapes are
+# aside, with the notices panel and section a fallback adds, so two runs of
+# one shape compare byte for byte. Colour escapes are
 # kept: a highlight renders through colour, so stripping them would hide it.
 # The memory-usage section keeps what is counted, never what is measured: each
 # caller's reading count, and each debug record's kind, tag and structure, so
@@ -210,6 +211,10 @@ normalise() {
     perl -ne '
         my $plain = $_; $plain =~ s/\e\[[0-9;]*m//g;
         if ($plain =~ /^=== read-path ===$/ .. $plain =~ /^=== END read-path ===$/) { next }
+        if ($plain =~ /^=== notices ===$/ .. $plain =~ /^=== END notices ===$/) { next }
+        # The notices panel and the blank row after it: the fallback says so there.
+        if ($plain =~ /^\x{e2}\x{95}\x{ad}\x{e2}\x{94}\x{80}/ .. $plain =~ /^\x{e2}\x{95}\x{b0}\x{e2}\x{94}\x{80}/) { $panel = 1; next }
+        if ($panel) { $panel = 0; next if $plain eq "\n" }
         if ($plain =~ /^=== memory-usage ===$/ .. $plain =~ /^=== END memory-usage ===$/) {
             next if $plain =~ /^readings_us: /;
             $plain =~ s/ elapsed_us=\d+$//;
@@ -372,14 +377,14 @@ scenario_fallback() {
     mkdir -p "$d"
     # The term of an `and` marker renamed, so it no longer matches its condition.
     altered_ltl "$d" ltl-altered 's/^(\s*#\@and )!\$disable_progress$/$1!\$disable_progress_renamed/'
-    run_ltl "$d/fallback" "$d/ltl-altered" -ni -bs 5 --generated-loop-threshold=0 -V read-path "$SMALL" "$LARGE"
+    run_ltl "$d/fallback" "$d/ltl-altered" -ni -bs 5 --generated-loop-threshold=0 -V read-path,notices "$SMALL" "$LARGE"
     run_ltl "$d/standard" "$d/ltl-altered" -ni -bs 5 -D -V read-path "$SMALL" "$LARGE"
     check "a mismatched marker falls back" "$(section_value "$d/fallback/out" generated_text)|$(section_value "$d/fallback/out" fallback_reason)|$(paths "$d/fallback/out")" "failed|marker_mismatch|standard standard" \
         'A marker that does not find its term stops generation and every file takes the standard path' 'generated_loop_text() in ltl' "$C_FALLBACK"
     check "fallback reason per file" "$(file_value "$d/fallback/out" "$LARGE" reason)" "fallback" \
         'A file that fell back records it' 'read_path_fall_back() in ltl' "$C_FALLBACK"
-    check "one notice for the run" "$(grep -c '^Note: the faster read path could not be prepared' "$d/fallback/err")" "1" \
-        'The fallback notice prints once a run on stderr, however many files fell back' 'read_path_fall_back() in ltl' "$C_FALLBACK"
+    check "one notice for the run" "$(grep -c '^  kind: read-path-fallback$' "$d/fallback/out")|$(grep -c 'faster read path' "$d/fallback/err")" "1|0" \
+        'The fallback raises one notice a run, however many files fell back, drawn in the notices panel and not on stderr' 'read_path_fall_back() in ltl' "$C_FALLBACK; features/412-notice-surfaces.md § Migration"
     if diff -q <(normalise "$d/fallback") <(normalise "$d/standard") > /dev/null; then
         pass_with "fallback output equals -D output"
     else
