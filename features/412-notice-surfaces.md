@@ -399,7 +399,10 @@ shapes, and the terminal's widths and backgrounds. Two means, both required:
 - **tmux-driven scenarios** for navigation and input on the alternate screen
   and below the cursor: keys sent, the pane captured as it is seen. A
   redirected run cannot observe them; the tmux scenarios are required even
-  though most cases are redirected runs (architect).
+  though most cases are redirected runs (architect). They run on macOS and
+  Linux only, skipped where tmux is absent, never on Windows, as settled in
+  prototyping (`docs/terminal-interaction.md` § Unattended runs and how a
+  surface is tested).
 
 Weighed: real producers alone reach only their own cells; a harness-side
 driver over subs sliced out of `ltl` never runs them in a real run, so
