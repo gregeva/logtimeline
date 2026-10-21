@@ -513,6 +513,67 @@ documents carry the settled form and cite the round that settled it. A line
 still open there (the headings of the options list in the modal and box,
 pending the producers' data model) is marked open in the document.
 
+## Producer interface
+
+The producer interface is how code anywhere in the run hands a notice or a
+question to the one surface called at that moment: the design on which the
+requirement 7 pattern rests. It is designed once the surfaces are chosen and
+validated (they are, on macOS, Linux and Windows, 2026-10-21), as a walkthrough
+of seven sections, each confirmed by the architect before the next: the record
+a producer passes; the two calls and what happens when an option is accepted;
+the moment each inventory row registers in; restraint; observability (the `-V`
+sections for notices and for choices, #748); the pattern entry; the options
+list's headings. What is settled is written here, then moved to the project
+documents as the surface contract was.
+
+### The situation the interface fits
+
+```
+phase        options            detect     read (progress owns     after read       finalize         render
+                                           the terminal)
+producers    udm specs, pattern  run index  read-path fallback,     unknown levels,  skipped pass,    index write
+today        files, bounds,      read-back  classification change,  filtered-out     sort fallback,   failure
+             deprecations        failures   impossible dates,       lines, byte      bin caveat,
+             (rows 1-11)         (32-33)    unit notes, CSV header  notation,        udm zero match,
+                                            (12-18)                 precision (19-24) classification (25-31)
+printed      at once, stderr     warn       deferred, or printed    at once, stderr  at once, stderr  warn
+             before the read                over the progress line
+surface      ask before the read            ask during the read     panel before the charts, or the browser when many
+(contract)   (a use case, not decided)      (memory growing)        guidance ask after statistics (the detected pattern)
+```
+
+### The architect's framing (2026-10-21)
+
+- **Deferral is the primary mode.** The deferred-notices array of `ltl` was a
+  placeholder, but its idea stands: every notice is caught and collected, and
+  presented together on one surface. An ask (interrupting the run, a modal, a
+  question before continuing) is immediate and cannot defer. The producer says
+  which it wants: one call with a mode, or a second entry point that
+  orchestrates the same backend.
+- **A blocking ask returns its answer directly to the caller**, which is what
+  is waiting, as a structure (a reference will do), not a bare key.
+- **In the browser a choice is recorded on the notice it answers**, so the
+  notice's structure holds its response. A recorded choice has an effect
+  afterwards, through consumers that look for the choices made; they belong to
+  the data model.
+- **A separate code section applies the choices.** Before execution
+  continues, one step goes through the notices for runtime-changing choices
+  taken and applies them. A choice affects only the stages that come after
+  it, never what was processed before it: the coherence of the output on any
+  one dimension is paramount. Which options a choice point may change (the
+  sort order, the number of messages shown, as examples) is decided per choice
+  point, by the feature that offers it, and is no concern of the notice,
+  selection and input surfaces.
+- **These are foundations.** The use cases that make choices are not yet on
+  the roadmap; they will come, and this issue lays what they build on.
+
+Confirmed by the architect from Claude's read-back (2026-10-21): one store,
+two entry points, so every notice, asked or not, is in the store with its
+answer beside it, and "immediate" always means asked, the contract having no
+surface that prints a notice at once without a question; one answer structure,
+set on the notice and returned by reference from the blocking call, the
+browser setting it through the layered ask.
+
 ## Open items
 
 - Each notice's placement under D1's five categories.

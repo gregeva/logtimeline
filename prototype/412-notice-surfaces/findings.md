@@ -658,7 +658,7 @@ the framework is left unvalidated on macOS.
 | the findings record what was chosen, what was learned and why | this file; the lessons are `prototype/README.md` § (e), the design prototype (2026-10-19) |
 | the light background | evaluated and accepted, every component once per form (`feedback/stage1-light.jsonl`) |
 | validating the selected components on Linux and Windows (the architect, from his terminals; standard terminal behaviour, so acceptance or a short list of adaptations, not a port) | Windows: accepted by the architect 2026-10-20 after his round and re-check, with the adaptations listed under § Windows validation round below; macOS: the re-check accepted 2026-10-20, dark and light; Linux: the round of 2026-10-20 accepted every view, its two findings built (the em dash as the bullet, the compact box's key bar with Esc); terminal detection, raised after it, built and confirmed on all three platforms by 2026-10-21 (§ Terminal detection) |
-| the producer interface (how code registers a notice or a choice) | not started; the surfaces are chosen and validated on macOS, Linux and Windows, so it is next |
+| the producer interface (how code registers a notice or a choice) | under design since 2026-10-21, a walkthrough of seven sections in `features/412-notice-surfaces.md` § Producer interface; the surfaces are chosen and validated on macOS, Linux and Windows |
 | the modal's and box's list headings | open until the producers' data model is investigated |
 
 ### Architect's feedback on the light background (2026-10-19)
