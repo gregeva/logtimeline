@@ -849,8 +849,7 @@ browser setting it through the layered ask.
 
 ## Open items
 
-- The acceptance criteria, agreed before code. A notice's category, immediacy and visibility
-  are each producer's decision at its migration.
+- None. Each producer's immediacy and visibility are set at its migration.
 
 ## Acceptance criteria
 
@@ -930,3 +929,78 @@ the case.
 Unassertable by a harness: how the panel looks on real data on macOS dark and
 light, Linux and Windows Terminal, the Windows glyph column included, judged
 by the architect in the terminal before the work is called done.
+
+The groups below are derived from the prototype and its tests, which are the
+guide (architect, 2026-10-21): every option `show.pl` exposes, every scenario
+of `check-tmux.sh`, every predicate of `capture/assert-surface.pl` and every
+view of the review rounds becomes a scenario, against the contract in
+`docs/terminal-interaction.md` and `docs/design-language.md`. Redirected runs
+are read through the cell decoder and `-V notices`; the tmux scenarios run on
+macOS and Linux only, skipped where tmux is absent. Unassertable throughout:
+the look on real data on macOS dark and light, Linux and Windows Terminal,
+judged by the architect in the terminal before the work is called done.
+
+### ask (requirements 2 and 5; D4, D5, D7, D8, D12, D14)
+
+- Real producer: rows 1 to 11, drawn before the read as the prototype's
+  preread choice, "Continue with these options?", **Stop and correct them**
+  (`s`) and **Continue** (`c`, the default); Stop ends the run before the read
+  with `-V notices` written.
+- Redirected: the modal and the compact box, each with one stage and with the
+  options list; two and three buttons; the countdown's default and a caller's
+  seconds; headings given and the default What? How? Why?, options of three,
+  two and one parts; each size tier and a fixed height; 80, 120, 160 columns;
+  dark and light; the record flag off and on; no terminal (`how=no_terminal`)
+  and answers given ahead, a letter, a letter with an option, upper case
+  (`how=ahead`). Asserted against § Buttons, § Countdown, § The options list,
+  § Pop-up size, § Padding, § Erasing and the record.
+- tmux, the prototype's scenarios carried over (`modal-read`, `modal-stopcd`,
+  `modal-quit`, `modal-pattern`, `modal-fixed`, `modal-preread`,
+  `modal-inline`, `box-read`, `box-pattern`): every key of § Keys on the
+  buttons and the list, the countdown run out (`how=default`) and stopped,
+  Esc (`how=esc`), q and x (`how=quit`, ignored on the compact box), the
+  stage change, both placements; with the predicates for padding, the run's
+  rows unmoved under the surface and no trace after it.
+
+### Browser (requirement 5; D5, D10)
+
+- Real producer: the deferred notices when they do not fit the terminal's
+  height, in place of the panel.
+- Redirected: the first frame drawn once, as it appears; tabs named with
+  their counts, wrapping to a second row; `◇` on a notice that carries a
+  choice; a detail with histograms at ltl's size, the bytes one only where
+  the messages carry bytes; the full width when the widest detail exceeds
+  the large tier; height from the tallest detail.
+- tmux, the prototype's `browser`, `browser-cd` and `browser-inline`: list
+  and tab keys, a tab chosen by number, Enter opening the layered ask over the
+  dimmed browser, its answer marking the notice `◆` and its detail showing what
+  was chosen, Esc back one layer, Esc and c closing, q and x quitting, the
+  15 s countdown closing it, both placements; the size never changing while
+  navigated; the same predicates as ask.
+
+### Terminal ownership (requirements 2 and 5; D16)
+
+- One rendering with or without a terminal: the redirected output of every
+  surface holds the same rows as the pane, with no cursor control, alternate
+  screen or wait (the prototype's `plain` predicate).
+- No run hangs: every redirected scenario ends with the default or the answer
+  given ahead.
+- The terminal restored on every exit: an answer, quit, the end of the run and
+  Ctrl-C during an ask leave the pane in its normal mode, the cursor shown and
+  the alternate screen left (tmux).
+- The progress line is not disturbed: a surface drawn before the read, and the
+  panel after it, leave the progress line's rows as `ltl` draws them today.
+- `-V section-layout` names the panel's section, and the run's other sections
+  keep their rows.
+- Standard error carries no ` at <file> line <N>` in any scenario (the
+  runtime-warning check).
+
+### Pattern, documentation and screenshots (requirement 7)
+
+- `docs/notice-surfaces.md`, `docs/architecture-patterns.md` § Notice
+  surfaces, `docs/terminal-interaction.md` and `docs/design-language.md`
+  describe what is built, with no "nothing in `ltl` implements this".
+- The hidden developer options of D17 sit in `ltl`'s list of hidden options,
+  outside `--help` and `docs/usage.md`.
+- One entry per surface in `process/screenshots.yaml`, generated by
+  `process/capture-screenshots.pl`.
