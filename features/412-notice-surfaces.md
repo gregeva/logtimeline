@@ -319,7 +319,8 @@ in raising order, in the harness content shape (`tests/HARNESS-DESIGN.md`
 § Content shape): `count`, then per record `notice: <id>` with `kind`,
 `category`, `stage`, `producer`, `immediacy`, `visible`, `shown` (the
 surface that drew it: `panel`, `ask`, `browser`, or `none`), `focus`,
-`statement`, `evidence`, `remedy`, `choice` (`yes`/`no`), and when the
+`statement`, `evidence` (one line per piece, in order, `-` when none;
+amended 2026-10-21), `remedy`, `choice` (`yes`/`no`), and when the
 record carries a choice (amended 2026-10-21) `headings` (`What? | How? |
 Why?`) and one nested block per option offered, `option: <key>` with
 `parts` (the parts separated by ` | `), `args` and `effect`; then `answer`
@@ -868,3 +869,17 @@ assertable unless marked otherwise.
 
 Across the group: `kind` is the same in every run of the same condition; a
 harness lookup that matches nothing is a failure.
+
+### `-V notices` (requirement 6; D15; agreed 2026-10-21)
+
+| dimension | values exercised | asserted |
+|---|---|---|
+| requesting it | `-V notices`; a bare `-V`; `-V list` | the section present and registered; listed among the reserved names of `tests/HARNESS-DESIGN.md` |
+| shape | a run whose records between them carry every field, the nested `option:` blocks and several `evidence:` lines included | `tests/validate-verbose-content-shape.sh` passes; absent values `-`, booleans `yes`/`no` |
+| when it is written | a record raised at render (row 34); a run ended by quit | the render record is in the section; on quit the section is written before the run stops |
+| `shown` | `panel`, `ask`, `browser`, `none` | each on the record drawn so |
+| `how` | `key`, `default`, `esc`, `no_terminal`, `ahead`, `quit` | each on the answer reached that way |
+| produced, gated, shown | `count`, `visible`, `shown` | requirement 6 read from these alone |
+| text | glyphs and bullets on the surfaces | the section is ASCII only |
+| no effect on output | the same run with and without `-V notices` | `-V section-layout` rows identical |
+| the harness | named for the section, `tests/validate-notices.sh` | `--list` and `--scenario`; every assertion declares `asserts`, `produced_by`, `contract`; the runtime-warning check |

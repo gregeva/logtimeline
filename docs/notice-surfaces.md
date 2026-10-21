@@ -157,8 +157,9 @@ notice: 2
 === END notices ===
 ```
 
-`shown` names the surface that drew the record (`panel`, `ask`, `browser`)
-or `none`; with `visible` it gives what was produced, gated and shown. No
+`evidence` is one line per piece, in order, so each is read exactly
+whatever it contains; `evidence: -` when there is none. `shown` names the
+surface that drew the record (`panel`, `ask`, `browser`) or `none`; with `visible` it gives what was produced, gated and shown. No
 separate section for choices: a harness selects the blocks with
 `choice: yes`. Text is ASCII; glyphs and bullets belong to the surfaces.
 
