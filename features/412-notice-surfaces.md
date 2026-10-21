@@ -415,8 +415,16 @@ terminal ownership, the part D16 exists to prove, would go untested.
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
 `printf STDERR`, `warn`, `die` and `defer_notice`), on `release/0.20.0` at
-`48278bf`. The categories are Claude's placements, not confirmed by the architect; they
-are settled in the planning that precedes implementation, not now.
+`48278bf`. The categories are settled (2026-10-21): the ten notices that fit
+two categories were chosen by the architect from their messages, the rest are
+placed by D1's test of what the analyst does. The ten, by the `kind` each
+carries: `sort-gated-by-omit` (row 8), `discard-switches-off-metric` (9),
+`heatmap-counting-metric` (6), `invalid-chart-value` (4) and `du-not-applied`
+(16), each *your options*, since the analyst's action is to change the command;
+`bound-finer-than-log` (24) and `udm-csv-column-absent` (18) *your options*;
+`filter-excluded-no-value` (20) *figure caveat*; `udm-capture-not-number` (29)
+*data anomaly*; `final-pass-skipped` (25) *decision taken for you*, its
+`--group-similar` reference point the remedy.
 
 Phases: **options** = option settlement in `adapt_to_command_line_options()`
 and its callees, printed before the read starts; **read** = inside
@@ -443,7 +451,7 @@ and its callees, printed before the read starts; **read** = inside
 | 13 | `format_classification_rule_change` | read (deferred) | `Note:` | a file's classification rules changed at line N because the detected format changed | data anomaly | none |
 | 14 | `defer_timestamp_impossible_notes` | read (deferred) | `Note:` | N of M lines of a format were not matched because their date cannot exist | data anomaly | `-lf <other variant>` if day and month are swapped |
 | 15 | `defer_format_unit_notes` | read (deferred) | `Note:` | a detected format is written by more than one producer, which differ in date layout or duration unit, and nothing decided which | data anomaly | `-lf <variant>` or `-du <unit>` |
-| 16 | `defer_format_unit_notes` | read (deferred) | `Note:` | `-du` is not applied to files whose format names the unit on each line | decision taken for you | none |
+| 16 | `defer_format_unit_notes` | read (deferred) | `Note:` | `-du` is not applied to files whose format names the unit on each line | your options | none |
 | 17 | `detect_and_parse_csv_header` | read (printed, not deferred) | `Warning:` | the CSV message column is not in the header | data anomaly | none |
 | 18 | `emit_udm_csv_unbound_notices` | read (printed, not deferred) and finalize | `Note:` | a `-udm` names a column absent from N CSV headers | your options | none |
 | 19 | `read_and_process_logs` | after read | `Note:` | a format's lines carried levels `ltl` does not recognise; those lines were not counted | data anomaly | none |
@@ -452,7 +460,7 @@ and its callees, printed before the read starts; **read** = inside
 | 22 | `resolve_byte_notation` | after read | `Note:` | the run's formats declare different byte notations; SI is used | decision taken for you | `-bn si` or `-bn iec` |
 | 23 | `resolve_timestamp_precision` | after read | `Note:` | timestamps are shown to a coarser precision than asked, because the logs carry no finer | decision taken for you | none |
 | 24 | `note_finer_duration_bounds` | after read | `Note:` | a duration bound is finer than the log's recorded unit | your options | none |
-| 25 | `report_skipped_final_pass` | finalize | `Note:` | the final consolidation pass was skipped over N messages; the similarity at which the data clusters | decision taken for you, with guidance | a reference point for `--group-similar`; `--mask` for identifiers |
+| 25 | `report_skipped_final_pass` | finalize | `Note:` | the final consolidation pass was skipped over N messages; the similarity at which the data clusters | decision taken for you | a reference point for `--group-similar`; `--mask` for identifiers |
 | 26 | `sort_fallback_to_occurrences` (2 texts) | finalize | `Note:` | the `-so` ranking could not be produced (no values observed, or none eligible); ordered by occurrences | decision taken for you | none |
 | 27 | `bin_consolidation_notice` | finalize | `Note:` | consolidated rows' percentiles are approximate under the bin data model | figure caveat | `-mdm raw` |
 | 28 | `emit_udm_zero_match_notices` | finalize | `Note:` plus indented `read as:`, `pattern:`, `hint:` lines | a `-udm` produced no metrics, with the interpretation acted on | your options | wrap a regex token key in slashes |
@@ -883,3 +891,18 @@ harness lookup that matches nothing is a failure.
 | text | glyphs and bullets on the surfaces | the section is ASCII only |
 | no effect on output | the same run with and without `-V notices` | `-V section-layout` rows identical |
 | the harness | named for the section, `tests/validate-notices.sh` | `--list` and `--scenario`; every assertion declares `asserts`, `produced_by`, `contract`; the runtime-warning check |
+
+### Migration (requirements 1 to 4; agreed 2026-10-21)
+
+Driven by the real producers, not the fixture option; every run carries
+`--disable-progress`, as every test run does.
+
+| dimension | values exercised | asserted |
+|---|---|---|
+| every notice of the inventory | rows 1 to 35, each raised under its condition on the smallest input carrying it | one record with its `kind`, `category` (as settled in the inventory), `producer`, `stage`; drawn by the panel or `ask` |
+| relevance (requirement 4) | each row's condition absent | no record of that `kind`; a clean run has `count: 0` and no panel |
+| nothing on standard error | every scenario | standard error holds only what § Not notices lists; a scan of `ltl`'s source finds every remaining `print STDERR`, `warn` and `die` site in a sub that table names |
+| raised during the read | rows 12 to 18, while the progress line owns the terminal | all deferred, `immediacy: deferred`, never drawn at the call |
+| numbers in notices | each row whose parts carry a count, a size or a share, at 1,000 or more | rendered through the width-to-format rule's notice budgets (`notice`, `notice exact`, `notice share`) |
+| the harnesses | the 19 harnesses whose 93 assertion lines read `Note:`/`Warning:` text | each reads `-V notices` by `kind`; no harness reads notice text from standard error; each moved assertion still asserts |
+| the old mechanism | `defer_notice()`, `flush_deferred_notices()`, `@deferred_notices` | gone from `ltl`; the pattern entry names no placeholders |
