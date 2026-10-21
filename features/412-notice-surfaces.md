@@ -542,18 +542,37 @@ of this stage's process are worked into `prototype/README.md` when the
 prototypes are done, as the rules of a design prototype, a kind that document
 does not yet describe.
 
-### Where prototyping stands
+### Prototyping closed (architect, 2026-10-21)
 
-Stage 1 (macOS, fixed example notices) is under way on branch
-`412-notice-surfaces`. Three rounds have been built and reviewed through
-`prototype/412-notice-surfaces/review.pl`; each round's feedback, what was
-built from it, and how to resume are in
-`prototype/412-notice-surfaces/findings.md` (§ Resuming). After round 3 the
-architect paused the stage to redesign its process (the steps above). The
-catch-up that follows the pause: the decisions the three rounds settled,
-locked below; the conventions contract, written here as a document and
-reviewed before code; then round 4 built against it. The stage's findings
-report comes here once its decision round is held.
+The prototyping stage is closed; its deliverable, the framework's
+specification and its locked decisions, is delivered:
+
+- **What was built**: three components (panel, ask in its modal and compact
+  box forms with the options list as its second stage, browser with a
+  layered ask) in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`,
+  exercised with the use cases as data (`notices/inputs.pl`), reviewed
+  through `review.pl` over seven rounds on macOS, the light background, the
+  Windows and Linux rounds and their re-checks, and terminal detection
+  (`lib/NoticeProto.pm`, `probe-terminal.pl`), between 2026-10-17 and
+  2026-10-21.
+- **What was chosen**: D2 to D8 and D10 (the surfaces), D11 to D15 (the data
+  model); the contract in `docs/design-language.md`,
+  `docs/terminal-interaction.md` and `docs/terminal-output.md`; the complete
+  pattern in `docs/notice-surfaces.md` with its index entry in
+  `docs/architecture-patterns.md`. D9 was withdrawn.
+- **What was learned**: the rules of the design prototype,
+  `prototype/README.md` § (e); the unattended capture method and the
+  decision that the test method follows the surface
+  (`prototype/412-notice-surfaces/findings.md` § Unattended capture); the
+  terminal findings per platform (§ Windows validation round, § Terminal
+  detection).
+- **Not held as a stage**: the later stage fed by real `ltl` runs, planned
+  above. The one real-run input used was the histogram detail of the
+  browser, captured from a run; the rest of that intent is met by the
+  migration of real producers, which is implementation.
+
+The prototype scripts stay as the reference the first delivery is built
+from; nothing in them is production code.
 
 ### Closing out prototyping (architect, 2026-10-17)
 
@@ -715,9 +734,10 @@ browser setting it through the layered ask.
 
 ## Open items
 
-- Each notice's placement under D1's five categories.
-- What is built into `ltl`: scoped only after the prototypes are delivered and
-  validated.
+- What is built into `ltl`, and the migration of the inventory: scoped next,
+  the prototypes being delivered and validated (2026-10-21). A notice's
+  category, immediacy and visibility are each producer's decision at its
+  migration.
 
 ## Acceptance criteria
 

@@ -13,9 +13,21 @@ Run from this directory with Homebrew Perl. Every prototype takes
 `--width N`; every choice point takes `--answer` (answers given ahead, comma
 separated, one per choice point) and `--seconds N`.
 
-## Resuming (2026-10-19)
+## Stage 1 is closed (2026-10-21)
 
-Where stage 1 stands, for picking the review up in a later session:
+The architect closed the prototyping stage on 2026-10-21 with every item of
+§ Where stage 1 stands done: the surfaces validated on macOS, Linux and
+Windows on both backgrounds, terminal detection confirmed on all three, the
+notice data model locked (D11 to D15), the contract's last open line closed,
+and the complete pattern written (`docs/notice-surfaces.md`). The close-out
+record is `features/412-notice-surfaces.md` § Prototyping closed. What
+follows, scoping the first delivery into `ltl`, is the architect's to
+direct. The section below is the state as it was on 2026-10-19 and is kept
+as history.
+
+## Resuming (2026-10-19, history)
+
+Where stage 1 stood, for picking the review up in a later session:
 
 - **Round 7 is reviewed and accepted** ("yes, you finally got it",
   `feedback/stage1-round7.jsonl`). Every view of the framework on macOS is now
