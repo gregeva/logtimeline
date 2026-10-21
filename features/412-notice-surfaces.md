@@ -507,6 +507,53 @@ unchanged against drop 1 on six option shapes over two inputs but for the
 new `notices absent` row; an interactive run in a tmux pane drew the panel
 with no query reply on screen, 0.22 s in all.
 
+### Drop 3: migration after the read and at finalize (2026-10-21)
+
+Rows 13 to 31 of the inventory are records of the store, drawn in the panel;
+none prints on standard error. Each producer passes the notice's parts; the
+kinds, with the category each was settled in:
+
+| row | kind | category | parts |
+|---|---|---|---|
+| 13 | `classification-rules-changed` | data anomaly | focus the file and line |
+| 14 | `date-cannot-exist` | data anomaly | focus the format; remedy the other member's `-lf` |
+| 15 | `format-producer-undecided` | data anomaly | focus the format; evidence the files; remedy the alternatives; one record per format, where the text joined them into one |
+| 16 | `du-not-applied` | your options | focus `-du <unit>`; evidence the files |
+| 17 | `csv-message-column-absent` | data anomaly | focus `-ucm <column>`; deferred, where it printed into the progress row |
+| 18 | `udm-csv-column-absent` | your options | focus the `-udm` spec |
+| 19 | `level-not-recognised` | data anomaly | focus the format; evidence each level with its lines |
+| 20 | `filter-excluded-no-value` | figure caveat | evidence why numeric filters drop such lines |
+| 21 | `directory-unreadable` | data anomaly | evidence the directories |
+| 22 | `byte-notations-differ` | decision taken for you | evidence each format's notation; remedy `-bn` |
+| 23 | `timestamp-precision-coarser` | decision taken for you | |
+| 24 | `bound-finer-than-log` | your options | focus the bound as typed |
+| 25 | `final-pass-skipped` | decision taken for you | remedy the `--group-similar` reference point and `--mask` |
+| 26 | `sort-not-produced` | decision taken for you | focus `-so/--sort-on <operand>`; one kind, two statements |
+| 27 | `bin-percentiles-approximate` | figure caveat | remedy `-mdm raw` |
+| 28 | `udm-no-metrics` | your options | focus the spec; evidence the reading and each pattern; remedy the slashes hint |
+| 29 | `udm-capture-not-number` | data anomaly | focus the spec; the counts and the share through the notice budgets, so 100.0% reads 100% |
+| 30 | `classification-columns-not-shown`, `classified-shares-omitted`, `classification-not-event-ledger` | figure caveat | the first's remedy `--help formats`; the second's evidence the formats |
+| 31 | `classification-not-matched` | data anomaly | remedy the detection patterns |
+
+`defer_notice()` and `flush_deferred_notices()` have no caller left; they go
+in drop 6 with the notices of option parsing.
+
+The harnesses: 17 harnesses read these notices; each now reads `-V notices`
+by kind through `tests/lib/notices.sh` (`tests/HARNESS-DESIGN.md` § A notice
+is asserted from its record), and every absence check that read an empty
+standard error, or the absence of a `Note:` line, also reads the record count,
+since a notice no longer prints there (Trap 13: a check that holds when the
+run did not happen). `validate-notices.sh` gains `migration-categories`, every
+`notice()` call in `ltl` against the categories above, and `migration-raised`,
+producer and stage on a run raising four of the kinds. `docs/usage.md`
+§ Notices replaces § Stderr warnings. Found on the way: in
+`validate-message-grouping.sh` the variables of the final-pass scenarios were
+set inside the block of the scenario before them, so a final-pass scenario run
+alone with `--scenario` stopped on an unbound variable; the block now closes
+before them. One snapshot reference changes, by design: `tests/reference-output/ms-w160.txt`
+gains the panel with the precision notice, which printed on standard error
+when it was captured; every other reference of the 74 recaptures identical.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,

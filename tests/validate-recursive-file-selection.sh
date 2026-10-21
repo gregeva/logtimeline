@@ -39,6 +39,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -87,7 +89,7 @@ capture_selection() {
     set +e
     # Run inside TMP_DIR so cwd artifacts never land in the repo
     # (HARNESS-DESIGN.md Trap 9: temp artifacts stay out of deliverables).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$rawfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -V notices "$@" ) > "$rawfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -348,13 +350,13 @@ else
             produced_by 'expand_recursive_pattern() in ltl (opendir failure path)' \
             contract    'features/420-recursive-file-selection.md § D8 — unreadable directories: collect, continue, report once at the end'
         assert_command \
-            command     "grep -aq 'Note: 1 directory could not be read and was skipped during recursive file selection' '$unreadable.stderr'" \
-            label       'one note on stderr names the skipped directory' \
-            asserts     'The gap left by an unreadable directory is reported rather than silent: a single Note on stderr states how many directories were skipped and names them. It goes to stderr so it stays clear of -o CSV and piped output' \
+            command     "[[ \$(notice_field '$unreadable.raw' directory-unreadable statement) == '1 directory could not be read and was skipped during recursive file selection' ]]" \
+            label       'one notice names the skipped directory' \
+            asserts     'The gap left by an unreadable directory is reported rather than silent: a single notice states how many directories were skipped and names them' \
             produced_by 'read_and_process_logs() in ltl (end-of-processing note emission, @unreadable_directories)' \
             contract    'features/420-recursive-file-selection.md § D8 — reported as a single Note to STDERR at the tail of read_and_process_logs(), following the deferred-note precedent there'
         assert_command \
-            command     "grep -aq \"locked\" '$unreadable.stderr' && [ \"\$(grep -ac 'could not be read and' '$unreadable.stderr')\" -eq 1 ]" \
+            command     "notice_field '$unreadable.raw' directory-unreadable evidence | grep -q 'locked\$' && [ \"\$(notice_kind_count '$unreadable.raw' directory-unreadable)\" -eq 1 ]" \
             label       'the note is emitted once and names the directory' \
             asserts     'The skipped directories are accumulated during the sweep and reported in one note at the end, not once per directory as they are encountered' \
             produced_by 'read_and_process_logs() in ltl (end-of-processing note emission)' \
@@ -383,7 +385,7 @@ else
     many="$TMP_DIR/unreadable-many.sel"
     if capture_selection "$many" $SHAPE -r "$SWEEP_MANY/*.888"; then
         assert_command \
-            command     "grep -aq 'Note: 1000 directories could not be read and were skipped during recursive file selection' '$many.stderr'" \
+            command     "[[ \$(notice_field '$many.raw' directory-unreadable statement) == '1000 directories could not be read and were skipped during recursive file selection' ]]" \
             label       'the note counts 1,000 unreadable directories exactly' \
             asserts     'A notice count that a list beside it must agree with renders exact: 1000 directories, never 1 thousand' \
             produced_by 'read_and_process_logs() in ltl (end-of-processing note emission), through value_text() and the notice exact row' \
@@ -399,7 +401,7 @@ current_scenario="silent-when-all-readable"
 echo "[$current_scenario]"
 if capture_selection "$TMP_DIR/silent.sel" $SHAPE -r "$FIXTURE_ROOT/*.888"; then
     assert_command \
-        command     "! grep -aq 'could not be read' '$TMP_DIR/silent.sel.stderr'" \
+        command     "[ \"\$(notice_kind_count '$TMP_DIR/silent.sel.raw' directory-unreadable)\" -eq 0 ]" \
         label       'no note when every directory in the sweep is readable' \
         asserts     'The unreadable-directory note is tied to an actual failure to open a directory, not to the use of -r: a fully readable tree produces no note' \
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission, guarded on @unreadable_directories)' \
@@ -554,16 +556,16 @@ echo "[$current_scenario]"
 inside="$TMP_DIR/inside.sel"
 if capture_selection "$inside" $SHAPE "$FIXTURE_ROOT/*"; then
     assert_command \
-        command     "grep -aq '^files: 4\$' '$inside' && ! grep -aq '^file: .*/archive\$' '$inside' && [ ! -s '$inside.stderr' ]" \
+        command     "grep -aq '^files: 4\$' '$inside' && ! grep -aq '^file: .*/archive\$' '$inside' && [ ! -s '$inside.stderr' ] && [ \"\$(notice_total '$inside.raw')\" = 0 ]" \
         label       'a pattern selecting files and directories reads the files and says nothing of the directories' \
-        asserts     'Directories inside an argument that selected files are skipped without a word: the fixture root holds four files and three directories, and the four files are read with an empty stderr' \
+        asserts     'Directories inside an argument that selected files are skipped without a word: the fixture root holds four files and three directories, and the four files are read with no notice and an empty stderr' \
         produced_by "$PRODUCED_BY_SELECTS_NOTHING" \
         contract    "$CONTRACT_SELECTS_NOTHING; docs/usage.md § Files"
 fi
 inside_r="$TMP_DIR/inside-r.sel"
 if capture_selection "$inside_r" $SHAPE -r "$FIXTURE_ROOT/*"; then
     assert_command \
-        command     "grep -aq '^files: 18\$' '$inside_r' && [ ! -s '$inside_r.stderr' ]" \
+        command     "grep -aq '^files: 18\$' '$inside_r' && [ ! -s '$inside_r.stderr' ] && [ \"\$(notice_total '$inside_r.raw')\" = 0 ]" \
         label       'the same pattern under -r reads every file in the tree, silently' \
         asserts     'Under -r the pattern selects all eighteen fixture files at every depth, and the directories it passes through raise nothing' \
         produced_by "$PRODUCED_BY_SELECTS_NOTHING; $PRODUCED_BY_EXPAND" \

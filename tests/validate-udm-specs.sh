@@ -83,6 +83,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 neutralize_colour_env
 
 if [[ ! -x "$LTL" ]]; then
@@ -124,7 +126,8 @@ CONTRACT_525_D6='features/525-timestamp-precision-option.md D6 (the long sub-sec
 run_ltl() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs,notices "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    notice_lines "$outfile" > "$outfile.notices"
     echo "$outfile"
 }
 
@@ -135,9 +138,10 @@ run_collision() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
     set +e
-    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs,notices "$@" "$COLLISION_FIXTURE" > "$outfile" 2>"$outfile.stderr"
     LAST_EXIT=$?
     set -e
+    notice_lines "$outfile" > "$outfile.notices"
     echo "$outfile"
 }
 
@@ -145,7 +149,8 @@ run_collision() {
 run_bytes() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs "$@" "$BYTE_FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -du ms -V udm-specs,notices "$@" "$BYTE_FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    notice_lines "$outfile" > "$outfile.notices"
     echo "$outfile"
 }
 
@@ -300,18 +305,18 @@ scenario_undelimited_regex() {
         produced_by 'parse_udm_configs() (hint) in ltl' \
         contract    "$CONTRACT"
 
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm 'unique_files::distinct:Download\\/([^ ?]+)': no metrics produced from matching lines" \
+    assert_line "$out.notices" \
+        pattern     "udm-no-metrics | -udm 'unique_files::distinct:Download\\/([^ ?]+)' | no metrics produced from matching lines | " \
         asserts     'D8: the zero-match notice is spoken for a metric whose derived occurrences are zero' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$out.stderr" \
-        pattern     '      read as: unit=none(raw)  aggregation=distinct  transform=none  extraction=token_key' \
+    assert_line "$out.notices" \
+        pattern     'read as: unit=none(raw)  aggregation=distinct  transform=none  extraction=token_key' \
         asserts     'D9: the notice shows the interpretation acted on, from the same config entry the section prints' \
         produced_by 'emit_udm_zero_match_notices() + udm_read_as() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$out.stderr" \
-        pattern     "      hint: the token key 'Download\\/([^ ?]+)' contains regex characters and is matched literally - if you meant a regex, wrap it in slashes: /Download\\/([^ ?]+)/" \
+    assert_line "$out.notices" \
+        pattern     "| the token key 'Download\\/([^ ?]+)' contains regex characters and is matched literally; if you meant a regex, wrap it in slashes: /Download\\/([^ ?]+)/" \
         asserts     'D4(b)/D6: the intent hint is spoken inside the zero-match notice' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
@@ -345,8 +350,8 @@ scenario_whole_match() {
         asserts     'D2: without a capture group the whole match is the value - 3 Download lines, 2 distinct files' \
         produced_by 'read_and_process_logs() extraction site (whole match) + derive_udm_production() in ltl' \
         contract    "$CONTRACT"
-    assert_absent "$out.stderr" \
-        pattern     'Note: -udm' \
+    assert_absent "$out.notices" \
+        pattern     'udm-no-metrics |' \
         asserts     'No zero-match notice for a metric that produced values' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
@@ -385,13 +390,13 @@ scenario_absent_field() {
         asserts     'The absent field produced nothing' \
         produced_by 'derive_udm_production() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm 'absent': no metrics produced from matching lines" \
+    assert_line "$out.notices" \
+        pattern     "udm-no-metrics | -udm 'absent' | no metrics produced from matching lines | " \
         asserts     'D8: the notice fires for a genuinely absent field - information, not an error' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
-    assert_absent "$out.stderr" \
-        pattern     '      hint:' \
+    assert_absent "$out.notices" \
+        pattern     'contains regex characters' \
         asserts     'D4(c): no hint is offered when no rule fires - the field may simply not be in the file' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
@@ -485,13 +490,13 @@ scenario_delta_single_match() {
         asserts     'D7/D8: a single match under delta accumulates nothing and reads as zero' \
         produced_by 'derive_udm_production() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm 'rows::delta': no metrics produced from matching lines" \
+    assert_line "$out.notices" \
+        pattern     "udm-no-metrics | -udm 'rows::delta' | no metrics produced from matching lines | " \
         asserts     'D8: one wording for every case, including the delta edge' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
-    assert_absent "$out.stderr" \
-        pattern     '      hint:' \
+    assert_absent "$out.notices" \
+        pattern     'contains regex characters' \
         asserts     'No hint on a plain name spec' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
@@ -1395,7 +1400,8 @@ scenario_continuation_lines() {
 run_nn() {
     local out="$1"
     shift
-    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs "$@" > "$out" 2>"$out.stderr" || true
+    "$LTL" --disable-progress -ni -bs 1440 -oe -V udm-specs,notices "$@" > "$out" 2>"$out.stderr" || true
+    notice_lines "$out" > "$out.notices"
 }
 
 # The produced: line of one metric's block, matched whole.
@@ -1428,13 +1434,13 @@ scenario_non_numeric_capture() {
         asserts     'D1: a skipped capture leaves the delta state alone, so the one delta is the difference of the two numbers' \
         produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (delta transform) in ltl' \
         contract    "$CONTRACT_638"
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm '$NN_SPEC': 2 line(s) recorded, 5 skipped (71.4%): the captured text is not a number" \
+    assert_line "$out.notices" \
+        pattern     "udm-capture-not-number | -udm '$NN_SPEC' | 2 line(s) recorded, 5 skipped (71.4%): the captured text is not a number | " \
         asserts     'D3: a partly skipped /regex/ metric is reported once, with the recorded count, the skipped count and the skipped share' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
         contract    "$CONTRACT_638"
     assert_command \
-        command     "[ \"\$(grep -c 'skipped (' '$out.stderr')\" = 2 ]" \
+        command     "[ \"\$(notice_kind_count '$out' udm-capture-not-number)\" = 2 ]" \
         label       'one skip notice per metric, two metrics' \
         asserts     'D3: one notice per metric that skipped a line' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
@@ -1507,8 +1513,8 @@ scenario_all_numeric_capture() {
         asserts     'D4: a metric that skipped nothing carries no skipped figure on -V udm-specs' \
         produced_by 'emit_udm_specs_verbose() in ltl' \
         contract    "$CONTRACT_638"
-    assert_absent "$out.stderr" \
-        pattern     'skipped (' \
+    assert_absent "$out.notices" \
+        pattern     'udm-capture-not-number |' \
         asserts     'D3: a metric whose every matched line was recorded prints no skip notice' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
         contract    "$CONTRACT_638"
@@ -1541,8 +1547,8 @@ scenario_non_numeric_filtered() {
         asserts     'D3: lines outside the time window count toward neither figure' \
         produced_by 'read_and_process_logs() skip count past the filters in ltl' \
         contract    "$CONTRACT_638"
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm '$NN_SPEC': 0 line(s) recorded, 4 skipped (100.0%): the captured text is not a number" \
+    assert_line "$out.notices" \
+        pattern     "udm-capture-not-number | -udm '$NN_SPEC' | 0 line(s) recorded, 4 skipped (100%): the captured text is not a number | " \
         asserts     'D3: a metric whose every retained line was skipped still reports its share, beside the zero-match notice' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
         contract    "$CONTRACT_638"
@@ -1565,8 +1571,8 @@ scenario_non_numeric_counting() {
         asserts     'D1: whether a capture is usable depends on the aggregation; under distinct, text such as abc12 is counted' \
         produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (counting branch) in ltl' \
         contract    "$CONTRACT_638"
-    assert_absent "$out.stderr" \
-        pattern     'skipped (' \
+    assert_absent "$out.notices" \
+        pattern     'udm-capture-not-number |' \
         asserts     'D1: a counting aggregation skips nothing, so no skip notice' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
         contract    "$CONTRACT_638"
@@ -1649,8 +1655,8 @@ scenario_number_forms() {
         asserts     'D6: a capture written as 42, -5, +5, 1.5, .5, 5., 1e3 or 1.5E-2 is a number and is recorded at its full value; a thousands separator, hexadecimal, Inf and NaN are not' \
         produced_by 'read_and_process_logs() USER DEFINED METRICS CAPTURE (number check) + derive_udm_production() in ltl' \
         contract    "$CONTRACT_638"
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm '$FORMS_SPEC': 8 line(s) recorded, 4 skipped (33.3%): the captured text is not a number" \
+    assert_line "$out.notices" \
+        pattern     "udm-capture-not-number | -udm '$FORMS_SPEC' | 8 line(s) recorded, 4 skipped (33.3%): the captured text is not a number | " \
         asserts     'D3: the documented pattern reports the values it could not record' \
         produced_by 'emit_udm_skipped_capture_notices() in ltl' \
         contract    "$CONTRACT_638"

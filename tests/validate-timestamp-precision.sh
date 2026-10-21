@@ -25,6 +25,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 scenario_register \
     one-formatter/structure \
@@ -175,13 +177,14 @@ pass_with() {
 
 # run_in TAG ARGS... — runs ltl in its own directory $TMP_DIR/TAG, stdout to
 # out.txt (ANSI stripped into plain.txt), stderr to err.txt, the exit code to
-# rc.txt; applies the runtime-warning check. A non-zero exit is a failure.
+# rc.txt, the notices it raised in -V notices; applies the runtime-warning
+# check. A non-zero exit is a failure.
 run_in() {
     local tag="$1"; shift
     local dir="$TMP_DIR/$tag" rc
     mkdir -p "$dir"
     set +e
-    ( cd "$dir" && "$LTL" "$@" > out.txt 2> err.txt )
+    ( cd "$dir" && "$LTL" -V notices "$@" > out.txt 2> err.txt )
     rc=$?
     set -e
     echo "$rc" > "$dir/rc.txt"
@@ -789,7 +792,7 @@ current_scenario="nanosecond/exact"
 for v in ns nanosecond; do
     run_in "nine-$v" "${COMMON[@]}" -ni -bs 1 -tp "$v" "$NINE"
     b=$(heading_bounds "$TMP_DIR/nine-$v")
-    n=$(grep -cE '^Note: timestamps are shown to the ' "$TMP_DIR/nine-$v/err.txt" || true)
+    n=$(notice_kind_count "$TMP_DIR/nine-$v/out.txt" timestamp-precision-coarser)
     if [[ "$b" == "2026-01-26 10:00:01.123456789|2026-01-26 10:00:02.999999999" && "$n" == 0 ]]; then
         pass_with "-tp $v renders all nine digits, .999999999 without carrying, with no notice"
     else
@@ -846,11 +849,11 @@ fi
 # ---------------------------------------------------------------------------
 # The precision the log carries (D4, D10)
 # ---------------------------------------------------------------------------
-CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
+CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
 
-# note_lines DIR — the precision notices on the run's stderr.
+# note_lines DIR — the statement of each precision notice the run raised.
 note_lines() {
-    grep -E '^Note: timestamps are shown to the ' "$1/err.txt" || true
+    notice_field "$1/out.txt" timestamp-precision-coarser statement
 }
 
 # expect_note LABEL DIR WANT — exactly one precision notice, equal to WANT
@@ -882,7 +885,7 @@ else
         "heading: $b" "labels with a fraction: $frac_labels" "index first_timestamp: $idx_first" "index ts_precision: $idx_tp"
 fi
 expect_note "-tp ms on a whole-second log: one notice naming the second and whole seconds" "$TMP_DIR/tc-access" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tc-three-us "${COMMON[@]}" -ni -bs 1 -tp us "$THREE"
 b=$(heading_bounds "$TMP_DIR/tc-three-us")
 if [[ "$b" == "2026-01-26 10:00:01.123|2026-01-26 10:00:03.789" ]]; then
@@ -892,25 +895,25 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
 fi
 expect_note "-tp us on a millisecond log: one notice naming the millisecond" "$TMP_DIR/tc-three-us" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tc-three-ms "${COMMON[@]}" -ni -bs 1 -tp ms "$THREE"
 expect_note "-tp ms on a millisecond log: no notice" "$TMP_DIR/tc-three-ms" ""
 run_in tc-three-ns "${COMMON[@]}" -ni -bs 1 -tp ns "$THREE"
 expect_note "-tp ns on a millisecond log: one notice, naming the millisecond the log carries" "$TMP_DIR/tc-three-ns" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/ladder; then
 current_scenario="truth/ladder"
 run_in tl-carry "${COMMON[@]}" -ni -bs 1 -tp us "$CARRY"
 expect_note "a four-digit fraction resolves to the millisecond" "$TMP_DIR/tl-carry" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tl-two "${COMMON[@]}" -ni -bs 1 -tp ms "$TWO"
 expect_note "a two-digit fraction resolves to the second" "$TMP_DIR/tl-two" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tl-fixed3 "${COMMON[@]}" -ni -bs 1 -tp us "$FIXED3"
 expect_note "a fixed three-digit format resolves to the millisecond it declares" "$TMP_DIR/tl-fixed3" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/several-files; then
@@ -935,7 +938,7 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
 fi
 expect_note "a request finer than every file carries: the notice names each file's precision" "$TMP_DIR/tsf-us" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
 fi
 
 if scenario_wanted truth/deprecated-switch; then
@@ -949,14 +952,14 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "labels with a fraction: $frac_labels"
 fi
 expect_note "-ms on a whole-second log: the notice" "$TMP_DIR/tds" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 fi
 
 if scenario_wanted truth/narrower-width; then
 current_scenario="truth/narrower-width"
 run_in tnw "${COMMON[@]}" -ni -bs 100ms -tp ms "$ACCESS"
 expect_note "a width finer than the log's precision: the notice says which buckets can hold a line" "$TMP_DIR/tnw" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds; at a bucket width below a second, only the buckets that start on a whole second can hold a line"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds; at a bucket width below a second, only the buckets that start on a whole second can hold a line"
 fi
 
 if scenario_wanted truth/unknown-precision; then
@@ -989,12 +992,12 @@ run_in tcf-ns "${COMMON[@]}" -ni -bs 1440 -tp ns -V runtime-config -udm latency 
 expect_precision "-tp ns on a CSV whose timestamps carry three digits shows them to the millisecond" "$TMP_DIR/tcf-ns" \
     "2026-06-01 10:00:05.123|2026-06-01 10:01:05.456" "timestamp_precision: ms; clamped from ns"
 expect_note "-tp ns on a millisecond CSV: the notice a scanned log gets" "$TMP_DIR/tcf-ns" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tcf-s "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$CSVS"
 expect_precision "-tp ms on a whole-second CSV alone shows it to the second" "$TMP_DIR/tcf-s" \
     "2026-06-01 10:00:05|2026-06-01 10:01:05" "timestamp_precision: s; clamped from ms"
 expect_note "-tp ms on a whole-second CSV: the notice names whole seconds" "$TMP_DIR/tcf-s" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tcf-mixed "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$THREE" "$CSVS"
 expect_precision "-tp ms over a millisecond log and a whole-second CSV shows the run to the millisecond" "$TMP_DIR/tcf-mixed" \
     "2026-01-26 10:00:01.123|2026-06-01 10:01:05.000" "timestamp_precision: ms"
@@ -1003,7 +1006,7 @@ run_in tcf-epoch "${COMMON[@]}" -ni -bs 1440 -tp ns -du ms -V runtime-config -ud
 expect_precision "an epoch CSV read with -du ms and no fraction carries the millisecond" "$TMP_DIR/tcf-epoch" \
     "2026-02-14 14:12:53.123|2026-02-14 14:13:53.456" "timestamp_precision: ms; clamped from ns"
 expect_note "an epoch CSV in milliseconds: the notice names milliseconds" "$TMP_DIR/tcf-epoch" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/structure; then

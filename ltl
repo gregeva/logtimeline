@@ -4804,8 +4804,8 @@ sub bin_consolidation_notice {
         ? 'consolidation combined ' . value_text($message_stats_collapse_projections, kind => 'count', budget => 'notice')
           . ' message histograms onto shared bucket geometries'
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
-    print STDERR "Note: $detail, so their percentiles are approximate"
-        . " - use -mdm raw for exact percentiles\n";
+    notice( kind => 'bin-percentiles-approximate', category => 'figure_caveat',
+            statement => "$detail, so their percentiles are approximate", remedy => 'use -mdm raw for exact percentiles' );
     return;
 }
 
@@ -4851,21 +4851,21 @@ sub format_variant_ambiguity_note {
 # to a variant group's default, and the files whose format names the duration
 # unit on each line, to which -du is not applied.
 sub defer_format_unit_notes {
-    if (@format_unit_ambiguity) {
-        my @clauses = map {
-            my ($entry, $consequence, $override, $files) = @$_;
-            my $plural = @$files > 1;
-            join(', ', @$files) . ": the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
-                . "; nothing in the file name" . ($plural ? 's' : '') . " or content decided which - use $override if the "
-                . ($plural ? 'files come' : 'file comes') . " from the other producer"
-        } @format_unit_ambiguity;
-        defer_notice( "Note: " . join('; ', @clauses) . "\n" );
+    for (@format_unit_ambiguity) {
+        my ($entry, $consequence, $override, $files) = @$_;
+        my $plural = @$files > 1;
+        notice( kind => 'format-producer-undecided', category => 'data_anomaly', focus => $entry->[FR_SLUG],
+                statement => "the detected log format is written by more than one producer and $consequence; nothing in the file name"
+                           . ($plural ? 's' : '') . " or content decided which",
+                evidence  => [ @$files ],
+                remedy    => "use $override if the " . ($plural ? 'files come' : 'file comes') . " from the other producer" );
     }
     if (@duration_unit_line_files) {
         my %slugs = map { $_->[1] => 1 } @duration_unit_line_files;
-        defer_notice( "Note: -du $duration_unit_override is not applied to " . join(', ', map { $_->[0] } @duration_unit_line_files)
-            . ": " . (@duration_unit_line_files > 1 ? 'their format names' : 'its format names') . " the duration unit on each line ("
-            . join(', ', sort keys %slugs) . ")\n" );
+        notice( kind => 'du-not-applied', category => 'your_options', focus => "-du $duration_unit_override",
+                statement => 'is not applied to ' . (@duration_unit_line_files > 1 ? 'these files: their format names' : 'this file: its format names')
+                           . ' the duration unit on each line (' . join(', ', sort keys %slugs) . ')',
+                evidence  => [ map { $_->[0] } @duration_unit_line_files ] );
     }
     return;
 }
@@ -4898,10 +4898,11 @@ sub defer_timestamp_impossible_notes {
         $recognised += $_->[FR_MATCHES] // 0 for @entries;
         my $g = @entries && defined $entries[0][FR_GROUP] ? $format_variant_groups{ $entries[0][FR_GROUP] } : undef;
         my @others = $g ? grep { $_->[FR_SLUG] ne $slug } map { $format_registry_entry{$_} } @{ $g->{members} } : ();
-        my $hint = @others ? ' - if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) : '';
-        defer_notice( "Note: " . value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
-            . " of " . value_text( $recognised, kind => 'count', budget => 'notice' )
-            . " lines of the $slug format were not matched because their date cannot exist under its date layout$hint\n" );
+        notice( kind => 'date-cannot-exist', category => 'data_anomaly', focus => $slug,
+                statement => value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
+                           . ' of ' . value_text( $recognised, kind => 'count', budget => 'notice' )
+                           . ' lines of this format were not matched because their date cannot exist under its date layout',
+                ( @others ? ( remedy => 'if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) ) : () ) );
     }
     return;
 }
@@ -5251,9 +5252,9 @@ sub format_classification_rule_change {
         if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
     $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
     $format_detection{$file}{cls_both}     = $new_entry->[FR_CLS_BOTH]     if $format_detection{$file};
-    defer_notice( "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
-        . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
-        . " - lines before this point were classified under the previous rules\n" )
+    notice( kind => 'classification-rules-changed', category => 'data_anomaly', focus => "$file line $line_number",
+            statement => 'the classification rules changed because the detected log format changed from '
+                       . $old_entry->[FR_SLUG] . ' to ' . $new_entry->[FR_SLUG] . '; lines before this point were classified under the previous rules' )
         if $n == 1;
     return;
 }
@@ -7465,7 +7466,8 @@ sub emit_udm_csv_unbound_notices {
     for my $idx (0 .. $#udm_configs) {
         my $files = $udm_csv_unbound_files[$idx] or next;
         my $config = $udm_configs[$idx];
-        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . " CSV file(s)\n";
+        notice( kind => 'udm-csv-column-absent', category => 'your_options', focus => "-udm '$config->{raw_arg}'",
+                statement => "no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . ' CSV file(s)' );
     }
 }
 
@@ -7479,8 +7481,11 @@ sub emit_udm_skipped_capture_notices {
     for my $config (@udm_configs) {
         my $skipped = $udm_skipped_lines{$config->{name}} or next;
         my $recorded = $production->{$config->{name}}{occurrences};
-        printf STDERR "Note: -udm '%s': %d line(s) recorded, %d skipped (%.1f%%): the captured text is not a number\n",
-            $config->{raw_arg}, $recorded, $skipped, $skipped / ($recorded + $skipped) * 100;
+        notice( kind => 'udm-capture-not-number', category => 'data_anomaly', focus => "-udm '$config->{raw_arg}'",
+                statement => value_text( $recorded, kind => 'count', budget => 'notice' ) . ' line(s) recorded, '
+                           . value_text( $skipped, kind => 'count', budget => 'notice' ) . ' skipped ('
+                           . value_text( $skipped / ($recorded + $skipped) * 100, kind => 'percentage', budget => 'notice share' )
+                           . '): the captured text is not a number' );
     }
 }
 
@@ -7492,12 +7497,12 @@ sub emit_udm_zero_match_notices {
     for my $idx (0 .. $#udm_configs) {
         my $config = $udm_configs[$idx];
         next if $production->{$config->{name}}{occurrences};
-        print STDERR "Note: -udm '$config->{raw_arg}': no metrics produced from matching lines\n";
-        print STDERR "      read as: " . udm_read_as($config, $idx) . "  matched against the whole line\n";
-        print STDERR "      pattern: $_\n" for @{$config->{patterns}};
-        if (($config->{hint} // '') eq 'token_key_has_regex_chars') {
-            print STDERR "      hint: the token key '$config->{token_key}' contains regex characters and is matched literally - if you meant a regex, wrap it in slashes: /$config->{token_key}/\n";
-        }
+        notice( kind => 'udm-no-metrics', category => 'your_options', focus => "-udm '$config->{raw_arg}'",
+                statement => 'no metrics produced from matching lines',
+                evidence  => [ 'read as: ' . udm_read_as($config, $idx) . ', matched against the whole line', map { "pattern: $_" } @{$config->{patterns}} ],
+                ( ($config->{hint} // '') eq 'token_key_has_regex_chars'
+                    ? ( remedy => "the token key '$config->{token_key}' contains regex characters and is matched literally; if you meant a regex, wrap it in slashes: /$config->{token_key}/" )
+                    : () ) );
     }
 }
 
@@ -7520,7 +7525,9 @@ sub emit_classification_percentage_notices {
     # format declares both a success and a failure classification (subsumes
     # 'none at all', D4), so the columns are not shown.
     if ( $show_classification && !$hide_classification && !$any_both ) {
-        print STDERR "Note: the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed. See --help formats for what each format classifies.\n";
+        notice( kind => 'classification-columns-not-shown', category => 'figure_caveat',
+                statement => 'the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed',
+                remedy    => 'see --help formats for what each format classifies' );
         return;
     }
     # Notice 4 — the summary's classified rows carry their shares only on a
@@ -7546,8 +7553,9 @@ sub emit_classification_percentage_notices {
             next if $cls && $cls->{success} && @{ $cls->{success} };
             $no_success_rule{ $entry->[FR_SLUG] } = 1;
         }
-        print STDERR "Note: the SUCCESS and FAILURE CLASSIFIED shares are omitted - a percentage needs a population where both outcomes are classified, and these formats define no success rule: "
-            . join( ', ', sort keys %no_success_rule ) . ".\n"
+        notice( kind => 'classified-shares-omitted', category => 'figure_caveat',
+                statement => 'the SUCCESS and FAILURE CLASSIFIED shares are omitted: a percentage needs a population where both outcomes are classified, and these formats define no success rule',
+                evidence  => [ sort keys %no_success_rule ] )
             if %no_success_rule;
     }
     return unless classification_columns_visible();
@@ -7556,7 +7564,8 @@ sub emit_classification_percentage_notices {
     # (On a mixed run this is the applicable caution: the columns render,
     # rows fed by the non-ledger source stay blank per bucket eligibility.)
     if ( $show_classification && $nonledger ) {
-        print STDERR "Note: the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly.\n";
+        notice( kind => 'classification-not-event-ledger', category => 'figure_caveat',
+                statement => 'the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly' );
         return;
     }
     # Notice 2 — event-ledger formats only: any non-zero shortfall of
@@ -7565,7 +7574,9 @@ sub emit_classification_percentage_notices {
     my $r = $recon;
     if ( !$nonledger && $r->{unclassified} > 0 ) {
         my $leak_pct = value_text( $r->{included} ? $r->{unclassified} / $r->{included} * 100 : 0, kind => 'percentage', budget => 'notice share' );
-        print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
+        notice( kind => 'classification-not-matched', category => 'data_anomaly',
+                statement => value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification; the percentages exclude them",
+                remedy    => "investigate the format's detection patterns for coverage" );
     }
     return;
 }
@@ -12168,7 +12179,8 @@ sub detect_and_parse_csv_header {
             if (exists $csv_col_index{lc($col_name)}) {
                 push @csv_message_col_indices, $csv_col_index{lc($col_name)};
             } else {
-                print STDERR "Warning: CSV message column '$col_name' not found in headers\n";
+                notice( kind => 'csv-message-column-absent', category => 'data_anomaly', focus => "-ucm $col_name",
+                        statement => 'the CSV message column is not in the header' );
             }
         }
     }
@@ -14098,17 +14110,13 @@ sub report_skipped_final_pass {
     my $skipped_keys = 0;
     $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
 
-    my $notice = "Note: the final consolidation pass was skipped over " . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . " message"
-        . ($skipped_keys == 1 ? "" : "s")
-        . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
-
     my @edges = sort { $a <=> $b } grep { defined } map { $consolidation_cliff_edge{$_} } @skipped;
-    if (@edges) {
-        $notice .= " This data's similarity clusters below $edges[0]%, which is a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more.";
-    }
-    $notice .= " Where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy.\n";
-
-    print STDERR $notice;
+    notice( kind => 'final-pass-skipped', category => 'decision_taken_for_you',
+            statement => 'the final consolidation pass was skipped over ' . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . ' message'
+                       . ($skipped_keys == 1 ? '' : 's')
+                       . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little",
+            remedy    => ( @edges ? "this data's similarity clusters below $edges[0]%, a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more; " : '' )
+                       . 'where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy' );
     return;
 }
 
@@ -14454,8 +14462,8 @@ sub resolve_timestamp_precision {
     my $narrower = $bucket_size_seconds < $time_unit_step{$limit}{ms} / 1000
         ? "; at a bucket width below a " . $name->($limit) . ", only the buckets that start on a whole " . $name->($limit) . " can hold a line"
         : '';
-    print STDERR "Note: timestamps are shown to the " . $name->($limit) . ": " . $name->($asked)
-        . " precision was asked for, and $what$narrower\n";
+    notice( kind => 'timestamp-precision-coarser', category => 'decision_taken_for_you',
+            statement => 'timestamps are shown to the ' . $name->($limit) . ': ' . $name->($asked) . " precision was asked for, and $what$narrower" );
 
     $timestamp_precision = $limit;
     $option_overrides{'timestamp-precision'}{clamped_from} = $asked;
@@ -14486,7 +14494,8 @@ sub note_finer_duration_bounds {
     for my $row (grep { $_->{kind} eq 'duration' } @quantity_options) {
         my $unit = $quantity_unit_entered{ $row->{long} } // next;
         next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};
-        print STDERR "Note: " . quantity_option_flag($row) . " $quantity_entered{ $row->{long} } is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}\n";
+        notice( kind => 'bound-finer-than-log', category => 'your_options', focus => quantity_option_flag($row) . " $quantity_entered{ $row->{long} }",
+                statement => "is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}" );
     }
     return;
 }
@@ -14517,9 +14526,10 @@ sub resolve_byte_notation {
         $byte_notation_source = 'format ' . join(',', @formats);
     } else {
         ($byte_notation, $byte_notation_source) = ('si', 'mixed');
-        print STDERR "Note: the log formats of this run declare different byte notations ("
-            . join('; ', map { "$_: " . ($declaration_of{$_} eq 'none' ? 'none' : uc $declaration_of{$_}) } @formats)
-            . "); byte values are shown in SI units. Use -bn si or -bn iec to choose.\n";
+        notice( kind => 'byte-notations-differ', category => 'decision_taken_for_you',
+                statement => 'the log formats of this run declare different byte notations; byte values are shown in SI units',
+                evidence  => [ map { "$_: " . ($declaration_of{$_} eq 'none' ? 'none' : uc $declaration_of{$_}) } @formats ],
+                remedy    => 'use -bn si or -bn iec to choose' );
     }
     return;
 }
@@ -15909,9 +15919,10 @@ sub apply_parse_time_sort_gate {
 # eligibility floor). Both texts are generic across the metric families.
 sub sort_fallback_to_occurrences {
     my ($detection_point) = @_;
-    print STDERR $detection_point eq 'pre-walk'
-        ? "Note: no $sort_gate{family} values were found - the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced, so the messages table is ordered by occurrences\n"
-        : "Note: the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced from the $sort_gate{family} values in this run - the messages table is ordered by occurrences\n";
+    notice( kind => 'sort-not-produced', category => 'decision_taken_for_you', focus => "-so/--sort-on $sort_gate{operand}",
+            statement => $detection_point eq 'pre-walk'
+                ? "could not be produced: no $sort_gate{family} values were found, so the messages table is ordered by occurrences"
+                : "could not be produced from the $sort_gate{family} values in this run, so the messages table is ordered by occurrences" );
     ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
     $sort_gate{fallback} = $detection_point;
 }
@@ -19392,13 +19403,13 @@ sub read_and_process_logs {
             my $tokens = $unregistered_levels{$slug};
             my $lines  = 0;
             $lines += $_ for values %$tokens;
-            print STDERR "Note: $slug lines carried " . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
-                . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
-                . join( ', ', map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' )
-                                    . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
-                              sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens )
-                . " - " . value_text( $lines, kind => 'count', budget => 'notice' )
-                . ( $lines == 1 ? " line was" : " lines were" ) . " not counted\n";
+            notice( kind => 'level-not-recognised', category => 'data_anomaly', focus => $slug,
+                    statement => 'lines carried ' . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
+                               . ( keys %$tokens == 1 ? ' level' : ' levels' ) . ' ltl does not recognise, so '
+                               . value_text( $lines, kind => 'count', budget => 'notice' )
+                               . ( $lines == 1 ? ' line was' : ' lines were' ) . ' not counted',
+                    evidence  => [ map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' ) . ( $tokens->{$_} == 1 ? ' line' : ' lines' ) . ')' }
+                                   sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens ] );
         }
     }
 
@@ -19407,9 +19418,10 @@ sub read_and_process_logs {
     # by far more than the thresholds explain, with no indication why.
     for my $metric (@builtin_metric_names) {
         next unless $numeric_filter_no_metric{$metric};
-        print STDERR "Note: " . value_text( $numeric_filter_no_metric{$metric}, kind => 'count', budget => 'notice' )
-            . " lines carried no $metric value and were excluded by the $metric filter"
-            . " (numeric filters only keep lines that carry the filtered metric)\n";
+        notice( kind => 'filter-excluded-no-value', category => 'figure_caveat',
+                statement => value_text( $numeric_filter_no_metric{$metric}, kind => 'count', budget => 'notice' )
+                           . " lines carried no $metric value and were excluded by the $metric filter",
+                evidence  => 'numeric filters only keep lines that carry the filtered metric' );
     }
 
     # Surface the directories a recursive sweep could not open. The sweep
@@ -19417,11 +19429,11 @@ sub read_and_process_logs {
     # tree the pattern describes unless the gap is reported.
     if (@unreadable_directories) {
         my $count = scalar @unreadable_directories;
-        print STDERR "Note: " . value_text($count, kind => 'count', budget => 'notice exact')
-            . ( $count == 1 ? " directory" : " directories" )
-            . " could not be read and " . ( $count == 1 ? "was" : "were" )
-            . " skipped during recursive file selection: "
-            . join( ', ', @unreadable_directories ) . "\n";
+        notice( kind => 'directory-unreadable', category => 'data_anomaly',
+                statement => value_text($count, kind => 'count', budget => 'notice exact')
+                           . ( $count == 1 ? ' directory' : ' directories' )
+                           . ' could not be read and ' . ( $count == 1 ? 'was' : 'were' ) . ' skipped during recursive file selection',
+                evidence  => [ @unreadable_directories ] );
     }
 
     return;

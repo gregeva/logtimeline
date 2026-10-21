@@ -690,6 +690,21 @@ Consequences for harness authors:
 - **Verify an override end-to-end, not by exit code.** A harness that resolves its corpus correctly and one that quietly skips its most expensive layer both exit 0. Check the counters the run reports (`L3=OK`, assertion counts, scenario counts) against a known-good run on the default path.
 - **Where the recorded path is part of the assertion, keep it relative.** `validate-regression.sh`, `capture-regression.sh` and `tests/baseline/run-benchmark.sh` pass repo-relative paths so no absolute path reaches captured references or the benchmark TSV (#209). These run from the directory *containing* the corpus rather than resolving an absolute path, which keeps `logs/...` intact under an override; because the captured prefix is the literal string `logs/`, an overriding corpus directory must itself be named `logs`, and they fail fast when it is not.
 
+## A notice is asserted from its record
+
+A notice the tool raises (a decision taken for the analyst, a condition found
+in the input, a caveat on the figures) is a record of the notice store, drawn
+in the notices panel on standard output and listed by `-V notices`. A harness
+asserts a notice by its `kind` from that section, through `tests/lib/notices.sh`
+(`notice_kind_count`, `notice_field`, `notice_lines`, `notice_total`), never
+by its text on standard error or in the panel: the record is the observable
+surface (`features/412-notice-surfaces.md` § D15). An absence check ("the run
+says nothing about X") reads the record count, `0` of that kind or
+`notice_total` of `0`; an empty standard error proves nothing about a notice,
+since none is printed there. The panel's own rendering is the render-invariant
+surface of `tests/validate-notices.sh`. The notices raised while the options
+are read still print on standard error until they move to the store.
+
 ## Runtime-warning cleanliness
 
 Every harness that invokes `ltl` MUST capture the invocation's stderr and fail the run if it contains a Perl runtime warning. A runtime warning (uninitialized value, substr outside of string, non-numeric argument, out-of-range date field, ...) is an unguarded data path — a bug that has not yet found the input that makes it fatal or wrong — and a harness that discards stderr certifies code it never looked at.

@@ -33,6 +33,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -73,7 +75,7 @@ capture_stderr() {
     set +e
     # Run inside TMP_DIR so cwd artifacts (ltl-index.csv) never land in the
     # repo (HARNESS-DESIGN.md Trap 9: temp artifacts stay out of deliverables).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$stdoutfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -V notices "$@" ) > "$stdoutfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -92,6 +94,8 @@ capture_stderr() {
     if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
+    # The run's notices are read from its -V notices section, kept beside the stderr capture.
+    cp "$stdoutfile" "$errfile.out"
 }
 
 # Self-documenting assertion (assert_command shape, HARNESS-DESIGN.md):
@@ -139,7 +143,7 @@ assert_command() {
 # never consulted, so the run uses one wide bucket and a single reported row.
 SHAPE="-bs 1440 -oe -n 1"
 
-NOTICE_CONTRACT='docs/usage.md § Options — Stderr warnings: message grouping under the bin message-stats data model answers consolidated rows from histograms combined onto a shared bucket geometry, so their percentiles are approximate and the run says so, pointing at -mdm raw'
+NOTICE_CONTRACT='docs/usage.md § Notices: message grouping under the bin message-stats data model answers consolidated rows from histograms combined onto a shared bucket geometry, so their percentiles are approximate and the run says so, pointing at -mdm raw'
 
 # Scenario selector (tests/HARNESS-DESIGN.md section The scenario selector).
 scenario_register grouped-bin-model-notice \
@@ -154,13 +158,13 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/grouped-bin.stderr"
 if capture_stderr "$errfile" $SHAPE $GROUPED_SHAPE -mdm bin "$FIXTURE_GROUPED"; then
     assert_command \
-        command     "grep -aq 'Note: consolidation combined [0-9,]* message histograms onto shared bucket geometries, so their percentiles are approximate - use -mdm raw for exact percentiles' '$errfile'" \
+        command     "[[ \$(notice_field '$errfile.out' bin-percentiles-approximate statement) =~ ^consolidation\ combined\ [0-9,]+\ message\ histograms\ onto\ shared\ bucket\ geometries,\ so\ their\ percentiles\ are\ approximate\$ && \$(notice_field '$errfile.out' bin-percentiles-approximate remedy) == 'use -mdm raw for exact percentiles' ]]" \
         label       'notice names the combination and the exact alternative' \
         asserts     'When message grouping runs under the bin message-stats data model and histograms were actually combined, the run reports how many were combined, states that the resulting percentiles are approximate, and names the data model that answers exactly' \
         produced_by 'bin_consolidation_notice() in ltl, called from pipeline_finalize() after group_similar_messages()' \
         contract    "$NOTICE_CONTRACT"
     assert_command \
-        command     "[ \"\$(grep -ac 'percentiles are approximate' '$errfile')\" -eq 1 ]" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' bin-percentiles-approximate)\" -eq 1 ]" \
         label       'emitted exactly once per run' \
         asserts     'The notice is a run-level statement about the analysis, not a per-cluster or per-file one, so a run that consolidates many keys still reports it once' \
         produced_by 'bin_consolidation_notice() in ltl, called from pipeline_finalize() after group_similar_messages()' \
@@ -176,7 +180,7 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/grouped-raw.stderr"
 if capture_stderr "$errfile" $SHAPE $GROUPED_SHAPE -mdm raw "$FIXTURE_GROUPED"; then
     assert_command \
-        command     "! grep -aq 'percentiles are approximate' '$errfile'" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' bin-percentiles-approximate)\" -eq 0 ]" \
         label       'no notice when the run already answers exactly' \
         asserts     'The raw message-stats data model holds every observed value, so grouping costs it no percentile accuracy and there is nothing to disclose' \
         produced_by 'bin_consolidation_notice() in ltl (capture-mode guard)' \
@@ -192,7 +196,7 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/ungrouped-bin.stderr"
 if capture_stderr "$errfile" $SHAPE -mdm bin "$FIXTURE"; then
     assert_command \
-        command     "! grep -aq 'percentiles are approximate' '$errfile'" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' bin-percentiles-approximate)\" -eq 0 ]" \
         label       'no notice when no row is consolidated' \
         asserts     'The notice is tied to grouping, not to the data model: an ungrouped bin run combines no histograms, so no percentile it reports carries a combination' \
         produced_by 'bin_consolidation_notice() in ltl (grouping guard)' \

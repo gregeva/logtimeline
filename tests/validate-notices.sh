@@ -466,6 +466,77 @@ scenario_panel_immediate() {
         'The section -V section-layout names notices starts at the deferred panel' 'draw_deferred_notices() in ltl' "$C_PANEL"
 }
 
+# ---------------------------------------------------------------------------
+# The migration (features/412-notice-surfaces.md § Inventory of current
+# notices, rows 12 to 31): every kind on the store is raised with the category
+# the inventory settled, read from the notice() calls in ltl's source; and a
+# run raising four of them records each with its producer and stage. Each
+# kind's own condition is asserted by the harness of the feature that raises
+# it, from -V notices.
+# ---------------------------------------------------------------------------
+C_MIGRATION="$DOC § Inventory of current notices (categories settled 2026-10-21); acceptance criteria, migration"
+MIGRATED_KINDS=(
+    "read-path-fallback=decision_taken_for_you"
+    "classification-rules-changed=data_anomaly"
+    "date-cannot-exist=data_anomaly"
+    "format-producer-undecided=data_anomaly"
+    "du-not-applied=your_options"
+    "csv-message-column-absent=data_anomaly"
+    "udm-csv-column-absent=your_options"
+    "level-not-recognised=data_anomaly"
+    "filter-excluded-no-value=figure_caveat"
+    "directory-unreadable=data_anomaly"
+    "byte-notations-differ=decision_taken_for_you"
+    "timestamp-precision-coarser=decision_taken_for_you"
+    "bound-finer-than-log=your_options"
+    "final-pass-skipped=decision_taken_for_you"
+    "sort-not-produced=decision_taken_for_you"
+    "bin-percentiles-approximate=figure_caveat"
+    "udm-no-metrics=your_options"
+    "udm-capture-not-number=data_anomaly"
+    "classification-columns-not-shown=figure_caveat"
+    "classified-shares-omitted=figure_caveat"
+    "classification-not-event-ledger=figure_caveat"
+    "classification-not-matched=data_anomaly"
+)
+
+scenario_migration_categories() {
+    current_scenario="migration-categories"
+    echo "[$current_scenario]"
+    local raised entry kind want got
+    raised=$(perl -0ne 'while (/\bnotice\(\s*kind\s*=>\s*\x27([^\x27]+)\x27,\s*category\s*=>\s*\x27([^\x27]+)\x27/g) { print "$1=$2\n" }' "$LTL" | sort -u)
+    for entry in "${MIGRATED_KINDS[@]}"; do
+        kind="${entry%%=*}"; want="${entry#*=}"
+        got=$(awk -F= -v k="$kind" '$1 == k { print $2 }' <<<"$raised" | paste -sd, -)
+        check "$kind is $want" "$got" "$want" \
+            'Each migrated notice is raised with the category the inventory settled, at every call that raises it' \
+            'the producer named in the inventory, through notice() in ltl' "$C_MIGRATION"
+    done
+    local extra
+    extra=$(cut -d= -f1 <<<"$raised" | grep -vxF -f <(printf '%s\n' "${MIGRATED_KINDS[@]%%=*}") | paste -sd, - || true)
+    check "no kind outside the inventory" "${extra:-none}" "none" \
+        'Every kind ltl raises is one the inventory names' 'notice() calls in ltl' "$C_MIGRATION"
+}
+
+scenario_migration_raised() {
+    current_scenario="migration-raised"
+    echo "[$current_scenario]"
+    run_ok raised "$LTL" -bs 1440 -oe -n 3 -tp ns -g 50 -mdm bin -udm 'nosuchkey::max' -dmin 1us -V notices "$DURATION_FIXTURE"
+    local kind
+    for kind in timestamp-precision-coarser:resolve_timestamp_precision:parse \
+                bound-finer-than-log:note_finer_duration_bounds:parse \
+                bin-percentiles-approximate:bin_consolidation_notice:finalize \
+                udm-no-metrics:emit_udm_zero_match_notices:finalize; do
+        IFS=: read -r k producer stage <<<"$kind"
+        check "$k: producer and stage" "$(block_field raised "$k" producer)|$(block_field raised "$k" stage)|$(block_field raised "$k" immediacy)|$(block_field raised "$k" shown)" \
+            "$producer|$stage|deferred|panel" \
+            'A migrated notice is recorded by the sub that raised it, in the stage it ran in, deferred, and drawn in the panel' \
+            "$producer() and notice() in ltl" "$C_MIGRATION"
+    done
+    check "nothing on standard error" "$(wc -c < "$TMP_DIR/raised.err" | tr -d ' ')" "0" \
+        'The notices raised after the read and at finalize reach the panel, never standard error' 'draw_deferred_notices() in ltl' "$C_MIGRATION"
+}
+
 scenario_register registered \
                   clean-run \
                   read-path-fallback \
@@ -481,7 +552,9 @@ scenario_register registered \
                   panel-wrap \
                   panel-light \
                   panel-windows-glyphs \
-                  panel-immediate
+                  panel-immediate \
+                  migration-categories \
+                  migration-raised
 scenario_parse_args "$@"
 
 if [[ ! -f "$LTL" ]]; then

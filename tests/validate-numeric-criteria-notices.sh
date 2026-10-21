@@ -3,7 +3,7 @@
 # ltl emits about its numeric criteria (the -dmin/-dmax/-bmin/-bmax/-cmin/-cmax
 # filters and the -hdmin/-hdmax/-hbmin/-hbmax/-hcmin/-hcmax highlight ranges).
 #
-# The system under test is the stderr messaging surface: when a numeric filter
+# The system under test is the notices a numeric filter raises: when a numeric filter
 # excludes lines because they carry no value for the filtered metric, ltl must
 # say so (and how many); when nothing was excluded that way, it must stay
 # silent. These notices exist so a numeric filter can never silently shrink
@@ -32,6 +32,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -71,7 +73,7 @@ capture_stderr() {
     set +e
     # Run inside TMP_DIR so cwd artifacts (ltl-index.csv) never land in the
     # repo (HARNESS-DESIGN.md Trap 9: temp artifacts stay out of deliverables).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$stdoutfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -V notices "$@" ) > "$stdoutfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -91,6 +93,8 @@ capture_stderr() {
     if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
         fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
     fi
+    # The notices raised after the read are read from -V notices, kept beside the stderr capture.
+    cp "$stdoutfile" "$errfile.out"
 }
 
 # Self-documenting assertion (assert_command shape, HARNESS-DESIGN.md):
@@ -156,14 +160,14 @@ errfile="$TMP_DIR/missing-metric.stderr"
 if capture_stderr "$errfile" $SHAPE -dmin 1 -bmin 1 -cmin 1 "$BOUNDARY_FIXTURE"; then
     for metric in duration bytes count; do
         assert_command \
-            command     "grep -aq 'Note: 1 lines carried no $metric value and were excluded by the $metric filter' '$errfile'" \
+            command     "notice_field '$errfile.out' filter-excluded-no-value statement | grep -qx '1 lines carried no $metric value and were excluded by the $metric filter'" \
             label       "exactly-one-line note for the $metric filter" \
             asserts     "When a numeric $metric filter is active and a line carries no $metric value, the line is excluded and the post-processing note reports the exact number of lines excluded that way (the fixture contains exactly one such line per metric)" \
             produced_by 'read_and_process_logs() in ltl (numeric threshold guards + end-of-processing note emission)' \
             contract    "$MISSING_METRIC_CONTRACT"
     done
     assert_command \
-        command     "[ \"\$(grep -ac '^Note:' '$errfile')\" -eq 3 ]" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' filter-excluded-no-value)\" -eq 3 ] && [ \"\$(notice_total '$errfile.out')\" -eq 3 ]" \
         label       'exactly three notes emitted (one per filtered metric)' \
         asserts     'The missing-metric note is emitted once per metric whose filter excluded at least one metric-less line — never duplicated, never merged' \
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission)' \
@@ -179,7 +183,7 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/all-carry.stderr"
 if capture_stderr "$errfile" $SHAPE -dmin 1 "$ACCESS_LOG"; then
     assert_command \
-        command     "! grep -aq 'carried no .* value and were excluded' '$errfile'" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' filter-excluded-no-value)\" -eq 0 ]" \
         label       'no missing-metric note when every line carries the metric' \
         asserts     'The missing-metric note only appears when at least one line was excluded for lacking the filtered metric; a filter that excluded nothing that way stays silent' \
         produced_by 'read_and_process_logs() in ltl (end-of-processing note emission)' \
@@ -240,7 +244,7 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/no-filters.stderr"
 if capture_stderr "$errfile" $SHAPE "$BOUNDARY_FIXTURE"; then
     assert_command \
-        command     "! grep -aq 'carried no .* value and were excluded' '$errfile'" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' filter-excluded-no-value)\" -eq 0 ]" \
         label       'no missing-metric note without numeric filters' \
         asserts     'Metric-less lines are kept (and produce no note) when no numeric filter is active; the note is tied to the filters, not to the data shape' \
         produced_by 'read_and_process_logs() in ltl (numeric threshold guards)' \

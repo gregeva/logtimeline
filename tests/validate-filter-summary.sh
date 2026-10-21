@@ -32,6 +32,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 neutralize_colour_env
 
 TMP_DIR=$(mktemp -d)
@@ -198,7 +200,7 @@ run_sections() {
     local outfile="$TMP_DIR/$current_scenario.out"
     set +e
     "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum \
-        -V filter-summary,format-detection,benchmark-data,profile "$@" "$log" \
+        -V filter-summary,format-detection,benchmark-data,profile,notices "$@" "$log" \
         > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
@@ -211,6 +213,7 @@ run_sections() {
         echo "FAIL: filter-summary section header not found in $outfile" >&2
         exit 1
     fi
+    notice_lines "$outfile" > "$outfile.notices"
     if ! assert_no_runtime_warnings "$outfile.stderr" "$current_scenario"; then
         fail=$((fail + 1))
         failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
@@ -433,19 +436,19 @@ if scenario_wanted impossible-date; then
         asserts 'The seven valid lines are included and none is placed at another line time: an impossible line contributes nothing' \
         produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
     assert_funnel_identities "$out"
-    assert_line "$out.stderr" pattern "^Note: 2 of 5 lines of the thingworx_standard format were not matched because their date cannot exist under its date layout\$" \
+    assert_line "$out.notices" pattern "^date-cannot-exist \\| thingworx_standard \\| 2 of 5 lines of this format were not matched because their date cannot exist under its date layout \\| " \
         asserts 'One note per format after the read, with the count and no file name, line number or value' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.stderr" pattern "^Note: 1 of 3 lines of the access_common_duration_thread_session format were not matched because their date cannot exist under its date layout\$" \
+    assert_line "$out.notices" pattern "^date-cannot-exist \\| access_common_duration_thread_session \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
         asserts 'The Apache common log date has the same outcome and note as the ISO arm' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
-    assert_line "$out.stderr" pattern "^Note: 1 of 3 lines of the apache_mod_jk format were not matched because their date cannot exist under its date layout\$" \
+    assert_line "$out.notices" pattern "^date-cannot-exist \\| apache_mod_jk \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
         asserts 'The asctime date has the same outcome and note as the ISO arm' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"
-    assert_absent "$out.stderr" pattern 'line [0-9]+:|previous line' \
+    assert_absent "$out.notices" pattern 'line [0-9]+|previous line' \
         asserts 'No note per line or per file, and no line is kept at the previous line time' \
         produced_by 'format_probe_signal() in ltl' \
         contract 'features/log-format-registry.md D52 as amended 2026-09-30; features/611-timestamp-acceptance.md C5'
@@ -459,7 +462,7 @@ if scenario_wanted impossible-date; then
         asserts 'The two valid rows are included' \
         produced_by "$PRODUCER" contract "$IMPOSSIBLE_CONTRACT"
     assert_funnel_identities "$csv_out"
-    assert_line "$csv_out.stderr" pattern "^Note: 1 of 3 lines of the csv format were not matched because their date cannot exist under its date layout\$" \
+    assert_line "$csv_out.notices" pattern "^date-cannot-exist \\| csv \\| 1 of 3 lines of this format were not matched because their date cannot exist under its date layout \\| " \
         asserts 'A CSV row has the same outcome and note as a scanned line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract "$IMPOSSIBLE_CONTRACT"

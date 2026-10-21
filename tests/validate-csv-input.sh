@@ -29,6 +29,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/run-dir.sh
 source "$SCRIPT_DIR/lib/run-dir.sh"
 
@@ -100,7 +102,7 @@ assert_command() {
 # -udm column; one bucket and one table row suffice.
 run_ltl() {
     local out="$1"; shift
-    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 "$@" > "$out" 2>"$out.stderr"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -V notices "$@" > "$out" 2>"$out.stderr"
 }
 
 # Runtime-warning cleanliness check for a run_ltl capture (stderr lives at
@@ -292,8 +294,8 @@ if scenario_wanted index-read-as-input; then
         "$TMP_DIR/idx/app.log" "$TMP_DIR/idx/ltl-index.csv" -udm latency:ms:mean || idx_rc=$?
     check_capture_warnings "$TMP_DIR/idx-in.out" "index-read-as-input"
     assert_command \
-        command     "[[ $idx_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/idx-in.out.stderr' ]]" \
-        label       'the index read as input produces no stderr output' \
+        command     "[[ $idx_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/idx-in.out.stderr' ]] && [[ \$(notice_total '$TMP_DIR/idx-in.out') == 0 ]]" \
+        label       'the index read as input produces no notice and no stderr output' \
         asserts     'A CSV none of whose rows has a parsable timestamp produces no message, and no metric-column note since its rows never matched' \
         produced_by 'the block csv_block_src() generates (its shape test) and emit_udm_csv_unbound_notices() in ltl' \
         contract    "$CONTRACT_640"
@@ -321,7 +323,7 @@ if scenario_wanted unplaced-rows; then
     delta_rc=0; run_ltl "$TMP_DIR/delta.out" -V format-detection,udm-specs "$TMP_DIR/delta.csv" -udm 'value::delta:sum' || delta_rc=$?
     check_capture_warnings "$TMP_DIR/delta.out" "unplaced-row-delta"
     assert_command \
-        command     "[[ $delta_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/delta.out.stderr' ]]" \
+        command     "[[ $delta_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/delta.out.stderr' ]] && [[ \$(notice_total '$TMP_DIR/delta.out') == 0 ]]" \
         label       'placeable rows go on the timeline with no per-row or per-file message' \
         asserts     'A CSV mixing parsable and unparsable rows prints nothing about the unparsable ones' \
         produced_by 'the block csv_block_src() generates (its shape test) in ltl' \
@@ -344,7 +346,7 @@ if scenario_wanted unplaced-rows; then
     eb_rc=0; run_ltl "$TMP_DIR/epoch-bad.out" -V filter-summary "$TMP_DIR/epoch-bad.csv" -udm latency:ms:mean || eb_rc=$?
     check_capture_warnings "$TMP_DIR/epoch-bad.out" "unplaced-row-epoch"
     assert_command \
-        command     "[[ $eb_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/epoch-bad.out.stderr' ]] && grep -aqx 'lines_included: 2' '$TMP_DIR/epoch-bad.out'" \
+        command     "[[ $eb_rc -eq 0 ]] && [[ ! -s '$TMP_DIR/epoch-bad.out.stderr' ]] && [[ \$(notice_total '$TMP_DIR/epoch-bad.out') == 0 ]] && grep -aqx 'lines_included: 2' '$TMP_DIR/epoch-bad.out'" \
         label       'an epoch CSV row that is not a number is unmatched, silently' \
         asserts     'In an epoch-timestamp CSV a row whose timestamp is not epoch seconds never reaches the epoch conversion' \
         produced_by 'the epoch block csv_block_src() generates (its shape test) in ltl' \
@@ -361,13 +363,13 @@ if scenario_wanted unbound-metric-note; then
     ub_rc=0; run_ltl "$TMP_DIR/unbound.out" "$TMP_DIR"/unbound/* -udm latency:ms:mean || ub_rc=$?
     check_capture_warnings "$TMP_DIR/unbound.out" "unbound-metric-note"
     assert_command \
-        command     "[[ $ub_rc -eq 0 ]] && [[ \$(grep -ac \"^Note: -udm 'latency:ms:mean': \" '$TMP_DIR/unbound.out.stderr') -eq 1 ]]" \
-        label       'exactly one Note line for the spec across two CSV files lacking the column' \
+        command     "[[ $ub_rc -eq 0 ]] && [[ \$(notice_kind_count '$TMP_DIR/unbound.out' udm-csv-column-absent) -eq 1 ]] && [[ \$(notice_field '$TMP_DIR/unbound.out' udm-csv-column-absent focus) == \"-udm 'latency:ms:mean'\" ]]" \
+        label       'exactly one notice for the spec across two CSV files lacking the column' \
         asserts     'A metric whose column is missing from the header of CSV files whose rows matched is reported once per run' \
         produced_by 'emit_udm_csv_unbound_notices() in ltl, counted by udm_note_sources()' \
         contract    "$CONTRACT_640"
     assert_command \
-        command     "grep -aq \"^Note: -udm 'latency:ms:mean': .* 2 CSV file\" '$TMP_DIR/unbound.out.stderr' && ! grep -aq 'nocol' '$TMP_DIR/unbound.out.stderr'" \
+        command     "[[ \$(notice_field '$TMP_DIR/unbound.out' udm-csv-column-absent statement) == \"no column named 'latency' in the header of 2 CSV file(s)\" ]] && [[ \$(notice_field '$TMP_DIR/unbound.out' udm-csv-column-absent evidence) == - ]]" \
         label       'the note gives the count of files (2) and no file name' \
         asserts     'The run-level note counts the CSV files and never lists them' \
         produced_by 'emit_udm_csv_unbound_notices() in ltl' \

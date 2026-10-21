@@ -69,6 +69,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 source "$SCRIPT_DIR/lib/rendered-output.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -125,7 +127,7 @@ capture_run() {
     local rc
     set +e
     with_ansi_colour "$LTL" --disable-progress --terminal-width "$width" \
-        -ni -bs 60 -n 1 --debug-layout "$@" > "$outfile" 2> "$outfile.stderr"
+        -ni -bs 60 -n 1 --debug-layout -V notices "$@" > "$outfile" 2> "$outfile.stderr"
     rc=$?
     set -e
     if [[ $rc -ne 0 || ! -s "$outfile" ]]; then
@@ -372,14 +374,14 @@ assert_command \
 
 assert_command \
     label "explicit request against a format without both criteria: no columns, notice 3 explains why (AC8, AC11, D4)" \
-    command "[[ \$(layout_field '$D1' success_pct vis) == 0 && \$(layout_field '$D1' failure_pct vis) == 0 ]] && grep -q 'percentage columns are not shown' '$D1.stderr'" \
+    command "[[ \$(layout_field '$D1' success_pct vis) == 0 && \$(layout_field '$D1' failure_pct vis) == 0 ]] && [[ \$(notice_kind_count '$D1' classification-columns-not-shown) == 1 ]]" \
     asserts "an explicit --show-classification against formats that do not declare both success and failure criteria shows no columns and says why, rather than leaving them silently absent" \
     produced_by "the post-read notice emission (D12) evaluating the D4 floor" \
     contract "features/452-success-failure-percentage-columns.md R9 notice 3, D4"
 
 assert_command \
     label "declining ledger (java_gc_g1) explicitly requested: no columns, notice 3 (AC8, F8)" \
-    command "[[ \$(layout_field '$G1' success_pct vis) == 0 && \$(layout_field '$G1' failure_pct vis) == 0 ]] && grep -q 'percentage columns are not shown' '$G1.stderr'" \
+    command "[[ \$(layout_field '$G1' success_pct vis) == 0 && \$(layout_field '$G1' failure_pct vis) == 0 ]] && [[ \$(notice_kind_count '$G1' classification-columns-not-shown) == 1 ]]" \
     asserts "a format that declares classification 'none' is treated as declaring no criteria: notice 3, never the leakage warning (F8's misfire is prevented by the D2 predicate)" \
     produced_by "the post-read notice emission (D12)" \
     contract "features/452-success-failure-percentage-columns.md F8, D2, R9 notice 3"
@@ -406,7 +408,7 @@ assert_command \
 
 assert_command \
     label "mixed run + --show-classification: columns render; ineligible buckets print counts, qualifying buckets print shares; notice 1 fires (AC15, AC18, R12, D2)" \
-    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && f0=\$(cell '$M2' '^ 2025-05-07 00:00' failure_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *\"text='\"*'3'* && \$s0 != *'%'* ]] && [[ \$f0 == *\"text='\"*'2'* && \$f0 != *'%'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && grep -q 'cover only operations the log records' '$M2.stderr' || { echo \"s0=\$s0\"; echo \"f0=\$f0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
+    command "[[ \$(layout_field '$M2' success_pct vis) == 1 ]] && s0=\$(cell '$M2' '^ 2025-05-07 00:00' success_pct) && f0=\$(cell '$M2' '^ 2025-05-07 00:00' failure_pct) && s3=\$(cell '$M2' '^ 2025-05-07 03:00' success_pct) && s4=\$(cell '$M2' '^ 2025-05-07 04:00' failure_pct) && [[ \$s0 == *\"text='\"*'3'* && \$s0 != *'%'* ]] && [[ \$f0 == *\"text='\"*'2'* && \$f0 != *'%'* ]] && [[ \$s3 == *\"text='\"*'100%'* ]] && [[ \$s4 == *'66.7%'* ]] && [[ \$(notice_kind_count '$M2' classification-not-event-ledger) == 1 ]] || { echo \"s0=\$s0\"; echo \"f0=\$f0\"; echo \"s3=\$s3\"; echo \"s4=\$s4\"; false; }" \
     asserts "per-bucket eligibility is a data question independent of visibility: a bucket touched by a source that cannot report a success shows the counts the share would have been built from — never a share, and never blank, which would read as a window with no successes and no failures — while an untouched bucket keeps its stable figure and the partial-coverage caution names the blind spots" \
     produced_by "normalize_data_for_output() per-bucket derivation gated on %bucket_outcomes slot 3; emit_classification_percentage_notices()" \
     contract "features/452-success-failure-percentage-columns.md R12/D2, R9 notice 1"
@@ -453,7 +455,7 @@ current_scenario="share-omission-notice"
 
 assert_command \
     label "a run whose shares are withheld says why, naming the formats that define no success rule (R9)" \
-    command "grep -q 'shares are omitted' '$M.stderr' && grep -q 'these formats define no success rule: windchill_method_server' '$M.stderr'" \
+    command "[[ \$(notice_kind_count '$M' classified-shares-omitted) == 1 && \$(notice_field '$M' classified-shares-omitted evidence) == windchill_method_server ]]" \
     asserts "when the classified rows drop their shares because a contributing format can report failures but never successes, the run says so and names that format — the reader is not left to infer why two percentages vanished" \
     produced_by "emit_classification_percentage_notices(), outside the columns-visible gate: the summary rows print whether or not the timeline columns do" \
     contract "features/452-success-failure-percentage-columns.md R9 notice 4, D10"
@@ -466,7 +468,7 @@ current_scenario="clean-run-hygiene"
 
 assert_command \
     label "no qualifying notice fires on a clean, fully-classified ledger run (AC11)" \
-    command "! grep -qE 'percentage columns are not shown|matched neither the success nor the failure classification|cover only operations the log records|shares are omitted' '$A.stderr'" \
+    command "[[ \$(for k in classification-columns-not-shown classification-not-matched classification-not-event-ledger classified-shares-omitted; do notice_kind_count '$A' \$k; done | paste -sd, -) == 0,0,0,0 ]]" \
     asserts "the qualifying notices are mutually exclusive by condition and silent when no condition holds — including the share-omission notice, which has nothing to say on a run whose shares print" \
     produced_by "the post-read notice emission (D12)" \
     contract "features/452-success-failure-percentage-columns.md R9, AC11"
@@ -494,11 +496,11 @@ LEAK_FIXTURE="$TMP_DIR/leakage-1200.txt"
 "$PERL" -e 'for my $i (0..1199) { printf "VERIFY CLS 2025-06-01 10:%02d:%02d.000 level=INFO thread=worker-1 object=Store took=1500 cache warm\n", int($i/60) % 60, $i % 60 }' > "$LEAK_FIXTURE"
 LK="$TMP_DIR/leakage.out"
 set +e
-"$LTL" --disable-progress -ni -lf classification_verification -bs 1440 -n 1 --terminal-width 160 "$LEAK_FIXTURE" > "$LK" 2> "$LK.stderr"
+"$LTL" --disable-progress -ni -lf classification_verification -bs 1440 -n 1 --terminal-width 160 -V notices "$LEAK_FIXTURE" > "$LK" 2> "$LK.stderr"
 set -e
 assert_command \
     label "the leakage warning reads 1200 included line(s) (100%) for 1,200 unclassified lines" \
-    command "grep -qF 'Warning: 1200 included line(s) (100%) matched neither the success nor the failure classification' '$LK.stderr'" \
+    command "[[ \$(notice_field '$LK' classification-not-matched statement) == '1200 included line(s) (100%) matched neither the success nor the failure classification; the percentages exclude them' ]]" \
     asserts "a notice's measured count renders through the one dispatch at its row (prose: 1,200 reads 1200 unclimbed, exact and narrower than any scaled spelling) and its share through the percentage formatter (100%, never 100.0%)" \
     produced_by "emit_classification_percentage_notices() in ltl, through value_text() and the notice and notice share rows" \
     contract "features/617-width-to-format-rule.md D6, D14, D23, D25"
