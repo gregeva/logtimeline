@@ -592,14 +592,17 @@ surface      ask before the read            ask during the read     panel before
   notice's structure holds its response. A recorded choice has an effect
   afterwards, through consumers that look for the choices made; they belong to
   the data model.
-- **A separate code section applies the choices.** Before execution
-  continues, one step goes through the notices for runtime-changing choices
-  taken and applies them. A choice affects only the stages that come after
-  it, never what was processed before it: the coherence of the output on any
-  one dimension is paramount. Which options a choice point may change (the
-  sort order, the number of messages shown, as examples) is decided per choice
-  point, by the feature that offers it, and is no concern of the notice,
-  selection and input surfaces.
+- **Applying a choice is the producer's code, not the model's.** Before
+  execution continues, the producer's own code goes through the notices for
+  runtime-changing choices taken and applies them. A choice affects only the
+  stages that come after it, never what was processed before it: the
+  coherence of the output on any one dimension is paramount. Which settings a
+  choice changes and how (the sort order, the number of messages shown, as
+  examples) is the producer's responsibility, decided per choice point, and
+  no concern of the notice, selection and input surfaces (architect,
+  2026-10-21, restated after Claude twice drew an apply step into the model).
+  The model's whole part is the answer on the record (D12) and the identifier
+  that gets the record back (D11).
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.
 - **Two parameters shape every notice: immediacy and choice** (architect,
