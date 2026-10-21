@@ -146,6 +146,11 @@ the options and what each does and does not do. When the records settle it,
 the step is recorded and taken, and saying so is the answer; alternatives
 invented to show a choice where none exists cost the architect's time twice.
 
+**The validated prototype is the design.** What the architect judged in the
+terminal is what the prototype's code does; after the exit, a contract line
+that reads otherwise is corrected to the prototype's behaviour, never put back
+to the architect as a choice.
+
 **Exit.** A design prototype exits when the architect has judged each
 selected surface in a terminal; each surface has a demonstrated way to be
 captured and checked unattended, chosen per surface; the contract has moved

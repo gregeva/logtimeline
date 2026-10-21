@@ -110,8 +110,9 @@ key and an action.
   the state the answer reaches, and the answer is taken.
 - **Two stages** (D8): a complex choice first asks whether to look at the
   options or continue as planned, a yes or no defaulting to continuing; only a
-  yes leads to the options list. The second stage is measured with the first,
-  so the surface does not change size at the transition.
+  yes leads to the options list. The width is chosen once for both stages;
+  the height is each stage's own, growing when the options list opens, since
+  the transition is a decision, not navigation (§ Pop-up size).
 - **Observable**: the `-V notices` section (D15) records each choice point
   in the block of the record that carries it, `choice: yes`, with the answer
   taken and how (a key, the default after the countdown, given ahead, or
@@ -197,10 +198,12 @@ height; for an options list the unit is the width at which its last column
 wraps to no more than two rows, so dense content takes a wider tier. The
 measure includes the top edge's text and the key bar. A caller may name a
 tier. The browser takes the full width when its widest detail exceeds the
-large tier. A surface never changes size while it is shown: the browser's
-height is computed from its tallest detail before it is drawn, and the second
-stage of a choice is measured with the first; the one exception is a caller
-that asks for a fixed height, which then holds blank rows in the first stage.
+large tier. A surface never changes size while the analyst navigates it:
+the browser's height is computed from its tallest detail before it is drawn.
+A choice's width is chosen once, measured with its second stage; its height
+is each stage's own, growing when the options list opens, a decision rather
+than navigation. A caller that asks for a fixed height gets the taller
+stage's height for both, the first stage holding blank rows.
 
 ### Where a component is drawn (D5)
 
