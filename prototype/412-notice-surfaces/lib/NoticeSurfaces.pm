@@ -267,7 +267,7 @@ sub bulleted {
 #
 #   panel( s, W, notices => [...], bullet => glyph, form => headed|edge )
 #
-# One box round all the notices, however many (D9 sends many to the browser):
+# One box round all the notices, however many:
 # each category headed once, its notices one row each, the categories divided
 # by a blank row (D3). The title is `notices` and its count, dim. A single
 # category takes the edge form (round 5: "this is the one"): the category's

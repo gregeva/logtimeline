@@ -221,10 +221,13 @@ What? How? Why? by default. The headings are parameters of the consumer, and a
 consumer whose options have fewer parts gets two columns or one. The why comes
 from the producer as part of the notice, not from the surface.
 
-### D9 — Many notices go to the browser, never to a panel (architect, 2026-10-19, from round 2)
+### D9 — withdrawn (2026-10-21)
 
-A large number of notices is for the interactive browser; printing them all to
-the terminal as a panel is rejected.
+Claude had written here "many notices go to the browser, never to a panel",
+from the architect's round 2 remark that the 25-notice panel was a lot of
+information. No rule or expectation was stated: which surface a moment of the
+run uses is the implementer's choice for that feature, never a rule of the
+framework or the engine. The number is left so that the others keep theirs.
 
 ### D10 — On a light background, secondary text is an explicit grey, not faint (architect, 2026-10-20, from the Windows round)
 
@@ -580,8 +583,8 @@ surface      ask before the read            ask during the read     panel before
 - **A producer may fire many times per file** (architect, 2026-10-21,
   correcting Claude's claim that the most frequent producer fires once per
   file). A finding on an API is raised once per API found, five in one file as
-  easily as one. The rule that a recurring error or warning is logged once
-  belongs to producers of that kind; it is not a rule of the notice capability.
+  easily as one. How often a producer raises is the producer's own practice,
+  outside the model.
 - **Migrating the current producers is part of the issue**, planned, the cost
   of bringing on a structured pattern that can grow; never a caveat against
   the model.

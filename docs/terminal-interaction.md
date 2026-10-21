@@ -14,7 +14,7 @@ surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,
 after seven review rounds on macOS, dark and light. Nothing in `ltl`
 implements it yet; the first delivery is the panel, with no interactivity, and
 the other components follow when a feature needs them. The locked decisions
-(D4, D5, D7, D8, D9, D10) are in `features/412-notice-surfaces.md` § Locked
+(D4, D5, D7, D8, D10) are in `features/412-notice-surfaces.md` § Locked
 decisions, which remains their authority; how input is supplied, including
 answers given ahead, is #748 (take the analyst's input at choice points, with
 a default and answers given ahead). The producer interface, how code anywhere
@@ -37,8 +37,8 @@ future consumer (architect, 2026-10-19).
 ## Components
 
 Three, and only three. Every moment of the run calls one of them with its own
-content; no moment has a presentation of its own (D5). Many notices go to the
-browser, never to a panel (D9).
+content; no moment has a presentation of its own (D5). Which component a
+moment uses is the choice of the feature that calls it.
 
 | component | for | what the caller passes |
 |---|---|---|

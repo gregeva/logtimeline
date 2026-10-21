@@ -327,7 +327,7 @@ By option:
 The architect paused the stage to redesign its process. What was diagnosed,
 what was agreed and the round procedure that came of it are recorded in
 `features/412-notice-surfaces.md` § Prototyping; the decisions the three
-rounds had settled are locked there as D2 to D9, and the framework's
+rounds had settled are locked there as D2 to D8 (D9, written then, was withdrawn on 2026-10-21), and the framework's
 specification is its § Surface framework contract, reviewed by the architect
 as a document before round 4 was built. The lessons go into
 `prototype/README.md` when the stage closes, as the rules of a design
