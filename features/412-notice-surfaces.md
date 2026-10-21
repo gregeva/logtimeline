@@ -267,6 +267,29 @@ an option named by index is positional and breaks on reordering, so each
 option carries a key, one name the producer gives; the prototype's four-value
 return list is replaced by the reference.
 
+### D13 — The notice record (architect, 2026-10-21, from the notice data model walkthrough)
+
+What a notice is in the store, one record per raising, never merged:
+
+| field | holds | set by |
+|---|---|---|
+| id | unique per raising, returned to the caller (D11) | the store |
+| kind | a stable name for the notice's type (`read-path-fallback`), the same in every run; what a harness asserts by and what an answer given ahead (#748) names | the producer |
+| category | one of the six (D1) | the producer |
+| focus, statement, evidence, remedy | the notice's parts (surface contract); evidence is zero or more | the producer |
+| producer | the sub that raised it | the producer |
+| stage | the pipeline stage it was raised in | the store |
+| immediacy | now or deferred | the producer |
+| visible | shown on the surfaces or not, default yes (D11) | the producer |
+| question, buttons, default button, countdown, options | the choice's definition when it has one; each option carries a key, its parts (D8), its command options and its effect | the producer |
+| answer | button letter, option key, how (D12); present means locked | the surface |
+
+The choice's definition lives on the record, not on the ask call, so a
+deferred notice carries its choice and the browser layers the ask on it from
+the record alone; the ask call carries presentation only (placement, the
+compact form, the seconds, whether to leave a record, D4). Not on the record:
+how often a producer raises, and any merging.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
