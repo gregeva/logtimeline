@@ -457,14 +457,14 @@ scenario_unreadable_value() {
 scenario_inverted_range_quotes() {
     current_scenario="inverted-range-quotes"
     echo "[$current_scenario]"
-    run_ltl inverted -ni -bs 1440 -oe -n 1 -dmin 2s -dmax 500ms "$BOUNDARY_FIXTURE"
-    local expected='Warning: -dmin 2s is greater than -dmax 500ms - the range is unsatisfiable, no log entries can match'
-    if [[ "$rc" -eq 0 ]] && grep -qxF -- "$expected" "$TMP_DIR/inverted.err"; then
+    run_ltl inverted -ni -bs 1440 -oe -n 1 -V notices -dmin 2s -dmax 500ms "$BOUNDARY_FIXTURE"
+    local expected='-dmin 2s is greater than -dmax 500ms - the range is unsatisfiable, no log entries can match'
+    if [[ "$rc" -eq 0 ]] && notice_field "$TMP_DIR/inverted.out" range-unsatisfiable statement | grep -qxF -- "$expected"; then
         pass_with "inverted range quoted as typed"
     else
         fail_with "inverted range quoted as typed" 'The inverted-range warning compares the resolved values and quotes the values as the user typed them' \
             'adapt_to_command_line_options() in ltl (the inverted-range check over @quantity_options)' 'features/605-input-units.md section 4 D18, section 6 AC12' \
-            "exit: $rc" "expected: $expected" "stderr: $(tr '\n' '|' < "$TMP_DIR/inverted.err")"
+            "exit: $rc" "expected: $expected" "notices: $(notice_field "$TMP_DIR/inverted.out" range-unsatisfiable statement | tr '\n' '|')"
     fi
 }
 

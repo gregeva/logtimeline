@@ -48,6 +48,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/run-dir.sh
 source "$SCRIPT_DIR/lib/run-dir.sh"
 
@@ -185,10 +187,11 @@ run_messages() {
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"; MSG_CSV=""
     local rc
     set +e
-    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100000 -o "$@" \
+    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100000 -o -V notices "$@" \
         > run.out 2> run.err )
     rc=$?
     set -e
+    notice_lines "$RUN_DIR/run.out" > "$RUN_DIR/run.notices"
 
     if ! assert_no_runtime_warnings "$RUN_ERR" "$current_scenario/$label"; then
         record_failure "perl-runtime-warnings-on-stderr ($label)"
@@ -225,9 +228,10 @@ run_expect_error() {
     fi
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"
     set +e
-    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe "$@" > run.out 2> run.err )
+    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -V notices "$@" > run.out 2> run.err )
     RUN_EXIT=$?
     set -e
+    notice_lines "$RUN_DIR/run.out" > "$RUN_DIR/run.notices"
     if ! assert_no_runtime_warnings "$RUN_ERR" "$current_scenario/$label"; then
         record_failure "perl-runtime-warnings-on-stderr ($label)"
     fi
@@ -413,16 +417,17 @@ check_classification() {
     ' "$1" "$2" "$3" "$4"
 }
 
-# The deprecation notice: exactly one stderr line says -uuid is deprecated and
-# names --mask; a run without -uuid prints none.
+# The deprecation notice: exactly one record says -uuid is deprecated and
+# names --mask; a run without -uuid raises none. The records are the run's
+# -V notices, one a line beside the stderr capture (run.notices).
 check_notice() {
-    local err="$1" expected="$2"
-    if [[ ! -e "$err" ]]; then echo "anchor not found: no stderr capture at $err"; return 1; fi
+    local err="${1%.err}.notices" expected="$2"
+    if [[ ! -e "$err" ]] || grep -qx MISSING-SECTION "$err"; then echo "anchor not found: no -V notices section beside $1"; return 1; fi
     local n
-    n=$(grep -c -- '-uuid.*deprecated' "$err" || true)
-    if [[ "$n" -ne "$expected" ]]; then echo "$n deprecation lines on stderr, expected $expected"; sed 's/^/  | /' "$err"; return 1; fi
-    if [[ "$expected" -eq 1 ]] && ! grep -q -- '--mask' "$err"; then echo "the notice does not name --mask"; sed 's/^/  | /' "$err"; return 1; fi
-    echo "$n deprecation line(s), as expected"
+    n=$(grep -c -- '^deprecated-spelling | -uuid' "$err" || true)
+    if [[ "$n" -ne "$expected" ]]; then echo "$n deprecation notices, expected $expected"; sed 's/^/  | /' "$err"; return 1; fi
+    if [[ "$expected" -eq 1 ]] && ! grep -q -- '^deprecated-spelling | -uuid.*--mask' "$err"; then echo "the notice does not name --mask"; sed 's/^/  | /' "$err"; return 1; fi
+    echo "$n deprecation notice(s), as expected"
 }
 
 # ---------------------------------------------------------------------------

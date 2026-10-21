@@ -601,8 +601,42 @@ The pane runs under bash, which goes on after a child that handled Ctrl-C
 itself. Two sabotaged copies (Esc recorded as a key, the countdown never
 stopped) fail the assertions written for them.
 
-**Step 2**, the notices raised at option parsing (rows 1 to 11) on the store
-and asked about before the read, follows.
+**Step 2: the notices of option parsing.** Rows 1 to 11 are records of the
+store, raised as the options are read, every one *your options*; none prints on
+standard error. Each statement is the notice's text as it was, without its
+`Warning:` or `Note:` prefix; the deprecation notice takes the spelling as its
+focus and its advice as its remedy. Their kinds, one per message: `udm-invalid-regex`,
+`udm-no-name`, `udm-key-and-pattern`, `udm-function-in-unit-slot`,
+`udm-counting-with-transform`, `udm-invalid-function`, `udm-fixed-string-pattern`,
+`udm-unit-ignored`, `udm-unit-unknown` (row 1); `udm-repeat-dropped`,
+`udm-name-collision` (row 2); `pattern-file-missing`, `pattern-file-too-large`,
+`pattern-file-unreadable`, `pattern-file-binary`, `pattern-file-empty`,
+`pattern-file-many-patterns`, `merged-regex-too-long` (row 3);
+`invalid-chart-value` (row 4); `range-unsatisfiable` (row 5);
+`heatmap-counting-metric`, `histogram-counting-metric` (row 6);
+`top-messages-zero` (row 7); `sort-gated-by-omit` (row 8);
+`discard-switches-off-metric` (row 9); `discard-wins` (row 10);
+`deprecated-spelling` (row 11).
+
+`ask_about_option_notices()`, called once the options are settled and before
+the progress line, puts them to the analyst in one ask, the prototype's
+preread choice: `options-review`, *your options*, "Continue with these
+options?", **Stop and correct them** (`s`) or **Continue** (`c`, the default),
+`shows` naming the notices. Stopping writes `-V notices` and exits 0 before any
+file is read. Notices the fixture option raises at the options stage are left
+to the surface their set exercises. In a terminal a run whose options raise a
+notice now waits up to ten seconds before the read, the countdown D16 set.
+
+The harnesses: 14 harnesses read these notices on standard error; each now
+reads them from `-V notices` by kind, through `tests/lib/notices.sh`, which
+gains `without_notice_boxes` for the comparisons of two runs that differ only
+by a notice (the pre-read question prints on standard output). Four snapshot
+references gain the question, each a scenario whose options use a deprecated
+spelling (`access-w80`, `scriptlog-w100`, `omit-os-w160`, `ms-w160`); the other
+70 recapture identical. `validate-notices.sh` gains `preread` (the question
+with no terminal, and in tmux `s` stopping the run before the read) and checks
+every kind of rows 1 to 11 in `migration-categories`, now reading `ask()` calls
+too. `docs/usage.md` § Notices describes the question.
 
 ## Inventory of current notices
 

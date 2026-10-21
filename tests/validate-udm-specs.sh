@@ -320,8 +320,8 @@ scenario_undelimited_regex() {
         asserts     'D4(b)/D6: the intent hint is spoken inside the zero-match notice' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
-    assert_absent "$out.stderr" \
-        pattern     'Warning:' \
+    assert_absent "$out.notices" \
+        pattern     'options-review |' \
         asserts     'D4(b): the hint is never spoken at parse time - the spec is valid by the grammar' \
         produced_by 'parse_udm_configs() in ltl' \
         contract    "$CONTRACT"
@@ -400,8 +400,8 @@ scenario_absent_field() {
         asserts     'D4(c): no hint is offered when no rule fires - the field may simply not be in the file' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \
         contract    "$CONTRACT"
-    assert_absent "$out.stderr" \
-        pattern     'Warning:' \
+    assert_absent "$out.notices" \
+        pattern     'options-review |' \
         asserts     'D3: an absent field is never a parse-time warning' \
         produced_by 'parse_udm_configs() in ltl' \
         contract    "$CONTRACT"
@@ -424,8 +424,8 @@ scenario_parse_time_rejections() {
     check_capture_warnings "$out"
     assert_section_present "$out"
 
-    assert_line "$out.stderr" \
-        pattern     "Warning: 'distinct' in the unit slot of -udm 'files:distinct:/Download\\/[^ ?]+/' is a function, not a unit - did you mean 'files::distinct:/Download\\/[^ ?]+/'? (leave the unit slot empty when there is no unit), skipping" \
+    assert_line "$out.notices" \
+        pattern     "udm-function-in-unit-slot | - | 'distinct' in the unit slot of -udm 'files:distinct:/Download\\/[^ ?]+/' is a function, not a unit - did you mean 'files::distinct:/Download\\/[^ ?]+/'? (leave the unit slot empty when there is no unit), skipping | - | -" \
         asserts     'D5(i): a function name in the unit slot is a provable defect, spoken at parse time with the corrected spec' \
         produced_by 'parse_udm_configs() (unit-slot check) in ltl' \
         contract    "$CONTRACT"
@@ -434,8 +434,8 @@ scenario_parse_time_rejections() {
         asserts     'A rejected spec is listed on the section with its reason token' \
         produced_by 'parse_udm_configs() (reject) + emit_udm_specs_verbose() in ltl' \
         contract    "$CONTRACT"
-    assert_line "$out.stderr" \
-        pattern     "Warning: the pattern /report/ in -udm 'x::distinct:/report/' is a fixed string, so 'distinct' can only ever be 1 - give it a capture group or a varying pattern, skipping" \
+    assert_line "$out.notices" \
+        pattern     "udm-fixed-string-pattern | - | the pattern /report/ in -udm 'x::distinct:/report/' is a fixed string, so 'distinct' can only ever be 1 - give it a capture group or a varying pattern, skipping | - | -" \
         asserts     'D5(ii): a fixed-string pattern under distinct is a provable defect, spoken at parse time' \
         produced_by 'parse_udm_configs() (literal-pattern check) in ltl' \
         contract    "$CONTRACT"
@@ -585,8 +585,8 @@ scenario_collision_transform() {
         asserts     'D1: the delta metric produces its own answer (20+30+40 over 3, the first line seeding the state)' \
         produced_by 'derive_udm_production() in ltl' \
         contract    "$CONTRACT_482"
-    assert_absent "$out.stderr" \
-        pattern     'Warning:' \
+    assert_absent "$out.notices" \
+        pattern     'options-review |' \
         asserts     'D1: specs a name can tell apart are separated silently, not refused' \
         produced_by 'parse_udm_configs() in ltl' \
         contract    "$CONTRACT_482"
@@ -717,8 +717,8 @@ scenario_collision_refused() {
     check_capture_warnings "$out"
     assert_section_present "$out"
 
-    assert_line "$out.stderr" \
-        pattern     "Warning: -udm 'rows:/(\\d+) rows/' and -udm 'rows' both resolve to the metric name 'rows' - give them different names, skipping the later one" \
+    assert_line "$out.notices" \
+        pattern     "udm-name-collision | - | -udm 'rows:/(\\d+) rows/' and -udm 'rows' both resolve to the metric name 'rows' - give them different names, skipping the later one | - | -" \
         asserts     'D4: the refusal names both specs and the name they contend for, and says what to change' \
         produced_by 'parse_udm_configs() (identity refusal) in ltl' \
         contract    "$CONTRACT_482"
@@ -752,8 +752,8 @@ scenario_collision_identical() {
     check_capture_warnings "$out"
     assert_section_present "$out"
 
-    assert_line "$out.stderr" \
-        pattern     "Note: -udm 'rows::ratio' was given more than once - keeping one metric, dropping the repeat" \
+    assert_line "$out.notices" \
+        pattern     "udm-repeat-dropped | - | -udm 'rows::ratio' was given more than once - keeping one metric, dropping the repeat | - | -" \
         asserts     'D5: the drop is a behavioural notice, always spoken so a typo is not hidden' \
         produced_by 'parse_udm_configs() (duplicate-argument drop) in ltl' \
         contract    "$CONTRACT_482"
@@ -857,8 +857,8 @@ scenario_no_collision_names_as_typed() {
         asserts     'D3: a named function adds no suffix when nothing collides with it' \
         produced_by 'resolve_udm_metric_names() in ltl' \
         contract    "$CONTRACT_482"
-    assert_absent "$out.stderr" \
-        pattern     'Note: -udm' \
+    assert_absent "$out.notices" \
+        pattern     'options-review |' \
         asserts     'Distinct names produce neither a refusal nor a duplicate-drop notice' \
         produced_by 'parse_udm_configs() in ltl' \
         contract    "$CONTRACT_482"
@@ -1332,8 +1332,8 @@ scenario_number_multiplier_and_unknown_unit() {
 
     out=$(run_bytes -udm 'v:KBytes:max')
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
-        pattern     "Warning: Unknown unit 'KBytes' in -udm 'v:KBytes:max', treating as raw number (time units: ns, us, ms, s, m, h, d, w, month, year; byte units: B, kB, MB, GB, TB, KiB, MiB, GiB, TiB)" \
+    assert_line "$out.notices" \
+        pattern     "udm-unit-unknown | - | Unknown unit 'KBytes' in -udm 'v:KBytes:max', treating as raw number (time units: ns, us, ms, s, m, h, d, w, month, year; byte units: B, kB, MB, GB, TB, KiB, MiB, GiB, TiB) | - | -" \
         asserts     'An unknown unit warns and names the time and byte vocabularies the slot accepts' \
         produced_by 'parse_udm_configs() in ltl (the lists are the ladders own)' \
         contract    "$CONTRACT_608"

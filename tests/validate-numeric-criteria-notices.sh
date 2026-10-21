@@ -200,19 +200,19 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/inverted.stderr"
 if capture_stderr "$errfile" $SHAPE -dmin 500 -dmax 100 -hbmin 6000 -hbmax 5000 "$BOUNDARY_FIXTURE"; then
     assert_command \
-        command     "grep -aq 'Warning: -dmin 500 is greater than -dmax 100 - the range is unsatisfiable, no log entries can match' '$errfile'" \
+        command     "notice_field '$errfile.out' range-unsatisfiable statement | grep -qxF -- '-dmin 500 is greater than -dmax 100 - the range is unsatisfiable, no log entries can match'" \
         label       'inverted filter range (-dmin > -dmax) warns as unsatisfiable' \
         asserts     'When a numeric filter minimum exceeds its maximum, ltl warns that the range is unsatisfiable and that no log entries can match, instead of rendering an empty result silently' \
         produced_by 'adapt_to_command_line_options() in ltl (inverted-range validation after highlight activation)' \
         contract    "$INVERTED_RANGE_CONTRACT"
     assert_command \
-        command     "grep -aq 'Warning: -hbmin 6000 is greater than -hbmax 5000 - the range is unsatisfiable, no log entries can be highlighted' '$errfile'" \
+        command     "notice_field '$errfile.out' range-unsatisfiable statement | grep -qxF -- '-hbmin 6000 is greater than -hbmax 5000 - the range is unsatisfiable, no log entries can be highlighted'" \
         label       'inverted highlight range (-hbmin > -hbmax) warns as unsatisfiable' \
         asserts     'When a numeric highlight minimum exceeds its maximum, ltl warns that the range is unsatisfiable and that no log entries can be highlighted; the run itself proceeds because highlights never change the analyzed population' \
         produced_by 'adapt_to_command_line_options() in ltl (inverted-range validation after highlight activation)' \
         contract    "$INVERTED_RANGE_CONTRACT"
     assert_command \
-        command     "[ \"\$(grep -ac '^Warning: .* the range is unsatisfiable' '$errfile')\" -eq 2 ]" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' range-unsatisfiable)\" -eq 2 ]" \
         label       'exactly one warning per inverted pair' \
         asserts     'Each of the six min/max pairs is validated independently; only the pairs actually inverted produce a warning' \
         produced_by 'adapt_to_command_line_options() in ltl (inverted-range validation after highlight activation)' \
@@ -228,7 +228,7 @@ echo "[$current_scenario]"
 errfile="$TMP_DIR/satisfiable.stderr"
 if capture_stderr "$errfile" $SHAPE -dmin 100 -dmax 100 -hbmin 5000 -hbmax 6000 "$BOUNDARY_FIXTURE"; then
     assert_command \
-        command     "! grep -aq 'the range is unsatisfiable' '$errfile'" \
+        command     "[ \"\$(notice_kind_count '$errfile.out' range-unsatisfiable)\" -eq 0 ]" \
         label       'no warning for satisfiable ranges (min == max is a valid single-value band)' \
         asserts     'An equal-bounds range is satisfiable (bounds are inclusive) and a normal min < max range is satisfiable; neither produces the unsatisfiable-range warning' \
         produced_by 'adapt_to_command_line_options() in ltl (inverted-range validation after highlight activation)' \

@@ -702,8 +702,9 @@ surface (`features/412-notice-surfaces.md` § D15). An absence check ("the run
 says nothing about X") reads the record count, `0` of that kind or
 `notice_total` of `0`; an empty standard error proves nothing about a notice,
 since none is printed there. The panel's own rendering is the render-invariant
-surface of `tests/validate-notices.sh`. The notices raised while the options
-are read still print on standard error until they move to the store.
+surface of `tests/validate-notices.sh`. A comparison of two runs that differ
+only by a notice (one spelling deprecated, the other not) compares them through
+`without_notice_boxes`, since the notices print on standard output.
 
 ## Runtime-warning cleanliness
 

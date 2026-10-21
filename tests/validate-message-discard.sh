@@ -47,6 +47,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/run-dir.sh
 source "$SCRIPT_DIR/lib/run-dir.sh"
 
@@ -159,10 +161,12 @@ run_messages() {
     RUN_OUT="$RUN_DIR/run.out"; RUN_ERR="$RUN_DIR/run.err"; MSG_CSV=""; STATS_CSV=""
     local rc
     set +e
-    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o "$@" \
+    ( cd "$RUN_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -V notices "$@" \
         > run.out 2> run.err )
     rc=$?
     set -e
+    # The notices the run raised, one record a line (-V notices).
+    notice_lines "$RUN_DIR/run.out" > "$RUN_DIR/run.notices"
 
     if ! assert_no_runtime_warnings "$RUN_DIR/run.err" "$current_scenario/$label"; then
         record_failure "perl-runtime-warnings-on-stderr ($label)"
@@ -337,14 +341,19 @@ message_columns() {
 }
 
 # A stderr file carries exactly one notice matching the pattern.
+# The notices are the run's -V notices records, one a line beside its stderr
+# capture (run.notices); a pattern written for the stderr text drops its
+# "Note: " prefix, which the record's statement does not carry, and matches
+# the statement.
 check_one_notice() {
-    local errfile="$1" pattern="$2"
-    if [[ ! -f "$errfile" ]]; then
-        echo "anchor not found: no stderr captured at $errfile"
+    local errfile="${1%.err}.notices" pattern="${2/#^Note: /}"
+    pattern="${pattern%\$}"
+    if [[ ! -f "$errfile" ]] || grep -qx MISSING-SECTION "$errfile"; then
+        echo "anchor not found: no -V notices section beside $1"
         return 1
     fi
     local n
-    n=$(grep -cE "$pattern" "$errfile" || true)
+    n=$(grep -cE -- "$pattern" "$errfile" || true)
     if [[ "$n" -ne 1 ]]; then
         echo "expected exactly one notice matching /$pattern/, found $n:"
         sed 's/^/  | /' "$errfile"
@@ -785,7 +794,7 @@ scenario_metrics() {
         produced_by "$PRODUCED_RESOLVE" \
         contract    "$CONTRACT_613 D12; criterion 11"
     assert_command \
-        command     "! grep -q 'switched off' '$RUN_ERR'" \
+        command     "! grep -qx MISSING-SECTION '$RUN_DIR/run.notices' && ! grep -q 'switched off' '$RUN_DIR/run.notices'" \
         label       '-d duration prints no switch-off notice' \
         asserts     'A metric named on -d is switched off without a notice, as its omit option does.' \
         produced_by "$PRODUCED_RESOLVE" \
@@ -1024,7 +1033,7 @@ scenario_name_vocabulary() {
         contract    "$CONTRACT_613 D12 and D13; criterion 12"
     run_messages d-lat -udm 'lat::max:elapsed' -xqs -d lat -V udm-specs "$VOCABULARY_FIXTURE" || return 0
     assert_command \
-        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && ! grep -q 'switched off' '$RUN_ERR'" \
+        command     "! grep -q '^udm: name=lat ' '$RUN_OUT' && ! grep -qx MISSING-SECTION '$RUN_DIR/run.notices' && ! grep -q 'switched off' '$RUN_DIR/run.notices'" \
         label       '-d lat switches lat off without a notice' \
         asserts     'A user-defined metric named by its name on -d is switched off as a built-in metric named on -d is, without a notice.' \
         produced_by "$PRODUCED_RESOLVE" \

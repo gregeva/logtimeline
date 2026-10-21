@@ -19,6 +19,11 @@
 #       One line per record, in raising order: kind, focus, statement,
 #       evidence (its pieces joined by '; ') and remedy, separated by ' | ',
 #       for a harness whose assertions match a whole notice by pattern.
+#   without_notice_boxes CAPTURE
+#       The capture with every notice box set aside (an ask, the panel) with
+#       the blank row after each, the -V notices section, and the blank rows
+#       before the first row left: what two runs that differ only in their
+#       notices are compared by.
 #
 # A capture without the section is a missing anchor: each function prints
 # MISSING-SECTION, so a check against it fails.
@@ -75,4 +80,15 @@ notice_lines() {
         /^  evidence: /  { v = substr($0, 13); evidence = evidence == "" ? v : evidence "; " v }
         /^  remedy: /    { remedy = substr($0, 11) }
     ' "$capture"
+}
+
+without_notice_boxes() {
+    perl -ne '
+        my $plain = $_; $plain =~ s/\e\[[0-9;]*m//g;
+        next if $plain =~ /^=== notices ===$/ .. $plain =~ /^=== END notices ===$/;
+        if ($plain =~ /^\x{e2}\x{95}\x{ad}/ .. $plain =~ /^\x{e2}\x{95}\x{b0}/) { $box = 1; next }
+        if ($box) { $box = 0; next if $plain eq "\n" }
+        next if !$seen && $plain eq "\n";
+        $seen = 1;
+        print;' "$1"
 }

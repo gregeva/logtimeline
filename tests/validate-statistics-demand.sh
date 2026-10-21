@@ -102,15 +102,20 @@ run_section_on() {
 }
 
 # after_demand <capture>: what a run printed after its statistics-demand
-# section, the notices panel and the notices section set aside: the rendered
-# messages two sorts are compared by. A fallback notice names the operand as
-# typed, so it differs between two spellings of one sort.
+# section, the notices panel, the notices section and the blank rows before
+# the first rendered row set aside: the rendered messages two sorts are
+# compared by. A fallback notice names the operand as typed, so it differs
+# between two spellings of one sort; a spelling that raises a notice is asked
+# about before the read, and the section after that ask opens with the one
+# blank row between sections.
 after_demand() {
     sed '1,/^=== END statistics-demand ===$/d' "$1" | perl -ne '
         my $plain = $_; $plain =~ s/\e\[[0-9;]*m//g;
         next if $plain =~ /^=== notices ===$/ .. $plain =~ /^=== END notices ===$/;
         if ($plain =~ /^\x{e2}\x{95}\x{ad}/ .. $plain =~ /^\x{e2}\x{95}\x{b0}/) { $panel = 1; next }
         if ($panel) { $panel = 0; next if $plain eq "\n" }
+        next if !$seen && $plain eq "\n";
+        $seen = 1;
         print;'
 }
 
@@ -547,7 +552,7 @@ for combo in "p99:-od:duration:-od/--omit-durations" "bytes_mean:-ob:bytes:-ob/-
             produced_by 'apply_parse_time_sort_gate() in ltl (sort key reset); calculate_all_statistics() emits sort_selection only on the calculated-statistic branch' \
             contract    "$GATE_CONTRACT"
         assert_command \
-            command     "grep -qF 'Note: cannot apply -so/--sort-on $operand because $flagname discards the $family metric - the messages table is ordered by occurrences' '$out.stderr'" \
+            command     "[[ \$(notice_field '$out' sort-gated-by-omit statement) == 'cannot apply -so/--sort-on $operand because $flagname discards the $family metric - the messages table is ordered by occurrences' ]]" \
             label       "contradiction note on stderr names -so/--sort-on $operand, $flagname and the fallback" \
             asserts     'The parse-time note names the contradiction (the option that discarded the metric, short and long form) and states that the table is ordered by occurrences' \
             produced_by 'apply_parse_time_sort_gate() in ltl' \
@@ -785,8 +790,9 @@ current_scenario="scenario-10-no-message-retention-inert-options"
 echo "--- $current_scenario ---"
 out=$(run_section statistics-demand -n 0 -g 85 -mdm bin -so p50)
 check_capture "$out"
-assert_line "$out.stderr" \
-    pattern     'Note: -n/--top-messages 0 retains no message, so .*-g/--group-similar.*-mdm/--message-stats-data-model.*-so/--sort-on have no effect' \
+notice_lines "$out" > "$out.notices"
+assert_line "$out.notices" \
+    pattern     '^top-messages-zero \| - \| -n/--top-messages 0 retains no message, so .*-g/--group-similar.*-mdm/--message-stats-data-model.*-so/--sort-on have no effect \|' \
     asserts     'Message grouping, the message statistics data model and the message ranking are reported inert (not rejected) when no message is retained, naming each option the user passed' \
     produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
@@ -817,8 +823,9 @@ cd "$CSV_ONLY_DIR"
 out=$(run_section statistics-demand -bs 1440 -oe -n 0 -o)
 cd "$WORKDIR"
 check_capture "$out"
-assert_line "$out.stderr" \
-    pattern     'Note: -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written' \
+notice_lines "$out" > "$out.notices"
+assert_line "$out.notices" \
+    pattern     '^top-messages-zero \| - \| -n/--top-messages 0 retains no message, so -o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written \|' \
     asserts     'A CSV request is reported as half-served when no message is retained: the user is told at run time which of the two files is not written and why' \
     produced_by 'adapt_to_command_line_options() in ltl (per-message retention fold, before the statistics-demand resolution)' \
     contract    'features/458-top-messages-zero-no-per-message-retention.md section Decisions'
@@ -1122,7 +1129,7 @@ for pair in mean:avg:mean std_dev:stddev:std_dev; do
             contract    "$ALIAS_CONTRACT"
     done
     assert_command \
-        command     "diff <(sed '1,/^=== END statistics-demand ===\$/d' '$one') <(sed '1,/^=== END statistics-demand ===\$/d' '$two') >/dev/null && [ -n \"\$(sed '1,/^=== END statistics-demand ===\$/d' '$one')\" ]" \
+        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ -n \"\$(after_demand '$one')\" ]" \
         label       "-so $first and -so $second render the same ranked messages" \
         asserts     "An alias ranks the messages as its statistic does: the rendered messages table of -so $second is identical to that of -so $first" \
         produced_by 'adapt_to_command_line_options() and print_message_summary() in ltl' \
@@ -1222,7 +1229,7 @@ for pair in bytes:bytes_sum count:count_sum duration:duration_sum min:duration_m
     one=$(ranked "$first"); two=$(ranked "$second")
     check_capture "$one"; check_capture "$two"
     assert_command \
-        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ -n \"\$(after_demand '$one')\" ] && ! grep -q '^Warning:' '$one.stderr' '$two.stderr'" \
+        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ -n \"\$(after_demand '$one')\" ] && [ \"\$(notice_kind_count '$one' deprecated-spelling)\$(notice_kind_count '$two' deprecated-spelling)\" = 00 ]" \
         label       "-so $first and -so $second render the same ranked messages, with no deprecation notice" \
         asserts     "A shorthand is the same sort as its full name: -so $first and -so $second give identical message tables, and neither is a deprecated spelling (the fixture carries no count values, so the count sorts print their fallback note, which is not read here)" \
         produced_by "$VOCAB_PRODUCED_BY" \
@@ -1235,7 +1242,7 @@ for pair in total:occurrences count_total:count_occurrences std_dev:stddev durat
     one=$(ranked "$old"); two=$(ranked "$new")
     check_capture "$one"; check_capture "$two"
     assert_command \
-        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ \"\$(grep -c '^Warning: $old is deprecated.*(given to -so/--sort-on): use $new\$' '$one.stderr')\" = 1 ] && ! grep -q '^Warning:' '$two.stderr'" \
+        command     "diff <(after_demand '$one') <(after_demand '$two') >/dev/null && [ \"\$(notice_kind_count '$one' deprecated-spelling)|\$(notice_field '$one' deprecated-spelling focus)|\$(notice_field '$one' deprecated-spelling remedy)|\$(notice_kind_count '$two' deprecated-spelling)\" = \"1|$old|use $new|0\" ] && notice_field '$one' deprecated-spelling statement | grep -q '(given to -so/--sort-on)\$'" \
         label       "-so $old ranks as -so $new and prints one deprecation notice naming $new" \
         asserts     "A deprecated spelling keeps working for the release: the same message table as -so $new, and one stderr line naming -so/--sort-on and the replacement" \
         produced_by "$VOCAB_PRODUCED_BY; record_deprecation() and print_deprecation_notices() in ltl" \

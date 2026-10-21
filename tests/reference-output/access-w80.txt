@@ -3,6 +3,18 @@
    ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
 
+╭─ ⚙ YOUR OPTIONS command usage warnings ──────────────────────────────╮
+│                                                                      │
+│  -os/--omit-stats is deprecated → use -od/--omit-durations to keep   │
+│  durations from being captured, or -hst/--hide-stats to keep the     │
+│  statistics panel from being displayed                               │
+│                                                                      │
+│                     Continue with these options?                     │
+│                                                                      │
+│              [ Stop and correct them ]      Continue   (10s)         │
+│                                                                      │
+╰─ ←→ Tab: move · Enter: choose · Esc: continue · q/x: quit ───────────╯
+
 ────────────────────────────────────────────────────────────────────────────────
      timestamp       legend   success failure        occurrences        bytes   
 ────────────────────────────────────────────────────────────────────────────────

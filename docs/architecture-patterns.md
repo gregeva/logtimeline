@@ -1036,6 +1036,7 @@ record it, and one observable section.
 record is raised in is set by `enter_notice_stage` as each pipeline stage
 begins. Producers on the store:
 - `read_path_fall_back` :: `notice( kind => 'read-path-fallback', category => 'decision_taken_for_you', statement => ... );`, drawn in the panel.
+- the notices raised as the options are read (`parse_udm_configs`, `read_pattern_file`, `build_merged_regex`, `adapt_to_command_line_options`, `apply_parse_time_sort_gate`, `resolve_discard_names`, `apply_discard_precedence`, `print_deprecation_notices`), put to the analyst before the read by `ask_about_option_notices` through `ask`.
 - the notices raised during and after the read and at finalize, each a `notice( kind => ..., category => ..., ... )` in its producer (`format_classification_rule_change`, `defer_timestamp_impossible_notes`, `defer_format_unit_notes`, `detect_and_parse_csv_header`, `emit_udm_csv_unbound_notices`, `read_and_process_logs`, `resolve_byte_notation`, `resolve_timestamp_precision`, `note_finer_duration_bounds`, `report_skipped_final_pass`, `sort_fallback_to_occurrences`, `bin_consolidation_notice`, `emit_udm_zero_match_notices`, `emit_udm_skipped_capture_notices`, `emit_classification_percentage_notices`); the kind each raises is listed in `features/412-notice-surfaces.md` § Drop 3.
 
 The panel is drawn by `draw_deferred_notices` before the timeline, and by
@@ -1057,9 +1058,8 @@ Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
 
 **Status.** Designed and locked before code (2026-10-21). Being built on #412
 in the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
-plan): the store, the record, `-V notices`, the panel and the notices raised
-during and after the read are in `ltl`; ask, the browser and the notices of
-option parsing follow.
+plan): the store, the record, `-V notices`, the panel, ask and every notice
+up to finalize are in `ltl`; the browser and the last four notices follow.
 
 ---
 

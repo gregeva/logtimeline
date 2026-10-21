@@ -12,7 +12,7 @@ document and is not part of the wiki.
 **Status.** Settled by the architect in the prototyping of #412 (notice
 surfaces: presenting notices and capturing the analyst's choices), 2026-10-19,
 after seven review rounds on macOS, dark and light, and validated on Linux
-and Windows on 2026-10-20. The panel is in `ltl`; the first delivery builds
+and Windows on 2026-10-20. The panel and ask are in `ltl`; the first delivery builds
 all three components, each reached by a real producer (D16).
 The locked decisions (D4, D5, D7, D8, D10 to D16) are in
 `features/412-notice-surfaces.md` § Locked decisions, which remains their
@@ -277,14 +277,14 @@ platform that lacks the method's tooling.
 | surface | what a run with no terminal holds | capture and check | screenshot |
 |---|---|---|---|
 | panel (notices inline, the first delivery and the normal use) | the same rows as in a terminal | redirected run, read through the cell decoder (`tests/lib/rendered-output.pl`), as every harness today; outcomes from `-V` | the panel's rows as a section through `-V section-layout`, as `process/capture-screenshots.pl` works today |
-| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes | the frame's cells and the `-V notices` blocks with `choice: yes` by redirected run; its behaviour (keys, erasing, the run unmoved under it, layering) in a tmux pane with keys sent, only once such a surface is delivered | decided when such a surface is delivered: the frame from a redirected run as a section, or a pane capture for the pop-up over the dimmed run |
+| a surface that asks (modal, box, options list) | the same surface drawn once, as it appears, in the state the given answer reaches, the default or that answer taken; nothing but rows and colour codes | the frame's cells and the `-V notices` blocks with `choice: yes` by redirected run; its behaviour (keys, erasing, the run unmoved under it, layering) in a tmux pane with keys sent (`tests/validate-notices.sh`, the `tmux-` scenarios) | decided when such a surface is delivered: the frame from a redirected run as a section, or a pane capture for the pop-up over the dimmed run |
 | browser (navigation, layered pop-ups) | its first frame drawn once, as it appears | as the asking surfaces: redirected run for outcomes, tmux pane for navigation and layering, only once delivered | as above |
 
 The pane-capture method is demonstrated, with predicates for pane padding, the
 run's rows unmoved under a pop-up, no trace after it, and a plain redirected
 run, each shown to tell a known-good build from the one that carried the
 defect it is for, in `prototype/412-notice-surfaces/findings.md` § Unattended
-capture. Its predicates enter `tests/lib/` when the first harness needs them.
+capture. Its predicates are `tests/lib/surface-capture.pl`.
 
 **Platforms.** The harnesses run on macOS and Linux, never on Windows
 (`docs/toolchain-guidance.md`). A harness that needs tmux is skipped where tmux

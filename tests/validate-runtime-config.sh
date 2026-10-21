@@ -32,6 +32,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -289,8 +291,8 @@ scenario_pushback_silent() {
             produced_by "$PRODUCED_BY_PUSHBACK; the file-argument expansion loop in adapt_to_command_line_options()" \
             contract    "$CONTRACT_PUSHBACK"
         assert_command \
-            command     "[ ! -s '$RUN_STDERR' ]" \
-            label       "ltl $option <file> says nothing on stderr" \
+            command     "[ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
+            label       "ltl $option <file> raises no notice and says nothing on stderr" \
             asserts     'The pushback is silent for every optional-operand option: a file after the option is the normal invocation.' \
             produced_by "$PRODUCED_BY_PUSHBACK" \
             contract    "$CONTRACT_PUSHBACK"
@@ -313,8 +315,8 @@ scenario_pushback_silent() {
         asserts 'A pushed-back -V value leaves -V bare: every section is emitted.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
     assert_command \
-        command     "[ ! -s '$RUN_STDERR' ]" \
-        label       'ltl -V <file> says nothing on stderr' \
+        command     "[ ! -s '$RUN_STDERR' ] && ! grep -q 'Continue with these options' '$RUN_STDOUT'" \
+        label       'ltl -V <file> raises no notice and says nothing on stderr' \
         asserts     'The -V pushback is silent, as every option'"'"'s is.' \
         produced_by "$PRODUCED_BY_PUSHBACK" contract "$CONTRACT_PUSHBACK"
 }
@@ -474,7 +476,10 @@ scenario_udm_position() {
 # comparison reads that surface and nothing timing-dependent. `-bs 1440 -oe`:
 # no assertion reads a bucket.
 CONTRACT_DEPRECATED='features/613-one-name-vocabulary.md D1 (time is not a metric name; -hm, -hg and -so print a deprecation notice for a release), D8 (size deprecated on -so), D17 (one deprecation-notice helper); criteria 2 and 3'
-TIME_NOTICE='^Warning: time is deprecated as a metric name \(given to [^)]*\): use duration$'
+# The deprecation notice is a record of -V notices (notice_lines: kind | focus
+# | statement | evidence | remedy); the rendered output is compared with the
+# notice boxes set aside (without_notice_boxes).
+TIME_NOTICE='^deprecated-spelling \| time \| is deprecated as a metric name \(given to [^)]*\) \| - \| use duration$'
 
 # Run ltl rendering only the named section, stdout to <label>.stdout.
 run_section_only() {
@@ -560,38 +565,46 @@ scenario_deprecated_metric_spellings() {
 
     local spelling
     for spelling in time TIME; do
-        run_ltl "dep-hm-$spelling" -bs 1440 -oe -V runtime-config -hm "$spelling" "$METRIC_FIXTURE"
+        run_ltl "dep-hm-$spelling" -bs 1440 -oe -V runtime-config,notices -hm "$spelling" "$METRIC_FIXTURE"
+        notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
         assert_line "$RUN_STDOUT" \
             pattern     '^heatmap: duration$' \
             asserts     "-hm $spelling draws the duration heatmap: time is a deprecated spelling of duration on -hm, in any case." \
             produced_by 'builtin_metric_name() in ltl (the deprecated spellings of @builtin_metrics)' \
             contract    "$CONTRACT_DEPRECATED"
-        assert_one_line "$RUN_STDERR" "$TIME_NOTICE" "-hm $spelling prints exactly one deprecation line naming time and duration" \
+        assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" "-hm $spelling raises exactly one deprecation notice naming time and duration" \
             'record_deprecation() and print_deprecation_notices() in ltl'
     done
 
-    run_section_only "dep-hg-duration" histogram -hg duration "$METRIC_FIXTURE"
+    run_section_only "dep-hg-duration" histogram -V notices -hg duration "$METRIC_FIXTURE"
     local hg_duration="$RUN_STDOUT"
-    run_section_only "dep-hg-time" histogram -hg time "$METRIC_FIXTURE"
-    assert_same_file "$hg_duration" "$RUN_STDOUT" '-hg time renders the histogram -hg duration renders' \
+    without_notice_boxes "$hg_duration" > "$hg_duration.rendered"
+    run_section_only "dep-hg-time" histogram -V notices -hg time "$METRIC_FIXTURE"
+    without_notice_boxes "$RUN_STDOUT" > "$RUN_STDOUT.rendered"
+    notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
+    assert_same_file "$hg_duration.rendered" "$RUN_STDOUT.rendered" '-hg time renders the histogram -hg duration renders' \
         'handle_histogram_option() in ltl, through builtin_metric_name()' "$CONTRACT_DEPRECATED"
-    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-hg time prints exactly one deprecation line, though -hg is read inside the option parser' \
+    assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" '-hg time raises exactly one deprecation notice, though -hg is read inside the option parser' \
         'handle_histogram_option() records it; print_deprecation_notices() prints it at option settlement'
 
-    run_section_only "dep-so-duration" messages -so duration "$METRIC_FIXTURE"
+    run_section_only "dep-so-duration" messages -V notices -so duration "$METRIC_FIXTURE"
     local so_duration="$RUN_STDOUT"
-    run_section_only "dep-so-time" messages -so time "$METRIC_FIXTURE"
-    assert_same_file "$so_duration" "$RUN_STDOUT" '-so time ranks the messages as -so duration does' \
+    without_notice_boxes "$so_duration" > "$so_duration.rendered"
+    run_section_only "dep-so-time" messages -V notices -so time "$METRIC_FIXTURE"
+    without_notice_boxes "$RUN_STDOUT" > "$RUN_STDOUT.rendered"
+    notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
+    assert_same_file "$so_duration.rendered" "$RUN_STDOUT.rendered" '-so time ranks the messages as -so duration does' \
         'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
-    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" '-so time prints exactly one deprecation line' \
+    assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" '-so time raises exactly one deprecation notice' \
         'record_deprecation() and print_deprecation_notices() in ltl'
 
-    run_ltl "dep-all-three" -bs 1440 -oe -hm time -hg time -so time "$METRIC_FIXTURE"
-    assert_one_line "$RUN_STDERR" "$TIME_NOTICE" 'time given to -hm, -hg and -so in one run prints one line, not three' \
+    run_ltl "dep-all-three" -bs 1440 -oe -V notices -hm time -hg time -so time "$METRIC_FIXTURE"
+    notice_lines "$RUN_STDOUT" > "$RUN_STDOUT.notices"
+    assert_one_line "$RUN_STDOUT.notices" "$TIME_NOTICE" 'time given to -hm, -hg and -so in one run raises one notice, not three' \
         'record_deprecation() in ltl (one notice per spelling, naming every option it was given to)'
-    assert_line "$RUN_STDERR" \
-        pattern     '^Warning: time is deprecated as a metric name \(given to -hm/--heatmap, -hg/--histogram, -so/--sort-on\): use duration$' \
-        asserts     'The one line names each option the deprecated spelling was given to, in the order the options are settled (-hm, -hg, -so).' \
+    assert_line "$RUN_STDOUT.notices" \
+        pattern     '^deprecated-spelling \| time \| is deprecated as a metric name \(given to -hm/--heatmap, -hg/--histogram, -so/--sort-on\) \| - \| use duration$' \
+        asserts     'The one notice names each option the deprecated spelling was given to, in the order the options are settled (-hm, -hg, -so).' \
         produced_by 'print_deprecation_notices() in ltl' \
         contract    "$CONTRACT_DEPRECATED"
 
@@ -599,8 +612,10 @@ scenario_deprecated_metric_spellings() {
     # this harness owns, carries the whole ranking.
     local size_dir="$TMP_DIR/dep-so-size" bytes_dir="$TMP_DIR/dep-so-bytes"
     mkdir -p "$size_dir" "$bytes_dir"
-    ( cd "$bytes_dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so bytes "$METRIC_FIXTURE" > run.out 2> run.err ) || true
-    ( cd "$size_dir"  && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -so size  "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    ( cd "$bytes_dir" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -V notices -so bytes "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    ( cd "$size_dir"  && "$LTL" --disable-progress -ni -bs 1440 -oe -n 100 -o -V notices -so size  "$METRIC_FIXTURE" > run.out 2> run.err ) || true
+    notice_lines "$bytes_dir/run.out" > "$bytes_dir/run.notices"
+    notice_lines "$size_dir/run.out" > "$size_dir/run.notices"
     check_stderr_warnings "$bytes_dir/run.err"
     check_stderr_warnings "$size_dir/run.err"
     local bytes_csv size_csv
@@ -608,10 +623,10 @@ scenario_deprecated_metric_spellings() {
     size_csv=$(find "$size_dir" -name '*-LTL-MESSAGES-*.csv' -print -quit)
     assert_same_file "$bytes_csv" "$size_csv" '-so size writes the MESSAGES CSV -so bytes writes' \
         'adapt_to_command_line_options() in ltl (the -so bare metric word, through builtin_metric_name())' "$CONTRACT_DEPRECATED"
-    assert_one_line "$size_dir/run.err" '^Warning: size is deprecated as a metric name \(given to -so/--sort-on\): use bytes$' \
-        '-so size prints exactly one deprecation line naming size and bytes' 'record_deprecation() and print_deprecation_notices() in ltl'
-    assert_no_line "$bytes_dir/run.err" \
-        pattern     'deprecated' \
+    assert_one_line "$size_dir/run.notices" '^deprecated-spelling \| size \| is deprecated as a metric name \(given to -so/--sort-on\) \| - \| use bytes$' \
+        '-so size raises exactly one deprecation notice naming size and bytes' 'record_deprecation() and print_deprecation_notices() in ltl'
+    assert_no_line "$bytes_dir/run.notices" \
+        pattern     'deprecated|MISSING-SECTION' \
         asserts     'The canonical name prints no deprecation line.' \
         produced_by 'builtin_metric_name() in ltl' \
         contract    "$CONTRACT_DEPRECATED"

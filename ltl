@@ -11629,7 +11629,7 @@ sub read_pattern_file {
 
     # Validate file exists
     unless (-e $canonical_filename) {
-        print STDERR "Warning: Pattern file not found: $filename\n";
+        notice( kind => 'pattern-file-missing', category => 'your_options', statement => "Pattern file not found: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11637,7 +11637,7 @@ sub read_pattern_file {
     # Check file size
     my $size = -s $canonical_filename;
     if ($size > $pattern_file_max_size) {
-        print STDERR "Warning: Pattern file exceeds maximum size (10KB): $filename\n";
+        notice( kind => 'pattern-file-too-large', category => 'your_options', statement => "Pattern file exceeds maximum size (10KB): $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11645,7 +11645,7 @@ sub read_pattern_file {
     # Check for binary (null bytes in first 8KB)
     my $fh;
     unless (open $fh, '<:raw', $canonical_filename) {
-        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        notice( kind => 'pattern-file-unreadable', category => 'your_options', statement => "Cannot read pattern file: $filename ($!)" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11653,7 +11653,7 @@ sub read_pattern_file {
     read($fh, $header, 8192);
     if (defined $header && $header =~ /\x00/) {
         close $fh;
-        print STDERR "Warning: Pattern file appears to be binary: $filename\n";
+        notice( kind => 'pattern-file-binary', category => 'your_options', statement => "Pattern file appears to be binary: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11661,7 +11661,7 @@ sub read_pattern_file {
 
     # Read file as text
     unless (open $fh, '<:encoding(UTF-8)', $canonical_filename) {
-        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        notice( kind => 'pattern-file-unreadable', category => 'your_options', statement => "Cannot read pattern file: $filename ($!)" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11676,15 +11676,15 @@ sub read_pattern_file {
     close $fh;
 
     if (@patterns == 0) {
-        print STDERR "Warning: Pattern file is empty: $filename\n";
+        notice( kind => 'pattern-file-empty', category => 'your_options', statement => "Pattern file is empty: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'empty', count => 0 };
         return ();
     }
 
     # Warn if pattern count exceeds limit (but use all patterns)
     if (@patterns > $pattern_file_max_patterns) {
-        print STDERR "Warning: Pattern file contains " . scalar(@patterns) .
-                     " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename\n";
+        notice( kind => 'pattern-file-many-patterns', category => 'your_options', statement => "Pattern file contains " . scalar(@patterns) .
+                     " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename" );
     }
 
     $pattern_file_status{$filter_type}{$filename} = { status => 'ok', count => scalar(@patterns) };
@@ -11709,8 +11709,8 @@ sub build_merged_regex {
 
     # Warn if merged regex exceeds length threshold
     if (length($merged) > $pattern_regex_max_length) {
-        print STDERR "Warning: Merged regex pattern is " . length($merged) .
-                     " characters (exceeds recommended limit of $pattern_regex_max_length)\n";
+        notice( kind => 'merged-regex-too-long', category => 'your_options', statement => "Merged regex pattern is " . length($merged) .
+                     " characters (exceeds recommended limit of $pattern_regex_max_length)" );
     }
 
     return $merged;
@@ -11946,7 +11946,7 @@ sub parse_udm_configs {
             $custom_pattern_text = $pat_str;
             eval { $custom_pattern = qr/$pat_str/ };
             if ($@) {
-                print STDERR "Warning: Invalid regex in -udm '$raw_arg': $@\n";
+                notice( kind => 'udm-invalid-regex', category => 'your_options', statement => "Invalid regex in -udm '$raw_arg': $@" );
                 $reject->($raw_arg, 'invalid_regex');
                 next;
             }
@@ -11961,13 +11961,13 @@ sub parse_udm_configs {
         my $token_key = (defined $fields[3] && $fields[3] ne '') ? $fields[3] : undef;
 
         unless (defined $name && $name ne '') {
-            print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
+            notice( kind => 'udm-no-name', category => 'your_options', statement => "-udm requires a metric name: '$raw_arg'" );
             $reject->($raw_arg, 'missing_name');
             next;
         }
 
         if (defined $token_key && defined $custom_pattern) {
-            print STDERR "Warning: -udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping\n";
+            notice( kind => 'udm-key-and-pattern', category => 'your_options', statement => "-udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping" );
             $reject->($raw_arg, 'key_and_regex');
             next;
         }
@@ -11977,7 +11977,7 @@ sub parse_udm_configs {
         if (defined $unit && $unit =~ /^(\w+)(?:\(\w+\))?$/ && $udm_function_names{$1}) {
             my $rest = join(':', grep { defined } $unit, $function, $token_key);
             $rest .= ":/$custom_pattern_text/" if defined $custom_pattern_text;
-            print STDERR "Warning: '$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping\n";
+            notice( kind => 'udm-function-in-unit-slot', category => 'your_options', statement => "'$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping" );
             $reject->($raw_arg, 'unit_slot_holds_function');
             next;
         }
@@ -11988,7 +11988,7 @@ sub parse_udm_configs {
             # Normalize aggregation aliases, including inside combined forms
             $function =~ s/^(\w+)/exists $udm_function_aliases{$1} ? $udm_function_aliases{$1} : $1/e;
             if ($function =~ /^($countings)\(/) {
-                print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
+                notice( kind => 'udm-counting-with-transform', category => 'your_options', statement => "Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping" );
                 $reject->($raw_arg, 'counting_with_transform');
                 next;
             } elsif ($function =~ /^($aggregations)\(($transforms)\)$/) {
@@ -12000,7 +12000,7 @@ sub parse_udm_configs {
             } elsif ($function =~ /^($aggregations|$countings)$/) {
                 $aggregation = $1;
             } else {
-                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: $function_list, or combined e.g. max(delta))\n";
+                notice( kind => 'udm-invalid-function', category => 'your_options', statement => "Invalid function '$function' in -udm '$raw_arg' (valid: $function_list, or combined e.g. max(delta))" );
                 $reject->($raw_arg, 'unknown_function');
                 next;
             }
@@ -12012,14 +12012,14 @@ sub parse_udm_configs {
         # distinct-based aggregation over it can only ever produce 1
         if (defined $custom_pattern_text && $aggregation =~ /^(?:distinct|ratio|drate)$/
             && $custom_pattern_text !~ /[\\()\[\]*+?^\$|.{}]/) {
-            print STDERR "Warning: the pattern /$custom_pattern_text/ in -udm '$raw_arg' is a fixed string, so '$aggregation' can only ever be 1 - give it a capture group or a varying pattern, skipping\n";
+            notice( kind => 'udm-fixed-string-pattern', category => 'your_options', statement => "the pattern /$custom_pattern_text/ in -udm '$raw_arg' is a fixed string, so '$aggregation' can only ever be 1 - give it a capture group or a varying pattern, skipping" );
             $reject->($raw_arg, 'literal_pattern_under_distinct');
             next;
         }
 
         # Counting aggregations operate on raw extracted strings: units do not apply
         if ($agg_kind eq 'counting' && defined $unit) {
-            print STDERR "Warning: Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'\n";
+            notice( kind => 'udm-unit-ignored', category => 'your_options', statement => "Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'" );
             $unit = undef;
         }
 
@@ -12044,7 +12044,7 @@ sub parse_udm_configs {
             my $multiplier = $byte_unit_bytes{$unit};
             $converter = sub { $_[0] * $multiplier };
         } elsif (defined $unit) {
-            print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number (time units: $time_unit_list; byte units: $byte_unit_list)\n";
+            notice( kind => 'udm-unit-unknown', category => 'your_options', statement => "Unknown unit '$unit' in -udm '$raw_arg', treating as raw number (time units: $time_unit_list; byte units: $byte_unit_list)" );
             $unit_type = 'raw';
             $converter = undef;
         } else {
@@ -12094,7 +12094,7 @@ sub parse_udm_configs {
     my (@kept_configs, %seen_raw_arg);
     for my $config (@udm_configs) {
         if ($seen_raw_arg{$config->{raw_arg}}++) {
-            print STDERR "Note: -udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat\n";
+            notice( kind => 'udm-repeat-dropped', category => 'your_options', statement => "-udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat" );
             $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
             next;
         }
@@ -12109,7 +12109,7 @@ sub parse_udm_configs {
     my (@named_configs, %claimed_by);
     for my $config (@udm_configs) {
         if (defined(my $owner = $claimed_by{$config->{name}})) {
-            print STDERR "Warning: -udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one\n";
+            notice( kind => 'udm-name-collision', category => 'your_options', statement => "-udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one" );
             $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
             next;
         }
@@ -16014,6 +16014,28 @@ sub ask {
     return $answer;
 }
 
+# The notices raised while the options were read (inventory rows 1 to 11),
+# put to the analyst before the read starts, while nothing has been read and
+# a mistyped option costs nothing to correct (#412 D16): continue, the
+# default, or stop and correct them. The notices are recorded as shown by the
+# ask and kept off the panel after it (D11, D13's shows). Stopping writes
+# -V notices and ends the run before the read. Fixture notices are left to
+# the surface their set exercises.
+sub ask_about_option_notices {
+    my @raised = grep { $_->{stage} eq 'options' && $_->{immediacy} eq 'deferred' && $_->{shown} eq 'none'
+                        && $_->{producer} ne 'raise_fixture_notices' } @notice_records;
+    return unless @raised;
+    my $answer = ask( kind => 'options-review', category => 'your_options',
+                      statement => 'the options given raised notices before the read',
+                      question  => 'Continue with these options?',
+                      buttons   => [ { label => 'Stop and correct them', key => 's', role => 'stop' },
+                                     { label => 'Continue', key => 'c', role => 'default' } ],
+                      shows     => [ map { $_->{id} } @raised ] );
+    return unless $answer->{button} eq 's';
+    emit_notices_verbose();
+    exit 0;
+}
+
 # Quitting from a surface: the surface is already cleared; the -V notices
 # section is written, then the run stops cleanly (D12).
 sub notice_quit_run {
@@ -16711,7 +16733,7 @@ sub apply_parse_time_sort_gate {
     );
     my $k = $killer{ $sort_gate{family} };
     return unless $k && $k->[0];
-    print STDERR "Note: cannot apply -so/--sort-on $operand because $k->[1] discards the $sort_gate{family} metric - the messages table is ordered by occurrences\n";
+    notice( kind => 'sort-gated-by-omit', category => 'your_options', statement => "cannot apply -so/--sort-on $operand because $k->[1] discards the $sort_gate{family} metric - the messages table is ordered by occurrences" );
     ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
     $sort_gate{observed} = 0;
     $sort_gate{fallback} = 'parse';
@@ -16791,7 +16813,8 @@ sub record_deprecation {
 sub print_deprecation_notices {
     for my $notice (@deprecations) {
         my $given = @{ $notice->{options} } ? ' (given to ' . join( ', ', @{ $notice->{options} } ) . ')' : '';
-        print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";
+        notice( kind => 'deprecated-spelling', category => 'your_options', focus => $notice->{spelling},
+                statement => "is deprecated$notice->{as}$given", remedy => $notice->{advice} );
     }
     @deprecations = ();
     %deprecation_of = ();
@@ -16996,11 +17019,11 @@ sub resolve_discard_names {
                 $resolved->{udm}{discarded} = 1 if $resolved->{udm};
                 for my $reader ( @{ $resolved->{readers} } ) {
                     $reader->{discarded} = 1;
-                    print STDERR "Note: -d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off\n";
+                    notice( kind => 'discard-switches-off-metric', category => 'your_options', statement => "-d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off" );
                 }
                 if ( defined( my $metric = $resolved->{probe_metric} ) ) {
                     ${ $builtin_metric{$metric}{omit_flag} } = 1;
-                    print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";
+                    notice( kind => 'discard-switches-off-metric', category => 'your_options', statement => "-d/--discard removes the key $name, which the $metric metric reads: the metric is switched off" );
                 }
                 push @discard_subs, discard_key_sub($name);
             }
@@ -17084,7 +17107,7 @@ sub apply_discard_precedence {
             delete $expose_key{$name};
             $expose_count = 0 if $name eq 'count';
         }
-        print STDERR "Note: " . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed\n";
+        notice( kind => 'discard-wins', category => 'your_options', statement => "" . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed" );
     }
 
     # A masked identifier that is also discarded: it is removed before the
@@ -17094,7 +17117,7 @@ sub apply_discard_precedence {
     if (%mask_discarded) {
         my @masked_too = grep { $mask_discarded{$_} } @mask_names;
         @mask_names = grep { !$mask_discarded{$_} } @mask_names;
-        print STDERR "Note: " . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked\n";
+        notice( kind => 'discard-wins', category => 'your_options', statement => "" . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked" );
     }
     return;
 }
@@ -17724,15 +17747,15 @@ sub adapt_to_command_line_options {
             }
         }
         if ($histogram_bucket_override < 0) {
-            warn "Invalid bucket override value: $histogram_bucket_override. Disabling override.\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid bucket override value: $histogram_bucket_override. Disabling override." );
             $histogram_bucket_override = 0;
         }
         if ($histogram_height < 3) {
-            warn "Histogram height too small: $histogram_height. Using minimum (3).\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Histogram height too small: $histogram_height. Using minimum (3)." );
             $histogram_height = 3;
         }
         if ($histogram_width_percent < 20 || $histogram_width_percent > 100) {
-            warn "Invalid histogram width percent: $histogram_width_percent. Using default (95).\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid histogram width percent: $histogram_width_percent. Using default (95)." );
             $histogram_width_percent = 95;
         }
     }
@@ -17746,7 +17769,7 @@ sub adapt_to_command_line_options {
     if (!$option_provenance{'data-model-precision'}) {
         $data_model_precision_source = 'default';
     } elsif ($data_model_precision_level < 1 || $data_model_precision_level > 9) {
-        warn "Invalid --data-model-precision: $data_model_precision_level (must be 1..9). Using default (5).\n";
+        notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid --data-model-precision: $data_model_precision_level (must be 1..9). Using default (5)." );
         $data_model_precision_level  = 5;
         $data_model_precision_source = 'default';
     } else {
@@ -17923,7 +17946,7 @@ sub adapt_to_command_line_options {
         my $max_row = $bound_pair{ $min_row->{kind} }{ $min_row->{bound}{role} }{max};
         my ($min, $max) = ( ${ $min_row->{target} }, ${ $max_row->{target} } );
         if (defined $min && defined $max && $min > $max) {
-            print STDERR "Warning: -$min_row->{short} $quantity_entered{ $min_row->{long} } is greater than -$max_row->{short} $quantity_entered{ $max_row->{long} } - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }\n";
+            notice( kind => 'range-unsatisfiable', category => 'your_options', statement => "-$min_row->{short} $quantity_entered{ $min_row->{long} } is greater than -$max_row->{short} $quantity_entered{ $max_row->{long} } - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }" );
         }
     }
 
@@ -18010,7 +18033,7 @@ sub adapt_to_command_line_options {
         my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');
         if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
             # A per-line distribution over counting (string) values is meaningless
-            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled\n";
+            notice( kind => 'heatmap-counting-metric', category => 'your_options', statement => "Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled" );
             $heatmap_enabled = 0;
             apply_output_visibility(1);   # without the heatmap, the statistics column is not hidden by it (#692 D27)
         } elsif ($resolved && $resolved->{kind} eq 'udm') {
@@ -18040,7 +18063,7 @@ sub adapt_to_command_line_options {
             for my $match (@matches) {
                 if ( $match->{agg_kind} eq 'counting' ) {
                     # A per-line distribution over counting (string) values is meaningless
-                    print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                    notice( kind => 'histogram-counting-metric', category => 'your_options', statement => "Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping" );
                     delete $histogram_metrics{$metric};
                     delete $histogram_metrics{ $match->{name} };
                     next;
@@ -18096,14 +18119,14 @@ sub adapt_to_command_line_options {
         push @inert, '-mdm/--message-stats-data-model' if defined $data_model_message;
         push @inert, '-so/--sort-on'                   if $sort_key ne 'occurrences';
         $group_similar_sensitivity = "none";
-        print STDERR "Note: -n/--top-messages 0 retains no message, so "
-            . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect\n"
+        notice( kind => 'top-messages-zero', category => 'your_options', statement => "-n/--top-messages 0 retains no message, so "
+            . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect" )
             if @inert;
         # -o is not inert: its per-time-bucket half still runs. Only the
         # per-message CSV disappears with the store it writes out, so it is
         # reported on its own line rather than joined into the list above.
-        print STDERR "Note: -n/--top-messages 0 retains no message, so "
-            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written\n"
+        notice( kind => 'top-messages-zero', category => 'your_options', statement => "-n/--top-messages 0 retains no message, so "
+            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written" )
             if $write_messages_to_csv;
     }
 
@@ -26011,6 +26034,7 @@ adapt_to_command_line_options( title => !$_help_or_explain_invoked );
 adapt_to_terminal_settings();
 start_row_counting();
 enter_notice_stage('options');
+ask_about_option_notices();
 open_section('progress') unless $disable_progress;    # the progress rows follow as their own section
 
 pipeline_detect();

@@ -238,7 +238,17 @@ export_observation() {
 # differ between two equivalent invocations: the echoed options and the
 # summary's elapsed time and peak memory.
 timeline_text() {
-    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt"
+    # The notices are set aside too: their boxes (an ask before the read, the
+    # panel) with the blank row after each, the -V notices section, and the
+    # blank rows before the first rendered row. A deprecated switch is asked
+    # about before the read; the runs compare by what they render.
+    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt" | perl -ne '
+        next if /^=== notices ===$/ .. /^=== END notices ===$/;
+        if (/^\x{e2}\x{95}\x{ad}/ .. /^\x{e2}\x{95}\x{b0}/) { $box = 1; next }
+        if ($box) { $box = 0; next if $_ eq "\n" }
+        next if !$seen && $_ eq "\n";
+        $seen = 1;
+        print;'
 }
 
 # benchmark_row DIR KEY — one CONFIG row of -V benchmark-data.
@@ -501,18 +511,18 @@ for sw in "-s|-tp s|-bs 30s" "-ms|-tp ms|-bs 100ms"; do
         else
             run_in "$tag" "${COMMON[@]}" -ni "$flag" -bs 1 "$THREE"
         fi
-        n=$(grep -cE "^Warning: ${flag}/--[a-z]+ is deprecated: use ${tp} for the timestamp precision, and give -bs a unit \(${bs}\) for the bucket width\$" "$TMP_DIR/$tag/err.txt" || true)
+        n=$(notice_lines "$TMP_DIR/$tag/out.txt" | grep -cE "^deprecated-spelling \| ${flag}/--[a-z]+ \| is deprecated \| - \| use ${tp} for the timestamp precision, and give -bs a unit \(${bs}\) for the bucket width\$" || true)
         if [[ "$n" == 1 ]]; then
             pass_with "$flag prints one deprecation line naming '$tp' and '$bs' (progress $progress)"
         else
             fail_with "$flag prints one deprecation line naming '$tp' and '$bs' (progress $progress)" \
-                "a deprecated switch prints exactly one stderr line pointing at -tp and a unit on -bs; it is a behavioural notice, so --disable-progress does not suppress it" \
+                "a deprecated switch raises exactly one notice pointing at -tp and a unit on -bs; it is a behavioural notice, so --disable-progress does not suppress it" \
                 'adapt_to_command_line_options() in ltl (deprecation notices)' "$CONTRACT_D5" \
-                "matching lines: $n" "stderr: $(head -3 "$TMP_DIR/$tag/err.txt" | tr '\n' '~')"
+                "matching notices: $n" "notices: $(notice_lines "$TMP_DIR/$tag/out.txt" | head -3 | tr '\n' '~')"
         fi
     done
     run_in "dep${flag}-same" "${COMMON[@]}" -ni "$flag" ${tp} -bs 1 "$THREE"
-    n=$(grep -cE "^Warning: ${flag}/--[a-z]+ is deprecated" "$TMP_DIR/dep${flag}-same/err.txt" || true)
+    n=$(notice_kind_count "$TMP_DIR/dep${flag}-same/out.txt" deprecated-spelling)
     if [[ "$(cat "$TMP_DIR/dep${flag}-same/rc.txt")" == 0 && "$n" == 1 ]]; then
         pass_with "$flag ${tp} runs, with the notice"
     else
@@ -621,14 +631,14 @@ else
         "a 100 ms width draws ten buckets a second, labelled .000, .100 ... .900" \
         'initialize_empty_time_windows() and print_bar_graph() in ltl' "$CONTRACT_D14" "labels: ${second:-none}"
 fi
-dep=$(grep -c '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt" || true)
-if [[ "$dep" == 1 ]] && diff -q <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" > /dev/null; then
-    pass_with "the pair's stderr differs only by -ms's deprecation line"
+dep="$(notice_kind_count "$TMP_DIR/pair-ms/out.txt" deprecated-spelling)|$(notice_field "$TMP_DIR/pair-ms/out.txt" deprecated-spelling focus)|$(notice_kind_count "$TMP_DIR/pair-tp/out.txt" deprecated-spelling)"
+if [[ "$dep" == "1|-ms/--milliseconds|0" ]] && diff -q "$TMP_DIR/pair-ms/err.txt" "$TMP_DIR/pair-tp/err.txt" > /dev/null; then
+    pass_with "the pair differs only by -ms's deprecation notice"
 else
-    fail_with "the pair's stderr differs only by -ms's deprecation line" \
-        "-ms -bs 100 prints its one deprecation line; apart from it the two runs print the same stderr" \
+    fail_with "the pair differs only by -ms's deprecation notice" \
+        "-ms -bs 100 raises its one deprecation notice; apart from it the two runs raise the same notices and print the same stderr" \
         'adapt_to_command_line_options() in ltl' "$CONTRACT_D5" "-ms notice lines: $dep" \
-        "diff: $(diff <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" | head -4 | tr '\n' '~')"
+        "deprecation notices (ms, tp): $dep" "stderr diff: $(diff "$TMP_DIR/pair-ms/err.txt" "$TMP_DIR/pair-tp/err.txt" | head -4 | tr '\n' '~')"
 fi
 fi
 

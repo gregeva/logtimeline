@@ -34,6 +34,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -64,7 +66,8 @@ CONTRACT='features/user-defined-metrics.md section Counting Aggregations (Issue 
 run_ltl() {
     local outfile
     outfile=$(mktemp "$TMP_DIR/out.XXXXXX")
-    "$LTL" --disable-progress -ni "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    "$LTL" --disable-progress -ni -V notices "$@" "$FIXTURE" > "$outfile" 2>"$outfile.stderr" || true
+    notice_lines "$outfile" > "$outfile.notices"
     echo "$outfile"
 }
 
@@ -387,12 +390,13 @@ scenario_validation_warnings() {
     echo "[$current_scenario]"
     local out
 
-    # The intentional rejection/guard diagnostics are printed to stderr, so
-    # each assertion reads the stderr capture (runtime-warning split, #341).
+    # Each rejection and guard is a notice raised as the options are read;
+    # each assertion reads its record (tests/HARNESS-DESIGN.md § A notice is
+    # asserted from its record).
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct(delta)")
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
-        pattern     "Warning: Counting aggregation 'distinct' cannot be combined with a transform" \
+    assert_line "$out.notices" \
+        pattern     "Counting aggregation 'distinct' cannot be combined with a transform" \
         asserts     'Counting aggregations combined with a transform are rejected at parse with a warning and the config is skipped' \
         produced_by 'parse_udm_configs() in ltl (counting-transform rejection branch)' \
         contract    "$CONTRACT"
@@ -400,8 +404,8 @@ scenario_validation_warnings() {
 
     out=$(run_ltl -bs 1 -n 1 -udm "u:ms:distinct:userId")
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
-        pattern     "Warning: Unit 'ms' ignored for counting aggregation 'distinct'" \
+    assert_line "$out.notices" \
+        pattern     "Unit 'ms' ignored for counting aggregation 'distinct'" \
         asserts     'A unit combined with a counting aggregation warns and the unit is ignored (counting operates on raw strings)' \
         produced_by 'parse_udm_configs() in ltl (counting unit guard)' \
         contract    "$CONTRACT"
@@ -409,7 +413,7 @@ scenario_validation_warnings() {
 
     out=$(run_ltl -bs 1 -n 1 -udm 'u::count:key:/foo=(\d+)/')
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
+    assert_line "$out.notices" \
         pattern     'supplies both a token key and a /pattern/' \
         asserts     'Supplying both a token key and a /pattern/ warns and skips the config' \
         produced_by 'parse_udm_configs() in ltl (token-key/pattern conflict check)' \
@@ -418,8 +422,8 @@ scenario_validation_warnings() {
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct:userId" -hm u)
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
-        pattern     "Warning: Heatmap metric 'u' uses counting aggregation 'distinct'" \
+    assert_line "$out.notices" \
+        pattern     "Heatmap metric 'u' uses counting aggregation 'distinct'" \
         asserts     '-hm naming a counting UDM warns and disables the heatmap (a per-line distribution over string events is meaningless)' \
         produced_by 'adapt_to_command_line_options() in ltl (heatmap UDM metric validation)' \
         contract    "$CONTRACT"
@@ -427,8 +431,8 @@ scenario_validation_warnings() {
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::distinct:userId" -hg u)
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
-        pattern     "Warning: Histogram metric 'u' uses counting aggregation 'distinct'" \
+    assert_line "$out.notices" \
+        pattern     "Histogram metric 'u' uses counting aggregation 'distinct'" \
         asserts     '-hg naming a counting UDM warns and skips that metric' \
         produced_by 'adapt_to_command_line_options() in ltl (histogram UDM metric validation)' \
         contract    "$CONTRACT"
@@ -436,7 +440,7 @@ scenario_validation_warnings() {
 
     out=$(run_ltl -bs 1 -n 1 -udm "u::median")
     check_capture_warnings "$out"
-    assert_line "$out.stderr" \
+    assert_line "$out.notices" \
         pattern     'valid: sum, min, max, mean, count, distinct, ratio, rate, drate, delta, idelta' \
         asserts     'An unknown aggregation keyword lists the full valid set, including the counting keywords and canonical mean' \
         produced_by 'parse_udm_configs() in ltl (function parse fallthrough)' \

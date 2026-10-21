@@ -470,7 +470,7 @@ scenario_panel_immediate() {
 
 # ---------------------------------------------------------------------------
 # The migration (features/412-notice-surfaces.md § Inventory of current
-# notices, rows 12 to 31): every kind on the store is raised with the category
+# notices, rows 1 to 31, and the ask before the read): every kind on the store is raised with the category
 # the inventory settled, read from the notice() calls in ltl's source; and a
 # run raising four of them records each with its producer and stage. Each
 # kind's own condition is asserted by the harness of the feature that raises
@@ -478,6 +478,36 @@ scenario_panel_immediate() {
 # ---------------------------------------------------------------------------
 C_MIGRATION="$DOC § Inventory of current notices (categories settled 2026-10-21); acceptance criteria, migration"
 MIGRATED_KINDS=(
+    # rows 1 to 11, raised as the options are read, each your options
+    "deprecated-spelling=your_options"
+    "discard-switches-off-metric=your_options"
+    "discard-wins=your_options"
+    "heatmap-counting-metric=your_options"
+    "histogram-counting-metric=your_options"
+    "invalid-chart-value=your_options"
+    "merged-regex-too-long=your_options"
+    "pattern-file-binary=your_options"
+    "pattern-file-empty=your_options"
+    "pattern-file-many-patterns=your_options"
+    "pattern-file-missing=your_options"
+    "pattern-file-too-large=your_options"
+    "pattern-file-unreadable=your_options"
+    "range-unsatisfiable=your_options"
+    "sort-gated-by-omit=your_options"
+    "top-messages-zero=your_options"
+    "udm-counting-with-transform=your_options"
+    "udm-fixed-string-pattern=your_options"
+    "udm-function-in-unit-slot=your_options"
+    "udm-invalid-function=your_options"
+    "udm-invalid-regex=your_options"
+    "udm-key-and-pattern=your_options"
+    "udm-name-collision=your_options"
+    "udm-no-name=your_options"
+    "udm-repeat-dropped=your_options"
+    "udm-unit-ignored=your_options"
+    "udm-unit-unknown=your_options"
+    "options-review=your_options"
+    # rows 12 to 31
     "read-path-fallback=decision_taken_for_you"
     "classification-rules-changed=data_anomaly"
     "date-cannot-exist=data_anomaly"
@@ -506,7 +536,7 @@ scenario_migration_categories() {
     current_scenario="migration-categories"
     echo "[$current_scenario]"
     local raised entry kind want got
-    raised=$(perl -0ne 'while (/\bnotice\(\s*kind\s*=>\s*\x27([^\x27]+)\x27,\s*category\s*=>\s*\x27([^\x27]+)\x27/g) { print "$1=$2\n" }' "$LTL" | sort -u)
+    raised=$(perl -0ne 'while (/\b(?:notice|ask)\(\s*kind\s*=>\s*\x27([^\x27]+)\x27,\s*category\s*=>\s*\x27([^\x27]+)\x27/g) { print "$1=$2\n" }' "$LTL" | sort -u)
     for entry in "${MIGRATED_KINDS[@]}"; do
         kind="${entry%%=*}"; want="${entry#*=}"
         got=$(awk -F= -v k="$kind" '$1 == k { print $2 }' <<<"$raised" | paste -sd, -)
@@ -743,6 +773,33 @@ scenario_ask_unattended() {
         'An ask over several notices heads them with the category and its count, one bulleted row each' 'ask() in ltl' "$C_ASK"
 }
 
+# ---------------------------------------------------------------------------
+# The notices of option parsing, asked about before the read (#412 D16): the
+# real producer of the ask. With no terminal, drawn once and continued; in a
+# terminal, s stops the run before the read with -V notices written.
+# ---------------------------------------------------------------------------
+scenario_preread() {
+    current_scenario="preread"
+    echo "[$current_scenario]"
+    run_ok pr "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 -so time -dmin 500 -dmax 100 -V notices "$DURATION_FIXTURE"
+    check "one question over the option notices" \
+        "$(block_field pr options-review shows)|$(block_field pr options-review answer)|$(block_field pr deprecated-spelling shown)|$(block_field pr range-unsatisfiable visible)" \
+        "1,2|button=c option=- how=no_terminal|ask|no" \
+        'The notices raised while the options were read are put in one ask before the read, which presents them (shows) and keeps them off the panel' \
+        'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
+    check "with no terminal the run continues" "$(grep -c 'LINES READ' "$TMP_DIR/pr.out")|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/pr.out" | grep -c 'Continue with these options?')|$(wc -c < "$TMP_DIR/pr.err" | tr -d ' ')" "1|1|0" \
+        'With no terminal the question is drawn once, the default continues the run, and nothing goes to standard error' 'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
+    run_ok clean "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 -V notices "$DURATION_FIXTURE"
+    check "no option notice, no question" "$(notice_kind_count "$TMP_DIR/clean.out" options-review)" "0" \
+        'A run whose options raise nothing is not asked' 'ask_about_option_notices() in ltl' "$DOC § D16"
+    tmux_ready || return 0
+    tmux_run ps "sleep:2.5 cap:up s sleep:1.5" -bs 1440 -oe -n 1 -so time -V notices "$DURATION_FIXTURE"
+    check "in a terminal the question waits" "$(grep -c 'Continue with these options?' "$TMP_DIR/ps.up.txt")" "1" \
+        'In a terminal the question is a modal over the run, waiting with its countdown' 'ask() in ltl' "$C_ASK"
+    check "s stops the run before the read, -V notices written" "$(pane_answer ps options-review)|$(pane_exit ps)|$(grep -c 'LINES READ' "$TMP_DIR/ps.final.txt" || true)" "button=s option=- how=key|0|0" \
+        'Stop and correct them ends the run before any file is read, the -V notices section written first' 'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
+}
+
 scenario_register registered \
                   clean-run \
                   read-path-fallback \
@@ -768,7 +825,8 @@ scenario_register registered \
                   tmux-options \
                   tmux-below-cursor \
                   tmux-box \
-                  tmux-ahead
+                  tmux-ahead \
+                  preread
 scenario_parse_args "$@"
 
 if [[ ! -f "$LTL" ]]; then
