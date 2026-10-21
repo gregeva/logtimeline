@@ -46,11 +46,15 @@ moment uses is the choice of the feature that calls it.
 | **ask** | a question put to the analyst during the run, with a default and a countdown, which may lead on to a list of options (the second stage) | the category; one or more notices; the question; the buttons and which is the default; the seconds to the default; the options list with its headings and default, when the choice has a second stage; the preferred placement (alternate screen or below the cursor) and the compact form; whether to leave a record (D4); any parameter of the defaults table it wants otherwise |
 | **browser** | many notices, or notices worth exploring, in a navigable list with a detail pane | the notices; the preferred placement; a detail renderer for a notice that has more to show than its parts (a histogram, a selection). A detail that carries ltl's histograms carries them at ltl's own size, side by side as the tool renders two metrics, which needs 160 to 180 columns |
 
-A notice is the same record everywhere: its category; a focus (what it is
+A notice is the same record everywhere, the notice record of
+`features/412-notice-surfaces.md` D13: its category; a focus (what it is
 about: an API, a time range, a count); a statement; evidence, zero or more; a
-remedy; the producer that raised it; and, when it offers options, the list of
-them. An option carries its parts under the consumer's headings (D8), the
-command options that apply it, and its effect in one line.
+remedy; the producer that raised it; its immediacy and visibility; and, when
+it carries a choice, the question, the buttons, the headings and the list of
+options, with the answer once given (D12). An option carries a key, its parts
+under the producer's headings (D8), the command options that apply it, and
+its effect in one line. The ask call adds presentation only: placement, the
+compact form, the seconds, whether to leave a record (D14).
 
 ---
 
