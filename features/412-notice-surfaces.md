@@ -381,6 +381,30 @@ it is proven:
 The per-line read loop is not touched, so no before/after benchmark is
 planned.
 
+### D17 — Every option of the framework is exercised, by fixtures and by tmux (architect, 2026-10-21)
+
+The acceptance criteria and their scenarios exercise every option of the
+framework, as the prototype's testing did (`show.pl`'s options,
+`check-tmux.sh`'s scenarios, `capture/specimens.sh`'s predicates, the
+review rounds' views): every component and form, placement, size, the
+presentation parameters, every way of answering, every key, the content
+shapes, and the terminal's widths and backgrounds. Two means, both required:
+
+- **Hidden developer options in `ltl`**: one raises a named set of fixture
+  notices through the real `notice` and `ask` calls with the presentation
+  parameters given, so a scenario reaches the cells the real producers do not
+  choose, through the same progress line and section accounting as any
+  producer; one gives answers ahead, which brings #748's requirement 3
+  (answers supplied ahead of time) into this issue.
+- **tmux-driven scenarios** for navigation and input on the alternate screen
+  and below the cursor: keys sent, the pane captured as it is seen. A
+  redirected run cannot observe them; the tmux scenarios are required even
+  though most cases are redirected runs (architect).
+
+Weighed: real producers alone reach only their own cells; a harness-side
+driver over subs sliced out of `ltl` never runs them in a real run, so
+terminal ownership, the part D16 exists to prove, would go untested.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
