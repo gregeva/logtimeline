@@ -1144,6 +1144,11 @@ console started from inside Windows Terminal inherits `WT_SESSION` and reads
 as Windows Terminal; both take the same glyphs, so only its background,
 dark by default there, follows from it.
 
+In macOS Terminal, locally (the architect, 2026-10-21), `perl show.pl terminal`:
+terminal `Apple_Terminal` from `TERM_PROGRAM`, background dark from the colour
+reply (luminance 0.15), the category glyphs ⚠ ≈ ⚙ ↻ ⏱ ➤. The two paths that
+name the terminal are each confirmed on macOS Terminal, locally and over SSH.
+
 The bullet is the em dash `—` on every terminal (the architect, 2026-10-20,
 after finding `╶` a bit small in the Linux round): `docs/design-language.md`
 § the notice's anatomy. The panel's seven bulleted rows change, nothing else.
