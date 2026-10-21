@@ -91,6 +91,7 @@ the deferred list.
 | visible | whether it appears on the deferred surfaces, default yes; primarily off for a notice already put to the analyst at its moment | the producer |
 | question, buttons, default button, countdown, headings, options | the choice's definition when it has one; the headings name the options' parts, What? How? Why? when none are given; each option carries a key, its parts, the command options that apply it and its effect in one line | the producer |
 | answer | see below; present means locked | the surface |
+| shows | on an ask presenting notices raised before it, the ids of those notices, each then `shown: ask` and `visible: no` | the producer, through `ask` |
 
 The choice's definition lives on the record, so a deferred notice carries its
 choice and the browser layers the ask on it from the record alone.
@@ -141,6 +142,7 @@ notice: 1
   statement: the faster read path could not be prepared, so large files are read with the standard path
   evidence: -
   remedy: -
+  shows: -
   choice: no
   answer: -
 notice: 2

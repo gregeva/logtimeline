@@ -293,6 +293,13 @@ What a notice is in the store, one record per raising, never merged:
 | visible | whether it appears on the deferred surfaces, default yes; primarily off for a notice already put to the analyst at its moment (D11) | the producer |
 | question, buttons, default button, countdown, headings, options | the choice's definition when it has one; the headings name the options' parts, What? How? Why? when none are given (amended 2026-10-21: the producer owns the options, so it owns what their parts are called); each option carries a key, its parts (D8), its command options and its effect | the producer |
 | answer | button letter, option key, how (D12); present means locked | the surface |
+| shows | on an ask that presents notices raised before it, the ids of those notices; each of them is then recorded `shown: ask`, `visible: no` (D11's primary use of visibility) | the producer, through `ask` |
+
+The `shows` row is part of the data model as settled (architect, 2026-10-21,
+locking it as option A when the pre-read ask of rows 1 to 11 was built: the
+alternatives, the choice carried on the first notice shown or the notices
+folded into the ask's evidence, put the answer on an arbitrary record or lost
+each notice's kind).
 
 The choice's definition lives on the record, not on the ask call, so a
 deferred notice carries its choice and the browser layers the ask on it from
@@ -320,7 +327,9 @@ in raising order, in the harness content shape (`tests/HARNESS-DESIGN.md`
 `category`, `stage`, `producer`, `immediacy`, `visible`, `shown` (the
 surface that drew it: `panel`, `ask`, `browser`, or `none`), `focus`,
 `statement`, `evidence` (one line per piece, in order, `-` when none;
-amended 2026-10-21), `remedy`, `choice` (`yes`/`no`), and when the
+amended 2026-10-21), `remedy`, `shows` (the ids of the notices an ask
+presented, comma-separated, `-` otherwise; amended 2026-10-21, D13's `shows`
+row), `choice` (`yes`/`no`), and when the
 record carries a choice (amended 2026-10-21) `headings` (`What? | How? |
 Why?`) and one nested block per option offered, `option: <key>` with
 `parts` (the parts separated by ` | `), `args` and `effect`; then `answer`
