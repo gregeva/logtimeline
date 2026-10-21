@@ -240,6 +240,19 @@ on either background (architect, the same day: the histograms under a
 layered modal must not lose their colour). Measurements:
 `docs/terminal-output.md` § Colour and emphasis.
 
+### D11 — One store, two entry calls (architect, 2026-10-21, from the notice data model walkthrough)
+
+One store of notice records, each with a unique identifier returned at
+registration. Two entry calls, `notice` and `ask`, over one backend. The
+caller says at call time whether the notice appears on the surfaces, visible
+by default; an invisible one stays on the stack, unseen by every surface. A
+choice taken at runtime is locked and shows what was chosen. The `-V`
+observability section exposes the data model. Trade-offs weighed before the
+lock: two stores (a deferred queue and an ask log) make the panel's record of
+an asked choice, the browser's layered ask and `-V` each read two places; no
+store for immediate notices leaves nothing to answer on and nothing for the
+apply step to read.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
