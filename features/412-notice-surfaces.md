@@ -302,6 +302,22 @@ the answer (D12). An immediate call made while the progress line owns the
 terminal is a development mistake, not a case the backend handles; the ask
 during the read is a designed scenario of the framing.
 
+### D15 — The `-V notices` section (architect, 2026-10-21, from the notice data model walkthrough)
+
+One section, `notices`, exposes every record of the store as an entity block,
+in raising order, in the harness content shape (`tests/HARNESS-DESIGN.md`
+§ Content shape): `count`, then per record `notice: <id>` with `kind`,
+`category`, `stage`, `producer`, `immediacy`, `visible`, `shown` (the
+surface that drew it: `panel`, `ask`, `browser`, or `none`), `focus`,
+`statement`, `evidence`, `remedy`, `choice` (`yes`/`no`) and `answer`
+(`button=<letter> option=<key> how=<key|default|ahead|quit>`, or `-`).
+`visible` with `shown` gives requirement 6 its produced, gated and shown. No
+separate section for choices: #748's record of each choice point (offered,
+the answer, how) is the block of the record that carries the choice, selected
+by `choice: yes`. Text is ASCII; the glyphs and bullets belong to the
+surfaces. This is the section contract; the harness that validates it is
+named for it when the first delivery lands.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
