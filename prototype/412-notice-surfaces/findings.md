@@ -680,7 +680,10 @@ Six entries, verbatim in `feedback/stage1-light.jsonl`: every view accepted
 bold"). The category sheet's light colours (the darkest step of each colour's
 light gradient) stand. One remark on the browser: Esc and close should be
 synonyms as q and x are; its reading is checked with the architect before
-anything changes.
+anything changes. Read with the architect on 2026-10-21: close is the
+dialogue, quit is the application; in the browser c closes as Esc does,
+written `Esc/c: close` in its key bar (`docs/terminal-interaction.md`
+§ Keys).
 
 ## Unattended capture: the method, demonstrated (2026-10-19)
 

@@ -76,11 +76,14 @@ choosing, wherever the action exists:
 | Enter | activate the highlighted row | activate the highlighted button |
 | a choice letter | | the caller passes the key character of each option; that letter is underlined in the option's printed label, marking it as the choice code; accepted in either case, so Shift or Caps Lock does not matter |
 
-Leaving:
+Leaving: **close is the dialogue, quit is the application** (architect,
+2026-10-21, from the light-background round). Closing gives the run back with
+the surface erased; quitting ends the run.
 
 | key | does |
 |---|---|
-| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing. Esc alone: no letter closes, since a letter would collide with a caller's choice letter |
+| Esc | closes the surface, erasing it, and takes the default: "I am not choosing, get me out of this screen"; in the browser, back from a detail to the list, then from the list to closing. On a surface that asks, Esc alone closes, since a letter would collide with a caller's choice letter |
+| c | in the browser, whose list has no choice letters, closes it: Esc and c are synonyms for close, as q and x are for quit |
 | q, x | synonyms with one explanation, "quit/exit the application": the surface is cleared and the run stops cleanly, where the analyst would otherwise reach for Ctrl-C; a parameter, on by default, with its default per use in the table below |
 | any other key | stops the countdown and nothing else (D7) |
 
@@ -95,7 +98,7 @@ key and an action.
 | ask, first stage | `←→ Tab: move · Enter: choose · Esc: continue reading · q/x: quit` where quitting is on; the choice letters underlined in the buttons |
 | ask, compact box | each choice letter with its action, then Esc: `s: stop here · c: continue reading · Esc: continue reading`; `· q/x: quit` where quitting is on |
 | ask, options list | `↑↓ j k: move · 1-N Enter: choose · Esc: continue as planned · q/x: quit` |
-| browser, list | `↑↓ j k: move · ←→ Tab: tabs · 1-N: tab · Enter: options · Esc: close · q/x: quit` |
+| browser, list | `↑↓ j k: move · ←→ Tab: tabs · 1-N: tab · Enter: options · Esc/c: close · q/x: quit` |
 | layered options list over the browser | as the options list, with `Esc: back` |
 
 ---
@@ -175,8 +178,9 @@ shows. The uses are the three components, the ask component in its two forms.
 A selection on an item in the browser may open an ask modal on top of the
 browser, with its own selection and options. The modal's keys and choice
 letters take effect while it is up, Esc goes back one layer, and the browser
-is back as it was when the modal closes. A notice answered there is marked `◆`
-in the list, and its detail shows what was chosen (round 4). While the modal is up the browser
+is back as it was when the modal closes. In the list a notice that carries a
+choice is marked `◇`, and `◆` once answered there, its detail then showing
+what was chosen (round 4). While the modal is up the browser
 under it is dimmed with its colours kept, its histograms included (D10). A
 layered modal is a pop-up and takes a pop-up's padding and size.
 

@@ -1162,7 +1162,7 @@ sub browser {
         my @detail = $detail_rows->( $shown[$sel], $iw, $chosen{ $shown[$sel] } );
         push @r, ( map { $detail[$_] // '' } 0 .. $D - 1 ), '';
         my $cd = defined $left ? ' ' . countdown( $s, $left, $p{seconds} ) : '';
-        my $foot = ' ' . $s->{dim} . key_bar( [ [ '↑↓ j k', 'move' ], [ '←→ Tab', 'tabs' ], [ '1-' . ( @cats + 1 ), 'tab' ], [ 'Enter', 'options' ], [ 'Esc', 'close' ] ], quit => $p{quit} ) . $s->{reset} . $cd . ' ';
+        my $foot = ' ' . $s->{dim} . key_bar( [ [ '↑↓ j k', 'move' ], [ '←→ Tab', 'tabs' ], [ '1-' . ( @cats + 1 ), 'tab' ], [ 'Enter', 'options' ], [ 'Esc/c', 'close' ] ], quit => $p{quit} ) . $s->{reset} . $cd . ' ';
         my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
         return frame( s => $s, width => $bw, rows => \@r, foot => $foot,
             title => " $s->{dim}notices (" . @items . ") · $range$s->{reset} " );
@@ -1187,7 +1187,7 @@ sub browser {
         my $act = action( $k, quit => $p{quit} );
         my @shown = $shown->();
         if ( $act eq 'quit' ) { restore_mode(); close_drawer($d); return 'quit' }
-        last if $act eq 'esc';
+        last if $act eq 'esc' || $act eq 'letter:c';    # close is the dialogue, quit the application
         if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % @shown }
         elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % @shown }
         elsif ( $act eq 'pgup' ) { $sel = $sel - $L < 0 ? 0 : $sel - $L }
