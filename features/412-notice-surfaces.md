@@ -513,20 +513,26 @@ documents carry the settled form and cite the round that settled it. A line
 still open there (the headings of the options list in the modal and box,
 pending the producers' data model) is marked open in the document.
 
-## Producer interface
+## Notice data model
 
-The producer interface is how code anywhere in the run hands a notice or a
-question to the one surface called at that moment: the design on which the
-requirement 7 pattern rests. It is designed once the surfaces are chosen and
-validated (they are, on macOS, Linux and Windows, 2026-10-21), as a walkthrough
-of seven sections, each confirmed by the architect before the next: the record
-a producer passes; the two calls and what happens when an option is accepted;
-the moment each inventory row registers in; restraint; observability (the `-V`
-sections for notices and for choices, #748); the pattern entry; the options
-list's headings. What is settled is written here, then moved to the project
-documents as the surface contract was.
+The notice data model is what every part of the mechanism shares: the store
+of notices, the record a notice is, the answer a choice leaves on it, the step
+that applies the choices taken, and the consumers that read them. The
+producer interface (how code anywhere in the run hands a notice or a question
+to the one surface called at that moment) is the entry side of that model,
+and the surfaces are its presentation side; the requirement 7 pattern rests
+on the model as a whole (architect, 2026-10-21: what is designed here is a
+common and shared data model, not a new producer interface). It is designed
+once the surfaces are chosen and validated (they are, on macOS, Linux and
+Windows, 2026-10-21), as a walkthrough of seven sections, each confirmed by
+the architect before the next: the record; the two entry calls, the answer
+and what happens when an option is accepted; the moment each inventory row
+registers in; restraint; observability (the `-V` sections for notices and for
+choices, #748); the pattern entry; the options list's headings. What is
+settled is written here, then moved to the project documents as the surface
+contract was.
 
-### The situation the interface fits
+### The situation the model fits
 
 ```
 phase        options            detect     read (progress owns     after read       finalize         render
