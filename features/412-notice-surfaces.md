@@ -843,5 +843,26 @@ browser setting it through the layered ask.
 
 ## Acceptance criteria
 
-To be derived from the requirements once the categories and the contract are
-agreed (`docs/test-driven-development.md`).
+Derived from the requirements and D11 to D17 (`docs/test-driven-development.md`),
+agreed group by group. Each is a coverage matrix: every value of every
+dimension is exercised by a scenario (D17), driven by the fixture option
+unless a real producer reaches it, and asserted as stated. Every criterion is
+assertable unless marked otherwise.
+
+### Store and record (requirements 1 and 3; D11 to D14; agreed 2026-10-21)
+
+| dimension | values exercised | asserted from `-V notices` |
+|---|---|---|
+| entry call | `notice` deferred; `notice` immediate; `ask` | `immediacy`; `shown` is `panel`, `ask`, `browser` or `none` |
+| visible | yes and no, for each entry call | a record with `visible: no` drawn at its call is in neither the panel nor the browser; `shown` names only the surface at the call |
+| raisings | one; the same producer several times in a run | one block per raising, distinct ids, never merged |
+| stage | every stage a notice can be raised in: options, detect, parse, finalize, render | `stage` set by the store, matching where the call ran |
+| category | all six | `category` |
+| parts | focus present and absent; evidence none, one, several; remedy present and absent | `focus`, `evidence`, `remedy`; `-` where absent |
+| choice | none; buttons only; buttons and an options list, with the producer's headings and with the default What? How? Why?; options of three, two and one parts | `choice`, `headings`, one `option:` block per option with `parts`, `args`, `effect` |
+| answer | by a key; the default after the countdown; Esc; given ahead (a letter; a letter with an option); quit; no terminal | `answer`; on quit the run stops with the section written first |
+| locked | a record answered at its call, later shown in the browser | the answer unchanged; the browser offers no second ask on it |
+| order | records from several stages | blocks in raising order; `count` equals the blocks |
+
+Across the group: `kind` is the same in every run of the same condition; a
+harness lookup that matches nothing is a failure.
