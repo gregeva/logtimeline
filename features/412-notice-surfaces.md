@@ -572,6 +572,19 @@ surface      ask before the read            ask during the read     panel before
   selection and input surfaces.
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.
+- **Two parameters shape every notice: immediacy and choice** (architect,
+  2026-10-21, correcting Claude's reading that immediate always means asked).
+  Immediacy is now or deferred; choice is none or a set of options. This is a
+  notices surface, so a message printed at once with nothing to answer is a
+  normal use of it. Two entry calls, possibly three.
+- **A producer may fire many times per file** (architect, 2026-10-21,
+  correcting Claude's claim that the most frequent producer fires once per
+  file). A finding on an API is raised once per API found, five in one file as
+  easily as one. The rule that a recurring error or warning is logged once
+  belongs to producers of that kind; it is not a rule of the notice capability.
+- **Migrating the current producers is part of the issue**, planned, the cost
+  of bringing on a structured pattern that can grow; never a caveat against
+  the model.
 
 Confirmed by the architect from Claude's read-back (2026-10-21): one store,
 two entry points, so every notice, asked or not, is in the store with its
