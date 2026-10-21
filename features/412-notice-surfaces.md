@@ -321,6 +321,28 @@ by `choice: yes`. Text is ASCII; the glyphs and bullets belong to the
 surfaces. This is the section contract; the harness that validates it is
 named for it when the first delivery lands.
 
+### D16 — The first delivery builds the whole framework, each component reached by a real producer (architect, 2026-10-21)
+
+This issue builds into `ltl` the whole framework: the store, the record with
+every field (D13), the `notice` and `ask` entry calls (D14), the `-V notices`
+section (D15), the rendering layer the components share, and terminal
+ownership designed once for all three (the progress line, standard output's
+row counting and the sections the screenshot tool reads, the alternate
+screen, restoring the terminal on exit or interrupt); the three components,
+panel, ask and browser; and the migration of the inventory. Each component
+is reached by a real producer, in effect a test surface built to validate the
+framework (architect): the panel by the deferred notices; `ask` by the
+notices raised at option parsing (rows 1 to 11), drawn before the read with a
+choice to continue or stop and correct the command; the browser by the
+deferred notices when they do not fit the terminal's height. Weighed: the
+panel alone, with `ask` and the browser built later on the record and the
+shared layer, leaves terminal ownership designed but proven only for the
+panel, the part a later piecemeal build is most likely to get wrong; all
+three built without producers ships code no real run reaches. For #748: the
+default taken when there is no terminal to wait on, the countdown and the two
+stages are built here, and the `-V` record of each choice point is D15;
+answers given ahead stay with #748.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
@@ -696,8 +718,8 @@ reference and points at a complete document per pattern), which replaces the
 behavioural-notices entry and names today's producers as placeholders to
 migrate; the complete pattern is `docs/notice-surfaces.md` (the surfaces,
 taking input, the data model, observability, the producer's contract),
-written from the locks before any code. What is built into `ltl`, and the migration, are
-scoped next, once the prototyping stage is closed.
+written from the locks before any code. What is built into `ltl`, and the
+migration, are D16.
 - **These are foundations.** The use cases that make choices are not yet on
   the roadmap; they will come, and this issue lays what they build on.
 - **Two parameters shape every notice: immediacy and choice** (architect,
@@ -734,10 +756,9 @@ browser setting it through the layered ask.
 
 ## Open items
 
-- What is built into `ltl`, and the migration of the inventory: scoped next,
-  the prototypes being delivered and validated (2026-10-21). A notice's
-  category, immediacy and visibility are each producer's decision at its
-  migration.
+- The delivery plan of D16 (its drops, in order) and the acceptance
+  criteria, agreed before code. A notice's category, immediacy and visibility
+  are each producer's decision at its migration.
 
 ## Acceptance criteria
 
