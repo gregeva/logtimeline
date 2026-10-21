@@ -16,6 +16,12 @@ the findings live in `features/342-redundant-logic-surfaces-audit-report.md`
 (the audit that opened this file) until the issue that resolves each one moves
 them on.
 
+An entry is an index entry: at most 60 lines from its heading to its rule,
+and its owning record names the `docs/` or `features/` file where the
+complete pattern lives, or states that the entry is the record. The
+pre-commit hook checks both (`process/check-architecture-patterns.sh`); an
+entry over the limit today passes until it grows.
+
 Every consumption site is cited as `sub` plus a snippet found by `grep -F` inside
 that sub; file-scope sites name the section. Names in this file are Perl
 identifiers: it is a developer document and is not part of the wiki.

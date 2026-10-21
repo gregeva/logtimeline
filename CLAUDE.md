@@ -292,7 +292,9 @@ about anything else, these still hold.
       existing sub. Near-duplicates found on the way are converged in the same change.
 - [ ] Consult `docs/architecture-patterns.md` for a pattern that fits before
       building. A change that adds a consumption site of a pattern, or
-      introduces a new one, records it there in the same commit.
+      introduces a new one, records it there in the same commit. An entry is
+      an index entry, at most 60 lines, pointing at the `docs/` file that
+      holds the complete pattern; the pre-commit hook refuses more.
 - [ ] Every accumulator tracks an observation count; derived output is gated on
       `count > 0`, never on `defined` over a zero-initialised field.
 - [ ] Any ` at <file> line <N>` on `ltl`'s stderr is a bug. Every harness that
@@ -410,8 +412,9 @@ about anything else, these still hold.
 Public repository. `./process/setup-hooks.sh` activates the tracked pre-commit
 guard at `.githooks/pre-commit`, which blocks staging anything under `.claude/`
 except the two shared, reviewed files named below, plus `.env*`, key and
-credential files, and common token patterns; `.gitignore` is the primary
-defense. Overriding needs `--no-verify` and an explanation in the commit message.
+credential files, and common token patterns, and refuses an architecture-pattern
+entry that is not an index entry (`process/check-architecture-patterns.sh`);
+`.gitignore` is the primary defense. Overriding needs `--no-verify` and an explanation in the commit message.
 
 Two mechanisms of the Claude Code harness are tracked so that the mechanical
 rules in this file are enforced rather than advised:
