@@ -253,6 +253,20 @@ an asked choice, the browser's layered ask and `-V` each read two places; no
 store for immediate notices leaves nothing to answer on and nothing for the
 apply step to read.
 
+### D12 — One answer structure, two routes (architect, 2026-10-21, from the notice data model walkthrough)
+
+The answer is a structure on the record, created when the choice is
+answered: the caller's choice letter of the button taken; the key of the
+option chosen, when the second stage was reached; how it was answered (a
+key, the default after the countdown, given ahead, or quit, so the `-V`
+section is written before the run ends). The blocking call returns a
+reference to that same structure; the browser sets it through the layered
+ask. A record with an answer is locked. The option's command options stay on
+the option, reached through the record by the chosen key, one copy. Weighed:
+an option named by index is positional and breaks on reordering, so each
+option carries a key, one name the producer gives; the prototype's four-value
+return list is replaced by the reference.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
