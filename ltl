@@ -171,6 +171,7 @@ my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elaps
 # -V statistics-demand and re-emitted as -V benchmark-data COUNTS rows).
 my ( $elapsed_stats_bucket_stats, $elapsed_stats_population_walk, $elapsed_stats_sort_selection, $elapsed_stats_group_calc, $elapsed_stats_threadpool_stats ) = ( 0,0,0,0,0 );
 my ( $stats_population_buckets, $stats_population_messages, $stats_population_threadpools ) = ( 0,0,0 );
+my $memory_reading_failed = 0;  # a failed Windows memory reading, noticed once per run
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -599,7 +600,6 @@ my $progress_bytes_done  = 0;
 my $progress_file_index  = 0;   # 1-based position of the file being read
 my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
-my @deferred_notices;           # notices raised mid-read, emitted once it ends
 # The notice store (#412 D11, D13): one record per raising, in raising order,
 # never merged. -V notices reads every record; a surface reads the visible ones.
 my @notice_records;
@@ -2531,7 +2531,8 @@ sub read_index_file {
     return unless -f $index_path;
 
     unless (-r $index_path) {
-        warn "ltl-index.csv exists but is unreadable; skipping read-back\n";
+        notice( kind => 'index-unreadable', category => 'runtime_condition',
+                statement => 'ltl-index.csv exists but is unreadable; skipping read-back', evidence => $index_path );
         return;
     }
 
@@ -2581,7 +2582,8 @@ sub read_index_file {
         # tests/HARNESS-DESIGN.md section Runtime-warning cleanliness relies on).
         my $err = $@ // '';
         chomp $err;
-        warn "ltl-index.csv malformed; skipping read-back ($err)\n";
+        notice( kind => 'index-malformed', category => 'runtime_condition',
+                statement => 'ltl-index.csv malformed; skipping read-back', evidence => $err );
         # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
         %file_entries = ();
         %selection_entries = ();
@@ -8321,7 +8323,10 @@ sub write_index_file {
     };
 
     if ($write_ok) {
-        rename($temp_path, $index_path) or warn "Cannot rename index file: $!";
+        # Written after the panel has been drawn, so drawn at its call.
+        rename($temp_path, $index_path)
+            or notice( kind => 'index-rename-failed', category => 'runtime_condition', immediacy => 'now',
+                       statement => 'Cannot rename index file', evidence => "$index_path: $!" );
     } else {
         unlink $temp_path;
         # A file that cannot be written leaves the run without an index; a row
@@ -12326,8 +12331,11 @@ sub get_memory_usage {
                                           : unpack('V', substr($buf, $offset, 4));
             }
         };
-        if ($@) {
-            warn "Failed to get memory usage on Windows: $@";
+        # Once per run: every later reading fails the same way.
+        if ( $@ && !$memory_reading_failed++ ) {
+            chomp( my $err = $@ );
+            notice( kind => 'memory-unreadable', category => 'runtime_condition',
+                    statement => 'Failed to get memory usage on Windows', evidence => $err );
         }
     } else {
         return 0;                                               # no reading on this platform
@@ -16318,30 +16326,6 @@ sub notice_leave_record {
     my @out = ( @rows, "  $s->{dim}↳ $record->{question} $taken ($answer->{how})$s->{reset}" );
     print "$_\n" for @out;
     notice_printed(@out);
-    return;
-}
-
-# Hold a notice raised while the read pass is running. The progress line owns
-# the terminal row for the duration of the read, so a notice printed as it is
-# discovered lands in the middle of that row and reads as a continuation of the
-# progress text. Notices are queued here instead and emitted by
-# flush_deferred_notices() once the read is over and the row is free.
-#
-# This is where a notice discovered mid-read belongs. A notice whose condition
-# is only known after the read (the numeric-filter and unreadable-directory
-# counts at the end of read_and_process_logs()) is already past the progress
-# line and prints directly.
-sub defer_notice {
-    my ($text) = @_;
-    push @deferred_notices, $text;
-    return;
-}
-
-# Emit every notice queued during the read, in the order it was raised, once
-# the progress line has finished with the terminal.
-sub flush_deferred_notices {
-    print STDERR $_ for @deferred_notices;
-    @deferred_notices = ();
     return;
 }
 
@@ -20465,7 +20449,6 @@ sub read_and_process_logs {
     # print into the progress line's row.
     defer_format_unit_notes();
     defer_timestamp_impossible_notes();
-    flush_deferred_notices();
 
     # Surface the levels the tool did not recognise. A line whose level slot
     # holds a token the vocabulary does not carry is matched against its format

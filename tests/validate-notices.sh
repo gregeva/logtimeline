@@ -530,6 +530,11 @@ MIGRATED_KINDS=(
     "classified-shares-omitted=figure_caveat"
     "classification-not-event-ledger=figure_caveat"
     "classification-not-matched=data_anomaly"
+    # rows 32 to 35, the run index and the memory reading, each a runtime condition
+    "index-unreadable=runtime_condition"
+    "index-malformed=runtime_condition"
+    "index-rename-failed=runtime_condition"
+    "memory-unreadable=runtime_condition"
 )
 
 scenario_migration_categories() {
@@ -567,6 +572,54 @@ scenario_migration_raised() {
     done
     check "nothing on standard error" "$(wc -c < "$TMP_DIR/raised.err" | tr -d ' ')" "0" \
         'The notices raised after the read and at finalize reach the panel, never standard error' 'draw_deferred_notices() in ltl' "$C_MIGRATION"
+}
+
+# Nothing prints on standard error but what the inventory's table of what is
+# not a notice names: every print STDERR, printf STDERR, warn and die left in
+# ltl sits in a sub that table lists (acceptance criteria, migration: nothing on
+# standard error). A new stderr site in any other sub fails here, naming it.
+NOT_NOTICE_SUBS='^(print_usage|_validate_dm|_validate_profile|read_and_process_logs|pipeline_render|build_format_registry|compile_format_[a-z_]+|compile_csv_block|format_[a-z_]+_src|format_validate_scan_sub|format_classification_resolve|derive_format_constraints|csv_block_for_file|generated_loop_[a-z_]+|read_path_text|value_text|value_column|stat_consumer_active|index_row|normalize_data_for_output|merge_consolidation_overlapping_patterns|detect_terminal|read_index_file|write_index_file|register_notice|ask|notice_tier_dims|_validate_notice_fixture|start_row_counting|run_with_output_discarded)$'
+scenario_stderr_sites() {
+    current_scenario="stderr-sites"
+    echo "[$current_scenario]"
+    local subs outside
+    subs=$(perl -ne 'if (/^sub (\w+)/) { $s = $1 } next if /^\s*#/; print( ( $s // "<outside any sub>" ), "\n" ) if /print\s+STDERR|printf\s+STDERR|\bwarn\b\s*[("\x27\$]|\bdie\b\s*[("\x27\$]/' "$LTL" | sort -u)
+    check "the scan finds the sites" "$([[ -n "$subs" ]] && grep -c . <<<"$subs" | awk '$1 > 0 { print "found" }')" "found" \
+        'The scan reads ltl and finds its standard error sites, so an empty result cannot pass' 'ltl source' "$C_MIGRATION"
+    outside=$(grep -vE "$NOT_NOTICE_SUBS" <<<"$subs" | paste -sd, - || true)
+    check "every standard error site is one the table names" "${outside:-none}" "none" \
+        'Every print STDERR, warn and die left in ltl is in a sub the table of what is not a notice names; a notice goes through notice() or ask()' \
+        'ltl source' "$C_MIGRATION"
+}
+
+# The run index (rows 32 to 34), each in a directory of its own, since the index
+# is ltl-index.csv in the working directory: unreadable, malformed, and a
+# directory in its place so the written file cannot be renamed onto it. Row 35
+# fails only on Windows, where no harness runs; migration-categories checks
+# its category.
+scenario_migration_index() {
+    current_scenario="migration-index"
+    echo "[$current_scenario]"
+    local case tag dir
+    mkdir -p "$TMP_DIR/idx-unr" "$TMP_DIR/idx-mal" "$TMP_DIR/idx-ren/ltl-index.csv"
+    printf 'header\n' > "$TMP_DIR/idx-unr/ltl-index.csv"; chmod 000 "$TMP_DIR/idx-unr/ltl-index.csv"
+    printf 'a,"b\nc\n' > "$TMP_DIR/idx-mal/ltl-index.csv"
+    for case in unr:index-unreadable:read_index_file:detect:deferred \
+                mal:index-malformed:read_index_file:detect:deferred \
+                ren:index-rename-failed:write_index_file:render:now; do
+        IFS=: read -r tag k producer stage immediacy <<<"$case"
+        dir="$TMP_DIR/idx-$tag"
+        ( cd "$dir" && perl "$LTL" --disable-progress -idx -bs 1440 -oe -n 1 -V notices "$DURATION_FIXTURE" ) > "$TMP_DIR/idx-$tag.out" 2> "$TMP_DIR/idx-$tag.err" \
+            || { fail=$((fail + 1)); failures+=("$current_scenario :: idx-$tag exit non-zero"); }
+        if ! assert_no_runtime_warnings "$TMP_DIR/idx-$tag.err" "$current_scenario/idx-$tag"; then
+            fail=$((fail + 1)); failures+=("$current_scenario :: idx-$tag perl-runtime-warnings-on-stderr")
+        fi
+        check "$k: producer, stage, drawn" "$(block_field "idx-$tag" "$k" producer)|$(block_field "idx-$tag" "$k" stage)|$(block_field "idx-$tag" "$k" immediacy)|$(block_field "idx-$tag" "$k" shown)|$(wc -c < "$TMP_DIR/idx-$tag.err" | tr -d ' ')" \
+            "$producer|$stage|$immediacy|panel|0" \
+            'A run index notice is recorded by the sub that raised it, in its stage, and drawn by the panel, nothing on standard error; the rename failure comes after the panel, so it is drawn at its call' \
+            "$producer() and notice() in ltl" "$C_MIGRATION"
+    done
+    chmod 644 "$TMP_DIR/idx-unr/ltl-index.csv"
 }
 
 # ---------------------------------------------------------------------------
@@ -877,6 +930,8 @@ scenario_register registered \
                   panel-immediate \
                   migration-categories \
                   migration-raised \
+                  migration-index \
+                  stderr-sites \
                   ask-unattended \
                   tmux-modal-keys \
                   tmux-countdown \

@@ -1031,35 +1031,36 @@ a harness could read but standard error. One store with one record shape gives
 every notice one presentation per category, one place to answer a choice and
 record it, and one observable section.
 
-**Consumption sites.** The store, the `notice` entry call (deferred) and
-`-V notices` are in `ltl` (`notice`, `emit_notices_verbose`); the stage each
-record is raised in is set by `enter_notice_stage` as each pipeline stage
-begins. Producers on the store:
-- `read_path_fall_back` :: `notice( kind => 'read-path-fallback', category => 'decision_taken_for_you', statement => ... );`, drawn in the panel.
-- the notices raised as the options are read (`parse_udm_configs`, `read_pattern_file`, `build_merged_regex`, `adapt_to_command_line_options`, `apply_parse_time_sort_gate`, `resolve_discard_names`, `apply_discard_precedence`, `print_deprecation_notices`), put to the analyst before the read by `ask_about_option_notices` through `ask`.
-- the notices raised during and after the read and at finalize, each a `notice( kind => ..., category => ..., ... )` in its producer (`format_classification_rule_change`, `defer_timestamp_impossible_notes`, `defer_format_unit_notes`, `detect_and_parse_csv_header`, `emit_udm_csv_unbound_notices`, `read_and_process_logs`, `resolve_byte_notation`, `resolve_timestamp_precision`, `note_finer_duration_bounds`, `report_skipped_final_pass`, `sort_fallback_to_occurrences`, `bin_consolidation_notice`, `emit_udm_zero_match_notices`, `emit_udm_skipped_capture_notices`, `emit_classification_percentage_notices`); the kind each raises is listed in `features/412-notice-surfaces.md` § Drop 3.
-
-The panel is drawn by `draw_deferred_notices` before the timeline, and by
-`notice` itself for an immediate notice, through the shared layer
-(`notice_style`, `notice_rows`, `notice_heading`, `notice_frame`); the
-terminal is found once by `detect_terminal`.
-
-The surfaces are prototyped in `prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`.
-Today's placeholders are producers to migrate (`features/412-notice-surfaces.md`
-§ Inventory of current notices):
-- `defer_notice` :: `push @deferred_notices, $text;` with `flush_deferred_notices` after the read pass: no producer calls it any more; it goes with the last migration.
-- `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";` (#613 D17).
-- `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";` (#613 D4, D12).
-- the `emit_<topic>_notices()` subs and `bin_consolidation_notice`: end-of-run notices printed directly; their numbers render through the width-to-format dispatch (#617), which migrated producers keep.
+**Consumption sites.** The store (`register_notice`, `@notice_records`), the
+entry calls `notice` and `ask`, and `-V notices` (`emit_notices_verbose`) are in
+`ltl`; `enter_notice_stage` sets the stage a record is raised in as each
+pipeline stage begins. Every notice `ltl` raises is a producer on the store,
+each a `notice( kind => ..., category => ..., ... )` in its own sub; the
+producers, the kind each raises and its category are listed in
+`features/412-notice-surfaces.md` § Inventory of current notices and
+§ Implementation progress. The notices raised as the options are read are put
+to the analyst before the read by `ask_about_option_notices` through `ask`;
+the rest are drawn in the panel, except the index rename failure, which comes
+after it and is drawn at its call. The surfaces are the panel (`draw_deferred_notices`, the `notices` section of
+`-V section-layout`, and `notice` for an immediate notice), ask
+(`notice_ask_surface`) and the browser (`notice_browser`, in the panel's place
+when the deferred notices do not fit the terminal's height), all drawn through
+the shared layer (`notice_style`, `notice_rows`, `notice_heading`,
+`notice_frame`) on the terminal `detect_terminal` finds. Each prints on
+standard output when redirected or piped, the default taken as when its
+countdown runs out. The hidden `--notice-fixture` and `--notice-answers`
+raise fixture notices and give answers ahead. Prototype:
+`prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`.
 
 **Owning record.** `features/412-notice-surfaces.md` (D1 to D17);
 `docs/notice-surfaces.md`, `docs/design-language.md`,
 `docs/terminal-interaction.md`.
 
-**Status.** Designed and locked before code (2026-10-21). Being built on #412
-in the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
+**Status.** Designed and locked before code (2026-10-21). Built on #412 in
+the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
 plan): the store, the record, `-V notices`, the panel, ask, the browser and
-every notice up to finalize are in `ltl`; the last four notices follow.
+every notice of the inventory are in `ltl`; nothing prints a notice on
+standard error.
 
 ---
 

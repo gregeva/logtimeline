@@ -612,7 +612,7 @@ assert_command \
     label       'the notice is emitted after the read completes' \
     asserts     'The notice is drawn in the panel once the read is over, below the completion line rather than between frames — the reader sees an uninterrupted progress line, then the notices' \
     produced_by 'draw_deferred_notices() in ltl, called from pipeline_render()' \
-    contract    'features/446-overall-progress-indicator.md section Implementation — flush_deferred_notices() empties the queue once the read is over'
+    contract    'features/446-overall-progress-indicator.md section Implementation — notices are held until the read ends; features/412-notice-surfaces.md section Panel'
 
 # The deferral changes WHEN a notice is written, never whether: a behavioural
 # notice always prints, --disable-progress or not (CLAUDE.md section Before writing or changing code:

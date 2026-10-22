@@ -666,6 +666,31 @@ layered list over the browser, ◆ and `chosen:`, the lock, c closing, the
 countdown closing it, below the cursor erased on Esc, q quitting); a copy of
 `ltl` that reopens an answered choice fails the lock assertion.
 
+### Drop 6: close of the migration (2026-10-22)
+
+Rows 32 to 35 move to `notice()`, each a runtime condition:
+- `read_index_file` raises `index-unreadable`, with the index's path as evidence, and `index-malformed`, with the CSV parse error, at detect.
+- `write_index_file` raises `index-rename-failed`, with the path and the system's error, at render. It is `immediacy: now`, since the write follows the panel and a deferred record would never be drawn.
+- `get_memory_usage` raises `memory-unreadable` once per run, since every later reading on Windows fails the same way.
+
+`defer_notice()`, `flush_deferred_notices()` and `@deferred_notices` are
+removed. The § Not notices table now names every sub that still writes to
+standard error. The pattern entry in `docs/architecture-patterns.md` lists the
+producers and surfaces as built. `features/446-overall-progress-indicator.md`,
+`features/476-per-format-log-level-declarations.md` and
+`features/621-generated-read-loop-body.md` carry the amendment where they named
+the removed subs.
+
+Proven:
+- `validate-notices.sh` `migration-index` runs each of rows 32 to 34 in a directory of its own: an unreadable index, a malformed one, and a directory in the index's place. Each record is checked for producer, stage, immediacy and `shown: panel`, with nothing on standard error. The `ltl` before this drop fails all three.
+- `stderr-sites` scans `ltl`'s source and checks that every remaining `print STDERR`, `printf STDERR`, `warn` and `die` is in a sub the § Not notices table names. The `ltl` before this drop fails it on `flush_deferred_notices` and `get_memory_usage`.
+- `migration-categories` checks the four new kinds' categories.
+- Row 35 fails only on Windows, where no harness runs, so its raising is not exercised.
+
+Observation: when the index file cannot be written, the run ends with no index
+and no notice (`write_index_file`, the `else` branch of its write). That case
+is not in the inventory.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
@@ -732,12 +757,15 @@ and its callees, printed before the read starts; **read** = inside
 | emission | sites | reason |
 |---|---|---|
 | `print_usage` and the run-stopping errors (`_validate_dm`, `_validate_profile`, a file that cannot be opened, the CSV output that cannot be written, no file to read, with the `-r` quoting hint) | ~15 | the run stops at the error, before any notice is deferred |
-| format-registry self-validation (`build_format_registry`, `compile_format_*`, `format_*_src`, `format_classification_resolve`, `derive_format_constraints`, `csv_block_for_file`) | ~50 | internal invariant failures: a defect in `ltl`, never a condition of the run |
+| format-registry self-validation (`build_format_registry`, `compile_format_*`, `compile_csv_block`, `format_*_src`, `format_validate_scan_sub`, `format_classification_resolve`, `derive_format_constraints`, `csv_block_for_file`) | ~50 | internal invariant failures: a defect in `ltl`, never a condition of the run |
 | generated read loop (`generated_loop_*`, `read_path_text`) | ~12 | internal invariant failures, caught and turned into row 12 |
 | `value_text`, `value_column`, `stat_consumer_active`, `index_row` | 4 | internal invariant failures |
 | `--debug-layout`, `--validate-layout`, `merge_consolidation_overlapping_patterns` debug print | 9 | developer diagnostics behind hidden options |
 | the filters note in `--help` | 1 | help text on standard output, not a notice |
-| `detect_light_terminal_background` | 1 | its `stty` failure is raised inside an `eval` and never printed |
+| `detect_terminal` | 1 | its `stty` failure is raised inside an `eval` and never printed |
+| `read_index_file`, `write_index_file` | 5 | raised inside an `eval` and turned into rows 32 and 33, or into a run without an index; the one that escapes, a row that does not fill the index's columns, is an internal invariant failure |
+| `register_notice`, `ask`, `notice_tier_dims`, `_validate_notice_fixture` | 7 | the notice store's own invariant failures (a producer passing a field, category or form the store does not have), and the hidden `--notice-fixture` option given a set it does not have |
+| `start_row_counting`, `run_with_output_discarded` | 2 | internal invariant failures of the output plumbing |
 
 ### Observations from the inventory
 

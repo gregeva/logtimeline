@@ -359,7 +359,9 @@ notice goes through the behavioural-notice mechanism
 (`docs/architecture-patterns.md` § Behavioural notices, deferred while
 progress owns the terminal): queued with `defer_notice()`, since the decision
 is taken while the read pass owns the terminal, printed by
-`flush_deferred_notices()`, once per run. Its text, in user terms: "Note: the
+`flush_deferred_notices()`, once per run (amended by #412: raised through
+`notice()` as `read-path-fallback` and drawn in the notices panel; the two
+subs are gone). Its text, in user terms: "Note: the
 faster read path could not be prepared, so large files are read with the
 standard path, which is slower". The reason (source unreadable, marker
 mismatch, compile failure) is recorded in `-V read-path` only. Generation and

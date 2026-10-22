@@ -578,6 +578,11 @@ by `flush_deferred_notices()` at the tail of `read_and_process_logs()`, on
 stderr, with the `Note:` prefix the neighbouring notices use. Each line names
 the format, and each unregistered token it produced with the number of lines
 that carried it, and states that those lines were not counted. Always printed.
+Amended by #412 (2026-10-22): the report is the notice store's
+`level-not-recognised` record, raised through `notice()` and drawn in the
+notices panel on standard output. `defer_notice()` and
+`flush_deferred_notices()` are gone (`features/412-notice-surfaces.md`
+§ Implementation progress).
 
 No line is emitted for a format that produced no unregistered level, and no run
 that lost nothing prints anything, which is every run over every corpus measured
