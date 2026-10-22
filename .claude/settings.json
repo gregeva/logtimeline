@@ -1,7 +1,4 @@
 {
-  "worktree": {
-    "bgIsolation": "none"
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -34,6 +31,14 @@
           }
         ]
       }
+    ]
+  },
+  "worktree": {
+    "bgIsolation": "none"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gh pr merge:*)"
     ]
   }
 }
