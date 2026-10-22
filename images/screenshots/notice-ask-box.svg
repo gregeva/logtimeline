@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1548" height="825" viewBox="0 0 1548 825">
+<desc>crop '' of: ltl --terminal-width 211 --terminal-height 53 -dbg --disable-progress --notice-fixture ask-box -n 3 tests/fixtures/tomcat-access-duration-spread.txt</desc>
+<rect width="100%" height="100%" fill="#191d27"/>
+<g font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12">
+<rect x="172.8" y="162.9" width="7.2" height="1" fill="#dee5eb" shape-rendering="crispEdges"/>
+<rect x="259.2" y="162.9" width="7.2" height="1" fill="#e5eff5" shape-rendering="crispEdges"/>
+<text x="14.4" y="41.4" fill="#465c6d" textLength="676.8" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="36" y="56.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">,::</text>
+<text x="64.8" y="56.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">ltl</text>
+<text x="93.6" y="56.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">::'</text>
+<text x="122.4" y="56.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">log</text>
+<text x="151.2" y="56.4" fill="#465c6d" textLength="57.6" lengthAdjust="spacing">timeline</text>
+<text x="216" y="56.4" fill="#465c6d" textLength="86.4" lengthAdjust="spacing">[0.20.0-412]</text>
+<text x="309.6" y="56.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">--</text>
+<text x="338.4" y="56.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">by</text>
+<text x="360" y="56.4" fill="#465c6d" textLength="28.8" lengthAdjust="spacing">Greg</text>
+<text x="396" y="56.4" fill="#465c6d" textLength="21.6" lengthAdjust="spacing">Eva</text>
+<text x="424.8" y="56.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">//</text>
+<text x="446.4" y="56.4" fill="#465c6d" textLength="86.4" lengthAdjust="spacing">geva@ptc.com</text>
+<text x="540" y="56.4" fill="#465c6d" textLength="14.4" lengthAdjust="spacing">//</text>
+<text x="561.6" y="56.4" fill="#465c6d" textLength="122.4" lengthAdjust="spacing">gregeva@gmail.com</text>
+<text x="14.4" y="71.4" fill="#465c6d" textLength="676.8" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="14.4" y="101.4" fill="#00d7af" textLength="14.4" lengthAdjust="spacing">╭─</text>
+<text x="36" y="101.4" fill="#00d7af" font-weight="bold">⏱</text>
+<text x="50.4" y="101.4" fill="#00d7af" font-weight="bold" textLength="50.4" lengthAdjust="spacing">RUNTIME</text>
+<text x="108" y="101.4" fill="#00d7af" font-weight="bold" textLength="64.8" lengthAdjust="spacing">CONDITION</text>
+<text x="180" y="101.4" fill="#7d7f84">a</text>
+<text x="194.4" y="101.4" fill="#7d7f84" textLength="64.8" lengthAdjust="spacing">condition</text>
+<text x="266.4" y="101.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">of</text>
+<text x="288" y="101.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="316.8" y="101.4" fill="#7d7f84" textLength="36" lengthAdjust="spacing">run's</text>
+<text x="360" y="101.4" fill="#7d7f84" textLength="79.2" lengthAdjust="spacing">environment</text>
+<text x="446.4" y="101.4" fill="#00d7af" textLength="1080" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+<text x="14.4" y="116.4" fill="#00d7af">│</text>
+<text x="1519.2" y="116.4" fill="#00d7af">│</text>
+<text x="14.4" y="131.4" fill="#00d7af">│</text>
+<text x="36" y="131.4" fill="#dee5eb">a</text>
+<text x="50.4" y="131.4" fill="#dee5eb" textLength="43.2" lengthAdjust="spacing">notice</text>
+<text x="100.8" y="131.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">that</text>
+<text x="136.8" y="131.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">asks</text>
+<text x="172.8" y="131.4" fill="#dee5eb" textLength="14.4" lengthAdjust="spacing">in</text>
+<text x="194.4" y="131.4" fill="#dee5eb" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="223.2" y="131.4" fill="#dee5eb" textLength="50.4" lengthAdjust="spacing">compact</text>
+<text x="280.8" y="131.4" fill="#dee5eb" textLength="21.6" lengthAdjust="spacing">box</text>
+<text x="1519.2" y="131.4" fill="#00d7af">│</text>
+<text x="14.4" y="146.4" fill="#00d7af">│</text>
+<text x="1519.2" y="146.4" fill="#00d7af">│</text>
+<text x="14.4" y="161.4" fill="#00d7af">│</text>
+<text x="36" y="161.4" fill="#dee5eb" textLength="57.6" lengthAdjust="spacing">Continue</text>
+<text x="100.8" y="161.4" fill="#dee5eb" textLength="57.6" lengthAdjust="spacing">reading?</text>
+<text x="172.8" y="161.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">Stop</text>
+<text x="208.8" y="161.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">here</text>
+<text x="259.2" y="161.4" fill="#e5eff5" font-weight="bold" textLength="57.6" lengthAdjust="spacing">Continue</text>
+<text x="324" y="161.4" fill="#e5eff5" font-weight="bold" textLength="50.4" lengthAdjust="spacing">reading</text>
+<text x="381.6" y="161.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">(9s)</text>
+<text x="1519.2" y="161.4" fill="#00d7af">│</text>
+<text x="14.4" y="176.4" fill="#00d7af">│</text>
+<text x="1519.2" y="176.4" fill="#00d7af">│</text>
+<text x="14.4" y="191.4" fill="#00d7af" textLength="14.4" lengthAdjust="spacing">╰─</text>
+<text x="36" y="191.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">s:</text>
+<text x="57.6" y="191.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">stop</text>
+<text x="93.6" y="191.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">here</text>
+<text x="129.6" y="191.4" fill="#7d7f84">·</text>
+<text x="144" y="191.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">c:</text>
+<text x="165.6" y="191.4" fill="#7d7f84" textLength="57.6" lengthAdjust="spacing">continue</text>
+<text x="230.4" y="191.4" fill="#7d7f84" textLength="50.4" lengthAdjust="spacing">reading</text>
+<text x="288" y="191.4" fill="#7d7f84">·</text>
+<text x="302.4" y="191.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">Esc:</text>
+<text x="338.4" y="191.4" fill="#7d7f84" textLength="57.6" lengthAdjust="spacing">continue</text>
+<text x="403.2" y="191.4" fill="#7d7f84" textLength="50.4" lengthAdjust="spacing">reading</text>
+<text x="460.8" y="191.4" fill="#00d7af" textLength="1065.6" lengthAdjust="spacing">───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+</g>
+</svg>

@@ -51,3 +51,59 @@ screenshots:
     ltl: -so time -dmin 500 -dmax 100 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
     background: dark
     pane: sleep:2
+
+  # The surfaces no real notice reaches yet, from the fixture sets of the
+  # hidden --notice-fixture option that the tmux scenarios of
+  # tests/validate-notices.sh drive (features/412-notice-surfaces.md D17, D18):
+  # neutral notices over the repository's synthetic Tomcat access log, so no
+  # real message reaches the image. Each is captured from a tmux pane, with the
+  # keys the matching scenario sends.
+
+  # The compact box below the cursor, its letter key bar.
+  - name: notice-ask-box
+    ltl: --notice-fixture ask-box -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    pane: sleep:2
+
+  # The modal below the cursor, the fallback placement to the alternate screen.
+  - name: notice-ask-inline
+    ltl: --notice-fixture ask-inline -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    pane: sleep:2
+
+  # The options list, the question's second stage, opened by l from the modal.
+  - name: notice-ask-options
+    ltl: --notice-fixture ask-options -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    pane: sleep:2 l sleep:0.6
+
+  # The options list opened by L from the compact box.
+  - name: notice-ask-options-box
+    ltl: --notice-fixture ask-options-box -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    pane: sleep:2 L sleep:0.6
+
+  # The browser on the alternate screen: thirty notices, a tab for each
+  # category with its count, the first notice's detail. The browser takes the
+  # panel's place when the notices do not fit the terminal's height; their
+  # panel is 43 rows at width 211, so the pane is 40 rows high.
+  - name: notice-browser
+    ltl: --notice-fixture browser-many -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    height: 40
+    pane: sleep:2
+
+  # The options list layered over the browser: tab 7 (guidance), up twice to
+  # the notice that carries a choice (marked ◇), Enter.
+  - name: notice-browser-layered
+    ltl: --notice-fixture browser-many -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    height: 40
+    pane: sleep:2 7 sleep:0.4 Up sleep:0.3 Up sleep:0.4 Enter sleep:0.8
+
+  # The browser below the cursor.
+  - name: notice-browser-inline
+    ltl: --notice-fixture browser-inline -n 3 tests/fixtures/tomcat-access-duration-spread.txt
+    background: dark
+    height: 40
+    pane: sleep:2

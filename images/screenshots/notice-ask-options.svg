@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1548" height="825" viewBox="0 0 1548 825">
+<desc>crop '' of: ltl --terminal-width 211 --terminal-height 53 -dbg --disable-progress --notice-fixture ask-options -n 3 tests/fixtures/tomcat-access-duration-spread.txt</desc>
+<rect width="100%" height="100%" fill="#191d27"/>
+<g font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="12">
+<rect x="432" y="405" width="216" height="15" fill="#e5eff5" shape-rendering="crispEdges"/>
+<text x="14.4" y="41.4" fill="#7d7f84" textLength="676.8" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="36" y="56.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">,::</text>
+<text x="64.8" y="56.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">ltl</text>
+<text x="93.6" y="56.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">::'</text>
+<text x="122.4" y="56.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">log</text>
+<text x="151.2" y="56.4" fill="#7d7f84" textLength="57.6" lengthAdjust="spacing">timeline</text>
+<text x="216" y="56.4" fill="#7d7f84" textLength="86.4" lengthAdjust="spacing">[0.20.0-412]</text>
+<text x="309.6" y="56.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">--</text>
+<text x="338.4" y="56.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">by</text>
+<text x="360" y="56.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">Greg</text>
+<text x="396" y="56.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">Eva</text>
+<text x="424.8" y="56.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">//</text>
+<text x="446.4" y="56.4" fill="#7d7f84" textLength="86.4" lengthAdjust="spacing">geva@ptc.com</text>
+<text x="540" y="56.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">//</text>
+<text x="561.6" y="56.4" fill="#7d7f84" textLength="122.4" lengthAdjust="spacing">gregeva@gmail.com</text>
+<text x="14.4" y="71.4" fill="#7d7f84" textLength="676.8" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="396" y="311.4" fill="#00d700" textLength="14.4" lengthAdjust="spacing">╭─</text>
+<text x="417.6" y="311.4" fill="#00d700" font-weight="bold">➤</text>
+<text x="432" y="311.4" fill="#00d700" font-weight="bold" textLength="57.6" lengthAdjust="spacing">GUIDANCE</text>
+<text x="496.8" y="311.4" fill="#7d7f84">a</text>
+<text x="511.2" y="311.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">next</text>
+<text x="547.2" y="311.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">step</text>
+<text x="583.2" y="311.4" fill="#7d7f84" textLength="36" lengthAdjust="spacing">worth</text>
+<text x="626.4" y="311.4" fill="#7d7f84" textLength="43.2" lengthAdjust="spacing">trying</text>
+<text x="676.8" y="311.4" fill="#00d700" textLength="475.2" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────╮</text>
+<text x="396" y="326.4" fill="#00d700">│</text>
+<text x="1144.8" y="326.4" fill="#00d700">│</text>
+<text x="396" y="341.4" fill="#00d700">│</text>
+<text x="417.6" y="341.4" fill="#dee5eb" font-weight="bold" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="446.4" y="341.4" fill="#dee5eb" font-weight="bold" textLength="36" lengthAdjust="spacing">focus</text>
+<text x="489.6" y="341.4" fill="#dee5eb">a</text>
+<text x="504" y="341.4" fill="#dee5eb" textLength="43.2" lengthAdjust="spacing">notice</text>
+<text x="554.4" y="341.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">with</text>
+<text x="590.4" y="341.4" fill="#dee5eb" textLength="50.4" lengthAdjust="spacing">options</text>
+<text x="648" y="341.4" fill="#dee5eb" textLength="36" lengthAdjust="spacing">worth</text>
+<text x="691.2" y="341.4" fill="#dee5eb" textLength="50.4" lengthAdjust="spacing">looking</text>
+<text x="748.8" y="341.4" fill="#dee5eb" textLength="14.4" lengthAdjust="spacing">at</text>
+<text x="1144.8" y="341.4" fill="#00d700">│</text>
+<text x="396" y="356.4" fill="#00d700">│</text>
+<text x="1144.8" y="356.4" fill="#00d700">│</text>
+<text x="396" y="371.4" fill="#00d700" textLength="756" lengthAdjust="spacing">├───────────────────────────────────────────────────────────────────────────────────────────────────────┤</text>
+<text x="396" y="386.4" fill="#00d700">│</text>
+<text x="1144.8" y="386.4" fill="#00d700">│</text>
+<text x="396" y="401.4" fill="#00d700">│</text>
+<text x="453.6" y="401.4" fill="#e5eff5" font-weight="bold" textLength="36" lengthAdjust="spacing">What?</text>
+<text x="547.2" y="401.4" fill="#e5eff5" font-weight="bold" textLength="28.8" lengthAdjust="spacing">How?</text>
+<text x="648" y="401.4" fill="#e5eff5" font-weight="bold" textLength="28.8" lengthAdjust="spacing">Why?</text>
+<text x="1144.8" y="401.4" fill="#00d700">│</text>
+<text x="396" y="416.4" fill="#00d700">│</text>
+<text x="417.6" y="416.4" fill="#00d700">▶</text>
+<text x="432" y="416.4" fill="#191d27" font-weight="bold">1</text>
+<text x="453.6" y="416.4" fill="#191d27" font-weight="bold" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="482.4" y="416.4" fill="#191d27" font-weight="bold" textLength="28.8" lengthAdjust="spacing">what</text>
+<text x="547.2" y="416.4" fill="#191d27" font-weight="bold" textLength="21.6" lengthAdjust="spacing">-so</text>
+<text x="576" y="416.4" fill="#191d27" font-weight="bold" textLength="36" lengthAdjust="spacing">count</text>
+<text x="648" y="416.4" fill="#00d700" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="676.8" y="416.4" fill="#00d700" textLength="21.6" lengthAdjust="spacing">why</text>
+<text x="705.6" y="416.4" fill="#00d700" textLength="14.4" lengthAdjust="spacing">of</text>
+<text x="727.2" y="416.4" fill="#00d700" textLength="36" lengthAdjust="spacing">three</text>
+<text x="770.4" y="416.4" fill="#00d700" textLength="43.2" lengthAdjust="spacing">parts,</text>
+<text x="820.8" y="416.4" fill="#00d700" textLength="28.8" lengthAdjust="spacing">long</text>
+<text x="856.8" y="416.4" fill="#00d700" textLength="43.2" lengthAdjust="spacing">enough</text>
+<text x="907.2" y="416.4" fill="#00d700" textLength="14.4" lengthAdjust="spacing">to</text>
+<text x="928.8" y="416.4" fill="#00d700" textLength="28.8" lengthAdjust="spacing">wrap</text>
+<text x="964.8" y="416.4" fill="#00d700" textLength="28.8" lengthAdjust="spacing">onto</text>
+<text x="1000.8" y="416.4" fill="#00d700">a</text>
+<text x="1015.2" y="416.4" fill="#00d700" textLength="43.2" lengthAdjust="spacing">second</text>
+<text x="1065.6" y="416.4" fill="#00d700" textLength="21.6" lengthAdjust="spacing">row</text>
+<text x="1094.4" y="416.4" fill="#00d700" textLength="14.4" lengthAdjust="spacing">of</text>
+<text x="1144.8" y="416.4" fill="#00d700">│</text>
+<text x="396" y="431.4" fill="#00d700">│</text>
+<text x="648" y="431.4" fill="#00d700" textLength="21.6" lengthAdjust="spacing">its</text>
+<text x="676.8" y="431.4" fill="#00d700" textLength="43.2" lengthAdjust="spacing">column</text>
+<text x="1144.8" y="431.4" fill="#00d700">│</text>
+<text x="396" y="446.4" fill="#00d700">│</text>
+<text x="432" y="446.4" fill="#dee5eb">2</text>
+<text x="453.6" y="446.4" fill="#dee5eb" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="482.4" y="446.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">what</text>
+<text x="547.2" y="446.4" fill="#dee5eb" textLength="21.6" lengthAdjust="spacing">-so</text>
+<text x="576" y="446.4" fill="#dee5eb" textLength="36" lengthAdjust="spacing">bytes</text>
+<text x="1144.8" y="446.4" fill="#00d700">│</text>
+<text x="396" y="461.4" fill="#00d700">│</text>
+<text x="432" y="461.4" fill="#dee5eb">3</text>
+<text x="453.6" y="461.4" fill="#dee5eb" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="482.4" y="461.4" fill="#dee5eb" textLength="28.8" lengthAdjust="spacing">what</text>
+<text x="1144.8" y="461.4" fill="#00d700">│</text>
+<text x="396" y="476.4" fill="#00d700">│</text>
+<text x="1144.8" y="476.4" fill="#00d700">│</text>
+<text x="396" y="491.4" fill="#00d700">│</text>
+<text x="439.2" y="491.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">the</text>
+<text x="468" y="491.4" fill="#7d7f84" textLength="43.2" lengthAdjust="spacing">effect</text>
+<text x="518.4" y="491.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">of</text>
+<text x="540" y="491.4" fill="#7d7f84" textLength="36" lengthAdjust="spacing">three</text>
+<text x="583.2" y="491.4" fill="#7d7f84" textLength="36" lengthAdjust="spacing">parts</text>
+<text x="1144.8" y="491.4" fill="#00d700">│</text>
+<text x="396" y="506.4" fill="#00d700">│</text>
+<text x="1144.8" y="506.4" fill="#00d700">│</text>
+<text x="396" y="521.4" fill="#00d700" textLength="14.4" lengthAdjust="spacing">╰─</text>
+<text x="417.6" y="521.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">↑↓</text>
+<text x="439.2" y="521.4" fill="#7d7f84">j</text>
+<text x="453.6" y="521.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">k:</text>
+<text x="475.2" y="521.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">move</text>
+<text x="511.2" y="521.4" fill="#7d7f84">·</text>
+<text x="525.6" y="521.4" fill="#7d7f84" textLength="21.6" lengthAdjust="spacing">1-3</text>
+<text x="554.4" y="521.4" fill="#7d7f84" textLength="43.2" lengthAdjust="spacing">Enter:</text>
+<text x="604.8" y="521.4" fill="#7d7f84" textLength="43.2" lengthAdjust="spacing">choose</text>
+<text x="655.2" y="521.4" fill="#7d7f84">·</text>
+<text x="669.6" y="521.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">Esc:</text>
+<text x="705.6" y="521.4" fill="#7d7f84" textLength="57.6" lengthAdjust="spacing">continue</text>
+<text x="770.4" y="521.4" fill="#7d7f84" textLength="14.4" lengthAdjust="spacing">as</text>
+<text x="792" y="521.4" fill="#7d7f84" textLength="50.4" lengthAdjust="spacing">planned</text>
+<text x="849.6" y="521.4" fill="#7d7f84">·</text>
+<text x="864" y="521.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">q/x:</text>
+<text x="900" y="521.4" fill="#7d7f84" textLength="28.8" lengthAdjust="spacing">quit</text>
+<text x="936" y="521.4" fill="#00d700" textLength="216" lengthAdjust="spacing">─────────────────────────────╯</text>
+</g>
+</svg>

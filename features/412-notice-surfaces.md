@@ -709,8 +709,14 @@ the real question before the read captured from a pane.
 - `pane`: one run, the image cell for cell as an independent tmux capture holds it, and the dimmed run faint;
 - `pane-refusals`.
 
-The corpus has no run whose deferred notices exceed the terminal's height: the
-small folders and the method-server and GC folders give none or one.
+The surfaces no real notice reaches yet come from the fixture sets the tmux
+scenarios drive (D17), over the repository's synthetic Tomcat access log so
+that no real message reaches an image, each with the keys of its scenario:
+`notice-ask-box`, `notice-ask-inline`, `notice-ask-options`,
+`notice-ask-options-box`, `notice-browser`, `notice-browser-layered` and
+`notice-browser-inline`. The browser entries are 40 rows high, because the
+thirty fixture notices make a 43-row panel at width 211, and the browser takes
+the panel's place only when the panel does not fit.
 
 Observation: when the index file cannot be written, the run ends with no index
 and no notice (`write_index_file`, the `else` branch of its write). That case
