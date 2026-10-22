@@ -1,0 +1,7 @@
+{"command":"perl show.pl panel","feedback":"yes, good","option":"panel","time":"2026-10-20T13:42:56+0200","title":"Panel: the dark category colours"}
+{"command":"perl show.pl ask --input memory","feedback":"good","option":"modal-read","time":"2026-10-20T13:43:18+0200","title":"Modal: redraw by difference"}
+{"command":"perl show.pl ask --input memory --form box","feedback":"good","option":"box-read","time":"2026-10-20T13:43:33+0200","title":"Compact box: one empty row above it"}
+{"command":"perl show.pl browser","feedback":"good","option":"browser","time":"2026-10-20T13:44:10+0200","title":"Browser: the detail pane and the layered list"}
+{"command":"perl show.pl browser --placement inline","feedback":"Good","option":"browser-inline","time":"2026-10-20T13:44:29+0200","title":"Browser below the cursor: one empty row above it"}
+{"command":"perl show.pl panel --bg light","feedback":"good","option":"light-panel","time":"2026-10-20T13:50:21+0200","title":"Panel on light: text and secondary text (D10)"}
+{"command":"perl show.pl ask --input memory --bg light","feedback":"good","option":"light-modal","time":"2026-10-20T13:53:37+0200","title":"Modal on light: the dimmed run keeps its colours"}

@@ -47,6 +47,20 @@ while IFS= read -r path; do
     done
 done <<< "$staged_paths"
 
+# An architecture-pattern entry is an index entry that points at the complete
+# pattern; the check compares the staged file with HEAD's.
+if grep -qx 'docs/architecture-patterns.md' <<< "$staged_paths"; then
+    root=$(git rev-parse --show-toplevel)
+    base_tmp=$(mktemp); staged_tmp=$(mktemp)
+    git show HEAD:docs/architecture-patterns.md > "$base_tmp" 2>/dev/null || : > "$base_tmp"
+    git show :docs/architecture-patterns.md > "$staged_tmp"
+    if ! "$root/process/check-architecture-patterns.sh" "$staged_tmp" "$base_tmp"; then
+        rm -f "$base_tmp" "$staged_tmp"
+        fail "docs/architecture-patterns.md: an entry is not an index entry (see process/check-architecture-patterns.sh)"
+    fi
+    rm -f "$base_tmp" "$staged_tmp"
+fi
+
 content_patterns=(
     'AKIA[0-9A-Z]{16}'
     'ghp_[A-Za-z0-9]{30,}'

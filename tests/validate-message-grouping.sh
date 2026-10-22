@@ -69,6 +69,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/logs-dir.sh
 source "$SCRIPT_DIR/lib/logs-dir.sh"
 
@@ -119,7 +121,7 @@ capture_section() {
     local errfile="$outfile.stderr"
     set +e
     # Run inside TMP_DIR so cwd artifacts never land in the repo (Trap 9).
-    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni "$@" ) > "$outfile" 2>"$errfile"
+    ( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -V notices "$@" ) > "$outfile" 2>"$errfile"
     local rc=$?
     set -e
     if [[ "$rc" -ne 0 ]]; then
@@ -461,6 +463,8 @@ if [[ -s "$out_downloads_75" ]] && capture_section "$out" $SHAPE -du us -xqs -g 
         contract    "$CONTRACT_SEARCH (criterion 5)"
 fi
 
+fi
+
 # --- Final-pass skip when streaming absorbed nothing (#584) -----------------
 #
 # The download fixture's keys have no partner at Dice 85, so streaming absorbs
@@ -468,16 +472,13 @@ fi
 # with the hidden --skip-final-min-keys so the decision is exercised on a
 # committed 400-line fixture instead of a corpus-sized input.
 #
-# `-bs 1440 -oe -n 1`: the assertions read the message-grouping section and the
-# notice on stderr, neither of which depends on the time axis or the rendered
-# table.
+# `-bs 1440 -oe -n 1`: the assertions read the message-grouping and notices
+# sections, neither of which depends on the time axis or the rendered table.
 
 CONTRACT_SKIP='features/fuzzy-message-consolidation.md § Design: skip the final pass when streaming absorbed nothing (#584) — acceptance criteria'
 SKIP_PRODUCER='group_similar_messages() in ltl (the per-group skip decision at the streaming/final-pass boundary), reported by pipeline_finalize()'
 NOTICE_PRODUCER='report_skipped_final_pass() in ltl'
 CLIFF_PRODUCER='consolidation_cliff_edge() in ltl, called from group_similar_messages() when the skip fires'
-
-fi
 
 if scenario_wanted skip-final-pass-fires; then
 current_scenario="skip-final-pass-fires"
@@ -492,21 +493,21 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100 "$F
         contract    "$CONTRACT_SKIP (criterion 1)"
 
     assert_command \
-        command     "grep -q 'the final consolidation pass was skipped' '$out.stderr'" \
+        command     "[[ \$(notice_kind_count '$out' final-pass-skipped) == 1 ]] && notice_field '$out' final-pass-skipped statement | grep -q '^the final consolidation pass was skipped over .*: grouping at 85% similarity absorbed almost none of this data as it was read'" \
         label       'the notice states that the final pass was skipped and why' \
         asserts     "When the skip fires, ltl prints a notice naming what was skipped and the reason: grouping at the requested similarity absorbed almost none of the data as it was read" \
         produced_by "$NOTICE_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 1)"
 
     assert_command \
-        command     "! grep -qE 'grouped before it was skipped|already grouped' '$out.stderr'" \
+        command     "notice_section_present '$out' && ! notice_lines '$out' | grep -qE 'grouped before it was skipped|already grouped'" \
         label       'the notice stays on the final pass and says nothing about the streaming phase' \
         asserts     "The notice reports the skipped final pass and the shape of the data, and does not report what the streaming phase absorbed: that is a different phase, and the count is a number the reader cannot act on" \
         produced_by "$NOTICE_PRODUCER" \
         contract    "$CONTRACT_SKIP (criterion 1) — the notice's subject"
 
     assert_command \
-        command     "grep -qE 'similarity clusters below [0-9]+%' '$out.stderr' && grep -q 'masking it with --mask' '$out.stderr'" \
+        command     "notice_field '$out' final-pass-skipped remedy | grep -qE 'similarity clusters below [0-9]+%' && notice_field '$out' final-pass-skipped remedy | grep -q 'masking it with --mask'" \
         label       'the notice carries the data shape and the remedy' \
         asserts     "The notice tells the analyst the similarity the data clusters at and that masking a per-request identifier is the other remedy, which is what makes a next run possible" \
         produced_by "$NOTICE_PRODUCER" \
@@ -535,7 +536,7 @@ fi
 # the prose notice row (the full word, a digit given up within 25%), the
 # threshold echoed verbatim. Generated: 1,500 access-log keys whose paths are
 # random letters, so none pairs at -g 85 and streaming absorbs none.
-# `-bs 1440 -oe -n 1`: the assertion reads the notice on stderr.
+# `-bs 1440 -oe -n 1`: the assertion reads the notice from -V notices.
 if scenario_wanted skip-final-pass-notice-count; then
 current_scenario="skip-final-pass-notice-count"
 echo "[$current_scenario]"
@@ -543,13 +544,13 @@ gen="$TMP_DIR/skip-count-1500.txt"
 perl -e 'srand(617); my @c = ("a".."z"); for my $i (0..1499) { my $p = join "", map { $c[rand @c] } 1..24; printf "192.0.2.10 - - [19/May/2026:12:%02d:%02d +0000] \"GET /store/%s/fetch HTTP/1.1\" 200 512 5\n", int($i/60) % 60, $i % 60, $p }' > "$gen"
 errfile="$TMP_DIR/skip-count.stderr"
 set +e
-"$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -g 85 --skip-final-min-keys 100 "$gen" > "$TMP_DIR/skip-count.out" 2> "$errfile"
+"$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -g 85 --skip-final-min-keys 100 -V notices "$gen" > "$TMP_DIR/skip-count.out" 2> "$errfile"
 set -e
 if ! assert_no_runtime_warnings "$errfile" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 assert_command \
-    command     "grep -qF 'the final consolidation pass was skipped over 1500 messages: grouping at 85% similarity' '$errfile'" \
+    command     "notice_field '$TMP_DIR/skip-count.out' final-pass-skipped statement | grep -qF 'the final consolidation pass was skipped over 1500 messages: grouping at 85% similarity'" \
     label       'the notice counts 1,500 skipped messages as 1500 and echoes the threshold verbatim' \
     asserts     "A notice's measured count renders through the one dispatch at the prose notice row (1,500 unclimbed: exact and narrower than 1.5 thousand); an echoed setting (the -g similarity) stays verbatim" \
     produced_by "report_skipped_final_pass() in ltl, through value_text() and the notice row" \
@@ -569,7 +570,7 @@ if capture_section "$out" $SHAPE -du us -xqs -g 85 --skip-final-min-keys 100000 
         contract    "$CONTRACT_SKIP (criterion 4)"
 
     assert_command \
-        command     "! grep -q 'the final consolidation pass was skipped' '$out.stderr'" \
+        command     "[[ \$(notice_kind_count '$out' final-pass-skipped) == 0 ]]" \
         label       'no notice when nothing is skipped' \
         asserts     "A run that skips no final pass prints no skip notice" \
         produced_by "$NOTICE_PRODUCER" \

@@ -292,7 +292,9 @@ about anything else, these still hold.
       existing sub. Near-duplicates found on the way are converged in the same change.
 - [ ] Consult `docs/architecture-patterns.md` for a pattern that fits before
       building. A change that adds a consumption site of a pattern, or
-      introduces a new one, records it there in the same commit.
+      introduces a new one, records it there in the same commit. An entry is
+      an index entry, at most 60 lines, pointing at the `docs/` file that
+      holds the complete pattern; the pre-commit hook refuses more.
 - [ ] Every accumulator tracks an observation count; derived output is gated on
       `count > 0`, never on `defined` over a zero-initialised field.
 - [ ] Any ` at <file> line <N>` on `ltl`'s stderr is a bug. Every harness that
@@ -310,6 +312,12 @@ about anything else, these still hold.
       same commit, and run the scenarios that read the changed section or key,
       each named with `--scenario`, to see them assert. Never a whole harness.
 - [ ] A visual surface is verified by looking at rendered output on real data.
+- [ ] Any script whose output a person reads in a terminal, prototypes and
+      tools included, follows `docs/terminal-output.md`: the UTF-8 code page
+      set on Windows, no `stty` or `tput`, every glyph one cell wide in Windows
+      Terminal, a colour that must hold its value (and anything bold) a
+      256-colour or 24-bit code, never a basic one. Windows output is checked
+      in a new window, not the agent's shell.
 
 ### After each change, before committing it
 
@@ -381,6 +389,10 @@ about anything else, these still hold.
 | Creating, renaming or editing any `tests/validate-*.sh`, or any `-V` section or key | `tests/HARNESS-DESIGN.md` (mandatory before acting) |
 | Deriving acceptance criteria | `docs/test-driven-development.md` |
 | Deciding whether and how to prototype | `prototype/README.md` |
+| How a surface looks: glyphs, colours, the two coexisting looks and the choice per surface, the category sheet, wording | `docs/design-language.md` |
+| How a surface behaves: components, keys, taking input, countdown, buttons, size, placement, padding, erasing, unattended runs and the test method per surface | `docs/terminal-interaction.md` |
+| Notices and choices: what a notice is, the surfaces, taking input, the data model, the `-V notices` section, the producer's contract | `docs/notice-surfaces.md` |
+| What any output to a terminal does per platform: encoding and code page, escape sequences, glyph width, terminal commands, checking output on Windows | `docs/terminal-output.md` |
 | Shell, grep, perl one-liners against this repo | `docs/toolchain-guidance.md` |
 | Choosing a test log | `docs/test-logs.md` (single source of truth for what the corpus holds; an issue names the log files it arises from, everything else describes a log by family and characteristics) |
 | CLI options and user-observable behaviour | `docs/usage.md`, `--help` |
@@ -400,8 +412,9 @@ about anything else, these still hold.
 Public repository. `./process/setup-hooks.sh` activates the tracked pre-commit
 guard at `.githooks/pre-commit`, which blocks staging anything under `.claude/`
 except the two shared, reviewed files named below, plus `.env*`, key and
-credential files, and common token patterns; `.gitignore` is the primary
-defense. Overriding needs `--no-verify` and an explanation in the commit message.
+credential files, and common token patterns, and refuses an architecture-pattern
+entry that is not an index entry (`process/check-architecture-patterns.sh`);
+`.gitignore` is the primary defense. Overriding needs `--no-verify` and an explanation in the commit message.
 
 Two mechanisms of the Claude Code harness are tracked so that the mechanical
 rules in this file are enforced rather than advised:

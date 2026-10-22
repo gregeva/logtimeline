@@ -87,6 +87,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -377,8 +379,8 @@ check_error_rate_counts_fatal() {
 }
 
 # The end-of-run report names the format, the token exactly as the producer
-# wrote it, and the number of lines that carried it. Read from stderr, where the
-# report is raised beside the numeric-filter and unreadable-directory notices.
+# wrote it, and the number of lines that carried it. Read from the run's notice
+# records (notice_lines over -V notices), one line per record.
 # A capture that carries no report line at all is a failure naming that, so an
 # absent report is never mistaken for a report naming something else.
 check_report_names() {
@@ -388,7 +390,7 @@ check_report_names() {
         my @report = grep { /ltl does not recognise/ } <$fh>;
         close $fh;
         unless (@report) {
-            print "anchor not found: no unregistered-level report on stderr\n";
+            print "anchor not found: no unregistered-level report\n";
             exit 1;
         }
         my ($line) = grep { /\b\Q$format\E\b/ } @report;
@@ -409,7 +411,7 @@ check_report_names() {
     ' "$1" "$2" "$3" "$4"
 }
 
-# A report line reached stderr at all. Separate from check_report_names so the
+# A report record exists at all. Separate from check_report_names so the
 # "it prints under --disable-progress" assertion measures presence rather than
 # content, and can fail on its own.
 check_report_present() {
@@ -419,7 +421,7 @@ check_report_present() {
         my @report = grep { /ltl does not recognise/ } <$fh>;
         close $fh;
         unless (@report) {
-            print "no unregistered-level report on stderr under --disable-progress\n";
+            print "no unregistered-level report under --disable-progress\n";
             exit 1;
         }
         print "report present under --disable-progress: @report";
@@ -438,7 +440,7 @@ check_report_omits() {
         my @report = grep { /ltl does not recognise/ } <$fh>;
         close $fh;
         unless (@report) {
-            print "anchor not found: no unregistered-level report on stderr to read the absence against\n";
+            print "anchor not found: no unregistered-level report to read the absence against\n";
             exit 1;
         }
         if (grep { /\b\Q$token\E\b/ } @report) {
@@ -824,10 +826,11 @@ RENDER_OUT="$TMP_DIR/render-outside.txt"
 STDERR_OUT="$TMP_DIR/render-outside.stderr"
 
 set +e
-( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 \
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 -V notices \
     --terminal-width "$WIDTH" "$FIXTURE_OUTSIDE" ) 2>"$STDERR_OUT" | strip_ansi > "$RENDER_OUT"
 render_outside_status=("${PIPESTATUS[@]}")
 set -e
+notice_lines "$RENDER_OUT" > "$STDERR_OUT.notices"
 
 if [[ "${render_outside_status[0]}" -ne 0 ]]; then
     echo "  FAIL  $current_scenario :: ltl exited ${render_outside_status[0]} while rendering" >&2
@@ -840,17 +843,17 @@ if ! assert_no_runtime_warnings "$STDERR_OUT" "$current_scenario"; then
 fi
 
 assert_command \
-    command     "check_report_names '$STDERR_OUT' 'windchill_method_server' 'NOTAREALLEVEL' 1" \
+    command     "check_report_names '$STDERR_OUT.notices' 'windchill_method_server' 'NOTAREALLEVEL' 1" \
     label       'the report names the format, the token and the line count' \
     asserts     "A line whose captured level is outside the vocabulary is matched against its format and then dropped by the per-line category gate, so it counts in LINES READ and not in LINES INCLUDED with nothing to attribute the gap to. The end of the run must name the format that produced the token, the token exactly as the producer wrote it, and how many lines carried it — the count is what separates a rounding error from a loss that matters." \
     produced_by 'read_and_process_logs() in ltl — the unregistered-level collection on the reject branch of the category gate, reported at the tail of the same sub beside the numeric-filter and unreadable-directory notices' \
     contract    'features/476-per-format-log-level-declarations.md § D6 (one report line per format, each token with its line count, always printed)'
 
 assert_command \
-    command     "check_report_present '$STDERR_OUT'" \
+    command     "check_report_present '$STDERR_OUT.notices'" \
     label       'the report prints under --disable-progress' \
-    asserts     'The report is a behavioural notice, not a progress indicator: --disable-progress suppresses progress indicators only. This run passes --disable-progress, as every harness invocation does, and the report must still reach stderr.' \
-    produced_by 'read_and_process_logs() in ltl — the notice block at the tail, which prints to stderr unconditionally' \
+    asserts     'The report is a behavioural notice, not a progress indicator: --disable-progress suppresses progress indicators only. This run passes --disable-progress, as every harness invocation does, and the report must still be raised.' \
+    produced_by 'read_and_process_logs() in ltl — the notice block at the tail, which raises it unconditionally' \
     contract    'features/476-per-format-log-level-declarations.md § D6 (it always prints; --disable-progress suppresses progress indicators only)'
 
 assert_command \
@@ -878,7 +881,7 @@ fi
 # line count the prose notice row (the full word, a digit given up within
 # 25%). Generated from the Edge C SDK fixture's shape: 1,500 AUTH lines and
 # 300 TRAFFIC_CONTROL lines between a START and an INFO line.
-# `-bs 1440 -oe -n 1`: the assertion reads the report on stderr.
+# `-bs 1440 -oe -n 1`: the assertion reads the report from -V notices.
 if scenario_wanted unregistered-level-numbers; then
 current_scenario="unregistered-level-numbers"
 echo "[$current_scenario]"
@@ -886,13 +889,13 @@ GEN_LEVELS="$TMP_DIR/edge-1800.txt"
 perl -e 'print "START 2025-08-09 18:19:01,100 8012 agent_main.cpp:14 Startup agent starting up\n"; for my $i (0..1499) { printf "AUTH 2025-08-09 18:%02d:%02d,200 8012 agent_auth.cpp:27 Authenticate credential exchange completed\n", 20 + int($i/60) % 30, $i % 60 } for my $i (0..299) { printf "TRAFFIC_CONTROL 2025-08-09 18:%02d:%02d,300 8012 agent_traffic.cpp:41 Throttle outbound rate adjusted\n", 20 + int($i/60), $i % 60 } print "INFO 2025-08-09 18:59:04,400 8012 agent_main.cpp:55 Ready agent ready for work\n"' > "$GEN_LEVELS"
 STDERR_LEVELS="$TMP_DIR/edge-1800.stderr"
 set +e
-( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 --terminal-width "$WIDTH" "$GEN_LEVELS" ) > /dev/null 2> "$STDERR_LEVELS"
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 --terminal-width "$WIDTH" -V notices "$GEN_LEVELS" ) > "$STDERR_LEVELS.out" 2> "$STDERR_LEVELS"
 set -e
 if ! assert_no_runtime_warnings "$STDERR_LEVELS" "$current_scenario"; then
     fail=$((fail + 1)); failures+=("$current_scenario :: perl-runtime-warnings-on-stderr")
 fi
 assert_command \
-    command     "grep -qF 'lines carried 2 levels ltl does not recognise: AUTH (1500 lines), TRAFFIC_CONTROL (300 lines) - 1800 lines were not counted' '$STDERR_LEVELS'" \
+    command     "notice_lines '$STDERR_LEVELS.out' | grep -qxF 'level-not-recognised | tw_edge_c_sdk | lines carried 2 levels ltl does not recognise, so 1800 lines were not counted | AUTH (1500 lines); TRAFFIC_CONTROL (300 lines) | -'" \
     label       'the report counts its levels exactly, and the lines of each level and their total in prose, which agree' \
     asserts     'The number of levels agrees with the list it precedes (notice exact); the line count of each level renders through the one dispatch at the prose notice row (1,500 reads 1500 and the total 1800, unclimbed: exact and narrower than any scaled spelling, so the parts and the total agree)' \
     produced_by 'read_and_process_logs() in ltl, the unregistered-level report, through value_text() and the notice exact and notice rows' \
@@ -907,10 +910,11 @@ RENDER_EDGE="$TMP_DIR/render-edge.txt"
 STDERR_EDGE="$TMP_DIR/render-edge.stderr"
 
 set +e
-( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 \
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 -V notices \
     --terminal-width "$WIDTH" "$FIXTURE_EDGE" ) 2>"$STDERR_EDGE" | strip_ansi > "$RENDER_EDGE"
 render_edge_status=("${PIPESTATUS[@]}")
 set -e
+notice_lines "$RENDER_EDGE" > "$STDERR_EDGE.notices"
 
 if [[ "${render_edge_status[0]}" -ne 0 ]]; then
     echo "  FAIL  $current_scenario :: ltl exited ${render_edge_status[0]} while rendering" >&2
@@ -924,7 +928,7 @@ fi
 
 for token in AUTH TRAFFIC_CONTROL; do
     assert_command \
-        command     "check_report_names '$STDERR_EDGE' 'tw_edge_c_sdk' '$token' 1" \
+        command     "check_report_names '$STDERR_EDGE.notices' 'tw_edge_c_sdk' '$token' 1" \
         label       "$token is reported with its line count" \
         asserts     "The Edge C SDK writes AUTH and TRAFFIC_CONTROL in the level slot. They are startup and control messages rather than severities, so they are not admitted to the vocabulary and the lines carrying them are dropped. The report is the mechanism that names such a token without promoting it to a category, and it must name this one with the number of lines that carried it." \
         produced_by 'read_and_process_logs() in ltl — the unregistered-level collection on the reject branch of the category gate, reported at the tail of the same sub' \
@@ -932,7 +936,7 @@ for token in AUTH TRAFFIC_CONTROL; do
 done
 
 assert_command \
-    command     "check_report_omits '$STDERR_EDGE' 'START'" \
+    command     "check_report_omits '$STDERR_EDGE.notices' 'START'" \
     label       'START is not reported, because the vocabulary already carries it' \
     asserts     'START is a member of the global vocabulary, put there by the Workgroup Manager letter map, so a START line from the Edge C SDK passes the gate and is counted as a category of a format that does not declare it. The report names what was dropped, and START was not dropped, so it must not appear — the declaration makes that condition legible rather than closing it, which would cost a per-format check on the accept path of every matched line.' \
     produced_by 'read_and_process_logs() in ltl — the collection runs on the reject branch only, and a token in %log_level_set never reaches it' \
@@ -963,10 +967,11 @@ RENDER_JK="$TMP_DIR/render-connector.txt"
 STDERR_JK="$TMP_DIR/render-connector.stderr"
 
 set +e
-( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 \
+( cd "$TMP_DIR" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 10 -V notices \
     --terminal-width "$WIDTH" "$FIXTURE_CONNECTOR" ) 2>"$STDERR_JK" | strip_ansi > "$RENDER_JK"
 render_jk_status=("${PIPESTATUS[@]}")
 set -e
+notice_lines "$RENDER_JK" > "$STDERR_JK.notices"
 
 if [[ "${render_jk_status[0]}" -ne 0 ]]; then
     echo "  FAIL  $current_scenario :: ltl exited ${render_jk_status[0]} while rendering" >&2
@@ -995,7 +1000,7 @@ assert_command \
     contract    'features/655-apache-mod-jk-connector-format.md D2 (an unmapped word stays as written and is reported, not lost) and features/476-per-format-log-level-declarations.md D1'
 
 assert_command \
-    command     "check_report_names '$STDERR_JK' 'apache_mod_jk' 'notice' 1" \
+    command     "check_report_names '$STDERR_JK.notices' 'apache_mod_jk' 'notice' 1" \
     label       'the unmapped word is reported under the connector format with its count' \
     asserts     'A word outside the level map stays as written. The end-of-run report must name the connector format, the word exactly as the connector wrote it, and the one line that carried it.' \
     produced_by 'read_and_process_logs() in ltl - the unregistered-level collection on the reject branch of the category gate, reported at the tail of the same sub' \

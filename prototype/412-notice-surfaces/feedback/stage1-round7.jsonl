@@ -1,0 +1,1 @@
+{"command":"perl show.pl ask --input pattern","feedback":"yes, you finally got it","option":"modal-pattern","time":"2026-10-19T14:15:04+0200","title":"Modal once a pattern is found, with its options list"}

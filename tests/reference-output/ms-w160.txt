@@ -2,6 +2,19 @@
 ──────────────────────────────────────────────────────────────────────────────────────────────
    ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
+╭─ ⚙ YOUR OPTIONS command usage warnings ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                                                                             │
+│  -ms/--milliseconds is deprecated → use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width                            │
+│                                                                                                                                                             │
+│  Continue with these options?  Stop and correct them   Continue (10s)                                                                                       │
+│                                                                                                                                                             │
+╰─ s: stop and correct them · c: continue · Esc: continue ────────────────────────────────────────────────────────────────────────────────────────────────────╯
+⚙ YOUR OPTIONS -ms/--milliseconds is deprecated → use -tp ms for the timestamp precision, and give -bs a unit (-bs 100ms) for the bucket width
+  ↳ Continue with these options? continue (no_terminal)
+
+╭─ ↻ DECISION TAKEN FOR YOU (1)  what the run did instead of what was asked ──────────────────────────────────────────────────────────────────────────────────╮
+│ — timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds                                     │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
       timestamp           legend     success failure           occurrences           duration    bytes                       latency statistics                 

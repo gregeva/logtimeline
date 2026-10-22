@@ -29,6 +29,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -455,14 +457,14 @@ scenario_unreadable_value() {
 scenario_inverted_range_quotes() {
     current_scenario="inverted-range-quotes"
     echo "[$current_scenario]"
-    run_ltl inverted -ni -bs 1440 -oe -n 1 -dmin 2s -dmax 500ms "$BOUNDARY_FIXTURE"
-    local expected='Warning: -dmin 2s is greater than -dmax 500ms - the range is unsatisfiable, no log entries can match'
-    if [[ "$rc" -eq 0 ]] && grep -qxF -- "$expected" "$TMP_DIR/inverted.err"; then
+    run_ltl inverted -ni -bs 1440 -oe -n 1 -V notices -dmin 2s -dmax 500ms "$BOUNDARY_FIXTURE"
+    local expected='-dmin 2s is greater than -dmax 500ms - the range is unsatisfiable, no log entries can match'
+    if [[ "$rc" -eq 0 ]] && notice_field "$TMP_DIR/inverted.out" range-unsatisfiable statement | grep -qxF -- "$expected"; then
         pass_with "inverted range quoted as typed"
     else
         fail_with "inverted range quoted as typed" 'The inverted-range warning compares the resolved values and quotes the values as the user typed them' \
             'adapt_to_command_line_options() in ltl (the inverted-range check over @quantity_options)' 'features/605-input-units.md section 4 D18, section 6 AC12' \
-            "exit: $rc" "expected: $expected" "stderr: $(tr '\n' '|' < "$TMP_DIR/inverted.err")"
+            "exit: $rc" "expected: $expected" "notices: $(notice_field "$TMP_DIR/inverted.out" range-unsatisfiable statement | tr '\n' '|')"
     fi
 }
 
@@ -474,24 +476,26 @@ scenario_inverted_range_quotes() {
 scenario_finer_bound_note() {
     current_scenario="finer-bound-note"
     echo "[$current_scenario]"
-    local note='Note: -dmin 200us is finer than the log'"'"'s durations, which are recorded in milliseconds'
-    run_ltl finer-us -ni -bs 1440 -oe -n 1 -V filter-summary -dmin 200us "$BOUNDARY_FIXTURE"
-    if grep -qxF -- "$note" "$TMP_DIR/finer-us.err"; then pass_with "-dmin 200us notes the finer unit"; else
+    local note='-dmin 200us | is finer than the log'"'"'s durations, which are recorded in milliseconds'
+    run_ltl finer-us -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin 200us "$BOUNDARY_FIXTURE"
+    local got
+    got="$(notice_field "$TMP_DIR/finer-us.out" bound-finer-than-log focus) | $(notice_field "$TMP_DIR/finer-us.out" bound-finer-than-log statement)"
+    if [[ "$got" == "$note" ]]; then pass_with "-dmin 200us notes the finer unit"; else
         fail_with "-dmin 200us notes the finer unit" 'A duration bound typed in a unit finer than the log records gets a note quoting it as typed and naming the log unit' \
-            'note_finer_duration_bounds() in ltl' 'features/605-input-units.md section 4 D22, section 6 AC13' "expected: $note" "stderr: $(tr '\n' '|' < "$TMP_DIR/finer-us.err")"
+            'note_finer_duration_bounds() in ltl' 'features/605-input-units.md section 4 D22, section 6 AC13' "expected: $note" "record:   $got"
     fi
     local value
     for value in 2ms 0.2; do
-        run_ltl "finer-$value" -ni -bs 1440 -oe -n 1 -V filter-summary -dmin "$value" "$BOUNDARY_FIXTURE"
-        check "-dmin $value prints no note" "$(grep -c 'is finer than the log' "$TMP_DIR/finer-$value.err" || true)" 0 \
+        run_ltl "finer-$value" -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin "$value" "$BOUNDARY_FIXTURE"
+        check "-dmin $value prints no note" "$(notice_kind_count "$TMP_DIR/finer-$value.out" bound-finer-than-log)" 0 \
             'A bare number, or a unit no finer than the log records, gets no note' 'note_finer_duration_bounds() in ltl' 'features/605-input-units.md section 4 D22, section 6 AC13'
     done
     check "-dmin 200us applies as -dmin 0.2" "$(line_value finer-us excluded_numeric)" "$(line_value finer-0.2 excluded_numeric)" \
         'The note clamps nothing: the bound applies as written' 'note_finer_duration_bounds() and read_and_process_logs() in ltl' 'features/605-input-units.md section 4 D22'
     # A format whose lines each name their unit ([150us]) declares 'line', not a
     # unit: there is no declared unit to be finer than, so no note.
-    run_ltl finer-line -ni -bs 1440 -oe -n 1 -V filter-summary -dmin 200us "$SUBMS_FIXTURE"
-    check "-dmin 200us on a log naming its unit per line prints no note" "$(grep -c 'is finer than the log' "$TMP_DIR/finer-line.err" || true)" 0 \
+    run_ltl finer-line -ni -bs 1440 -oe -n 1 -V filter-summary,notices -dmin 200us "$SUBMS_FIXTURE"
+    check "-dmin 200us on a log naming its unit per line prints no note" "$(notice_kind_count "$TMP_DIR/finer-line.out" bound-finer-than-log)" 0 \
         'A log whose lines each name their own duration unit declares no unit to compare a bound with, so a sub-millisecond bound gets no note' \
         'note_finer_duration_bounds() in ltl (a declaration of line contributes no unit)' 'features/605-input-units.md section 4 D22 and D30'
 }

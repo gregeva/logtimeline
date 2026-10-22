@@ -171,6 +171,7 @@ my ( $current_memory_usage, $max_memory_usage, $end_time, $elapsed_total, $elaps
 # -V statistics-demand and re-emitted as -V benchmark-data COUNTS rows).
 my ( $elapsed_stats_bucket_stats, $elapsed_stats_population_walk, $elapsed_stats_sort_selection, $elapsed_stats_group_calc, $elapsed_stats_threadpool_stats ) = ( 0,0,0,0,0 );
 my ( $stats_population_buckets, $stats_population_messages, $stats_population_threadpools ) = ( 0,0,0 );
+my $memory_reading_failed = 0;  # a failed Windows memory reading, noticed once per run
 my %memory_high_water_marks;  # High-water marks for each data structure (Issue #45)
 my @verbose_output;           # Accumulated verbose output lines (Issue #56)
 
@@ -250,6 +251,9 @@ my %verbose_section_registry = (
     'benchmark-data' => {
         description => 'Machine-parseable TSV: version, files, line counts, timings, memory, structure counts.',
     },
+    'notices' => {
+        description => 'Every notice the run raised, one block per raising in raising order: its kind, category, stage, producer, immediacy, visibility, the surface that drew it, its parts, the choice it carries and the answer. Printed after the run\'s last notice (Issue #412).',
+    },
     'section-layout' => {
         description => 'Where each output section and part started on standard output and how many rows it printed, tab-separated: name, state (rendered, hidden, absent), start row, row count. Printed after the last row (Issue #597).',
     },
@@ -275,6 +279,7 @@ my @verbose_section_order = qw(
     udm-specs
     aggregate-export
     memory-usage
+    notices
     section-layout
     benchmark-data
 );
@@ -595,7 +600,37 @@ my $progress_bytes_done  = 0;
 my $progress_file_index  = 0;   # 1-based position of the file being read
 my $progress_file_count  = 0;   # N; 0 when the sweep did not run (single file)
 my $progress_last_paint  = 0;   # Time::HiRes epoch of the last repaint
-my @deferred_notices;           # notices raised mid-read, emitted once it ends
+# The notice store (#412 D11, D13): one record per raising, in raising order,
+# never merged. -V notices reads every record; a surface reads the visible ones.
+my @notice_records;
+my $notice_stage = 'options';   # the pipeline stage running, set by enter_notice_stage()
+my $notice_fixture;             # hidden --notice-fixture NAME: the fixture set raised (D17)
+# The six categories in presentation order (#412 D1, D2, D10;
+# docs/design-language.md § The category sheet): the name a producer passes,
+# the heading, the glyph, the glyph Windows terminals draw one cell wide where
+# the first is drawn wider (docs/terminal-output.md § Glyphs and width), the
+# colour by its @column_colors name with the 256-colour code a dark background
+# takes where the column colour is a basic code, and how to read the category.
+my @notice_category_sheet = (
+    { name => 'data_anomaly',           heading => 'DATA ANOMALY',           glyph => '⚠', windows => '△', colour => 'orange',
+      reads => 'check the source data or the options before trusting the figures' },
+    { name => 'figure_caveat',          heading => 'FIGURE CAVEAT',          glyph => '≈', windows => '≈', colour => 'magenta', dark => 170,
+      reads => 'the figures cover less than they appear to' },
+    { name => 'your_options',           heading => 'YOUR OPTIONS',           glyph => '⚙', windows => '⛭', colour => 'cyan',    dark => 44,
+      reads => 'command usage warnings' },
+    { name => 'decision_taken_for_you', heading => 'DECISION TAKEN FOR YOU', glyph => '↻', windows => '↻', colour => 'blue',    dark => 33,
+      reads => 'what the run did instead of what was asked' },
+    { name => 'runtime_condition',      heading => 'RUNTIME CONDITION',      glyph => '⏱', windows => '⧖', colour => 'teal',
+      reads => "a condition of the run's environment" },
+    { name => 'guidance',               heading => 'GUIDANCE',               glyph => '➤', windows => '►', colour => 'green',   dark => 40,
+      reads => 'a next step worth trying' },
+);
+my @notice_categories = map { $_->{name} } @notice_category_sheet;
+# The browser's presentation (docs/terminal-interaction.md § Parameters and
+# their defaults by use); a fixture set may change it.
+my %notice_browser_presentation = ( placement => 'alt', size => 'auto', quit => 1, seconds => 15, rows => 10, lead => 1 );
+
+my %notice_category = map { $_ => 1 } @notice_categories;
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
 
 # Output sections and their parts in print order, as -V section-layout reports
@@ -606,6 +641,10 @@ my @output_sections = qw(
     threadpools threadpools-highlighted threadpools-overall
     summary summary-values summary-files
 );
+# The sections -V section-layout reports: those above, and the notices panel
+# after the progress rows (#412). Notices always print, so the panel is no
+# value of --hide or --show.
+my @section_layout_order = map { $_ eq 'progress' ? ( 'progress', 'notices' ) : $_ } @output_sections;
 my %section_rows;               # section or part => { start, rows } as printed, while rows are counted
 # The fixed alias of each public section (#597 D11, D17). Titles and parts have none.
 my %section_aliases = ( tl => 'timeline', hg => 'histogram', opt => 'options', msg => 'messages',
@@ -2492,7 +2531,8 @@ sub read_index_file {
     return unless -f $index_path;
 
     unless (-r $index_path) {
-        warn "ltl-index.csv exists but is unreadable; skipping read-back\n";
+        notice( kind => 'index-unreadable', category => 'runtime_condition',
+                statement => 'ltl-index.csv exists but is unreadable; skipping read-back', evidence => $index_path );
         return;
     }
 
@@ -2542,7 +2582,8 @@ sub read_index_file {
         # tests/HARNESS-DESIGN.md section Runtime-warning cleanliness relies on).
         my $err = $@ // '';
         chomp $err;
-        warn "ltl-index.csv malformed; skipping read-back ($err)\n";
+        notice( kind => 'index-malformed', category => 'runtime_condition',
+                statement => 'ltl-index.csv malformed; skipping read-back', evidence => $err );
         # Discard any partial parse — spec §"Edge cases" requires no pre-seed.
         %file_entries = ();
         %selection_entries = ();
@@ -3035,7 +3076,7 @@ sub _classify_argv_provenance {
                 'mdm|message-stats-data-model',
                 'bdm|bucket-stats-data-model',
                 'terminal-width|tw', 'terminal-height|th', 'no-auto-hide|nah',
-                'debug|D', 'debug-layout', 'validate-layout', 'help:s', 'explain|ex:s',
+                'debug|D', 'debug-layout', 'validate-layout', 'notice-fixture', 'notice-answers', 'help:s', 'explain|ex:s',
             );
             for my $s (@specs) {
                 my @parts = split /\|/, $s;
@@ -4769,8 +4810,8 @@ sub bin_consolidation_notice {
         ? 'consolidation combined ' . value_text($message_stats_collapse_projections, kind => 'count', budget => 'notice')
           . ' message histograms onto shared bucket geometries'
         : 'consolidated rows combine each absorbed message histogram onto a shared bucket geometry';
-    print STDERR "Note: $detail, so their percentiles are approximate"
-        . " - use -mdm raw for exact percentiles\n";
+    notice( kind => 'bin-percentiles-approximate', category => 'figure_caveat',
+            statement => "$detail, so their percentiles are approximate", remedy => 'use -mdm raw for exact percentiles' );
     return;
 }
 
@@ -4816,21 +4857,21 @@ sub format_variant_ambiguity_note {
 # to a variant group's default, and the files whose format names the duration
 # unit on each line, to which -du is not applied.
 sub defer_format_unit_notes {
-    if (@format_unit_ambiguity) {
-        my @clauses = map {
-            my ($entry, $consequence, $override, $files) = @$_;
-            my $plural = @$files > 1;
-            join(', ', @$files) . ": the detected log format (" . $entry->[FR_SLUG] . ") is written by more than one producer and " . $consequence
-                . "; nothing in the file name" . ($plural ? 's' : '') . " or content decided which - use $override if the "
-                . ($plural ? 'files come' : 'file comes') . " from the other producer"
-        } @format_unit_ambiguity;
-        defer_notice( "Note: " . join('; ', @clauses) . "\n" );
+    for (@format_unit_ambiguity) {
+        my ($entry, $consequence, $override, $files) = @$_;
+        my $plural = @$files > 1;
+        notice( kind => 'format-producer-undecided', category => 'data_anomaly', focus => $entry->[FR_SLUG],
+                statement => "the detected log format is written by more than one producer and $consequence; nothing in the file name"
+                           . ($plural ? 's' : '') . " or content decided which",
+                evidence  => [ @$files ],
+                remedy    => "use $override if the " . ($plural ? 'files come' : 'file comes') . " from the other producer" );
     }
     if (@duration_unit_line_files) {
         my %slugs = map { $_->[1] => 1 } @duration_unit_line_files;
-        defer_notice( "Note: -du $duration_unit_override is not applied to " . join(', ', map { $_->[0] } @duration_unit_line_files)
-            . ": " . (@duration_unit_line_files > 1 ? 'their format names' : 'its format names') . " the duration unit on each line ("
-            . join(', ', sort keys %slugs) . ")\n" );
+        notice( kind => 'du-not-applied', category => 'your_options', focus => "-du $duration_unit_override",
+                statement => 'is not applied to ' . (@duration_unit_line_files > 1 ? 'these files: their format names' : 'this file: its format names')
+                           . ' the duration unit on each line (' . join(', ', sort keys %slugs) . ')',
+                evidence  => [ map { $_->[0] } @duration_unit_line_files ] );
     }
     return;
 }
@@ -4863,10 +4904,11 @@ sub defer_timestamp_impossible_notes {
         $recognised += $_->[FR_MATCHES] // 0 for @entries;
         my $g = @entries && defined $entries[0][FR_GROUP] ? $format_variant_groups{ $entries[0][FR_GROUP] } : undef;
         my @others = $g ? grep { $_->[FR_SLUG] ne $slug } map { $format_registry_entry{$_} } @{ $g->{members} } : ();
-        my $hint = @others ? ' - if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) : '';
-        defer_notice( "Note: " . value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
-            . " of " . value_text( $recognised, kind => 'count', budget => 'notice' )
-            . " lines of the $slug format were not matched because their date cannot exist under its date layout$hint\n" );
+        notice( kind => 'date-cannot-exist', category => 'data_anomaly', focus => $slug,
+                statement => value_text( $by_slug{$slug}, kind => 'count', budget => 'notice' )
+                           . ' of ' . value_text( $recognised, kind => 'count', budget => 'notice' )
+                           . ' lines of this format were not matched because their date cannot exist under its date layout',
+                ( @others ? ( remedy => 'if the day and month are read the wrong way round, use ' . join(' or ', map { '-lf ' . $_->[FR_SLUG] } @others) ) : () ) );
     }
     return;
 }
@@ -5216,9 +5258,9 @@ sub format_classification_rule_change {
         if $n <= FORMAT_CLS_RULE_CHANGE_LINES_MAX;
     $format_detection{$file}{event_ledger} = $new_entry->[FR_EVENT_LEDGER] if $format_detection{$file};
     $format_detection{$file}{cls_both}     = $new_entry->[FR_CLS_BOTH]     if $format_detection{$file};
-    defer_notice( "Note: $file line $line_number: the classification rules changed because the detected log format changed from "
-        . $old_entry->[FR_SLUG] . " to " . $new_entry->[FR_SLUG]
-        . " - lines before this point were classified under the previous rules\n" )
+    notice( kind => 'classification-rules-changed', category => 'data_anomaly', focus => "$file line $line_number",
+            statement => 'the classification rules changed because the detected log format changed from '
+                       . $old_entry->[FR_SLUG] . ' to ' . $new_entry->[FR_SLUG] . '; lines before this point were classified under the previous rules' )
         if $n == 1;
     return;
 }
@@ -7430,7 +7472,8 @@ sub emit_udm_csv_unbound_notices {
     for my $idx (0 .. $#udm_configs) {
         my $files = $udm_csv_unbound_files[$idx] or next;
         my $config = $udm_configs[$idx];
-        print STDERR "Note: -udm '$config->{raw_arg}': no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . " CSV file(s)\n";
+        notice( kind => 'udm-csv-column-absent', category => 'your_options', focus => "-udm '$config->{raw_arg}'",
+                statement => "no column named '$config->{base_name}' in the header of " . value_text( $files, kind => 'count', budget => 'notice' ) . ' CSV file(s)' );
     }
 }
 
@@ -7444,8 +7487,11 @@ sub emit_udm_skipped_capture_notices {
     for my $config (@udm_configs) {
         my $skipped = $udm_skipped_lines{$config->{name}} or next;
         my $recorded = $production->{$config->{name}}{occurrences};
-        printf STDERR "Note: -udm '%s': %d line(s) recorded, %d skipped (%.1f%%): the captured text is not a number\n",
-            $config->{raw_arg}, $recorded, $skipped, $skipped / ($recorded + $skipped) * 100;
+        notice( kind => 'udm-capture-not-number', category => 'data_anomaly', focus => "-udm '$config->{raw_arg}'",
+                statement => value_text( $recorded, kind => 'count', budget => 'notice' ) . ' line(s) recorded, '
+                           . value_text( $skipped, kind => 'count', budget => 'notice' ) . ' skipped ('
+                           . value_text( $skipped / ($recorded + $skipped) * 100, kind => 'percentage', budget => 'notice share' )
+                           . '): the captured text is not a number' );
     }
 }
 
@@ -7457,12 +7503,12 @@ sub emit_udm_zero_match_notices {
     for my $idx (0 .. $#udm_configs) {
         my $config = $udm_configs[$idx];
         next if $production->{$config->{name}}{occurrences};
-        print STDERR "Note: -udm '$config->{raw_arg}': no metrics produced from matching lines\n";
-        print STDERR "      read as: " . udm_read_as($config, $idx) . "  matched against the whole line\n";
-        print STDERR "      pattern: $_\n" for @{$config->{patterns}};
-        if (($config->{hint} // '') eq 'token_key_has_regex_chars') {
-            print STDERR "      hint: the token key '$config->{token_key}' contains regex characters and is matched literally - if you meant a regex, wrap it in slashes: /$config->{token_key}/\n";
-        }
+        notice( kind => 'udm-no-metrics', category => 'your_options', focus => "-udm '$config->{raw_arg}'",
+                statement => 'no metrics produced from matching lines',
+                evidence  => [ 'read as: ' . udm_read_as($config, $idx) . ', matched against the whole line', map { "pattern: $_" } @{$config->{patterns}} ],
+                ( ($config->{hint} // '') eq 'token_key_has_regex_chars'
+                    ? ( remedy => "the token key '$config->{token_key}' contains regex characters and is matched literally; if you meant a regex, wrap it in slashes: /$config->{token_key}/" )
+                    : () ) );
     }
 }
 
@@ -7485,7 +7531,9 @@ sub emit_classification_percentage_notices {
     # format declares both a success and a failure classification (subsumes
     # 'none at all', D4), so the columns are not shown.
     if ( $show_classification && !$hide_classification && !$any_both ) {
-        print STDERR "Note: the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed. See --help formats for what each format classifies.\n";
+        notice( kind => 'classification-columns-not-shown', category => 'figure_caveat',
+                statement => 'the success/failure percentage columns are not shown: the matched log format(s) do not declare both a success and a failure classification, so no percentage can be computed',
+                remedy    => 'see --help formats for what each format classifies' );
         return;
     }
     # Notice 4 — the summary's classified rows carry their shares only on a
@@ -7511,8 +7559,9 @@ sub emit_classification_percentage_notices {
             next if $cls && $cls->{success} && @{ $cls->{success} };
             $no_success_rule{ $entry->[FR_SLUG] } = 1;
         }
-        print STDERR "Note: the SUCCESS and FAILURE CLASSIFIED shares are omitted - a percentage needs a population where both outcomes are classified, and these formats define no success rule: "
-            . join( ', ', sort keys %no_success_rule ) . ".\n"
+        notice( kind => 'classified-shares-omitted', category => 'figure_caveat',
+                statement => 'the SUCCESS and FAILURE CLASSIFIED shares are omitted: a percentage needs a population where both outcomes are classified, and these formats define no success rule',
+                evidence  => [ sort keys %no_success_rule ] )
             if %no_success_rule;
     }
     return unless classification_columns_visible();
@@ -7521,7 +7570,8 @@ sub emit_classification_percentage_notices {
     # (On a mixed run this is the applicable caution: the columns render,
     # rows fed by the non-ledger source stay blank per bucket eligibility.)
     if ( $show_classification && $nonledger ) {
-        print STDERR "Note: the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly.\n";
+        notice( kind => 'classification-not-event-ledger', category => 'figure_caveat',
+                statement => 'the success/failure percentages cover only operations the log records: a matched format is not an event ledger, so operations can be missing from the figure entirely, and the configured criteria may not attribute an operation to success or failure correctly' );
         return;
     }
     # Notice 2 — event-ledger formats only: any non-zero shortfall of
@@ -7530,7 +7580,9 @@ sub emit_classification_percentage_notices {
     my $r = $recon;
     if ( !$nonledger && $r->{unclassified} > 0 ) {
         my $leak_pct = value_text( $r->{included} ? $r->{unclassified} / $r->{included} * 100 : 0, kind => 'percentage', budget => 'notice share' );
-        print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification - the percentages exclude them; investigate the format's detection patterns for coverage.\n";
+        notice( kind => 'classification-not-matched', category => 'data_anomaly',
+                statement => value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched neither the success nor the failure classification; the percentages exclude them",
+                remedy    => "investigate the format's detection patterns for coverage" );
     }
     return;
 }
@@ -8271,7 +8323,10 @@ sub write_index_file {
     };
 
     if ($write_ok) {
-        rename($temp_path, $index_path) or warn "Cannot rename index file: $!";
+        # Written after the panel has been drawn, so drawn at its call.
+        rename($temp_path, $index_path)
+            or notice( kind => 'index-rename-failed', category => 'runtime_condition', immediacy => 'now',
+                       statement => 'Cannot rename index file', evidence => "$index_path: $!" );
     } else {
         unlink $temp_path;
         # A file that cannot be written leaves the run without an index; a row
@@ -8530,7 +8585,7 @@ sub print_section_layout {
     return unless counting_rows();
     print "=== section-layout ===\n";
     print join( "\t", qw( name state start rows ) ) . "\n";
-    for my $name (@output_sections) {
+    for my $name (@section_layout_order) {
         my $state = section_state($name);
         my @position = $state eq 'rendered' ? @{ $section_rows{$name} }{qw( start rows )} : ( '', '' );
         print join( "\t", $name, $state, @position ) . "\n";
@@ -8547,6 +8602,7 @@ sub print_title {
     $title =~ s/\n(\033\[0m)\n\z/$1\n/;
     print $title;
     $title_rows = () = $title =~ /\n/g;
+    notice_printed( split /\n/, $title );
     return;
 }
 
@@ -11582,7 +11638,7 @@ sub read_pattern_file {
 
     # Validate file exists
     unless (-e $canonical_filename) {
-        print STDERR "Warning: Pattern file not found: $filename\n";
+        notice( kind => 'pattern-file-missing', category => 'your_options', statement => "Pattern file not found: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11590,7 +11646,7 @@ sub read_pattern_file {
     # Check file size
     my $size = -s $canonical_filename;
     if ($size > $pattern_file_max_size) {
-        print STDERR "Warning: Pattern file exceeds maximum size (10KB): $filename\n";
+        notice( kind => 'pattern-file-too-large', category => 'your_options', statement => "Pattern file exceeds maximum size (10KB): $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11598,7 +11654,7 @@ sub read_pattern_file {
     # Check for binary (null bytes in first 8KB)
     my $fh;
     unless (open $fh, '<:raw', $canonical_filename) {
-        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        notice( kind => 'pattern-file-unreadable', category => 'your_options', statement => "Cannot read pattern file: $filename ($!)" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11606,7 +11662,7 @@ sub read_pattern_file {
     read($fh, $header, 8192);
     if (defined $header && $header =~ /\x00/) {
         close $fh;
-        print STDERR "Warning: Pattern file appears to be binary: $filename\n";
+        notice( kind => 'pattern-file-binary', category => 'your_options', statement => "Pattern file appears to be binary: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11614,7 +11670,7 @@ sub read_pattern_file {
 
     # Read file as text
     unless (open $fh, '<:encoding(UTF-8)', $canonical_filename) {
-        print STDERR "Warning: Cannot read pattern file: $filename ($!)\n";
+        notice( kind => 'pattern-file-unreadable', category => 'your_options', statement => "Cannot read pattern file: $filename ($!)" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'error', count => 0 };
         return ();
     }
@@ -11629,15 +11685,15 @@ sub read_pattern_file {
     close $fh;
 
     if (@patterns == 0) {
-        print STDERR "Warning: Pattern file is empty: $filename\n";
+        notice( kind => 'pattern-file-empty', category => 'your_options', statement => "Pattern file is empty: $filename" );
         $pattern_file_status{$filter_type}{$filename} = { status => 'empty', count => 0 };
         return ();
     }
 
     # Warn if pattern count exceeds limit (but use all patterns)
     if (@patterns > $pattern_file_max_patterns) {
-        print STDERR "Warning: Pattern file contains " . scalar(@patterns) .
-                     " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename\n";
+        notice( kind => 'pattern-file-many-patterns', category => 'your_options', statement => "Pattern file contains " . scalar(@patterns) .
+                     " patterns (exceeds recommended limit of $pattern_file_max_patterns): $filename" );
     }
 
     $pattern_file_status{$filter_type}{$filename} = { status => 'ok', count => scalar(@patterns) };
@@ -11662,8 +11718,8 @@ sub build_merged_regex {
 
     # Warn if merged regex exceeds length threshold
     if (length($merged) > $pattern_regex_max_length) {
-        print STDERR "Warning: Merged regex pattern is " . length($merged) .
-                     " characters (exceeds recommended limit of $pattern_regex_max_length)\n";
+        notice( kind => 'merged-regex-too-long', category => 'your_options', statement => "Merged regex pattern is " . length($merged) .
+                     " characters (exceeds recommended limit of $pattern_regex_max_length)" );
     }
 
     return $merged;
@@ -11899,7 +11955,7 @@ sub parse_udm_configs {
             $custom_pattern_text = $pat_str;
             eval { $custom_pattern = qr/$pat_str/ };
             if ($@) {
-                print STDERR "Warning: Invalid regex in -udm '$raw_arg': $@\n";
+                notice( kind => 'udm-invalid-regex', category => 'your_options', statement => "Invalid regex in -udm '$raw_arg': $@" );
                 $reject->($raw_arg, 'invalid_regex');
                 next;
             }
@@ -11914,13 +11970,13 @@ sub parse_udm_configs {
         my $token_key = (defined $fields[3] && $fields[3] ne '') ? $fields[3] : undef;
 
         unless (defined $name && $name ne '') {
-            print STDERR "Warning: -udm requires a metric name: '$raw_arg'\n";
+            notice( kind => 'udm-no-name', category => 'your_options', statement => "-udm requires a metric name: '$raw_arg'" );
             $reject->($raw_arg, 'missing_name');
             next;
         }
 
         if (defined $token_key && defined $custom_pattern) {
-            print STDERR "Warning: -udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping\n";
+            notice( kind => 'udm-key-and-pattern', category => 'your_options', statement => "-udm '$raw_arg' supplies both a token key and a /pattern/ - use one or the other, skipping" );
             $reject->($raw_arg, 'key_and_regex');
             next;
         }
@@ -11930,7 +11986,7 @@ sub parse_udm_configs {
         if (defined $unit && $unit =~ /^(\w+)(?:\(\w+\))?$/ && $udm_function_names{$1}) {
             my $rest = join(':', grep { defined } $unit, $function, $token_key);
             $rest .= ":/$custom_pattern_text/" if defined $custom_pattern_text;
-            print STDERR "Warning: '$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping\n";
+            notice( kind => 'udm-function-in-unit-slot', category => 'your_options', statement => "'$unit' in the unit slot of -udm '$raw_arg' is a function, not a unit - did you mean '$name" . "::$rest'? (leave the unit slot empty when there is no unit), skipping" );
             $reject->($raw_arg, 'unit_slot_holds_function');
             next;
         }
@@ -11941,7 +11997,7 @@ sub parse_udm_configs {
             # Normalize aggregation aliases, including inside combined forms
             $function =~ s/^(\w+)/exists $udm_function_aliases{$1} ? $udm_function_aliases{$1} : $1/e;
             if ($function =~ /^($countings)\(/) {
-                print STDERR "Warning: Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping\n";
+                notice( kind => 'udm-counting-with-transform', category => 'your_options', statement => "Counting aggregation '$1' cannot be combined with a transform in -udm '$raw_arg', skipping" );
                 $reject->($raw_arg, 'counting_with_transform');
                 next;
             } elsif ($function =~ /^($aggregations)\(($transforms)\)$/) {
@@ -11953,7 +12009,7 @@ sub parse_udm_configs {
             } elsif ($function =~ /^($aggregations|$countings)$/) {
                 $aggregation = $1;
             } else {
-                print STDERR "Warning: Invalid function '$function' in -udm '$raw_arg' (valid: $function_list, or combined e.g. max(delta))\n";
+                notice( kind => 'udm-invalid-function', category => 'your_options', statement => "Invalid function '$function' in -udm '$raw_arg' (valid: $function_list, or combined e.g. max(delta))" );
                 $reject->($raw_arg, 'unknown_function');
                 next;
             }
@@ -11965,14 +12021,14 @@ sub parse_udm_configs {
         # distinct-based aggregation over it can only ever produce 1
         if (defined $custom_pattern_text && $aggregation =~ /^(?:distinct|ratio|drate)$/
             && $custom_pattern_text !~ /[\\()\[\]*+?^\$|.{}]/) {
-            print STDERR "Warning: the pattern /$custom_pattern_text/ in -udm '$raw_arg' is a fixed string, so '$aggregation' can only ever be 1 - give it a capture group or a varying pattern, skipping\n";
+            notice( kind => 'udm-fixed-string-pattern', category => 'your_options', statement => "the pattern /$custom_pattern_text/ in -udm '$raw_arg' is a fixed string, so '$aggregation' can only ever be 1 - give it a capture group or a varying pattern, skipping" );
             $reject->($raw_arg, 'literal_pattern_under_distinct');
             next;
         }
 
         # Counting aggregations operate on raw extracted strings: units do not apply
         if ($agg_kind eq 'counting' && defined $unit) {
-            print STDERR "Warning: Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'\n";
+            notice( kind => 'udm-unit-ignored', category => 'your_options', statement => "Unit '$unit' ignored for counting aggregation '$aggregation' in -udm '$raw_arg'" );
             $unit = undef;
         }
 
@@ -11997,7 +12053,7 @@ sub parse_udm_configs {
             my $multiplier = $byte_unit_bytes{$unit};
             $converter = sub { $_[0] * $multiplier };
         } elsif (defined $unit) {
-            print STDERR "Warning: Unknown unit '$unit' in -udm '$raw_arg', treating as raw number (time units: $time_unit_list; byte units: $byte_unit_list)\n";
+            notice( kind => 'udm-unit-unknown', category => 'your_options', statement => "Unknown unit '$unit' in -udm '$raw_arg', treating as raw number (time units: $time_unit_list; byte units: $byte_unit_list)" );
             $unit_type = 'raw';
             $converter = undef;
         } else {
@@ -12047,7 +12103,7 @@ sub parse_udm_configs {
     my (@kept_configs, %seen_raw_arg);
     for my $config (@udm_configs) {
         if ($seen_raw_arg{$config->{raw_arg}}++) {
-            print STDERR "Note: -udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat\n";
+            notice( kind => 'udm-repeat-dropped', category => 'your_options', statement => "-udm '$config->{raw_arg}' was given more than once - keeping one metric, dropping the repeat" );
             $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
             next;
         }
@@ -12062,7 +12118,7 @@ sub parse_udm_configs {
     my (@named_configs, %claimed_by);
     for my $config (@udm_configs) {
         if (defined(my $owner = $claimed_by{$config->{name}})) {
-            print STDERR "Warning: -udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one\n";
+            notice( kind => 'udm-name-collision', category => 'your_options', statement => "-udm '$config->{raw_arg}' and -udm '$owner' both resolve to the metric name '$config->{name}' - give them different names, skipping the later one" );
             $reject->($config->{raw_arg}, 'duplicate_metric_identity', $config->{spec_index});
             next;
         }
@@ -12133,7 +12189,8 @@ sub detect_and_parse_csv_header {
             if (exists $csv_col_index{lc($col_name)}) {
                 push @csv_message_col_indices, $csv_col_index{lc($col_name)};
             } else {
-                print STDERR "Warning: CSV message column '$col_name' not found in headers\n";
+                notice( kind => 'csv-message-column-absent', category => 'data_anomaly', focus => "-ucm $col_name",
+                        statement => 'the CSV message column is not in the header' );
             }
         }
     }
@@ -12223,84 +12280,11 @@ sub convert_duration_to_ms {
     return $step->{per_ms} ? $value / $step->{per_ms} : $value * $step->{ms};
 }
 
+# 1 when the terminal's background is light, from its answer to the
+# background colour query (detect_terminal()); 0 with no answer, with no
+# terminal and on Windows, where -lbg is given explicitly.
 sub detect_light_terminal_background {
-    # Detect if terminal has a light background using OSC 11 query
-    # Returns 1 if light background detected, 0 otherwise
-    # Uses xterm-compatible escape sequence: \e]11;?\e\\
-    # Terminal responds with: \e]11;rgb:RRRR/GGGG/BBBB\e\\
-    #
-    # References:
-    # - https://jwodder.github.io/kbits/posts/term-fgbg/
-    # - https://dystroy.org/blog/terminal-light/
-    #
-    # Note: On Windows, OSC 11 query is not reliably supported (only works in
-    # Windows Terminal 1.22+, not in legacy conhost or cmd.exe). The stty command
-    # used for terminal raw mode is also Unix-only. Users on Windows should use
-    # the -lbg flag explicitly if they have a light background terminal.
-
-    # Skip auto-detection on Windows - use -lbg flag instead
-    return 0 if $^O eq 'MSWin32';
-
-    return 0 unless -t STDIN && -t STDOUT;  # Only works on interactive terminals
-
-    my $response = '';
-    my $is_light = 0;
-
-    eval {
-        # Save terminal settings
-        my $old_settings = `stty -g 2>/dev/null`;
-        chomp $old_settings if $old_settings;
-
-        # Set terminal to raw mode with timeout
-        system('stty', '-icanon', '-echo', 'min', '0', 'time', '1') == 0 or die "stty failed";
-
-        # Send OSC 11 query (background color)
-        # Using BEL (0x07) as terminator for wider compatibility
-        print STDOUT "\e]11;?\a";
-        STDOUT->flush();
-
-        # Read response with timeout (using select)
-        my $rin = '';
-        vec($rin, fileno(STDIN), 1) = 1;
-
-        my $timeout = 0.1;  # 100ms timeout
-        my $start = time();
-
-        while ((time() - $start) < $timeout) {
-            if (select(my $rout = $rin, undef, undef, 0.01)) {
-                my $char;
-                if (sysread(STDIN, $char, 1)) {
-                    $response .= $char;
-                    # Response ends with BEL (0x07) or ST (\e\\)
-                    last if $response =~ /\a$/ || $response =~ /\e\\$/;
-                }
-            }
-        }
-
-        # Restore terminal settings
-        system('stty', $old_settings) if $old_settings;
-
-        # Parse response: expect format like \e]11;rgb:RRRR/GGGG/BBBB\a
-        if ($response =~ /rgb:([0-9a-fA-F]+)\/([0-9a-fA-F]+)\/([0-9a-fA-F]+)/) {
-            my ($r, $g, $b) = ($1, $2, $3);
-
-            # Normalize to 0-1 range (values can be 2 or 4 hex digits)
-            my $max_val = (length($r) == 4) ? 65535 : 255;
-            my $r_norm = hex($r) / $max_val;
-            my $g_norm = hex($g) / $max_val;
-            my $b_norm = hex($b) / $max_val;
-
-            # Calculate luma (perceived brightness)
-            # Using ITU-R BT.709 coefficients
-            my $luma = 0.2126 * $r_norm + 0.7152 * $g_norm + 0.0722 * $b_norm;
-
-            # Light background if luma > 0.5
-            $is_light = ($luma > 0.5) ? 1 : 0;
-        }
-    };
-
-    # If anything fails, default to dark background (0)
-    return $is_light;
+    return detect_terminal()->{background} eq 'light' ? 1 : 0;
 }
 
 # The process's resident memory, in bytes. $site names the caller for the
@@ -12347,8 +12331,11 @@ sub get_memory_usage {
                                           : unpack('V', substr($buf, $offset, 4));
             }
         };
-        if ($@) {
-            warn "Failed to get memory usage on Windows: $@";
+        # Once per run: every later reading fails the same way.
+        if ( $@ && !$memory_reading_failed++ ) {
+            chomp( my $err = $@ );
+            notice( kind => 'memory-unreadable', category => 'runtime_condition',
+                    statement => 'Failed to get memory usage on Windows', evidence => $err );
         }
     } else {
         return 0;                                               # no reading on this platform
@@ -14136,17 +14123,13 @@ sub report_skipped_final_pass {
     my $skipped_keys = 0;
     $skipped_keys += $forward_count_ref->{$_} // 0 for @skipped;
 
-    my $notice = "Note: the final consolidation pass was skipped over " . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . " message"
-        . ($skipped_keys == 1 ? "" : "s")
-        . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little.";
-
     my @edges = sort { $a <=> $b } grep { defined } map { $consolidation_cliff_edge{$_} } @skipped;
-    if (@edges) {
-        $notice .= " This data's similarity clusters below $edges[0]%, which is a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more.";
-    }
-    $notice .= " Where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy.\n";
-
-    print STDERR $notice;
+    notice( kind => 'final-pass-skipped', category => 'decision_taken_for_you',
+            statement => 'the final consolidation pass was skipped over ' . value_text( $skipped_keys, kind => 'count', budget => 'notice' ) . ' message'
+                       . ($skipped_keys == 1 ? '' : 's')
+                       . ": grouping at $consolidation_threshold% similarity absorbed almost none of this data as it was read, so that pass would have cost a great deal of time and memory and grouped very little",
+            remedy    => ( @edges ? "this data's similarity clusters below $edges[0]%, a reference point for tuning --group-similar to your analysis goal rather than a setting to adopt: a lower similarity groups more but generalises further, and the values just below the default may cost more while grouping no more; " : '' )
+                       . 'where the messages differ mainly by an identifier such as a UUID, masking it with --mask is usually the better remedy' );
     return;
 }
 
@@ -14492,8 +14475,8 @@ sub resolve_timestamp_precision {
     my $narrower = $bucket_size_seconds < $time_unit_step{$limit}{ms} / 1000
         ? "; at a bucket width below a " . $name->($limit) . ", only the buckets that start on a whole " . $name->($limit) . " can hold a line"
         : '';
-    print STDERR "Note: timestamps are shown to the " . $name->($limit) . ": " . $name->($asked)
-        . " precision was asked for, and $what$narrower\n";
+    notice( kind => 'timestamp-precision-coarser', category => 'decision_taken_for_you',
+            statement => 'timestamps are shown to the ' . $name->($limit) . ': ' . $name->($asked) . " precision was asked for, and $what$narrower" );
 
     $timestamp_precision = $limit;
     $option_overrides{'timestamp-precision'}{clamped_from} = $asked;
@@ -14524,7 +14507,8 @@ sub note_finer_duration_bounds {
     for my $row (grep { $_->{kind} eq 'duration' } @quantity_options) {
         my $unit = $quantity_unit_entered{ $row->{long} } // next;
         next unless $time_unit_step{$unit}{ms} < $time_unit_step{$finest}{ms};
-        print STDERR "Note: " . quantity_option_flag($row) . " $quantity_entered{ $row->{long} } is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}\n";
+        notice( kind => 'bound-finer-than-log', category => 'your_options', focus => quantity_option_flag($row) . " $quantity_entered{ $row->{long} }",
+                statement => "is finer than the log's durations, which are recorded in $time_unit_step{$finest}{long}" );
     }
     return;
 }
@@ -14555,9 +14539,10 @@ sub resolve_byte_notation {
         $byte_notation_source = 'format ' . join(',', @formats);
     } else {
         ($byte_notation, $byte_notation_source) = ('si', 'mixed');
-        print STDERR "Note: the log formats of this run declare different byte notations ("
-            . join('; ', map { "$_: " . ($declaration_of{$_} eq 'none' ? 'none' : uc $declaration_of{$_}) } @formats)
-            . "); byte values are shown in SI units. Use -bn si or -bn iec to choose.\n";
+        notice( kind => 'byte-notations-differ', category => 'decision_taken_for_you',
+                statement => 'the log formats of this run declare different byte notations; byte values are shown in SI units',
+                evidence  => [ map { "$_: " . ($declaration_of{$_} eq 'none' ? 'none' : uc $declaration_of{$_}) } @formats ],
+                remedy    => 'use -bn si or -bn iec to choose' );
     }
     return;
 }
@@ -14865,27 +14850,1492 @@ sub size_selected_files_for_progress {
 # load-bearing part: a progress figure that rounded up would show 100% while
 # reading was still going on, and on this surface 100% means finished.
 #
-# Hold a notice raised while the read pass is running. The progress line owns
-# the terminal row for the duration of the read, so a notice printed as it is
-# discovered lands in the middle of that row and reads as a continuation of the
-# progress text. Notices are queued here instead and emitted by
-# flush_deferred_notices() once the read is over and the row is free.
-#
-# This is where a notice discovered mid-read belongs. A notice whose condition
-# is only known after the read (the numeric-filter and unreadable-directory
-# counts at the end of read_and_process_logs()) is already past the progress
-# line and prints directly.
-sub defer_notice {
-    my ($text) = @_;
-    push @deferred_notices, $text;
+# Register one notice in the store and return its id (#412 D11, D13, D14).
+# The producer passes the notice's parts, never a formatted line; the store
+# sets the id and the stage, and records the sub that called as the producer.
+# A deferred notice draws nothing at the call; an immediate one draws the
+# panel with that one notice, inline, at the call. A choice's definition travels
+# on the record (question, buttons with the default among them, countdown,
+# headings, options), so a surface can put the choice from the record alone;
+# the headings default to What? How? Why?, as many as the options have parts.
+# An ask that presents notices raised before it names them in shows.
+my %notice_field = map { $_ => 1 } qw( kind category focus statement evidence remedy immediacy visible
+                                       question buttons countdown headings options shows );
+
+sub register_notice {
+    my ( $n, $producer ) = @_;
+    my @unknown = grep { !$notice_field{$_} } sort keys %$n;
+    die "notice(): unknown field(s) @unknown\n" if @unknown;
+    die "notice(): kind and statement are required\n" unless defined $n->{kind} && defined $n->{statement};
+    die "notice(): category '" . ( $n->{category} // '' ) . "' is not one of @notice_categories\n"
+        unless defined $n->{category} && $notice_category{ $n->{category} };
+    $producer //= 'main';
+    $producer =~ s/^main:://;
+    my $record = {
+        %$n,
+        id        => scalar(@notice_records) + 1,
+        stage     => $notice_stage,
+        producer  => $producer,
+        evidence  => ref $n->{evidence} ? [ @{ $n->{evidence} } ] : defined $n->{evidence} ? [ $n->{evidence} ] : [],
+        immediacy => $n->{immediacy} // 'deferred',
+        visible   => $n->{visible} // 1,
+        shown     => 'none',
+        shows     => [ @{ $n->{shows} // [] } ],
+    };
+    die "notice(): immediacy '$record->{immediacy}' is not now or deferred\n" unless $record->{immediacy} =~ /^(?:now|deferred)$/;
+    if ( $record->{options} ) {
+        my $parts = max( map { scalar @{ $_->{parts} } } @{ $record->{options} } );
+        $record->{headings} //= [ ( 'What?', 'How?', 'Why?' )[ 0 .. $parts - 1 ] ];
+    }
+    push @notice_records, $record;
+    return $record;
+}
+
+sub notice {
+    my (%n) = @_;
+    my $record = register_notice( \%n, ( caller(1) )[3] );
+    draw_notice_panel( undef, $record ) if $record->{immediacy} eq 'now';
+    return $record->{id};
+}
+
+# The pipeline stage a notice is raised in, set as each stage begins; the
+# fixture notices of that stage are raised there (#412 D17).
+sub enter_notice_stage {
+    ($notice_stage) = @_;
+    raise_fixture_notices() if defined $notice_fixture;
     return;
 }
 
-# Emit every notice queued during the read, in the order it was raised, once
-# the progress line has finished with the terminal.
-sub flush_deferred_notices {
-    print STDERR $_ for @deferred_notices;
-    @deferred_notices = ();
+# Fixture notice sets of the hidden --notice-fixture option (#412 D17). Each
+# entry is raised through notice() as its stage begins, so a scenario reaches
+# every field and value of the record through the calls a producer makes.
+# The content is neutral: none of it is a notice ltl raises.
+my %notice_fixture_sets = (
+    'record-fields' => [
+        { stage => 'options', kind => 'fixture-statement', category => 'your_options',
+          statement => 'a notice with its statement alone' },
+        { stage => 'detect', kind => 'fixture-every-part', category => 'data_anomaly', focus => 'the focus',
+          statement => 'a notice with every part', evidence => [ 'the first piece of evidence', 'the second piece: after a colon' ],
+          remedy => '-x example' },
+        { stage => 'parse', kind => 'fixture-one-evidence', category => 'figure_caveat',
+          statement => 'a notice with one piece of evidence', evidence => 'the one piece' },
+        { stage => 'accumulate', kind => 'fixture-raised-twice', category => 'runtime_condition',
+          statement => 'a notice raised twice, the first time' },
+        { stage => 'accumulate', kind => 'fixture-raised-twice', category => 'runtime_condition',
+          statement => 'a notice raised twice, the second time' },
+        { stage => 'finalize', kind => 'fixture-invisible', category => 'decision_taken_for_you',
+          statement => 'a notice kept off the deferred surfaces', visible => 0 },
+        { stage => 'finalize', kind => 'fixture-choice-buttons', category => 'runtime_condition',
+          statement => 'a notice with a choice of buttons', question => 'Continue?', countdown => 10,
+          buttons => [ { label => 'Stop here', key => 's', role => 'stop' },
+                       { label => 'Continue', key => 'c', role => 'default' } ] },
+        { stage => 'render', kind => 'fixture-choice-options', category => 'guidance', focus => 'the focus',
+          statement => 'a notice with a choice of options', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' },
+                       { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'three', parts => [ 'the what', 'the how', 'the why' ], args => '-so count', effect => 'the effect of three parts' },
+                       { key => 'two',   parts => [ 'the what', 'the how' ],            args => '-so bytes', effect => 'the effect of two parts' },
+                       { key => 'one',   parts => [ 'the what' ],                       args => '-n 5',      effect => 'the effect of one part' } ] },
+        { stage => 'render', kind => 'fixture-choice-headings', category => 'guidance',
+          statement => 'a notice whose options carry the producer\'s headings', question => 'Look at the options?',
+          headings => [ 'Order', 'Option' ],
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' },
+                       { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'by-duration', parts => [ 'by duration', '-so duration' ], args => '-so duration', effect => 'the slowest messages first' } ] },
+    ],
+    'panel-one' => [
+        { stage => 'finalize', kind => 'fixture-one', category => 'decision_taken_for_you',
+          statement => 'the one notice of the run' },
+    ],
+    'panel-edge' => [
+        { stage => 'parse', kind => 'fixture-edge', category => 'figure_caveat', focus => 'the focus',
+          statement => 'the first notice of one category', evidence => 'its evidence' },
+        { stage => 'finalize', kind => 'fixture-edge', category => 'figure_caveat',
+          statement => 'the second notice of one category', remedy => '-x example' },
+        { stage => 'finalize', kind => 'fixture-edge', category => 'figure_caveat',
+          statement => 'the third notice of one category' },
+    ],
+    'panel-categories' => [
+        { stage => 'render',   kind => 'fixture-guidance', category => 'guidance', statement => 'a guidance notice', remedy => '-so count' },
+        { stage => 'finalize', kind => 'fixture-runtime', category => 'runtime_condition', statement => 'a runtime condition' },
+        { stage => 'finalize', kind => 'fixture-decision', category => 'decision_taken_for_you', statement => 'a decision taken for the analyst' },
+        { stage => 'parse',    kind => 'fixture-options', category => 'your_options', focus => '-x', statement => 'a command usage warning' },
+        { stage => 'parse',    kind => 'fixture-caveat', category => 'figure_caveat', statement => 'a figure caveat', evidence => [ 'one', 'two' ] },
+        { stage => 'detect',   kind => 'fixture-anomaly', category => 'data_anomaly', focus => 'file.txt', statement => 'a data anomaly', evidence => 'its evidence' },
+        { stage => 'detect',   kind => 'fixture-anomaly', category => 'data_anomaly', statement => 'a second data anomaly' },
+    ],
+    'panel-wrap' => [
+        { stage => 'finalize', kind => 'fixture-wrap', category => 'data_anomaly', focus => 'the focus of a long notice',
+          statement => 'a notice whose statement runs on well past the width of the narrowest terminal the tool supports, so it wraps by words onto the rows below',
+          evidence => [ 'the first piece of evidence it carries', 'the second piece' ], remedy => '-x example -d another' },
+        { stage => 'finalize', kind => 'fixture-short', category => 'guidance', statement => 'a short notice beside it' },
+    ],
+    'panel-immediate' => [
+        { stage => 'options', kind => 'fixture-immediate', category => 'your_options', immediacy => 'now',
+          statement => 'a notice drawn at its call, before the read' },
+        { stage => 'finalize', kind => 'fixture-deferred', category => 'runtime_condition',
+          statement => 'a notice deferred to the panel' },
+    ],
+    # Asks, raised before the read as the option-parsing producer is; each
+    # entry's ask holds the presentation parameters passed to ask().
+    'ask-modal' => [
+        { stage => 'options', ask => {}, kind => 'fixture-ask', category => 'runtime_condition', focus => 'the focus',
+          statement => 'a notice that asks', evidence => 'its evidence', question => 'Continue reading?',
+          buttons => [ { label => 'Stop here', key => 's', role => 'stop' }, { label => 'Continue reading', key => 'c', role => 'default' } ] },
+    ],
+    'ask-box' => [
+        { stage => 'options', ask => { form => 'box' }, kind => 'fixture-ask-box', category => 'runtime_condition',
+          statement => 'a notice that asks in the compact box', question => 'Continue reading?',
+          buttons => [ { label => 'Stop here', key => 's', role => 'stop' }, { label => 'Continue reading', key => 'c', role => 'default' } ] },
+    ],
+    'ask-inline' => [
+        { stage => 'options', ask => { placement => 'inline' }, kind => 'fixture-ask-inline', category => 'runtime_condition',
+          statement => 'a modal below the cursor', question => 'Continue reading?',
+          buttons => [ { label => 'Stop here', key => 's', role => 'stop' }, { label => 'Continue reading', key => 'c', role => 'default' } ] },
+    ],
+    'ask-options' => [
+        { stage => 'options', ask => {}, kind => 'fixture-ask-options', category => 'guidance', focus => 'the focus',
+          statement => 'a notice with options worth looking at', question => 'Look at the options?',
+          buttons => [ { label => 'Stop', key => 's', role => 'stop' }, { label => 'Look at the options', key => 'l', role => 'more' },
+                       { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'three', parts => [ 'the what', '-so count', 'the why of three parts, long enough to wrap onto a second row of its column' ], args => '-so count', effect => 'the effect of three parts' },
+                       { key => 'two',   parts => [ 'the what', '-so bytes' ], args => '-so bytes', effect => 'the effect of two parts' },
+                       { key => 'one',   parts => [ 'the what' ], args => '-n 5', effect => 'the effect of one part' } ] },
+    ],
+    'ask-options-box' => [
+        { stage => 'options', ask => { form => 'box' }, kind => 'fixture-ask-options-box', category => 'guidance',
+          statement => 'a compact box with options', question => 'Look at the options?', headings => [ 'Order', 'Option' ],
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'by-count', parts => [ 'by count', '-so count' ], args => '-so count', effect => 'the most frequent first' },
+                       { key => 'by-bytes', parts => [ 'by bytes', '-so bytes' ], args => '-so bytes', effect => 'the largest first' } ] },
+    ],
+    'ask-fixed' => [
+        { stage => 'options', ask => { fixed_height => 1 }, kind => 'fixture-ask-fixed', category => 'guidance',
+          statement => 'a modal whose height is fixed for both stages', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'a', parts => [ 'option a', '-so count', 'why a' ], args => '-so count', effect => 'the effect of a' },
+                       { key => 'b', parts => [ 'option b', '-so bytes', 'why b' ], args => '-so bytes', effect => 'the effect of b' } ] },
+    ],
+    'ask-record' => [
+        { stage => 'options', ask => { record => 1, seconds => 3 }, kind => 'fixture-ask-record', category => 'runtime_condition',
+          statement => 'a notice whose answer is left as a record', question => 'Continue reading?',
+          buttons => [ { label => 'Stop here', key => 's', role => 'stop' }, { label => 'Continue reading', key => 'c', role => 'default' } ] },
+    ],
+    'browser-many'      => [ notice_fixture_browser_set() ],
+    'browser-inline'    => [ { stage => 'options', browser => { placement => 'inline' } }, notice_fixture_browser_set() ],
+    'browser-countdown' => [ { stage => 'options', browser => { seconds => 3 } }, notice_fixture_browser_set() ],
+    'ask-several' => [
+        { stage => 'options', kind => 'fixture-shown-first', category => 'your_options', focus => '-x', statement => 'the first notice the ask presents' },
+        { stage => 'options', kind => 'fixture-shown-second', category => 'your_options', statement => 'the second notice the ask presents', remedy => '-d key' },
+        { stage => 'options', ask => { shows_raised => 1 }, kind => 'fixture-ask-several', category => 'your_options',
+          statement => 'an ask presenting the notices raised before it', question => 'Continue with these options?',
+          buttons => [ { label => 'Stop and correct them', key => 's', role => 'stop' }, { label => 'Continue', key => 'c', role => 'default' } ] },
+    ],
+);
+
+# Thirty notices across the six categories, two carrying a choice: more than
+# a terminal's height holds, so the browser takes the panel's place.
+sub notice_fixture_browser_set {
+    my @names = map { $_->{name} } @notice_category_sheet;
+    return (
+        ( map { { stage => 'finalize', kind => 'fixture-many', category => $names[ $_ % 6 ], statement => "the notice numbered $_ of the browser fixture" } } 1 .. 28 ),
+        { stage => 'finalize', kind => 'fixture-browser-choice', category => 'guidance', focus => 'the focus',
+          statement => 'a notice with options to choose in the browser', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'first', parts => [ 'the first', '-so count', 'the why of the first' ], args => '-so count', effect => 'the effect of the first' },
+                       { key => 'second', parts => [ 'the second', '-so bytes', 'the why of the second' ], args => '-so bytes', effect => 'the effect of the second' } ] },
+        { stage => 'finalize', kind => 'fixture-browser-choice', category => 'guidance',
+          statement => 'a second notice with options', question => 'Look at the options?',
+          buttons => [ { label => 'Look at the options', key => 'l', role => 'more' }, { label => 'Continue as planned', key => 'c', role => 'default' } ],
+          options => [ { key => 'only', parts => [ 'the only option', '-n 5' ], args => '-n 5', effect => 'the effect of the only option' } ] },
+    );
+}
+
+sub _validate_notice_fixture {
+    my ($value) = @_;
+    return if defined $value && exists $notice_fixture_sets{$value};
+    die "--notice-fixture: '" . ( $value // '' ) . "' is not a fixture set; the sets are "
+      . join( ', ', sort keys %notice_fixture_sets ) . "\n";
+}
+
+sub raise_fixture_notices {
+    for my $entry ( grep { $_->{stage} eq $notice_stage } @{ $notice_fixture_sets{$notice_fixture} } ) {
+        my %n = %$entry;
+        delete $n{stage};
+        if ( my $browser = delete $n{browser} ) { %notice_browser_presentation = ( %notice_browser_presentation, %$browser ); next }
+        my $ask = delete $n{ask};
+        unless ($ask) { notice(%n); next }
+        my %presentation = %$ask;
+        if ( delete $presentation{shows_raised} ) {
+            $n{shows} = [ map { $_->{id} } grep { $_->{producer} eq 'raise_fixture_notices' && $_->{shown} eq 'none' } @notice_records ];
+        }
+        ask( %n, %presentation );
+    }
+    return;
+}
+
+# -V notices (#412 D15): every record of the store as an entity block, in
+# raising order, absent values written -, text on one line. Printed at the
+# end of pipeline_render(), after the run's last notice.
+sub emit_notices_verbose {
+    return unless section_requested('notices');
+    my $text = sub {
+        my ($v) = @_;
+        return '-' unless defined $v && length $v;
+        $v =~ s/\s*[\t\r\n]+\s*/ /g;
+        return $v;
+    };
+    print "=== notices ===\n";
+    print "count: " . scalar(@notice_records) . "\n";
+    for my $r (@notice_records) {
+        my $choice = defined $r->{question} || $r->{buttons} ? 'yes' : 'no';
+        my $answer = $r->{answer};
+        print "notice: $r->{id}\n";
+        print "  $_\n" for
+            "kind: $r->{kind}", "category: $r->{category}", "stage: $r->{stage}", "producer: $r->{producer}",
+            "immediacy: $r->{immediacy}", 'visible: ' . ( $r->{visible} ? 'yes' : 'no' ), "shown: $r->{shown}",
+            'focus: ' . $text->( $r->{focus} ), 'statement: ' . $text->( $r->{statement} ),
+            ( @{ $r->{evidence} } ? map { 'evidence: ' . $text->($_) } @{ $r->{evidence} } : 'evidence: -' ),
+            'remedy: ' . $text->( $r->{remedy} ), 'shows: ' . ( @{ $r->{shows} } ? join( ',', @{ $r->{shows} } ) : '-' ), "choice: $choice";
+        if ( $r->{options} ) {
+            print '  headings: ' . join( ' | ', @{ $r->{headings} } ) . "\n";
+            for my $o ( @{ $r->{options} } ) {
+                print "  option: $o->{key}\n";
+                print '    parts: ' . join( ' | ', map { $text->($_) } @{ $o->{parts} } ) . "\n";
+                print '    args: ' . $text->( $o->{args} ) . "\n";
+                print '    effect: ' . $text->( $o->{effect} ) . "\n";
+            }
+        }
+        print '  answer: ' . ( $answer ? "button=$answer->{button} option=" . ( $answer->{option} // '-' ) . " how=$answer->{how}" : '-' ) . "\n";
+    }
+    print "=== END notices ===\n";
+    return;
+}
+
+# The terminal that draws the output, found once, on first use: its name and
+# its background (docs/terminal-output.md § The terminals). The
+# environment names the terminal on the machine ltl runs on; over SSH only the
+# terminal's own answers reach it: its name-and-version reply, an identity
+# reply where one has been measured, its background colour. With no terminal,
+# and on Windows, where ltl does not yet put the console in raw mode, nothing
+# is asked and the background is dark.
+my %terminal_identity_reply = ( '1;95;0' => 'Apple_Terminal', '84;0;0' => 'tmux' );
+my %terminal;
+
+sub detect_terminal {
+    return \%terminal if %terminal;
+    %terminal = ( name => 'unknown', background => 'dark' );
+    if    ( $ENV{WT_SESSION} )   { $terminal{name} = 'windows-terminal' }
+    elsif ( $^O eq 'MSWin32' )   { $terminal{name} = 'conhost' }
+    elsif ( $ENV{TERM_PROGRAM} ) { $terminal{name} = $ENV{TERM_PROGRAM} }
+    return \%terminal if $^O eq 'MSWin32' || !( -t STDIN && -t STDOUT );
+    open my $tty, '>', '/dev/tty' or return \%terminal;
+    $tty->autoflush(1);
+    my $old_settings = `stty -g 2>/dev/null`;
+    chomp $old_settings;
+    eval {
+        system( 'stty', '-icanon', '-echo', 'min', '0', 'time', '1' ) == 0 or die "stty failed\n";
+        if ( $terminal{name} eq 'unknown' ) {
+            if ( terminal_reply( $tty, "\e[>0q" ) =~ /\eP>\|([^\s\e]+)/ ) {
+                $terminal{name} = $1;
+            } elsif ( terminal_reply( $tty, "\e[>c" ) =~ /\e\[>([\d;]+)c/ && $terminal_identity_reply{$1} ) {
+                $terminal{name} = $terminal_identity_reply{$1};
+            }
+        }
+        # The background's luma (ITU-R BT.709); light above one half. A
+        # component is two or four hex digits.
+        if ( terminal_reply( $tty, "\e]11;?\a" ) =~ m{rgb:([0-9a-f]+)/([0-9a-f]+)/([0-9a-f]+)}i ) {
+            my @c = map { hex($_) / ( length($_) == 4 ? 65535 : 255 ) } ( $1, $2, $3 );
+            $terminal{background} = 0.2126 * $c[0] + 0.7152 * $c[1] + 0.0722 * $c[2] > 0.5 ? 'light' : 'dark';
+        }
+    };
+    system( 'stty', $old_settings ) if $old_settings;
+    close $tty;
+    return \%terminal;
+}
+
+# The terminal's answer to a query, read up to its answer to the primary
+# device attributes request sent after it: every terminal answers that one,
+# so a query it ignores costs no wait. Half a second at most.
+sub terminal_reply {
+    my ( $tty, $query ) = @_;
+    print {$tty} $query, "\e[c";
+    my ( $reply, $start ) = ( '', Time::HiRes::time() );
+    my $rin = '';
+    vec( $rin, fileno(STDIN), 1 ) = 1;
+    while ( Time::HiRes::time() - $start < 0.5 ) {
+        next unless select( my $rout = $rin, undef, undef, 0.01 );
+        my $char;
+        last unless sysread( STDIN, $char, 1 );
+        $reply .= $char;
+        last if $reply =~ /\e\[\?[\d;]*c\z/;
+    }
+    $reply =~ s/\e\[\?[\d;]*c\z//;
+    return $reply;
+}
+
+# The background the notice surfaces draw for: as -lbg, -dbg or the heatmap's
+# detection settled it, otherwise the terminal's answer.
+sub notice_background {
+    return $light_background ? 'light' : 'dark' if $light_background_source ne 'default';
+    return detect_terminal()->{background};
+}
+
+# The new style's codes for this run's background (docs/design-language.md
+# § The new style, § Light background; #412 D6, D10), and each category's
+# colour and glyph. Built once, on first use.
+my %notice_style;
+
+sub notice_style {
+    return \%notice_style if %notice_style;
+    my $light   = notice_background() eq 'light';
+    my $windows = detect_terminal()->{name} =~ /^(?:windows-terminal|conhost)$/;
+    my %column  = map { $_->{name} => $_ } @column_colors;
+    %notice_style = (
+        frame => $light ? "\e[38;5;244m" : "\e[90m",
+        text  => $light ? "\e[38;5;16m"  : "\e[37m",
+        dim   => $light ? "\e[38;5;244m" : "\e[2m",
+        bold  => "\e[1m",
+        pick  => $light ? "\e[1;38;5;16m" : "\e[1;97m",
+        reset => "\e[0m",
+        box   => { %{ $histogram_box_sets{light} }, corner_tl => '╭', corner_tr => '╮', corner_bl => '╰', corner_br => '╯' },
+    );
+    for my $c (@notice_category_sheet) {
+        my $col = $column{ $c->{colour} };
+        # The column colour without the reset it opens with, so a bold before it holds.
+        ( my $column_fg = $col->{fg} ) =~ s{^\e\[0m}{};
+        $notice_style{fg}{ $c->{name} } = $light ? "\e[38;5;$col->{gradient_light}[-1]m"
+                                        : defined $c->{dark} ? "\e[38;5;$c->{dark}m"
+                                        : $column_fg;
+        $notice_style{glyph}{ $c->{name} } = $windows ? $c->{windows} : $c->{glyph};
+    }
+    return \%notice_style;
+}
+
+# The cells a string takes: its colour codes removed, a character a cell.
+# Every glyph the surfaces draw is one cell wide on every target terminal
+# (docs/terminal-output.md § Glyphs and width).
+sub notice_cells {
+    my ($s) = @_;
+    $s =~ s/\e\[[0-9;]*m//g;
+    utf8::decode($s);
+    return length $s;
+}
+
+# A string cut to $width cells, an ellipsis marking the cut, colour codes kept.
+sub notice_fit {
+    my ( $s, $width ) = @_;
+    return $s if notice_cells($s) <= $width;
+    my $text = $s;
+    utf8::decode($text);
+    my ( $out, $cells ) = ( '', 0 );
+    while ( $text =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e/ ) { $out .= $t; next }
+        last if $cells + 1 > $width - 1;
+        $out .= $t;
+        $cells++;
+    }
+    utf8::encode($out);
+    return "$out…\e[0m";
+}
+
+sub notice_pad {
+    my ( $row, $width ) = @_;
+    $row = notice_fit( $row, $width );
+    return $row . ( ' ' x ( $width - notice_cells($row) ) );
+}
+
+# A notice as rows of at most $width cells (#412 D3): the bullet in the
+# category's colour, the focus in bold, the statement, the evidence in
+# secondary text after a dot, the remedy after an arrow in the category's
+# colour. It wraps by words; the rows after the first start under the text,
+# past the bullet. With bullet => 0 (one notice alone in an ask) there is no
+# bullet and no indent.
+sub notice_rows {
+    my ( $r, $width, %o ) = @_;
+    my $bullet = $o{bullet} // 1;
+    my $s  = notice_style();
+    my $fg = $s->{fg}{ $r->{category} };
+    my @parts;
+    push @parts, [ $r->{focus}, $s->{bold} . $s->{text} ] if defined $r->{focus} && length $r->{focus};
+    push @parts, [ $r->{statement}, $s->{text} ];
+    push @parts, [ '· ' . join( '; ', @{ $r->{evidence} } ), $s->{dim} ] if @{ $r->{evidence} };
+    push @parts, [ "→ $r->{remedy}", $fg ] if defined $r->{remedy} && length $r->{remedy};
+    my @words = map { my ( $t, $c ) = @$_; map { [ $_, $c ] } split / +/, $t } @parts;
+    my @lines = ( [] );
+    my $cells = 0;
+    for my $w (@words) {
+        my $wc = notice_cells( $w->[0] );
+        if ( @{ $lines[-1] } && $cells + 1 + $wc > $width - ( $bullet ? 2 : 0 ) ) { push @lines, []; $cells = 0 }
+        $cells += ( @{ $lines[-1] } ? 1 : 0 ) + $wc;
+        push @{ $lines[-1] }, $w;
+    }
+    my @rows = map { join ' ', map { $_->[1] . $_->[0] . $s->{reset} } @$_ } @lines;
+    return @rows unless $bullet;
+    return ( "$fg—$s->{reset} " . shift(@rows), map { "  $_" } @rows );
+}
+
+# A category heading on one row: its glyph and name in its colour, bold, the
+# count, and how to read the category, cut to fit.
+sub notice_heading {
+    my ( $cat, $count, $width ) = @_;
+    my $s = notice_style();
+    my $head = "$s->{bold}$s->{fg}{ $cat->{name} }$s->{glyph}{ $cat->{name} } $cat->{heading}$s->{reset}"
+             . ( defined $count ? " $s->{dim}($count)$s->{reset}" : '' );
+    my $room = $width - notice_cells($head) - 2;
+    $head .= "  $s->{dim}" . notice_fit( $cat->{reads}, $room ) . $s->{reset} if $room > 12;
+    return $head;
+}
+
+# Rows framed in a box $width cells wide, $title set in the top edge and $foot
+# (a key bar) in the bottom one, the frame in $edge, each row padded to the
+# inside width, $side cells of padding inside each edge (one for a box that
+# stays on screen, two for a pop-up), a row 'RULE' a divider across the box.
+sub notice_frame {
+    my (%a) = @_;
+    my $s = notice_style();
+    my $b = $s->{box};
+    my ( $e, $w, $side ) = ( $a{edge} // $s->{frame}, $a{width}, $a{side} );
+    my $title = notice_fit( $a{title} // '', $w - 4 );
+    my $fill  = $w - 3 - notice_cells($title);
+    my @out = ( $e . $b->{corner_tl} . $b->{h_line} . $s->{reset} . $title . $e . ( $b->{h_line} x ( $fill > 0 ? $fill : 0 ) ) . $b->{corner_tr} . $s->{reset} );
+    for my $row ( @{ $a{rows} } ) {
+        if ( $row eq 'RULE' ) {
+            push @out, $e . $histogram_box_sets{light}{t_right} . ( $b->{h_line} x ( $w - 2 ) ) . $histogram_box_sets{light}{t_left} . $s->{reset};
+            next;
+        }
+        push @out, $e . $b->{v_line} . $s->{reset} . ( ' ' x $side ) . notice_pad( $row, $w - 2 - 2 * $side ) . ( ' ' x $side ) . $e . $b->{v_line} . $s->{reset};
+    }
+    my $foot = notice_fit( $a{foot} // '', $w - 4 );
+    my $foot_fill = $w - 3 - notice_cells($foot);
+    push @out, $e . $b->{corner_bl} . ( length $foot ? $b->{h_line} . $s->{reset} . $foot . $e . ( $b->{h_line} x max( 0, $foot_fill ) ) : $b->{h_line} x ( $w - 2 ) ) . $b->{corner_br} . $s->{reset};
+    return @out;
+}
+
+# The panel (#412 D3, D5): one box round the notices, however many, each
+# category headed once in presentation order, its notices one row each, the
+# categories divided by a blank row, titled `notices` and its count in
+# secondary text. A single category takes the edge form: its glyph, name,
+# count and how-to-read text in the top edge, in its colour, the notices alone
+# inside. The box is one cell narrower than the terminal, so its last column
+# never wraps.
+sub notice_panel_rows {
+    my (@records) = @_;
+    my $s = notice_style();
+    my $box = $terminal_width - 1;
+    my $inside = $box - 4;
+    my @groups = grep { @{ $_->[1] } } map { my $c = $_; [ $c, [ grep { $_->{category} eq $c->{name} } @records ] ] } @notice_category_sheet;
+    if ( @groups == 1 ) {
+        my ( $cat, $in ) = @{ $groups[0] };
+        return notice_frame( width => $box, side => 1, edge => $s->{fg}{ $cat->{name} },
+                             title => ' ' . notice_heading( $cat, scalar @$in, $box - 7 ) . ' ',
+                             rows  => [ map { notice_rows( $_, $inside ) } @$in ] );
+    }
+    my @rows;
+    for my $i ( 0 .. $#groups ) {
+        my ( $cat, $in ) = @{ $groups[$i] };
+        push @rows, '' if $i;
+        push @rows, notice_heading( $cat, scalar @$in, $inside ), map { notice_rows( $_, $inside ) } @$in;
+    }
+    return notice_frame( width => $box, side => 1, title => " $s->{dim}notices (" . scalar(@records) . ")$s->{reset} ", rows => \@rows );
+}
+
+# Draw the panel with the records given, on standard output, and mark them
+# shown. The deferred panel is the notices section; a notice drawn at its
+# call opens a section of its own, unnamed, so one blank row still separates
+# it from what is above.
+sub draw_notice_panel {
+    my ( $section, @records ) = @_;
+    return unless @records;
+    open_section($section);
+    my @rows = notice_panel_rows(@records);
+    print "$_\n" for @rows;
+    notice_printed( '', @rows );
+    $_->{shown} = 'panel' for @records;
+    return;
+}
+
+# The deferred panel, before the timeline: every deferred, visible notice no
+# surface has drawn; the browser in its place when the panel would not fit.
+sub draw_deferred_notices {
+    my @records = grep { $_->{immediacy} eq 'deferred' && $_->{visible} && $_->{shown} eq 'none' } @notice_records;
+    return unless @records;
+    # The browser when the panel would not fit the terminal's height (D16).
+    return notice_browser(@records) if notice_panel_rows(@records) > $terminal_height - 1;
+    draw_notice_panel( 'notices', @records );
+    return;
+}
+
+# --- ask: a question put to the analyst (#412 D4, D5, D7, D8, D12, D14) ------
+#
+# The one surface for a question during the run: a modal on the alternate
+# screen over the dimmed run, or below the cursor, or the compact box below the
+# cursor; a button whose role is 'more' leads to the options list, its second
+# stage. Every parameter has a default per use (docs/terminal-interaction.md
+# § Parameters and their defaults by use): a caller passes only what it wants
+# otherwise.
+my %notice_presentation = (
+    'ask-modal' => { placement => 'alt',    size => 'auto', quit => 1, keybar => 'full',    seconds => 10, record => 0, lead => 1 },
+    'ask-box'   => { placement => 'inline', size => 'full', quit => 0, keybar => 'letters', seconds => 10, record => 0, lead => 1 },
+);
+my @notice_answers_ahead;       # hidden --notice-answers a,b,...: one per choice point, in order (D17)
+my @notice_printed_rows;        # the rows standard output holds, for the dimmed copy under a pop-up
+my ( $notice_mode_changed, $notice_alt_screen ) = ( 0, 0 );
+
+# The rows the run printed to the terminal, kept so a pop-up on the alternate
+# screen draws over a dimmed copy of them, each row where the terminal has it.
+sub notice_printed {
+    push @notice_printed_rows, @_;
+    splice @notice_printed_rows, 0, @notice_printed_rows - 200 if @notice_printed_rows > 200;
+    return;
+}
+
+sub notice_interactive { return -t STDIN && -t STDOUT }
+
+# The terminal in cbreak mode for a surface that waits on keys, given back on
+# every way out: the answer, quit, an interrupt, a fatal error, the end of the
+# program (docs/terminal-interaction.md § Unattended runs).
+sub notice_raw_mode {
+    ReadMode('cbreak');
+    notice_windows_vt_input();
+    $notice_mode_changed = 1;
+    return;
+}
+
+sub notice_restore_terminal {
+    print "\e[?1049l" if $notice_alt_screen;
+    $notice_alt_screen = 0;
+    return unless $notice_mode_changed;
+    ReadMode('restore');
+    print "\e[?25h\e[0m";
+    $notice_mode_changed = 0;
+    return;
+}
+END { notice_restore_terminal() }
+
+# On Windows the console hands the terminal's escape sequences (an arrow key,
+# a cursor position report) to the program only with virtual terminal input
+# on its input handle (docs/terminal-output.md § Input); ReadMode('restore')
+# puts the input mode back as it was.
+my %notice_win_input;
+sub notice_windows_vt_input {
+    return unless $^O eq 'MSWin32';
+    unless (%notice_win_input) {
+        require Win32::API;
+        %notice_win_input = (
+            get    => Win32::API->new( 'kernel32', 'GetConsoleMode', [ 'N', 'P' ], 'I' ),
+            set    => Win32::API->new( 'kernel32', 'SetConsoleMode', [ 'N', 'N' ], 'I' ),
+            handle => Win32::API->new( 'kernel32', 'GetStdHandle', ['N'], 'N' )->Call(-10),    # STD_INPUT_HANDLE
+        );
+    }
+    my $mode = pack 'L', 0;
+    $notice_win_input{get}->Call( $notice_win_input{handle}, $mode ) or return;
+    $notice_win_input{set}->Call( $notice_win_input{handle}, unpack( 'L', $mode ) | 0x0200 );
+    return;
+}
+
+# One key, decoded: 'up', 'down', 'left', 'right', 'enter', 'esc', 'tab',
+# 'shift-tab', 'pgup', 'pgdn', or the character; undef when the timeout passes.
+sub notice_read_key {
+    my ($timeout) = @_;
+    my $c = ReadKey( defined $timeout ? $timeout : 0 );
+    return undef unless defined $c;
+    return 'enter' if $c eq "\n" || $c eq "\r";
+    return 'tab'   if $c eq "\t";
+    return $c unless $c eq "\e";
+    my $n = ReadKey(0.05);
+    return 'esc' unless defined $n && ( $n eq '[' || $n eq 'O' );
+    my $seq = '';
+    while ( defined( my $d = ReadKey(0.05) ) ) {
+        $seq .= $d;
+        last if $d =~ /[A-Za-z~]/;
+    }
+    return { A => 'up', B => 'down', C => 'right', D => 'left', Z => 'shift-tab', '5~' => 'pgup', '6~' => 'pgdn' }->{$seq} // 'esc';
+}
+
+# A decoded key as one action, the same on every component
+# (docs/terminal-interaction.md § Keys).
+sub notice_action {
+    my ( $k, $quit ) = @_;
+    return 'up'   if $k eq 'up'   || $k eq 'k';
+    return 'down' if $k eq 'down' || $k eq 'j';
+    return $k     if $k =~ /^(?:pgup|pgdn|left|right|enter|esc)$/;
+    return 'next' if $k eq 'tab';
+    return 'prev' if $k eq 'shift-tab';
+    return "digit:$k" if $k =~ /^[1-9]$/;
+    return 'other' if length $k != 1;
+    my $l = lc $k;
+    return 'quit' if $quit && ( $l eq 'q' || $l eq 'x' );
+    return "letter:$l";
+}
+
+# The row the cursor stands on, from the terminal's report (CSI 6n).
+sub notice_cursor_row {
+    print "\e[6n";
+    my $reply = '';
+    while ( defined( my $c = ReadKey(0.3) ) ) {
+        $reply .= $c;
+        last if $c eq 'R';
+    }
+    return $reply =~ /\e\[(\d+);\d+R/ ? $1 : undef;
+}
+
+# A string as characters, and back, for the drawing that counts cells: ltl's
+# text is UTF-8 bytes.
+sub notice_chars { my ($s) = @_; utf8::decode($s); return $s }
+sub notice_bytes { my ($s) = @_; utf8::encode($s); return $s }
+
+# Words wrapped to rows of at most $width cells.
+sub notice_wrap {
+    my ( $text, $width ) = @_;
+    $width = 10 if $width < 10;
+    my ( @rows, $row );
+    for my $word ( split / +/, $text // '' ) {
+        if ( !defined $row )                                { $row = $word; next }
+        if ( notice_cells("$row $word") <= $width )          { $row .= " $word"; next }
+        push @rows, $row;
+        $row = $word;
+    }
+    push @rows, $row if defined $row;
+    return @rows;
+}
+
+# The longest word of the texts, in cells: what cannot be wrapped.
+sub notice_longest_word {
+    return max( 0, map { notice_cells($_) } map { split / +/, $_ // '' } @_ );
+}
+
+# --- where a surface is drawn ---------------------------------------------------
+#
+# alt:    centred on the alternate screen over a dimmed copy of the rows the run
+#         printed, every row at its position; drawn by difference; the screen is
+#         given back as it was on leaving.
+# inline: below the cursor, one empty row before it unless the row above is
+#         already empty; redrawn in place; erased on leaving, the cursor back
+#         on the row it started on.
+# plain:  no terminal: drawn once, as it first appears.
+
+sub notice_drawer {
+    my (%a) = @_;
+    my $mode = notice_interactive() ? $a{placement} : 'plain';
+    my $d = { mode => $mode, W => $terminal_width, H => $terminal_height, h => 0, want_lead => $a{lead} // 1 };
+    if ( my $parent = $a{under} ) {
+        # Layered over a surface: on its alternate screen, over it dimmed with
+        # its colours kept, leaving the screen to it; or centred within the
+        # rows of a surface below the cursor (docs/terminal-interaction.md
+        # § Layered surfaces).
+        if ( $parent->{mode} eq 'alt' ) {
+            @$d{qw(mode nested parent)} = ( 'alt', 1, $parent );
+            $d->{base} = [ map { notice_cut_cells( notice_dim_row( $_, notice_background() ), 0, $d->{W} ) } @{ $parent->{screen} } ];
+        } else {
+            @$d{qw(mode parent)} = ( 'over', $parent );
+        }
+        return $d;
+    }
+    if ( $mode eq 'alt' ) {
+        my $row = notice_cursor_row() // $d->{H};
+        $row = $d->{H} if $row > $d->{H};
+        my @backdrop = ('') x $d->{H};
+        my $r = $row - 2;
+        for my $p ( reverse @notice_printed_rows ) {
+            last if $r < 0;
+            $backdrop[ $r-- ] = $p;
+        }
+        $d->{base} = [ map { notice_chars( notice_dim_row( $_, notice_background() ) ) } @backdrop ];
+        $_ = notice_cut_cells( $_, 0, $d->{W} ) for @{ $d->{base} };
+    }
+    return $d;
+}
+
+# The cells $from to $from + $len - 1 of a row, in the colour state it had at
+# $from; $len undef runs to the end. Rows here are characters, not bytes.
+sub notice_cut_cells {
+    my ( $s, $from, $len ) = @_;
+    my ( $col, $state, $out ) = ( 0, '', '' );
+    while ( $s =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e\[/ ) { $col < $from ? ( $state .= $t ) : ( $out .= $t ); next }
+        last if defined $len && $col >= $from + $len;
+        $out .= $t if $col >= $from;
+        $col++;
+    }
+    ( my $plain = $out ) =~ s/\e\[[0-9;]*m//g;
+    $out .= ' ' x ( $len - length $plain ) if defined $len && length $plain < $len;
+    return $state . $out . "\e[0m";
+}
+
+# The layer's rows laid over the base at their place.
+sub notice_compose {
+    my ( $d, $layer ) = @_;
+    my @out = @{ $d->{base} };
+    for my $i ( 0 .. $#{ $layer->{rows} } ) {
+        my $r = $layer->{top} - 1 + $i;
+        next if $r < 0 || $r > $#out;
+        my $row = $layer->{rows}[$i];
+        ( my $plain = $row ) =~ s/\e\[[0-9;]*m//g;
+        my $c = $layer->{col} - 1;
+        $out[$r] = notice_cut_cells( $out[$r], 0, $c ) . $row . "\e[0m" . notice_cut_cells( $out[$r], $c + length $plain, max( 0, $d->{W} - $c - length $plain ) );
+    }
+    return \@out;
+}
+
+# A row as its cells, each the character with the colour state it is drawn in.
+sub notice_cell_list {
+    my ($s) = @_;
+    my ( $state, @c ) = ('');
+    while ( $s =~ /\G(\e\[[0-9;]*m|.)/gs ) {
+        my $t = $1;
+        if ( $t =~ /^\e\[/ ) { $state = $t =~ /^\e\[0?m$/ ? '' : $state . $t; next }
+        push @c, "$state\0$t";
+    }
+    return \@c;
+}
+
+# Rewrite, on each row that changed, only the cells from its first change to
+# its last, overwritten in place: nothing is cleared first, so what lies behind
+# the surface never shows through (docs/terminal-interaction.md § Redrawing).
+sub notice_paint_differences {
+    my ( $d, $rows ) = @_;
+    my $was = $d->{screen};
+    for my $r ( 0 .. $#$rows ) {
+        my $new = $rows->[$r];
+        next if $was && defined $was->[$r] && $was->[$r] eq $new;
+        if ( !$was || !defined $was->[$r] ) { print notice_bytes( "\e[" . ( $r + 1 ) . ";1H$new" ); next }
+        my ( $a, $b ) = ( notice_cell_list( $was->[$r] ), notice_cell_list($new) );
+        my $n = max( scalar @$a, scalar @$b );
+        my $first = 0;
+        $first++ while $first < $n && ( $a->[$first] // '' ) eq ( $b->[$first] // '' );
+        next if $first == $n;
+        my $last = $n - 1;
+        $last-- while $last > $first && ( $a->[$last] // '' ) eq ( $b->[$last] // '' );
+        print notice_bytes( "\e[" . ( $r + 1 ) . ';' . ( $first + 1 ) . 'H' . notice_cut_cells( $new, $first, $last - $first + 1 ) );
+    }
+    $d->{screen} = $rows;
+    return;
+}
+
+# A row under a pop-up, dimmed with its colours kept (#412 D10). Dark: faint
+# over the row's own colours, bold dropped so it cannot cancel the faint.
+# Light, where faint darkens: every colour half way to white, uncoloured text
+# in the secondary grey.
+sub notice_dim_row {
+    my ( $r, $bg ) = @_;
+    if ( $bg ne 'light' ) {
+        $r =~ s/\e\[([0-9;]*)m/notice_sgr_without_weight($1) . "\e[2m"/ge;
+        return "\e[2m$r\e[0m";
+    }
+    $r =~ s/\e\[([0-9;]*)m/notice_light_dimmed_sgr($1)/ge;
+    return "\e[38;5;244m$r\e[0m";
+}
+
+sub notice_sgr_without_weight {
+    my @p = grep { $_ ne '1' && $_ ne '2' && $_ ne '22' } split /;/, $_[0], -1;
+    return @p ? "\e[" . join( ';', @p ) . 'm' : '';
+}
+
+# The xterm values of the 256 colours, for blending a colour towards white.
+my @notice_xterm16 = ( [ 0, 0, 0 ], [ 205, 0, 0 ], [ 0, 205, 0 ], [ 205, 205, 0 ], [ 0, 0, 238 ], [ 205, 0, 205 ], [ 0, 205, 205 ], [ 229, 229, 229 ],
+    [ 127, 127, 127 ], [ 255, 0, 0 ], [ 0, 255, 0 ], [ 255, 255, 0 ], [ 92, 92, 255 ], [ 255, 0, 255 ], [ 0, 255, 255 ], [ 255, 255, 255 ] );
+
+sub notice_rgb_of_index {
+    my ($n) = @_;
+    return @{ $notice_xterm16[$n] } if $n < 16;
+    if ( $n < 232 ) {
+        my @lv = ( 0, 95, 135, 175, 215, 255 );
+        $n -= 16;
+        return ( $lv[ int( $n / 36 ) ], $lv[ int( $n / 6 ) % 6 ], $lv[ $n % 6 ] );
+    }
+    my $g = 8 + 10 * ( $n - 232 );
+    return ( $g, $g, $g );
+}
+
+sub notice_half_to_white { return join ';', map { int( $_ + ( 255 - $_ ) / 2 ) } @_ }
+
+sub notice_light_dimmed_sgr {
+    my @p = split /;/, $_[0], -1;
+    @p = (0) unless @p;
+    my @out;
+    while (@p) {
+        my $c = shift @p;
+        $c = 0 if $c eq '';
+        if    ( $c == 0 )                         { push @out, 0, '38;5;244' }
+        elsif ( $c == 39 )                        { push @out, '38;5;244' }
+        elsif ( $c == 1 || $c == 2 || $c == 22 )  { }
+        elsif ( $c >= 30 && $c <= 37 )            { push @out, '38;2;' . notice_half_to_white( notice_rgb_of_index( $c - 30 ) ) }
+        elsif ( $c >= 90 && $c <= 97 )            { push @out, '38;2;' . notice_half_to_white( notice_rgb_of_index( $c - 82 ) ) }
+        elsif ( $c >= 40 && $c <= 47 )            { push @out, '48;2;' . notice_half_to_white( notice_rgb_of_index( $c - 40 ) ) }
+        elsif ( $c >= 100 && $c <= 107 )          { push @out, '48;2;' . notice_half_to_white( notice_rgb_of_index( $c - 92 ) ) }
+        elsif ( ( $c == 38 || $c == 48 ) && @p && $p[0] == 5 ) { shift @p; push @out, "$c;2;" . notice_half_to_white( notice_rgb_of_index( shift @p ) ) }
+        elsif ( ( $c == 38 || $c == 48 ) && @p && $p[0] == 2 ) { shift @p; push @out, "$c;2;" . notice_half_to_white( splice @p, 0, 3 ) }
+        else                                      { push @out, $c }
+    }
+    return @out ? "\e[" . join( ';', @out ) . 'm' : '';
+}
+
+sub notice_draw_rows {
+    my ( $d, @rows ) = @_;
+    if ( $d->{mode} eq 'plain' ) {
+        return if $d->{h}++;
+        print "$_\n" for @rows;
+        return;
+    }
+    if ( $d->{mode} eq 'alt' ) {
+        unless ( $d->{on}++ ) {
+            if ( $d->{nested} ) { $d->{screen} = [ @{ $d->{parent}{screen} } ] }
+            else {
+                print "\e[?1049h\e[H\e[2J";
+                $notice_alt_screen = 1;
+                $d->{screen} = [ (' ' x $d->{W}) x $d->{H} ];
+            }
+        }
+        my @chars = map { notice_chars($_) } @rows;
+        my $bw  = max map { notice_cells($_) } @rows;
+        my $top = max( 1, int( ( $d->{H} - @rows ) / 2 ) + 1 );
+        my $col = max( 1, int( ( $d->{W} - $bw ) / 2 ) + 1 );
+        notice_paint_differences( $d, notice_compose( $d, { rows => \@chars, top => $top, col => $col } ) );
+        return;
+    }
+    if ( $d->{mode} eq 'over' ) {
+        my $p   = $d->{parent};
+        my $bw  = max map { notice_cells($_) } @rows;
+        my $top = max( 0, int( ( $p->{h} - @rows ) / 2 ) );
+        my $col = max( 1, int( ( $d->{W} - $bw ) / 2 ) + 1 );
+        my $up  = $p->{h} - 1 - $top;
+        print "\e[${up}A" if $up > 0;
+        print "\r\e[${col}G$rows[$_]" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
+        my $down = $p->{h} - 1 - ( $top + $#rows );
+        print "\e[${down}B" if $down > 0;
+        print "\r";
+        return;
+    }
+    if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1 }
+    elsif ( !$d->{want_lead} || @notice_printed_rows && notice_cells( $notice_printed_rows[-1] ) == 0 ) {
+        # The caller wants no empty row before the surface, or the row above is
+        # already empty, that one empty row: the surface starts on the
+        # cursor's own row.
+        print "\r\e[2K";
+        $d->{lead} = 0;
+    }
+    else { print "\r\e[2K\n"; $d->{lead} = 1 }
+    print "\r";
+    print "$rows[$_]\e[K" . ( $_ < $#rows ? "\n" : '' ) for 0 .. $#rows;
+    print "\e[J" if @rows < $d->{h};
+    $d->{h} = @rows;
+    return;
+}
+
+sub notice_close_drawer {
+    my ( $d, %a ) = @_;
+    if ( $d->{mode} eq 'alt' && $d->{nested} ) {
+        $d->{parent}{screen} = undef;    # the parent repaints every row, in place
+    } elsif ( $d->{mode} eq 'alt' && $d->{on} ) {
+        print "\e[?1049l";
+        $notice_alt_screen = 0;
+    } elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
+        # A record left in the surface's place starts on its first row, so the
+        # empty row before it stays; otherwise the surface leaves no trace.
+        my $up = $d->{h} - 1 + ( $a{keep_lead} ? 0 : $d->{lead} // 0 );
+        print "\e[${up}A" if $up > 0;
+        print "\r\e[J";
+    }
+    $d->{h} = $d->{on} = 0;
+    return;
+}
+
+# --- buttons, the countdown, the options list --------------------------------
+
+my %notice_button_order = ( stop => 0, more => 1, default => 2 );
+
+# A label with its choice letter underlined, at the letter's first
+# occurrence in either case.
+sub notice_lettered {
+    my ($b) = @_;
+    my $l = $b->{label};
+    return $l unless defined $b->{key};
+    my $i = index( lc $l, lc $b->{key} );
+    return $l if $i < 0;
+    return substr( $l, 0, $i ) . "\e[4m" . substr( $l, $i, 1 ) . "\e[24m" . substr( $l, $i + 1 );
+}
+
+# The seconds left, dim in brackets, or the same width of nothing once the
+# countdown is stopped, so what stands beside it does not move (D7).
+sub notice_countdown {
+    my ( $left, $seconds ) = @_;
+    my $s = notice_style();
+    my $slot = length("(${seconds}s)");
+    return ' ' x $slot unless defined $left;
+    my $t = "(${left}s)";
+    return "$s->{dim}$t$s->{reset}" . ( ' ' x ( $slot - length $t ) );
+}
+
+# The buttons on one row, centred in $iw on their labels alone, the countdown
+# beside the default, outside the centred width (docs/terminal-interaction.md
+# § Buttons). The highlighted one is in reverse video in the category's colour.
+sub notice_button_row {
+    my ( $fg, $btns, $focus, $left, $seconds, $iw ) = @_;
+    my $s = notice_style();
+    my $row = join '    ', map {
+        my $t = notice_lettered( $btns->[$_] );
+        $_ == $focus ? "$fg\e[7m\e[1m  $t  \e[0m" : "$s->{text}\[ $t ]$s->{reset}"
+    } 0 .. $#$btns;
+    return $row unless defined $iw;
+    return ( ' ' x max( 0, int( ( $iw - notice_cells($row) ) / 2 ) ) ) . "$row " . notice_countdown( $left, $seconds );
+}
+
+# The columns of an options list: how many parts, the widths of the columns
+# before the last, where the last starts and the gap between columns (one
+# space at the tightest, up to five with room), D8.
+sub notice_option_columns {
+    my ( $options, $headings, $iw ) = @_;
+    my $P = min( scalar @$headings, max map { scalar @{ $_->{parts} } } @$options );
+    my @w;
+    for my $c ( 0 .. $P - 2 ) {
+        $w[$c] = max( notice_cells( $headings->[$c] ), map { notice_cells( $_->{parts}[$c] // '' ) } @$options );
+        $w[$c] = int( $iw * 0.4 ) if $iw && $w[$c] > int( $iw * 0.4 );
+    }
+    my $lead  = 5;    # the marker, the number and the spaces after them
+    my $gaps  = $P - 1;
+    my $fixed = 0;
+    $fixed += $_ for @w;
+    my $last_min = min( 24, max( notice_cells( $headings->[ $P - 1 ] ), notice_longest_word( map { $_->{parts}[ $P - 1 ] } @$options ) ) );
+    my $spare = $iw - $lead - $fixed - $last_min;
+    my $gap = $gaps ? min( 5, max( 1, int( $spare / ( 2 * $gaps ) ) ) ) : 0;
+    return ( $P, \@w, $lead + $fixed + $gap * $gaps, $gap );
+}
+
+# The options list: the headings, one row per option with the highlighted
+# one's cells in reverse video, the last column wrapped, then an empty row and
+# the highlighted option's effect.
+sub notice_options_rows {
+    my ( $options, $headings, $sel, $fg, $iw ) = @_;
+    my $s = notice_style();
+    my ( $P, $w, $last_at, $gap ) = notice_option_columns( $options, $headings, $iw );
+    my $room = max( 8, $iw - $last_at );
+    my $g = ' ' x $gap;
+    my $head = $P > 1 ? ( ' ' x 5 ) . join( '', map { notice_pad( $headings->[$_], $w->[$_] ) . $g } 0 .. $P - 2 ) : ' ' x $last_at;
+    my @rows = ( "$s->{pick}$head$headings->[ $P - 1 ]$s->{reset}" );
+    for my $i ( 0 .. $#$options ) {
+        my $o = $options->[$i];
+        my $fixed = join '', map { notice_pad( $o->{parts}[$_] // '', $w->[$_] ) . $g } 0 .. $P - 2;
+        my @last = notice_wrap( $o->{parts}[ $P - 1 ] // '', $room );
+        @last = ('') unless @last;
+        my $c = $i == $sel ? $fg : $s->{dim};
+        my $cells = ( $i + 1 ) . '  ' . $fixed;
+        push @rows, ( $i == $sel ? "$fg▶$s->{reset} $s->{pick}\e[7m$cells\e[0m" : "  $s->{text}$cells$s->{reset}" ) . $c . shift(@last) . $s->{reset};
+        push @rows, ( ' ' x $last_at ) . "$c$_$s->{reset}" for @last;
+    }
+    push @rows, '', "   $s->{dim}" . notice_fit( $options->[$sel]{effect} // '', $iw - 3 ) . $s->{reset};
+    return @rows;
+}
+
+# The width the list needs for its last column to wrap to no more than two
+# rows: dense content takes a wider tier through it.
+sub notice_options_unit {
+    my ( $options, $headings ) = @_;
+    my ( $P, $w, $last_at ) = notice_option_columns( $options, $headings, 0 );
+    my $last = max( 16, map { notice_cells( $_->{parts}[ $P - 1 ] // '' ) } @$options );
+    return $last_at + max( notice_longest_word( map { $_->{parts}[ $P - 1 ] } @$options ), int( ( $last + 1 ) / 2 ) );
+}
+
+# Pop-up size tiers, as shares of the terminal (docs/terminal-interaction.md
+# § Pop-up size): the smallest in which the longest unbreakable unit fits and
+# the rows do not exceed the height.
+my %notice_tier = ( small => [ 0.5, 0.3 ], medium => [ 0.7, 0.5 ], large => [ 0.9, 0.8 ] );
+
+sub notice_tier_dims {
+    my ($tier) = @_;
+    my ( $fw, $fh ) = @{ $notice_tier{$tier} or die "no size tier '$tier'\n" };
+    my $bw = int( $terminal_width * $fw );
+    $bw = 44 if $bw < 44;
+    $bw = $terminal_width - 2 if $bw > $terminal_width - 2;
+    my $mh = int( $terminal_height * $fh );
+    $mh = 6 if $mh < 6;
+    return ( $bw, $mh );
+}
+
+sub notice_choose_tier {
+    my ( $measure, $named ) = @_;
+    return notice_tier_dims($named) if $named && $named ne 'auto';
+    for my $t (qw(small medium large)) {
+        my ( $bw, $mh ) = notice_tier_dims($t);
+        my ( $unit, $rows ) = $measure->($bw);
+        return ( $bw, $mh ) if $unit <= $bw - 4 && $rows <= $mh;
+    }
+    return notice_tier_dims('large');
+}
+
+# Wait for a choice with a countdown to its default. $draw->($left) paints the
+# surface with the seconds left, undef once stopped; $act->($action) returns
+# [choice, how] for an action that chooses and undef for any other, which stops
+# the countdown and says nothing (D7).
+sub notice_wait_choice {
+    my (%a) = @_;
+    my $end = Time::HiRes::time() + $a{seconds};
+    my $stopped = $a{seconds} <= 0;
+    print "\e[?25l";
+    while (1) {
+        my $left = $stopped ? undef : int( $end - Time::HiRes::time() + 0.999 );
+        return [ $a{default}, 'default' ] if defined $left && $left <= 0;
+        $a{draw}->($left);
+        my $wait = $stopped ? undef : $end - Time::HiRes::time() - ( $left - 1 );
+        my $k = notice_read_key( $stopped ? undef : $wait > 0 ? $wait : 0.01 );
+        next unless defined $k;
+        my $c = $a{act}->( notice_action( $k, $a{quit} ) );
+        return $c if $c;
+        $stopped = 1;
+    }
+}
+
+# The next answer given ahead, or undef.
+sub notice_answer_ahead { return @notice_answers_ahead ? shift @notice_answers_ahead : undef }
+
+# Ask (#412 D14): register the choice as a record, draw the ask surface now,
+# block, and return a reference to the answer (D12): the button's choice
+# letter, the option's key when the second stage was reached, and how it was
+# answered. Every choice has a default, taken when the countdown ends, on Esc,
+# with no terminal to wait on, or from an answer given ahead. The surface is
+# erased once answered (D4); with record, the notices and the answer stay as
+# inline text. Quitting writes -V notices and ends the run.
+#   ask( kind, category, focus, statement, evidence, remedy, visible,
+#        question, buttons => [ { label, key, role } ], countdown, headings,
+#        options => [ { key, parts, args, effect } ], shows => [ids],
+#        form => modal|box, placement => alt|inline, size, seconds, quit,
+#        record, lead, fixed_height )
+my %notice_ask_presentation = map { $_ => 1 } qw( form placement size seconds quit record lead fixed_height );
+sub ask {
+    my (%a) = @_;
+    my %p = map { $_ => delete $a{$_} } grep { $notice_ask_presentation{$_} } keys %a;
+    my $form = delete $p{form} // 'modal';
+    %p = ( %{ $notice_presentation{"ask-$form"} or die "ask(): no form '$form'\n" }, map { $_ => $p{$_} } grep { defined $p{$_} } keys %p );
+    $p{seconds} = $a{countdown} if defined $a{countdown};
+    $a{countdown} //= $p{seconds};
+    my $record = register_notice( { %a, immediacy => 'now' }, ( caller(1) )[3] );
+    $record->{shown} = 'ask';
+    my @shown = map { $notice_records[ $_ - 1 ] } @{ $record->{shows} };
+    @{$_}{qw(shown visible)} = ( 'ask', 0 ) for @shown;
+    return notice_ask_surface( $record, @shown ? \@shown : [$record], %p, form => $form );
+}
+
+# The ask surface for a record that carries a choice (D14): the one ask()
+# registers, or a deferred notice the browser layers it on (D12). stage => 2
+# opens on the options list, for an ask layered over the browser, where Esc
+# goes back without an answer; under => the drawer of the surface it is
+# layered over. Returns the answer, or undef when a layered list is left.
+sub notice_ask_surface {
+    my ( $record, $body_notices, %p ) = @_;
+    my @body_notices = @$body_notices;
+    my $form  = $p{form} // 'modal';
+    my $stage = $p{stage} // 1;
+    %p = ( %{ $notice_presentation{"ask-$form"} }, map { $_ => $p{$_} } grep { defined $p{$_} } keys %p );
+
+    my $s   = notice_style();
+    my ($cat) = grep { $_->{name} eq $record->{category} } @notice_category_sheet;
+    my $fg  = $s->{fg}{ $cat->{name} };
+    my @btn = sort { $notice_button_order{ $a->{role} } <=> $notice_button_order{ $b->{role} } } @{ $record->{buttons} // [] };
+    my ($def_i) = grep { $btn[$_]{role} eq 'default' } 0 .. $#btn;
+    $def_i //= $#btn;
+    my %letter = map { lc $btn[$_]{key} => $_ } grep { defined $btn[$_]{key} } 0 .. $#btn;
+    my $options  = $record->{options};
+    my $headings = $record->{headings};
+    my $count    = @body_notices;
+    my ($more) = grep { $_->{role} eq 'more' } @btn;
+    my $answer = { button => $btn[$def_i]{key}, option => undef, how => undef };
+    $record->{answer} = $answer if $stage == 1;
+    my $option_default = $options ? $options->[0]{key} : undef;
+    my %option_at = $options ? map { $options->[$_]{key} => $_ } 0 .. $#$options : ();
+
+    # Answers given ahead: one per choice point, the option key next when the
+    # button leads to the list.
+    my $ahead;
+    if ( $stage == 1 && defined( my $given = notice_answer_ahead() ) ) {
+        my $i = $given eq 'default' ? $def_i : $letter{ lc $given } // $def_i;
+        @$answer{qw(button how)} = ( $btn[$i]{key}, 'ahead' );
+        if ( $btn[$i]{role} eq 'more' && $options ) {
+            my $o = notice_answer_ahead();
+            $answer->{option} = defined $o && exists $option_at{$o} ? $o : $option_default;
+        }
+        $ahead = [ $i, defined $answer->{option} ? $option_at{ $answer->{option} } : undef ];
+    }
+
+    my $title = ' ' . "$s->{bold}$fg$s->{glyph}{ $cat->{name} } $cat->{heading}$s->{reset}" . ( $count > 1 ? " $s->{dim}($count)$s->{reset}" : '' ) . ' ';
+    my $top_edge = sub {
+        my ($bw) = @_;
+        my $room = $bw - 6 - notice_cells($title);
+        return $room > 12 ? "$title$s->{dim}" . notice_fit( $cat->{reads}, $room ) . "$s->{reset} " : $title;
+    };
+    my $q = "$s->{text}$record->{question}$s->{reset}";
+    my $esc_takes = lc $btn[$def_i]{label};
+    my $body = sub {
+        my ($iw) = @_;
+        return map { notice_rows( $_, $iw, bullet => $count > 1 ) } @body_notices;
+    };
+    my $tail1 = sub {
+        my ( $iw, $focus, $left ) = @_;
+        if ( $form eq 'box' ) {
+            my @ch = map {
+                my $t = notice_lettered( $btn[$_] );
+                $_ == $def_i ? "$s->{pick}$t$s->{reset} " . notice_countdown( $left, $p{seconds} ) : "$s->{text}$t$s->{reset}"
+            } 0 .. $#btn;
+            return ( '', $q . '  ' . join( '   ', @ch ) );
+        }
+        return ( '', ( ' ' x max( 0, int( ( $iw - notice_cells($q) ) / 2 ) ) ) . $q, '',
+                 notice_button_row( $fg, \@btn, $focus, $left, $p{seconds}, $iw ) );
+    };
+    my $tail2 = sub { my ( $iw, $sel ) = @_; return ( '', 'RULE', '', notice_options_rows( $options, $headings, $sel, $fg, $iw ) ) };
+    my $key_bar = sub {
+        my ($stage) = @_;
+        my @pairs;
+        if ( $p{keybar} eq 'letters' ) {
+            @pairs = $stage == 2 ? ( [ '1-' . @$options, 'choose' ], [ 'Esc', 'continue as planned' ] )
+                   : ( ( map { [ $_->{key}, lc $_->{label} ] } grep { defined $_->{key} } @btn ), [ 'Esc', $esc_takes ] );
+        } else {
+            @pairs = $stage == 2 ? ( [ '↑↓ j k', 'move' ], [ '1-' . @$options . ' Enter', 'choose' ], [ 'Esc', 'continue as planned' ] )
+                   : ( [ '←→ Tab', 'move' ], [ 'Enter', 'choose' ], [ 'Esc', $esc_takes ] );
+        }
+        push @pairs, [ 'q/x', 'quit' ] if $p{quit};
+        return " $s->{dim}" . join( ' · ', map { "$_->[0]: $_->[1]" } @pairs ) . "$s->{reset} ";
+    };
+    my $stage_rows = sub {
+        my ( $iw, $stage ) = @_;
+        my @t = $stage == 2 ? $tail2->( $iw, 0 ) : $tail1->( $iw, 0, $p{seconds} );
+        return 2 + $body->($iw) + @t;
+    };
+    my $rows_in = sub {
+        my ( $iw, $stage ) = @_;
+        return max( $stage_rows->( $iw, 1 ), $options ? $stage_rows->( $iw, 2 ) : 0 ) if $p{fixed_height} || !defined $stage;
+        return $stage_rows->( $iw, $stage );
+    };
+    my $measure = sub {
+        my ($bw) = @_;
+        my $iw = $bw - 6;
+        my $unit = max( notice_cells($title) + 6 + min( 24, notice_cells( $cat->{reads} ) ),
+                        notice_cells( $key_bar->(1) ) + 4,
+                        ( $options ? notice_cells( $key_bar->(2) ) + 4 : 0 ),
+                        notice_cells( notice_button_row( $fg, \@btn, 0 ) ) + 2 + length("($p{seconds}s)") + 8,
+                        ( $options ? notice_options_unit( $options, $headings ) + 8 : 0 ),
+                        notice_longest_word( $record->{question}, map { ( $_->{focus}, $_->{statement}, $_->{remedy}, @{ $_->{evidence} } ) } @body_notices ) + 8 );
+        return ( $unit, $rows_in->($iw) + 2 );
+    };
+    my ( $bw, $mh ) = $form eq 'box' ? ( $terminal_width - 1, $terminal_height - 2 ) : notice_choose_tier( $measure, $p{size} );
+    my $iw = $bw - 6;
+    my $frame_rows = sub {
+        my ( $stage, $x, $left ) = @_;
+        my $height = min( $rows_in->( $iw, $stage ), $mh - 2 );
+        my @b = $body->($iw);
+        my @t = $stage == 2 ? $tail2->( $iw, $x ) : $tail1->( $iw, $x, $left );
+        my @in = ( '', @b, ( ('') x max( 0, $height - 2 - @b - @t ) ), @t, '' );
+        @in = @in[ 0 .. $height - 1 ] if @in > $height;
+        return notice_frame( width => $bw, side => 2, edge => $fg, title => $top_edge->($bw),
+                             foot => ( $p{keybar} eq 'none' ? undef : $key_bar->($stage) ), rows => \@in );
+    };
+
+    my $interactive = notice_interactive();
+    if ( $interactive && $ahead ) {
+        notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
+        return $answer;
+    }
+    local $| = 1;    # a surface is drawn without line ends: every write reaches the terminal at once
+    local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
+    local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
+    notice_raw_mode() if $interactive;
+    my $d = notice_drawer( placement => $form eq 'modal' ? $p{placement} : 'inline', under => $p{under}, lead => $p{lead} );
+    my $indent = $d->{mode} eq 'inline' && $form eq 'modal' ? ' ' x int( ( $terminal_width - $bw ) / 2 ) : '';
+    my $draw = sub { notice_draw_rows( $d, map { "$indent$_" } @_ ) };
+
+    if ( $d->{mode} eq 'plain' ) {
+        # No terminal: drawn once as it appears, in the state the answer given
+        # ahead reaches, or with the default highlighted; nothing waits.
+        my ( $i, $oi ) = $ahead ? @$ahead : ( $def_i, undef );
+        # One blank row above it, as between any two sections, unless the
+        # caller wants none: the same rows as in a terminal.
+        $p{lead} ? open_section() : close_section();
+        $draw->( defined $oi ? $frame_rows->( 2, $oi ) : $frame_rows->( 1, $i, $p{seconds} ) );
+        $answer->{how} //= 'no_terminal';
+        notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
+        return $answer;
+    }
+    if ( $stage == 2 ) {
+        # Layered over the browser: the list at once, Esc back without an
+        # answer, Enter answering the record through the button that leads
+        # to the list.
+        my $sel = 0;
+        my $n   = @$options;
+        while (1) {
+            $draw->( $frame_rows->( 2, $sel ) );
+            my $k = notice_read_key();
+            next unless defined $k;
+            my $act = notice_action( $k, $p{quit} );
+            if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % $n }
+            elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % $n }
+            elsif ( $act eq 'pgup' ) { $sel = 0 }
+            elsif ( $act eq 'pgdn' ) { $sel = $n - 1 }
+            elsif ( $act =~ /^digit:(\d)$/ && $1 <= $n ) { $sel = $1 - 1 }
+            elsif ( $act eq 'enter' ) {
+                $record->{answer} = { button => ( $more // $btn[$def_i] )->{key}, option => $options->[$sel]{key}, how => 'key' };
+                last;
+            }
+            elsif ( $act eq 'esc' )  { last }
+            elsif ( $act eq 'quit' ) { notice_close_drawer($d); notice_quit_run( $record->{answer} = { button => undef, option => undef } ) }
+        }
+        notice_close_drawer($d);
+        return $record->{answer};
+    }
+    my $focus = $def_i;
+    my $chosen = notice_wait_choice(
+        seconds => $p{seconds},
+        default => $def_i,
+        quit    => $p{quit},
+        draw    => sub { $draw->( $frame_rows->( 1, $focus, $_[0] ) ) },
+        act     => sub {
+            my ($act) = @_;
+            return [ 'quit', 'quit' ] if $act eq 'quit';
+            return [ $letter{$1}, 'key' ] if $act =~ /^letter:(.)$/ && defined $letter{$1};
+            return [ $def_i, 'esc' ] if $act eq 'esc';
+            if ( $form eq 'modal' ) {
+                return [ $focus, 'key' ] if $act eq 'enter';
+                $focus = ( $focus + 1 ) % @btn if $act eq 'right' || $act eq 'next';
+                $focus = ( $focus - 1 ) % @btn if $act eq 'left'  || $act eq 'prev';
+                return undef;
+            }
+            return [ $def_i, 'key' ] if $act eq 'enter';
+            return undef;
+        },
+    );
+    my ( $i, $how ) = @$chosen;
+    if ( $i eq 'quit' ) { notice_close_drawer($d); notice_quit_run($answer); }
+    @$answer{qw(button how)} = ( $btn[$i]{key}, $how );
+    if ( $btn[$i]{role} eq 'more' && $options ) {
+        my $sel = 0;
+        my $n   = @$options;
+        while (1) {
+            $draw->( $frame_rows->( 2, $sel ) );
+            my $k = notice_read_key();
+            next unless defined $k;
+            my $act = notice_action( $k, $p{quit} );
+            if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % $n }
+            elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % $n }
+            elsif ( $act eq 'pgup' ) { $sel = 0 }
+            elsif ( $act eq 'pgdn' ) { $sel = $n - 1 }
+            elsif ( $act =~ /^digit:(\d)$/ && $1 <= $n ) { $sel = $1 - 1 }
+            elsif ( $act eq 'enter' ) { @$answer{qw(option how)} = ( $options->[$sel]{key}, 'key' ); last }
+            elsif ( $act eq 'esc' )   { @$answer{qw(option how)} = ( $option_default, 'esc' ); last }
+            elsif ( $act eq 'quit' )  { notice_close_drawer($d); notice_quit_run($answer) }
+        }
+    }
+    notice_close_drawer( $d, keep_lead => $p{record} );
+    notice_restore_terminal();
+    notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
+    return $answer;
+}
+
+# The notices raised while the options were read (inventory rows 1 to 11),
+# put to the analyst before the read starts, while nothing has been read and
+# a mistyped option costs nothing to correct (#412 D16): continue, the
+# default, or stop and correct them. The notices are recorded as shown by the
+# ask and kept off the panel after it (D11, D13's shows). Stopping writes
+# -V notices and ends the run before the read. Fixture notices are left to
+# the surface their set exercises.
+sub ask_about_option_notices {
+    my @raised = grep { $_->{stage} eq 'options' && $_->{immediacy} eq 'deferred' && $_->{shown} eq 'none'
+                        && $_->{producer} ne 'raise_fixture_notices' } @notice_records;
+    return unless @raised;
+    # The compact box with its choice, on the row under the title with no empty
+    # row before it, leaving the notices and the answer behind in its place:
+    # the analyst keeps what was presented and chosen, whether the run goes on
+    # or stops (#412 D19).
+    my $answer = ask( kind => 'options-review', category => 'your_options',
+                      statement => 'the options given raised notices before the read',
+                      question  => 'Continue with these options?',
+                      buttons   => [ { label => 'Stop and correct them', key => 's', role => 'stop' },
+                                     { label => 'Continue', key => 'c', role => 'default' } ],
+                      shows     => [ map { $_->{id} } @raised ],
+                      form => 'box', record => 1, lead => 0 );
+    return unless $answer->{button} eq 's';
+    emit_notices_verbose();
+    exit 0;
+}
+
+# --- the browser (#412 D5) ----------------------------------------------------
+#
+# Many notices in a navigable list: tabs across the top filter by category,
+# All first, every tab named with its count; the list beneath, one row per
+# notice; the selected notice's detail under it, in a pane sized before
+# anything is drawn for the tallest detail, so the browser never changes size
+# while navigated. Enter on a notice that carries a choice layers the options
+# list over the browser; the answer is set on the record (D12) and locks it: ◇
+# marks a choice on offer, ◆ one answered. A countdown closes it until any
+# key (15 s). Esc and c close it, q and x quit the run (docs/terminal-interaction.md
+# § Keys). With no terminal its first frame is drawn once.
+
+sub notice_browser {
+    my (@records) = @_;
+    my %p = %notice_browser_presentation;
+    my $s = notice_style();
+    my %category_at = map { $notice_category_sheet[$_]{name} => $_ } 0 .. $#notice_category_sheet;
+    my @items = sort { $category_at{ $a->{category} } <=> $category_at{ $b->{category} } || $a->{id} <=> $b->{id} } @records;
+    my @cats  = grep { my $c = $_; grep { $_->{category} eq $c->{name} } @items } @notice_category_sheet;
+    $_->{shown} = 'browser' for @items;
+
+    my $choice_line = sub {
+        my ($n) = @_;
+        my $fg = $s->{fg}{ $n->{category} };
+        my $a  = $n->{answer};
+        return "$s->{dim}chosen:$s->{reset} $s->{pick}" . ( map { $_->{parts}[0] } grep { $_->{key} eq $a->{option} } @{ $n->{options} } )[0]
+             . "$s->{reset} $fg" . ( map { $_->{args} // '' } grep { $_->{key} eq $a->{option} } @{ $n->{options} } )[0] . $s->{reset}
+            if $a && defined $a->{option};
+        return "$fg◇$s->{reset} $s->{dim}" . scalar( @{ $n->{options} } ) . " options on offer: Enter to choose$s->{reset}";
+    };
+    my $detail_rows = sub {
+        my ( $n, $iw ) = @_;
+        my ($c) = grep { $_->{name} eq $n->{category} } @notice_category_sheet;
+        my @r = ( notice_heading( $c, undef, $iw ), '', notice_rows( $n, $iw, bullet => 0 ) );
+        push @r, '', $choice_line->($n) if $n->{options};
+        return @r;
+    };
+    my $tab_rows = sub {
+        my ( $tab, $iw ) = @_;
+        my @tabs = ( $tab == 0 ? "$s->{pick}\e[7m All (" . @items . ") \e[0m" : "$s->{text} All (" . @items . ") $s->{reset}" );
+        for my $i ( 0 .. $#cats ) {
+            my $c  = $cats[$i];
+            my $n  = grep { $_->{category} eq $c->{name} } @items;
+            my $fg = $s->{fg}{ $c->{name} };
+            my $l  = " $s->{glyph}{ $c->{name} } $c->{heading} ($n) ";
+            push @tabs, $tab == $i + 1 ? "$fg\e[7m\e[1m$l\e[0m" : "$fg$l$s->{reset}";
+        }
+        my @rows = ('');
+        for my $t (@tabs) {
+            push @rows, '' if $rows[-1] ne '' && notice_cells("$rows[-1] $t") > $iw;
+            $rows[-1] .= ( $rows[-1] ne '' ? ' ' : '' ) . $t;
+        }
+        return @rows;
+    };
+
+    my ( $D, $T, $L );
+    my $measure = sub {
+        my ($bw) = @_;
+        my $iw = $bw - 6;
+        $D = max map { scalar( $detail_rows->( $_, $iw ) ) } @items;
+        $T = scalar( $tab_rows->( 0, $iw ) );
+        return ( 40 + 6, 1 + $T + 1 + $p{rows} + 1 + 1 + 1 + $D + 1 + 2 );
+    };
+    my $interactive = notice_interactive();
+    my $placement = $p{placement};
+    my ( $bw, $mh ) = $placement eq 'inline' ? ( $terminal_width - 1, $terminal_height - 2 ) : notice_choose_tier( $measure, $p{size} );
+    $measure->($bw);
+    $L = min( $p{rows}, $mh - 2 - 5 - $T - 1 - $D );
+    $L = 3 if $L < 3;
+    my $iw = $bw - 6;
+
+    my ( $tab, $sel, $top ) = ( 0, 0, 0 );
+    my $shown = sub { $tab ? grep { $_->{category} eq $cats[ $tab - 1 ]{name} } @items : @items };
+    my $rows = sub {
+        my ($left) = @_;
+        my @shown = $shown->();
+        $sel = $#shown if $sel > $#shown;
+        $top = $sel if $sel < $top;
+        $top = $sel - $L + 1 if $sel >= $top + $L;
+        my @r = ( '', $tab_rows->( $tab, $iw ), '' );
+        for my $i ( $top .. $top + $L - 1 ) {
+            if ( $i > $#shown ) { push @r, ''; next }
+            my $n  = $shown[$i];
+            my $fg = $s->{fg}{ $n->{category} };
+            my $mark = $n->{options} ? ( $n->{answer} && defined $n->{answer}{option} ? "$fg◆$s->{reset}" : "$fg◇$s->{reset}" ) : ' ';
+            my $text = notice_fit( join( ' ', notice_rows( $n, 100_000, bullet => 0 ) ), $iw - 6 );
+            ( my $plain = $text ) =~ s/\e\[[0-9;]*m//g;
+            push @r, $i == $sel
+                ? "$fg▶$s->{reset} $fg$s->{glyph}{ $n->{category} }$s->{reset} \e[7m" . notice_pad( $plain, $iw - 6 ) . "\e[0m $mark"
+                : "  $fg$s->{glyph}{ $n->{category} }$s->{reset} " . notice_pad( $text, $iw - 6 ) . " $mark";
+        }
+        push @r, '', 'RULE', '';
+        my @detail = $detail_rows->( $shown[$sel], $iw );
+        push @r, ( map { $detail[$_] // '' } 0 .. $D - 1 ), '';
+        my @pairs = ( [ '↑↓ j k', 'move' ], [ '←→ Tab', 'tabs' ], [ '1-' . ( @cats + 1 ), 'tab' ], [ 'Enter', 'options' ], [ 'Esc/c', 'close' ] );
+        push @pairs, [ 'q/x', 'quit' ] if $p{quit};
+        my $foot = " $s->{dim}" . join( ' · ', map { "$_->[0]: $_->[1]" } @pairs ) . $s->{reset} . ( defined $left ? ' ' . notice_countdown( $left, $p{seconds} ) : '' ) . ' ';
+        my $range = ( @shown ? $top + 1 : 0 ) . '-' . ( $top + $L > @shown ? scalar @shown : $top + $L ) . ' of ' . @shown;
+        return notice_frame( width => $bw, side => 2, rows => \@r, foot => $foot,
+                             title => " $s->{dim}notices (" . @items . ") · $range$s->{reset} " );
+    };
+
+    local $| = 1;
+    local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
+    local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
+    notice_raw_mode() if $interactive;
+    my $d = notice_drawer( placement => $placement, lead => $p{lead} );
+    my $indent = $d->{mode} eq 'inline' ? '' : '';
+    if ( $d->{mode} eq 'plain' ) {
+        open_section('notices');
+        notice_draw_rows( $d, $rows->( $p{seconds} ) );
+        return;
+    }
+    print "\e[?25l";
+    my $end = Time::HiRes::time() + $p{seconds};
+    my $stopped = $p{seconds} <= 0;
+    while (1) {
+        my $left = $stopped ? undef : int( $end - Time::HiRes::time() + 0.999 );
+        last if defined $left && $left <= 0;
+        notice_draw_rows( $d, $rows->($left) );
+        my $wait = $stopped ? undef : $end - Time::HiRes::time() - ( $left - 1 );
+        my $k = notice_read_key( $stopped ? undef : $wait > 0 ? $wait : 0.01 );
+        next unless defined $k;
+        $stopped = 1;
+        my $act = notice_action( $k, $p{quit} );
+        my @shown = $shown->();
+        if ( $act eq 'quit' ) { notice_close_drawer($d); notice_quit_run( {} ) }
+        last if $act eq 'esc' || $act eq 'letter:c';    # close is the dialogue, quit the application
+        if    ( $act eq 'up' )   { $sel = ( $sel - 1 ) % @shown }
+        elsif ( $act eq 'down' ) { $sel = ( $sel + 1 ) % @shown }
+        elsif ( $act eq 'pgup' ) { $sel = $sel - $L < 0 ? 0 : $sel - $L }
+        elsif ( $act eq 'pgdn' ) { $sel = $sel + $L > $#shown ? $#shown : $sel + $L }
+        elsif ( $act eq 'right' || $act eq 'next' ) { $tab = ( $tab + 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'left'  || $act eq 'prev' ) { $tab = ( $tab - 1 ) % ( @cats + 1 ); ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act =~ /^digit:(\d)$/ && $1 <= @cats + 1 ) { $tab = $1 - 1; ( $sel, $top ) = ( 0, 0 ) }
+        elsif ( $act eq 'enter' && $shown[$sel]{options} && !( $shown[$sel]{answer} && defined $shown[$sel]{answer}{option} ) ) {
+            # A choice not yet taken: its options list layered over the browser.
+            notice_ask_surface( $shown[$sel], [ $shown[$sel] ], form => 'modal', stage => 2, seconds => 0, quit => $p{quit}, under => $d );
+        }
+    }
+    notice_close_drawer($d);
+    notice_restore_terminal();
+    return;
+}
+
+# Quitting from a surface: the surface is already cleared; the -V notices
+# section is written, then the run stops cleanly (D12).
+sub notice_quit_run {
+    my ($answer) = @_;
+    @$answer{qw(how)} = ('quit');
+    notice_restore_terminal();
+    emit_notices_verbose();
+    exit 0;
+}
+
+# What a surface leaves when the caller asks for a record (D4): the notices as
+# inline text in the ltl look, and the answer on the row after them.
+sub notice_leave_record {
+    my ( $record, $notices, $btn ) = @_;
+    my $s = notice_style();
+    my ($cat) = grep { $_->{name} eq $record->{category} } @notice_category_sheet;
+    my $fg = $s->{fg}{ $cat->{name} };
+    my $lead = "$s->{bold}$fg$s->{glyph}{ $cat->{name} } $cat->{heading}$s->{reset} ";
+    my @rows;
+    if ( @$notices == 1 ) {
+        my @r = notice_rows( $notices->[0], $terminal_width - 1 - notice_cells($lead), bullet => 0 );
+        @rows = ( $lead . shift(@r), map { "  $_" } @r );
+    } else {
+        @rows = ( notice_heading( $cat, scalar @$notices, $terminal_width - 1 ), map { notice_rows( $_, $terminal_width - 1 ) } @$notices );
+    }
+    my $answer = $record->{answer};
+    my ($b) = grep { ( $_->{key} // '' ) eq ( $answer->{button} // '' ) } @$btn;
+    my $taken = lcfirst( $b ? $b->{label} : $answer->{button} );
+    if ( defined $answer->{option} ) {
+        my ($o) = grep { $_->{key} eq $answer->{option} } @{ $record->{options} };
+        $taken .= ': ' . lcfirst( $o->{parts}[0] ) . ( $o->{args} ? " $o->{args}" : '' );
+    }
+    my @out = ( @rows, "  $s->{dim}↳ $record->{question} $taken ($answer->{how})$s->{reset}" );
+    print "$_\n" for @out;
+    notice_printed(@out);
     return;
 }
 
@@ -15524,7 +16974,7 @@ sub apply_parse_time_sort_gate {
     );
     my $k = $killer{ $sort_gate{family} };
     return unless $k && $k->[0];
-    print STDERR "Note: cannot apply -so/--sort-on $operand because $k->[1] discards the $sort_gate{family} metric - the messages table is ordered by occurrences\n";
+    notice( kind => 'sort-gated-by-omit', category => 'your_options', statement => "cannot apply -so/--sort-on $operand because $k->[1] discards the $sort_gate{family} metric - the messages table is ordered by occurrences" );
     ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
     $sort_gate{observed} = 0;
     $sort_gate{fallback} = 'parse';
@@ -15537,9 +16987,10 @@ sub apply_parse_time_sort_gate {
 # eligibility floor). Both texts are generic across the metric families.
 sub sort_fallback_to_occurrences {
     my ($detection_point) = @_;
-    print STDERR $detection_point eq 'pre-walk'
-        ? "Note: no $sort_gate{family} values were found - the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced, so the messages table is ordered by occurrences\n"
-        : "Note: the requested sort (-so/--sort-on $sort_gate{operand}) could not be produced from the $sort_gate{family} values in this run - the messages table is ordered by occurrences\n";
+    notice( kind => 'sort-not-produced', category => 'decision_taken_for_you', focus => "-so/--sort-on $sort_gate{operand}",
+            statement => $detection_point eq 'pre-walk'
+                ? "could not be produced: no $sort_gate{family} values were found, so the messages table is ordered by occurrences"
+                : "could not be produced from the $sort_gate{family} values in this run, so the messages table is ordered by occurrences" );
     ( $sort_type, $sort_key ) = ( 'occurrences', 'occurrences' );
     $sort_gate{fallback} = $detection_point;
 }
@@ -15603,7 +17054,8 @@ sub record_deprecation {
 sub print_deprecation_notices {
     for my $notice (@deprecations) {
         my $given = @{ $notice->{options} } ? ' (given to ' . join( ', ', @{ $notice->{options} } ) . ')' : '';
-        print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";
+        notice( kind => 'deprecated-spelling', category => 'your_options', focus => $notice->{spelling},
+                statement => "is deprecated$notice->{as}$given", remedy => $notice->{advice} );
     }
     @deprecations = ();
     %deprecation_of = ();
@@ -15808,11 +17260,11 @@ sub resolve_discard_names {
                 $resolved->{udm}{discarded} = 1 if $resolved->{udm};
                 for my $reader ( @{ $resolved->{readers} } ) {
                     $reader->{discarded} = 1;
-                    print STDERR "Note: -d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off\n";
+                    notice( kind => 'discard-switches-off-metric', category => 'your_options', statement => "-d/--discard removes the key $name, which the -udm metric $reader->{name} reads: the metric is switched off" );
                 }
                 if ( defined( my $metric = $resolved->{probe_metric} ) ) {
                     ${ $builtin_metric{$metric}{omit_flag} } = 1;
-                    print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";
+                    notice( kind => 'discard-switches-off-metric', category => 'your_options', statement => "-d/--discard removes the key $name, which the $metric metric reads: the metric is switched off" );
                 }
                 push @discard_subs, discard_key_sub($name);
             }
@@ -15896,7 +17348,7 @@ sub apply_discard_precedence {
             delete $expose_key{$name};
             $expose_count = 0 if $name eq 'count';
         }
-        print STDERR "Note: " . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed\n";
+        notice( kind => 'discard-wins', category => 'your_options', statement => "" . join(', ', @exposed_too) . " given to both -x/--expose and -d/--discard: discarded, and not exposed" );
     }
 
     # A masked identifier that is also discarded: it is removed before the
@@ -15906,7 +17358,7 @@ sub apply_discard_precedence {
     if (%mask_discarded) {
         my @masked_too = grep { $mask_discarded{$_} } @mask_names;
         @mask_names = grep { !$mask_discarded{$_} } @mask_names;
-        print STDERR "Note: " . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked\n";
+        notice( kind => 'discard-wins', category => 'your_options', statement => "" . join(', ', @masked_too) . " given to both -m/--mask and -d/--discard: discarded, and not masked" );
     }
     return;
 }
@@ -16323,6 +17775,8 @@ sub adapt_to_command_line_options {
         'debug-layout' => \$debug_layout,                                           # hidden
         'detection-window=i' => \$format_detection_window,                          # hidden — D30 two-phase-store window size (default 0 until #17 sizes it)
         'validate-layout' => \$validate_layout,                                     # hidden
+        'notice-fixture=s' => sub { _validate_notice_fixture($_[1]); $notice_fixture = $_[1] },   # hidden — a named fixture set raised through notice() at each stage (#412 D17)
+        'notice-answers=s' => sub { push @notice_answers_ahead, split /,/, $_[1] },                # hidden — answers given ahead, one per choice point in order (#412 D17, #748)
         'help:s'       => \$show_help,                                              # hidden — special-cased; legacy aliases -?/--help via PreProcessor. Optional arg: '' = full help; 'statistics' = stats index; other = error (Issue #261).
         'explain|ex:s' => \$explain_arg,                                            # Issue #261: optional arg: '' = topic registry; <topic> = long-form explanation. Aliases shared with -so (avg, stddev, p1..p99999).
     );
@@ -16534,15 +17988,15 @@ sub adapt_to_command_line_options {
             }
         }
         if ($histogram_bucket_override < 0) {
-            warn "Invalid bucket override value: $histogram_bucket_override. Disabling override.\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid bucket override value: $histogram_bucket_override. Disabling override." );
             $histogram_bucket_override = 0;
         }
         if ($histogram_height < 3) {
-            warn "Histogram height too small: $histogram_height. Using minimum (3).\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Histogram height too small: $histogram_height. Using minimum (3)." );
             $histogram_height = 3;
         }
         if ($histogram_width_percent < 20 || $histogram_width_percent > 100) {
-            warn "Invalid histogram width percent: $histogram_width_percent. Using default (95).\n";
+            notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid histogram width percent: $histogram_width_percent. Using default (95)." );
             $histogram_width_percent = 95;
         }
     }
@@ -16556,7 +18010,7 @@ sub adapt_to_command_line_options {
     if (!$option_provenance{'data-model-precision'}) {
         $data_model_precision_source = 'default';
     } elsif ($data_model_precision_level < 1 || $data_model_precision_level > 9) {
-        warn "Invalid --data-model-precision: $data_model_precision_level (must be 1..9). Using default (5).\n";
+        notice( kind => 'invalid-chart-value', category => 'your_options', statement => "Invalid --data-model-precision: $data_model_precision_level (must be 1..9). Using default (5)." );
         $data_model_precision_level  = 5;
         $data_model_precision_source = 'default';
     } else {
@@ -16733,7 +18187,7 @@ sub adapt_to_command_line_options {
         my $max_row = $bound_pair{ $min_row->{kind} }{ $min_row->{bound}{role} }{max};
         my ($min, $max) = ( ${ $min_row->{target} }, ${ $max_row->{target} } );
         if (defined $min && defined $max && $min > $max) {
-            print STDERR "Warning: -$min_row->{short} $quantity_entered{ $min_row->{long} } is greater than -$max_row->{short} $quantity_entered{ $max_row->{long} } - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }\n";
+            notice( kind => 'range-unsatisfiable', category => 'your_options', statement => "-$min_row->{short} $quantity_entered{ $min_row->{long} } is greater than -$max_row->{short} $quantity_entered{ $max_row->{long} } - the range is unsatisfiable, $unsatisfiable{ $min_row->{bound}{role} }" );
         }
     }
 
@@ -16820,7 +18274,7 @@ sub adapt_to_command_line_options {
         my $resolved = resolve_metric_operand($heatmap_metric, '-hm/--heatmap');
         if ($resolved && $resolved->{kind} eq 'udm' && $resolved->{config}{agg_kind} eq 'counting') {
             # A per-line distribution over counting (string) values is meaningless
-            print STDERR "Warning: Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled\n";
+            notice( kind => 'heatmap-counting-metric', category => 'your_options', statement => "Heatmap metric '$heatmap_metric' uses counting aggregation '$resolved->{config}{aggregation}' - heatmap disabled" );
             $heatmap_enabled = 0;
             apply_output_visibility(1);   # without the heatmap, the statistics column is not hidden by it (#692 D27)
         } elsif ($resolved && $resolved->{kind} eq 'udm') {
@@ -16850,7 +18304,7 @@ sub adapt_to_command_line_options {
             for my $match (@matches) {
                 if ( $match->{agg_kind} eq 'counting' ) {
                     # A per-line distribution over counting (string) values is meaningless
-                    print STDERR "Warning: Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping\n";
+                    notice( kind => 'histogram-counting-metric', category => 'your_options', statement => "Histogram metric '$metric' uses counting aggregation '$match->{aggregation}' - skipping" );
                     delete $histogram_metrics{$metric};
                     delete $histogram_metrics{ $match->{name} };
                     next;
@@ -16906,14 +18360,14 @@ sub adapt_to_command_line_options {
         push @inert, '-mdm/--message-stats-data-model' if defined $data_model_message;
         push @inert, '-so/--sort-on'                   if $sort_key ne 'occurrences';
         $group_similar_sensitivity = "none";
-        print STDERR "Note: -n/--top-messages 0 retains no message, so "
-            . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect\n"
+        notice( kind => 'top-messages-zero', category => 'your_options', statement => "-n/--top-messages 0 retains no message, so "
+            . join(', ', @inert) . (@inert == 1 ? " has" : " have") . " no effect" )
             if @inert;
         # -o is not inert: its per-time-bucket half still runs. Only the
         # per-message CSV disappears with the store it writes out, so it is
         # reported on its own line rather than joined into the list above.
-        print STDERR "Note: -n/--top-messages 0 retains no message, so "
-            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written\n"
+        notice( kind => 'top-messages-zero', category => 'your_options', statement => "-n/--top-messages 0 retains no message, so "
+            . "-o/--output-csv writes the STATS CSV only: no MESSAGES CSV is written" )
             if $write_messages_to_csv;
     }
 
@@ -17341,7 +18795,8 @@ sub read_path_fall_back {
     $read_path_fallback_reason //= $reason;
     @{ $read_path_file{$in_file} }{qw(path reason)} = ('standard', 'fallback');
     return if $read_path_noticed++;
-    defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");
+    notice( kind => 'read-path-fallback', category => 'decision_taken_for_you',
+            statement => 'the faster read path could not be prepared, so large files are read with the standard path, which is slower' );
     return;
 }
 
@@ -19004,7 +20459,6 @@ sub read_and_process_logs {
     # print into the progress line's row.
     defer_format_unit_notes();
     defer_timestamp_impossible_notes();
-    flush_deferred_notices();
 
     # Surface the levels the tool did not recognise. A line whose level slot
     # holds a token the vocabulary does not carry is matched against its format
@@ -19018,13 +20472,13 @@ sub read_and_process_logs {
             my $tokens = $unregistered_levels{$slug};
             my $lines  = 0;
             $lines += $_ for values %$tokens;
-            print STDERR "Note: $slug lines carried " . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
-                . ( keys %$tokens == 1 ? " level" : " levels" ) . " ltl does not recognise: "
-                . join( ', ', map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' )
-                                    . ( $tokens->{$_} == 1 ? " line" : " lines" ) . ")" }
-                              sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens )
-                . " - " . value_text( $lines, kind => 'count', budget => 'notice' )
-                . ( $lines == 1 ? " line was" : " lines were" ) . " not counted\n";
+            notice( kind => 'level-not-recognised', category => 'data_anomaly', focus => $slug,
+                    statement => 'lines carried ' . value_text( scalar(keys %$tokens), kind => 'count', budget => 'notice exact' )
+                               . ( keys %$tokens == 1 ? ' level' : ' levels' ) . ' ltl does not recognise, so '
+                               . value_text( $lines, kind => 'count', budget => 'notice' )
+                               . ( $lines == 1 ? ' line was' : ' lines were' ) . ' not counted',
+                    evidence  => [ map { "$_ (" . value_text( $tokens->{$_}, kind => 'count', budget => 'notice' ) . ( $tokens->{$_} == 1 ? ' line' : ' lines' ) . ')' }
+                                   sort { $tokens->{$b} <=> $tokens->{$a} || $a cmp $b } keys %$tokens ] );
         }
     }
 
@@ -19033,9 +20487,10 @@ sub read_and_process_logs {
     # by far more than the thresholds explain, with no indication why.
     for my $metric (@builtin_metric_names) {
         next unless $numeric_filter_no_metric{$metric};
-        print STDERR "Note: " . value_text( $numeric_filter_no_metric{$metric}, kind => 'count', budget => 'notice' )
-            . " lines carried no $metric value and were excluded by the $metric filter"
-            . " (numeric filters only keep lines that carry the filtered metric)\n";
+        notice( kind => 'filter-excluded-no-value', category => 'figure_caveat',
+                statement => value_text( $numeric_filter_no_metric{$metric}, kind => 'count', budget => 'notice' )
+                           . " lines carried no $metric value and were excluded by the $metric filter",
+                evidence  => 'numeric filters only keep lines that carry the filtered metric' );
     }
 
     # Surface the directories a recursive sweep could not open. The sweep
@@ -19043,11 +20498,11 @@ sub read_and_process_logs {
     # tree the pattern describes unless the gap is reported.
     if (@unreadable_directories) {
         my $count = scalar @unreadable_directories;
-        print STDERR "Note: " . value_text($count, kind => 'count', budget => 'notice exact')
-            . ( $count == 1 ? " directory" : " directories" )
-            . " could not be read and " . ( $count == 1 ? "was" : "were" )
-            . " skipped during recursive file selection: "
-            . join( ', ', @unreadable_directories ) . "\n";
+        notice( kind => 'directory-unreadable', category => 'data_anomaly',
+                statement => value_text($count, kind => 'count', budget => 'notice exact')
+                           . ( $count == 1 ? ' directory' : ' directories' )
+                           . ' could not be read and ' . ( $count == 1 ? 'was' : 'were' ) . ' skipped during recursive file selection',
+                evidence  => [ @unreadable_directories ] );
     }
 
     return;
@@ -24209,6 +25664,7 @@ sub print_threadpool_summary {
 # (#179). Per-line recognition itself remains a detect-role step executed
 # inside read_and_process_logs() — see the parse-stage interleaving note.
 sub pipeline_detect {
+    enter_notice_stage('detect');
     # Issue #58: compile the declarative format definitions into the live
     # registry and run its load-time validation gates. Must run after
     # option parsing — extraction closures bake CLI-gated behavior.
@@ -24236,6 +25692,7 @@ sub pipeline_detect {
 # fire mid-stream. That interleaving is contractual -- do not restructure it to
 # make the stages look cleanly sequential.
 sub pipeline_parse {
+    enter_notice_stage('parse');
     # READ AND PROCESS LOGS #
     $start_time = [gettimeofday];
     read_and_process_logs();
@@ -24253,6 +25710,7 @@ sub pipeline_parse {
 # Emits: empty time buckets for uncovered intervals so the bucket axis is
 # contiguous for finalize and render.
 sub pipeline_accumulate {
+    enter_notice_stage('accumulate');
     # INITIALIZE EMPTY TIME BUCKETS #
     $start_time = [gettimeofday];
     initialize_empty_time_windows();
@@ -24281,6 +25739,7 @@ sub emit_message_grouping_accounting {
 # histogram bucket structures (each a #266 data-model dispatcher).
 # Phase 2 (#59, later release) adds per-bucket lifecycle hooks inside this role.
 sub pipeline_finalize {
+    enter_notice_stage('finalize');
     # GROUP SIMILAR MESSAGES TOGETHER (Issue #96) #
     unless( $group_similar_sensitivity eq "none" ) {
 
@@ -24528,6 +25987,7 @@ sub pipeline_finalize {
 # echoed options, message/threadpool summaries, the closing run summary, CSV
 # output lifecycle, and the persistent index file (#46).
 sub pipeline_render {
+    enter_notice_stage('render');
     # NORMALIZE DATA FOR CONSOLE OUTPUT #
     $start_time = [gettimeofday];
     normalize_data_for_output();
@@ -24567,6 +26027,8 @@ sub pipeline_render {
     emit_udm_specs_verbose();
 
     print_verbose_output();
+
+    draw_deferred_notices();
 
     if( $write_messages_to_csv ) {                     # If write to CSV enabled, open filehandles
         $csv = Text::CSV->new({ binary => 1, eol => $/ });                                              # Create a new CSV object
@@ -24634,6 +26096,7 @@ sub pipeline_render {
     write_index_file() if $index_enabled;  # Write persistent index file with per-file metadata (Issue #46)
 
     emit_memory_usage_verbose();           # after the run's last memory reading
+    emit_notices_verbose();                # after the run's last notice
 }
 
 # What the usage error says about one file argument that selected no file:
@@ -24810,6 +26273,8 @@ my $_help_or_explain_invoked = grep {
 adapt_to_command_line_options( title => !$_help_or_explain_invoked );
 adapt_to_terminal_settings();
 start_row_counting();
+enter_notice_stage('options');
+ask_about_option_notices();
 open_section('progress') unless $disable_progress;    # the progress rows follow as their own section
 
 pipeline_detect();

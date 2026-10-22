@@ -59,6 +59,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 source "$SCRIPT_DIR/lib/rendered-output.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 scenario_register legend-text-light \
                   legend-text-dark \
@@ -395,7 +397,7 @@ current_scenario="udm-highlight-matches-none"
 cap="$TMP_DIR/udm-highlight-none.out"
 set +e
 with_ansi_colour "$LTL" --disable-progress --terminal-width "$WIDTH" \
-    -ni -bs 1440 -oe -n 1 -h "$HIGHLIGHT" -V section-layout \
+    -ni -bs 1440 -oe -n 1 -h "$HIGHLIGHT" -V section-layout,notices \
     -udm 'catalog_bytes::max:/catalog HTTP\/1\.1" \d+ (\d+)/' -hg catalog_bytes "$FIXTURE" \
     > "$cap" 2> "$cap.stderr"
 rc=$?
@@ -408,8 +410,8 @@ assert_command \
     produced_by "print_histograms() in ltl (reads each metric's highlighted bars; absent for a user-defined metric no highlighted line carried)" \
     contract "$CONTRACT_719"
 assert_command \
-    label "nothing is printed on stderr" \
-    command "sed 's/^/stderr: /' '$cap.stderr'; [[ ! -s '$cap.stderr' ]]" \
+    label "no notice, nothing on stderr" \
+    command "sed 's/^/stderr: /' '$cap.stderr'; [[ ! -s '$cap.stderr' && \$(notice_total '$cap') == 0 ]]" \
     asserts "the histogram draws without a highlight overlay silently: no notice, no Perl error, as a built-in metric whose values the highlight matches none of" \
     produced_by "print_histograms() in ltl" \
     contract "$CONTRACT_719"

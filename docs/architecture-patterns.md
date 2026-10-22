@@ -4,8 +4,8 @@ The recurring mechanisms `ltl` is built from, one entry each: what the pattern
 is, when a new capability should reach for it, why it has the shape it has, where
 it is used, and which record owns its decisions. It is an index beside the
 feature docs, not a replacement for them: where an owning record exists the entry
-summarises and points; where none exists (activation flags, behavioural notices,
-the one-resolution-surface rule, the operand pushback, the hot-loop discipline)
+summarises and points; where none exists (activation flags, the
+one-resolution-surface rule, the operand pushback, the hot-loop discipline)
 the entry is the record.
 
 How to use it: before building, find the pattern the change fits and build on
@@ -15,6 +15,12 @@ pattern is established or needs refinement, and names the finding that says why;
 the findings live in `features/342-redundant-logic-surfaces-audit-report.md`
 (the audit that opened this file) until the issue that resolves each one moves
 them on.
+
+An entry is an index entry: at most 60 lines from its heading to its rule,
+and its owning record names the `docs/` or `features/` file where the
+complete pattern lives, or states that the entry is the record. The
+pre-commit hook checks both (`process/check-architecture-patterns.sh`); an
+entry over the limit today passes until it grows.
 
 Every consumption site is cited as `sub` plus a snippet found by `grep -F` inside
 that sub; file-scope sites name the section. Names in this file are Perl
@@ -999,43 +1005,62 @@ decide as early as the information exists.
 
 ---
 
-## Behavioural notices, deferred while progress owns the terminal
+## Notice surfaces: one store of notice records, two entry calls
 
-**Definition.** A notice about behaviour (an auto-disable, a fallback, a limit
-hit, a dropped line) always prints, regardless of `--disable-progress`, on
-stderr. A notice raised while the read pass owns the terminal is queued with
-`defer_notice()` and emitted by `flush_deferred_notices()` after the progress
-line; end-of-run notices are emitted by `emit_<topic>_notices()` subs. This
-entry is the record; no feature doc owns the mechanism.
+**Definition.** A notice is a message to the analyst about this run (a
+decision taken for them, a condition found in the input, a consequence of
+their options, guidance), and may carry a choice. Code anywhere in the run
+registers it as a record in one store through one of two entry calls,
+`notice` (deferred or immediate, returns the record's id) and `ask`
+(immediate, blocks, returns a reference to the answer), and never composes
+or prints the finished text itself. The surfaces (panel, ask, browser)
+present the store by category; `-V notices` exposes every record. The
+complete pattern (the surfaces, taking input, the data model, observability
+and the producer's contract): `docs/notice-surfaces.md`.
 
-**Intended uses.** Any message a user needs in order to understand what the
-run did. `--disable-progress` never gates it; a notice raised inside the loop
-is deferred, not printed over the progress line.
+**Intended uses.** Any message the analyst needs about what the run did,
+found, or was asked to do, and any choice put to them during the run. The
+producer passes what the notice says and decides its category, immediacy,
+visibility and relevance; a producer that offers a choice applies the answer
+in its own code, to the stages that follow. A notice always prints:
+`--disable-progress` suppresses progress indicators only.
 
-**Reasoning.** A notice hidden behind a progress switch is a notice a captured
-session never sees (CLAUDE.md § Before writing or changing code; the
-progress-side rationale in `docs/progress-indication-best-practices.md`).
+**Reasoning.** Each producer printing its own finished text put notices
+wherever the producing code ran, with five prefixes, no structure, and nothing
+a harness could read but standard error. One store with one record shape gives
+every notice one presentation per category, one place to answer a choice and
+record it, and one observable section.
 
-**Consumption sites.**
-- `defer_notice` :: `push @deferred_notices, $text;`
-- `read_and_process_logs` :: `flush_deferred_notices();`
-- `emit_classification_percentage_notices` :: `print STDERR "Warning: " . value_text( $r->{unclassified}, kind => 'count', budget => 'notice' ) . " included line(s) ($leak_pct) matched`
-- `bin_consolidation_notice` :: `print STDERR "Note: $detail, so their percentiles are approximate"`
-- `print_deprecation_notices` :: `print STDERR "Warning: $notice->{spelling} is deprecated$notice->{as}$given: $notice->{advice}\n";`: the one way a deprecation prints. A deprecated option or spelling is recorded with `record_deprecation` as it is met (with the options a spelling was given on) and printed once at option settlement (#613 D17); the `-os`, `-uuid`, `-s` and `-ms` notices route through it.
-- `resolve_discard_names` :: `print STDERR "Note: -d/--discard removes the key $name, which the $metric metric reads: the metric is switched off\n";`: a metric switched off because `-d` removed the key it reads says so, at option settlement (#613 D4, D12).
-- `read_path_fall_back` :: `defer_notice("Note: the faster read path could not be prepared, so large files are read with the standard path, which is slower\n");`: a read-path body that could not be prepared, queued once a run while the read pass owns the terminal.
+**Consumption sites.** The store (`register_notice`, `@notice_records`), the
+entry calls `notice` and `ask`, and `-V notices` (`emit_notices_verbose`) are in
+`ltl`; `enter_notice_stage` sets the stage a record is raised in as each
+pipeline stage begins. Every notice `ltl` raises is a producer on the store,
+each a `notice( kind => ..., category => ..., ... )` in its own sub; the
+producers, the kind each raises and its category are listed in
+`features/412-notice-surfaces.md` § Inventory of current notices and
+§ Implementation progress. The notices raised as the options are read are put
+to the analyst before the read by `ask_about_option_notices` through `ask`;
+the rest are drawn in the panel, except the index rename failure, which comes
+after it and is drawn at its call. The surfaces are the panel (`draw_deferred_notices`, the `notices` section of
+`-V section-layout`, and `notice` for an immediate notice), ask
+(`notice_ask_surface`) and the browser (`notice_browser`, in the panel's place
+when the deferred notices do not fit the terminal's height), all drawn through
+the shared layer (`notice_style`, `notice_rows`, `notice_heading`,
+`notice_frame`) on the terminal `detect_terminal` finds. Each prints on
+standard output when redirected or piped, the default taken as when its
+countdown runs out. The hidden `--notice-fixture` and `--notice-answers`
+raise fixture notices and give answers ahead. Prototype:
+`prototype/412-notice-surfaces/lib/NoticeSurfaces.pm`.
 
-**Owning record.** This entry, until #412 (the notices surface) lands and
-inventories every ad-hoc notice.
+**Owning record.** `features/412-notice-surfaces.md` (D1 to D17);
+`docs/notice-surfaces.md`, `docs/design-language.md`,
+`docs/terminal-interaction.md`.
 
-**Status.** Needs refinement, by #412 (the notices surface), which inventories every ad-hoc notice and gives them one place to render. The warning emitted inside the option parser's
-warning capture, which never printed (item 1, F1.17), is gone since #614: the
-`-hg` handler only records its value.
-The numbers inside notices render through the one dispatch since #617: each
-notice names the budget row for what it exposes, `notice` (prose) for a scale
-and `notice exact` for a count a list beside it must agree with, and a share
-the `notice share` percentage row (entry *Width-to-format rule: one dispatch
-per metric kind*).
+**Status.** Designed and locked before code (2026-10-21). Built on #412 in
+the drops of its delivery plan (`features/412-notice-surfaces.md` § Delivery
+plan): the store, the record, `-V notices`, the panel, ask, the browser and
+every notice of the inventory are in `ltl`; nothing prints a notice on
+standard error.
 
 ---
 

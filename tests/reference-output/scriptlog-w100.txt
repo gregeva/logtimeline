@@ -2,6 +2,18 @@
 ──────────────────────────────────────────────────────────────────────────────────────────────
    ,:: ltl ::' log timeline [VERSION] --  by Greg Eva // geva@ptc.com // gregeva@gmail.com
 ──────────────────────────────────────────────────────────────────────────────────────────────
+╭─ ⚙ YOUR OPTIONS command usage warnings ─────────────────────────────────────────────────────────╮
+│                                                                                                 │
+│  -os/--omit-stats is deprecated → use -od/--omit-durations to keep durations from being         │
+│  captured, or -hst/--hide-stats to keep the statistics panel from being displayed               │
+│                                                                                                 │
+│  Continue with these options?  Stop and correct them   Continue (10s)                           │
+│                                                                                                 │
+╰─ s: stop and correct them · c: continue · Esc: continue ────────────────────────────────────────╯
+⚙ YOUR OPTIONS -os/--omit-stats is deprecated → use -od/--omit-durations to keep durations from
+  being captured, or -hst/--hide-stats to keep the statistics panel from being
+  displayed
+  ↳ Continue with these options? continue (no_terminal)
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
      timestamp      legend          occurrences          duration    bytes       count      users   

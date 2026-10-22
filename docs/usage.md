@@ -256,7 +256,7 @@ bare, because duration is the tool's subject: `p95` is `duration_p95`.
 `<metric>_avg` is `<metric>_mean`, and `avg` is `mean`. `occurrences` ranks by
 the number of messages.
 
-Deprecated, accepted for this release with a notice on stderr: `time` for
+Deprecated, accepted for this release with a notice before the read: `time` for
 `duration`, `size` for `bytes`, `std_dev` for `stddev`, `count_total` for
 `count_occurrences`, `total` for `occurrences`. `stddev` is the name of the
 standard deviation; `std_dev` is the spelling the CSV headers and YAML keys
@@ -550,16 +550,27 @@ ltl -V list
 
 Section content is governed by per-section stability contracts — additions are non-breaking, renames and removals are breaking. Test harnesses consume these sections; see `tests/HARNESS-DESIGN.md` for the contributor-facing contract.
 
-### Stderr warnings
+### Notices
 
-`ltl` emits warnings to stderr when an input is accepted but resolved in a way that may surprise the user. These do not affect exit codes — the run proceeds — but pipelines that capture stderr may need to filter them. The warnings exist to make previously-silent overrides observable; suppressing them by default would defeat the purpose.
+When a run takes a decision on your behalf, finds something in the data that affects the figures, or has a next step to suggest, `ltl` says so in a notices panel, drawn after the progress line and before the timeline. The panel groups the notices by what you do with them:
 
-| Trigger | Warning |
-|---------|---------|
+| Category | How to read it |
+|----------|----------------|
+| data anomaly | check the source data or the options before trusting the figures |
+| figure caveat | the figures cover less than they appear to |
+| your options | command usage warnings |
+| decision taken for you | what the run did instead of what was asked |
+| runtime condition | a condition of the run's environment |
+| guidance | a next step worth trying |
+
+Each notice is one row: what it is about, what happened, its evidence after a dot, and what you can do after an arrow. The panel is part of the output, so a run redirected to a file carries it too. A notice never changes the exit code: the run proceeds. A notice about the options themselves (a malformed `-udm`, a deprecated spelling, a value replaced by its default) is shown before the read starts, with the question *Continue with these options?*: **Continue** (`c`, the default) reads the files, **Stop and correct them** (`s`) ends the run so you can fix the command. In a terminal the question appears in a box below the title and waits ten seconds, then continues; any other key stops the countdown, and Esc continues at once. Once answered, the notices and the answer stay in the output, whether the run continues or stops. With no terminal (output redirected or piped) it is printed once, followed by the notices and the answer, and the run continues. `-V notices` lists every notice the run raised.
+
+| Trigger | What you see |
+|---------|--------------|
 | `--data-model`, `--histogram-data-model`, `--heatmap-data-model`, `--message-stats-data-model`, or `--bucket-stats-data-model` supplied with a value other than `raw` or `bin` | ltl exits with `<flag>: '<value>' is not a valid data model; valid values are 'raw' and 'bin'`. |
-| `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A note reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
+| `-g` combined with the bin counter data model on the per-message-key surface (`-mdm bin`, or `-dm bin`) | A figure caveat reports that percentiles on consolidated rows are approximate — the merged messages' histograms are re-projected onto one shared geometry — and points at `-mdm raw` for exact percentiles on those rows. Every other statistic, and every row that was not consolidated, is unaffected. |
 
-To inspect the resolved configuration after warnings have fired, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
+To inspect the resolved configuration after a notice, use `-V runtime-config` and read the `command-line` and `environment-variable` sub-sections.
 
 ## Environment
 
@@ -586,7 +597,7 @@ Version, help, and diagnostic options.
 
 LogTimeLine uses precise metric names to avoid ambiguity. `duration` explicitly means a time lapse — how long something took. `count` means an amount of work completed in the metrics sense (e.g. rows processed, items returned), distinct from `occurrences` which is the total number of log entries matched. `bytes` means response or payload size. These distinctions matter because imprecise terms like "time" or "size" could refer to different things depending on context.
 
-That said, logtimeline accepts a few alternates, each on the options listed. Built-in metric names match in any case on every option. `time` and `size` are deprecated: they still work for this release and print a notice on stderr naming the replacement.
+That said, logtimeline accepts a few alternates, each on the options listed. Built-in metric names match in any case on every option. `time` and `size` are deprecated: they still work for this release, and a notice before the read names the replacement.
 
 | Canonical Name | Alternates | Accepted by |
 |---------------|------------|-------------|

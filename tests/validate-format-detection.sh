@@ -51,6 +51,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -179,7 +181,7 @@ run_format_detection() {
     local outfile
     outfile="$TMP_DIR/$(basename "$log" | tr -c 'A-Za-z0-9._-' '_').out"
     set +e
-    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection "$@" "$log" > "$outfile" 2>"$outfile.stderr"
+    "$LTL" --disable-progress -ni -bs 1440 -oe -n 1 -osum -V format-detection,notices "$@" "$log" > "$outfile" 2>"$outfile.stderr"
     local ec=$?
     set -e
     if [[ "$ec" -ne 0 ]]; then
@@ -191,6 +193,8 @@ run_format_detection() {
         echo "FAIL: empty capture for $log" >&2
         exit 1
     fi
+    # The notices the run raised, one line each, for the assertions on a notice.
+    notice_lines "$outfile" > "$outfile.notices"
     # HARNESS-DESIGN.md Trap 3: confirm section header present before
     # returning the file path. A missing header is a hard fail visible
     # at each scenario's first assertion.
@@ -587,7 +591,8 @@ scenario_family_bracketed_unit() {
     # so for the two files read.
     local dir2="$TMP_DIR/$current_scenario-du"; mkdir -p "$dir2"
     cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/one.txt"; cp "$FIXTURE_DIR/access-bracketed-us.txt" "$dir2/two.txt"
-    ( cd "$dir2" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o -du us one.txt two.txt > out 2> out.stderr ) || true
+    ( cd "$dir2" && "$LTL" --disable-progress -ni -bs 1440 -oe -n 0 -o -du us -V notices one.txt two.txt > out 2> out.stderr ) || true
+    notice_lines "$dir2/out" > "$dir2/out.notices"
     check_capture_warnings "$dir2/out"
     local csv2; csv2=$(ls "$dir2"/*-LTL-STATS-*.csv 2>/dev/null | head -1 || true)
     assert_command \
@@ -596,7 +601,7 @@ scenario_family_bracketed_unit() {
         asserts 'a format whose lines name their own duration unit declares line, and -du is not applied on top of the unit each line names' \
         produced_by 'read_and_process_logs() in ltl (the -du branch skips an entry declaring line)' contract 'features/605-input-units.md D30'
     assert_command \
-        command "[ \"\$(grep -c -- '^Note: -du us is not applied to one.txt, two.txt: their format names the duration unit on each line (access_common_duration_bracketed)\$' '$dir2/out.stderr')\" = 1 ] && [ \"\$(grep -c -- '-du us is not applied' '$dir2/out.stderr')\" = 1 ]" \
+        command "[ \"\$(grep -cxF -- 'du-not-applied | -du us | is not applied to these files: their format names the duration unit on each line (access_common_duration_bracketed) | one.txt; two.txt | -' '$dir2/out.notices')\" = 1 ] && [ \"\$(grep -c -- '^du-not-applied ' '$dir2/out.notices')\" = 1 ]" \
         label 'one notice names every file -du is not applied to' \
         asserts 'the notice that -du is not applied to a format naming its unit per line is printed once per run, naming each file, never per line or per file' \
         produced_by 'defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D30 and D31'
@@ -615,7 +620,7 @@ scenario_family_ambiguity_note_once() {
     sed 's/^2026-05-30/2026-05-03/' "$FIXTURE_DIR/connection-server.txt" > "$a"; cp "$a" "$b"
     out=$(run_format_detection "$a" "$b"); check_capture_warnings "$out"
     assert_command \
-        command "[ \"\$(grep -c '^Note: .*: the detected log format (connection_server_standard) is written by more than one producer' '$out.stderr')\" = 1 ] && grep -qE '(one\.txt, [^:]*two\.txt|two\.txt, [^:]*one\.txt): the detected' '$out.stderr' && grep -q -- '-lf integration_runtime_standard' '$out.stderr'" \
+        command "[ \"\$(grep -c '^format-producer-undecided | connection_server_standard | ' '$out.notices')\" = 1 ] && grep -qE '^format-producer-undecided \\| [^|]+ \\| [^|]+ \\| ([^|]*one\\.txt; [^|]*two\\.txt|[^|]*two\\.txt; [^|]*one\\.txt) \\| ' '$out.notices' && grep -q -- '-lf integration_runtime_standard' '$out.notices'" \
         label 'the ambiguity note prints once per run, naming every file that fell to a default and the alternative' \
         asserts 'a two-file run where both files fall to the group default prints the note once, naming both files and every other member' \
         produced_by 'format_variant_ambiguity_note() and defer_format_unit_notes() in ltl' contract 'features/605-input-units.md D31 (superseding the once-per-file rule of features/444-access-log-format-family-and-user-surface.md D15)'
@@ -1820,8 +1825,8 @@ scenario_variant_ambiguity_note() {
     out=$(run_format_detection "$undecided")
     check_capture_warnings "$out"
 
-    assert_line "$out.stderr" \
-        pattern     '^Note: [^:]+: the detected log format \(connection_server_standard\) is written by more than one producer and the date layout differs between them; nothing in the file name or content decided which - use -lf integration_runtime_standard if the file comes from the other producer$' \
+    assert_line "$out.notices" \
+        pattern     '^format-producer-undecided \| connection_server_standard \| the detected log format is written by more than one producer and the date layout differs between them; nothing in the file name or content decided which \| [^|]*renamed-cxserver\.txt \| use -lf integration_runtime_standard if the file comes from the other producer$' \
         asserts     'Binding a default-selected variant-group member without deciding evidence emits the note on stderr once per file, naming the file, the consequence class (here the date layout) and -lf with every other member (#444 D15)' \
         produced_by 'format_variant_ambiguity_note() in ltl (first-match block)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note); the note text is part of the contract'
@@ -1835,8 +1840,8 @@ scenario_variant_ambiguity_note() {
     local out_pin
     out_pin=$(run_format_detection "$undecided" -lf connection_server_standard)
     check_capture_warnings "$out_pin"
-    assert_absent "$out_pin.stderr" \
-        pattern     '^Note: [^:]+: the detected log format' \
+    assert_absent "$out_pin.notices" \
+        pattern     '^format-producer-undecided ' \
         asserts     'With -lf given, the note is contracted ABSENT: the user named the format' \
         produced_by 'format_variant_ambiguity_note() in ltl (pin gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
@@ -1846,8 +1851,8 @@ scenario_variant_ambiguity_note() {
     local out_cb
     out_cb=$(run_format_detection "$LOGS_DIR/Codebeamber/codebeamer_access_log.2025-10-29.txt")
     check_capture_warnings "$out_cb"
-    assert_absent "$out_cb.stderr" \
-        pattern     '^Note: [^:]+: the detected log format' \
+    assert_absent "$out_cb.notices" \
+        pattern     '^format-producer-undecided ' \
         asserts     'A format that is not a member of a variant group is contracted to never emit the note — the gate is group membership plus a default-basis selection' \
         produced_by 'format_variant_ambiguity_note() in ltl (variant-group gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
@@ -1858,8 +1863,8 @@ scenario_variant_ambiguity_note() {
     local out_named
     out_named=$(run_format_detection "$staged")
     check_capture_warnings "$out_named"
-    assert_absent "$out_named.stderr" \
-        pattern     '^Note: [^:]+: the detected log format' \
+    assert_absent "$out_named.notices" \
+        pattern     '^format-producer-undecided ' \
         asserts     'Filename stem evidence decides the variant (basis evidence), so the default-selection note is contracted ABSENT' \
         produced_by 'format_variant_ambiguity_note() in ltl (selection-basis gate)' \
         contract    'features/log-format-registry.md section Drop 1.5 I6 (ambiguity note)'
@@ -1903,9 +1908,9 @@ scenario_classification_format_switch() {
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - rule_change: file=<path> line=N from=<slug> to=<slug> (D19)"
 
-    assert_line "$out.stderr" \
-        pattern     '^Note: .*classification-format-switch\.txt line 5: the classification rules changed because the detected log format changed from access_common_duration to thingworx_standard - lines before this point were classified under the previous rules$' \
-        asserts     'The user is told, on stderr, at which line the rules changed, from which format to which, and that earlier lines were classified under the previous rules' \
+    assert_line "$out.notices" \
+        pattern     '^classification-rules-changed \| .*classification-format-switch\.txt line 5 \| the classification rules changed because the detected log format changed from access_common_duration to thingworx_standard; lines before this point were classified under the previous rules \| ' \
+        asserts     'The user is told, in a notice, at which line the rules changed, from which format to which, and that earlier lines were classified under the previous rules' \
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - D19 note text; registered on #412 as a producer to migrate"
 
@@ -1962,10 +1967,10 @@ scenario_classification_format_interleaved() {
         contract    "$CLASSIFICATION_CONTRACT - rule_change: lines in input order (D19)"
 
     local notes
-    notes=$(grep -c '^Note: .*the classification rules changed' "$out.stderr" || true)
+    notes=$(grep -c '^classification-rules-changed ' "$out.notices" || true)
     assert_command \
         command     "[[ '$notes' == '1' ]]" \
-        label       "exactly one rule-change note on stderr for 23 changes (observed: $notes)" \
+        label       "exactly one rule-change notice for 23 changes (observed: $notes)" \
         asserts     'The user is told once per file, at the first change, however many times the rules change afterwards' \
         produced_by "$RULE_CHANGE_PRODUCER" \
         contract    "$CLASSIFICATION_CONTRACT - note once per file, at the first change (D19)"
@@ -2093,7 +2098,7 @@ scenario_variant_integration_runtime_named() {
         asserts 'Every timestamped line of the slice is read under yyyy-dd-MM with no fatal (#385)' \
         produced_by 'compile_format_scan_sub() in ltl (iso_ms_ddmm block)' \
         contract 'features/log-format-registry.md section Drop 1.5 D47/N10'
-    assert_absent "$out.stderr" pattern '^Note: ' \
+    assert_absent "$out.notices" pattern '^(format-producer-undecided|date-cannot-exist|du-not-applied|classification-rules-changed) ' \
         asserts 'No diagnostic: the layout is right and the decision was made by evidence' \
         produced_by 'format_probe_signal() / format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D52/I6'
@@ -2140,7 +2145,7 @@ scenario_date_order_one_sampled_line() {
     local log; log=$(generate_connection_server_runs 2024-13-05@9x1 2024-04-05@10x300)
     local out; out=$(run_format_detection "$log"); check_capture_warnings "$out"
     assert_date_order "$out" 1 mt10 0 1 'One sampled line valid only day first, every other line valid either way'
-    assert_line "$out.stderr" pattern '^Note: 1 of 301 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout' \
+    assert_line "$out.notices" pattern '^date-cannot-exist \| connection_server_standard \| 1 of 301 lines of this format were not matched because their date cannot exist under its date layout \| ' \
         asserts 'The left-out line is reported in the run'"'"'s impossible-date note, which names the other order'"'"'s -lf' \
         produced_by 'the impossible-date note in ltl (timestamp_impossible_lines)' \
         contract "$DATE_ORDER_CONTRACT; acceptance criterion 1; features/611-timestamp-acceptance.md C4"
@@ -2183,7 +2188,7 @@ scenario_unit_tomcat_named() {
         asserts 'The Tomcat name decomposes to stem, .txt and a date (the thread-session entry declares the same stem and precedes the common-duration entry)' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_absent "$out.stderr" pattern '^Note: ' \
+    assert_absent "$out.notices" pattern '^(format-producer-undecided|date-cannot-exist|du-not-applied|classification-rules-changed) ' \
         asserts 'A shape outside any variant group raises no ambiguity note' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
@@ -2202,7 +2207,7 @@ scenario_unit_httpd_named() {
         asserts 'No entry declares the httpd name any more, so the name carries no evidence' \
         produced_by 'format_filename_evidence() in ltl' \
         contract 'features/log-format-registry.md section -V format-detection section-contract (#384 additions)'
-    assert_absent "$out.stderr" pattern '^Note: ' \
+    assert_absent "$out.notices" pattern '^(format-producer-undecided|date-cannot-exist|du-not-applied|classification-rules-changed) ' \
         asserts 'No variant group, no note; the unit is the -du mechanism'"'"'s business' \
         produced_by 'format_variant_ambiguity_note() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 I6'
@@ -2500,7 +2505,7 @@ scenario_format_pin() {
         asserts 'Only the 38 records whose date exists under the pinned layout are matched; no record is kept at the previous line time' \
         produced_by 'read_and_process_logs() in ltl' \
         contract 'features/log-format-registry.md section Drop 1.5 D52 as amended 2026-09-30; features/611-timestamp-acceptance.md AC3'
-    assert_line "$out.stderr" pattern "^Note: 86 of 124 lines of the connection_server_standard format were not matched because their date cannot exist under its date layout - if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
+    assert_line "$out.notices" pattern "^date-cannot-exist \\| connection_server_standard \\| 86 of 124 lines of this format were not matched because their date cannot exist under its date layout \\| - \\| if the day and month are read the wrong way round, use -lf integration_runtime_standard\$" \
         asserts 'The run is told once, with the count and the other member of the date-layout group to pin, never per file or per line' \
         produced_by 'defer_timestamp_impossible_notes() in ltl' \
         contract 'features/611-timestamp-acceptance.md C5, AC3'

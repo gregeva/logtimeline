@@ -65,6 +65,8 @@ source "$SCRIPT_DIR/lib/colour-env.sh"
 source "$SCRIPT_DIR/lib/rendered-output.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/nondeterministic.sh
 source "$SCRIPT_DIR/lib/nondeterministic.sh"
 
@@ -936,7 +938,7 @@ if scenario_wanted stats-and-heatmap-columns; then
     fi
     if run_ltl hm-hst "${hm_args[@]}" -hm duration -hst "$SPREAD_LOG" \
        && run_ltl hm-hide-both "${hm_args[@]}" -hm duration -hi stats,heatmap "$SPREAD_LOG" \
-       && run_ltl hm-os "${hm_args[@]}" -hm duration -os "$SPREAD_LOG"; then
+       && run_ltl hm-os "${hm_args[@]}" -hm duration -os -V notices "$SPREAD_LOG"; then
         assert_command \
             command     "same_streams hm-hst hm-hide-both && heading_absent $(printf '%q' "$(capture hm-hst)") heatmap" \
             label       '-hst under -hm prints what -hi stats,heatmap prints' \
@@ -944,9 +946,9 @@ if scenario_wanted stats-and-heatmap-columns; then
             produced_by 'the hide-stats entry in adapt_to_command_line_options() pushes hide stats,heatmap, in ltl' \
             contract    'features/597-section-visibility.md § D26'
         assert_command \
-            command     "cmp -s $(printf '%q' "$(capture hm-os)") $(printf '%q' "$(capture hm-hst)") && grep -qF 'omit-stats is deprecated' $(printf '%q' "$TMP_DIR/hm-os/err")" \
+            command     "cmp -s <(without_notice_boxes $(printf '%q' "$(capture hm-os)")) $(printf '%q' "$(capture hm-hst)") && notice_lines $(printf '%q' "$(capture hm-os)") | grep -qE '^deprecated-spelling \\| [^|]*omit-stats \\| is deprecated'" \
             label       '-os under -hm hides both columns as -hst does, with its deprecation notice' \
-            asserts     'The deprecated -os prints on standard output what -hst prints, and names its replacement on standard error' \
+            asserts     'The deprecated -os prints what -hst prints once its notice, asked about before the read, is set aside, and the notice names it' \
             produced_by 'the omit-stats entry in adapt_to_command_line_options() pushes hide stats,heatmap; record_deprecation(), in ltl' \
             contract    'features/597-section-visibility.md § D26; acceptance criteria'
     fi

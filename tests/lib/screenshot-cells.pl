@@ -10,6 +10,7 @@
 #   screenshot-cells.pl heatmap SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD LAYOUT GRADIENT
 #   screenshot-cells.pl edges   SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD
 #   screenshot-cells.pl png     SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD PNG
+#   screenshot-cells.pl faint   SVG CAPTURE FIRST LAST COL_FIRST COL_STOP PAD [TEXT]
 #
 # CAPTURE is ltl's standard output; FIRST and LAST are the crop's rows (from 1),
 # COL_FIRST and COL_STOP its columns (from 0, stop exclusive); PAD is the
@@ -124,7 +125,7 @@ if ( $mode eq 'colours' ) {
             next if $want->{fg} eq 'reverse';
             $cells++;
             $seen{"background $want->{bg}"}{ $got->{bg} }++;
-            $seen{"text $want->{fg}"}{ $got->{fg} }++ if $want->{ch} ne ' ' && defined $got->{fg};
+            $seen{"text $want->{fg}" . ( $want->{dim} ? ' faint' : '' ) }{ $got->{fg} }++ if $want->{ch} ne ' ' && defined $got->{fg};
         }
     }
     for my $key ( sort keys %seen ) {
@@ -137,6 +138,39 @@ if ( $mode eq 'colours' ) {
     push @problems, "the default background is drawn as " . join( ' ', sort keys %{ $seen{'background default'} } ) . ", not the image's background $base_bg"
         if $seen{'background default'} && join( '', keys %{ $seen{'background default'} } ) ne $base_bg;
     report( sprintf '%d cells, %d distinct colours: each drawn consistently, 256-colour indices at their xterm values', $cells, scalar keys %seen );
+}
+
+if ( $mode eq 'faint' ) {
+    # Faint text is drawn halfway between the colour ltl named and the cell's
+    # background: each faint cell against a cell of the same colour, not faint,
+    # or for the default colour against TEXT, the profile's text colour, when
+    # the image has no default text at full strength.
+    my ( %normal, $checked );
+    $normal{'default 0'} = $rest[0] if defined $rest[0];
+    for my $r ( 0 .. $rows - 1 ) {
+        for my $c ( 0 .. $cols - 1 ) {
+            my ( $want, $got ) = ( $expected[$r][$c], $image[$r][$c] );
+            next if $want->{ch} eq ' ' || $want->{fg} eq 'reverse' || $want->{dim} || !defined $got->{fg};
+            $normal{"$want->{fg} $want->{bold}"} //= $got->{fg};
+        }
+    }
+    my sub mid {
+        my ( $a, $b ) = map { [ map { hex } /^#(..)(..)(..)$/ ] } @_;
+        return sprintf '#%02x%02x%02x', map { int( ( $a->[$_] + $b->[$_] ) / 2 + 0.5 ) } 0 .. 2;
+    }
+    for my $r ( 0 .. $rows - 1 ) {
+        for my $c ( 0 .. $cols - 1 ) {
+            my ( $want, $got ) = ( $expected[$r][$c], $image[$r][$c] );
+            next unless $want->{dim} && $want->{ch} ne ' ' && $want->{fg} ne 'reverse' && defined $got->{fg};
+            my $base = $normal{"$want->{fg} $want->{bold}"} // next;
+            $checked++;
+            my $want_fg = mid( $base, $got->{bg} );
+            push @problems, sprintf( 'row %d column %d: faint %s drawn as %s, not %s', $first + $r, $col_first + $c, $want->{fg}, $got->{fg}, $want_fg )
+                if $got->{fg} ne $want_fg;
+        }
+    }
+    push @problems, 'no faint cell with a colour also drawn at full strength: nothing to check' unless $checked;
+    report("$checked faint cells, each halfway between its colour and the background");
 }
 
 if ( $mode eq 'ticks' ) {

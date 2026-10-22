@@ -47,6 +47,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 # shellcheck source=lib/rendered-output.sh
 source "$SCRIPT_DIR/lib/rendered-output.sh"
 
@@ -361,7 +363,7 @@ run_udm() {
     local base="$UDM_TMP/$name"
     set +e
     # shellcheck disable=SC2086
-    "$LTL" --disable-progress $UDM_SHAPE -V heatmap-palette "$@" "$input" > "$base.out" 2> "$base.stderr"
+    "$LTL" --disable-progress $UDM_SHAPE -V heatmap-palette,notices "$@" "$input" > "$base.out" 2> "$base.stderr"
     echo "$?" > "$base.exit"
     set -e
     cat "$base.stderr" "$base.out" > "$base.all"
@@ -468,7 +470,7 @@ scenario_udm_no_value() {
         contract    'features/678-heatmap-udm-without-column.md D1 and AC2'
 
     assert_command \
-        command     "n=\$(grep -c \"^Note: -udm 'x::max': no metrics produced from matching lines\$\" '$UDM_TMP/none.stderr'); [[ \$n == 1 ]] || { echo \"notice lines: \$n\"; false; }" \
+        command     "n=\$(notice_kind_count '$UDM_TMP/none.out' udm-no-metrics); f=\$(notice_field '$UDM_TMP/none.out' udm-no-metrics focus)#\$(notice_field '$UDM_TMP/none.out' udm-no-metrics statement); [[ \$n == 1 && \$f == \"-udm 'x::max'#no metrics produced from matching lines\" ]] || { echo \"notices: \$n \$f\"; false; }" \
         label       'the zero-match notice prints once for the one spec' \
         asserts     'The existing zero-match notice is printed exactly as defined, once per spec that produced nothing: here once' \
         produced_by 'emit_udm_zero_match_notices() in ltl' \

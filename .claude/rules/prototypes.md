@@ -22,3 +22,8 @@ A prototype answers a question before implementation commits to an answer.
 - The exit is a decision recorded as Dxx in the owning feature doc, or for a
   verification-method prototype, a demonstrated assertion that distinguishes
   known-good from known-bad input, proposed with its cost.
+- A design prototype (a surface the analyst sees or answers) reviews the
+  framework and its contract, never instances; every round is recorded, read
+  back and confirmed before building; the review list shrinks every round;
+  what was asked is counted as rendered in a capture of what the architect
+  sees, not inferred from code.

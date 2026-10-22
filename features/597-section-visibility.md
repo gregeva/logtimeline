@@ -97,6 +97,11 @@ Row 1 is the top of the title block. Positions are those of the same run without
 | `threadpools` (D17) | `threadpools-highlighted`, `threadpools-overall` | the highlighted and overall thread-pool tables; present only with the thread-pool summary option |
 | `summary` | `summary-values`, `summary-files` | the left column (categories, counters, timing, memory) and the right column (file list and log-formats legend) |
 
+Amended by #412 (notice surfaces, 2026-10-21): `-V section-layout` also
+reports `notices`, the notices panel, after `progress`; it is no value of
+`--hide` or `--show`, since behavioural notices always print
+(`features/412-notice-surfaces.md` § Drop 2).
+
 `messages` and `summary` are the public names. The messages part names follow the
 table titles the tool prints (`TOP HIGHLIGHTED MESSAGES`, `TOP OVERALL MESSAGES`). The part names are hidden values:
 they exist so that output can be cut to a strict minimum, for example
@@ -136,7 +141,9 @@ option not taken into account", printed while options are read, so it lands betw
 the title and the timeline) moves to standard error with every other notice. The
 "no lines matched" message printed in place of the timeline stays on standard output
 as part of the timeline section. Test fixtures capture standard error separately
-from standard output.
+from standard output. Amended by #412 (2026-10-21): the notices move from
+standard error to the notices panel on standard output, a section of its own
+counted like every other (`features/412-notice-surfaces.md` § D16 and § Drop 2).
 
 **D13: the `-V section-layout` section, tab-separated** (architect, 2026-09-24).
 A header row, then one row per section and per part (D7) in print order, each with

@@ -15,7 +15,7 @@
 # requirement instead.
 #
 # Public functions:
-#   decode_line($line)                -> arrayref of { ch, fg, bg } per cell
+#   decode_line($line)                -> arrayref of { ch, fg, bg, bold, dim } per cell
 #   display_width($line)              -> printable columns (escapes are 0-width)
 #   fill_extent($cells)               -> cells carrying a background
 #   fill_colour($cells)               -> the single fill colour, 'none', or MIXED:
@@ -28,7 +28,8 @@
 #   centred_report($slice)            -> 'centred' or the imbalance
 #
 # Attribute vocabulary: 'default', "ansi:<code>" (30-37/90-97 fg, 40-47/100-107
-# bg), "256:<n>" for 38;5;n / 48;5;n, and 'reverse' for SGR 7.
+# bg), "256:<n>" for 38;5;n / 48;5;n, and 'reverse' for SGR 7. Bold (SGR 1) and
+# faint (SGR 2) are flags of their own, 1 or 0, both cleared by SGR 22 and 0.
 #
 # TRAPS, each of which produced a wrong answer while this was written:
 #   - Decode UTF-8 BEFORE measuring. The box-drawing rules are multi-byte;
@@ -53,6 +54,7 @@ sub decode_line {
     my ($line) = @_;
     my @cells;
     my ($fg, $bg) = ('default', 'default');
+    my ($bold, $dim) = (0, 0);
 
     while ($line =~ /\G(\e\[([0-9;]*)m|\e\][^\a]*\a|\e\[[0-9;]*[A-Za-z]|.)/gs) {
         my ($tok, $sgr) = ($1, $2);
@@ -71,7 +73,10 @@ sub decode_line {
                     $i += 3;
                     next;
                 }
-                if    ( $p eq '0' || $p eq '' ) { ( $fg, $bg ) = ( 'default', 'default' ) }
+                if    ( $p eq '0' || $p eq '' ) { ( $fg, $bg, $bold, $dim ) = ( 'default', 'default', 0, 0 ) }
+                elsif ( $p eq '1' )             { $bold = 1 }
+                elsif ( $p eq '2' )             { $dim = 1 }
+                elsif ( $p eq '22' )            { ( $bold, $dim ) = ( 0, 0 ) }
                 elsif ( $p eq '39' )            { $fg = 'default' }
                 elsif ( $p eq '49' )            { $bg = 'default' }
                 elsif ( $p eq '7' )             { ( $fg, $bg ) = ( 'reverse', 'reverse' ) }
@@ -85,7 +90,7 @@ sub decode_line {
         next if $tok =~ /\A\e/;              # a non-SGR escape: no cell
         next if $tok eq "\r" || $tok eq "\n";
         next if ord($tok) < 32;              # C0 controls occupy no column
-        push @cells, { ch => $tok, fg => $fg, bg => $bg };
+        push @cells, { ch => $tok, fg => $fg, bg => $bg, bold => $bold, dim => $dim };
     }
     return \@cells;
 }

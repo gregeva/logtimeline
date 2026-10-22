@@ -23,10 +23,14 @@ A prototype is required when the work introduces:
   × per-execution cost (a cheap operation run tens of millions of times, or an
   expensive one run per key at high cardinality)
 - **(d)** a key requirement whose **verification method is not yet known**
+- **(e)** a **new surface the analyst sees or answers**, whose form, wording,
+  keys and behaviour are not settled by `docs/design-language.md` and
+  `docs/terminal-interaction.md`
 
 (a)–(c) are cost questions: *will this be fast enough, and is this the right
 shape to store?* (d) is a measurement question: *how would we know whether we
-built what was asked for?* Both are cheaper to answer before implementation than
+built what was asked for?* (e) is a form question: *what does the analyst see,
+and how do they answer?* All are cheaper to answer before implementation than
 after, and for the same reason — afterwards, the answer is constrained by what
 has already been built.
 
@@ -64,6 +68,96 @@ steps.
 infrastructure; some requirements are obvious to any tester on a single run and
 are not worth a suite at all. That call is the architect's. The prototype
 supplies options, costs and a recommendation — not a built solution.
+
+## (e): the design prototype
+
+A surface is designed by iteration: something is drawn, the architect judges
+it in a terminal, and the next round narrows it. The method is right and it is
+expensive; the rules below are what made the first use of it (#412, notice
+surfaces: seven review rounds, 2026-10-17 to 2026-10-19) converge after three
+rounds had not. Each was learned by failing at it; the record is
+`prototype/412-notice-surfaces/findings.md`.
+
+**The review object is the framework, not its instances.** Example use cases
+(a deprecation notice, a yes-or-no during the read, a choice once a pattern is
+found) are inputs the components are exercised with, never scripts of their
+own. Reviewing twelve renderings of the same mechanism costs twelve
+corrections of one defect and converges on nothing; reviewing a few components
+with parameters, and a contract of the conventions they share, converges on a
+framework the next feature can call. The contract (components, parameters and
+their defaults by use, keys, sizing, placement, padding, erasing, wording,
+glyphs and colours) is written **before** the instances that follow it, and is
+itself the first thing reviewed, as a document.
+
+**Every round runs the same five steps**, and nothing is built between them:
+
+1. The round's feedback is recorded in the findings, each remark with the
+   exact command that drew the view it is about (the review runner saves both).
+2. A read-back goes to the architect before anything is built: what was
+   heard, what changes, what is not changing and why. Building waits for his
+   confirmation of that reading.
+3. The round's settled lines are proposed for lock and moved into the record
+   in the same step: a locked decision in the feature doc, or a line of the
+   project's design and interaction documents, which the contract becomes once
+   settled. Only what still needs iteration stays open in the findings.
+4. The next round is built against the contract. Claude's own check before
+   review observes what the architect will observe, a terminal pane captured
+   as it is seen, alternate screen included, or says that it cannot. A check
+   that reads the escape stream, or a replay through an emulator without the
+   feature under test, has not observed the surface.
+5. The round shows only the views a change touched, or something new. A view
+   the architect has validated is not shown again, and a mechanism validated
+   on one surface (a key, a placement, the padding) is not re-shown on every
+   surface that shares it. **The review list is the measure of convergence**:
+   it gets shorter every round, towards sign-off, and a list that does not
+   shrink is a round that did not converge.
+
+**What was asked is what is rendered, counted.** A padding of two is two
+cells measured in the capture, not two added to what was there; a pane's
+empty rows are counted in the capture, each pane, each edge, never inferred
+from the code meant to produce them. One missing row survived three rounds
+with the capture that showed it in hand and uncounted.
+
+**A locked form is swept across every surface when it is locked**, in the
+same change, and the sweep is checked by reading each surface's rendering.
+A form settled on one surface and left unapplied on another is a defect the
+architect finds again.
+
+**Inputs are the tool's own, at the tool's size.** A surface that carries a
+chart carries the chart as `ltl` renders it, generated from a real run, at the
+width the tool needs for it; a generic stand-in misleads the review of the
+surface's size and padding.
+
+**Both backgrounds are reviewed.** Every component is judged once per form on
+a dark and on a light terminal before the stage closes; the colours that
+survive one do not all survive the other.
+
+**The verification method is chosen per surface, against what the first
+delivery uses.** The method follows the surface it targets: the cheapest
+capture that sees what the surface produces, and nothing runs on a platform
+without its tooling. A surface printed inline is tested by a redirected run as
+every harness is; a surface that must be driven (keys, layered pop-ups,
+erasing) waits for the terminal-driving method until it is scheduled. A choice
+among tools for every surface at once is the wrong question.
+
+**Tension is found, not manufactured.** A decision goes to the architect when
+two options are viable or a tension is unsettled, laid out with the situation,
+the options and what each does and does not do. When the records settle it,
+the step is recorded and taken, and saying so is the answer; alternatives
+invented to show a choice where none exists cost the architect's time twice.
+
+**The validated prototype is the design.** What the architect judged in the
+terminal is what the prototype's code does; after the exit, a contract line
+that reads otherwise is corrected to the prototype's behaviour, never put back
+to the architect as a choice.
+
+**Exit.** A design prototype exits when the architect has judged each
+selected surface in a terminal; each surface has a demonstrated way to be
+captured and checked unattended, chosen per surface; the contract has moved
+out of the issue's record into the project's design and interaction
+documents, with a locked decision behind every line; and the findings record
+what was chosen, what was learned, and why. Prototype code is not promoted:
+what `ltl` builds, and how, is scoped after the exit.
 
 ## (a)–(c): the cost prototype
 
@@ -118,4 +212,6 @@ is the decision.
 
 - `docs/test-driven-development.md` — where the (d) trigger comes from
 - `tests/HARNESS-DESIGN.md` — building the harness once the method is known
+- `docs/design-language.md`, `docs/terminal-interaction.md` — what a design
+  prototype's contract becomes, and what a new surface is designed against
 - `docs/process/workflow.md` § Feature lifecycle — where prototyping sits in the workflow

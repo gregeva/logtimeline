@@ -1,0 +1,6 @@
+{"command":"perl show.pl panel --bg light","feedback":"yes, it works","option":"panel","time":"2026-10-19T14:20:36+0200","title":"Panel with the typical set, light background"}
+{"command":"perl show.pl panel --input deprecation --bg light","feedback":"yes, all good","option":"panel-one","time":"2026-10-19T14:20:57+0200","title":"Panel with a single notice, light background"}
+{"command":"perl show.pl ask --input memory --bg light","feedback":"all good","option":"modal-read","time":"2026-10-19T14:21:23+0200","title":"Modal during the read, light background"}
+{"command":"perl show.pl ask --input pattern --bg light","feedback":"yes, all good","option":"modal-pattern","time":"2026-10-19T14:21:49+0200","title":"Modal with its options list, light background"}
+{"command":"perl show.pl ask --input memory --form box --bg light","feedback":"Yes, nice - that is black bold.","option":"box-read","time":"2026-10-19T14:23:09+0200","title":"The compact box, light background"}
+{"command":"perl show.pl browser --bg light","feedback":"Yes, all good as well.  Esc/close should be synonyms just like Q/X are.","option":"browser","time":"2026-10-19T14:24:25+0200","title":"Notice browser, light background"}

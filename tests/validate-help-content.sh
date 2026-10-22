@@ -40,6 +40,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -710,7 +712,7 @@ scenario_J_unit_list_parity() {
     "$LTL" --disable-progress -ni -ru xyz "$UNIT_FIXTURE" > "$err/ru" 2>&1 || true
     "$LTL" --disable-progress -ni -bs 5qq "$UNIT_FIXTURE" > "$err/bs" 2>&1 || true
     "$LTL" --disable-progress -ni -bn xyz "$UNIT_FIXTURE" > "$err/bn" 2>&1 || true
-    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v:xyz:max' "$UNIT_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -V notices -udm 'v:xyz:max' "$UNIT_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
     local f
     for f in du ru bs bn udm; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
 
@@ -720,8 +722,8 @@ scenario_J_unit_list_parity() {
     bs_list=$(sed -n "s/^Error: Invalid bucket size '5qq'.* with a unit of //p" "$err/bs")
     local bn_list
     bn_list=$(sed -n "s/^Error: Invalid byte notation 'xyz'\. Valid values: //p" "$err/bn")
-    udm_time=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*(time units: \(.*\); byte units: .*)$/\1/p" "$err/udm")
-    udm_bytes=$(sed -n "s/^Warning: Unknown unit 'xyz' in -udm .*; byte units: \(.*\))$/\1/p" "$err/udm")
+    udm_time=$(notice_field "$err/udm.out" udm-unit-unknown statement | sed -n "s/^Unknown unit 'xyz' in -udm .*(time units: \(.*\); byte units: .*)$/\1/p")
+    udm_bytes=$(notice_field "$err/udm.out" udm-unit-unknown statement | sed -n "s/^Unknown unit 'xyz' in -udm .*; byte units: \(.*\))$/\1/p")
 
     assert_equal "$( [[ -n "$du_list" && -n "$ru_list" && -n "$bs_list" && -n "$bn_list" && -n "$udm_time" && -n "$udm_bytes" ]] && echo found )" "found" \
         label       'the -du, -ru, -bs and -bn rejections and the -udm unknown-unit warning each print their list' \
@@ -835,7 +837,7 @@ scenario_K_name_list_parity() {
     "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hm foo "$NAME_FIXTURE" > "$err/hm.out" 2> "$err/hm" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe -udm x::max -hg duration,foo "$NAME_FIXTURE" > "$err/hg.out" 2> "$err/hg" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe --hide foo "$NAME_FIXTURE" > "$err/hide.out" 2> "$err/hide" || true
-    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
+    ( cd "$err" && "$LTL" --disable-progress -ni -bs 1440 -oe -V notices -udm 'v::bogus' "$NAME_FIXTURE" ) > "$err/udm.out" 2> "$err/udm" || true
     "$LTL" --disable-progress -ni -bs 1440 -oe -m foo "$NAME_FIXTURE" > "$err/mask.out" 2> "$err/mask" || true
     local f
     for f in hm hg hide udm mask; do check_stderr_warnings "$err/$f" "$current_scenario/$f"; done
@@ -844,7 +846,7 @@ scenario_K_name_list_parity() {
     hm_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hm" | sed -n "s/^Error: 'foo' matches no file (it followed -hm\/--heatmap and is not a metric; the metrics are \(.*\), x)$/\1/p")
     hg_list=$(sed -e 's/.\x08//g' -e 's/\x1b\[[0-9;]*m//g' "$err/hg" | sed -n "s/^Error: 'foo' given to -hg\/--histogram is not a metric; the metrics are \(.*\), x$/\1/p")
     hide_columns=$(sed -n "s/^Error: Unknown section or column 'foo' for --hide\. Sections: .*; columns: \(.*\)$/\1/p" "$err/hide")
-    udm_functions=$(sed -n "s/^Warning: Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p" "$err/udm")
+    udm_functions=$(notice_field "$err/udm.out" udm-invalid-function statement | sed -n "s/^Invalid function 'bogus' in -udm .* (valid: \(.*\), or combined e\.g\. max(delta))$/\1/p")
     local mask_list mask_or_list
     mask_list=$(sed -n "s/^Error: Unknown mask name 'foo' for -m\. Valid values: //p" "$err/mask")
     mask_or_list=$(sed -E 's/, ([^,]*)$/ or \1/' <<< "$mask_list")
@@ -936,7 +938,7 @@ scenario_K_name_list_parity() {
     done
     local so_deprecated usage_deprecated
     so_deprecated=$(sed -E 's/.* Deprecated: ([^.]*)\..*/\1/' "$so_row")
-    usage_deprecated=$(awk '/^Deprecated, accepted for this release with a notice on stderr: / { f = 1 } f { printf "%s ", $0 } f && /^$/ { exit }' "$USAGE_MD" | sed -E 's/^Deprecated, accepted for this release with a notice on stderr: ([^.]*)\..*/\1/; s/`//g; s/  +/ /g')
+    usage_deprecated=$(awk '/^Deprecated, accepted for this release with a notice before the read: / { f = 1 } f { printf "%s ", $0 } f && /^$/ { exit }' "$USAGE_MD" | sed -E 's/^Deprecated, accepted for this release with a notice before the read: ([^.]*)\..*/\1/; s/`//g; s/  +/ /g')
     assert_equal "$usage_deprecated" "$so_deprecated" \
         label       'docs/usage.md names the deprecated -so spellings the --help -so row names, in order' \
         asserts     'docs/usage.md agrees with the deprecated spellings the tool lists' \

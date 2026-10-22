@@ -26,6 +26,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 # Ambient FORCE_COLOR/NO_COLOR must not decide what this harness asserts
 # against (tests/HARNESS-DESIGN.md section Colour rendering is controlled,
@@ -325,14 +327,15 @@ scenario_precision_out_of_range() {
     current_scenario="precision-out-of-range"
     echo "[$current_scenario]"
     local out
-    out=$(run_section --data-model-precision 12)
+    out=$(run_section --data-model-precision 12 -V notices)
     check_capture_warnings "$out"
 
     assert_header_present "$out"
 
-    # The intentional out-of-range diagnostic is printed to stderr, so the
-    # assertion reads the stderr capture (runtime-warning split, issue #341).
-    assert_line "$out.stderr" \
+    # The out-of-range diagnostic is a notice raised as the options are read:
+    # the assertion reads its record.
+    notice_field "$out" invalid-chart-value statement > "$out.notices"
+    assert_line "$out.notices" \
         pattern     'Invalid --data-model-precision: 12 \(must be 1\.\.9\)' \
         asserts     'When --data-model-precision is outside the locked 1..9 range, ltl emits a warning to stderr naming the invalid value' \
         produced_by 'adapt_to_command_line_options() in ltl (tier range-check branch)' \

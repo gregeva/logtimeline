@@ -25,6 +25,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 scenario_register \
     one-formatter/structure \
@@ -175,13 +177,14 @@ pass_with() {
 
 # run_in TAG ARGS... — runs ltl in its own directory $TMP_DIR/TAG, stdout to
 # out.txt (ANSI stripped into plain.txt), stderr to err.txt, the exit code to
-# rc.txt; applies the runtime-warning check. A non-zero exit is a failure.
+# rc.txt, the notices it raised in -V notices; applies the runtime-warning
+# check. A non-zero exit is a failure.
 run_in() {
     local tag="$1"; shift
     local dir="$TMP_DIR/$tag" rc
     mkdir -p "$dir"
     set +e
-    ( cd "$dir" && "$LTL" "$@" > out.txt 2> err.txt )
+    ( cd "$dir" && "$LTL" -V notices "$@" > out.txt 2> err.txt )
     rc=$?
     set -e
     echo "$rc" > "$dir/rc.txt"
@@ -235,7 +238,11 @@ export_observation() {
 # differ between two equivalent invocations: the echoed options and the
 # summary's elapsed time and peak memory.
 timeline_text() {
-    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt"
+    # The notices are set aside too (without_notice_boxes): their boxes, the
+    # record the question before the read leaves, and the -V notices section.
+    # A deprecated switch is asked about before the read; the runs compare by
+    # what they render.
+    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt" | without_notice_boxes /dev/stdin
 }
 
 # benchmark_row DIR KEY — one CONFIG row of -V benchmark-data.
@@ -498,18 +505,18 @@ for sw in "-s|-tp s|-bs 30s" "-ms|-tp ms|-bs 100ms"; do
         else
             run_in "$tag" "${COMMON[@]}" -ni "$flag" -bs 1 "$THREE"
         fi
-        n=$(grep -cE "^Warning: ${flag}/--[a-z]+ is deprecated: use ${tp} for the timestamp precision, and give -bs a unit \(${bs}\) for the bucket width\$" "$TMP_DIR/$tag/err.txt" || true)
+        n=$(notice_lines "$TMP_DIR/$tag/out.txt" | grep -cE "^deprecated-spelling \| ${flag}/--[a-z]+ \| is deprecated \| - \| use ${tp} for the timestamp precision, and give -bs a unit \(${bs}\) for the bucket width\$" || true)
         if [[ "$n" == 1 ]]; then
             pass_with "$flag prints one deprecation line naming '$tp' and '$bs' (progress $progress)"
         else
             fail_with "$flag prints one deprecation line naming '$tp' and '$bs' (progress $progress)" \
-                "a deprecated switch prints exactly one stderr line pointing at -tp and a unit on -bs; it is a behavioural notice, so --disable-progress does not suppress it" \
+                "a deprecated switch raises exactly one notice pointing at -tp and a unit on -bs; it is a behavioural notice, so --disable-progress does not suppress it" \
                 'adapt_to_command_line_options() in ltl (deprecation notices)' "$CONTRACT_D5" \
-                "matching lines: $n" "stderr: $(head -3 "$TMP_DIR/$tag/err.txt" | tr '\n' '~')"
+                "matching notices: $n" "notices: $(notice_lines "$TMP_DIR/$tag/out.txt" | head -3 | tr '\n' '~')"
         fi
     done
     run_in "dep${flag}-same" "${COMMON[@]}" -ni "$flag" ${tp} -bs 1 "$THREE"
-    n=$(grep -cE "^Warning: ${flag}/--[a-z]+ is deprecated" "$TMP_DIR/dep${flag}-same/err.txt" || true)
+    n=$(notice_kind_count "$TMP_DIR/dep${flag}-same/out.txt" deprecated-spelling)
     if [[ "$(cat "$TMP_DIR/dep${flag}-same/rc.txt")" == 0 && "$n" == 1 ]]; then
         pass_with "$flag ${tp} runs, with the notice"
     else
@@ -618,14 +625,14 @@ else
         "a 100 ms width draws ten buckets a second, labelled .000, .100 ... .900" \
         'initialize_empty_time_windows() and print_bar_graph() in ltl' "$CONTRACT_D14" "labels: ${second:-none}"
 fi
-dep=$(grep -c '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt" || true)
-if [[ "$dep" == 1 ]] && diff -q <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" > /dev/null; then
-    pass_with "the pair's stderr differs only by -ms's deprecation line"
+dep="$(notice_kind_count "$TMP_DIR/pair-ms/out.txt" deprecated-spelling)|$(notice_field "$TMP_DIR/pair-ms/out.txt" deprecated-spelling focus)|$(notice_kind_count "$TMP_DIR/pair-tp/out.txt" deprecated-spelling)"
+if [[ "$dep" == "1|-ms/--milliseconds|0" ]] && diff -q "$TMP_DIR/pair-ms/err.txt" "$TMP_DIR/pair-tp/err.txt" > /dev/null; then
+    pass_with "the pair differs only by -ms's deprecation notice"
 else
-    fail_with "the pair's stderr differs only by -ms's deprecation line" \
-        "-ms -bs 100 prints its one deprecation line; apart from it the two runs print the same stderr" \
+    fail_with "the pair differs only by -ms's deprecation notice" \
+        "-ms -bs 100 raises its one deprecation notice; apart from it the two runs raise the same notices and print the same stderr" \
         'adapt_to_command_line_options() in ltl' "$CONTRACT_D5" "-ms notice lines: $dep" \
-        "diff: $(diff <(grep -v '^Warning: -ms/--milliseconds is deprecated' "$TMP_DIR/pair-ms/err.txt") "$TMP_DIR/pair-tp/err.txt" | head -4 | tr '\n' '~')"
+        "deprecation notices (ms, tp): $dep" "stderr diff: $(diff "$TMP_DIR/pair-ms/err.txt" "$TMP_DIR/pair-tp/err.txt" | head -4 | tr '\n' '~')"
 fi
 fi
 
@@ -789,7 +796,7 @@ current_scenario="nanosecond/exact"
 for v in ns nanosecond; do
     run_in "nine-$v" "${COMMON[@]}" -ni -bs 1 -tp "$v" "$NINE"
     b=$(heading_bounds "$TMP_DIR/nine-$v")
-    n=$(grep -cE '^Note: timestamps are shown to the ' "$TMP_DIR/nine-$v/err.txt" || true)
+    n=$(notice_kind_count "$TMP_DIR/nine-$v/out.txt" timestamp-precision-coarser)
     if [[ "$b" == "2026-01-26 10:00:01.123456789|2026-01-26 10:00:02.999999999" && "$n" == 0 ]]; then
         pass_with "-tp $v renders all nine digits, .999999999 without carrying, with no notice"
     else
@@ -846,11 +853,11 @@ fi
 # ---------------------------------------------------------------------------
 # The precision the log carries (D4, D10)
 # ---------------------------------------------------------------------------
-CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a stderr notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
+CONTRACT_D4_CLAMP='features/525-timestamp-precision-option.md D4 (the precision printed never goes below what the file contains, with a notice) and D10 (read from the timestamp field'"'"'s stated unit and its digits); § 6.4 (proposed: a fraction not a multiple of three covers the steps its digits complete; a file whose precision cannot be read sets no limit); D4 as amended 2026-10-08 (several files: the request gives way only to the finest precision any processed file carries)'
 
-# note_lines DIR — the precision notices on the run's stderr.
+# note_lines DIR — the statement of each precision notice the run raised.
 note_lines() {
-    grep -E '^Note: timestamps are shown to the ' "$1/err.txt" || true
+    notice_field "$1/out.txt" timestamp-precision-coarser statement
 }
 
 # expect_note LABEL DIR WANT — exactly one precision notice, equal to WANT
@@ -882,7 +889,7 @@ else
         "heading: $b" "labels with a fraction: $frac_labels" "index first_timestamp: $idx_first" "index ts_precision: $idx_tp"
 fi
 expect_note "-tp ms on a whole-second log: one notice naming the second and whole seconds" "$TMP_DIR/tc-access" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tc-three-us "${COMMON[@]}" -ni -bs 1 -tp us "$THREE"
 b=$(heading_bounds "$TMP_DIR/tc-three-us")
 if [[ "$b" == "2026-01-26 10:00:01.123|2026-01-26 10:00:03.789" ]]; then
@@ -892,25 +899,25 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
 fi
 expect_note "-tp us on a millisecond log: one notice naming the millisecond" "$TMP_DIR/tc-three-us" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tc-three-ms "${COMMON[@]}" -ni -bs 1 -tp ms "$THREE"
 expect_note "-tp ms on a millisecond log: no notice" "$TMP_DIR/tc-three-ms" ""
 run_in tc-three-ns "${COMMON[@]}" -ni -bs 1 -tp ns "$THREE"
 expect_note "-tp ns on a millisecond log: one notice, naming the millisecond the log carries" "$TMP_DIR/tc-three-ns" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/ladder; then
 current_scenario="truth/ladder"
 run_in tl-carry "${COMMON[@]}" -ni -bs 1 -tp us "$CARRY"
 expect_note "a four-digit fraction resolves to the millisecond" "$TMP_DIR/tl-carry" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tl-two "${COMMON[@]}" -ni -bs 1 -tp ms "$TWO"
 expect_note "a two-digit fraction resolves to the second" "$TMP_DIR/tl-two" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tl-fixed3 "${COMMON[@]}" -ni -bs 1 -tp us "$FIXED3"
 expect_note "a fixed three-digit format resolves to the millisecond it declares" "$TMP_DIR/tl-fixed3" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/several-files; then
@@ -935,7 +942,7 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "heading: $b"
 fi
 expect_note "a request finer than every file carries: the notice names each file's precision" "$TMP_DIR/tsf-us" \
-    "Note: timestamps are shown to the millisecond: microsecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
+    "timestamps are shown to the millisecond: microsecond precision was asked for, and the logs' timestamps carry milliseconds in $THREE, whole seconds in $ACCESS"
 fi
 
 if scenario_wanted truth/deprecated-switch; then
@@ -949,14 +956,14 @@ else
         'resolve_timestamp_precision() in ltl' "$CONTRACT_D4_CLAMP" "labels with a fraction: $frac_labels"
 fi
 expect_note "-ms on a whole-second log: the notice" "$TMP_DIR/tds" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 fi
 
 if scenario_wanted truth/narrower-width; then
 current_scenario="truth/narrower-width"
 run_in tnw "${COMMON[@]}" -ni -bs 100ms -tp ms "$ACCESS"
 expect_note "a width finer than the log's precision: the notice says which buckets can hold a line" "$TMP_DIR/tnw" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds; at a bucket width below a second, only the buckets that start on a whole second can hold a line"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds; at a bucket width below a second, only the buckets that start on a whole second can hold a line"
 fi
 
 if scenario_wanted truth/unknown-precision; then
@@ -989,12 +996,12 @@ run_in tcf-ns "${COMMON[@]}" -ni -bs 1440 -tp ns -V runtime-config -udm latency 
 expect_precision "-tp ns on a CSV whose timestamps carry three digits shows them to the millisecond" "$TMP_DIR/tcf-ns" \
     "2026-06-01 10:00:05.123|2026-06-01 10:01:05.456" "timestamp_precision: ms; clamped from ns"
 expect_note "-tp ns on a millisecond CSV: the notice a scanned log gets" "$TMP_DIR/tcf-ns" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 run_in tcf-s "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$CSVS"
 expect_precision "-tp ms on a whole-second CSV alone shows it to the second" "$TMP_DIR/tcf-s" \
     "2026-06-01 10:00:05|2026-06-01 10:01:05" "timestamp_precision: s; clamped from ms"
 expect_note "-tp ms on a whole-second CSV: the notice names whole seconds" "$TMP_DIR/tcf-s" \
-    "Note: timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
+    "timestamps are shown to the second: millisecond precision was asked for, and the log's timestamps carry whole seconds"
 run_in tcf-mixed "${COMMON[@]}" -ni -bs 1440 -tp ms -V runtime-config -udm latency "$THREE" "$CSVS"
 expect_precision "-tp ms over a millisecond log and a whole-second CSV shows the run to the millisecond" "$TMP_DIR/tcf-mixed" \
     "2026-01-26 10:00:01.123|2026-06-01 10:01:05.000" "timestamp_precision: ms"
@@ -1003,7 +1010,7 @@ run_in tcf-epoch "${COMMON[@]}" -ni -bs 1440 -tp ns -du ms -V runtime-config -ud
 expect_precision "an epoch CSV read with -du ms and no fraction carries the millisecond" "$TMP_DIR/tcf-epoch" \
     "2026-02-14 14:12:53.123|2026-02-14 14:13:53.456" "timestamp_precision: ms; clamped from ns"
 expect_note "an epoch CSV in milliseconds: the notice names milliseconds" "$TMP_DIR/tcf-epoch" \
-    "Note: timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
+    "timestamps are shown to the millisecond: nanosecond precision was asked for, and the log's timestamps carry milliseconds"
 fi
 
 if scenario_wanted truth/structure; then

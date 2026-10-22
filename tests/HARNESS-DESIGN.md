@@ -220,6 +220,8 @@ This list prevents collisions across parallel work. Update it when adding a new 
 - `section-layout` — per output section and part, in print order: its state (rendered, hidden, absent), the standard-output row it started on and the rows it printed, as a tab-separated table. Rows are counted as they print, leaving out every `-V` range wherever it prints, so they are the rows of the same run without `-V`. Printed after the run's last row (Issue #597; contract in features/597-section-visibility.md § D3, D13, D14). Asserted by `tests/validate-section-layout.sh`.
 - `read-path` — the path each file was read by: the threshold in effect and its source, whether `-D` forced the standard path, whether the generated body's text was written and why a body could not be prepared, per file its size, path and reason, and one line per gate marker the generator resolved with whether the code under it stays in the generated body (Issue #721; contract in features/621-generated-read-loop-body.md § 9). Asserted by `tests/validate-read-path.sh`.
 
+- `notices` — every notice the run raised, one entity block per raising in raising order: its kind, category, stage, producer, immediacy, visibility, the surface that drew it (`shown`), its focus, statement, evidence (one line per piece), remedy, the choice it carries with its headings and option blocks, and the answer. Printed at the end of `pipeline_render()`, after the run's last notice (Issue #412; contract in features/412-notice-surfaces.md § D15). Asserted by `tests/validate-notices.sh`.
+
 **Reserved by sub-issues, not yet implemented:**
 - *(none)*
 
@@ -687,6 +689,22 @@ Consequences for harness authors:
 - **One resolution surface.** `resolve_log_path` is it. A new `if [[ "$logfile" = /* ]]` ladder is a review defect — that duplication is what produced the silent skip above.
 - **Verify an override end-to-end, not by exit code.** A harness that resolves its corpus correctly and one that quietly skips its most expensive layer both exit 0. Check the counters the run reports (`L3=OK`, assertion counts, scenario counts) against a known-good run on the default path.
 - **Where the recorded path is part of the assertion, keep it relative.** `validate-regression.sh`, `capture-regression.sh` and `tests/baseline/run-benchmark.sh` pass repo-relative paths so no absolute path reaches captured references or the benchmark TSV (#209). These run from the directory *containing* the corpus rather than resolving an absolute path, which keeps `logs/...` intact under an override; because the captured prefix is the literal string `logs/`, an overriding corpus directory must itself be named `logs`, and they fail fast when it is not.
+
+## A notice is asserted from its record
+
+A notice the tool raises (a decision taken for the analyst, a condition found
+in the input, a caveat on the figures) is a record of the notice store, drawn
+in the notices panel on standard output and listed by `-V notices`. A harness
+asserts a notice by its `kind` from that section, through `tests/lib/notices.sh`
+(`notice_kind_count`, `notice_field`, `notice_lines`, `notice_total`), never
+by its text on standard error or in the panel: the record is the observable
+surface (`features/412-notice-surfaces.md` § D15). An absence check ("the run
+says nothing about X") reads the record count, `0` of that kind or
+`notice_total` of `0`; an empty standard error proves nothing about a notice,
+since none is printed there. The panel's own rendering is the render-invariant
+surface of `tests/validate-notices.sh`. A comparison of two runs that differ
+only by a notice (one spelling deprecated, the other not) compares them through
+`without_notice_boxes`, since the notices print on standard output.
 
 ## Runtime-warning cleanliness
 

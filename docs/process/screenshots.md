@@ -395,7 +395,8 @@ entries. The comment above each entry says what the screenshot is for.
 | `background` | no | `dark` (default) or `light`; stating it is good practice. The tool runs `ltl` with `-dbg` or `-lbg` and draws the image on that background |
 | `width`, `height` | no | the terminal size: the picture's resolution (*Resolution: the terminal size*). 211 and 53 by default; 237 by 62 for a busy chart |
 | `pad` | no | the margin around each image, as CSS writes it: `1` all round, `1,2` (default) one row top and bottom and two columns left and right, `1,2,3` top, sides, bottom, `1,4,1,2` top, right, bottom, left |
-| `crops` | no | a list of crops, each with `sections`, `start`, `end`, `cols`, `label`; none means the whole output |
+| `pane` | no | run `ltl` in a tmux pane and draw the pane as it is seen after these steps, one string: `sleep:N` waits N seconds, any other word is a key sent to the pane (*A surface seen in a terminal: the pane*) |
+| `crops` | no | a list of crops, each with `sections`, `start`, `end`, `cols`, `label`; none means the whole output. With `pane`, `cols` and `label` only |
 
 The tool's own `--width`, `--height` and `--pad` override every entry for one run.
 
@@ -427,6 +428,42 @@ others still run; the run exits non-zero naming the failures.
   left, with `ltl`'s rows added to it.
 - `LTL_CONFIG` is ignored, so settings on the machine running the tool never change
   an image.
+
+## A surface seen in a terminal: the pane
+
+A notice surface that asks, the modal over the dimmed run, and the notice
+browser on the alternate screen only look as designed in a terminal: a
+redirected run prints them inline, once. Such an entry names `pane`, and the
+tool runs `ltl` once in a tmux pane of the entry's size, instead of the probe and
+capture runs (`features/412-notice-surfaces.md` D18). The tmux server is the
+tool's own, with no configuration and no status line, so the pane is the whole
+terminal. The tool runs the steps, captures the pane with its colours, and ends
+the session. The answer the surface would have waited for is never given.
+
+- **Steps.** `sleep:N` waits N seconds; any other word is a key, as tmux names
+  it (`Down`, `Enter`, `Escape`, `Tab`, `q`). At least one `sleep` is needed, so
+  the surface has drawn before the capture. Keep the waits inside the
+  surface's countdown (10 seconds for a question, 15 for the browser), or the
+  countdown takes the default and the surface is gone. `sleep:2` is enough for
+  a question before the read; a question or browser after the read waits for
+  the read.
+- **Crops.** A pane is one screen, not the run's sections, so a crop takes
+  `cols` and `label` only; the image is the whole pane otherwise.
+- **Sensitive content.** The dimmed run under a pop-up can carry messages and
+  file names, so every pane image is flagged for a check before it is
+  committed.
+- **tmux** is needed, on `PATH`; without it the entry fails before `ltl` runs.
+  The exit status `ltl` reached before the capture, if any, and Perl warnings on
+  its standard error fail the entry as they do any run.
+
+```yaml
+  # The question put before the read when the options carry a notice: two
+  # option notices, the modal over the dimmed title, its countdown running.
+  - name: notice-ask
+    ltl: -so time -dmin 500 -dmax 100 logs/...
+    background: dark
+    pane: sleep:2
+```
 
 ## Documentation in another repository
 

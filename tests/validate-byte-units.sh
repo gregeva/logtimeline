@@ -29,6 +29,8 @@ source "$SCRIPT_DIR/lib/runtime-warnings.sh"
 source "$SCRIPT_DIR/lib/colour-env.sh"
 # shellcheck source=lib/scenario-select.sh
 source "$SCRIPT_DIR/lib/scenario-select.sh"
+# shellcheck source=lib/notices.sh
+source "$SCRIPT_DIR/lib/notices.sh"
 
 neutralize_colour_env
 
@@ -155,9 +157,9 @@ expect_equal() {
     fi
 }
 
-# notice_count DIR TAG — how many mixed-declaration notices the run printed
+# notice_count DIR TAG — how many mixed-declaration notices the run raised, from -V notices
 notice_count() {
-    grep -c '^Note: the log formats of this run declare different byte notations' "$1/$2.err" || true
+    notice_kind_count "$1/$2.out" byte-notations-differ
 }
 
 BOUNDARY_SI='999 B|1 kB|1 kB|1 kB|1 MB|1 MB|1 MB|1 MB|1.5 MB'
@@ -261,7 +263,7 @@ scenario_format_declaration() {
 scenario_mixed_declarations() {
     current_scenario="mixed-declarations"
     echo "[$current_scenario]"
-    local common=(--disable-progress -ni -bs 1440 -oe -o)
+    local common=(--disable-progress -ni -bs 1440 -oe -o -V notices)
     local plain="$TMP_DIR/plain-text.txt"
     printf 'first line of plain text\nsecond line of plain text\n' > "$plain"
 
@@ -270,12 +272,12 @@ scenario_mixed_declarations() {
         'Files whose formats declare different notations render SI' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
     expect_equal "GC and access log print one notice" "$(notice_count "$TMP_DIR/mix" run)" "1" \
         'One notice for the run, not one per file' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED"
-    if grep -qF 'java_gc_g1: IEC; access_common_duration: none); byte values are shown in SI units. Use -bn si or -bn iec to choose.' "$TMP_DIR/mix/run.err"; then
+    if [[ "$(notice_field "$TMP_DIR/mix/run.out" byte-notations-differ evidence)#$(notice_field "$TMP_DIR/mix/run.out" byte-notations-differ statement)#$(notice_field "$TMP_DIR/mix/run.out" byte-notations-differ remedy)" == 'java_gc_g1: IEC|access_common_duration: none#the log formats of this run declare different byte notations; byte values are shown in SI units#use -bn si or -bn iec to choose' ]]; then
         pass_with "the notice names both formats' declarations and the option"
     else
         fail_with "the notice names both formats' declarations and the option" \
             'The notice says which format declares what, and how to choose' 'resolve_byte_notation() in ltl' "$CONTRACT_MIXED" \
-            "stderr: $(grep '^Note: the log formats' "$TMP_DIR/mix/run.err" | head -1)"
+            "record: $(notice_field "$TMP_DIR/mix/run.out" byte-notations-differ statement) / $(notice_field "$TMP_DIR/mix/run.out" byte-notations-differ evidence)"
     fi
 
     run_ltl_in "$TMP_DIR/twice" run "${common[@]}" "$GC_FIXTURE" "$GC_FIXTURE"
