@@ -748,6 +748,43 @@ Observation: when the index file cannot be written, the run ends with no index
 and no notice (`write_index_file`, the `else` branch of its write). That case
 is not in the inventory.
 
+### Completion gate: memory (2026-10-22)
+
+The before/after benchmark (`single-day-access-log-standard`, 761,698 lines;
+`before` at `bff2283c` in the release worktree, `after` on this branch, both
+worktrees under `.claude/worktrees/`) measured:
+- total time 5.3 s before and 5.2 s after (−1.3%);
+- RSS peak 100.4 MB before and 102.3 MB after (+1.8 MB), all in memory not attributed to a structure.
+
+The difference is the code the notice framework adds. `perl -c ltl` alone uses
+2.15 MB more (39.11 to 41.25 MB), and a 12-line run uses 2.16 MB more (median
+of 3, each within 0.05 MB). No module is newly loaded at startup. The fixture
+sets measure within noise.
+
+Larger runs (hash seed fixed on both sides, same options):
+
+| run | lines | before | after | RSS difference | data structures (`-mem`) |
+|---|---|---|---|---|---|
+| 1 file, 140 MB | about 1.0 M | 111.52 MB | 113.80 MB | +2.28 MB | |
+| 13 files, 1.1 GB | about 4 M | 425.16 MB | 427.47 MB | +2.31 MB | |
+| 26 files, 2.2 GB | 8,266,583 | 765.64 MB | 775.77 MB | +10.13 MB | all 38 equal |
+| 60 files, 3.4 GB | 15,943,990 | 2,641 MB | 2,664 MB | +23.1 MB (+12 to +42 MB across runs and readings) | all 38 equal |
+
+Every data structure is the same size on both sides. The per-line read loop is
+identical apart from line numbers, since every change in
+`read_and_process_logs()` comes after the read. The growth at multi-GB peaks is
+in memory no structure owns. Giving the base `ltl` 2.3 MB of plain small
+allocations at startup raised its 2.2 GB peak by 6.8 MB of the branch's
+10.1 MB, so the allocator magnifies a fixed startup cost at large peaks. The
+rest is not explained further on this 8 GB machine. A 6.9 GB pair ran under
+memory compression (10 to 11.6 million page reclaims), so its peak RSS is left
+out. Without a fixed seed, `%log_messages` differs by up to 5 MB between runs
+of the same code, from hash randomisation.
+
+Disposition (architect, 2026-10-22): accepted. The cost is the framework's
+fixed 2.1 MB of compiled code, magnified by the allocator at multi-GB peaks,
+with no extra data held per line, per key or per file.
+
 ## Inventory of current notices
 
 Every stderr emission in `ltl` (169 sites, from a scan of `print STDERR`,
