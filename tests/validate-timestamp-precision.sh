@@ -238,17 +238,11 @@ export_observation() {
 # differ between two equivalent invocations: the echoed options and the
 # summary's elapsed time and peak memory.
 timeline_text() {
-    # The notices are set aside too: their boxes (an ask before the read, the
-    # panel) with the blank row after each, the -V notices section, and the
-    # blank rows before the first rendered row. A deprecated switch is asked
-    # about before the read; the runs compare by what they render.
-    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt" | perl -ne '
-        next if /^=== notices ===$/ .. /^=== END notices ===$/;
-        if (/^\x{e2}\x{95}\x{ad}/ .. /^\x{e2}\x{95}\x{b0}/) { $box = 1; next }
-        if ($box) { $box = 0; next if $_ eq "\n" }
-        next if !$seen && $_ eq "\n";
-        $seen = 1;
-        print;'
+    # The notices are set aside too (without_notice_boxes): their boxes, the
+    # record the question before the read leaves, and the -V notices section.
+    # A deprecated switch is asked about before the read; the runs compare by
+    # what they render.
+    grep -vE '^(command-line|environment) options: |^  (TOTAL TIME|MAXIMUM MEMORY USED) ' "$1/plain.txt" | without_notice_boxes /dev/stdin
 }
 
 # benchmark_row DIR KEY — one CONFIG row of -V benchmark-data.

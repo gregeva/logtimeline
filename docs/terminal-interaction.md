@@ -171,7 +171,14 @@ shows. The uses are the three components, the ask component in its two forms.
 | choice letters | from the caller, underlined | from the caller, underlined | none in the list itself; a selection on an item may open an ask modal on top of the browser, whose own choice letters then take effect | not applicable |
 | headings of the options list | the producer's; What? How? Why? when none are given | as the modal | as the modal | not applicable |
 | record left after answering | off | off | not applicable | not applicable |
+| empty row before, below the cursor | on | on | on | not applicable |
 | top edge | category, count, how to read it | category, count, how to read it | `notices` and the count | `notices` and the count; a single category takes the edge form |
+
+A use passes what it wants otherwise. The question before the read, about the
+notices the options raised, is the compact box with no empty row before it,
+and leaves its record in its place: the notices and the answer stay in the
+output whether the run goes on or stops (`features/412-notice-surfaces.md`
+D19).
 
 ### Layered surfaces
 
@@ -217,11 +224,13 @@ stage's height for both, the first stage holding blank rows.
   copy is placed from the cursor position report (CSI 6n), so the progress row
   does not move.
 - **Below the cursor**: drawn into rows reserved under the cursor, the fallback
-  when the alternate screen is not wanted or not available; one empty row
-  precedes a box that will be erased, and where the row above the cursor is
-  already empty the surface starts on the cursor's row and adds none, so two
-  empty rows never stand above it (architect, 2026-10-20, from the Windows
-  re-check).
+  when the alternate screen is not wanted or not available. Whether one empty
+  row precedes the surface is the caller's choice, on by default; where the
+  row above the cursor is already empty the surface starts on the cursor's
+  row and adds none, so two empty rows never stand above it (architect,
+  2026-10-20, from the Windows re-check). A record left in the surface's place
+  starts on the surface's first row, so the first row is the same while the
+  surface is up and after it (architect, 2026-10-22).
 - **The compact form** of ask is a box below the cursor whose top edge carries
   the category, the count when there is more than one notice, and how to read
   the category, with the question on its last inside row.

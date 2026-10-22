@@ -43,10 +43,10 @@ screenshots:
       - sections: notices
 
   # The question put before the read when the options carry notices: -so time
-  # (a deprecated metric name) and a -dmin above -dmax, the modal over the
-  # dimmed title, its countdown running. Captured from a tmux pane, where it is
-  # seen as designed (features/412-notice-surfaces.md D18), two seconds in, with
-  # the seconds the countdown has left.
+  # (a deprecated metric name) and a -dmin above -dmax, the compact box below
+  # the title (features/412-notice-surfaces.md D19), its countdown running.
+  # Captured from a tmux pane, where it is seen as designed (D18), two seconds
+  # in, with the seconds the countdown has left.
   - name: notice-ask
     ltl: -so time -dmin 500 -dmax 100 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
     background: dark

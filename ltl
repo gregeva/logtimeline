@@ -628,7 +628,7 @@ my @notice_category_sheet = (
 my @notice_categories = map { $_->{name} } @notice_category_sheet;
 # The browser's presentation (docs/terminal-interaction.md § Parameters and
 # their defaults by use); a fixture set may change it.
-my %notice_browser_presentation = ( placement => 'alt', size => 'auto', quit => 1, seconds => 15, rows => 10 );
+my %notice_browser_presentation = ( placement => 'alt', size => 'auto', quit => 1, seconds => 15, rows => 10, lead => 1 );
 
 my %notice_category = map { $_ => 1 } @notice_categories;
 my $sections_opened = 0;        # rendered sections so far; open_section() separates them
@@ -15376,8 +15376,8 @@ sub draw_deferred_notices {
 # § Parameters and their defaults by use): a caller passes only what it wants
 # otherwise.
 my %notice_presentation = (
-    'ask-modal' => { placement => 'alt',    size => 'auto', quit => 1, keybar => 'full',    seconds => 10, record => 0 },
-    'ask-box'   => { placement => 'inline', size => 'full', quit => 0, keybar => 'letters', seconds => 10, record => 0 },
+    'ask-modal' => { placement => 'alt',    size => 'auto', quit => 1, keybar => 'full',    seconds => 10, record => 0, lead => 1 },
+    'ask-box'   => { placement => 'inline', size => 'full', quit => 0, keybar => 'letters', seconds => 10, record => 0, lead => 1 },
 );
 my @notice_answers_ahead;       # hidden --notice-answers a,b,...: one per choice point, in order (D17)
 my @notice_printed_rows;        # the rows standard output holds, for the dimmed copy under a pop-up
@@ -15519,7 +15519,7 @@ sub notice_longest_word {
 sub notice_drawer {
     my (%a) = @_;
     my $mode = notice_interactive() ? $a{placement} : 'plain';
-    my $d = { mode => $mode, W => $terminal_width, H => $terminal_height, h => 0 };
+    my $d = { mode => $mode, W => $terminal_width, H => $terminal_height, h => 0, want_lead => $a{lead} // 1 };
     if ( my $parent = $a{under} ) {
         # Layered over a surface: on its alternate screen, over it dimmed with
         # its colours kept, leaving the screen to it; or centred within the
@@ -15710,9 +15710,10 @@ sub notice_draw_rows {
         return;
     }
     if ( $d->{h} ) { print "\e[" . ( $d->{h} - 1 ) . "A" if $d->{h} > 1 }
-    elsif ( @notice_printed_rows && notice_cells( $notice_printed_rows[-1] ) == 0 ) {
-        # The row above is already empty: that is the one empty row before the
-        # surface, which starts on the cursor's own row.
+    elsif ( !$d->{want_lead} || @notice_printed_rows && notice_cells( $notice_printed_rows[-1] ) == 0 ) {
+        # The caller wants no empty row before the surface, or the row above is
+        # already empty, that one empty row: the surface starts on the
+        # cursor's own row.
         print "\r\e[2K";
         $d->{lead} = 0;
     }
@@ -15725,14 +15726,16 @@ sub notice_draw_rows {
 }
 
 sub notice_close_drawer {
-    my ($d) = @_;
+    my ( $d, %a ) = @_;
     if ( $d->{mode} eq 'alt' && $d->{nested} ) {
         $d->{parent}{screen} = undef;    # the parent repaints every row, in place
     } elsif ( $d->{mode} eq 'alt' && $d->{on} ) {
         print "\e[?1049l";
         $notice_alt_screen = 0;
     } elsif ( $d->{mode} eq 'inline' && $d->{h} ) {
-        my $up = $d->{h} - 1 + ( $d->{lead} // 0 );
+        # A record left in the surface's place starts on its first row, so the
+        # empty row before it stays; otherwise the surface leaves no trace.
+        my $up = $d->{h} - 1 + ( $a{keep_lead} ? 0 : $d->{lead} // 0 );
         print "\e[${up}A" if $up > 0;
         print "\r\e[J";
     }
@@ -15898,8 +15901,8 @@ sub notice_answer_ahead { return @notice_answers_ahead ? shift @notice_answers_a
 #        question, buttons => [ { label, key, role } ], countdown, headings,
 #        options => [ { key, parts, args, effect } ], shows => [ids],
 #        form => modal|box, placement => alt|inline, size, seconds, quit,
-#        record, fixed_height )
-my %notice_ask_presentation = map { $_ => 1 } qw( form placement size seconds quit record fixed_height );
+#        record, lead, fixed_height )
+my %notice_ask_presentation = map { $_ => 1 } qw( form placement size seconds quit record lead fixed_height );
 sub ask {
     my (%a) = @_;
     my %p = map { $_ => delete $a{$_} } grep { $notice_ask_presentation{$_} } keys %a;
@@ -16036,7 +16039,7 @@ sub notice_ask_surface {
     local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
     local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
     notice_raw_mode() if $interactive;
-    my $d = notice_drawer( placement => $form eq 'modal' ? $p{placement} : 'inline', under => $p{under} );
+    my $d = notice_drawer( placement => $form eq 'modal' ? $p{placement} : 'inline', under => $p{under}, lead => $p{lead} );
     my $indent = $d->{mode} eq 'inline' && $form eq 'modal' ? ' ' x int( ( $terminal_width - $bw ) / 2 ) : '';
     my $draw = sub { notice_draw_rows( $d, map { "$indent$_" } @_ ) };
 
@@ -16044,7 +16047,9 @@ sub notice_ask_surface {
         # No terminal: drawn once as it appears, in the state the answer given
         # ahead reaches, or with the default highlighted; nothing waits.
         my ( $i, $oi ) = $ahead ? @$ahead : ( $def_i, undef );
-        open_section();    # one blank row above it, as between any two sections
+        # One blank row above it, as between any two sections, unless the
+        # caller wants none: the same rows as in a terminal.
+        $p{lead} ? open_section() : close_section();
         $draw->( defined $oi ? $frame_rows->( 2, $oi ) : $frame_rows->( 1, $i, $p{seconds} ) );
         $answer->{how} //= 'no_terminal';
         notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
@@ -16118,7 +16123,7 @@ sub notice_ask_surface {
             elsif ( $act eq 'quit' )  { notice_close_drawer($d); notice_quit_run($answer) }
         }
     }
-    notice_close_drawer($d);
+    notice_close_drawer( $d, keep_lead => $p{record} );
     notice_restore_terminal();
     notice_leave_record( $record, \@body_notices, \@btn ) if $p{record};
     return $answer;
@@ -16135,12 +16140,17 @@ sub ask_about_option_notices {
     my @raised = grep { $_->{stage} eq 'options' && $_->{immediacy} eq 'deferred' && $_->{shown} eq 'none'
                         && $_->{producer} ne 'raise_fixture_notices' } @notice_records;
     return unless @raised;
+    # The compact box with its choice, on the row under the title with no empty
+    # row before it, leaving the notices and the answer behind in its place:
+    # the analyst keeps what was presented and chosen, whether the run goes on
+    # or stops (#412 D19).
     my $answer = ask( kind => 'options-review', category => 'your_options',
                       statement => 'the options given raised notices before the read',
                       question  => 'Continue with these options?',
                       buttons   => [ { label => 'Stop and correct them', key => 's', role => 'stop' },
                                      { label => 'Continue', key => 'c', role => 'default' } ],
-                      shows     => [ map { $_->{id} } @raised ] );
+                      shows     => [ map { $_->{id} } @raised ],
+                      form => 'box', record => 1, lead => 0 );
     return unless $answer->{button} eq 's';
     emit_notices_verbose();
     exit 0;
@@ -16252,7 +16262,7 @@ sub notice_browser {
     local $SIG{INT}  = sub { notice_restore_terminal(); print "\n"; exit 130 };
     local $SIG{TERM} = sub { notice_restore_terminal(); exit 143 };
     notice_raw_mode() if $interactive;
-    my $d = notice_drawer( placement => $placement );
+    my $d = notice_drawer( placement => $placement, lead => $p{lead} );
     my $indent = $d->{mode} eq 'inline' ? '' : '';
     if ( $d->{mode} eq 'plain' ) {
         open_section('notices');

@@ -21,9 +21,11 @@
 #       for a harness whose assertions match a whole notice by pattern.
 #   without_notice_boxes CAPTURE
 #       The capture with every notice box set aside (an ask, the panel) with
-#       the blank row after each, the -V notices section, and the blank rows
-#       before the first row left: what two runs that differ only in their
-#       notices are compared by.
+#       the blank row after each when a blank row stood before it, so one
+#       separates what is left, the record an ask leaves right after its box
+#       (its rows through the one with the answer, after ↳), the -V notices
+#       section, and the blank rows before the first row left: what two runs
+#       that differ only in their notices are compared by.
 #
 # A capture without the section is a missing anchor: each function prints
 # MISSING-SECTION, so a check against it fails.
@@ -86,9 +88,12 @@ without_notice_boxes() {
     perl -ne '
         my $plain = $_; $plain =~ s/\e\[[0-9;]*m//g;
         next if $plain =~ /^=== notices ===$/ .. $plain =~ /^=== END notices ===$/;
-        if ($plain =~ /^\x{e2}\x{95}\x{ad}/ .. $plain =~ /^\x{e2}\x{95}\x{b0}/) { $box = 1; next }
-        if ($box) { $box = 0; next if $plain eq "\n" }
+        if ($plain =~ /^\x{e2}\x{95}\x{ad}/ .. $plain =~ /^\x{e2}\x{95}\x{b0}/) { $before = $last_blank unless $box; $box = 1; next }
+        if ($box && $plain =~ /^[\x80-\xff]+ [A-Z]{3}/) { $record = 1 }
+        if ($record) { $box = 1; $record = 0 if $plain =~ /^\s+\x{e2}\x{86}\x{b3} /; next }
+        if ($box) { $box = 0; next if $plain eq "\n" && $before }
         next if !$seen && $plain eq "\n";
         $seen = 1;
+        $last_blank = $plain eq "\n";
         print;' "$1"
 }

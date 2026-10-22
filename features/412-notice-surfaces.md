@@ -431,6 +431,27 @@ that image shows the box inline in the output, which is never what a terminal
 user sees, and a browser that looks like a tall panel. Generating these
 entries needs tmux, on the macOS host that the PNG already requires.
 
+### D19 — The question before the read is the compact box with its choice, and leaves its record (architect, 2026-10-22, from the terminal review)
+
+The question put before the read when the options raise notices,
+`ask_about_option_notices()`, is the compact box with its choice, the surface
+the prototype settled for this moment. It is drawn below the cursor, under the
+title, at full width. It is neither the modal centred on the alternate screen
+nor the modal centred below the cursor. Once answered it leaves its record:
+the notices it presented and the answer taken, as inline text, whether the run
+continues, by key or countdown, or stops.
+
+The architect's findings on a real access log:
+- With the modal on the alternate screen, Stop left only the title in the terminal, with no trace of what had been presented or chosen, and the modal sat in the middle of the terminal, far above the title.
+- The modal below the cursor, the first correction, was still a centred pane and the wrong surface.
+- The compact box then printed an empty row before itself, and erasing it removed that row too, so the record started one row above where the box had been. The first row of a surface must not be in two places. The empty row is the caller's choice, and this use wants none: the box and its record both start on the row under the title.
+
+The ask's per-use defaults in `docs/terminal-interaction.md` stay as they are;
+this use passes `form => 'box'`, `record => 1` and `lead => 0`. `lead`, the
+empty row before a surface below the cursor, is a presentation parameter of
+the ask and the browser, on by default. A record left in a surface's place
+keeps that row, so it starts on the surface's first row.
+
 ## Implementation progress
 
 ### Drop 1: store and record (2026-10-21)

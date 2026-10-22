@@ -645,7 +645,8 @@ tmux_ready() {
 # it; STEPS is sleep:N, cap:LABEL (the pane, with and without its attributes,
 # to NAME.LABEL.ansi and .txt), under:LABEL (the normal screen while a pop-up
 # holds the alternate one: what the terminal showed before it) or a key name
-# for send-keys. Afterwards the
+# for send-keys, or state:LABEL (the pane's "alternate_on cursor_flag" at
+# that moment, to NAME.LABEL.state). Afterwards the
 # whole pane history, wrapped rows joined, is NAME.final.txt, and the pane's
 # terminal state NAME.state ("alternate_on cursor_flag").
 tmux_run() {
@@ -660,6 +661,7 @@ tmux_run() {
         case "$step" in
             sleep:*) sleep "${step#sleep:}" ;;
             under:*) tmux capture-pane -a -p -t "$sess" > "$TMP_DIR/$name.${step#under:}.txt" || true ;;
+            state:*) tmux display-message -p -t "$sess" '#{alternate_on} #{cursor_flag}' > "$TMP_DIR/$name.${step#state:}.state" || true ;;
             cap:*)   tmux capture-pane -e -p -t "$sess" > "$TMP_DIR/$name.${step#cap:}.ansi" || true
                      tmux capture-pane -p -t "$sess"    > "$TMP_DIR/$name.${step#cap:}.txt" || true ;;
             *)       tmux send-keys -t "$sess" "$step" || true ;;
@@ -840,15 +842,24 @@ scenario_preread() {
         "1,2|button=c option=- how=no_terminal|ask|no" \
         'The notices raised while the options were read are put in one ask before the read, which presents them (shows) and keeps them off the panel' \
         'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
-    check "with no terminal the run continues" "$(grep -c 'LINES READ' "$TMP_DIR/pr.out")|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/pr.out" | grep -c 'Continue with these options?')|$(wc -c < "$TMP_DIR/pr.err" | tr -d ' ')" "1|1|0" \
+    check "with no terminal the run continues" "$(grep -c 'LINES READ' "$TMP_DIR/pr.out")|$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/pr.out" | grep -c '│ *Continue with these options?')|$(wc -c < "$TMP_DIR/pr.err" | tr -d ' ')" "1|1|0" \
         'With no terminal the question is drawn once, the default continues the run, and nothing goes to standard error' 'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
+    check "with no terminal the record follows the question" "$(sed 's/\x1b\[[0-9;]*m//g' "$TMP_DIR/pr.out" | grep -A4 '^╰' | grep -cE '^⚙ YOUR OPTIONS \(2\)|^— time is deprecated|^  ↳ Continue with these options\? continue \(no_terminal\)$')" "3" \
+        'The question leaves its record after it: the notices it presented and the answer taken (D19)' 'ask_about_option_notices() and notice_leave_record() in ltl' "$DOC § D19"
     run_ok clean "$LTL" -bs 1440 -oe -n 1 --terminal-width 120 -V notices "$DURATION_FIXTURE"
     check "no option notice, no question" "$(notice_kind_count "$TMP_DIR/clean.out" options-review)" "0" \
         'A run whose options raise nothing is not asked' 'ask_about_option_notices() in ltl' "$DOC § D16"
     tmux_ready || return 0
-    tmux_run ps "sleep:2.5 cap:up s sleep:1.5" -bs 1440 -oe -n 1 -so time -V notices "$DURATION_FIXTURE"
-    check "in a terminal the question waits" "$(grep -c 'Continue with these options?' "$TMP_DIR/ps.up.txt")" "1" \
-        'In a terminal the question is a modal over the run, waiting with its countdown' 'ask() in ltl' "$C_ASK"
+    tmux_run ps "sleep:2.5 cap:up state:up s sleep:1.5" -bs 1440 -oe -n 1 -so time -V notices "$DURATION_FIXTURE"
+    local title_row
+    title_row=$(grep -n "log timeline" "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1)
+    check "in a terminal the question is the compact box under the title" "$(grep -c 'Continue with these options?  Stop and correct them' "$TMP_DIR/ps.up.txt")|$(cut -d' ' -f1 "$TMP_DIR/ps.up.state")|$(grep -n '╭' "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1)" \
+        "1|0|$(( title_row + 2 ))" \
+        'In a terminal the question is the compact box with its choice, on the normal screen, on the row after the title with no empty row before it, waiting with its countdown (D19)' 'ask_about_option_notices() and ask() in ltl' "$DOC § D19; $C_ASK"
+    check "the record starts on the box's first row" "$(grep -n '^⚙ YOUR OPTIONS' "$TMP_DIR/ps.final.txt" | head -1 | cut -d: -f1)" "$(grep -n '╭' "$TMP_DIR/ps.up.txt" | head -1 | cut -d: -f1)" \
+        'The record left in the box'"'"'s place starts on the row the box started on: the first row of the surface is the same while it is up and after it (D19)' 'notice_close_drawer() and notice_leave_record() in ltl' "$DOC § D19"
+    check "s leaves the record of what was presented and chosen" "$(grep -cE '^⚙ YOUR OPTIONS time is deprecated|^  ↳ Continue with these options\? stop and correct them \(key\)$' "$TMP_DIR/ps.final.txt")|$(grep -c '╭' "$TMP_DIR/ps.final.txt" || true)" "2|0" \
+        'After Stop the question is erased and its record stays: the notice it presented and the answer taken; the run then ends (D19)' 'ask_about_option_notices() and notice_leave_record() in ltl' "$DOC § D19"
     check "s stops the run before the read, -V notices written" "$(pane_answer ps options-review)|$(pane_exit ps)|$(grep -c 'LINES READ' "$TMP_DIR/ps.final.txt" || true)" "button=s option=- how=key|0|0" \
         'Stop and correct them ends the run before any file is read, the -V notices section written first' 'ask_about_option_notices() in ltl' "$DOC § D16; $C_ASK"
 }
