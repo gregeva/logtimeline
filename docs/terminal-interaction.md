@@ -300,8 +300,9 @@ capture. Its predicates are `tests/lib/surface-capture.pl`.
 (`docs/toolchain-guidance.md`). A harness that needs tmux is skipped where tmux
 is absent and runs elsewhere; the better remedy, equipping the Windows
 development host with WSL or Cygwin so interactive surfaces are tested there
-too, is an enhancement to the Windows setup, to be filed when the first
-interactive surface is scheduled.
+too, is an enhancement to the Windows setup, filed as #751 (run the test
+harnesses on the Windows development host through WSL or Cygwin) and labelled
+not planned.
 
 ---
 

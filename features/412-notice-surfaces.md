@@ -718,6 +718,11 @@ that no real message reaches an image, each with the keys of its scenario:
 thirty fixture notices make a 43-row panel at width 211, and the browser takes
 the panel's place only when the panel does not fit.
 
+The Windows remedy for the tmux tests, equipping the Windows development host
+with WSL or Cygwin, is filed as #751 (run the test harnesses on the Windows
+development host through WSL or Cygwin), labelled not planned (architect,
+2026-10-22).
+
 Observation: when the index file cannot be written, the run ends with no index
 and no notice (`write_index_file`, the `else` branch of its write). That case
 is not in the inventory.
