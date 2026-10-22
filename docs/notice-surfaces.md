@@ -31,6 +31,11 @@ them with its own content.
 | browser | many notices, or notices worth exploring, in a navigable list with a detail pane; an ask may be layered on an item |
 
 Which component a moment uses is the choice of the feature that calls it.
+Every component prints on standard output when it is redirected or piped. The
+browser prints its pane once and the ask its frame, each with the default
+taken as when the countdown runs out with no key. So no component is limited to
+a terminal, and each one is tested from a redirected run
+(`docs/terminal-interaction.md` § Unattended runs and how a surface is tested).
 How a surface looks (the two coexisting looks, the category sheet of glyphs
 and colours, the notice's anatomy, wording, the light background) is
 `docs/design-language.md`. How a surface behaves (keys and key bars, taking

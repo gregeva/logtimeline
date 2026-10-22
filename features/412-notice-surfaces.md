@@ -1221,6 +1221,11 @@ judged by the architect in the terminal before the work is called done.
 
 - Real producer: the deferred notices when they do not fit the terminal's
   height, in place of the panel.
+- The browser has the standard-output fallback, as every surface does
+  (architect, 2026-10-22). Redirected or piped, it prints its pane on standard
+  output, with the default taken as when its countdown runs out with no input.
+  The browser is never limited to a terminal: that would remove the
+  redirected checks below. Only navigation needs tmux.
 - Redirected: the first frame drawn once, as it appears; tabs named with
   their counts, wrapping to a second row; `◇` on a notice that carries a
   choice; a detail with histograms at ltl's size, the bytes one only where
@@ -1238,6 +1243,10 @@ judged by the architect in the terminal before the work is called done.
 - One rendering with or without a terminal: the redirected output of every
   surface holds the same rows as the pane, with no cursor control, alternate
   screen or wait (the prototype's `plain` predicate).
+- Every surface prints in the standard-output fallback: the panel, the ask
+  and the browser alike (architect, 2026-10-22). No surface is limited to a
+  terminal, so a redirected run reaches each one, and its outcomes are
+  asserted there. Navigation and keys are asserted in tmux.
 - No run hangs: every redirected scenario ends with the default or the answer
   given ahead.
 - The terminal restored on every exit: an answer, quit, the end of the run and

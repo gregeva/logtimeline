@@ -269,6 +269,16 @@ waiting for a key when there is none, so the surface appears once and the run
 goes on with the default or the answer given ahead. There is no second code
 path that changes the tool's standard output.
 
+**Every surface has the standard-output fallback; none is limited to a
+terminal.** The panel, every surface that asks, and the browser all print on
+standard output when it is redirected or piped. A surface that waits on keys
+takes its default as its countdown does when no key arrives. The browser in
+that case prints its pane once, as it first appears. A redirected run therefore
+reaches every surface, and a harness checks each surface's rows and outcomes
+from that run. Only navigation and key handling need a terminal, and they are
+tested in a tmux pane. A rule that kept a surface to terminals would remove
+these redirected checks, and the acceptance criteria rely on them.
+
 **The test method follows the surface it targets.** A harness or the
 screenshot tool uses the cheapest capture that sees what the surface produces;
 no method runs for a surface that does not need it, and nothing runs on a
