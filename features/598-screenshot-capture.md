@@ -313,6 +313,19 @@ to another repository that does not ignore it. When `ltl-index.csv` was not in t
 named folder before a recipe's probe run, the tool removes it after the capture
 run; one already there is left in place, with the rows `ltl` added to it.
 
+**D27: a surface seen in a terminal is captured from a tmux pane** (#412 D18,
+architect, 2026-10-22, for the notice surfaces that ask and the notice
+browser; the mechanism below is Claude's design under that lock). An entry
+names `pane`, one string of steps: `sleep:N` or a key name. `ltl` then runs
+once in a tmux pane of the entry's size, on a tmux server of the tool's own
+with no configuration and the status line off, with standard error to a
+file. The steps run, then the pane is captured with its colours
+(`capture-pane -e`) and drawn as the capture run's output is. There is no
+probe run, a crop takes `cols` and `label` only, and every image is flagged
+for a check of sensitive content. Faint text (SGR 2), which the dimmed run
+under a pop-up is drawn in, is drawn halfway between its colour and the
+background, in pane and redirected captures alike.
+
 ## Capture tool design (agreed with the architect, 2026-09-24)
 
 **Command line.** One ad hoc run mirrors one manifest entry, in the same words:

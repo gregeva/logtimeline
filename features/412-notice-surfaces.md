@@ -420,6 +420,17 @@ Weighed: real producers alone reach only their own cells; a harness-side
 driver over subs sliced out of `ltl` never runs them in a real run, so
 terminal ownership, the part D16 exists to prove, would go untested.
 
+### D18 — The ask and the browser are screenshotted from a tmux pane (architect, 2026-10-22)
+
+The documentation screenshots of the ask and the browser are captured by
+`process/capture-screenshots.pl` from a tmux pane, where they are seen as
+designed: the modal over the dimmed run, the browser on the alternate screen.
+The panel stays a section of a redirected run, which prints the same rows as a
+terminal. Chosen over the frame of a redirected run, cropped as a section:
+that image shows the box inline in the output, which is never what a terminal
+user sees, and a browser that looks like a tall panel. Generating these
+entries needs tmux, on the macOS host that the PNG already requires.
+
 ## Implementation progress
 
 ### Drop 1: store and record (2026-10-21)
@@ -686,6 +697,20 @@ Proven:
 - `stderr-sites` scans `ltl`'s source and checks that every remaining `print STDERR`, `printf STDERR`, `warn` and `die` is in a sub the § Not notices table names. The `ltl` before this drop fails it on `flush_deferred_notices` and `get_memory_usage`.
 - `migration-categories` checks the four new kinds' categories.
 - Row 35 fails only on Windows, where no harness runs, so its raising is not exercised.
+
+Screenshots (D18): `process/capture-screenshots.pl` gains the pane capture,
+`features/598-screenshot-capture.md` D27. `ltl` runs once in a tmux pane of the
+entry's size, steps run, and the pane is drawn, with faint text halfway to the
+background. `process/screenshots.yaml` gains `notice-panel`, the panel as a
+section of a real run with three notices in three categories, and `notice-ask`,
+the real question before the read captured from a pane.
+`validate-screenshot-capture.sh` gains:
+- `faint`: faint cells drawn halfway, which fails on the tool without it;
+- `pane`: one run, the image cell for cell as an independent tmux capture holds it, and the dimmed run faint;
+- `pane-refusals`.
+
+The corpus has no run whose deferred notices exceed the terminal's height: the
+small folders and the method-server and GC folders give none or one.
 
 Observation: when the index file cannot be written, the run ends with no index
 and no notice (`write_index_file`, the `else` branch of its write). That case

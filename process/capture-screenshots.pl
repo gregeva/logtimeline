@@ -4,13 +4,16 @@
 #   process/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #       [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
-#       -- <ltl options and input files>
+#       [--pane 'STEPS'] -- <ltl options and input files>
 #   process/capture-screenshots.pl --manifest FILE [--only NAME]
 #       [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 #
 # ltl runs twice, in the repository root or in the folder the recipe names: a
 # probe run with -V section-layout for the rows each section printed, then the
-# capture run whose output is drawn. Each crop is one image,
+# capture run whose output is drawn. With a pane, ltl instead runs once in a
+# tmux pane of the recipe's size, and the pane as it is seen after the steps is
+# drawn: a pop-up over the dimmed run, a surface on the alternate screen
+# (#412 D18). Each crop is one image,
 # BASE[-sections][-label].svg, with a PNG of the same size beside it drawn by
 # WebKit (process/capture-png.swift). A manifest lists one recipe per entry, in
 # the same words. Specification and guidance:
@@ -111,7 +114,7 @@ sub usage {
 usage: process/capture-screenshots.pl --name BASE [--background dark|light] [--dir DIR]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
            [--crop 'sections=A[,B] start=+-N end=+-N cols=L,R label=LABEL'] ...
-           -- <ltl options and input files>
+           [--pane 'STEPS'] -- <ltl options and input files>
        process/capture-screenshots.pl --manifest FILE [--only NAME]
            [--width N] [--height N] [--pad T[,R[,B[,L]]]] [--out-dir DIR] [--trace]
 
@@ -121,9 +124,13 @@ it: to --out-dir (default: the current directory), or for a manifest to
 images/screenshots/. Without --crop, or for a crop without sections, the image
 is the whole output. Input paths are relative to the folder ltl runs in.
 --pad sets the blank margin around every image, as CSS does: rows top and
-bottom, cells left and right (default 1,2). A manifest lists one run per
-entry: name, ltl, and optionally dir (relative to the manifest's folder),
-background, width, height, pad and crops. The PNGs need swiftc (macOS).
+bottom, cells left and right (default 1,2). --pane runs ltl in a tmux pane
+instead and draws the pane as it is seen once STEPS have run: sleep:N waits N
+seconds, any other word is a key sent to the pane (Down, Enter, Escape, q); a
+crop then takes cols and label only. A manifest lists one run per entry: name,
+ltl, and optionally dir (relative to the manifest's folder), background,
+width, height, pad, pane and crops. The PNGs need swiftc (macOS); a pane
+needs tmux.
 Guidance: docs/process/screenshots.md.
 END
 }
@@ -203,6 +210,20 @@ sub crop_from_words {
     return make_crop( $base, %field );
 }
 
+# The steps of a pane capture (#412 D18), from one string: sleep:N waits N
+# seconds, any other word is a key tmux sends to the pane.
+sub parse_pane {
+    my ($value) = @_;
+    fail('pane: the steps are one string of words, sleep:N or a key') unless defined $value && !ref $value && $value =~ /\S/;
+    my @steps = split ' ', $value;
+    for my $step (@steps) {
+        next if $step =~ /^sleep:\d+(?:\.\d+)?$/;
+        fail("pane: '$step' is neither sleep:N nor a key name") unless $step =~ /^(?:[A-Za-z0-9]|[A-Z][A-Za-z0-9]+|[CMS]-[A-Za-z0-9])$/;
+    }
+    fail('pane: the steps need at least one sleep:N, so the run has drawn before it is captured') unless grep { /^sleep:/ } @steps;
+    return \@steps;
+}
+
 # ---- Running ltl -----------------------------------------------------------
 
 # Run ltl in the recipe's folder, the repository root unless it names one
@@ -240,6 +261,52 @@ sub run_redirected {
     open STDOUT, '>&', $saved_out or die "cannot restore standard output: $!\n";
     open STDERR, '>&', $saved_err or die "cannot restore standard error: $!\n";
     return $status;
+}
+
+# Run ltl in a tmux pane of the recipe's size, on a tmux server of its own
+# with no configuration and no status line, so the pane is the whole terminal;
+# run the steps, capture the pane with its colours, and end the session.
+# Standard error goes to a file and is checked as run_ltl checks it; an exit
+# status ltl reached before the capture is checked too. Returns the capture.
+sub run_pane {
+    my ( $r, $scratch, @argv ) = @_;
+    my $tmux = ( grep { -x } map { File::Spec->catfile( $_, 'tmux' ) } File::Spec->path() )[0]
+        or fail('a pane capture needs tmux, which is not on PATH');
+    my $dir = $r->{dir} // $repo_root;
+    my ( $err_file, $status_file ) = map { File::Spec->catfile( $scratch, "pane.$_" ) } qw(err status);
+    my $q = sub { my $s = shift; $s =~ s/'/'\\''/g; "'$s'" };
+    my $command = join ' ', 'env -u LTL_CONFIG -u FORCE_COLOR -u NO_COLOR', map( { $q->($_) } $^X, $ltl, @argv ),
+        '2>' . $q->($err_file) . '; echo $? >' . $q->($status_file) . '; sleep 600';
+    my @server = ( $tmux, '-L', "ltl-capture-$$", '-f', File::Spec->devnull );
+    my %before = map { $_ => 1 } output_files($dir);
+    my $session = 'capture';
+    system( @server, 'new-session', '-d', '-s', $session, '-x', $r->{width}, '-y', $r->{height}, '-c', $dir,
+            'bash', '--noprofile', '--norc', '-c', $command ) == 0 or fail('tmux could not start the pane');
+    system( @server, 'set-option', '-t', $session, 'status', 'off' ) == 0 or fail('tmux could not switch off its status line');
+    my $capture = eval {
+        for my $step ( @{ $r->{pane} } ) {
+            if ( $step =~ /^sleep:(.+)$/ ) { select undef, undef, undef, $1 }
+            else { system( @server, 'send-keys', '-t', $session, $step ) == 0 or fail("tmux could not send '$step'") }
+        }
+        my $size = `@{[ join ' ', map { $q->($_) } @server ]} display-message -p -t $session '#{pane_width}x#{pane_height}'`;
+        chomp $size;
+        fail("the pane is $size, not $r->{width}x$r->{height}") unless $size eq "$r->{width}x$r->{height}";
+        my $text = `@{[ join ' ', map { $q->($_) } @server ]} capture-pane -e -p -t $session`;
+        fail('tmux could not capture the pane') if $? != 0;
+        $text;
+    };
+    my $error = $@;
+    system( @server, 'kill-server' );
+    remove_output_files( $dir, defined $r->{dir} ? \%before : undef );
+    die $error unless defined $capture;
+    my $err = -e $err_file ? slurp($err_file) : '';
+    print STDERR $err if length $err;
+    fail("ltl (pane run) printed a Perl warning on standard error") if $err =~ / at \S+ line \d+/;
+    if ( -e $status_file ) {
+        chomp( my $status = slurp($status_file) );
+        fail("ltl (pane run) exited with status $status before the capture") if $status ne '0';
+    }
+    return $capture;
 }
 
 # The files at the top of a folder named as ltl names the files -o writes.
@@ -297,6 +364,12 @@ sub run_recipe {
                     ( $r->{background} eq 'light' ? '-lbg' : '-dbg' ), '--disable-progress' );
     my @probe_args   = ( @common, '-V', 'section-layout', @{ $r->{ltl} } );
     my @capture_args = ( @common, @{ $r->{ltl} } );
+    if ( $r->{pane} ) {
+        for my $crop ( @{ $r->{crops} } ) {
+            fail("crop '$crop->{spec}': a pane capture is one screen, not the run's sections; a crop takes cols and label")
+                if @{ $crop->{sections} } || $crop->{start} || $crop->{end};
+        }
+    }
     print "ltl @capture_args\n";
     print "trace: folder: " . ( $r->{dir} // $repo_root ) . "\n" if $opt{trace};
     # In a named folder, the index file ltl writes is removed when this
@@ -304,41 +377,52 @@ sub run_recipe {
     # git and left (D16).
     my $index = defined $r->{dir} && !-e File::Spec->catfile( $r->{dir}, 'ltl-index.csv' ) ? File::Spec->catfile( $r->{dir}, 'ltl-index.csv' ) : undef;
     my ( $probe, $capture );
-    my $ran = eval { $probe = run_ltl( $r, $scratch, 'probe', @probe_args ); $capture = run_ltl( $r, $scratch, 'capture', @capture_args ); 1 };
+    my $ran = eval {
+        if   ( $r->{pane} ) { $capture = run_pane( $r, $scratch, @capture_args ) }
+        else                { $probe = run_ltl( $r, $scratch, 'probe', @probe_args ); $capture = run_ltl( $r, $scratch, 'capture', @capture_args ) }
+        1;
+    };
     if ( $index && -e $index ) {
         unlink $index or fail("cannot remove $index: $!");
         print "trace: removed $index\n" if $opt{trace};
     }
     die $@ unless $ran;
-    if ( $opt{trace} ) {
+    if ( $opt{trace} && $r->{pane} ) {
+        print "trace: pane run: ltl @capture_args\n";
+        print "trace: pane steps: @{ $r->{pane} }\n";
+        print "trace: ltl runs: 1\n";
+    } elsif ( $opt{trace} ) {
         print "trace: probe run: ltl @probe_args\n";
         print "trace: capture run: ltl @capture_args\n";
         print "trace: ltl runs: 2\n";
     }
+    my ( @report_order, %section, $total_rows );
+    if ( $r->{pane} ) {
+        $total_rows = $r->{height};
+    } else {
+        # Section positions from the probe run's -V section-layout report.
+        my ($block) = $probe =~ /^=== section-layout ===\n(.*?)^=== END section-layout ===$/ms
+            or fail('the probe run printed no section-layout report');
+        my @lines = split /\n/, $block;
+        shift @lines;    # header: name state start rows
+        for my $line (@lines) {
+            my ( $name, $state, $start, $rows ) = split /\t/, $line, -1;
+            push @report_order, $name;
+            $section{$name} = { state => $state, start => $start, rows => $rows, order => $#report_order };
+        }
 
-    # Section positions from the probe run's -V section-layout report.
-    my ( @report_order, %section );
-    my ($block) = $probe =~ /^=== section-layout ===\n(.*?)^=== END section-layout ===$/ms
-        or fail('the probe run printed no section-layout report');
-    my @lines = split /\n/, $block;
-    shift @lines;    # header: name state start rows
-    for my $line (@lines) {
-        my ( $name, $state, $start, $rows ) = split /\t/, $line, -1;
-        push @report_order, $name;
-        $section{$name} = { state => $state, start => $start, rows => $rows, order => $#report_order };
+        # The probe run's rows with every -V range removed, as the capture run prints them.
+        my ( $probe_rows, $depth ) = ( 0, 0 );
+        for my $line ( split /\n/, $probe ) {
+            if ( $line =~ /^=== (END )?.+ ===$/ ) { $depth += $1 ? -1 : 1; next }
+            $probe_rows++ unless $depth;
+        }
+        my @capture_lines = split /\n/, $capture, -1;
+        pop @capture_lines if @capture_lines && $capture_lines[-1] eq '';
+        fail( sprintf 'the capture run printed %d rows and the probe run %d: the probe\'s positions do not apply',
+            scalar @capture_lines, $probe_rows ) if @capture_lines != $probe_rows;
+        $total_rows = @capture_lines;
     }
-
-    # The probe run's rows with every -V range removed, as the capture run prints them.
-    my ( $probe_rows, $depth ) = ( 0, 0 );
-    for my $line ( split /\n/, $probe ) {
-        if ( $line =~ /^=== (END )?.+ ===$/ ) { $depth += $1 ? -1 : 1; next }
-        $probe_rows++ unless $depth;
-    }
-    my @capture_lines = split /\n/, $capture, -1;
-    pop @capture_lines if @capture_lines && $capture_lines[-1] eq '';
-    fail( sprintf 'the capture run printed %d rows and the probe run %d: the probe\'s positions do not apply',
-        scalar @capture_lines, $probe_rows ) if @capture_lines != $probe_rows;
-    my $total_rows = @capture_lines;
 
     resolve_crop( $_, \%section, \@report_order, $total_rows, $r->{width} ) for @{ $r->{crops} };
 
@@ -370,6 +454,7 @@ sub run_recipe {
         my $sections = @{ $crop->{sections} } ? join( ',', @{ $crop->{sections} } ) : 'whole output';
         my $line = sprintf '%s + .png  rows %d-%d (%s)  cols %d-%d', $path, $crop->{first}, $crop->{last}, $sections, $crop->{col_first}, $crop->{col_stop} - 1;
         $line .= '  check for sensitive content before committing: shows ' . join( ', ', @{ $crop->{sensitive} } ) if @{ $crop->{sensitive} };
+        $line .= '  check for sensitive content before committing: a pane shows whatever the run printed' if $r->{pane};
         print "$line\n";
         print "trace: crop '$crop->{spec}': rows $crop->{first}-$crop->{last} cols $crop->{col_first}-" . ( $crop->{col_stop} - 1 ) . "\n" if $opt{trace};
     }
@@ -470,13 +555,19 @@ sub palette_for {
     return { colours => \@colours, map { $_ => hex_of( $profile->{$_} ) } qw(text bold background) };
 }
 
+# Faint text, as Terminal.app draws it: the colour halfway to the background.
+sub faint_of {
+    my ( $fg, $bg ) = map { [ map { hex } /^#(..)(..)(..)$/ ] } @_;
+    return sprintf '#%02x%02x%02x', map { int( ( $fg->[$_] + $bg->[$_] ) / 2 + 0.5 ) } 0 .. 2;
+}
+
 # The capture run's output as a grid of cells: character, colours, attributes.
 # Rows are clipped at the terminal width, never wrapped.
 sub build_grid {
     my ( $capture, $palette, $width ) = @_;
     my @colours = @{ $palette->{colours} };
     my ( @grid, %sgr );
-    my $reset = sub { %sgr = ( fg => undef, bg => undef, bold => 0, underline => 0, reverse => 0 ) };
+    my $reset = sub { %sgr = ( fg => undef, bg => undef, bold => 0, faint => 0, underline => 0, reverse => 0 ) };
     $reset->();
     my $apply = sub {
         my @p = map { $_ eq '' ? 0 : $_ } split /;/, $_[0], -1;
@@ -485,7 +576,8 @@ sub build_grid {
             my $c = shift @p;
             if    ( $c == 0 )  { $reset->() }
             elsif ( $c == 1 )  { $sgr{bold} = 1 }
-            elsif ( $c == 22 ) { $sgr{bold} = 0 }
+            elsif ( $c == 2 )  { $sgr{faint} = 1 }
+            elsif ( $c == 22 ) { @sgr{qw(bold faint)} = ( 0, 0 ) }
             elsif ( $c == 4 )  { $sgr{underline} = 1 }
             elsif ( $c == 24 ) { $sgr{underline} = 0 }
             elsif ( $c == 7 )  { $sgr{reverse} = 1 }
@@ -516,6 +608,7 @@ sub build_grid {
         else {
             if ( $col < $width ) {
                 my ( $fg, $bg ) = ( $sgr{fg} // ( $sgr{bold} ? $palette->{bold} : $palette->{text} ), $sgr{bg} // $palette->{background} );
+                $fg = faint_of( $fg, $bg ) if $sgr{faint};
                 ( $fg, $bg ) = ( $bg, $fg ) if $sgr{reverse};
                 $grid[$row][$col] = { ch => $5, fg => $fg, bg => $bg, bold => $sgr{bold}, underline => $sgr{underline} };
             }
@@ -615,7 +708,7 @@ sub main {
     my @ltl_args  = defined $separator ? @args[ $separator + 1 .. $#args ] : ();
     my @crop_words;
     GetOptionsFromArray( \@tool_args, \%opt, 'name=s', 'background=s', 'width=s', 'height=s', 'pad=s',
-        'out-dir=s', 'dir=s', 'trace', 'crop=s' => \@crop_words, 'manifest=s', 'only=s', 'help' => sub { print usage(); exit 0 } )
+        'out-dir=s', 'dir=s', 'trace', 'crop=s' => \@crop_words, 'pane=s', 'manifest=s', 'only=s', 'help' => sub { print usage(); exit 0 } )
         or fail( "invalid options\n" . usage() );
     fail("unexpected argument: @tool_args") if @tool_args;
     check_size( '--width', $opt{width} )   if defined $opt{width};
@@ -648,6 +741,7 @@ sub main {
         pad        => parse_pad( $opt{pad} // DEFAULT_PAD ),
         out_dir    => $out_dir // getcwd(),
         ltl        => \@ltl_args,
+        pane       => defined $opt{pane} ? parse_pane( $opt{pane} ) : undef,
         crops      => \@crops,
     } );
     return 0;
@@ -655,11 +749,11 @@ sub main {
 
 # ---- Manifest (D19) --------------------------------------------------------
 
-my @entry_keys = qw( name ltl dir background width height pad crops );
+my @entry_keys = qw( name ltl dir background width height pad pane crops );
 
 sub run_manifest {
     my ( $out_dir, $crop_words, $ltl_args ) = @_;
-    for my $flag (qw( name background dir )) {
+    for my $flag (qw( name background dir pane )) {
         fail("--$flag is set in the manifest entry, not on the command line") if defined $opt{$flag};
     }
     fail('--crop is set in the manifest entry, not on the command line') if @$crop_words;
@@ -710,6 +804,7 @@ sub run_manifest {
             height     => check_size( "$where: height", $opt{height} // $entry->{height} // DEFAULT_HEIGHT ),
             pad        => eval { parse_pad( $opt{pad} // $entry->{pad} // DEFAULT_PAD ) } // fail("$where: $@"),
             ltl        => \@ltl,
+            pane       => defined $entry->{pane} ? eval { parse_pane( $entry->{pane} ) } // fail("$where: $@") : undef,
             crops      => \@crops,
         };
     }

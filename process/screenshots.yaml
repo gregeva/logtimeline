@@ -29,3 +29,25 @@ screenshots:
       - sections: timeline
         cols: 159,0
         label: heatmap
+
+  # The notices panel before the timeline: two hours of an application
+  # server's access log, run with options that raise three notices in three
+  # categories (a nanosecond -tp the log cannot carry, a microsecond -dmin finer
+  # than its milliseconds, -mdm bin with -g 50 making percentiles approximate).
+  # The panel prints the same rows in a terminal and redirected, so it is a
+  # section of the run (features/412-notice-surfaces.md D18).
+  - name: notice-panel
+    ltl: -st 09:00 -et 11:00 -bs 30 -tp ns -dmin 1us -mdm bin -g 50 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+    background: dark
+    crops:
+      - sections: notices
+
+  # The question put before the read when the options carry notices: -so time
+  # (a deprecated metric name) and a -dmin above -dmax, the modal over the
+  # dimmed title, its countdown running. Captured from a tmux pane, where it is
+  # seen as designed (features/412-notice-surfaces.md D18), two seconds in, with
+  # the seconds the countdown has left.
+  - name: notice-ask
+    ltl: -so time -dmin 500 -dmax 100 logs/AccessLogs/localhost_access_log-twx01-twx-thingworx-0.2025-05-07.txt
+    background: dark
+    pane: sleep:2

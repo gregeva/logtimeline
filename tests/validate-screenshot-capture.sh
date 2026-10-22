@@ -56,7 +56,8 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 scenario_register crop-cells colours ticks heatmap-colours background hidden-absent size-precedence runs-and-crops manifest edges \
-    run-folder manifest-folder folder-output-files folder-index png-size png-pixels png-needs-swiftc
+    run-folder manifest-folder folder-output-files folder-index png-size png-pixels png-needs-swiftc \
+    faint pane pane-refusals
 scenario_parse_args "$@"
 
 pass=0
@@ -609,6 +610,117 @@ if scenario_wanted "$current_scenario"; then
         asserts     'The PNG needs the Swift compiler; without it the tool stops with an error naming it before ltl runs, and writes no image' \
         produced_by 'prepare_png_helper() in process/capture-screenshots.pl' \
         contract    "$CONTRACT criterion 18, D24"
+fi
+
+# The text colour of the dark profile, Terminal.app Clear Dark (%profiles in
+# process/capture-screenshots.pl): what ltl's default colour is drawn as.
+DARK_TEXT='#e0e0e0'
+
+# ---------------------------------------------------------------------------
+current_scenario="faint"
+if scenario_wanted "$current_scenario"; then
+    echo "=== $current_scenario: faint text is drawn halfway to the background ==="
+    # A -udm that matches nothing raises a deferred notice, so the notices
+    # panel prints, its heading's description in faint text.
+    out="$TMP_DIR/faint"
+    run_tool "$out" --name f --pad 0 --out-dir "$TMP_DIR" --trace --crop 'sections=notices' -- -ni -bs 1440 -oe -n 1 -udm 'nosuchkey::max' "$FIXTURE" || true
+    check_warnings "$out"
+    capture_ltl "$out" "$TMP_DIR/faint.ltl"
+    read -r first last cf cs <<< "$(traced_crop "$out" 'sections=notices')" || true
+    assert_command \
+        command     "perl '$CELLS' faint '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0 '$DARK_TEXT'" \
+        label       'the panel heading description: faint cells drawn halfway between their colour and the background' \
+        asserts     'Text ltl prints faint (SGR 2) is drawn halfway between the colour it names and the background, as Terminal.app draws it, never at full strength' \
+        produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
+        contract    "$CONTRACT D27"
+    assert_command \
+        command     "perl '$CELLS' colours '$TMP_DIR/f-notices.svg' '$TMP_DIR/faint.ltl' ${first:-0} ${last:-0} ${cf:-0} ${cs:-0} 0,0,0,0" \
+        label       'every colour of the panel, faint and full, drawn consistently' \
+        asserts     'Each colour ltl names, faint or not, is drawn in one colour throughout the image' \
+        produced_by 'build_grid() in process/capture-screenshots.pl' \
+        contract    "$CONTRACT criterion 2, D27"
+fi
+
+# A pane of our own, as the tool makes it: ltl in tmux, the steps, the pane
+# captured with its colours. The harness's independent view of what the tool's
+# pane image must show.
+own_pane() {
+    local out="$1" steps="$2"; shift 2
+    local server=( tmux -L "ltl-capture-check-$$" -f /dev/null ) args step
+    printf -v args '%q ' "$(command -v perl)" "$LTL" --terminal-width 211 --terminal-height 53 -dbg --disable-progress "$@"
+    "${server[@]}" new-session -d -s own -x 211 -y 53 -c "$REPO_DIR" bash --noprofile --norc -c "$args 2>/dev/null; sleep 60"
+    "${server[@]}" set-option -t own status off > /dev/null
+    for step in $steps; do
+        case "$step" in
+            sleep:*) sleep "${step#sleep:}" ;;
+            *)       "${server[@]}" send-keys -t own "$step" ;;
+        esac
+    done
+    "${server[@]}" capture-pane -e -p -t own > "$out" || true
+    "${server[@]}" kill-server 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+current_scenario="pane"
+if scenario_wanted "$current_scenario"; then
+    echo "=== $current_scenario: a surface seen in a terminal, captured from a tmux pane ==="
+    if ! command -v tmux > /dev/null 2>&1; then
+        echo "  SKIP  $current_scenario :: tmux is not available on this host"
+    else
+        # The question put before the read for two option notices. A key the
+        # question does not use stops its countdown, so the frame holds still
+        # and two runs draw the same cells.
+        steps='sleep:2 z sleep:0.5'
+        shape=( -ni -bs 1440 -oe -n 1 -so time -dmin 500 -dmax 100 "$FIXTURE" )
+        out="$TMP_DIR/pane"
+        run_tool "$out" --name p --pad 0 --out-dir "$TMP_DIR" --trace --pane "$steps" -- "${shape[@]}" || true
+        check_warnings "$out"
+        own_pane "$TMP_DIR/pane.own" "$steps" "${shape[@]}"
+        assert_command \
+            command     "grep -q '^trace: ltl runs: 1\$' '$out' && grep -q '^trace: pane steps: $steps\$' '$out' && ! grep -q '^trace: probe run' '$out'" \
+            label       'one run of ltl, in the pane, with the steps traced' \
+            asserts     'A pane capture runs ltl once, in a tmux pane, with no probe run' \
+            produced_by 'run_recipe() and run_pane() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27"
+        assert_command \
+            command     "grep -q 'Continue with these options?' '$TMP_DIR/pane.own' && perl '$CELLS' chars '$TMP_DIR/p.svg' '$TMP_DIR/pane.own' 1 53 0 211 0,0,0,0" \
+            label       'the image is the pane: the question over the run, every cell as tmux holds it' \
+            asserts     'The image of a pane capture holds, cell for cell, what the pane shows after the steps: the question drawn as a pop-up, the run under it' \
+            produced_by 'run_pane() and build_grid() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27; features/412-notice-surfaces.md D18"
+        assert_command \
+            command     "perl '$CELLS' faint '$TMP_DIR/p.svg' '$TMP_DIR/pane.own' 1 53 0 211 0,0,0,0 '$DARK_TEXT'" \
+            label       'the run under the question: faint, halfway to the background' \
+            asserts     'The dimmed run under a pop-up is drawn faint, halfway between its colour and the background' \
+            produced_by 'build_grid() and faint_of() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27"
+        assert_command \
+            command     "grep -q 'check for sensitive content before committing: a pane shows whatever the run printed' '$out' && pngs_match_svgs '$TMP_DIR'" \
+            label       'the pane image flagged for a check, with its PNG' \
+            asserts     'Every pane image is flagged for a sensitive-content check and has its PNG of the same size' \
+            produced_by 'run_recipe() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27, D23"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+current_scenario="pane-refusals"
+if scenario_wanted "$current_scenario"; then
+    echo "=== $current_scenario: a pane crop takes columns only, and steps are checked ==="
+    mkdir -p "$TMP_DIR/refused"
+    for pair in "sections|--crop sections=timeline|a pane capture is one screen" "step|--pane sleep:1;rm|neither sleep:N nor a key" "nosleep|--pane Enter|at least one sleep:N"; do
+        IFS='|' read -r tag args message <<< "$pair"
+        out="$TMP_DIR/pane-$tag"
+        status=0
+        # shellcheck disable=SC2086
+        run_tool "$out" --name r$tag --out-dir "$TMP_DIR/refused" --pane sleep:1 $args -- -ni -bs 1440 -oe -n 1 "$FIXTURE" 2>/dev/null || status=$?
+        assert_command \
+            command     "[[ $status -ne 0 ]] && grep -q '$message' '$out.stderr' && [[ -z \"\$(ls '$TMP_DIR/refused')\" ]]" \
+            label       "$tag: refused with '$message', no image" \
+            asserts     'A pane crop naming sections or offsets, a step that is neither sleep:N nor a key, and steps with no wait are refused before any image is written' \
+            produced_by 'parse_pane() and run_recipe() in process/capture-screenshots.pl' \
+            contract    "$CONTRACT D27"
+    done
 fi
 
 echo ""
