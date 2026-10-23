@@ -25,8 +25,7 @@ before taking its steps (§ Phase 4: investigation stages, one per
 environment): run `perl process/check-environment.pl` first and record what
 the Windows column reports on a host as found. The standing description of
 the check, the setup per host and the troubleshooting entries is
-`docs/development-environment.md`. AC16 on Windows, as on Linux, is every
-harness starting, never the full suite.
+`docs/development-environment.md`.
 
 Stages 3 (Windows) and 4 (the container builds) are each planned on their own
 host before their steps are taken. What stages 1 and 2 leave to them (the
