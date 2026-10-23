@@ -120,6 +120,26 @@ Dock, an editor's task runner, a scheduled job, a hook run by a graphical git
 client) runs the system interpreters. This is a candidate mechanism for the
 agent's past use of the system Perl, examined in phase 3.
 
+### Phase 3: how the wrong interpreter has been reached (in progress)
+
+The architect starts Claude Code from a terminal, never from the desktop app,
+so the agent's shell inherits the interactive environment and its `PATH`
+(measured in this session: Homebrew Perl, bash and Python). The
+non-interactive shell above therefore does not explain the agent's past use
+of the system Perl in a terminal-started session, unless `~/.zshrc` did not
+yet carry the Homebrew lines at the time; its comment matches the wording
+`README.md` gained when the harnesses started refusing bash 3.2 (2026-09-24).
+
+Cases on record, found by searching issues and commit messages for
+"system Perl":
+
+| Mechanism | Case | What was observed |
+|---|---|---|
+| A tool script found on `PATH` carries the shebang of another Perl | #85 (the macOS build missed `Devel::Size`) | bare `pp` ran under the system Perl's PAR::Packer, which could not see the modules installed for the active Perl; fixed by `perl -S pp` |
+| An interpreter named by an absolute path that stops being right | #544 (profiling setup) | the pinned keg path no longer existed after a Homebrew Perl upgrade |
+| A script whose first line names the system Perl | `#!/usr/bin/perl` in five prototype scripts (`prototype/426-revalidate-v6.pl`, `-v7.pl`, `-v8-rebless.pl`, `prototype/heatmap-mini.pl`, `prototype/heatmap-test.pl`) | run by their path, they start `/usr/bin/perl` whatever `PATH` holds; no recorded failure |
+| A shell context that does not read `~/.zshrc` | phase 1, measured | system Perl, bash 3.2 and system Python |
+
 ## Records found
 
 `./process/find-records.sh --issues 'brew --prefix' 'opt/homebrew' 'require-bash' 'shebang' 'Homebrew bash' 'Homebrew Perl' 'macos-setup' 'windows-setup'`
