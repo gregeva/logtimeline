@@ -10,7 +10,7 @@ environment and setup never overwrites the user's shell configuration (D12,
 D6 as changed, D13, condition 8 retired); stage 1 (the macOS development
 host) planned in § Stage 1 implementation plan; steps 0 (the `before`
 benchmark), 1 (`process/check-environment.pl`) and 2 (the session-start
-hook) done, AC8's budget with the architect; next step 3
+hook) done, AC8's budget set (D14); next step 3
 (`build/macos-setup.sh`). Open, measured in stage 1: what still needs the
 Perl keg line on `PATH` (§ Phase 4: what Homebrew's own configuration already
 provides on macOS). What is in
@@ -564,6 +564,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D11 | The check reports what it expected, what it found and the context it ran in, and points at the failed condition's entry in this document's § Troubleshooting a failed condition; it carries no remedies, and the agent or developer reading it works out the cause on the host from that entry | architect |
 | D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
+| D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
 
 ## Acceptance criteria
 
@@ -657,9 +658,10 @@ scripts, put first on `PATH` to change what one name resolves to.
       name and identifies the `PATH` order as the cause. M L W.
 - [ ] **AC8. The hook is fast enough to run at every session start.** On a
       set-up host, `time sh -c '<command>'`, five runs.
-      Pass when: the median is within the budget the architect sets from the
-      stage 1 measurement. M L W; unknown until measured.
-      - M, 2026-10-23, measured: the hook's command, five runs, 0.28 to
+      Pass when: the median is within the median of five timed runs of the
+      outstanding-state sweep (`process/claude-hooks/session-start.sh`) on the
+      same host (D14). M L W.
+      - M, 2026-10-23, pass: the hook's command, five runs, 0.28 to
         0.30 s, median 0.29 s. Each condition alone (`--condition N`, five
         runs, medians): startup and condition 1 0.02 s; condition 3, the
         twenty runtime modules, 0.07 s; condition 7, the NumPy and SciPy
