@@ -40,7 +40,10 @@ one per environment). What stage 1 leaves to them:
 
 - `process/check-environment.pl` has its Linux and Windows columns written
   from the conditions table and not yet run; `run_capture` is the one place a
-  tool is started, for stage 3 to adapt to Strawberry Perl.
+  tool is started, for stage 3 to adapt to Strawberry Perl. Condition 7's
+  `modules` test (D15) exists for macOS only; stages 2 and 3 give their host
+  entries in `%place` theirs, once their setups say where NumPy and SciPy
+  are installed.
 - `README.md`'s Linux and Windows instructions, and `docs/toolchain-guidance.md`
   § Windows development host (trap 3, the shim at Git's
   `/opt/homebrew/bin/perl`, now unused by `./ltl`), are stages 2 and 3's to
@@ -270,7 +273,7 @@ by trusting the Perl the check runs under.
 | 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
-| 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
+| 7 | `python3` on `PATH` imports NumPy and SciPy, each from the setup's install (D15) | Homebrew's, not `/usr/bin/python3`; each module's file resolves into its own formula's Cellar | the distribution's; the modules' place established in the Linux stage | the WinGet Python; the modules' place established in the Windows stage | fail where the harnesses run, note on Windows |
 | 8 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7; the report also shows, for context, what a new terminal tab (an interactive login shell) and a plain non-login shell resolve | `zsh -lc`; `~/.zprofile` (D6) | a login bash | a Git Bash login shell | fail |
 | 9 | `tmux` is on `PATH` | expected | expected | not expected | note |
 | 10 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
@@ -626,6 +629,7 @@ Written in the specification stage; the architect closed the stage without a lin
 | D12 | The check judges the environment, whatever configured it; setup never overwrites or duplicates the user's shell configuration, and adds a piece only when `--repair` (or the full setup's shell step) finds it missing | architect |
 | D13 | Homebrew is a requirement of the macOS development host: `build/macos-setup.sh` stops when it is absent, as today, and never installs it. The case in D12's first wording, setup adding Homebrew's line after installing Homebrew itself, therefore does not arise | architect |
 | D14 | AC8's budget: the session-start check finishes within the outstanding-state sweep's time on the same host. The two SessionStart entries run in parallel, so the check then never lengthens session start, and each host is judged against itself rather than against a figure measured on macOS (decided 2026-10-23 from the stage 1 measurement: check 0.29 s, sweep 3.40 s, medians of five) | architect |
+| D15 | Condition 7 also judges where NumPy and SciPy load from: each module's file must resolve into the setup's install (on macOS its own formula's Cellar), so a `pip` install shadowing the setup's fails it. Decided 2026-10-23 from a second macOS host, where a `python3` link to Homebrew's Python passed condition 7 while it loaded a pip-installed SciPy 1.17.1 over Homebrew's unlinked 1.18.1 (§ Step 5). Linux and Windows name their place in their stages | architect |
 
 ## Acceptance criteria
 
@@ -688,6 +692,22 @@ scripts, put first on `PATH` to change what one name resolves to.
         /usr/bin/python3`. Condition 8 passes in both: it judges the login
         shell's tools against what conditions 2, 6 and 7 expect, not against
         the check's own `PATH`.
+- [x] **AC4a. NumPy or SciPy from outside the setup's install is reported**
+      (D15). macOS, on a host whose Homebrew Python has a module installed
+      with `pip` in its `site-packages`: `ln -s <Homebrew python3.x>
+      "$D/python3"; PATH="$D:$PATH" perl process/check-environment.pl
+      --condition 7`, then the same with `PYTHONPATH` set to the formula's
+      own `site-packages` in its Cellar. Pass when: the first run fails
+      condition 7 naming the file the module loads from, with its pointer;
+      the second passes. M.
+      - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
+        the second host): the first run failed, found `<D>/python3 ->
+        …/Cellar/python@3.14/…/python3.14; SciPy loads from
+        /opt/homebrew/lib/python3.14/site-packages/scipy/__init__.py`; with
+        `PYTHONPATH=/opt/homebrew/Cellar/scipy/1.18.1_1/lib/python3.14/site-packages`
+        it passed. The code before D15 passed the first run. The host as it
+        stands reads as before, condition 7 naming `/usr/bin/python3`; the
+        full check took 0.16 s before and after (medians of five).
 - [ ] **AC5. The check writes nothing.** `T=$(mktemp -d)`, then, a second
       later, `M=$(mktemp)`; then `HOME="$T" ZDOTDIR="$T" perl
       process/check-environment.pl`, then `find "$T" -newer "$M"` and
@@ -1168,8 +1188,8 @@ Two things hold for every entry:
 | 4 | note: the profiler is not installed | expected unless setup ran with `--dev-deps`; the same upgrade cause as 3 applies |
 | 5 | Linux: `PERL5LIB` does not carry `~/perl5` | the line that sets it missing from a file this context reads, as for 2 |
 | 6 | the first `bash` is older than 4 | the system's bash ahead of the setup's; macOS's `/bin/bash` is 3.2. Same `PATH` causes as 2 |
-| 7 | `python3` does not import NumPy or SciPy | another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH` |
-| 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone, which only an interactive shell reads: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did. `--repair` adds the missing piece to `~/.zprofile` |
+| 7 | `python3` does not import NumPy or SciPy, or loads one from outside the setup's install | another Python ahead of the setup's (macOS `/usr/bin/python3`; on Windows the Microsoft Store stub), or the modules installed for a different Python than the one on `PATH`; on macOS, Homebrew's Python present only as a versioned formula another formula depends on, which links `python3.x` and no `python3`, so `/usr/bin/python3` comes first; or a module installed with `pip` into Homebrew Python's `site-packages`, which shadows the formula's own and can leave the formula unlinked (the report names the file the module loads from; `brew link --dry-run <formula>` shows what is not linked) |
+| 8 | a login shell from a clean environment resolves different tools | the lines that put the tools first are in a file a login shell does not read (on macOS, `~/.zshrc` alone, which only an interactive shell reads: the report then shows a new tab right and a login shell wrong), or another file read after them reorders `PATH`; compare the modes as § Phase 4: where macOS setup writes its shell configuration did. `--repair` adds the missing piece to `~/.zprofile`. When every mode resolves the same tool as the `PATH` the check saw, the shell files are not the cause: the failure repeats condition 2's, 6's or 7's, and that entry applies |
 | 9 | note: no `tmux` | the terminal-interface navigation tests cannot run on this host |
 | 10 | note: no screenshot tools | screenshot capture cannot run on this host |
 | 11 | Windows: `core.autocrlf` is not `false` | the clone was made without `-c core.autocrlf=false`, or a global setting overrides the repository's; scripts check out with CRLF endings and fail in Git Bash |

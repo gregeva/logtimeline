@@ -157,12 +157,18 @@ sub modules_not_loading {
 
 # Where this host's setup puts each development tool: the test its resolved
 # path passes, and how that reads in a report. A tool absent from a host's
-# entry may be anywhere on that host.
+# entry may be anywhere on that host. A python3 entry's modules test is passed
+# each module's name and the resolved path of the file it loads from; without
+# one, a module may load from anywhere.
 my %place = (
     macos => {
         perl    => { test => sub { $_[0] =~ m{/Cellar/perl/} }, text => "Homebrew's, a path into its Cellar, not /usr/bin or /System" },
         bash    => { test => sub { $_[0] =~ m{/Cellar/} },      text => "Homebrew's, a path into its Cellar, not /bin" },
-        python3 => { test => sub { $_[0] =~ m{/Cellar/} },      text => "Homebrew's, a path into its Cellar, not /usr/bin" },
+        python3 => {
+            test    => sub { $_[0] =~ m{/Cellar/} },
+            text    => "Homebrew's, a path into its Cellar, not /usr/bin; NumPy and SciPy each from its own formula's Cellar, not a pip install",
+            modules => sub { my ( $module, $path ) = @_; $path =~ m{/Cellar/\Q$module\E/} },
+        },
     },
     linux => {
         perl    => { test => sub { $_[0] =~ m{^/(usr/)?bin/} }, text => "the distribution's, in /usr/bin" },
@@ -202,8 +208,18 @@ sub judge {
         return ( $ok, describe( $tool, $version // 'version not read' ) );
     }
     return ( 0, describe($tool) ) unless $in_place;
-    my ($status) = $measure->( sub { run_capture( $tool->{path}, '-B', '-c', 'import numpy, scipy' ) } );
-    return ( $status == 0, describe($tool) . ( $status == 0 ? '; NumPy and SciPy import' : '; NumPy or SciPy does not import' ) );
+    my ( $status, $out ) = $measure->( sub {
+        run_capture( $tool->{path}, '-B', '-c',
+            'import os, numpy, scipy; print(os.path.realpath(numpy.__file__)); print(os.path.realpath(scipy.__file__))' );
+    } );
+    return ( 0, describe($tool) . '; NumPy or SciPy does not import' ) if $status != 0;
+    my %from;
+    @from{qw(numpy scipy)} = split /\n/, $out;
+    my $modules = $place && $place->{modules};
+    my @outside = grep { $modules && !$modules->( $_, $from{$_} // '' ) } qw(numpy scipy);
+    return ( 1, describe($tool) . '; NumPy and SciPy import' ) unless @outside;
+    my %label = ( numpy => 'NumPy', scipy => 'SciPy' );
+    return ( 0, describe($tool) . '; ' . join( ', ', map { "$label{$_} loads from $from{$_}" } @outside ) );
 }
 
 # --- The conditions -----------------------------------------------------------
