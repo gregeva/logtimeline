@@ -200,7 +200,7 @@ by trusting the Perl the check runs under.
 | 1 | a `perl` is on `PATH` | | | | fail |
 | 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
 | 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
-| 4 | it loads the development-only modules (the profiler) | when installed (`--with-develop`) | when installed (`--with-develop`) | when installed (`--with-develop`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
+| 4 | it loads the development-only modules (the profiler) | when installed (`--dev-deps`) | when installed (`--dev-deps`) | when installed (`--dev-deps`), once `build/cpanfile.windows` carries the develop block (544 D5a as amended) | note |
 | 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
 | 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
 | 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
@@ -266,7 +266,7 @@ full setup safe to re-run was the alternative, set aside because every install
 step on every host (Homebrew's upgrade-on-install, WinGet, cpanm) would have
 to become a guaranteed no-op, each a separate promise to keep and test.
 
-### Phase 4: one option set for every setup script (proposal)
+### Phase 4: one option set for every setup script (decided by the architect, 2026-10-23)
 
 The setup options today are three conventions: `build/macos-setup.sh` takes no
 arguments and reads `LTL_INSTALL_DEV_DEPS=1` (544 D6); `build/windows-setup.ps1`
@@ -279,19 +279,19 @@ harness through `tests/lib/scenario-select.sh`; `--label`, `--force`,
 `tests/baseline/run-benchmark.sh`), and an unknown option exits non-zero
 having done nothing.
 
-Proposed: the same options, spelled the same way, on all three setup scripts.
+The same options, spelled the same way, on all three setup scripts. The
+architect named the development option `--dev-deps`; it passes cpanm
+`--with-develop`.
 
 | Option | Effect | Replaces |
 |---|---|---|
 | (none) | full setup: install the runtime tools and modules, write the shell configuration, run the check | |
-| `--with-develop` | full setup, plus the development-only modules (the profiler) | `LTL_INSTALL_DEV_DEPS=1` on macOS, `-DevDeps` on Windows |
+| `--dev-deps` | full setup, plus the development-only modules (the profiler) | `LTL_INSTALL_DEV_DEPS=1` on macOS, `-DevDeps` on Windows |
 | `--package` | full setup, plus PAR::Packer, for building the static binary | `-Package` on Windows; on macOS PAR::Packer is installed unconditionally today |
 | `--repair` | write the shell configuration only, then run the check | |
 | `--validate` | run the check only | |
 | `-h`, `--help` | usage | |
 
-- `--with-develop` is cpanm's own name for the flag the setup passes on, and
-  the cpanfile names the phase `develop`: one word for one thing.
 - `--repair` and `--validate` take neither install option; given together, or
   with an unknown option, the script exits non-zero having done nothing.
 - `.github/workflows/release-build.yml` runs `./build/macos-setup.sh` bare, then
@@ -346,7 +346,7 @@ records what it finds here before the next.
 |---|---|---|
 | 1 | macOS development host | the check script, the session-start hook, `build/macos-setup.sh` with `--repair` and `--validate`, the rule applied to every script; the harness suite passes |
 | 2 | Linux development host | a new Linux setup script (the distribution's Perl, `local::lib`), the check's Linux column, the screenshot tools on Linux; the harness suite passes |
-| 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--with-develop`, the option set parsed by PowerShell |
+| 3 | Windows development host | `build/windows-setup.ps1` with `--repair` and `--validate`, the check under Git Bash, `./ltl` through `env perl` with no shim, the hooks, the profiler with `--dev-deps`, the option set parsed by PowerShell |
 | 4 | the container builds | `build/windows-package.sh` (Wine) and `build/ubuntu-package.sh` build as before, with the develop block in `build/cpanfile.windows` |
 
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
@@ -433,8 +433,8 @@ Draft, for the architect's review.
 - **R7. Python under the same rule.** `python3` is the one setup installs;
   condition 7 asserts it.
 - **R8. Profiling on every host.** `build/cpanfile.windows` carries the
-  develop block (544 D5a as amended); `--with-develop` installs the profiler
-  on every host; no packaged binary carries it.
+  develop block (544 D5a as amended); `--dev-deps` installs the profiler on
+  every host; no packaged binary carries it.
 - **R9. No message about a tool the host does not have.** No script prints a
   message from, or a remedy naming, a tool absent from the host it runs on.
 - **R10. The records say what is now true.** `README.md` § Install
@@ -453,6 +453,7 @@ Draft, for the architect's review.
 | D2 | The session-start hook: shell form, an `sh` launcher, the Perl check | architect |
 | D3 | Linux starts from the distribution's Perl with `local::lib`; not a hard requirement, settled in the Linux stage | architect |
 | D4 | Setup modes: full, `--repair`, `--validate` | architect |
+| D9 | One option set on every setup script: `--dev-deps`, `--package`, `--repair`, `--validate`, `-h`/`--help`; CI's macOS step runs `--package`; 544 D6's environment variable goes | architect |
 | D5 | Profiling on every host; 544 D5a amended | architect |
 | D6 | macOS writes its block into both `~/.zshenv` and `~/.zprofile` | delegated, from the measurement |
 | D7 | The one rule and its exceptions; `require-bash.sh` stays as a guard with a host-neutral message | delegated |
@@ -530,7 +531,7 @@ own files are never touched.
 
 **Profiling and packaging (R8)**
 
-- [ ] **AC17.** On Windows, `build/windows-setup.ps1 --with-develop` leaves
+- [ ] **AC17.** On Windows, `build/windows-setup.ps1 --dev-deps` leaves
       `perl -MDevel::NYTProf -e 1` succeeding. W; assertable in stage 3.
 - [ ] **AC18.** A profiling run (`tests/profile/run-profile.sh`) produces its
       report on Windows. W; unknown: whether the profiling scripts meet the

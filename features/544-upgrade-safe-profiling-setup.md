@@ -218,8 +218,16 @@ add a compile step for nothing. Keeping the block out of the Windows variant als
 the two files' difference exactly what it is documented to be: platform-specific runtime
 modules.
 
-**D6 (delegated): `build/macos-setup.sh` installs the development-only phase only when
-asked, via an environment variable `LTL_INSTALL_DEV_DEPS=1`.**
+**D6 (amended by the architect, 2026-10-23, in `features/750-interpreter-resolution.md`
+D9): every setup script installs the development-only phase only when asked, by the
+option `--dev-deps`, the same on macOS, Linux and Windows.** A bare run still installs no
+profiler, so the CI step that runs `./build/macos-setup.sh` stays correct without the
+option. The environment variable below goes; its second reason, that the script had no
+option parser, ends with the setup modes 750 adds.
+
+*The decision as first taken (delegated), superseded by the amendment above:*
+`build/macos-setup.sh` installs the development-only phase only when asked, via an
+environment variable `LTL_INSTALL_DEV_DEPS=1`.
 The script's dependency step becomes: with the variable set to `1`, run
 `cpanm --notest --installdeps --with-develop .`; otherwise the existing
 `cpanm --notest --installdeps .`. The script prints which of the two it chose.
