@@ -17,8 +17,8 @@ problem at the time, and the analysis is expected to challenge it.
 
 Open in stage 1, in this order:
 
-1. **The release build on the issue branch**, asked of the architect and not
-   yet answered: `gh workflow run release-build.yml --ref
+1. ~~**The release build on the issue branch**~~ Done 2026-10-23, success
+   (§ Step 3, its CI bullet). The command was: `gh workflow run release-build.yml --ref
    750-interpreter-resolution`, its own command. The macOS job now runs
    `./build/macos-setup.sh --package`, which ends with the environment check,
    so a condition failing on GitHub's runner stops the build; the release job
@@ -1124,6 +1124,15 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   `./build/macos-setup.sh --package`. Verified by a manual run of that
   workflow on the issue branch (its release job runs on tags only), asked of
   the architect first.
+  Run 2026-10-23 (run 40015452666, at `de4d789c`): success; build-macos,
+  build-ubuntu amd64 and arm64 and build-windows passed, release skipped. On
+  GitHub's macOS runner the shell step found condition 8 failing (a clean
+  login shell resolved `/usr/bin/perl` 5.34.1, `/bin/bash` 3.2 and the
+  python.org `python3` in `/Library/Frameworks`), added Homebrew's line to
+  the runner's `~/.zprofile`, and the final check read 7 pass, 0 FAIL, notes
+  for the profiler and `tmux`; condition 7 passed under D15's tests on
+  every host, with the python.org Python also present. The link step
+  printed nothing: every formula was already linked.
 - **Proven by** AC9 (`--validate` and `--repair` install nothing), AC10 (a
   working configuration gains nothing), AC10a (the missing piece added once),
   AC11 (both login modes resolve the tools), each in a throwaway home.
