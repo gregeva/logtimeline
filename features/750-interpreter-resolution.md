@@ -29,14 +29,10 @@ Open in stage 1, in this order:
    Code is started from the issue worktree: `PATH="/usr/bin:/bin:$PATH"
    claude`. A session started from the main checkout does not run the hook
    until the release merges.
-3. **Parked for another host**, one not behind this network's web proxy,
-   which blocks the `Archive-Zip` download PAR::Packer depends on (§ Step 3,
-   the Perl keg line): install PAR::Packer for Homebrew Perl (`perl -S cpanm
-   --notest PAR::Packer`); build from a login shell started from a clean
-   environment that carries Homebrew's line only (`build/macos-package.sh
-   arm64`), and record which `pp` it starts and whether the binary runs; then
-   AC19's macOS build. The shell step gains the Perl keg line only if that
-   run shows it is needed.
+3. ~~Parked for another host: the Perl keg measurement and AC19's macOS
+   build.~~ Done on a second macOS development host, 2026-10-23: the keg
+   line is not needed, and AC19 passes for the macOS build (§ Step 3, the
+   Perl keg line; AC19).
 
 Then stages 2 (Linux), 3 (Windows) and 4 (the container builds), each planned
 on its own host before its steps are taken (§ Phase 4: investigation stages,
@@ -59,7 +55,8 @@ single-day-access-log-standard --label 750-after`) from a worktree beside the
 `release/0.20.0` one, so both sides run from the same kind of checkout,
 compared with `750-before.tsv`; then the full harness suite (AC16).
 
-State outside the repository, on the macOS development host only:
+State outside the repository, on the first macOS development host only (the
+one the keg measurement was parked from):
 
 - `tests/baseline/results/750-before.tsv`, untracked, in the `release/0.20.0`
   worktree (`.claude/worktrees/release-0.20.0`), captured at `7d0b57f8`. The
@@ -837,6 +834,12 @@ scripts, put first on `PATH` to change what one name resolves to.
       cpanfile and the profiler installed, build each binary and list its
       archive (`unzip -l <binary>`). Pass when: no entry names
       `Devel/NYTProf`. M C.
+      - M, 2026-10-23, pass, on a second macOS development host: with the
+        cpanfile's develop block requiring `Devel::NYTProf` and the profiler
+        loading in Homebrew Perl 5.44.0 (condition 4 passing),
+        `build/macos-package.sh arm64` from a clean login shell; `unzip -l`
+        lists 148 entries, none naming `Devel/NYTProf`. C (the CI builds)
+        is stage 4's.
 
 **The records (R10)**
 
@@ -991,8 +994,19 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   use pp; pp->go();`, so under Homebrew Perl it would load Homebrew Perl's own
   `pp.pm`. **Parked by the architect (2026-10-23), to be done from another
   host**, not behind this network's proxy: this measurement, and with it
-  AC19's macOS build, which needs PAR::Packer on the host as well. Until then
-  the shell step adds Homebrew's line only.
+  AC19's macOS build, which needs PAR::Packer on the host as well.
+  **Measured on a second macOS development host, 2026-10-23: the keg line is
+  not needed.** That host has Homebrew Perl 5.44.0 with PAR::Packer 1.064
+  installed, and a `~/.zprofile` holding Homebrew's own line only. From
+  `env -i HOME=… USER=… TERM=… /bin/zsh -lc`: `HOMEBREW_PREFIX=/opt/homebrew`,
+  `perl` resolves `/opt/homebrew/bin/perl` (5.44.0); the keg's `bin`, which
+  holds Homebrew Perl's own `pp`, is not on `PATH`, so `perl -S pp` finds
+  macOS's `/usr/bin/pp`, whose `use pp;` under Homebrew Perl loads
+  `/opt/homebrew/opt/perl/lib/perl5/site_perl/5.44/pp.pm` and PAR::Packer from
+  the same `site_perl`. `build/macos-package.sh arm64` built the binary
+  (Mach-O arm64, linked against `libSystem` alone, its archive's modules from
+  `5.44.0/darwin-thread-multi-2level`), which ran `--version` with exit 0 and
+  passed the read-path check. The shell step stays Homebrew's line only.
 - **CI:** `.github/workflows/release-build.yml` runs
   `./build/macos-setup.sh --package`. Verified by a manual run of that
   workflow on the issue branch (its release job runs on tags only), asked of
