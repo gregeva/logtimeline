@@ -1003,6 +1003,7 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass: first line `#!/usr/bin/env perl`; `./ltl
         --disable-progress --version` printed `0.20.0-750`.
       - L, 2026-10-23, Ubuntu 26.04.1, pass: `./ltl --disable-progress --version` printed `0.20.0-750`, first line `#!/usr/bin/env perl`.
+      - W, 2026-10-24, Windows 11 ARM64, pass: after the full setup removed the wrapper, a Git Bash login shell ran `./ltl --disable-progress --version` (`Version: 0.20.0-750`, exit 0) through `perl` = `/c/Strawberry/perl/bin/perl`; `ls /opt/homebrew/bin/perl`: "No such file or directory".
 - [ ] **AC16. The harness suite passes, and every harness starts on each
       host it runs on.** macOS: the completion gate's full suite
       (`docs/process/workflow.md` § 3), run once, after stage 4; pass when
@@ -1626,6 +1627,27 @@ Runs on this host, captured in the session's scratchpad:
 | `--repair` on this host | "BASH_ENV is …\.bashrc", "~/bin/python3 is present", condition 8 pass, "Nothing to add"; `~/.bashrc`, `~/.bash_profile` and `~/bin/python3` byte for byte unchanged; exit 0 |
 | `--repair` twice, `HOME` a stand-in holding only `.bashrc` with `export KEEP=1`, `BASH_ENV` naming it | first: wrapper written, condition 8 FAIL (login shell resolves `/usr/bin/perl`), the Strawberry Perl block appended after `export KEEP=1`, then 7 pass; the stand-in's `.bash_profile` was written by Git for Windows' own `/etc/profile` and reads `~/.bashrc`, so nothing was added there. Second: nothing added, files unchanged |
 | the session-start hook, the four environments of the previous section | the same messages, with `--repair` as the fix for the configuration causes |
+
+### Step 2: no wrapper at Git's `/opt/homebrew/bin/perl` (2026-10-24)
+
+`build/windows-setup.ps1` no longer writes the wrapper; its elevated step
+installs Strawberry Perl and removes a wrapper it finds there, with the
+directories left holding nothing else (`Remove-Shim`). The full setup elevates
+when Strawberry Perl is missing or a wrapper is present. Tried on a scratch
+Git root: the wrapper alone, with `opt` and `homebrew` removed; beside another
+file in `opt`, which stays; none, nothing touched.
+
+The full setup on this host (the elevation approved by the architect): every
+WinGet package already installed; the wrapper and the `opt` directory removed;
+the shell step added nothing and left `~/.bashrc`, `~/.bash_profile` and
+`~/bin/python3` byte for byte; the check 7 pass, 1 note (4), exit 0. AC15 on
+Windows passes (recorded under it).
+
+The line-endings step warned "1 tracked files have CR LF endings but the tree
+has changes": a file committed with CRLF endings (`i/crlf w/crlf`), which a
+fresh checkout gives back with CRLF, so the warning could never clear. The step
+now takes only files committed with LF and checked out with CRLF (`i/lf
+w/crlf`): none on this host.
 
 ## Troubleshooting a failed condition
 

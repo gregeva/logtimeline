@@ -12,8 +12,8 @@
     each package. Strawberry Perl publishes x64 only, so on ARM64 it runs under
     Windows' x64 emulation; the script reports this.
 
-    Steps that write under Program Files (Strawberry Perl, the interpreter shim)
-    need administrator rights. Started without them, the script re-launches just
+    Steps that write under Program Files (installing Strawberry Perl, removing
+    a wrapper left at Git's /opt/homebrew/bin/perl) need administrator rights. Started without them, the script re-launches just
     those steps elevated and Windows asks once for approval.
 
     The options are read from the arguments, not bound as PowerShell
@@ -103,6 +103,22 @@ function Install-WingetPackage($id, [string]$scope = '') {
     Write-Info "installing $id"
     & winget @a | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "winget install $id failed (exit $LASTEXITCODE)" }
+}
+
+# ltl starts through env perl, so nothing is placed at Git Bash's
+# /opt/homebrew/bin/perl, a path Git Bash resolves under the Git install. A
+# wrapper found there, which ran Strawberry Perl for a first line naming that
+# path, is removed, with the directories holding nothing else.
+$ShimFile = Join-Path $GitRoot 'opt\homebrew\bin\perl'
+function Remove-Shim {
+    if (-not (Test-Path $ShimFile)) { return }
+    Remove-Item -LiteralPath $ShimFile -Force
+    Write-Info "removed $ShimFile"
+    $dir = Split-Path $ShimFile
+    while ($dir -ne $GitRoot -and (Test-Path $dir) -and -not (Get-ChildItem -Force $dir)) {
+        Remove-Item -LiteralPath $dir -Force
+        $dir = Split-Path $dir
+    }
 }
 
 function Test-ManagedBlock($path, $name) {
@@ -209,15 +225,7 @@ function Invoke-ShellStep {
 if ($Phase -eq 'Machine') {
     Write-Step 'Machine-wide steps (administrator)'
     Install-WingetPackage 'StrawberryPerl.StrawberryPerl'
-
-    # ltl's first line names /opt/homebrew/bin/perl (the macOS development
-    # interpreter). Git Bash resolves /opt under the Git install; a one-line
-    # wrapper there lets './ltl' run exactly as it does on macOS.
-    $shimDir = Join-Path $GitRoot 'opt\homebrew\bin'
-    New-Item -ItemType Directory -Force $shimDir | Out-Null
-    $shim = "#!/bin/sh`nexec /c/Strawberry/perl/bin/perl.exe `"`$@`"`n"
-    [IO.File]::WriteAllText((Join-Path $shimDir 'perl'), $shim, (New-Object Text.UTF8Encoding $false))
-    Write-Info "interpreter shim written to $shimDir\perl"
+    Remove-Shim
     return
 }
 
@@ -247,10 +255,9 @@ Install-WingetPackage 'jqlang.jq' 'user'
 Install-WingetPackage 'Python.Python.3.13' 'user'
 Update-SessionPath
 
-Write-Step '[2/7] Strawberry Perl and the interpreter shim (needs administrator)'
-$shimFile = Join-Path $GitRoot 'opt\homebrew\bin\perl'
-if ((Test-Path "$StrawberryRoot\perl\bin\perl.exe") -and (Test-Path $shimFile)) {
-    Write-Info 'Strawberry Perl and the shim are present'
+Write-Step '[2/7] Strawberry Perl (needs administrator)'
+if ((Test-Path "$StrawberryRoot\perl\bin\perl.exe") -and -not (Test-Path $ShimFile)) {
+    Write-Info 'Strawberry Perl is present'
 } elseif (Test-Admin) {
     & $PSCommandPath -Phase Machine
 } else {
@@ -292,7 +299,8 @@ Write-Step '[6/7] Git: line endings'
 Push-Location $RepoRoot
 try {
     git config --local core.autocrlf false
-    $bad = @(git ls-files --eol | Where-Object { $_ -match 'w/crlf' -and $_ -notmatch 'attr/-text' })
+    # Only a file committed with LF endings checks out again with LF.
+    $bad = @(git ls-files --eol | Where-Object { $_ -match '^i/lf\s+w/crlf' -and $_ -notmatch 'attr/-text' })
     if ($bad.Count -gt 0) {
         $dirty = git status --porcelain
         if ($dirty) {
