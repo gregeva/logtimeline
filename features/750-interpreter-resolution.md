@@ -29,8 +29,16 @@ the time, and the analysis is expected to challenge it.
 - **Linux has no development setup.** It has no Homebrew, while the primary
   development environment relies on Homebrew; a Linux development setup
   script is likely needed.
+- **Python is held to the same requirement.** The harnesses use Python
+  (NumPy, SciPy); every consumer runs the Python the development setup
+  installs, never whatever the system happens to carry.
 - **Some limits are strict and stay:** screenshot capture runs on macOS and
-  Linux only, because of the dependencies it uses.
+  Linux only, because of the dependencies it uses; the terminal-interface
+  navigation tests need tmux and run on macOS and Linux only.
+- **The analysis runs on each operating system.** Cross-system investigation
+  stages try, test and, where needed, build the setup on the host it is for
+  (macOS, Linux, a real Windows host, the Wine build), rather than reasoning
+  about a host from another one.
 - The way forward is the cleanest, most coherent one the analysis finds, and
   it may change earlier decisions; nothing is locked up front.
 
