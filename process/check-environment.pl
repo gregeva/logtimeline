@@ -74,13 +74,16 @@ sub real {
 # Start a tool and capture its standard output; its standard input is empty
 # and its standard error discarded. Returns the exit status (-1 when it could
 # not start or ran past TOOL_TIMEOUT) and the output. The one place a tool is
-# started.
+# started. The tool runs in a session of its own, so a timeout kills its whole
+# process group, and so it has no controlling terminal: an interactive shell
+# started from a terminal in a process group of its own is stopped as soon as
+# it touches that terminal, and would run into the timeout.
 sub run_capture {
     my (@cmd) = @_;
     my $pid = open( my $fh, '-|' );
     return ( -1, '' ) unless defined $pid;
     if ( !$pid ) {
-        setpgrp( 0, 0 );
+        POSIX::setsid();
         open STDIN,  '<', File::Spec->devnull;
         open STDERR, '>', File::Spec->devnull;
         exec { $cmd[0] } @cmd or POSIX::_exit(127);

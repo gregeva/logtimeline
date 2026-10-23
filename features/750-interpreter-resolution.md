@@ -679,6 +679,11 @@ scripts, put first on `PATH` to change what one name resolves to.
       - M, 2026-10-23, pass, on the architect's home after `--repair` (stage
         1 step 5): eleven conditions reported, 9 pass and 2 `n/a` (5, Linux's
         `PERL5LIB`; 11, Windows' line endings), exit 0.
+      - M, 2026-10-23, pass, on a second macOS development host, after the
+        developer removed a `pip` SciPy and ran the full setup from a
+        terminal: 8 pass, 1 note (no `tmux`), 2 `n/a`. That run's condition 8
+        context showed a new terminal tab resolving nothing; see § Step 1,
+        run from a terminal.
 - [ ] **AC2. The wrong Perl first on `PATH` is reported, and the check still
       runs under it.** macOS: `PATH="/usr/bin:/bin:$PATH" /usr/bin/perl
       process/check-environment.pl`. Windows: `PATH="/usr/bin:$PATH"
@@ -872,8 +877,9 @@ scripts, put first on `PATH` to change what one name resolves to.
         `1289 /opt/homebrew/lib/python3.14/site-packages/scipy` (the count
         `brew link --overwrite --dry-run` gives); perl, bash, python, numpy
         and cpanminus already linked, untouched; `find` listed nothing. The
-        case where the formula can link is reached once the developer
-        removes the colliding files.
+        developer then removed pip's SciPy (`pip uninstall`) and ran the full
+        setup: "[link] Linking scipy", Homebrew reporting 2854 symlinks
+        created, and the check passing condition 7 on Python 3.15.
 - [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
       run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
@@ -1020,6 +1026,20 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
 - **Proven by** AC2 (the wrong Perl first), AC3 (a Perl without the modules),
   AC4 (old bash; the system Python), AC5 (writes nothing). AC1 waits for
   step 3's `--validate`.
+- **Run from a terminal** (found on a second macOS host, 2026-10-23): the
+  developer's full setup, run in a terminal, reported condition 8's new
+  terminal tab (`zsh -lic`) resolving no `perl`, `bash` or `python3`, where
+  every run from the agent's shell had resolved them. Reproduced under a
+  pseudo-terminal (`script -q`): the full check took 20.31 s against 0.32 s
+  without one. Each tool was started in a process group of its own, still
+  attached to the terminal; the interactive zsh, touching the terminal from
+  a background group, was stopped until the 20-second timeout killed it.
+  `run_capture` now starts each tool in a session of its own (`setsid`),
+  which has no controlling terminal and still lets a timeout kill the whole
+  group. After the change, under the pseudo-terminal: 0.37 to 0.38 s, the tab
+  line resolving all three tools, 8 pass; without one, 0.37 s and the same
+  result; the hook's output unchanged. Only `-lic` touches the terminal, so
+  only that context line, never a condition's result, was affected.
 
 ### Step 2: the session-start hook
 
