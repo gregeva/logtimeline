@@ -795,6 +795,20 @@ scripts, put first on `PATH` to change what one name resolves to.
         ltl homebrew >>>`, `eval "$(/opt/homebrew/bin/brew shellenv)"`,
         `# <<< ltl homebrew <<<`; the check passed (exit 0). The second run
         reported "Nothing to add" and `cmp` found no difference.
+- [x] **AC10b. Setup links what it installs, and leaves files it did not put
+      there.** macOS, on a host with a formula installed but not linked
+      because a `pip` install holds its paths: `./build/macos-setup.sh`.
+      Pass when: it exits 1 naming each colliding directory with its file
+      count and the pointer, every formula already linked is left as it is,
+      and `find` lists nothing newer than a mark made before the run in the
+      Python `site-packages` directories. M.
+      - M, 2026-10-23, pass, on a second macOS development host (§ Step 5,
+        the second host): exit 1, "scipy is installed but cannot link",
+        `1289 /opt/homebrew/lib/python3.14/site-packages/scipy` (the count
+        `brew link --overwrite --dry-run` gives); perl, bash, python, numpy
+        and cpanminus already linked, untouched; `find` listed nothing. The
+        case where the formula can link is reached once the developer
+        removes the colliding files.
 - [ ] **AC11. Every login shell resolves the same tools.** After AC10a's first
       run, for each login mode `-lc` and `-lic`:
       `env -i HOME="$T" ZDOTDIR="$T" zsh <mode> 'command -v perl bash python3'`
@@ -973,6 +987,20 @@ Done 2026-10-23: `tests/baseline/results/750-before.tsv` in the
   --notest --installdeps .`, with `--with-develop` under `--dev-deps`; the
   `PATH` exports and `GITHUB_PATH` lines for its own run and CI as today; then
   the shell step, then the check, exiting with its status.
+- **The link step** (full setup, after the installs): `brew install` leaves
+  a formula that is installed but not linked as it is ("already installed,
+  it's just not linked"), so each formula setup installs is linked. A formula
+  whose files collide with files put there another way (a `pip` install)
+  is not linked: setup names the colliding directories with their file
+  counts, leaves them (D12), points at troubleshooting entry 7 and exits 1.
+  The collisions are found from the formula's Cellar files and
+  `brew info --json=v2` (`linked_keg`), never by asking `brew link`.
+  Measured on a second macOS host, 2026-10-23, Homebrew 7.0.10: a `brew link`
+  that fails on a collision removes its links but leaves the directories it
+  made, and `brew link --overwrite --dry-run` makes them too; the empty
+  `python3.15/site-packages/scipy` then imports in Python 3.15 as an empty
+  namespace package with no `__version__`. The 148 empty directories these
+  runs left were removed, by birth time and `rmdir`.
 - **The shell step** (`--repair`, and the full setup's; D12, D6): run the
   check; when condition 8 passes, add nothing. When it fails, ask a clean
   login shell (`env -i … /bin/zsh -lc`) for `HOMEBREW_PREFIX`, which

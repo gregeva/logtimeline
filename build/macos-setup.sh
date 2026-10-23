@@ -135,6 +135,55 @@ shell_step() {
     fi
 }
 
+# Link each formula this script installs. brew install leaves a formula that is
+# installed but not linked as it is; one whose files collide with files put
+# there another way (a pip install, a copy by hand) cannot link. Those files
+# are the developer's: they are named, grouped by directory, and left, and the
+# setup stops. The collisions are found from the formula's own files before
+# any link is made, without brew: a brew link that fails on one, and even
+# brew link --dry-run, leaves directories behind in the prefix, and an empty
+# package directory imports in Python as an empty namespace package.
+# The Perl part prints "linked" for a linked formula, nothing for one that can
+# link, and otherwise each colliding directory with its count of files.
+link_formulae() {
+    local formula state
+    for formula in "$@"; do
+        state="$(brew info --json=v2 "$formula" | perl -MJSON::PP -MFile::Find -MCwd=realpath -e '
+            my ( $prefix, $cellar ) = @ARGV;
+            my $f = decode_json( do { local $/; <STDIN> } )->{formulae}[0];
+            if ( defined $f->{linked_keg} ) { print "linked\n"; exit 0 }
+            my $keg = "$cellar/$f->{name}/$f->{installed}[-1]{version}";
+            my %count;
+            for my $top ( grep { -d "$keg/$_" } qw(bin sbin include lib share etc Frameworks) ) {
+                find( { no_chdir => 1, wanted => sub {
+                    return if -d $File::Find::name && !-l $File::Find::name;
+                    ( my $rel = $File::Find::name ) =~ s{^\Q$keg\E/}{};
+                    my $target = "$prefix/$rel";
+                    return unless -e $target || -l $target;
+                    my $real = realpath($target) // q{};
+                    return if index( $real, realpath($keg) . q{/} ) == 0;
+                    ( my $group = $target ) =~ s{(/site-packages/[^/]+)/.*}{$1} or $group =~ s{/[^/]+$}{};
+                    $count{$group}++;
+                } }, "$keg/$top" );
+            }
+            print "$count{$_} $_\n" for sort keys %count;
+        ' "$(brew --prefix)" "$(brew --cellar)")"
+        if [ "$state" = linked ]; then
+            continue
+        fi
+        if [ -z "$state" ]; then
+            echo "[link] Linking $formula"
+            brew link "$formula"
+            continue
+        fi
+        echo "[link] $formula is installed but cannot link: files already in place were not put there by Homebrew."
+        echo "[link] They were installed another way, such as pip; setup leaves them. Files per directory:"
+        printf '%s\n' "$state" | sed 's/^/         /'
+        echo "[link] See features/750-interpreter-resolution.md § Troubleshooting a failed condition, condition 7."
+        exit 1
+    done
+}
+
 if [ "$mode" = repair ]; then
     shell_step
     echo ""
@@ -175,6 +224,7 @@ brew install python numpy scipy
 
 echo "[4/7] Installing cpanminus..."
 brew install cpanminus
+link_formulae perl bash python numpy scipy cpanminus
 
 if [ "$package" = 1 ]; then
     echo "[5/7] Installing PAR::Packer..."
