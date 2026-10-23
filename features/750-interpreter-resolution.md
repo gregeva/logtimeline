@@ -1752,6 +1752,27 @@ Observations, not changed:
   `~/.bashrc` exists (AC5, partial). Setup's own `.bash_profile` step then
   finds a file reading `~/.bashrc` and adds nothing.
 
+### Step 7: the write guard on Windows paths (2026-10-24)
+
+`process/claude-hooks/guard-write.sh` compared paths with forward slashes
+only. On Windows Claude Code passes a written file's path with backslashes,
+and `CLAUDE_PROJECT_DIR` holds one too, so none of its rules applied to a
+write there: under `logs/`, to a released baseline TSV, to
+`.claude/settings.local.json`, nor the check that a feature doc cites only
+records the session has read (whose `Read` paths in the transcript are
+backslashed as well). The guard now compares every path in forward-slash
+form, and strips the project root without regard to case on Windows, where a
+drive letter arrives in either case. On macOS and Linux the paths it compares
+are unchanged.
+
+Run under Git's own Perl and Strawberry Perl, with the root given each way
+(captured in the session's scratchpad): writes under `logs/` (backslashed,
+forward-slashed, lower-case drive), a released baseline TSV and
+`settings.local.json` blocked; an ordinary file allowed; a feature doc citing
+`docs/test-logs.md` allowed after a backslashed `Read` of it in the
+transcript, blocked with none. 32 of 32 as expected; the committed guard let
+20 of them through.
+
 ## Troubleshooting a failed condition
 
 The entries live in `docs/development-environment.md` § Troubleshooting a

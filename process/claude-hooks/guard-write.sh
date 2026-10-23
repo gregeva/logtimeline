@@ -9,11 +9,16 @@ use JSON::PP;
 local $/;
 my $in = <STDIN> // '';
 my $call = eval { decode_json($in) } || {};
-my $p = $call->{tool_input}{file_path} // $call->{tool_input}{notebook_path} // '';
+# On Windows a path arrives with backslashes and a drive letter in either case;
+# every path is compared in forward-slash form, the project root without
+# regard to case there.
+my $windows = $^O =~ /^(?:msys|cygwin|MSWin32)$/;
+sub slashed { ( my $path = $_[0] // '' ) =~ tr{\\}{/}; $path }
+my $p = slashed( $call->{tool_input}{file_path} // $call->{tool_input}{notebook_path} );
 exit 0 if $p eq '';
-my $root = $ENV{CLAUDE_PROJECT_DIR} // '';
+my $root = slashed( $ENV{CLAUDE_PROJECT_DIR} );
 my $rel = $p;
-$rel =~ s{^\Q$root\E/}{} if $root ne '';
+if ( $root ne '' ) { $windows ? $rel =~ s{^\Q$root\E/}{}i : $rel =~ s{^\Q$root\E/}{} }
 
 sub deny { print STDERR "[claude-hook] BLOCKED: $_[0]\n"; exit 2 }
 
@@ -88,7 +93,7 @@ if ( $p =~ m{^(.*)/features/([^/]+)\.md$} ) {
                 my $name  = $block->{name} // '';
                 for my $record ( keys %cited ) {
                     if ( $name eq 'Read' ) {
-                        $read{$record} = 1 if ( $input->{file_path} // '' ) =~ m{/\Q$record\E$};
+                        $read{$record} = 1 if slashed( $input->{file_path} ) =~ m{/\Q$record\E$};
                     } elsif ( $name eq 'Bash' ) {
                         # The reading command and the record share one
                         # segment of the command line, so a `wc` or `ls` of
