@@ -4,8 +4,35 @@ Issue: #750 (scripts set their own PATH from `brew --prefix`, which works around
 the environment setup and fails where Homebrew is absent). Parent: #729
 (process, tests and build).
 
-Status: specification. The surfaces' contracts below are put to the architect
-for confirmation; requirements, decisions and acceptance criteria follow it.
+Status: specification, analysis. What is in place today is recorded as found,
+not as the contract: most of it was put in piecemeal to get past a problem at
+the time, and the analysis is expected to challenge it.
+
+## The architect's framing (2026-10-23)
+
+- **The requirement is the expected Perl, consistently.** Every consumer (the
+  developer's shell, the agent, the harnesses, the hooks, profiling,
+  benchmarks, builds) runs the one Perl that carries the modules the
+  application and the development environment install. Homebrew Perl is how
+  macOS meets that, not the requirement: 544 D1 and the profiling setup
+  pinned Homebrew Perl because the agent was at times picking up the macOS
+  system Perl. Profiling is to work on Windows and Linux as well.
+- **Which interpreter comes first is an environment setup problem.** The order
+  `PATH` is built in belongs to each host's setup script, not to the scripts
+  that run afterwards. The `export PATH="$(brew --prefix)..."` line and the
+  absolute Homebrew paths are workarounds of a setup that did not do this.
+- **`tests/lib/require-bash.sh` is a workaround of the same kind:** macOS's
+  `/bin/bash` 3.2 let a crashed harness exit 0.
+- **Windows has two runtime environments, and both must hold:** the CI build,
+  Strawberry Perl under Wine in a Linux container (no Windows kernel), and a
+  real Windows host (Windows kernel and file structure).
+- **Linux has no development setup.** It has no Homebrew, while the primary
+  development environment relies on Homebrew; a Linux development setup
+  script is likely needed.
+- **Some limits are strict and stay:** screenshot capture runs on macOS and
+  Linux only, because of the dependencies it uses.
+- The way forward is the cleanest, most coherent one the analysis finds, and
+  it may change earlier decisions; nothing is locked up front.
 
 ## What it is for
 
@@ -30,9 +57,9 @@ prototype scripts the issue reports are one form of it. Found by
 | A hint naming Homebrew to every platform | `tests/lib/require-bash.sh`: "Install Homebrew bash (build/macos-setup.sh) and put `$(brew --prefix)/bin` first on PATH." | a Linux developer with bash older than 4 is told to install Homebrew |
 | Setup and instructions | `build/macos-setup.sh` exports `PATH` for its own process and, under CI, appends to `GITHUB_PATH`; it writes nothing to the developer's shell profile. `CLAUDE.md` § Test and benchmark and `README.md` § Test-harness dependencies tell the developer to export the `brew --prefix` line themselves | macOS gets Homebrew first on `PATH` by a manual step; Windows gets Strawberry Perl first by a managed block the setup writes into `~/.bashrc` |
 
-## The surfaces and their contracts today
+## What is in place today
 
-| Surface | Contract today | Record line behind it |
+| Surface | As built | Record line behind it |
 |---|---|---|
 | The development interpreter on macOS | Homebrew Perl, never the system Perl | `features/544-upgrade-safe-profiling-setup.md` D1 (locked): "The development environment stays Homebrew Perl." |
 | How a script finds Perl | `perl` from `PATH` | 544 D7 (delegated): "The interpreter is `perl` from PATH. On a documented setup this is already Homebrew Perl, because `build/macos-setup.sh` puts `$(brew --prefix)/opt/perl/bin` ahead of the system directories." |
@@ -66,7 +93,7 @@ run and for later CI steps; a developer's next shell is not changed by it.
 
 ## Requirements
 
-To be agreed after the contracts above are confirmed.
+To be derived from the analysis and agreed with the architect.
 
 ## Decisions
 
