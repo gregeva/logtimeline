@@ -357,6 +357,9 @@ about anything else, these still hold.
 - [ ] **Issue:** release-notes decision, completion comment (with any recorded
       skip), close with label stripped, dependents released, merged branch
       deleted (`docs/process/workflow.md` § 4).
+- [ ] **Parent:** when the closed issue has a parent (`gh api
+      repos/{owner}/{repo}/issues/{n}/parent`) whose sub-issues are now all
+      closed, its close-out is put to the architect in the same action.
 - [ ] **Runs to the end.** Once the issue is finished, every close-out step runs
       without asking, including deleting the issue's own before/after benchmark
       TSVs and removing its merged worktree, whose `logs` symlink goes with it
