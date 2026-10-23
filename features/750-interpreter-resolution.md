@@ -184,6 +184,31 @@ Not yet locked; the shape the design is being worked toward.
   `python3` on `PATH` imports NumPy and SciPy, and the host-limited tools
   (tmux, the screenshot tools) are present where they are expected.
 
+### Phase 4: the expected conditions (draft, for the architect's review)
+
+One list; a cell names the per-host alternative where hosts differ. "Fail"
+stops the session-start report at a problem to fix; "note" reports without
+failing. Each condition is tested by running the tool found on `PATH`, never
+by trusting the Perl the check runs under.
+
+| # | Condition | macOS | Linux | Windows (Git Bash) | Severity |
+|---|---|---|---|---|---|
+| 1 | a `perl` is on `PATH` | | | | fail |
+| 2 | it is the development Perl, not another on the host | Homebrew's, not `/usr/bin` or `/System` | the distribution's | Strawberry Perl's, not Git's own `/usr/bin/perl` | fail |
+| 3 | it loads every runtime module the cpanfile requires | `build/cpanfile` | `build/cpanfile` | `build/cpanfile.windows` | fail |
+| 4 | it loads the development-only modules (the profiler) | when installed | when installed | not installable today: `build/cpanfile.windows` carries no develop block (544 D5a, "there is no profiling on the Windows path"), against the architect's framing that profiling works on Windows too | note |
+| 5 | modules installed under the home are visible to it | n/a | `PERL5LIB` carries `~/perl5` | n/a | fail |
+| 6 | `bash` on `PATH` is 4 or later | Homebrew's | the distribution's | Git Bash | fail |
+| 7 | `python3` on `PATH` imports NumPy and SciPy | Homebrew's, not `/usr/bin/python3` | the distribution's | the WinGet Python | fail where the harnesses run, note on Windows |
+| 8 | the shell configuration carries the setup's managed block | the file every login zsh reads | the file every login bash reads | `~/.bashrc`, read by `~/.bash_profile` | fail |
+| 9 | a login shell started from a clean environment resolves the same `perl`, `bash` and `python3` as conditions 2, 6 and 7 | | | | fail |
+| 10 | `tmux` is on `PATH` | expected | expected | not expected | note |
+| 11 | the screenshot tools are present | `swiftc` (Xcode command line tools) | established in the Linux stage | not expected | note |
+| 12 | the repository checks files out with LF endings | n/a | n/a | `core.autocrlf=false` | fail |
+
+Condition 9 is the measured fault of phase 1: the Homebrew interpreters were
+set up only in `~/.zshrc`, read by interactive shells alone.
+
 ### How Claude Code runs a hook (documentation, read 2026-10-23)
 
 From https://code.claude.com/docs/en/hooks.md and
